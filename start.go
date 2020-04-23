@@ -30,9 +30,8 @@ type Container struct {
 	GIT string `json:"git"`
 }
 
-func getthebest(tensor string) {
+func getthebest(tensor string) Container {
 	fmt.Printf("Founding way to resolve ...  %#v\n", tensor)
-
 	// Open our jsonFile
 	jsonFile, err := os.Open("data.json")
 	// if we os.Open returns an error then handle it
@@ -40,23 +39,30 @@ func getthebest(tensor string) {
 		fmt.Println(err)
 	}
 	fmt.Println("Successfully Opened data.json")
-
 	// read our opened jsonFile as a byte array.
 	byteValue, _ := ioutil.ReadAll(jsonFile)
 	// initialize out Tensors array
 	var tensors Tensors
+	var bestContainer Container
 	// we unmarshal our byteArray which contains our
 	// jsonFile's content into 'users' which we defined above
 	json.Unmarshal(byteValue, &tensors)
-
 	for i := 0; i < len(tensors.TENSORS); i++ {
 		if tensors.TENSORS[i].DEF == tensor {
 			fmt.Printf("Ya tenemos nuestro tensor ..  %#v\n", tensor)
+			var bestScore = 0
+			for j := 0; j < len(tensors.TENSORS[i].CONTAINERS); j++ {
+				var container Container = tensors.TENSORS[i].CONTAINERS[i]
+				if bestScore <= container.SCORE {
+					bestScore = container.SCORE
+					bestContainer = container
+				}
+			}
 		}
 	}
-
 	// defer the closing of our jsonFile so that we can parse it later on
 	defer jsonFile.Close()
+	return bestContainer
 }
 
 func main() {
@@ -64,5 +70,6 @@ func main() {
 	var tensor string
 	fmt.Print("Select the problem.. tensor:  ")
 	fmt.Scanf("%s", &tensor)
-	getthebest(tensor)
+	var container = getthebest(tensor)
+	fmt.Print(container.GIT)
 }
