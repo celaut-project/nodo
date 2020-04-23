@@ -1,0 +1,26 @@
+{
+    "tensors": [
+        {
+            "id": "None",
+            "definition": "SAT-Solver",
+            "containers": [
+                {
+                    "id": "None",
+                    "score": "0",
+                    "git": "https://gitlab.com/jal04/frontier-sat.git"
+                },
+                {
+                    "id": "None",
+                    "score": "0",
+                    "git": "https://gitlab.com/jal04/single-sat.git"
+                },
+            ]
+        },
+        {
+            "id": "None",
+            "definition": "GatosyCactus",
+            "containers": [
+            ]
+        },
+    ]
+}
