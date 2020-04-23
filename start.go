@@ -1,9 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 )
+
+// Tensors struct
+type Tensors struct {
+	TENSORS []Tensor `json:"tensors"`
+}
 
 // Tensor struct
 type Tensor struct {
@@ -33,6 +40,20 @@ func getthebest(tensor string) {
 		fmt.Println(err)
 	}
 	fmt.Println("Successfully Opened data.json")
+
+	// read our opened jsonFile as a byte array.
+	byteValue, _ := ioutil.ReadAll(jsonFile)
+	// initialize out Tensors array
+	var tensors Tensors
+	// we unmarshal our byteArray which contains our
+	// jsonFile's content into 'users' which we defined above
+	json.Unmarshal(byteValue, &tensors)
+
+	for i := 0; i < len(tensors.TENSORS); i++ {
+		if tensors.TENSORS[i].DEF == tensor {
+			fmt.Printf("Ya tenemos nuestro tensor ..  %#v\n", tensor)
+		}
+	}
 
 	// defer the closing of our jsonFile so that we can parse it later on
 	defer jsonFile.Close()
