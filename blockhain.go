@@ -1,4 +1,4 @@
-package hypernode
+package main
 
 import (
 	"bytes"
