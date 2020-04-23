@@ -1,4 +1,4 @@
-package main
+package hypernode
 
 import (
 	"bytes"
@@ -46,8 +46,4 @@ func Genesis() *Block {
 //InitBlockChain retorna el puntero a la blockchain.
 func InitBlockChain() *BlockChain {
 	return &BlockChain{[]*Block{Genesis()}}
-}
-
-func main() {
-
 }
