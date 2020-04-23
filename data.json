@@ -13,7 +13,7 @@
                     "id": "None",
                     "score": "0",
                     "git": "https://gitlab.com/jal04/single-sat.git"
-                },
+                }
             ]
         },
         {
@@ -21,6 +21,6 @@
             "definition": "GatosyCactus",
             "containers": [
             ]
-        },
+        }
     ]
 }
