@@ -70,6 +70,9 @@ func main() {
 	var tensor string
 	fmt.Print("Select the problem.. tensor:  ")
 	fmt.Scanf("%s", &tensor)
+	fmt.Printf("*******")
 	var container = getthebest(tensor)
-	fmt.Print(container.GIT)
+	fmt.Print("Best solution is; " + container.GIT + " with score: ")
+	fmt.Print(container.SCORE)
+	fmt.Printf("\n\n")
 }

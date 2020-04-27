@@ -6,13 +6,39 @@
             "containers": [
                 {
                     "id": "None",
-                    "score": "0",
+                    "score": "1",
                     "git": "https://gitlab.com/jal04/frontier-sat.git"
                 },
                 {
                     "id": "None",
-                    "score": "0",
+                    "score": "3",
                     "git": "https://gitlab.com/jal04/single-sat.git"
+                }
+            ]
+        },
+        {
+            "id": "None",
+            "definition": "P",
+            "containers": [
+                {
+                    "id": "None",
+                    "score": "19",
+                    "git": "https://gitlab.com/jal04/frontier-sat.git"
+                },
+                {
+                    "id": "None",
+                    "score": "39",
+                    "git": "https://gitlab.com/jal04/single-sat.git"
+                },
+                {
+                    "id": "None",
+                    "score": "7",
+                    "git": "https://gitlab.com/jal04/pepino-sat.git"
+                },
+                {
+                    "id": "None",
+                    "score": "18",
+                    "git": "https://gitlab.com/jal04/walksat-sat.git"
                 }
             ]
         },
