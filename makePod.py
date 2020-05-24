@@ -3,7 +3,7 @@ from subprocess import run
 
 class Pod:
     From = None         # Apunta a otro Hyperfile.
-    Pkgs = []   # Para diferenciar entre PKG y RUN, usar tuplas, si usamos dos listas distintas no sabremos el orden.
+    Pkgs = []           # Para diferenciar entre PKG y RUN, usar tuplas, si usamos dos listas distintas no sabremos el orden.
     Api = None
     Tensor = None
     def __init__(self):
@@ -37,7 +37,7 @@ class Pod:
         def isOCI(filename):
             pass
         def isDocker(filename):
-            pass
+            return filename == 'Dockerfile'
         if isHyper(self.From):
             abstract_pod = makePod(self.From)
             abstract_pod.build()
@@ -46,33 +46,33 @@ class Pod:
         elif isOCI(self.From):
             run("podman build ",self.From)
         elif isDocker(self.From):
+            print("Docker build ....")
             run("docker build ",self.From)
 
 
 
 
 def makePod(filename):
-
     def switch(line, pod):
         s = line[0]
         if s == 'FROM':
             pod.setFrom(line[1])
         elif s == 'PKG':
-            pod.setIns(line[1:])
+            pod.setPkg(line[1:])
         elif s == 'API':
             pod.setApi(line[1:])
         elif s == 'CTR':
             pod.setCtr(line[1:])
         elif s == 'TNS':
             pod.setTensor(line[1:])
-    
     file = open(filename, "r")
     pod = Pod()
     for l in file.readlines():
         switch( l.split(), pod )
-    
-    pod.show()
-    pod.build()
+    return pod
+
 
 if __name__ == "__main__":
-    makePod("hyperfile.hy")
+    pod = makePod("hyperfile.hy")
+    pod.show()
+    pod.build()
