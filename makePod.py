@@ -1,19 +1,29 @@
 
 class Pod:
     From = None
-    Pkg = []
+    Instructions = []
+    Api = None
     def __init__(self):
         super().__init__()
     
     def setFrom(self, line):
         self.From = line
 
-    def setPkg(self, line):
-        self.Pkg = line
+    def setIns(self, line):
+        self.Instructions.append(line)
+
+    def setApi(self, line):
+        self.Api = line
+
+    def setCtr(self, line):
+        self.Contract = line
     
     def show(self):
         print(self.From)
-        print(self.Pkg)
+        print(self.Api)
+        print(self.Contract)
+        print(self.Instructions)
+
     
 
 
@@ -24,7 +34,13 @@ if __name__ == "__main__":
         if s == 'FROM':
             pod.setFrom(line[1])
         elif s == 'PKG':
-            pod.setPkg(line[1:])
+            pod.setIns(line[1:])
+        elif s == 'API':
+            pod.setApi(line[1:])
+        elif s == 'RUN':
+            pod.setIns(line[1:])
+        elif s == 'CTR':
+            pod.setCtr(line[1:])
 
     
     

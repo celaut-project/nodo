@@ -1,10 +1,11 @@
 FROM scratch
 CTR None
-PKG docker Python
+API None
+PKG docker get Python:3.6
 RUN apt-get update \
     && apt-get -y install python3-tk \
     && apt-get -y install python3-pip \
     && apt-get -y install minisat \
     && pip3 install pandas \
     && pip3 install numpy \
-PKG www.github.com/josemibnf/sat-solver
+PKG git clone www.github.com/josemibnf/sat-solver
