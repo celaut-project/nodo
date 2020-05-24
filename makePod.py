@@ -41,8 +41,10 @@ class Pod:
         if isHyper(self.From):
             abstract_pod = makePod(self.From)
             abstract_pod.build()
+            for pkg in self.Pkgs:
+                run("docker exec ",pkg)
         elif isOCI(self.From):
-            pass
+            run("podman build ",self.From)
         elif isDocker(self.From):
             run("docker build ",self.From)
 
@@ -63,10 +65,6 @@ def makePod(filename):
             pod.setCtr(line[1:])
         elif s == 'TNS':
             pod.setTensor(line[1:])
-
-
-
-
     
     file = open(filename, "r")
     pod = Pod()
