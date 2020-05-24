@@ -1,7 +1,7 @@
 FROM Dockerfile
 CTR None
 API None
-PKG git clone www.github.com/josemibnf/sat-solver
+PKG git clone https://github.com/josemibnf/sat-solver.git
 
 
 
