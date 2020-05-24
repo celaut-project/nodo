@@ -1,8 +1,9 @@
 
 class Pod:
     From = None
-    Instructions = []
+    Instructions = [] # Para diferenciar entre PKG y RUN, usar tuplas, si usamos dos listas distintas no sabremos el orden.
     Api = None
+    Tensor = None
     def __init__(self):
         super().__init__()
     
@@ -17,12 +18,19 @@ class Pod:
 
     def setCtr(self, line):
         self.Contract = line
+
+    def setTensor(self, line):
+        self.Tensor = line
     
     def show(self):
         print(self.From)
         print(self.Api)
         print(self.Contract)
+        print(self.Tensor)
         print(self.Instructions)
+    
+    def build():
+        pass
 
     
 
@@ -41,10 +49,12 @@ if __name__ == "__main__":
             pod.setIns(line[1:])
         elif s == 'CTR':
             pod.setCtr(line[1:])
+        elif s == 'TNS':
+            pod.setTensor(line[1:])
 
-    
-    
-    
+
+
+            
     
     file = open("hyperfile.hy", "r")
     pod = Pod()
@@ -52,3 +62,4 @@ if __name__ == "__main__":
         switch( l.split(), pod )
     
     pod.show()
+    pod.build()
