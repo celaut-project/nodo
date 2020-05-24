@@ -1,9 +1,13 @@
-def makePod(filename):
+if __name__ == "__main__":
+        
     def dofrom(line):
         print(line)
+    
     def dopkg(line):
         print(line)
 
+    
+    
     def switch(line):
         s = line[0]
         if s == 'FROM':
@@ -13,10 +17,10 @@ def makePod(filename):
         else:
             print("      OPCION INVALIDA  ",s)
 
-    file = open(filename, "r")
+    
+    
+    
+    
+    file = open("hyperfile.hy", "r")
     for l in file.readlines():
         switch( l.split() )
-
-
-if __name__ == "__main__":
-    makePod("hyperfile.hy")
