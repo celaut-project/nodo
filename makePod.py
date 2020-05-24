@@ -1,26 +1,38 @@
-if __name__ == "__main__":
-        
-    def dofrom(line):
-        print(line)
-    
-    def dopkg(line):
-        print(line)
 
+class Pod:
+    From = None
+    Pkg = []
+    def __init__(self):
+        super().__init__()
     
+    def setFrom(self, line):
+        self.From = line
+
+    def setPkg(self, line):
+        self.Pkg = line
     
-    def switch(line):
+    def show(self):
+        print(self.From)
+        print(self.Pkg)
+    
+
+
+if __name__ == "__main__":
+
+    def switch(line, pod):
         s = line[0]
         if s == 'FROM':
-            dofrom(line[1])
+            pod.setFrom(line[1])
         elif s == 'PKG':
-            dopkg(line[1:])
-        else:
-            print("      OPCION INVALIDA  ",s)
+            pod.setPkg(line[1:])
 
     
     
     
     
     file = open("hyperfile.hy", "r")
+    pod = Pod()
     for l in file.readlines():
-        switch( l.split() )
+        switch( l.split(), pod )
+    
+    pod.show()
