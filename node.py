@@ -1,24 +1,21 @@
-
-
-
 def makePod(filename):
-    def dofrom():
-        print("IS FROM")
-    def dopkg():
-        print("IS PKG")
+    def dofrom(line):
+        print(line)
+    def dopkg(line):
+        print(line)
 
-    def switch(s):
+    def switch(line):
+        s = line[0]
         if s == 'FROM':
-            dofrom()
+            dofrom(line[1])
         elif s == 'PKG':
-            dopkg()
+            dopkg(line[1:])
         else:
-            print("OPCION INVALIDA  ",s)
+            print("      OPCION INVALIDA  ",s)
 
     file = open(filename, "r")
     for l in file.readlines():
-        line = l.split(" ")
-        switch(line[0])
+        switch( l.split() )
 
 
 if __name__ == "__main__":
