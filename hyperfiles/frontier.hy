@@ -3,7 +3,7 @@ PKG1 17 #python
 PKG2 23 #frontier
 IMPORT
 CTR none
-API none
+API (cnf)-->solution
 BUILD
 TENSOR
 LEDGER

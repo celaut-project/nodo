@@ -2,20 +2,17 @@
 from subprocess import run
 
 class Pod:
-    From = None
-    Pkgs = []          
+    Pkgs = {}       
     Api = None
     Tensor = None
+    Contract = None
     isAbstract = None
     def __init__(self):
         super().__init__()
         self.isAbstract = True
-    
-    def setFrom(self, line):
-        self.From = line
 
-    def setPkg(self, line):
-        self.Pkgs.append(line)
+    def setPkg(self,key,line):
+        self.Pkgs.update({key:line})
 
     def setApi(self, line):
         self.Api = line
@@ -28,11 +25,11 @@ class Pod:
         self.Tensor = line
     
     def show(self):
-        print(self.From)
-        print(self.Api)
-        print(self.Contract)
-        print(self.Tensor)
-        print(self.Pkgs)
+        print('API ',self.Api)
+        print('Contract',self.Contract)
+        print('Tensor ',self.Tensor)
+        print('Packages ',self.Pkgs)
+        print('Abstract ',self.isAbstract)
     
     def build(self):
         pass
@@ -42,10 +39,8 @@ class Pod:
 def makePod(filename):
     def switch(line, pod):
         s = line[0]
-        if s == 'FROM':
-            pod.setFrom(line[1])
-        elif s == 'PKG':
-            pod.setPkg(line[1:])
+        if s.split()[:3] == 'PKG':
+            pod.setPkg(s.split()[3],line[1:])
         elif s == 'API':
             pod.setApi(line[1:])
         elif s == 'CTR':
@@ -55,15 +50,16 @@ def makePod(filename):
     file = open(filename, "r")
     pod = Pod()
     for l in file.readlines():
-        switch( l.split(), pod )
+        if l=='':
+            switch( l.split(), pod )
     return pod
 
 def isValidHyperFile(file):
-    pass
+    return True
 
 if __name__ == "__main__":
-    file="hyperfile.hy"
+    file="hyperfiles/frontier.hy"
     if isValidHyperFile(file):
-        pod = makePod()
+        pod = makePod(file)
         pod.show()
         pod.build()
