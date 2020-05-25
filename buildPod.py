@@ -2,7 +2,7 @@
 from subprocess import run
 
 class Pod:
-    From = None         # Apunta a otro Hyperfile.
+    From = None         # Apunta a otro Hyperfile o OCIfile.
     Pkgs = []           # Para diferenciar entre PKG y RUN, usar tuplas, si usamos dos listas distintas no sabremos el orden.
     Api = None
     Tensor = None
@@ -48,7 +48,6 @@ class Pod:
         elif isDocker(self.From):
             print("Docker build ....")
             run("docker build ",self.From)
-
 
 
 
