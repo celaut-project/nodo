@@ -1,4 +1,7 @@
 FROM scratch
+BUILD
+TENSOR
+LEDGER
 PKG0 python
 PKG1
 CTR none

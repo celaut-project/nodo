@@ -6,8 +6,10 @@ class Pod:
     Pkgs = []          
     Api = None
     Tensor = None
+    isAbstract = None
     def __init__(self):
         super().__init__()
+        self.isAbstract = True
     
     def setFrom(self, line):
         self.From = line
@@ -17,6 +19,7 @@ class Pod:
 
     def setApi(self, line):
         self.Api = line
+        self.isAbstract = False
 
     def setCtr(self, line):
         self.Contract = line
