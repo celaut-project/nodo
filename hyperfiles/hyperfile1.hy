@@ -1,16 +1,10 @@
 FROM scratch
+PKG0 ubuntu
+PKG1 python
+PKG2 frontier
+IMPORT
+CTR none
+API none
 BUILD
 TENSOR
 LEDGER
-PKG0 python
-PKG1
-CTR none
-API none
-IMPORT
-
-.
-:PKG0 
-:FROM scratch
-:API javaAPI
-:PKG npm treasureworld
-:CTR none
