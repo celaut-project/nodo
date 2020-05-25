@@ -2,7 +2,7 @@
 from subprocess import run
 
 class Pod:
-    From = None         # Apunta a otro Hyperfile o OCIfile.
+    From = None
     Pkgs = []          
     Api = None
     Tensor = None
@@ -35,22 +35,7 @@ class Pod:
         print(self.Pkgs)
     
     def build(self):
-        def isHyper(filename):
-            pass
-        def isOCI(filename):
-            pass
-        def isDocker(filename):
-            return filename == 'Dockerfile'
-        if isHyper(self.From):
-            abstract_pod = makePod(self.From)
-            abstract_pod.build()
-            for pkg in self.Pkgs:
-                run("docker exec ",pkg)
-        elif isOCI(self.From):
-            run("podman build ",self.From)
-        elif isDocker(self.From):
-            print("Docker build ....")
-            run("docker build ",self.From)
+        pass
 
 
 
