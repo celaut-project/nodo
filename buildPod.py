@@ -3,7 +3,7 @@ from subprocess import run
 
 class Pod:
     From = None         # Apunta a otro Hyperfile o OCIfile.
-    Pkgs = []           # Para diferenciar entre PKG y RUN, usar tuplas, si usamos dos listas distintas no sabremos el orden.
+    Pkgs = []          
     Api = None
     Tensor = None
     def __init__(self):
@@ -70,8 +70,12 @@ def makePod(filename):
         switch( l.split(), pod )
     return pod
 
+def isValidHyperFile(file):
+    pass
 
 if __name__ == "__main__":
-    pod = makePod("hyperfile.hy")
-    pod.show()
-    pod.build()
+    file="hyperfile.hy"
+    if isValidHyperFile(file):
+        pod = makePod()
+        pod.show()
+        pod.build()
