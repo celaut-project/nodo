@@ -38,6 +38,7 @@ class Pod:
 
 def makePod(filename):
     def switch(line, pod):
+        print(line)
         s = line[0]
         if s.split()[:3] == 'PKG':
             pod.setPkg(s.split()[3],line[1:])
@@ -50,7 +51,7 @@ def makePod(filename):
     file = open(filename, "r")
     pod = Pod()
     for l in file.readlines():
-        if l=='':
+        if l!=' ' and l!='.' and l!=':':
             switch( l.split(), pod )
     return pod
 
