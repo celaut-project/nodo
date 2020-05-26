@@ -51,7 +51,7 @@ def makePod(filename):
     file = open(filename, "r")
     pod = Pod()
     for l in file.readlines():
-        if l!=' ' and l!='.' and l!=':':
+        while l!='':
             switch( l.split(), pod )
     return pod
 
