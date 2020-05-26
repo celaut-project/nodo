@@ -41,7 +41,7 @@ def makePod(filename):
     def switch(line, pod):
         s = line[0]
         if s.startswith('PKG'):
-            pod.setPkg(s.split()[3],line[1])
+            pod.setPkg(s[3],line[1])
         elif s == 'API':
             pod.setApi(line[1:])
         elif s == 'CTR':
