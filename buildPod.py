@@ -12,6 +12,7 @@ class Pod:
         self.isAbstract = True
 
     def setPkg(self,key,line):
+        print(key, line)
         self.Pkgs.update({key:line})
 
     def setApi(self, line):
@@ -38,10 +39,9 @@ class Pod:
 
 def makePod(filename):
     def switch(line, pod):
-        print(line)
         s = line[0]
-        if s.split()[:3] == 'PKG':
-            pod.setPkg(s.split()[3],line[1:])
+        if s.startswith('PKG'):
+            pod.setPkg(s.split()[3],line[1])
         elif s == 'API':
             pod.setApi(line[1:])
         elif s == 'CTR':
