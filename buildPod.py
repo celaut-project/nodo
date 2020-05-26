@@ -33,10 +33,12 @@ class Pod:
     
     @staticmethod
     def makePod(filename):
+        def get_this_file(s):
+            pass
         def switch(line, pod):
             s = line[0]
             if s.startswith('PKG'):
-                pod.setPkg(s[3],line[1])
+                pod.setPkg(s[3], get_this_file(line[1]))
             elif s == 'API':
                 pod.setApi(line[1:])
             elif s == 'CTR':
@@ -55,8 +57,7 @@ class Pod:
     def build(self):
         for k in self.Pkgs.keys():
             line = self.Pkgs.get(k)
-            print(line)
-
+            
 
 def isValidHyperFile(file):
     return True

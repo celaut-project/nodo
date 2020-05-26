@@ -1,26 +1,21 @@
-PKG0 11 #ubuntu
-PKG1 17 #python
-PKG2 23 #frontier
-IMPORT
+.IMPORT
 CTR none
 API (cnf)-->solution
 BUILD
 TENSOR
 LEDGER
-
-. #ubuntu
+.PKG0
 :@hash256@
 :http:\\www.docker.com\ubuntu:18.0.oci
 :http:\\www.ocirepo.rethat.com\ubuntu:18.0.oci
 :@AfterAll
-
-. #python
+.PKG1
 :@BeforeAll
 :@hash256@
 :apt-get install python3.8
 :@AfterAll
-
-. #frontier
+TENSOR
+.PKG2
 :@BeforeAll
 :@hash256@
 :git clone https:\\www.github.com\josemibnf\sat-solver\frontier1.py
