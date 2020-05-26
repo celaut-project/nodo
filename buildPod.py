@@ -51,8 +51,10 @@ def makePod(filename):
     file = open(filename, "r")
     pod = Pod()
     for l in file.readlines():
-        while l!='':
+        try:
             switch( l.split(), pod )
+        except IndexError:
+            break
     return pod
 
 def isValidHyperFile(file):
