@@ -2,7 +2,7 @@
 from subprocess import run
 
 class Pod:
-    Pkgs = {}       
+    Pkgs = []       
     Api = None
     Tensor = None
     Contract = None
@@ -11,8 +11,8 @@ class Pod:
         super().__init__()
         self.isAbstract = True
 
-    def setPkg(self,key,line):
-        self.Pkgs.update({key:line})
+    def setPkg(self, file):
+        self.Pkgs.append(file)
 
     def setApi(self, line):
         self.Api = line
@@ -33,12 +33,12 @@ class Pod:
     
     @staticmethod
     def makePod(filename):
-        def get_this_file(s):
+        def get_this_file():
             pass
         def switch(line, pod):
             s = line[0]
-            if s.startswith('PKG'):
-                pod.setPkg(s[3], get_this_file(line[1]))
+            if s.startswith('.PKG'):
+                pod.setPkg(get_this_file())
             elif s == 'API':
                 pod.setApi(line[1:])
             elif s == 'CTR':
@@ -55,8 +55,7 @@ class Pod:
         return pod
 
     def build(self):
-        for k in self.Pkgs.keys():
-            line = self.Pkgs.get(k)
+        pass
             
 
 def isValidHyperFile(file):
@@ -66,5 +65,5 @@ if __name__ == "__main__":
     file="hyperfiles/frontier.hy"
     if isValidHyperFile(file):
         pod = Pod.makePod(file)
-        #pod.show()
+        pod.show()
         pod.build()

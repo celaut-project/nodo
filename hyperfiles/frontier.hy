@@ -1,9 +1,4 @@
-.IMPORT
-CTR none
-API (cnf)-->solution
-BUILD
-TENSOR
-LEDGER
+API (cnf)->solution
 .PKG0
 :@hash256@
 :http:\\www.docker.com\ubuntu:18.0.oci
@@ -14,7 +9,6 @@ LEDGER
 :@hash256@
 :apt-get install python3.8
 :@AfterAll
-TENSOR
 .PKG2
 :@BeforeAll
 :@hash256@
