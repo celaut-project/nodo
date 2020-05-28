@@ -2,31 +2,22 @@
     "API": [
         "(cnf)->solution"
     ],
+    "BUILD": "",
     "PKG": [
         {
+            "#": "ubuntu",
             "@hash256@": "ldjf49p2on",
-            "REP": [
-                "http:\\www.docker.com\ubuntu:18.0.oci",
-                "http:\\www.ocirepo.rethat.com\ubuntu:18.0.oci"
-            ],
-            "after": ""
+            "TENSOR": ""
         },
         {
-            "before": "",
+            "#": "python",
             "@hash256@": "lñ4mrerekrere45jbnlj",
-            "REP": [
-                "apt-get install python3.8"
-            ],
-            "after": ""
+            "TENSOR": ""
         },
         {
-            "before": "",
+            "#": "frontier",
             "@hash256@": "4343443nnknkn4o3joj",
-            "REP": [
-                "git clone https:\\www.github.com\josemibnf\sat-solver\frontier1.py",
-                "npm install josemibnf.frontier1"
-            ],
-            "after": ""
+            "TENSOR": ""
         }
     ],
     "IMP": [
@@ -34,5 +25,7 @@
     ],
     "CTR": [
 
-    ]
+    ],
+    "TENSOR": "",
+    "LEDGER": ""
 }
