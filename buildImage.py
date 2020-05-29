@@ -60,6 +60,8 @@ class Image:
             
 
 def isValidHyperFile(file):
+    def isValidBuild():
+        pass
     return True
 
 if __name__ == "__main__":
