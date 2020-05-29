@@ -55,7 +55,8 @@ class Image:
         return image
 
     def build(self):
-        pass
+        OCIfile = None
+        run("docker build - < ",OCIfile)
             
 
 def isValidHyperFile(file):
