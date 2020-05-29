@@ -1,4 +1,5 @@
 {
+    "@main-hash256@": "k2g3h4blk54nb23h4jb,4-nk25b4hj,5knk3n4j23,bn42545",
     "API": [
         "(cnf)->solution"
     ],
@@ -20,10 +21,10 @@
             "TENSOR": ""
         }
     ],
-    "IMP": [
+    "IMPORT": [
 
     ],
-    "CTR": [
+    "CONTRACT": [
 
     ],
     "TENSOR": "",

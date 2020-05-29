@@ -1,7 +1,7 @@
 
 from subprocess import run
 
-class Pod:
+class Image:
     Pkgs = []       
     Api = None
     Tensor = None
@@ -46,13 +46,13 @@ class Pod:
             elif s == 'TNS':
                 pod.setTensor(line[1:])
         file = open(filename, "r")
-        pod = Pod()
+        image = Image()
         for l in file.readlines():
             try:
-                switch( l.split(), pod )
+                switch( l.split(), image )
             except IndexError:
                 break
-        return pod
+        return image
 
     def build(self):
         pass
@@ -64,6 +64,6 @@ def isValidHyperFile(file):
 if __name__ == "__main__":
     file="hyperfiles/frontier.hy"
     if isValidHyperFile(file):
-        pod = Pod.makePod(file)
-        pod.show()
-        pod.build()
+        image = Image.makePod(file)
+        image.show()
+        image.build()
