@@ -3,7 +3,10 @@
     "API": [
         "(cnf)->solution"
     ],
-    "BUILD": "",
+    "BUILD": "\\FROM ubuntu\n\\\n\\RUN apt-get update \\\n\\    && apt-get -y install python3.6\n\\\n\\RUN apt-get update \\\n\\    && apt-get -y install python3-tk \\\n\\    && apt-get -y install python3-pip \\\n\\    && apt-get -y install minisat \\\n\\    && pip3 install pandas \\\n\\    && pip3 install numpy\n\\\n\\WORKDIR /frontier/\n\\RUN apt-get update \\\n\\    && apt-get -y install git \\\n\\    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n\\    && mv sat-solver/* . \\\n\\    && rm -rf sat-solver",
+    "CONTRACT": [],
+    "IMPORT": [],
+    "LEDGER": "",
     "PKG": [
         {
             "#": "ubuntu",
@@ -12,7 +15,7 @@
         },
         {
             "#": "python",
-            "@hash256@": "lñ4mrerekrere45jbnlj",
+            "@hash256@": "l4mrerekrere45jbnlj",
             "TENSOR": ""
         },
         {
@@ -21,12 +24,5 @@
             "TENSOR": ""
         }
     ],
-    "IMPORT": [
-
-    ],
-    "CONTRACT": [
-
-    ],
-    "TENSOR": "",
-    "LEDGER": ""
+    "TENSOR": ""
 }

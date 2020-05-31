@@ -1,24 +1,26 @@
 
 import json
 
-def makeBuild(Dockername, Hypername):
-    
-    #Read Dockerfile
+def DockerfileToString(Dockername):
+        #Read Dockerfile
     Dockerfile = open(Dockername, "r")
     build = ""
     for l in Dockerfile.readlines():
         build = build+"\\"+l
     print(build,"\n")
-    
-    #Read Hyperfile
-    with open(Hypername) as hf:
-        Hyperfile = json.load(hf)
-    print(Hyperfile,"\n") 
+    Dockerfile.close()
+    return build
 
-    #Update Hyperfile.BUILD
-    #Hyperfile.update("BUILD":build)
+def writeBuild(Hypername, string):
+    Hyperfile = json.load(open(Hypername,"r"))
+    Hyperfile.update({'BUILD': string})
+    print(Hyperfile)
+    return( json.dumps(Hyperfile, indent=4, sort_keys=True) )
 
 if __name__ == "__main__":
     Dockerfile = "frontier/Dockerfile"
     Hyperfile = "frontier/Hyperfile.json"
-    makeBuild(Dockerfile, Hyperfile)
+    string = DockerfileToString(Dockerfile)
+    json = writeBuild(Hyperfile, string)
+    with open(Hyperfile, "w") as json_file:
+        json_file.write(json)
