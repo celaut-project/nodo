@@ -1,40 +1,14 @@
 
 from subprocess import run
+import json
 
 class Image:
-    Pkgs = []
-    Build = None     
-    Api = None
-    Tensor = None
-    Contract = None
+    image = None
     isAbstract = None
-    def __init__(self):
-        super().__init__()
+    def __init__(self, image):
         self.isAbstract = True
+        self.image = image
 
-    def setPkg(self, file):
-        self.Pkgs.append(file)
-
-    def setApi(self, line):
-        self.Api = line
-        self.isAbstract = False
-
-    def setCtr(self, line):
-        self.Contract = line
-
-    def setTensor(self, line):
-        self.Tensor = line
-        
-    def setBuild(self, line):
-        self.Build = line
-    
-    def show(self):
-        print('API ',self.Api)
-        print('Contract',self.Contract)
-        print('Tensor ',self.Tensor)
-        print('Packages ',self.Pkgs)
-        print('Abstract ',self.isAbstract)
-    
     @staticmethod
     def makePod(filename):
         def get_this_file():
@@ -58,9 +32,16 @@ class Image:
                 break
         return image
 
+    @staticmethod
+    def makeImage(filename):
+        file = json.load(open(filename,"r"))
+        return Image(file)
+
+    def show(self):
+        print(self.image)
+
     def build(self):
-        OCIfile = None
-        run("docker build - < ",OCIfile)
+        pass
             
 
 def isValidHyperFile(file):
@@ -69,8 +50,8 @@ def isValidHyperFile(file):
     return True
 
 if __name__ == "__main__":
-    file="hyperfiles/frontier.hy"
+    file="frontier/Hyperfile.json"
     if isValidHyperFile(file):
         image = Image.makePod(file)
         image.show()
-        image.build()
+        #image.build()
