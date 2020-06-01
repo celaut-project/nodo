@@ -15,10 +15,15 @@ class Image:
         return Image(file)
 
     def show(self):
-        print(self.image)
+        print(self.image.get('BUILD'))
 
     def build(self):
-        pass
+        def dockerfile():
+            myfile = open("Dockerfile", 'w')
+            myfile.write(self.image.get('BUILD'))
+            myfile.close()
+            return "Dockerfile"
+        run('docker build ', dockerfile())
             
 
 def isValidHyperFile(file):
@@ -31,4 +36,4 @@ if __name__ == "__main__":
     if isValidHyperFile(file):
         image = Image.makeImage(file)
         image.show()
-        #image.build()
+        image.build()
