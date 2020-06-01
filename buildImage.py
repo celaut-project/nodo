@@ -22,9 +22,10 @@ class Image:
             myfile = open("Dockerfile", 'w')
             myfile.write(self.image.get('BUILD'))
             myfile.close()
-            return "Dockerfile"
-        run('docker build ', dockerfile())
-            
+        dockerfile()
+        run('docker build .')
+        run('rm Dockerfile')
+        
 
 def isValidHyperFile(file):
     def isValidBuild():
