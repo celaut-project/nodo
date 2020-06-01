@@ -6,7 +6,7 @@ def DockerfileToString(Dockername):
     Dockerfile = open(Dockername, "r")
     build = ""
     for l in Dockerfile.readlines():
-        build = build+"\\"+l
+        build = build+l
     print(build,"\n")
     Dockerfile.close()
     return build
