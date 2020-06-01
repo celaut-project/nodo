@@ -1,4 +1,3 @@
-
 from subprocess import run
 import json
 
@@ -15,7 +14,7 @@ class Image:
         return Image(file)
 
     def show(self):
-        print(self.image.get('BUILD'))
+        print(self.image)
 
     def build(self):
         def dockerfile():
@@ -25,7 +24,7 @@ class Image:
         dockerfile()
         run('docker build .')
         run('rm Dockerfile')
-        
+
 
 def isValidHyperFile(file):
     def isValidBuild():
