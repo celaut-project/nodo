@@ -6,7 +6,7 @@ def random_cnf():
     pass
 
 def get_solver_port(image):
-    response = requests.get('http://localhost'+gateway_port, params={'image':image})
+    response = requests.get('http://localhost/'+gateway_port+'/get', params={'image':image})
     return response.text()    
 
 if __name__ == "__main__":
