@@ -6,10 +6,11 @@ def random_cnf():
     pass
 
 def get_solver_port(image):
-    response = requests.get('http://localhost/'+gateway_port+'/get', params={'image':image})
-    return response.text()    
+    response = requests.get("http://0.0.0.0:8080/", params={'image':image})
+    #response = requests.get('http://localhost/'+gateway_port+'/get', params={'image':image})
+    return response    
 
 if __name__ == "__main__":
     sovler_port = get_solver_port('3723c39d43fc')
-    response = requests.get(sovler_port, params=random_cnf())
-    best_interpretation = response.text()
+    print( sovler_port)
+    #response = requests.get(sovler_port, params=random_cnf())
