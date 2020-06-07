@@ -9,10 +9,5 @@ if __name__ == "__main__":
         def get(self, name):
             return {"image":name}
     
-    class Free(Resource):
-        def delete  (self, name):
-            return {"image":name}
-
-    api.add_resource(Free, "/free")
-    api.add_resource(Get, "/get")
+    api.add_resource(Get, "/")
     app.run(host='0.0.0.0', port=8080)
