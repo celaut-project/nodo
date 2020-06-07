@@ -7,12 +7,12 @@ if __name__ == "__main__":
 
     class Get(Resource):
         def get(self, name):
-            return {"image":"3723c39d43fc"}
+            return {"image":name}
     
-    class Delete(Resource):
+    class Free(Resource):
         def delete  (self, name):
-            return {"image":"3723c39d43fc"}
+            return {"image":name}
 
-    api.add_resource(Delete, "/delete")
+    api.add_resource(Free, "/free")
     api.add_resource(Get, "/get")
     app.run(host='0.0.0.0', port=8080)
