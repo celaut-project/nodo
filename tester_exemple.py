@@ -1,13 +1,13 @@
 from pip._vendor import requests
 
-gateway_uri = 'http://0.0.0.0:8080'
-gateway_uri_delete = 'http://0.0.0.0:8080/delete'
+gateway_uri = 'http://0.0.0.0:8080/'
+gateway_uri_delete = 'http://0.0.0.0:8080/delete/'
 
 def random_cnf():
     pass
 
 def get_solver_uri(image):
-    response = requests.get(gateway_uri+'/3723c39d43fc')
+    response = requests.get(gateway_uri+'3723c39d43fc')
     return response
 
 if __name__ == "__main__":
