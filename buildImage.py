@@ -1,6 +1,5 @@
 import sys
 from subprocess import run
-import os
 import json
 
 class Image:
@@ -50,7 +49,7 @@ def select_port():
     return find_free_port()
 
 def ok(image):
-    file =  os.listdir('registry/'+image+'.json')
+    file =  open('registry/'+image+'.json','r')
     container_id = main(file).image.get('Container').get('Id')
     container_id = container_id.split(':')[1]
     return container_id
