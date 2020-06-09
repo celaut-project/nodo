@@ -7,7 +7,10 @@ if __name__ == "__main__":
 
     class Get(Resource):
         def get(self, name):
-            return {"image":name}
-    
-    api.add_resource(Get, "/")
+            if name=='3723c39d43fc':
+                return {"port":'http://0.0.0.0:8000'}
+            else:
+                return 404
+
+    api.add_resource(Get, "/")  
     app.run(host='0.0.0.0', port=8080)
