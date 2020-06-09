@@ -47,7 +47,7 @@ def select_port():
             s.bind(('', 0))
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             return s.getsockname()[1]
-    return find_free_port()
+    return str(find_free_port())
 
 def ok(image):
     file =  "registry/"+image+".json"
