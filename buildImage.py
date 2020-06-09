@@ -20,7 +20,7 @@ class Image:
     def build(self):
         def dockerfile():
             myfile = open("Dockerfile", 'w')
-            myfile.write(self.image.get('BUILD'))
+            myfile.write(self.image.get('Build'))
             myfile.close()
         dockerfile()
         run('docker build .')
@@ -32,9 +32,20 @@ def isValidHyperFile(file):
         pass
     return True
 
-if __name__ == "__main__":
-    file=sys.argv[1]
+def main(file):
     if isValidHyperFile(file):
         image = Image.makeImage(file)
         image.show()
-        image.build()
+        image.build() 
+        return image   
+
+def select_port():
+    return '8000'
+
+def ok(image):
+    file = 'registry/'+image+'.json'
+    return main(file).image.get('Container').get('Id')
+
+if __name__ == "__main__":
+    file=sys.argv[1]
+    main(file)
