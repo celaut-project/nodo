@@ -1,4 +1,5 @@
 from flask import Flask
+from subprocess import run
 
 if __name__ == "__main__":
 
@@ -6,12 +7,11 @@ if __name__ == "__main__":
 
     @app.route('/<image>')
     def get(image):
-        if image=='3723c39d43fc':
-            pod_port = '8000'
-            pod_api = '/'
-            return 'http://0.0.0.0:'+pod_port+pod_api
-        else:
-            return 404
+        run('docker build ',image) # Si no esta construido, lo construye.
+        pod_port = '8000'  # select_port()
+        run('docker exec ',image,' -port ',pod_port) # Ejecuta una instancia de la imagen con el puerto que sea.
+        pod_api = '/'
+        return 'http://0.0.0.0:'+pod_port+pod_api
 
     @app.route('/delete/<port_uri>')
     def delete(port_uri):
