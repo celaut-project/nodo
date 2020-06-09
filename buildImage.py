@@ -1,5 +1,6 @@
 import sys
 from subprocess import run
+import os
 import json
 
 class Image:
@@ -26,7 +27,6 @@ class Image:
         run('docker build .')
         run('rm Dockerfile')
 
-
 def isValidHyperFile(file):
     def isValidBuild():
         pass
@@ -43,8 +43,10 @@ def select_port():
     return '8000'
 
 def ok(image):
-    file = 'registry/'+image+'.json'
-    return main(file).image.get('Container').get('Id')
+    file =  os.listdir('registry/'+image+'.json')
+    container_id = main(file).image.get('Container').get('Id')
+    container_id = container_id.split(':')[1]
+    return container_id
 
 if __name__ == "__main__":
     file=sys.argv[1]
