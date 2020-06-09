@@ -10,5 +10,9 @@ if __name__ == "__main__":
             return 'http://0.0.0.0:8000'
         else:
             return 404
+
+    @app.route('/delete/<port_uri>')
+    def delete(self, name):
+        return 404
  
     app.run(host='0.0.0.0', port=8080)
