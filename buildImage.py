@@ -1,6 +1,7 @@
 import sys
 from subprocess import run
 import json
+import os
 
 class Image:
     image = None
@@ -24,7 +25,7 @@ class Image:
             myfile.close()
         dockerfile()
         run('docker build .')
-        run('rm Dockerfile')
+        os.remove("Dockerfile")
 
 def isValidHyperFile(file):
     def isValidBuild():
