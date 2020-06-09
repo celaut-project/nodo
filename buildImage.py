@@ -49,7 +49,7 @@ def select_port():
     return find_free_port()
 
 def ok(image):
-    file =  open('registry/'+image+'.json','r')
+    file =  'registry/'+image+'.json'
     container_id = main(file).image.get('Container').get('Id')
     container_id = container_id.split(':')[1]
     return container_id
