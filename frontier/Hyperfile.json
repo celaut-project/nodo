@@ -5,7 +5,7 @@
     "CONTRACT": [],
     "IMPORT": [],
     "LEDGER": "",
-    "PKG": [
+    "LAYERS": [
         {
             "#": "ubuntu",
             "@hash256@": "ldjf49p2on",
