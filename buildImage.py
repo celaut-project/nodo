@@ -20,7 +20,7 @@ class Image:
     def build(self):
         def dockerfile():
             myfile = open("Dockerfile", 'w')
-            myfile.write(self.image.get('Build'))
+            myfile.write(self.image.get('Container').get('Build'))
             myfile.close()
         dockerfile()
         run('docker build .')
@@ -49,7 +49,7 @@ def select_port():
     return find_free_port()
 
 def ok(image):
-    file =  'registry/'+image+'.json'
+    file =  "registry/"+image+".json"
     container_id = main(file).image.get('Container').get('Id')
     container_id = container_id.split(':')[1]
     return container_id
