@@ -1,4 +1,4 @@
-
+import sys
 import json
 
 def DockerfileToString(Dockername):
@@ -18,8 +18,8 @@ def writeBuild(Hypername, string):
     return( json.dumps(Hyperfile, indent=4, sort_keys=True) )
 
 if __name__ == "__main__":
-    Dockerfile = "frontier/Dockerfile"
-    Hyperfile = "frontier/Hyperfile.json"
+    Dockerfile = sys.argv[1] # Dockerfile
+    Hyperfile = sys.argv[2]  # Hyperfile
     string = DockerfileToString(Dockerfile)
     json = writeBuild(Hyperfile, string)
     with open(Hyperfile, "w") as json_file:

@@ -1,3 +1,4 @@
+import sys
 from subprocess import run
 import json
 
@@ -32,7 +33,7 @@ def isValidHyperFile(file):
     return True
 
 if __name__ == "__main__":
-    file="frontier/Hyperfile.json"
+    file=sys.argv[1]
     if isValidHyperFile(file):
         image = Image.makeImage(file)
         image.show()
