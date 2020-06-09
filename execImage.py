@@ -8,7 +8,7 @@ if __name__ == "__main__":
     class Get(Resource):
         def get(self, name):
             if name=='3723c39d43fc':
-                return {"port":'http://0.0.0.0:8000'}
+                return {"uri":'http://0.0.0.0:8000'}
             else:
                 return 404
 
