@@ -7,10 +7,10 @@ def random_cnf():
     return 'cnf'
 
 def get_solver_uri(image):
-    response = requests.get(gateway_uri+'3723c39d43fc')
+    response = requests.get(gateway_uri+image)
     return response.text
 
 if __name__ == "__main__":
-    sovler_uri = get_solver_uri('3723c39d43fc')
+    sovler_uri = get_solver_uri('344jnfdgk')
     print(sovler_uri)
     response = requests.get( sovler_uri+random_cnf() )
