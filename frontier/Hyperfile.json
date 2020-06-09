@@ -1,11 +1,99 @@
 {
-    "@mainhash@": ["sha256:e708d374699bfe85d7aa8d13bcd1c62a561caf28a254ff75d3845d5163b4f962", "sha256:e37e197c3129fe6317c62d48984b8f90739f9d17ca74b945cabefdbd5c0d4e5f" ],
-    "API": "/",
-    "BUILD": "FROM ubuntu\n\nRUN apt-get update \\\n    && apt-get -y install python3.6\n\nRUN apt-get update \\\n    && apt-get -y install python3-tk \\\n    && apt-get -y install python3-pip \\\n    && apt-get -y install minisat \\\n    && pip3 install pandas \\\n    && pip3 install numpy\n\nWORKDIR /frontier/\nRUN apt-get update \\\n    && apt-get -y install git \\\n    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n    && mv sat-solver/* . \\\n    && rm -rf sat-solver",
-    "CONTRACT": [],
-    "IMPORT": [],
-    "LEDGER": "",
-    "LAYERS": [
+    "MainHash": ["sha256:e708d374699bfe85d7aa8d13bcd1c62a561caf28a254ff75d3845d5163b4f962", "sha256:e37e197c3129fe6317c62d48984b8f90739f9d17ca74b945cabefdbd5c0d4e5f" ],
+    "Api": "/",
+    "Build":     {
+        "Id": "sha256:e708d374699bfe85d7aa8d13bcd1c62a561caf28a254ff75d3845d5163b4f962",
+        "RepoTags": [],
+        "RepoDigests": [],
+        "Parent": "sha256:e37e197c3129fe6317c62d48984b8f90739f9d17ca74b945cabefdbd5c0d4e5f",
+        "Comment": "",
+        "Created": "2020-06-09T11:39:55.174901321Z",
+        "Container": "895f3a410be127d168503476962667f37e654014e4e7fdbf4cec4f9f167cb377",
+        "ContainerConfig": {
+            "Hostname": "",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Cmd": [
+                "/bin/sh",
+                "-c",
+                "apt-get update     && apt-get -y install git     && git clone --branch frontier https://github.com/josemibnf/sat-solver.git     && mv sat-solver/* .     && rm -rf sat-solver"
+            ],
+            "Image": "sha256:e37e197c3129fe6317c62d48984b8f90739f9d17ca74b945cabefdbd5c0d4e5f",
+            "Volumes": null,
+            "WorkingDir": "/frontier/",
+            "Entrypoint": null,
+            "OnBuild": null,
+            "Labels": null
+        },
+        "DockerVersion": "19.03.8",
+        "Author": "",
+        "Config": {
+            "Hostname": "",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Cmd": [
+                "/bin/bash"
+            ],
+            "ArgsEscaped": true,
+            "Image": "sha256:e37e197c3129fe6317c62d48984b8f90739f9d17ca74b945cabefdbd5c0d4e5f",
+            "Volumes": null,
+            "WorkingDir": "/frontier/",
+            "Entrypoint": null,
+            "OnBuild": null,
+            "Labels": null
+        },
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Size": 617334664,
+        "VirtualSize": 617334664,
+        "GraphDriver": {
+            "Data": {
+                "LowerDir": "/var/lib/docker/overlay2/94b0581618303df4d71b4519ff5f224fe1991a6a00068678d5c346f754f9d77f/diff:/var/lib/docker/overlay2/6deb608dc05e87632b9ab42a6d6efdea71e4e6e44255e29a2b8e69073a2d93cc/diff:/var/lib/docker/overlay2/1bd5839080a1e44f2f095eaff89eb48e3d9e2ca907b1827ae2f70af2c0c2dcdf/diff:/var/lib/docker/overlay2/18fa39d23ae9b964fb7c42eed83080e3e8ea1289c71be65b1228526089347c18/diff:/var/lib/docker/overlay2/fbba9d80fe959d69897ddbc60de75e4a3a53699900a9d76d3c3cb21c008f29fc/diff:/var/lib/docker/overlay2/23bd68e36cd0773e6e73be7783e8b792efcadded5f7acd94f4d2bdf26440af1c/diff:/var/lib/docker/overlay2/523ba3350671b4661e4fed79a98c7b7e485eaaf40c701925ac6fc587ec8cdd01/diff",
+                "MergedDir": "/var/lib/docker/overlay2/e405675f9b711642121240f759d17a24d50db292917097e7d68b96a4c4c7694c/merged",
+                "UpperDir": "/var/lib/docker/overlay2/e405675f9b711642121240f759d17a24d50db292917097e7d68b96a4c4c7694c/diff",
+                "WorkDir": "/var/lib/docker/overlay2/e405675f9b711642121240f759d17a24d50db292917097e7d68b96a4c4c7694c/work"
+            },
+            "Name": "overlay2"
+        },
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:7789f1a3d4e9258fbe5469a8d657deb6aba168d86967063e9b80ac3e1154333f",
+                "sha256:9e53fd4895597d04f8871a68caea4c686011e1fbd0be32e57e89ada2ea5c24c4",
+                "sha256:2a19bd70fcd4ce7fd73b37b1b2c710f8065817a9db821ff839fe0b4b4560e643",
+                "sha256:8891751e0a1733c5c214d17ad2b0040deccbdea0acebb963679735964d516ac2",
+                "sha256:3da8d6116929eea54b0f7c1302b9f5e7aad1ef027567bc74d075e8043cc57a81",
+                "sha256:e280c8bf9399fe96225d18f18e422b0edbb5616f813f990ab3e4618548851850",
+                "sha256:c070b47c993723cd7ec08cc1f05ee7e732348cd3f4fdb9127f5abee8454aa4c8",
+                "sha256:4e422ec44ad8fc6ae17fe16bd01553623b19857209b11f5272568dacd6de619f"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "0001-01-01T00:00:00Z"
+        }
+    },
+    "Contract": [],
+    "Import": [],
+    "Ledger": "",
+    "Layers": [
         {
             "#": "ubuntu",
             "@hash256@": "ldjf49p2on",
@@ -22,5 +110,5 @@
             "TENSOR": ""
         }
     ],
-    "TENSOR": ""
+    "Tensor": ""
 }

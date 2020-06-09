@@ -1,0 +1,26 @@
+{
+    "@mainhash@": ["sha256:e708d374699bfe85d7aa8d13bcd1c62a561caf28a254ff75d3845d5163b4f962", "sha256:e37e197c3129fe6317c62d48984b8f90739f9d17ca74b945cabefdbd5c0d4e5f" ],
+    "API": "/",
+    "BUILD": "FROM ubuntu\n\nRUN apt-get update \\\n    && apt-get -y install python3.6\n\nRUN apt-get update \\\n    && apt-get -y install python3-tk \\\n    && apt-get -y install python3-pip \\\n    && apt-get -y install minisat \\\n    && pip3 install pandas \\\n    && pip3 install numpy\n\nWORKDIR /frontier/\nRUN apt-get update \\\n    && apt-get -y install git \\\n    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n    && mv sat-solver/* . \\\n    && rm -rf sat-solver",
+    "CONTRACT": [],
+    "IMPORT": [],
+    "LEDGER": "",
+    "LAYERS": [
+        {
+            "#": "ubuntu",
+            "@hash256@": "ldjf49p2on",
+            "TENSOR": ""
+        },
+        {
+            "#": "python",
+            "@hash256@": "l4mrerekrere45jbnlj",
+            "TENSOR": ""
+        },
+        {
+            "#": "frontier",
+            "@hash256@": "4343443nnknkn4o3joj",
+            "TENSOR": ""
+        }
+    ],
+    "TENSOR": ""
+}
