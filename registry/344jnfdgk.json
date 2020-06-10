@@ -2,10 +2,7 @@
     "Id": "sha256:344jnfdgk",
     "Api": "/",
     "Container":     {
-        "Id" : "sha256:236478987654345678987654345678gh4jf8f9k",
-        "Build" : [
-            "FROM ubuntu\n\nRUN apt-get update \\\n    && apt-get -y install python3.6\n\nRUN apt-get update \\\n    && apt-get -y install python3-tk \\\n    && apt-get -y install python3-pip \\\n    && apt-get -y install minisat \\\n    && pip3 install pandas \\\n    && pip3 install numpy\n\nWORKDIR /frontier/\nRUN apt-get update \\\n    && apt-get -y install git \\\n    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n    && mv sat-solver/* . \\\n    && rm -rf sat-solver"
-        ],
+        "Build" : "FROM ubuntu\n\nRUN apt-get update \\\n    && apt-get -y install python3.6\n\nRUN apt-get update \\\n    && apt-get -y install python3-tk \\\n    && apt-get -y install python3-pip \\\n    && apt-get -y install minisat \\\n    && pip3 install pandas \\\n    && pip3 install numpy\n\nWORKDIR /frontier/\nRUN apt-get update \\\n    && apt-get -y install git \\\n    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n    && mv sat-solver/* . \\\n    && rm -rf sat-solver",
         "Config" : [  
             {
                 "Id": "sha256:b0263b405189696cd403af39aacba143aa53983de15763189eefaa6150184557",

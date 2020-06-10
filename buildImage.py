@@ -24,7 +24,8 @@ class Image:
             myfile.write(self.image.get('Container').get('Build'))
             myfile.close()
         dockerfile()
-        run('docker build .')
+        image_id = self.image.get('Id').split(':')[1]
+        run('docker build -t '+image_id+' .')
         os.remove("Dockerfile")
 
 def isValidHyperFile(file):
@@ -51,9 +52,9 @@ def select_port():
 
 def ok(image):
     file =  "registry/"+image+".json"
-    container_id = main(file).image.get('Container').get('Id')
-    container_id = container_id.split(':')[1]
-    return container_id
+    image_id = main(file).image.get('Id')
+    image_id = image_id.split(':')[1]
+    return image_id
 
 if __name__ == "__main__":
     file=sys.argv[1]
