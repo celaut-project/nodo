@@ -3,7 +3,7 @@
     "Api": "/",
     "Container":     {
         "Build" : "FROM ubuntu\n\nRUN apt-get update \\\n    && apt-get -y install python3.6\n\nRUN apt-get update \\\n    && apt-get -y install python3-tk \\\n    && apt-get -y install python3-pip \\\n    && apt-get -y install minisat \\\n    && pip3 install pandas \\\n    && pip3 install numpy\n\nWORKDIR /frontier/\nRUN apt-get update \\\n    && apt-get -y install git \\\n    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n    && mv sat-solver/* . \\\n    && rm -rf sat-solver",
-        "Config" : [  
+        "Config" : [
             {
                 "Id": "sha256:b0263b405189696cd403af39aacba143aa53983de15763189eefaa6150184557",
                 "RepoTags": [],
@@ -181,7 +181,98 @@
                 "Metadata": {
                     "LastTagTime": "0001-01-01T00:00:00Z"
                 }
-            } 
+            },
+            {
+                "Id": "sha256:8579b6e63afc0e98dd03502c909101ec0a4eb66daa19a6a55b4273d3d58421bc",
+                "RepoTags": [
+                    "u5482ec44g48fc6ae17fe16bd01553623b19857209b11f5272568dacd6de619f:latest"
+                ],
+                "RepoDigests": [],
+                "Parent": "sha256:53b37e49a72b72cc1e443b33b3a2b4956fa362cbb14de81874911c7f55ccc37f",
+                "Comment": "",
+                "Created": "2020-06-10T14:20:22.730027071Z",
+                "Container": "a7433292cb5fb0049c3b7130ad0285c5d12f2e8316f1556a947163b0b8ba51fd",
+                "ContainerConfig": {
+                    "Hostname": "",
+                    "Domainname": "",
+                    "User": "",
+                    "AttachStdin": false,
+                    "AttachStdout": false,
+                    "AttachStderr": false,
+                    "Tty": false,
+                    "OpenStdin": false,
+                    "StdinOnce": false,
+                    "Env": [
+                        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "Cmd": [
+                        "/bin/sh",
+                        "-c",
+                        "apt-get update     && apt-get -y install git     && git clone --branch frontier https://github.com/josemibnf/sat-solver.git     && mv sat-solver/* .     && rm -rf sat-solver"
+                    ],
+                    "Image": "sha256:53b37e49a72b72cc1e443b33b3a2b4956fa362cbb14de81874911c7f55ccc37f",
+                    "Volumes": null,
+                    "WorkingDir": "/frontier/",
+                    "Entrypoint": null,
+                    "OnBuild": null,
+                    "Labels": null
+                },
+                "DockerVersion": "19.03.8",
+                "Author": "",
+                "Config": {
+                    "Hostname": "",
+                    "Domainname": "",
+                    "User": "",
+                    "AttachStdin": false,
+                    "AttachStdout": false,
+                    "AttachStderr": false,
+                    "Tty": false,
+                    "OpenStdin": false,
+                    "StdinOnce": false,
+                    "Env": [
+                        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "Cmd": [
+                        "/bin/bash"
+                    ],
+                    "ArgsEscaped": true,
+                    "Image": "sha256:53b37e49a72b72cc1e443b33b3a2b4956fa362cbb14de81874911c7f55ccc37f",
+                    "Volumes": null,
+                    "WorkingDir": "/frontier/",
+                    "Entrypoint": null,
+                    "OnBuild": null,
+                    "Labels": null
+                },
+                "Architecture": "amd64",
+                "Os": "linux",
+                "Size": 617404037,
+                "VirtualSize": 617404037,
+                "GraphDriver": {
+                    "Data": {
+                        "LowerDir": "/var/lib/docker/overlay2/b99ae2dd604b2d59579ef7d44e965523675d42fa8b72cec0e940b41bc56aca9b/diff:/var/lib/docker/overlay2/5e1daa94856f8bb301b5075dae81f9831de1d15f46525b54b710219c0151e331/diff:/var/lib/docker/overlay2/0ccfc00765fa3576f884504f181ed95ff6dab9f138cb82643762e3016f75ee10/diff:/var/lib/docker/overlay2/18fa39d23ae9b964fb7c42eed83080e3e8ea1289c71be65b1228526089347c18/diff:/var/lib/docker/overlay2/fbba9d80fe959d69897ddbc60de75e4a3a53699900a9d76d3c3cb21c008f29fc/diff:/var/lib/docker/overlay2/23bd68e36cd0773e6e73be7783e8b792efcadded5f7acd94f4d2bdf26440af1c/diff:/var/lib/docker/overlay2/523ba3350671b4661e4fed79a98c7b7e485eaaf40c701925ac6fc587ec8cdd01/diff",
+                        "MergedDir": "/var/lib/docker/overlay2/f08d424c2d81b4772573fb40f7c6097acef3a127f6c4e19d765b3c1607449221/merged",
+                        "UpperDir": "/var/lib/docker/overlay2/f08d424c2d81b4772573fb40f7c6097acef3a127f6c4e19d765b3c1607449221/diff",
+                        "WorkDir": "/var/lib/docker/overlay2/f08d424c2d81b4772573fb40f7c6097acef3a127f6c4e19d765b3c1607449221/work"
+                    },
+                    "Name": "overlay2"
+                },
+                "RootFS": {
+                    "Type": "layers",
+                    "Layers": [
+                        "sha256:7789f1a3d4e9258fbe5469a8d657deb6aba168d86967063e9b80ac3e1154333f",
+                        "sha256:9e53fd4895597d04f8871a68caea4c686011e1fbd0be32e57e89ada2ea5c24c4",
+                        "sha256:2a19bd70fcd4ce7fd73b37b1b2c710f8065817a9db821ff839fe0b4b4560e643",
+                        "sha256:8891751e0a1733c5c214d17ad2b0040deccbdea0acebb963679735964d516ac2",
+                        "sha256:01e6f9132b3c32ec4051172ed078dbf6dc21011969c1a29b0a5c6ef5e0798df1",
+                        "sha256:20251e2bb65da8785ca8d43bf17e70dd663eb0d9405f0de21ca3f2e5b99dc7b0",
+                        "sha256:caa65789f0000fed731fc842f706905ef4e60fd66e725839553103206ab2c027",
+                        "sha256:16f27138747a9edbc11d96f8fe1c426280b1ed3bcf310237d40dbd2a4ce1a53d"
+                    ]
+                },
+                "Metadata": {
+                    "LastTagTime": "2020-06-10T14:20:23.022679599Z"
+                }
+            }
         ],
         "Layers": [
         {

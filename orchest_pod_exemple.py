@@ -11,6 +11,5 @@ def get_solver_uri(image):
     return response.text
 
 if __name__ == "__main__":
-    sovler_uri = get_solver_uri('344jnfdgk')
-    print(sovler_uri)
-    #response = requests.get( sovler_uri+random_cnf() )
+    sovler_uri = get_solver_uri('u5482ec44g48fc6ae17fe16bd01553623b19857209b11f5272568dacd6de619f')
+    response = requests.get( sovler_uri+random_cnf() )
