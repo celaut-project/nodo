@@ -52,9 +52,7 @@ def select_port():
 
 def ok(image):
     file =  "registry/"+image+".json"
-    image_id = main(file).image.get('Id')
-    image_id = image_id.split(':')[1]
-    return image_id
+    return main(file).image.get('Id').split(':')[1]
 
 if __name__ == "__main__":
     file=sys.argv[1]
