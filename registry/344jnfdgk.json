@@ -185,12 +185,8 @@
                     "LastTagTime": "0001-01-01T00:00:00Z"
                 }
             } 
-        ]
-    },
-    "Contract": [],
-    "Import": [],
-    "Ledger": "",
-    "Layers": [
+        ],
+        "Layers": [
         {
             "#": "ubuntu",
             "@hash256@": "ldjf49p2on",
@@ -206,6 +202,10 @@
             "@hash256@": "4343443nnknkn4o3joj",
             "TENSOR": ""
         }
-    ],
+        ]
+    },
+    "Contract": [],
+    "Import": [],
+    "Ledger": "",
     "Tensor": ""
 }
