@@ -1,122 +1,114 @@
 {
-    "Id": "sha256:u5482ec44g48fc6ae17fe16bd01553623b19857209b11f5272568dacd6de619f",
     "Api": {
-        "Type" : "Rest",
-        "Methods" : [
+        "Methods": [
             {
-                "Type" : "Get",
-                "Path" : "/",
-                "Params" : [
+                "Params": [
                     "cnf"
                 ],
-                "Return" : "interpretation"
+                "Path": "/",
+                "Return": "interpretation",
+                "Type": "Get"
             }
         ],
-        "Responses" : {
+        "Responses": {
             "200": {
-              "description": "Product listing",
-              "schema": {
-                "$ref": "#/definitions/Product"
-              }
+                "description": "Product listing",
+                "schema": {
+                    "$ref": "#/definitions/Product"
+                }
             },
             "400": {
-              "description": "Bad request",
-              "schema": {
-                "$ref": "#/definitions/Error"
-              }
+                "description": "Bad request",
+                "schema": {
+                    "$ref": "#/definitions/Error"
+                }
             },
             "401": {
-              "description": "Unauthorized",
-              "schema": {
-              "$ref": "#/definitions/Error"
-              }
+                "description": "Unauthorized",
+                "schema": {
+                    "$ref": "#/definitions/Error"
+                }
             },
             "403": {
-              "description": "Forbidden",
-              "schema": {
-              "$ref": "#/definitions/Error"
-              }
+                "description": "Forbidden",
+                "schema": {
+                    "$ref": "#/definitions/Error"
+                }
             },
             "404": {
-              "description": "Not found",
-              "schema": {
-              "$ref": "#/definitions/Error"
-              }
+                "description": "Not found",
+                "schema": {
+                    "$ref": "#/definitions/Error"
+                }
             },
             "405": {
-              "description": "Method not allowed",
-              "schema": {
-              "$ref": "#/definitions/Error"
-              }
+                "description": "Method not allowed",
+                "schema": {
+                    "$ref": "#/definitions/Error"
+                }
             }
-        }
+        },
+        "Type": "Rest"
     },
-    "Container":     {
-        "Build" : "FROM ubuntu\n\nRUN apt-get update \\\n    && apt-get -y install python3.6\n\nRUN apt-get update \\\n    && apt-get -y install python3-tk \\\n    && apt-get -y install python3-pip \\\n    && apt-get -y install minisat \\\n    && pip3 install pandas \\\n    && pip3 install numpy\n\nWORKDIR /frontier/\nRUN apt-get update \\\n    && apt-get -y install git \\\n    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n    && mv sat-solver/* . \\\n    && rm -rf sat-solver",
-        "Config" : [
+    "Container": {
+        "Build": "FROM ubuntu\nRUN apt-get update \\\n    && apt-get -y install python3.6\nRUN apt-get update \\\n    && apt-get -y install python3-tk\nRUN apt-get update \\\n    && apt-get -y install python3-pip\nRUN pip3 install flask\nRUN pip3 install pandas\nRUN pip3 install numpy\nRUN apt-get update \\\n    && apt-get -y install minisat\nWORKDIR /frontier/\nRUN apt-get update \\\n    && apt-get -y install git \\\n    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n    && mv sat-solver/* . \\\n    && rm -rf sat-solver \\\n    && rm -rf .git\nENTRYPOINT [ \"python3 start.py\" ]",
+        "Config": [
             {
-                "Id": "sha256:b0263b405189696cd403af39aacba143aa53983de15763189eefaa6150184557",
-                "RepoTags": [],
-                "RepoDigests": [],
-                "Parent": "sha256:43b06cc7430809db2a23f00eb5fe526a032e621640e3fda6163179d9e91f7608",
+                "Architecture": "amd64",
+                "Author": "",
                 "Comment": "",
-                "Created": "2020-06-09T20:39:29.102919234Z",
-                "Container": "a52d1474617a5bb31ac47a87d4fbdf72f414feb7d6e485b307c0dae06fa7fb7b",
-                "ContainerConfig": {
-                    "Hostname": "",
-                    "Domainname": "",
-                    "User": "",
+                "Config": {
+                    "ArgsEscaped": true,
+                    "AttachStderr": false,
                     "AttachStdin": false,
                     "AttachStdout": false,
-                    "AttachStderr": false,
-                    "Tty": false,
-                    "OpenStdin": false,
-                    "StdinOnce": false,
+                    "Cmd": [
+                        "/bin/bash"
+                    ],
+                    "Domainname": "",
+                    "Entrypoint": null,
                     "Env": [
                         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                     ],
+                    "Hostname": "",
+                    "Image": "sha256:43b06cc7430809db2a23f00eb5fe526a032e621640e3fda6163179d9e91f7608",
+                    "Labels": null,
+                    "OnBuild": null,
+                    "OpenStdin": false,
+                    "StdinOnce": false,
+                    "Tty": false,
+                    "User": "",
+                    "Volumes": null,
+                    "WorkingDir": "/frontier/"
+                },
+                "Container": "a52d1474617a5bb31ac47a87d4fbdf72f414feb7d6e485b307c0dae06fa7fb7b",
+                "ContainerConfig": {
+                    "AttachStderr": false,
+                    "AttachStdin": false,
+                    "AttachStdout": false,
                     "Cmd": [
                         "/bin/sh",
                         "-c",
                         "apt-get update     && apt-get -y install git     && git clone --branch frontier https://github.com/josemibnf/sat-solver.git     && mv sat-solver/* .     && rm -rf sat-solver"
                     ],
-                    "Image": "sha256:43b06cc7430809db2a23f00eb5fe526a032e621640e3fda6163179d9e91f7608",
-                    "Volumes": null,
-                    "WorkingDir": "/frontier/",
-                    "Entrypoint": null,
-                    "OnBuild": null,
-                    "Labels": null
-                },
-                "DockerVersion": "19.03.8",
-                "Author": "",
-                "Config": {
-                    "Hostname": "",
                     "Domainname": "",
-                    "User": "",
-                    "AttachStdin": false,
-                    "AttachStdout": false,
-                    "AttachStderr": false,
-                    "Tty": false,
-                    "OpenStdin": false,
-                    "StdinOnce": false,
+                    "Entrypoint": null,
                     "Env": [
                         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                     ],
-                    "Cmd": [
-                        "/bin/bash"
-                    ],
-                    "ArgsEscaped": true,
+                    "Hostname": "",
                     "Image": "sha256:43b06cc7430809db2a23f00eb5fe526a032e621640e3fda6163179d9e91f7608",
-                    "Volumes": null,
-                    "WorkingDir": "/frontier/",
-                    "Entrypoint": null,
+                    "Labels": null,
                     "OnBuild": null,
-                    "Labels": null
+                    "OpenStdin": false,
+                    "StdinOnce": false,
+                    "Tty": false,
+                    "User": "",
+                    "Volumes": null,
+                    "WorkingDir": "/frontier/"
                 },
-                "Architecture": "amd64",
-                "Os": "linux",
-                "Size": 617347380,
-                "VirtualSize": 617347380,
+                "Created": "2020-06-09T20:39:29.102919234Z",
+                "DockerVersion": "19.03.8",
                 "GraphDriver": {
                     "Data": {
                         "LowerDir": "/var/lib/docker/overlay2/dd73f20c6fc3cda007345a051e5b5ab5a8540c763b67cecb9e67c24822027e47/diff:/var/lib/docker/overlay2/259d17a46ce345b9d5c33ac452732ac2a7ab3243d3eee4e695128688d3899b15/diff:/var/lib/docker/overlay2/24b65dec779c73d587f8f20f1fd6c93cbfc78ce16ca004566741ab16ac46d0ce/diff:/var/lib/docker/overlay2/18fa39d23ae9b964fb7c42eed83080e3e8ea1289c71be65b1228526089347c18/diff:/var/lib/docker/overlay2/fbba9d80fe959d69897ddbc60de75e4a3a53699900a9d76d3c3cb21c008f29fc/diff:/var/lib/docker/overlay2/23bd68e36cd0773e6e73be7783e8b792efcadded5f7acd94f4d2bdf26440af1c/diff:/var/lib/docker/overlay2/523ba3350671b4661e4fed79a98c7b7e485eaaf40c701925ac6fc587ec8cdd01/diff",
@@ -126,8 +118,15 @@
                     },
                     "Name": "overlay2"
                 },
+                "Id": "sha256:b0263b405189696cd403af39aacba143aa53983de15763189eefaa6150184557",
+                "Metadata": {
+                    "LastTagTime": "0001-01-01T00:00:00Z"
+                },
+                "Os": "linux",
+                "Parent": "sha256:43b06cc7430809db2a23f00eb5fe526a032e621640e3fda6163179d9e91f7608",
+                "RepoDigests": [],
+                "RepoTags": [],
                 "RootFS": {
-                    "Type": "layers",
                     "Layers": [
                         "sha256:7789f1a3d4e9258fbe5469a8d657deb6aba168d86967063e9b80ac3e1154333f",
                         "sha256:9e53fd4895597d04f8871a68caea4c686011e1fbd0be32e57e89ada2ea5c24c4",
@@ -137,75 +136,68 @@
                         "sha256:dd5882fd17ea7b5eb980a00c452353965f3a2fdea520b40d3822ef5ef4678a96",
                         "sha256:f7c4a1da4b7b9c71bee06220257f4ebde2a46461983456f1208fb01320441abf",
                         "sha256:833188044400e71e642da33dc13dbddd035e70fe46da67abce19edbe16b4ec9b"
-                    ]
+                    ],
+                    "Type": "layers"
                 },
-                "Metadata": {
-                    "LastTagTime": "0001-01-01T00:00:00Z"
-                }
-            }, 
+                "Size": 617347380,
+                "VirtualSize": 617347380
+            },
             {
-                "Id": "sha256:e708d374699bfe85d7aa8d13bcd1c62a561caf28a254ff75d3845d5163b4f962",
-                "RepoTags": [],
-                "RepoDigests": [],
-                "Parent": "sha256:e37e197c3129fe6317c62d48984b8f90739f9d17ca74b945cabefdbd5c0d4e5f",
+                "Architecture": "amd64",
+                "Author": "",
                 "Comment": "",
-                "Created": "2020-06-09T11:39:55.174901321Z",
-                "Container": "895f3a410be127d168503476962667f37e654014e4e7fdbf4cec4f9f167cb377",
-                "ContainerConfig": {
-                    "Hostname": "",
-                    "Domainname": "",
-                    "User": "",
+                "Config": {
+                    "ArgsEscaped": true,
+                    "AttachStderr": false,
                     "AttachStdin": false,
                     "AttachStdout": false,
-                    "AttachStderr": false,
-                    "Tty": false,
-                    "OpenStdin": false,
-                    "StdinOnce": false,
+                    "Cmd": [
+                        "/bin/bash"
+                    ],
+                    "Domainname": "",
+                    "Entrypoint": null,
                     "Env": [
                         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                     ],
+                    "Hostname": "",
+                    "Image": "sha256:e37e197c3129fe6317c62d48984b8f90739f9d17ca74b945cabefdbd5c0d4e5f",
+                    "Labels": null,
+                    "OnBuild": null,
+                    "OpenStdin": false,
+                    "StdinOnce": false,
+                    "Tty": false,
+                    "User": "",
+                    "Volumes": null,
+                    "WorkingDir": "/frontier/"
+                },
+                "Container": "895f3a410be127d168503476962667f37e654014e4e7fdbf4cec4f9f167cb377",
+                "ContainerConfig": {
+                    "AttachStderr": false,
+                    "AttachStdin": false,
+                    "AttachStdout": false,
                     "Cmd": [
                         "/bin/sh",
                         "-c",
                         "apt-get update     && apt-get -y install git     && git clone --branch frontier https://github.com/josemibnf/sat-solver.git     && mv sat-solver/* .     && rm -rf sat-solver"
                     ],
-                    "Image": "sha256:e37e197c3129fe6317c62d48984b8f90739f9d17ca74b945cabefdbd5c0d4e5f",
-                    "Volumes": null,
-                    "WorkingDir": "/frontier/",
-                    "Entrypoint": null,
-                    "OnBuild": null,
-                    "Labels": null
-                },
-                "DockerVersion": "19.03.8",
-                "Author": "",
-                "Config": {
-                    "Hostname": "",
                     "Domainname": "",
-                    "User": "",
-                    "AttachStdin": false,
-                    "AttachStdout": false,
-                    "AttachStderr": false,
-                    "Tty": false,
-                    "OpenStdin": false,
-                    "StdinOnce": false,
+                    "Entrypoint": null,
                     "Env": [
                         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                     ],
-                    "Cmd": [
-                        "/bin/bash"
-                    ],
-                    "ArgsEscaped": true,
+                    "Hostname": "",
                     "Image": "sha256:e37e197c3129fe6317c62d48984b8f90739f9d17ca74b945cabefdbd5c0d4e5f",
-                    "Volumes": null,
-                    "WorkingDir": "/frontier/",
-                    "Entrypoint": null,
+                    "Labels": null,
                     "OnBuild": null,
-                    "Labels": null
+                    "OpenStdin": false,
+                    "StdinOnce": false,
+                    "Tty": false,
+                    "User": "",
+                    "Volumes": null,
+                    "WorkingDir": "/frontier/"
                 },
-                "Architecture": "amd64",
-                "Os": "linux",
-                "Size": 617334664,
-                "VirtualSize": 617334664,
+                "Created": "2020-06-09T11:39:55.174901321Z",
+                "DockerVersion": "19.03.8",
                 "GraphDriver": {
                     "Data": {
                         "LowerDir": "/var/lib/docker/overlay2/94b0581618303df4d71b4519ff5f224fe1991a6a00068678d5c346f754f9d77f/diff:/var/lib/docker/overlay2/6deb608dc05e87632b9ab42a6d6efdea71e4e6e44255e29a2b8e69073a2d93cc/diff:/var/lib/docker/overlay2/1bd5839080a1e44f2f095eaff89eb48e3d9e2ca907b1827ae2f70af2c0c2dcdf/diff:/var/lib/docker/overlay2/18fa39d23ae9b964fb7c42eed83080e3e8ea1289c71be65b1228526089347c18/diff:/var/lib/docker/overlay2/fbba9d80fe959d69897ddbc60de75e4a3a53699900a9d76d3c3cb21c008f29fc/diff:/var/lib/docker/overlay2/23bd68e36cd0773e6e73be7783e8b792efcadded5f7acd94f4d2bdf26440af1c/diff:/var/lib/docker/overlay2/523ba3350671b4661e4fed79a98c7b7e485eaaf40c701925ac6fc587ec8cdd01/diff",
@@ -215,8 +207,15 @@
                     },
                     "Name": "overlay2"
                 },
+                "Id": "sha256:e708d374699bfe85d7aa8d13bcd1c62a561caf28a254ff75d3845d5163b4f962",
+                "Metadata": {
+                    "LastTagTime": "0001-01-01T00:00:00Z"
+                },
+                "Os": "linux",
+                "Parent": "sha256:e37e197c3129fe6317c62d48984b8f90739f9d17ca74b945cabefdbd5c0d4e5f",
+                "RepoDigests": [],
+                "RepoTags": [],
                 "RootFS": {
-                    "Type": "layers",
                     "Layers": [
                         "sha256:7789f1a3d4e9258fbe5469a8d657deb6aba168d86967063e9b80ac3e1154333f",
                         "sha256:9e53fd4895597d04f8871a68caea4c686011e1fbd0be32e57e89ada2ea5c24c4",
@@ -226,77 +225,68 @@
                         "sha256:e280c8bf9399fe96225d18f18e422b0edbb5616f813f990ab3e4618548851850",
                         "sha256:c070b47c993723cd7ec08cc1f05ee7e732348cd3f4fdb9127f5abee8454aa4c8",
                         "sha256:4e422ec44ad8fc6ae17fe16bd01553623b19857209b11f5272568dacd6de619f"
-                    ]
+                    ],
+                    "Type": "layers"
                 },
-                "Metadata": {
-                    "LastTagTime": "0001-01-01T00:00:00Z"
-                }
+                "Size": 617334664,
+                "VirtualSize": 617334664
             },
             {
-                "Id": "sha256:8579b6e63afc0e98dd03502c909101ec0a4eb66daa19a6a55b4273d3d58421bc",
-                "RepoTags": [
-                    "u5482ec44g48fc6ae17fe16bd01553623b19857209b11f5272568dacd6de619f:latest"
-                ],
-                "RepoDigests": [],
-                "Parent": "sha256:53b37e49a72b72cc1e443b33b3a2b4956fa362cbb14de81874911c7f55ccc37f",
+                "Architecture": "amd64",
+                "Author": "",
                 "Comment": "",
-                "Created": "2020-06-10T14:20:22.730027071Z",
-                "Container": "a7433292cb5fb0049c3b7130ad0285c5d12f2e8316f1556a947163b0b8ba51fd",
-                "ContainerConfig": {
-                    "Hostname": "",
-                    "Domainname": "",
-                    "User": "",
+                "Config": {
+                    "ArgsEscaped": true,
+                    "AttachStderr": false,
                     "AttachStdin": false,
                     "AttachStdout": false,
-                    "AttachStderr": false,
-                    "Tty": false,
-                    "OpenStdin": false,
-                    "StdinOnce": false,
+                    "Cmd": [
+                        "/bin/bash"
+                    ],
+                    "Domainname": "",
+                    "Entrypoint": null,
                     "Env": [
                         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                     ],
+                    "Hostname": "",
+                    "Image": "sha256:53b37e49a72b72cc1e443b33b3a2b4956fa362cbb14de81874911c7f55ccc37f",
+                    "Labels": null,
+                    "OnBuild": null,
+                    "OpenStdin": false,
+                    "StdinOnce": false,
+                    "Tty": false,
+                    "User": "",
+                    "Volumes": null,
+                    "WorkingDir": "/frontier/"
+                },
+                "Container": "a7433292cb5fb0049c3b7130ad0285c5d12f2e8316f1556a947163b0b8ba51fd",
+                "ContainerConfig": {
+                    "AttachStderr": false,
+                    "AttachStdin": false,
+                    "AttachStdout": false,
                     "Cmd": [
                         "/bin/sh",
                         "-c",
                         "apt-get update     && apt-get -y install git     && git clone --branch frontier https://github.com/josemibnf/sat-solver.git     && mv sat-solver/* .     && rm -rf sat-solver"
                     ],
-                    "Image": "sha256:53b37e49a72b72cc1e443b33b3a2b4956fa362cbb14de81874911c7f55ccc37f",
-                    "Volumes": null,
-                    "WorkingDir": "/frontier/",
-                    "Entrypoint": null,
-                    "OnBuild": null,
-                    "Labels": null
-                },
-                "DockerVersion": "19.03.8",
-                "Author": "",
-                "Config": {
-                    "Hostname": "",
                     "Domainname": "",
-                    "User": "",
-                    "AttachStdin": false,
-                    "AttachStdout": false,
-                    "AttachStderr": false,
-                    "Tty": false,
-                    "OpenStdin": false,
-                    "StdinOnce": false,
+                    "Entrypoint": null,
                     "Env": [
                         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                     ],
-                    "Cmd": [
-                        "/bin/bash"
-                    ],
-                    "ArgsEscaped": true,
+                    "Hostname": "",
                     "Image": "sha256:53b37e49a72b72cc1e443b33b3a2b4956fa362cbb14de81874911c7f55ccc37f",
-                    "Volumes": null,
-                    "WorkingDir": "/frontier/",
-                    "Entrypoint": null,
+                    "Labels": null,
                     "OnBuild": null,
-                    "Labels": null
+                    "OpenStdin": false,
+                    "StdinOnce": false,
+                    "Tty": false,
+                    "User": "",
+                    "Volumes": null,
+                    "WorkingDir": "/frontier/"
                 },
-                "Architecture": "amd64",
-                "Os": "linux",
-                "Size": 617404037,
-                "VirtualSize": 617404037,
+                "Created": "2020-06-10T14:20:22.730027071Z",
+                "DockerVersion": "19.03.8",
                 "GraphDriver": {
                     "Data": {
                         "LowerDir": "/var/lib/docker/overlay2/b99ae2dd604b2d59579ef7d44e965523675d42fa8b72cec0e940b41bc56aca9b/diff:/var/lib/docker/overlay2/5e1daa94856f8bb301b5075dae81f9831de1d15f46525b54b710219c0151e331/diff:/var/lib/docker/overlay2/0ccfc00765fa3576f884504f181ed95ff6dab9f138cb82643762e3016f75ee10/diff:/var/lib/docker/overlay2/18fa39d23ae9b964fb7c42eed83080e3e8ea1289c71be65b1228526089347c18/diff:/var/lib/docker/overlay2/fbba9d80fe959d69897ddbc60de75e4a3a53699900a9d76d3c3cb21c008f29fc/diff:/var/lib/docker/overlay2/23bd68e36cd0773e6e73be7783e8b792efcadded5f7acd94f4d2bdf26440af1c/diff:/var/lib/docker/overlay2/523ba3350671b4661e4fed79a98c7b7e485eaaf40c701925ac6fc587ec8cdd01/diff",
@@ -306,8 +296,17 @@
                     },
                     "Name": "overlay2"
                 },
+                "Id": "sha256:8579b6e63afc0e98dd03502c909101ec0a4eb66daa19a6a55b4273d3d58421bc",
+                "Metadata": {
+                    "LastTagTime": "2020-06-10T14:20:23.022679599Z"
+                },
+                "Os": "linux",
+                "Parent": "sha256:53b37e49a72b72cc1e443b33b3a2b4956fa362cbb14de81874911c7f55ccc37f",
+                "RepoDigests": [],
+                "RepoTags": [
+                    "u5482ec44g48fc6ae17fe16bd01553623b19857209b11f5272568dacd6de619f:latest"
+                ],
                 "RootFS": {
-                    "Type": "layers",
                     "Layers": [
                         "sha256:7789f1a3d4e9258fbe5469a8d657deb6aba168d86967063e9b80ac3e1154333f",
                         "sha256:9e53fd4895597d04f8871a68caea4c686011e1fbd0be32e57e89ada2ea5c24c4",
@@ -317,32 +316,33 @@
                         "sha256:20251e2bb65da8785ca8d43bf17e70dd663eb0d9405f0de21ca3f2e5b99dc7b0",
                         "sha256:caa65789f0000fed731fc842f706905ef4e60fd66e725839553103206ab2c027",
                         "sha256:16f27138747a9edbc11d96f8fe1c426280b1ed3bcf310237d40dbd2a4ce1a53d"
-                    ]
+                    ],
+                    "Type": "layers"
                 },
-                "Metadata": {
-                    "LastTagTime": "2020-06-10T14:20:23.022679599Z"
-                }
+                "Size": 617404037,
+                "VirtualSize": 617404037
             }
         ],
         "Layers": [
-        {
-            "#": "ubuntu",
-            "@hash256@": "ldjf49p2on",
-            "TENSOR": ""
-        },
-        {
-            "#": "python",
-            "@hash256@": "l4mrerekrere45jbnlj",
-            "TENSOR": ""
-        },
-        {
-            "#": "frontier",
-            "@hash256@": "4343443nnknkn4o3joj",
-            "TENSOR": ""
-        }
+            {
+                "#": "ubuntu",
+                "@hash256@": "ldjf49p2on",
+                "TENSOR": ""
+            },
+            {
+                "#": "python",
+                "@hash256@": "l4mrerekrere45jbnlj",
+                "TENSOR": ""
+            },
+            {
+                "#": "frontier",
+                "@hash256@": "4343443nnknkn4o3joj",
+                "TENSOR": ""
+            }
         ]
     },
     "Contract": [],
+    "Id": "sha256:u5482ec44g48fc6ae17fe16bd01553623b19857209b11f5272568dacd6de619f",
     "Import": [],
     "Ledger": "",
     "Tensor": ""

@@ -13,7 +13,9 @@ def DockerfileToString(Dockername):
 
 def writeBuild(Hypername, string):
     Hyperfile = json.load(open(Hypername,"r"))
-    Hyperfile.update({'Container': {'Build':string}})
+    container = Hyperfile.get('Container')
+    container.update({'Build': string})
+    Hyperfile.update({'Container': container})
     return( json.dumps(Hyperfile, indent=4, sort_keys=True) )
 
 if __name__ == "__main__":
