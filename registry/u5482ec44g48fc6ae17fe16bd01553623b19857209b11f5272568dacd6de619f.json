@@ -1,11 +1,15 @@
 {
     "Id": "sha256:u5482ec44g48fc6ae17fe16bd01553623b19857209b11f5272568dacd6de619f",
     "Api": {
-        "Type" : "REST",
-        "Params" : [
+        "Type" : "Rest",
+        "Methods" : [
             {
-                "name" : "cnf",
-                "type" : "file"
+                "Type" : "Get",
+                "Path" : "/",
+                "Params" : [
+                    "cnf"
+                ],
+                "Return" : "interpretation"
             }
         ],
         "Responses" : {
