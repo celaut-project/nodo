@@ -37,7 +37,7 @@ class Hyper:
                 layers.append(
                     {
                         "Id" : "",
-                        "Build" : [l] # Si queremos que actualize habria que usar append, de momento no.
+                        "Build" : [' '.join(l.split()[1:])] # Si queremos que actualize habria que usar append, de momento no.
                     }
                 )
                 container.update({'Layers' : layers})
