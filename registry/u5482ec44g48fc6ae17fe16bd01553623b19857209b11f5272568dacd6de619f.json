@@ -71,7 +71,7 @@
             "sha256:40f01be667f20a7f7c22db6373ade0c5b1dbc3eacfab183f146f2cd9717866cf",
             {
                "Id" : "sha256:f181762b3b5fd19446b9a8bb37a99d26942def59c72204e8e6824f7b3b869bc1",
-               "Commad" : ["RUN apt-get update \\\n    && apt-get -y install git \\\n    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n    && mv sat-solver/* . \\\n    && rm -rf sat-solver \\\n    && rm -rf .git\n"]
+               "Build" : ["RUN apt-get update \\\n    && apt-get -y install git \\\n    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n    && mv sat-solver/* . \\\n    && rm -rf sat-solver \\\n    && rm -rf .git\n"]
             }
         ]
     },
