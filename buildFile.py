@@ -31,13 +31,13 @@ class Hyper:
             }
         for l in Dockerfile.readlines():
             command = l.split()[0]
-            if command == 'RUN':
+            if command == 'RUN' or command == 'FROM':
                 layers = container.get('Layers')
                 # De momento no mira de actualizarla, mete como capa nueva y la id la deja en blanco.
                 layers.append(
                     {
                         "Id" : "",
-                        "Build" : [' '.join(l.split()[1:])] # Si queremos que actualize habria que usar append, de momento no.
+                        "Build" : [' '.join(l.split())] # Si queremos que actualize habria que usar append, de momento no.
                     }
                 )
                 container.update({'Layers' : layers})
