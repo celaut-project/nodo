@@ -4,7 +4,7 @@ import json
 class Hyper:
     def __init__(self):
         super().__init__()
-        file = {
+        self.file = {
                 "Api": {},
                 "Container" : {},
                 "Contract": [],
@@ -13,7 +13,7 @@ class Hyper:
                 "Ledger": "",
                 "Tensor": ""
             }
-        registry = 'OOOOO/'
+        self.registry = 'OOOOO/'
 
     def parseContainer(self, Dockername):
         #Read Dockerfile
@@ -46,6 +46,9 @@ class Hyper:
                 container.update({'WorkDir' : l.split()[1:]})
         Dockerfile.close()
         self.file.update({'Container' : container})
+
+    def parseApi(self):
+        pass
 
     def makeId(self):
         self.file.update({'Id':'sha256:x89j3mm4nodl3990lol33n4m3n4m3n443434jjkd21dllfdwidmvlejldkfjh3m4n3kj4b'})
