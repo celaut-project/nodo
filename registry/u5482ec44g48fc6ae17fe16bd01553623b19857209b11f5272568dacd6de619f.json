@@ -52,7 +52,6 @@
     },
     "Container": {
         "Entrypoint": [
-            "python3 start.py",
             "python3 start.py"
         ],
         "Layers": [
