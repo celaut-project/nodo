@@ -47,8 +47,11 @@ class Hyper:
         Dockerfile.close()
         self.file.update({'Container' : container})
 
+    def makeId(self):
+        self.file.update({'Id':'sha256:x89j3mm4nodl3990lol33n4m3n4m3n443434jjkd21dllfdwidmvlejldkfjh3m4n3kj4b'})
+
     def save(self):
-        registry = self.registry+self.file.get('Id').split(':')[1]
+        registry = self.registry + self.file.get('Id').split(':')[1]
         with open(registry,'w') as file:
             json.dumps(self.file, file, indent=4, sort_keys=True)
 
