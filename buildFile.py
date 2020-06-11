@@ -13,7 +13,7 @@ class Hyper:
                 "Ledger": "",
                 "Tensor": ""
             }
-        self.registry = 'OOOOO/'
+        self.registry = 'registry/'
 
     def parseContainer(self, Dockername):
         #Read Dockerfile
