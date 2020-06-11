@@ -19,7 +19,7 @@ class Hyper:
 
     def parseContainer(self):
         def parseInspect(container):
-            os.system('powershell.exe [docker inspect building >> inspect.json]')
+            os.system('powershell.exe docker inspect building >> inspect.json')
             inspect = json.load(open('inspect.json','r'))
             container.update({'Volumes':inspect.get('Config').get('Volumes')})
             container.update({'WorkingDir':inspect.get('Config').get('WorkingDir')})
