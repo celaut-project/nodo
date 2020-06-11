@@ -15,25 +15,43 @@ class Hyper:
             }
         registry = 'OOOOO/'
 
+    class Container:
+        def __init__(self):
+            super().__init__()
+            volume = None
+            workdir = None
+            entrypoint = None
+            layers = []
+        
+    class Layer:
+        def __init__(self):
+            super().__init__()
+            id = None
+            build = None
+
     def parseContainer(self, Dockername):
         #Read Dockerfile
         Dockerfile = open(Dockername, "r")
-        build = ""
+        container = Container()
         for l in Dockerfile.readlines():
-            build = build+l
-        print(build,"\n")
+            command = what_is(l.split()[0])
+            if command == 'RUN':
+                layer = Layer()
+                layer.build.append(l)
+                container.layers.append(layer)
         Dockerfile.close()
-        return build
 
     def save(self):
         json.dumps(self.file, indent=4, sort_keys=True)
 
 if __name__ == "__main__":
     Hyperfile = Hyper() # Hyperfile
-    Dockerfile = sys.argv[1] # Dockerfile
+    Dockerfile = sys.argv[1] # Dockerfile, no soporta comandos de varias lineas.
     
     Hyperfile.parseContainer(Dockerfile)
     Hyperfile.parseApi()
     
     Hyperfile.makeId()
     Hyperfile.save()
+
+    # tmb se podria hacer buildFile.py --update Hyperfile.json Dockerfile, para actualizar y añadir valores a uno ya existente.
