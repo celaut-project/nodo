@@ -51,9 +51,7 @@
         "Type": "Rest"
     },
     "Container": {
-        "Entrypoint": [
-            "python3 start.py"
-        ],
+        "Entrypoint": [],
         "Envs": [],
         "Layers": [
             {
@@ -123,9 +121,7 @@
         "OsArch": [],
         "Ports": [],
         "Volumes": [],
-        "WorkingDir": [
-            "/frontier"
-        ]
+        "WorkingDir": ""
     },
     "Contract": [],
     "Id": "sha256:u5482ec44g48fc6ae17fe16bd01553623b19857209b11f5272568dacd6de619f",
