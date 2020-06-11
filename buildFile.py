@@ -18,7 +18,7 @@ class Hyper:
 
     def parseContainer(self):
         def parseInspect(container):
-            run('docker inspect '+self.file.get('Id').split(':')[1]+' >> inspect.json')
+            run('docker inspect building... >> inspect.json')
             inspect = json.load(open('inspect.json','r'))
             inspect.load('')
         def parseDockerfile(container):
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1:
         Hyperfile = Hyper( json.load(open(sys.argv[1],"r")) ) # Hyperfile
             
-    run('docker build .')
+    run('docker build -t building... .')
     Hyperfile.parseContainer()
     #Hyperfile.parseApi()
 
