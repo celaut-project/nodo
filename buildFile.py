@@ -18,9 +18,10 @@ class Hyper:
 
     def parseContainer(self):
         def parseInspect(container):
-            run('docker inspect building... >> inspect.json')
+            run('docker inspect building >> inspect.json')
             inspect = json.load(open('inspect.json','r'))
-            inspect.load('')
+            container.update({'Volumes':inspect.get('Config').get('Volumes')})
+            container.update({'WorkingDir':inspect.get('Config').get('WorkingDir')})
         def parseDockerfile(container):
             Dockerfile = open("Dockerfile", "r")
             for l in Dockerfile.readlines():
@@ -36,18 +37,19 @@ class Hyper:
                         }
                     )
                     container.update({'Layers' : layers})
-                """elif command == 'ENTRYPOINT':
+                elif command == 'ENTRYPOINT':
                     entrypoint = container.get('Entrypoint')
                     entrypoint.append( ' '.join(l.split()[1:]) )
                     container.update({'Entrypoint' : entrypoint})
-                elif command == 'WORKDIR':
-                    container.update({'WorkingDir' : l.split()[1:]})"""
+                elif command == 'EXPOSE':
+                    ports = container.get('Ports')
+                    ports.append( ' '.join(l.split()[1:]) )
+                    container.update({'Ports' : ports})
             Dockerfile.close()
             return container
         container = self.file.get('Container')
         if container == {}:
             container = {
-                "Envs" : [],
                 "Ports" : [],
                 "Volumes" : [],
                 "WorkingDir" : "",
@@ -80,7 +82,7 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1:
         Hyperfile = Hyper( json.load(open(sys.argv[1],"r")) ) # Hyperfile
             
-    run('docker build -t building... .')
+    run('docker build -t building .')
     Hyperfile.parseContainer()
     #Hyperfile.parseApi()
 
