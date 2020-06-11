@@ -54,6 +54,104 @@
         "Build": "FROM ubuntu\nRUN apt-get update \\\n    && apt-get -y install python3.6\nRUN apt-get update \\\n    && apt-get -y install python3-tk\nRUN apt-get update \\\n    && apt-get -y install python3-pip\nRUN pip3 install flask\nRUN pip3 install pandas\nRUN pip3 install numpy\nRUN apt-get update \\\n    && apt-get -y install minisat\nWORKDIR /frontier/\nRUN apt-get update \\\n    && apt-get -y install git \\\n    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n    && mv sat-solver/* . \\\n    && rm -rf sat-solver \\\n    && rm -rf .git\nENTRYPOINT [ \"python3 start.py\" ]",
         "Config": [
             {
+                "Id": "sha256:1cc06840e8f7a3f18193fdcc0fadcd4e3c6366476088d6a174aca457f746568c",
+                "RepoTags": [
+                    "u5482ec44g48fc6ae17fe16bd01553623b19857209b11f5272568dacd6de619f:latest"
+                ],
+                "RepoDigests": [],
+                "Parent": "sha256:c9f884d79867e491f3ea7ced9627219720f717f8b0b4462291e965c8033822ff",
+                "Comment": "",
+                "Created": "2020-06-11T09:37:46.121434326Z",
+                "Container": "ddc1ca67f030b76cf57d45c1c94c145605296828856e839efe1402699cddac3f",
+                "ContainerConfig": {
+                    "Hostname": "ddc1ca67f030",
+                    "Domainname": "",
+                    "User": "",
+                    "AttachStdin": false,
+                    "AttachStdout": false,
+                    "AttachStderr": false,
+                    "Tty": false,
+                    "OpenStdin": false,
+                    "StdinOnce": false,
+                    "Env": [
+                        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "Cmd": [
+                        "/bin/sh",
+                        "-c",
+                        "#(nop) ",
+                        "ENTRYPOINT [\"python3 start.py\"]"
+                    ],
+                    "Image": "sha256:c9f884d79867e491f3ea7ced9627219720f717f8b0b4462291e965c8033822ff",
+                    "Volumes": null,
+                    "WorkingDir": "/frontier",
+                    "Entrypoint": [
+                        "python3 start.py"
+                    ],
+                    "OnBuild": null,
+                    "Labels": {}
+                },
+                "DockerVersion": "19.03.8",
+                "Author": "",
+                "Config": {
+                    "Hostname": "",
+                    "Domainname": "",
+                    "User": "",
+                    "AttachStdin": false,
+                    "AttachStdout": false,
+                    "AttachStderr": false,
+                    "Tty": false,
+                    "OpenStdin": false,
+                    "StdinOnce": false,
+                    "Env": [
+                        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "Cmd": null,
+                    "Image": "sha256:c9f884d79867e491f3ea7ced9627219720f717f8b0b4462291e965c8033822ff",
+                    "Volumes": null,
+                    "WorkingDir": "/frontier/",
+                    "Entrypoint": [
+                        "python3 start.py"
+                    ],
+                    "OnBuild": null,
+                    "Labels": null
+                },
+                "Architecture": "amd64",
+                "Os": "linux",
+                "Size": 626574634,
+                "VirtualSize": 626574634,
+                "GraphDriver": {
+                    "Data": {
+                        "LowerDir": "/var/lib/docker/overlay2/053998718b6334a0e796e3b584510ebcdd43afa73b96f82b43e8c73ba214a7df/diff:/var/lib/docker/overlay2/16a59bf98f70bc7332f1802ef7017c40c300c65d4139ec0251ec86b0cace0c9a/diff:/var/lib/docker/overlay2/29ad5fb2fe9c6d498d3373a8e970a2f9827b195df2696ce5437c850c17258af9/diff:/var/lib/docker/overlay2/644b0224f0497f80568ad38131cce007204780882fc27de97d5dda0a2b98592a/diff:/var/lib/docker/overlay2/e76aa7261a46ab93c928af77d0a6c2e512c8050e7d7f71f8937b1c1358f2902c/diff:/var/lib/docker/overlay2/0f02a16bd9bab8e06a3a25d9291a21978b99986bf5d02d5b64724ae62ffed55c/diff:/var/lib/docker/overlay2/451dce60b23a337cfeface5b7fd643f479ea1b6f7a620606aeb13ec281a2d1bd/diff:/var/lib/docker/overlay2/7e48fe200449f05c2f133cc417244b30a43676870792ee06f44b23cf3bb85365/diff:/var/lib/docker/overlay2/18fa39d23ae9b964fb7c42eed83080e3e8ea1289c71be65b1228526089347c18/diff:/var/lib/docker/overlay2/fbba9d80fe959d69897ddbc60de75e4a3a53699900a9d76d3c3cb21c008f29fc/diff:/var/lib/docker/overlay2/23bd68e36cd0773e6e73be7783e8b792efcadded5f7acd94f4d2bdf26440af1c/diff:/var/lib/docker/overlay2/523ba3350671b4661e4fed79a98c7b7e485eaaf40c701925ac6fc587ec8cdd01/diff",
+                        "MergedDir": "/var/lib/docker/overlay2/8522ea7af168572a5c78fff8feb2c2e05b96ab9467ab86c7dbbeadd5bad70e76/merged",
+                        "UpperDir": "/var/lib/docker/overlay2/8522ea7af168572a5c78fff8feb2c2e05b96ab9467ab86c7dbbeadd5bad70e76/diff",
+                        "WorkDir": "/var/lib/docker/overlay2/8522ea7af168572a5c78fff8feb2c2e05b96ab9467ab86c7dbbeadd5bad70e76/work"
+                    },
+                    "Name": "overlay2"
+                },
+                "RootFS": {
+                    "Type": "layers",
+                    "Layers": [
+                        "sha256:7789f1a3d4e9258fbe5469a8d657deb6aba168d86967063e9b80ac3e1154333f",
+                        "sha256:9e53fd4895597d04f8871a68caea4c686011e1fbd0be32e57e89ada2ea5c24c4",
+                        "sha256:2a19bd70fcd4ce7fd73b37b1b2c710f8065817a9db821ff839fe0b4b4560e643",
+                        "sha256:8891751e0a1733c5c214d17ad2b0040deccbdea0acebb963679735964d516ac2",
+                        "sha256:44c8d6c30e626e5651c76f0c3188c7d084d6b483293dbd221ba5c5cd27e1cc54",
+                        "sha256:ac47eb6a61611ab36281c541eb41b11a5dc35ec48927d7e90317a5e2fe85c59c",
+                        "sha256:e8c203b084b0108d6cb48ab4f86a73e4b93a275c2226b0aac28370b9139d6772",
+                        "sha256:ef00dafe87799bfb7d74dee694ef2a41511df0afff9eaa029b598451248784c1",
+                        "sha256:036387f1c537fdb46e58d253cced539189c9c76145bb947ee80bf7f67b128ee8",
+                        "sha256:aa63551901b573d34b69ddc82838a22459eaa292c09929629339eacd357b2ab9",
+                        "sha256:bb56d3449612d040aa1fee23e07e20d9e0239b38291fa513dde020255f567759",
+                        "sha256:40f01be667f20a7f7c22db6373ade0c5b1dbc3eacfab183f146f2cd9717866cf",
+                        "sha256:f181762b3b5fd19446b9a8bb37a99d26942def59c72204e8e6824f7b3b869bc1"
+                    ]
+                },
+                "Metadata": {
+                    "LastTagTime": "2020-06-11T09:37:46.291541961Z"
+                }
+            },
+            {
                 "Architecture": "amd64",
                 "Author": "",
                 "Comment": "",
