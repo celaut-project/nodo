@@ -36,7 +36,8 @@ class Hyper:
                 # De momento no mira de actualizarla, mete como capa nueva y la id la deja en blanco.
                 layers.append(
                     {
-                        "Id" : "",
+                        "DiffId" : "",
+                        "ChainId" : "",
                         "Build" : [' '.join(l.split())] # Si queremos que actualize habria que usar append, de momento no.
                     }
                 )
