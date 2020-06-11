@@ -23,22 +23,16 @@ class Hyper:
             inspect = json.load(open('inspect.json','r'))[0]
             container.update({'Volumes':inspect.get('Config').get('Volumes')})
             container.update({'WorkingDir':inspect.get('Config').get('WorkingDir')})
+            
             os.remove("inspect.json")
             return container
         def parseDockerfile(container):
             Dockerfile = open("Dockerfile", "r")
+            layers_in_file = []
             for l in Dockerfile.readlines():
                 command = l.split()[0]
                 if command == 'RUN' or command == 'FROM':
-                    layers = container.get('Layers')
-                    layers.append(
-                        {
-                            "DiffId" : "",
-                            "ChainId" : "",
-                            "Build" : [' '.join(l.split())] # Si queremos que actualize habria que usar append, de momento no.
-                        }
-                    )
-                    container.update({'Layers' : layers})
+                    layers_in_file.append(' '.join(l.split()))
                 elif command == 'ENTRYPOINT':
                     entrypoint = container.get('Entrypoint')
                     entrypoint.append( ' '.join(l.split()[1:]) )
@@ -58,9 +52,9 @@ class Hyper:
                 "Entrypoint" : [],
                 "Layers" : [],
                 "OsArch" : []
-            }  
-        container = parseDockerfile(container)
+            }          
         container = parseInspect(container)
+        container = parseDockerfile(container)
         self.file.update({'Container' : container})
 
     def parseApi(self):
