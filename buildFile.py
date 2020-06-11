@@ -19,17 +19,17 @@ class Hyper:
 
     def parseContainer(self):
         def parseInspect(container):
-            os.system('powershell.exe docker inspect building >> inspect.json')
-            inspect = json.load(open('inspect.json','r'))
+            os.system('powershell.exe docker inspect building > inspect.json')
+            inspect = json.load(open('inspect.json','r'))[0]
             container.update({'Volumes':inspect.get('Config').get('Volumes')})
             container.update({'WorkingDir':inspect.get('Config').get('WorkingDir')})
+            os.remove("inspect.json")
         def parseDockerfile(container):
             Dockerfile = open("Dockerfile", "r")
             for l in Dockerfile.readlines():
                 command = l.split()[0]
                 if command == 'RUN' or command == 'FROM':
                     layers = container.get('Layers')
-                    # De momento no mira de actualizarla, mete como capa nueva y la id la deja en blanco.
                     layers.append(
                         {
                             "DiffId" : "",
