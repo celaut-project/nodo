@@ -1,27 +1,39 @@
 import sys
 import json
 
-def DockerfileToString(Dockername):
-    #Read Dockerfile
-    Dockerfile = open(Dockername, "r")
-    build = ""
-    for l in Dockerfile.readlines():
-        build = build+l
-    print(build,"\n")
-    Dockerfile.close()
-    return build
+class Hyper:
+    def __init__(self):
+        super().__init__()
+        file = {
+                "Api": {},
+                "Container" : {},
+                "Contract": [],
+                "Id": "",
+                "Import": [],
+                "Ledger": "",
+                "Tensor": ""
+            }
+        registry = 'OOOOO/'
 
-def writeBuild(Hypername, string):
-    Hyperfile = json.load(open(Hypername,"r"))
-    container = Hyperfile.get('Container')
-    container.update({'Build': string})
-    Hyperfile.update({'Container': container})
-    return( json.dumps(Hyperfile, indent=4, sort_keys=True) )
+    def parseContainer(self, Dockername):
+        #Read Dockerfile
+        Dockerfile = open(Dockername, "r")
+        build = ""
+        for l in Dockerfile.readlines():
+            build = build+l
+        print(build,"\n")
+        Dockerfile.close()
+        return build
+
+    def save(self):
+        json.dumps(self.file, indent=4, sort_keys=True)
 
 if __name__ == "__main__":
-    Hyperfile = sys.argv[1]  # Hyperfile
-    Dockerfile = sys.argv[2] # Dockerfile
-    string = DockerfileToString(Dockerfile)
-    json = writeBuild(Hyperfile, string)
-    with open(Hyperfile, "w") as json_file:
-        json_file.write(json)
+    Hyperfile = Hyper() # Hyperfile
+    Dockerfile = sys.argv[1] # Dockerfile
+    
+    Hyperfile.parseContainer(Dockerfile)
+    Hyperfile.parseApi()
+    
+    Hyperfile.makeId()
+    Hyperfile.save()
