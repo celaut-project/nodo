@@ -48,7 +48,10 @@ class Hyper:
         self.file.update({'Container' : container})
 
     def save(self):
-        json.dumps(self.file, indent=4, sort_keys=True)
+        registry = self.registry+self.file.get('Id').split(':')[1]
+        with open(registry,'w') as file:
+            json.dumps(self.file, file, indent=4, sort_keys=True)
+
 
 if __name__ == "__main__":
     Hyperfile = Hyper() # Hyperfile
