@@ -2,9 +2,7 @@ import sys
 import json
 
 class Hyper:
-    def __init__(self):
-        super().__init__()
-        self.file = {
+    def __init__(self, file={
                 "Api": {},
                 "Container" : {},
                 "Contract": [],
@@ -12,7 +10,9 @@ class Hyper:
                 "Import": [],
                 "Ledger": "",
                 "Tensor": ""
-            }
+            }):
+        super().__init__()
+        self.file = file
         self.registry = 'registry/'
 
     def parseContainer(self, Dockername):
@@ -62,13 +62,22 @@ class Hyper:
             file.write( json.dumps(self.file, indent=4, sort_keys=True) )
 
 if __name__ == "__main__":
-    Dockerfile = sys.argv[1] # Dockerfile, no soporta comandos de varias lineas.
-    Hyperfile = Hyper() # Hyperfile
+    if len(sys.argv) == 1:
+        print("\nIMPORTANTE: el Dockerfile no soporta comandos de varias lineas.")
+        print("./buildFile.py Dockerfile            --> without optional args.")
+        print("./buildFile.py Dockerfile Hyperfile  --> to update the Hyperfile. \n")
+        exit()
+    elif len(sys.argv) > 1:
+        Dockerfile = sys.argv[1] # Dockerfile
+        if len(sys.argv) > 2:
+            Hyperfile = Hyper( json.load(open(sys.argv[2],"r")) ) # Hyperfile
+        else:
+            Hyperfile = Hyper() # Hyperfile
 
     Hyperfile.parseContainer(Dockerfile)
-    Hyperfile.parseApi()
+    #Hyperfile.parseApi()
 
-    Hyperfile.makeId()
+    #Hyperfile.makeId()
     Hyperfile.save()
 
     # tmb se podria hacer buildFile.py --update Hyperfile.json Dockerfile, para actualizar y añadir valores a uno ya existente.

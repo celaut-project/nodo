@@ -50,29 +50,70 @@
         },
         "Type": "Rest"
     },
-    "Container" : {
-        "Volumes": null,
-        "WorkingDir": "/frontier",
+    "Container": {
         "Entrypoint": [
+            "python3 start.py",
             "python3 start.py"
         ],
         "Layers": [
-            "sha256:7789f1a3d4e9258fbe5469a8d657deb6aba168d86967063e9b80ac3e1154333f",
-            "sha256:9e53fd4895597d04f8871a68caea4c686011e1fbd0be32e57e89ada2ea5c24c4",
-            "sha256:2a19bd70fcd4ce7fd73b37b1b2c710f8065817a9db821ff839fe0b4b4560e643",
-            "sha256:8891751e0a1733c5c214d17ad2b0040deccbdea0acebb963679735964d516ac2",
-            "sha256:44c8d6c30e626e5651c76f0c3188c7d084d6b483293dbd221ba5c5cd27e1cc54",
-            "sha256:ac47eb6a61611ab36281c541eb41b11a5dc35ec48927d7e90317a5e2fe85c59c",
-            "sha256:e8c203b084b0108d6cb48ab4f86a73e4b93a275c2226b0aac28370b9139d6772",
-            "sha256:ef00dafe87799bfb7d74dee694ef2a41511df0afff9eaa029b598451248784c1",
-            "sha256:036387f1c537fdb46e58d253cced539189c9c76145bb947ee80bf7f67b128ee8",
-            "sha256:aa63551901b573d34b69ddc82838a22459eaa292c09929629339eacd357b2ab9",
-            "sha256:bb56d3449612d040aa1fee23e07e20d9e0239b38291fa513dde020255f567759",
-            "sha256:40f01be667f20a7f7c22db6373ade0c5b1dbc3eacfab183f146f2cd9717866cf",
             {
-               "Id" : "sha256:f181762b3b5fd19446b9a8bb37a99d26942def59c72204e8e6824f7b3b869bc1",
-               "Build" : ["RUN apt-get update \\\n    && apt-get -y install git \\\n    && git clone --branch frontier https://github.com/josemibnf/sat-solver.git \\\n    && mv sat-solver/* . \\\n    && rm -rf sat-solver \\\n    && rm -rf .git\n"]
+                "Build": [
+                    "ubuntu"
+                ],
+                "Id": ""
+            },
+            {
+                "Build": [
+                    "apt-get update && apt-get -y install python3.6"
+                ],
+                "Id": ""
+            },
+            {
+                "Build": [
+                    "apt-get update && apt-get -y install python3-tk"
+                ],
+                "Id": ""
+            },
+            {
+                "Build": [
+                    "apt-get update && apt-get -y install python3-pip"
+                ],
+                "Id": ""
+            },
+            {
+                "Build": [
+                    "pip3 install flask"
+                ],
+                "Id": ""
+            },
+            {
+                "Build": [
+                    "pip3 install pandas"
+                ],
+                "Id": ""
+            },
+            {
+                "Build": [
+                    "pip3 install numpy"
+                ],
+                "Id": ""
+            },
+            {
+                "Build": [
+                    "apt-get update && apt-get -y install minisat"
+                ],
+                "Id": ""
+            },
+            {
+                "Build": [
+                    "apt-get update && apt-get -y install git && git clone --branch frontier https://github.com/josemibnf/sat-solver.git && mv sat-solver/* . && rm -rf sat-solver && rm -rf .git"
+                ],
+                "Id": ""
             }
+        ],
+        "Volumes": null,
+        "WorkingDir": [
+            "/frontier"
         ]
     },
     "Contract": [],
