@@ -80,5 +80,3 @@ if __name__ == "__main__":
 
     #Hyperfile.makeId()
     Hyperfile.save()
-
-    # tmb se podria hacer buildFile.py --update Hyperfile.json Dockerfile, para actualizar y añadir valores a uno ya existente.
