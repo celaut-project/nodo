@@ -24,6 +24,7 @@ class Hyper:
             container.update({'Volumes':inspect.get('Config').get('Volumes')})
             container.update({'WorkingDir':inspect.get('Config').get('WorkingDir')})
             os.remove("inspect.json")
+            return container
         def parseDockerfile(container):
             Dockerfile = open("Dockerfile", "r")
             for l in Dockerfile.readlines():
