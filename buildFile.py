@@ -50,7 +50,7 @@ class Hyper:
             Dockerfile.close()
             return container
         container = self.file.get('Container')
-        if container == {}:
+        if container == {} or container == None:
             container = {
                 "Ports" : [],
                 "Volumes" : [],
