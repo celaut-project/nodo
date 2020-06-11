@@ -54,7 +54,8 @@ class Hyper:
         pass
 
     def makeId(self):
-        self.file.update({'Id':'sha256:x89j3mm4nodl3990lol33n4m3n4m3n443434jjkd21dllfdwidmvlejldkfjh3m4n3kj4b'})
+        id = 'xx87tgyhiuji8u97y6tguhjniouy87trfcgvbhnjiouytf'
+        self.file.update({'Id':'sha256:'+id})
 
     def save(self):
         registry = self.registry + self.file.get('Id').split(':')[1] + '.json'
