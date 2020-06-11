@@ -17,8 +17,33 @@ class Hyper:
         self.registry = 'registry/'
 
     def parseContainer(self, Dockername):
-        #Read Dockerfile
-        Dockerfile = open(Dockername, "r")
+        def parseInspect(container):
+            run('docker inspect '+self.file.get('Id').split(':')[1]+' >> inspect.json')
+            inspect = json.load(open('inspect.json','r'))
+            inspect.load('')
+        def parseDockerfile(container):
+            Dockerfile = open(Dockername, "r")
+            for l in Dockerfile.readlines():
+                command = l.split()[0]
+                if command == 'RUN' or command == 'FROM':
+                    layers = container.get('Layers')
+                    # De momento no mira de actualizarla, mete como capa nueva y la id la deja en blanco.
+                    layers.append(
+                        {
+                            "DiffId" : "",
+                            "ChainId" : "",
+                            "Build" : [' '.join(l.split())] # Si queremos que actualize habria que usar append, de momento no.
+                        }
+                    )
+                    container.update({'Layers' : layers})
+                """elif command == 'ENTRYPOINT':
+                    entrypoint = container.get('Entrypoint')
+                    entrypoint.append( ' '.join(l.split()[1:]) )
+                    container.update({'Entrypoint' : entrypoint})
+                elif command == 'WORKDIR':
+                    container.update({'WorkingDir' : l.split()[1:]})"""
+            Dockerfile.close()
+            return container
         container = self.file.get('Container')
         if container == {}:
             container = {
@@ -29,35 +54,13 @@ class Hyper:
                 "Entrypoint" : [],
                 "Layers" : [],
                 "OsArch" : []
-            }
-        for l in Dockerfile.readlines():
-            command = l.split()[0]
-            if command == 'RUN' or command == 'FROM':
-                layers = container.get('Layers')
-                # De momento no mira de actualizarla, mete como capa nueva y la id la deja en blanco.
-                layers.append(
-                    {
-                        "DiffId" : "",
-                        "ChainId" : "",
-                        "Build" : [' '.join(l.split())] # Si queremos que actualize habria que usar append, de momento no.
-                    }
-                )
-                container.update({'Layers' : layers})
-            elif command == 'ENTRYPOINT':
-                entrypoint = container.get('Entrypoint')
-                entrypoint.append( ' '.join(l.split()[1:]) )
-                container.update({'Entrypoint' : entrypoint})
-            elif command == 'WORKDIR':
-                container.update({'WorkingDir' : l.split()[1:]})
-        Dockerfile.close()
+            }  
+        container = parseDockerfile(container)
+        container = parseInspect(container)
         self.file.update({'Container' : container})
 
     def parseApi(self):
         pass
-
-    def parseInspect(self):
-        run('docker inspect '+self.file.get('Id').split(':')[1]+' >> inspect.json')
-        inspect = open('inspect.json','r')
 
     def makeId(self):
         id = 'xx87tgyhiuji8u97y6tguhjniouy87trfcgvbhnjiouytf'
@@ -83,7 +86,6 @@ if __name__ == "__main__":
 
     Hyperfile.parseContainer(Dockerfile)
     #Hyperfile.parseApi()
-    Hyperfile.parseInspect()
 
     #Hyperfile.makeId()
     Hyperfile.save()
