@@ -22,6 +22,17 @@ class Hyper:
             workdir = None
             entrypoint = None
             layers = []
+        def make(self, Dockerfile):
+            for l in Dockerfile.readlines():
+                command = l.split()[0]
+                if command == 'RUN' or command == 'FROM':
+                    layer = Layer()
+                    layer.build.append(l)
+                    self.layers.append(layer)
+                elif command == 'ENTRYPOINT':
+                    self.entrypoint = l.split()[1:]
+                elif command == 'WORKDIR':
+                    self.workdir = l.split()[1:]
         
     class Layer:
         def __init__(self):
@@ -32,13 +43,7 @@ class Hyper:
     def parseContainer(self, Dockername):
         #Read Dockerfile
         Dockerfile = open(Dockername, "r")
-        container = Container()
-        for l in Dockerfile.readlines():
-            command = what_is(l.split()[0])
-            if command == 'RUN':
-                layer = Layer()
-                layer.build.append(l)
-                container.layers.append(layer)
+        container = Container().make(Dockerfile)
         Dockerfile.close()
 
     def save(self):
