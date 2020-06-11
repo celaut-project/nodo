@@ -1,5 +1,6 @@
 import sys
 import json
+from subprocess import run
 
 class Hyper:
     def __init__(self, file={
@@ -54,6 +55,10 @@ class Hyper:
     def parseApi(self):
         pass
 
+    def parseInspect(self):
+        run('docker inspect '+self.file.get('Id').split(':')[1]+' >> inspect.json')
+        inspect = open('inspect.json','r')
+
     def makeId(self):
         id = 'xx87tgyhiuji8u97y6tguhjniouy87trfcgvbhnjiouytf'
         self.file.update({'Id':'sha256:'+id})
@@ -78,6 +83,7 @@ if __name__ == "__main__":
 
     Hyperfile.parseContainer(Dockerfile)
     #Hyperfile.parseApi()
+    Hyperfile.parseInspect()
 
     #Hyperfile.makeId()
     Hyperfile.save()
