@@ -31,7 +31,7 @@ class Hyper:
             }
         for l in Dockerfile.readlines():
             command = l.split()[0]
-            if command == 'RUN' or command == 'FROM':
+            if command == 'RUN':
                 layers = container.get('Layers')
                 # De momento no mira de actualizarla, mete como capa nueva y la id la deja en blanco.
                 layers.append(
