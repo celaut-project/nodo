@@ -15,36 +15,37 @@ class Hyper:
             }
         registry = 'OOOOO/'
 
-    class Container:
-        def __init__(self):
-            super().__init__()
-            volume = None
-            workdir = None
-            entrypoint = None
-            layers = []
-        def make(self, Dockerfile):
-            for l in Dockerfile.readlines():
-                command = l.split()[0]
-                if command == 'RUN' or command == 'FROM':
-                    layer = Layer()
-                    layer.build.append(l)
-                    self.layers.append(layer)
-                elif command == 'ENTRYPOINT':
-                    self.entrypoint = l.split()[1:]
-                elif command == 'WORKDIR':
-                    self.workdir = l.split()[1:]
-        
-    class Layer:
-        def __init__(self):
-            super().__init__()
-            id = None
-            build = None
-
     def parseContainer(self, Dockername):
         #Read Dockerfile
         Dockerfile = open(Dockername, "r")
-        container = Container().make(Dockerfile)
+        container = self.file.get('Container')
+        if container == {}:
+            container = {
+                "Volumes" : [],
+                "WorkingDir" : "",
+                "Entrypoint" : [],
+                "Layers" : [],
+            }
+        for l in Dockerfile.readlines():
+            command = l.split()[0]
+            if command == 'RUN' or command == 'FROM':
+                layers = container.get('Layers')
+                # De momento no mira de actualizarla, mete como capa nueva y la id la deja en blanco.
+                layers.append(
+                    {
+                        "Id" : "",
+                        "Build" : [l] # Si queremos que actualize habria que usar append, de momento no.
+                    }
+                )
+                container.update({'Layers' : layers})
+            elif command == 'ENTRYPOINT':
+                entrypoint = container.get('Entrypoint')
+                entrypoint.append(l.split()[1:])
+                container.update({'Entrypoint' : entrypoint})
+            elif command == 'WORKDIR':
+                container.update({'WorkDir' : l.split()[1:]})
         Dockerfile.close()
+        self.file.update({'Container' : container})
 
     def save(self):
         json.dumps(self.file, indent=4, sort_keys=True)
