@@ -56,67 +56,69 @@
         ],
         "Layers": [
             {
-                "Build": [
-                    "FROM ubuntu"
-                ],
+                "Build": [],
                 "ChainId": "",
-                "DiffId": ""
+                "DiffId": "sha256:7789f1a3d4e9258fbe5469a8d657deb6aba168d86967063e9b80ac3e1154333f"
             },
             {
-                "Build": [
-                    "RUN apt-get update && apt-get -y install python3.6"
-                ],
+                "Build": [],
                 "ChainId": "",
-                "DiffId": ""
+                "DiffId": "sha256:9e53fd4895597d04f8871a68caea4c686011e1fbd0be32e57e89ada2ea5c24c4"
             },
             {
-                "Build": [
-                    "RUN apt-get update && apt-get -y install python3-tk"
-                ],
+                "Build": [],
                 "ChainId": "",
-                "DiffId": ""
+                "DiffId": "sha256:2a19bd70fcd4ce7fd73b37b1b2c710f8065817a9db821ff839fe0b4b4560e643"
             },
             {
-                "Build": [
-                    "RUN apt-get update && apt-get -y install python3-pip"
-                ],
+                "Build": [],
                 "ChainId": "",
-                "DiffId": ""
+                "DiffId": "sha256:8891751e0a1733c5c214d17ad2b0040deccbdea0acebb963679735964d516ac2"
             },
             {
-                "Build": [
-                    "RUN pip3 install flask"
-                ],
+                "Build": [],
                 "ChainId": "",
-                "DiffId": ""
+                "DiffId": "sha256:7a558b7359935b809cb3ed24c4df0ee1955de84e20485e09e993f1eda441116f"
             },
             {
-                "Build": [
-                    "RUN pip3 install pandas"
-                ],
+                "Build": [],
                 "ChainId": "",
-                "DiffId": ""
+                "DiffId": "sha256:eb6aec585abc3211c2624918f1192e4f102f23a9fb5d1c1e51bb3d43caecaa80"
             },
             {
-                "Build": [
-                    "RUN pip3 install numpy"
-                ],
+                "Build": [],
                 "ChainId": "",
-                "DiffId": ""
+                "DiffId": "sha256:d2467fed3b6f33db85fd3fb376c50af12b2d6894bf86d435a4ae78324023c089"
             },
             {
-                "Build": [
-                    "RUN apt-get update && apt-get -y install minisat"
-                ],
+                "Build": [],
                 "ChainId": "",
-                "DiffId": ""
+                "DiffId": "sha256:2299c46e3aadeb8b056cca0fa897e96d8efc824b793ad59494d237f001152f64"
             },
             {
-                "Build": [
-                    "RUN apt-get update && apt-get -y install git && git clone --branch frontier https://github.com/josemibnf/sat-solver.git && mv sat-solver/* . && rm -rf sat-solver && rm -rf .git"
-                ],
+                "Build": [],
                 "ChainId": "",
-                "DiffId": ""
+                "DiffId": "sha256:017c35b95072aa6639a6c5971b15d834985cec74a757be7aec24981b9805c6d6"
+            },
+            {
+                "Build": [],
+                "ChainId": "",
+                "DiffId": "sha256:4e0f1afc0d4584893f296e8364f66892043d5b9624fd6a80488e658ad4f2095d"
+            },
+            {
+                "Build": [],
+                "ChainId": "",
+                "DiffId": "sha256:9469ed7765ec7e68f7ffd3b877e90e5cf3eab2fdfbb6a228ed9dce99436e9663"
+            },
+            {
+                "Build": [],
+                "ChainId": "",
+                "DiffId": "sha256:9e862016bcb0131261046ff750781b015e1779afc7dc82cc010405048155bda8"
+            },
+            {
+                "Build": [],
+                "ChainId": "",
+                "DiffId": "sha256:03fd4b9fd104c7da7fb8270b1acfde3fbd1f82b2ada7c0bd65de83030170163c"
             }
         ],
         "OsArch": [],

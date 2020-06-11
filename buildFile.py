@@ -23,7 +23,17 @@ class Hyper:
             inspect = json.load(open('inspect.json','r'))[0]
             container.update({'Volumes':inspect.get('Config').get('Volumes')})
             container.update({'WorkingDir':inspect.get('Config').get('WorkingDir')})
-            
+            if container.get('Layers') == []:
+                layers = []
+                for layer in inspect.get('RootFS').get('Layers'):
+                    layers.append({
+                        "DiffId" : layer,
+                        "ChainId" : "",
+                        "Build" : []
+                    })
+                container.update({'Layers' : layers})
+            else:
+                pass # Estaria bien comprobar las hashes.
             os.remove("inspect.json")
             return container
         def parseDockerfile(container):
