@@ -78,7 +78,7 @@ if __name__ == "__main__":
         print("./buildFile.py Dockerfile Hyperfile  --> to update the Hyperfile. \n")
         Hyperfile = Hyper() # Hyperfile
     elif len(sys.argv) > 1:
-        Hyperfile = Hyper( json.load(open(sys.argv[2],"r")) ) # Hyperfile
+        Hyperfile = Hyper( json.load(open(sys.argv[1],"r")) ) # Hyperfile
             
     run('docker build .')
     Hyperfile.parseContainer()
