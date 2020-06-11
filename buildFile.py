@@ -56,8 +56,7 @@ class Hyper:
     def save(self):
         registry = self.registry + self.file.get('Id').split(':')[1] + '.json'
         with open(registry,'w') as file:
-            json.dumps(self.file, indent=4, sort_keys=True)
-
+            file.write( json.dumps(self.file, indent=4, sort_keys=True) )
 
 if __name__ == "__main__":
     Hyperfile = Hyper() # Hyperfile
@@ -65,7 +64,7 @@ if __name__ == "__main__":
     
     Hyperfile.parseContainer(Dockerfile)
     Hyperfile.parseApi()
-    
+
     Hyperfile.makeId()
     Hyperfile.save()
 
