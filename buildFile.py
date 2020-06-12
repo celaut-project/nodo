@@ -5,13 +5,13 @@ import os
 
 class Hyper:
     def __init__(self, file={
-                "Api": {},
-                "Container" : {},
-                "Contract": [],
-                "Id": "",
-                "Import": [],
-                "Ledger": "",
-                "Tensor": ""
+                "Api": None,        # list
+                "Container" : None, # dict
+                "Contract": None,   # list
+                "Id": None,         # array
+                "Import": None,     # list
+                "Ledger": None, 
+                "Tensor": None
             }):
         super().__init__()
         self.file = file
@@ -24,7 +24,7 @@ class Hyper:
             container.update({'Volumes':inspect.get('Config').get('Volumes')})
             container.update({'WorkingDir':inspect.get('Config').get('WorkingDir')})
             container.update({'Entrypoint' : inspect.get('Config').get('Entrypoint')[2]})
-            if container.get('Layers') == []:
+            if container.get('Layers') == None:
                 layers = []
                 for layer in inspect.get('RootFS').get('Layers'):
                     layers.append({
@@ -47,13 +47,13 @@ class Hyper:
             Dockerfile.close()
             return container
         container = self.file.get('Container')
-        if container == {} or container == None:
+        if container == None:
             container = {
-                "Volumes" : [],
-                "WorkingDir" : "",
-                "Entrypoint" : "",
-                "Layers" : [],
-                "OsArch" : []
+                "Volumes" : None,       # list
+                "WorkingDir" : None,    # array
+                "Entrypoint" : None,    # array
+                "Layers" : None,        # list
+                "OsArch" : None         # list
             }          
         container = parseInspect(container)
         container = parseDockerfile(container)
