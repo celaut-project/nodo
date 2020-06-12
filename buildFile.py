@@ -23,6 +23,7 @@ class Hyper:
             inspect = json.load(open('inspect.json','r'))[0]
             container.update({'Volumes':inspect.get('Config').get('Volumes')})
             container.update({'WorkingDir':inspect.get('Config').get('WorkingDir')})
+            container.update({'Entrypoint' : inspect.get('Config').get('Entrypoint')[2]})
             if container.get('Layers') == []:
                 layers = []
                 for layer in inspect.get('RootFS').get('Layers'):
@@ -43,23 +44,14 @@ class Hyper:
                 command = l.split()[0]
                 if command == 'RUN' or command == 'FROM':
                     layers_in_file.append(' '.join(l.split()))
-                elif command == 'ENTRYPOINT':
-                    entrypoint = container.get('Entrypoint')
-                    entrypoint.append( ' '.join(l.split()[1:]) )
-                    container.update({'Entrypoint' : entrypoint})
-                elif command == 'EXPOSE':
-                    ports = container.get('Ports')
-                    ports.append( ' '.join(l.split()[1:]) )
-                    container.update({'Ports' : ports})
             Dockerfile.close()
             return container
         container = self.file.get('Container')
         if container == {} or container == None:
             container = {
-                "Ports" : [],
                 "Volumes" : [],
                 "WorkingDir" : "",
-                "Entrypoint" : [],
+                "Entrypoint" : "",
                 "Layers" : [],
                 "OsArch" : []
             }          
@@ -94,4 +86,4 @@ if __name__ == "__main__":
 
     Hyperfile.makeId()
     Hyperfile.save()
-    run('docker rmi building --force')
+    #run('docker rmi building --force')
