@@ -49,7 +49,7 @@ class Hyper:
                 build = layers[i].get('Build')
                 if build == None: build = []
                 build.append(l)
-                layers[-1].update({'Build' : build})
+                layers[i].update({'Build' : build})
             container.update({'Layers' : layers[::-1]})
             Dockerfile.close()
             return container
