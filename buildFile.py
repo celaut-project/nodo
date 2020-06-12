@@ -8,7 +8,7 @@ class Hyper:
                 "Api": None,        # list
                 "Container" : None, # dict
                 "Contract": None,   # list
-                "Id": None,         # array
+                "Merkle": None,     # dict
                 "Import": None,     # list
                 "Ledger": None, 
                 "Tensor": None
@@ -28,7 +28,6 @@ class Hyper:
                 layers = []
                 for layer in inspect.get('RootFS').get('Layers'):
                     layers.append({
-                        "Id" : None,
                         "DiffId" : layer,
                         "ChainId" : None,
                         "Build" : None
@@ -57,7 +56,6 @@ class Hyper:
         container = self.file.get('Container')
         if container == None:
             container = {
-                "Id" : None,            # array
                 "Volumes" : None,       # list
                 "WorkingDir" : None,    # array
                 "Entrypoint" : None,    # array
@@ -74,10 +72,10 @@ class Hyper:
 
     def makeId(self):
         id = 'xx87tgyhiuji8u97y6tguhjniouy87trfcgvbhnjiouytf'
-        self.file.update({'Id':'sha256:'+id})
+        self.file.update({'Merkle' : {'Id':'sha256:'+id}})
 
     def save(self):
-        registry = self.registry + self.file.get('Id').split(':')[1] + '.json'
+        registry = self.registry + self.file.get('Merkle').get('Id').split(':')[1] + '.json'
         with open(registry,'w') as file:
             file.write( json.dumps(self.file, indent=4, sort_keys=True) )
 
