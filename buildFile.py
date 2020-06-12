@@ -28,6 +28,7 @@ class Hyper:
                 layers = []
                 for layer in inspect.get('RootFS').get('Layers'):
                     layers.append({
+                        "Id" : None,
                         "DiffId" : layer,
                         "ChainId" : None,
                         "Build" : None
@@ -56,6 +57,7 @@ class Hyper:
         container = self.file.get('Container')
         if container == None:
             container = {
+                "Id" : None,            # array
                 "Volumes" : None,       # list
                 "WorkingDir" : None,    # array
                 "Entrypoint" : None,    # array
@@ -94,4 +96,4 @@ if __name__ == "__main__":
 
     Hyperfile.makeId()
     Hyperfile.save()
-    run('docker rmi building --force')
+    #run('docker rmi building --force')
