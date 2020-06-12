@@ -45,6 +45,7 @@ class Hyper:
                 if command == 'RUN' or command == 'FROM':
                     layers_in_file.append(' '.join(l.split()))
             layers = container.get('Layers').reverse()
+            print(layers)
             for i, l in enumerate(layers_in_file.reverse()):
                 build = layers[i].get('Build')
                 if build == None: build = []
