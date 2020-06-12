@@ -67,7 +67,8 @@ class Hyper:
         self.file.update({'Container' : container})
 
     def parseApi(self):
-        pass
+        api = json.load(open("Api.json","r"))
+        self.file.update({'Api' : api})
 
     def makeId(self):
         id = 'xx87tgyhiuji8u97y6tguhjniouy87trfcgvbhnjiouytf'
@@ -89,8 +90,8 @@ if __name__ == "__main__":
             
     run('docker build -t building .')
     Hyperfile.parseContainer()
-    #Hyperfile.parseApi()
+    Hyperfile.parseApi()
 
     Hyperfile.makeId()
     Hyperfile.save()
-    #run('docker rmi building --force')
+    run('docker rmi building --force')
