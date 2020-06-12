@@ -92,5 +92,6 @@ if __name__ == "__main__":
     Hyperfile.parseContainer()
     #Hyperfile.parseApi()
 
-    #Hyperfile.makeId()
+    Hyperfile.makeId()
     Hyperfile.save()
+    run('docker rmi building --force')
