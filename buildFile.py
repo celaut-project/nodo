@@ -44,6 +44,12 @@ class Hyper:
                 command = l.split()[0]
                 if command == 'RUN' or command == 'FROM':
                     layers_in_file.append(' '.join(l.split()))
+            layers = container.get('Layers').reverse()
+            for i, l in enumerate(layers_in_file.reverse()):
+                build = layers[i].get('Build')
+                build.append(l)
+                layers[-1].update({'Build' : build})
+            container.update({'Layers' : layers.reverse()})
             Dockerfile.close()
             return container
         container = self.file.get('Container')
