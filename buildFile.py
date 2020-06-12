@@ -29,8 +29,8 @@ class Hyper:
                 for layer in inspect.get('RootFS').get('Layers'):
                     layers.append({
                         "DiffId" : layer,
-                        "ChainId" : "",
-                        "Build" : []
+                        "ChainId" : None,
+                        "Build" : None
                     })
                 container.update({'Layers' : layers})
             else:
@@ -47,6 +47,7 @@ class Hyper:
             layers = container.get('Layers').reverse()
             for i, l in enumerate(layers_in_file.reverse()):
                 build = layers[i].get('Build')
+                if build == None: build = []
                 build.append(l)
                 layers[-1].update({'Build' : build})
             container.update({'Layers' : layers.reverse()})
