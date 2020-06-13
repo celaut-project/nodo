@@ -106,11 +106,17 @@ class Hyper:
                     "Func": None
                 }
             def makeLayers():
-                id = 'sha256:'+sha256(concat())
-                return {
-                    "Id":id,
-                    "Func": "Hacemos una cadena"
-                }
+                def makeLayer(i):
+                    merkle = [
+                        makeLayer(i+1),
+
+                    ]
+                    id = 'sha256:'+sha256(concat(merkle))
+                    return {
+                        "Id":id,
+                        "Func": "Hacemos una cadena"
+                    }
+                return makeLayer(len(self.file.get('Container').get('Layers')))
             def makeOsArch():
                 id = 'sha256:'+sha256(self.file.get('Container').get('OsArch'))
                 return {
