@@ -5,12 +5,10 @@ import os
 import hashlib
 
 def value(id):
-    if id is None: return None
-    else: return id.split(':')[1]
+    return id.split(':')[1]
 
 def sha256(id):
-    if id is None: return None
-    else: return hashlib.sha256(id.encode()).hexdigest()
+    return hashlib.sha256(id.encode()).hexdigest()
 class Hyper:
     def __init__(self, file={
                 "Api": None,        # list
@@ -94,7 +92,7 @@ class Hyper:
 
         def makeApi():
             return {
-                "Id" : None,
+                "Id" : "",
                 "Func": None,
             }
         def makeContainer():
@@ -104,7 +102,7 @@ class Hyper:
             }
         def makeContract():
             return {
-                "Id" : None,
+                "Id" : "",
                 "Func": None,
             }
         merkle = [
