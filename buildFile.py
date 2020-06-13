@@ -5,10 +5,12 @@ import os
 import hashlib
 
 def value(id):
-    return id.split(':')[1]
+    if id is None: return None
+    else: return id.split(':')[1]
 
 def sha256(id):
-    return hashlib.sha256(id.encode()).hexdigest()
+    if id is None: return None
+    else: return hashlib.sha256(id.encode()).hexdigest()
 class Hyper:
     def __init__(self, file={
                 "Api": None,        # list
@@ -97,7 +99,7 @@ class Hyper:
             }
         def makeContainer():
             return {
-                "Id" : None,
+                "Id" : "2a19bd70fcd4ce7fd73b37b1b2c710f8065817a9db821ff839fe0b4b4560e643",
                 "Func" : None,
             }
         def makeContract():
@@ -133,6 +135,6 @@ if __name__ == "__main__":
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
 
-    #Hyperfile.makeId()
+    Hyperfile.makeId()
     Hyperfile.save()
     #run('docker rmi building --force')
