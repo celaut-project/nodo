@@ -72,7 +72,7 @@ class Hyper:
 
     def makeId(self):
         id = 'xx87tgyhiuji8u97y6tguhjniouy87trfcgvbhnjiouytf'
-        self.file.update({'Merkle' : {'Id':'sha256:'+id}})
+        self.file.update({'Merkle' : {'Id':'sha256:'+id, "Func": None}})
 
     def save(self):
         registry = self.registry + self.file.get('Merkle').get('Id').split(':')[1] + '.json'
