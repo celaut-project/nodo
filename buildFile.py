@@ -75,8 +75,22 @@ class Hyper:
         self.file.update({'Api' : api})
 
     def makeId(self):
+        class Merkle:
+            def __init__(self):
+                super().__init__()
+                id = ""
+                func = ""
+                merkle = Merkle()
+            def toDict(self):
+                return {
+                    "Id": self.id,
+                    "Func": self.func,
+                    "Merkle": self.merkle.toDict()
+                }
         id = 'xx87tgyhiuji8u97y6tguhjniouy87trfcgvbhnjiouytf'
-        self.file.update({'Merkle' : {'Id':'sha256:'+id, "Func": None}})
+        func = ""
+        merkle = Merkle().toDict
+        self.file.update({'Merkle' : {'Id':'sha256:'+id, "Func": func, "Merkle":merkle}})
 
     def save(self):
         registry = self.registry + self.file.get('Merkle').get('Id').split(':')[1] + '.json'
