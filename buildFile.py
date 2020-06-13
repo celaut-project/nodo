@@ -113,12 +113,19 @@ class Hyper:
                     def makeBuEl(i):
                         def makeBuild(i):
                             merkle = self.file.get('Container').get('Layers')[i].get('Build')
-                            id = 'sha256:'+sha256(suma(merkle))
-                            return {
-                                "Id":id,
-                                "Func": "esto es un build.",
-                                "Merkle": merkle
-                            }
+                            if merkle is None:
+                                id = 'sha256:'
+                                return {
+                                    "Id":id,
+                                    "Func": "esto es un build."
+                                }
+                            else:
+                                id = 'sha256:'+sha256(suma(merkle))
+                                return {
+                                    "Id":id,
+                                    "Func": "esto es un build.",
+                                    "Merkle": merkle
+                                }
                         merkle = [
                             makeBuild(i),
                             makeElem(self.file.get('Container').get('Layers')[i].get('ChainId'))
