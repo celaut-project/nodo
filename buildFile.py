@@ -110,7 +110,7 @@ class Hyper:
                     def makePrev(i):
                         merkle = [
                             makeBuild(i),
-                            getElem(self.file.get('Container').get('Layers')[i].get('ChainId'))
+                            makeElem(self.file.get('Container').get('Layers')[i].get('ChainId'))
                         ]
                         id = 'sha256:'+sha256(concat(merkle))
                         return {
