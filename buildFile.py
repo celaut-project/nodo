@@ -84,7 +84,11 @@ class Hyper:
             id = value(merkle_list[0].get('Id'))
             for merkle in merkle_list[1:]:
                 id = id+" "+value(merkle.get('Id'))
-            return  "sha256:"+sha256(id)
+            return  id
+        def suma(merkle_list):
+            for merkle in merkle_list:
+                id = id + int(value(merkle_list.get('Id')))
+            return hex(id)[:-(len(hex(id))-64)] # Recorta el resultado de la suma a 64.
 
         def makeApi():
             return {
