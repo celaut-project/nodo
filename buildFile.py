@@ -80,7 +80,7 @@ class Hyper:
         api = json.load(open("Api.json","r"))
         self.file.update({'Api' : api})
 
-    def makeId(self):
+    def makeMerkle(self):
         def concat(merkle_list):
             id = value(merkle_list[0].get('Id'))
             for merkle in merkle_list[1:]:
@@ -97,9 +97,32 @@ class Hyper:
                 "Func": None,
             }
         def makeContainer():
+            def makeLayers():
+                return {}
+            merkle = [
+                {
+                    "Id" : "",
+                    "Func": None
+                },
+                makeLayers(),
+                {
+                    "Id" : "",
+                    "Func": None
+                },
+                {
+                    "Id" : "",
+                    "Func": None
+                },
+                {
+                    "Id" : "",
+                    "Func": None
+                },
+            ]
+            id = sha256(concat(merkle))
             return {
-                "Id" : "sha256:2a19bd70fcd4ce7fd73b37b1b2c710f8065817a9db821ff839fe0b4b4560e643",
+                "Id" : id,
                 "Func" : None,
+                "Merkle": merkle
             }
         def makeContract():
             return {
@@ -111,8 +134,8 @@ class Hyper:
             makeContainer(),
             makeContract()
         ]
-        id = concat(merkle)
-        func = "concatenacion en orden alfabetico de todos los atributos"
+        id = sha256(concat(merkle))
+        func = "hash de la concatenacion en orden alfabetico de todos los atributos"
         self.file.update({'Merkle' : {'Id':'sha256:'+id, "Func": func, "Merkle":merkle}})
 
     def save(self):
@@ -134,6 +157,6 @@ if __name__ == "__main__":
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
 
-    Hyperfile.makeId()
+    Hyperfile.makeMerkle()
     Hyperfile.save()
     #run('docker rmi building --force')
