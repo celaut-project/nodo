@@ -98,7 +98,7 @@ class Hyper:
             }
         def makeContainer():
             return {
-                "Id" : "2a19bd70fcd4ce7fd73b37b1b2c710f8065817a9db821ff839fe0b4b4560e643",
+                "Id" : "sha256:2a19bd70fcd4ce7fd73b37b1b2c710f8065817a9db821ff839fe0b4b4560e643",
                 "Func" : None,
             }
         def makeContract():
