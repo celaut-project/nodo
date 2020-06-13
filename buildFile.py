@@ -88,6 +88,7 @@ class Hyper:
                 id = id+" "+value(merkle.get('Id'))
             return  id
         def suma(merkle_list):
+            id = 0
             for merkle in merkle_list:
                 id = id + int(value(merkle_list.get('Id')))
             return hex(id)[:-(len(hex(id))-64)] # Recorta el resultado de la suma a 64.
