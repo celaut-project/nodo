@@ -110,9 +110,9 @@ class Hyper:
                 return makeElem(self.file.get('Container').get('Entrypoint'))
             def makeLayers():
                 def makeLayer(i):
-                    def makePrev(i):
+                    def makeBuEl(i):
                         merkle = [
-                            makeBuild(i),
+                            #makeBuild(i),
                             makeElem(self.file.get('Container').get('Layers')[i].get('ChainId'))
                         ]
                         id = 'sha256:'+sha256(concat(merkle))
@@ -120,16 +120,17 @@ class Hyper:
                             "Id":id,
                             "Func": "Hacemos una cadena"
                         }
-                    merkle = [
+                    if i==0: merkle = [ makeBuEl(i) ]
+                    else: merkle = [
                         makeLayer(i-1),
-                        makePrev(i)
+                        makeBuEl(i)
                     ]
                     id = 'sha256:'+sha256(concat(merkle))
                     return {
                         "Id":id,
                         "Func": "Hacemos una cadena"
                     }
-                return makeLayer(len(self.file.get('Container').get('Layers')))
+                return makeLayer(len(self.file.get('Container').get('Layers'))-1)
             def makeOsArch():
                 id = 'sha256:'+sha256(self.file.get('Container').get('OsArch'))
                 return {
