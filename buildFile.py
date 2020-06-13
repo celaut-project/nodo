@@ -98,7 +98,10 @@ class Hyper:
             }
         def makeContainer():
             def makeLayers():
-                return {}
+                return {
+                    "Id":"",
+                    "Func":""
+                }
             merkle = [
                 {
                     "Id" : "",
@@ -118,7 +121,7 @@ class Hyper:
                     "Func": None
                 },
             ]
-            id = sha256(concat(merkle))
+            id = 'sha256:'+sha256(concat(merkle))
             return {
                 "Id" : id,
                 "Func" : None,
