@@ -93,8 +93,9 @@ class Hyper:
             return hex(id)[:-(len(hex(id))-64)] # Recorta el resultado de la suma a 64.
 
         def makeApi():
+            id = 'sha256:'
             return {
-                "Id" : "",
+                "Id" : id,
                 "Func": None,
             }
         def makeContainer():
@@ -105,9 +106,10 @@ class Hyper:
                     "Func": None
                 }
             def makeLayers():
+                id = 'sha256:'+sha256(concat())
                 return {
-                    "Id":"",
-                    "Func":""
+                    "Id":id,
+                    "Func": "Hacemos una cadena"
                 }
             def makeOsArch():
                 id = 'sha256:'+sha256(self.file.get('Container').get('OsArch'))
@@ -141,8 +143,9 @@ class Hyper:
                 "Merkle": merkle
             }
         def makeContract():
+            id = 'sha256:'
             return {
-                "Id" : "",
+                "Id" : id,
                 "Func": None,
             }
         merkle = [
