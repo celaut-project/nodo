@@ -8,8 +8,9 @@ def value(id):
     if id is "": return ""
     else: return id.split(':')[1]
 
-def sha256(id):
-    return hashlib.sha256(id.encode()).hexdigest()
+def sha256(val):
+    if val is None: return ""
+    return hashlib.sha256(val.encode()).hexdigest()
 class Hyper:
     def __init__(self, file={
                 "Api": None,        # list
@@ -97,29 +98,41 @@ class Hyper:
                 "Func": None,
             }
         def makeContainer():
+            def makeEntrypoint():
+                id = 'sha256:'+sha256(self.file.get('Container').get('Entrypoint'))
+                return {
+                    "Id" : id,
+                    "Func": None
+                }
             def makeLayers():
                 return {
                     "Id":"",
                     "Func":""
                 }
+            def makeOsArch():
+                id = 'sha256:'+sha256(self.file.get('Container').get('OsArch'))
+                return {
+                    "Id" : id,
+                    "Func": None
+                }
+            def makeVolumes():
+                id = 'sha256:'+sha256(self.file.get('Container').get('Volumes'))
+                return {
+                    "Id" : id,
+                    "Func": None
+                }
+            def makeWorkingDir():
+                id = 'sha256:'+sha256(self.file.get('Container').get('WorkingDir'))
+                return {
+                    "Id" : id,
+                    "Func": None
+                }
             merkle = [
-                {
-                    "Id" : "",
-                    "Func": None
-                },
+                makeEntrypoint(),
                 makeLayers(),
-                {
-                    "Id" : "",
-                    "Func": None
-                },
-                {
-                    "Id" : "",
-                    "Func": None
-                },
-                {
-                    "Id" : "",
-                    "Func": None
-                },
+                makeOsArch(),
+                makeVolumes(),
+                makeWorkingDir()
             ]
             id = 'sha256:'+sha256(concat(merkle))
             return {
