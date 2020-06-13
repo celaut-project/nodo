@@ -92,6 +92,13 @@ class Hyper:
                 id = id + int(value(merkle_list.get('Id')))
             return hex(id)[:-(len(hex(id))-64)] # Recorta el resultado de la suma a 64.
 
+        def makeElem(elem):
+            id = 'sha256:'+sha256(elem)
+            return {
+                "Id" : id,
+                "Func": "sha256(atr)"
+            }
+
         def makeApi():
             id = 'sha256:'
             return {
@@ -100,11 +107,7 @@ class Hyper:
             }
         def makeContainer():
             def makeEntrypoint():
-                id = 'sha256:'+sha256(self.file.get('Container').get('Entrypoint'))
-                return {
-                    "Id" : id,
-                    "Func": None
-                }
+                return makeElem(self.file.get('Container').get('Entrypoint'))
             def makeLayers():
                 def makeLayer(i):
                     def makePrev(i):
