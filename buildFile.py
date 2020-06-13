@@ -2,6 +2,7 @@ import sys
 import json
 from subprocess import run
 import os
+import hashlib
 
 class Hyper:
     def __init__(self, file={
@@ -26,10 +27,13 @@ class Hyper:
             container.update({'Entrypoint' : inspect.get('Config').get('Entrypoint')[2]})
             if container.get('Layers') == None:
                 layers = []
+                chainId = None
                 for layer in inspect.get('RootFS').get('Layers'):
+                    if chainId is None: chainId = layer
+                    else: chainId = "sha256:"+hashlib.sha256((chainId.split(":")[1]+" "+layer.split(":")[1]).encode()).hexdigest()
                     layers.append({
                         "DiffId" : layer,
-                        "ChainId" : None,
+                        "ChainId" : chainId,
                         "Build" : None
                     })
                 container.update({'Layers' : layers})
