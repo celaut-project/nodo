@@ -90,8 +90,8 @@ class Hyper:
         def suma(merkle_list):
             id = 0
             for merkle in merkle_list:
-                id = id + int(value(merkle.get('Id')))
-            return hex(id)[:-(len(hex(id))-64)] # Recorta el resultado de la suma a 64.
+                id = id + int(value(merkle.get('Id')),16)
+            return hex(id)[2:-(len(hex(id))-64)] # Recorta el resultado de la suma a 64.
 
         def makeElem(elem):
             id = 'sha256:'+sha256(elem)
