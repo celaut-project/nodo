@@ -107,9 +107,19 @@ class Hyper:
                 }
             def makeLayers():
                 def makeLayer(i):
+                    def makePrev(i):
+                        merkle = [
+                            makeBuild(i),
+                            getElem(self.file.get('Container').get('Layers')[i].get('ChainId'))
+                        ]
+                        id = 'sha256:'+sha256(concat(merkle))
+                        return {
+                            "Id":id,
+                            "Func": "Hacemos una cadena"
+                        }
                     merkle = [
-                        makeLayer(i+1),
-
+                        makeLayer(i-1),
+                        makePrev(i)
                     ]
                     id = 'sha256:'+sha256(concat(merkle))
                     return {
