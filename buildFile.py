@@ -5,7 +5,8 @@ import os
 import hashlib
 
 def value(id):
-    return id.split(':')[1]
+    if id is "": return ""
+    else: return id.split(':')[1]
 
 def sha256(id):
     return hashlib.sha256(id.encode()).hexdigest()
