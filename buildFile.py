@@ -4,6 +4,11 @@ from subprocess import run
 import os
 import hashlib
 
+def value(id):
+    return id.split(':')[1]
+
+def sha256(id):
+    return hashlib.sha256(id.encode()).hexdigest()
 class Hyper:
     def __init__(self, file={
                 "Api": None,        # list
@@ -30,7 +35,7 @@ class Hyper:
                 chainId = None
                 for layer in inspect.get('RootFS').get('Layers'):
                     if chainId is None: chainId = layer
-                    else: chainId = "sha256:"+hashlib.sha256((chainId.split(":")[1]+" "+layer.split(":")[1]).encode()).hexdigest()
+                    else: chainId = "sha256:"+sha256(value(chainId)+" "+value(layer))
                     layers.append({
                         "DiffId" : layer,
                         "ChainId" : chainId,
@@ -75,25 +80,39 @@ class Hyper:
         self.file.update({'Api' : api})
 
     def makeId(self):
-        class Merkle:
-            def __init__(self):
-                super().__init__()
-                id = ""
-                func = ""
-                merkle = Merkle()
-            def toDict(self):
-                return {
-                    "Id": self.id,
-                    "Func": self.func,
-                    "Merkle": self.merkle.toDict()
-                }
-        id = 'xx87tgyhiuji8u97y6tguhjniouy87trfcgvbhnjiouytf'
-        func = ""
-        merkle = Merkle().toDict
+        def concat(merkle_list):
+            id = value(merkle_list[0].get('Id'))
+            for merkle in merkle_list[1:]:
+                id = id+" "+value(merkle.get('Id'))
+            return  "sha256:"+sha256(id)
+
+        def makeApi():
+            return {
+                "Id" : None,
+                "Func": None,
+            }
+        def makeContainer():
+            return {
+                "Id" : None,
+                "Func" : None,
+            }
+        def makeContract():
+            return {
+                "Id" : None,
+                "Func": None,
+            }
+        merkle = [
+            makeApi(),
+            makeContainer(),
+            makeContract()
+        ]
+        id = concat(merkle)
+        func = "concatenacion en orden alfabetico de todos los atributos"
         self.file.update({'Merkle' : {'Id':'sha256:'+id, "Func": func, "Merkle":merkle}})
 
     def save(self):
-        registry = self.registry + self.file.get('Merkle').get('Id').split(':')[1] + '.json'
+        #registry = self.registry + self.file.get('Merkle').get('Id').split(':')[1] + '.json'
+        registry = self.registry + 'xx34hjnmkoi9u8y7ghbjnki8u7y6trfghbjkiu8y7tfgv' + '.json'
         with open(registry,'w') as file:
             file.write( json.dumps(self.file, indent=4, sort_keys=True) )
 
@@ -110,6 +129,6 @@ if __name__ == "__main__":
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
 
-    Hyperfile.makeId()
+    #Hyperfile.makeId()
     Hyperfile.save()
     #run('docker rmi building --force')
