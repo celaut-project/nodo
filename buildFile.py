@@ -117,8 +117,9 @@ class Hyper:
                         ]
                         id = 'sha256:'+sha256(concat(merkle))
                         return {
-                            "Id":id,
-                            "Func": "Hacemos una cadena"
+                            "Id" : id,
+                            "Func": "Hacemos una cadena",
+                            "Merkle": merkle
                         }
                     if i==0: merkle = [ makeBuEl(i) ]
                     else: merkle = [
@@ -128,7 +129,8 @@ class Hyper:
                     id = 'sha256:'+sha256(concat(merkle))
                     return {
                         "Id":id,
-                        "Func": "Hacemos una cadena"
+                        "Func": "Hacemos una cadena",
+                        "Merkle": merkle
                     }
                 return makeLayer(len(self.file.get('Container').get('Layers'))-1)
             def makeOsArch():
