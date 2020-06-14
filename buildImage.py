@@ -33,7 +33,7 @@ class Image:
                 if string is not None: return string +'\n'
                 else: return ""
             def workingdir():
-                string = 'WORKINGDIR '+self.image.get('Container').get('WorkingDir')
+                string = 'WORKDIR '+self.image.get('Container').get('WorkingDir')
                 if string is not None: return string +'\n'
                 else: return ""
             myfile = open("Dockerfile", 'w')
