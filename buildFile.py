@@ -199,7 +199,7 @@ class Hyper:
         self.file.update({'Merkle' : {'Id':'sha256:'+id, "Func": func, "Merkle":merkle}})
 
     def save(self):
-        registry = self.registry + self.file.get('Merkle').get('Id').split(':')[1] + '.json'
+        registry = self.registry + self.file.get('Merkle').get('Id') + '.json'
         with open(registry,'w') as file:
             file.write( json.dumps(self.file, indent=4, sort_keys=True) )
 
