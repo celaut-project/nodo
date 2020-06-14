@@ -9,7 +9,7 @@ class Image:
     def __init__(self, image):
         self.isAbstract = True
         self.image = image
-        self.id = image.get('Merkle').get('Id').split(':')[1]
+        self.id_value = image.get('Merkle').get('Id').split(':')[1]
 
     @staticmethod
     def makeImage(filename):
@@ -22,11 +22,19 @@ class Image:
     def build(self):
         def dockerfile():
             def runs():
-                pass
+                string = ""
+                for layer in self.image.get('Container').get('Layers'):
+                    # Aqui se puede elegir el elemento de la lista que mejor te venga.
+                    if layer is not None: string = string+layer.get('Build')[0]+'\n'
+                return string
             def entrypoint():
-                pass
+                string = self.image.get('Container').get('Entrypoint')
+                if string is not None: return string +'\n'
+                else: return ""
             def workingdir():
-                pass
+                string = self.image.get('Container').get('WorkingDir')
+                if string is not None: return string +'\n'
+                else: return ""
             myfile = open("Dockerfile", 'w')
             myfile.write(runs())
             myfile.write(entrypoint())
@@ -60,7 +68,7 @@ def select_port():
 
 def ok(image):
     file =  "registry/"+image+".json"
-    return main(file).id
+    return main(file).id_value
 
 if __name__ == "__main__":
     file=sys.argv[1]
