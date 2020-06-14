@@ -17,7 +17,7 @@ class Image:
         return Image(file)
 
     def show(self):
-        print(self.image)
+        print(self.image.get('Container'))
 
     def build(self):
         def dockerfile():
@@ -29,11 +29,11 @@ class Image:
                     if build is not None: string = string+build[0]+'\n'
                 return string
             def entrypoint():
-                string = self.image.get('Container').get('Entrypoint')
+                string = 'ENTRYPOINT '+self.image.get('Container').get('Entrypoint')
                 if string is not None: return string +'\n'
                 else: return ""
             def workingdir():
-                string = self.image.get('Container').get('WorkingDir')
+                string = 'WORKINGDIR '+self.image.get('Container').get('WorkingDir')
                 if string is not None: return string +'\n'
                 else: return ""
             myfile = open("Dockerfile", 'w')
