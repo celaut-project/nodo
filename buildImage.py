@@ -9,6 +9,7 @@ class Image:
     def __init__(self, image):
         self.isAbstract = True
         self.image = image
+        self.id = image.get('Merkle').get('Id').split(':')[1]
 
     @staticmethod
     def makeImage(filename):
@@ -24,8 +25,7 @@ class Image:
             myfile.write(self.image.get('Container').get('Build'))
             myfile.close()
         dockerfile()
-        image_id = self.image.get('Id').split(':')[1]
-        run('docker build -t '+image_id+' .')
+        run('docker build -t '+self.id+' .')
         os.remove("Dockerfile")
 
 def isValidHyperFile(file):
@@ -52,7 +52,7 @@ def select_port():
 
 def ok(image):
     file =  "registry/"+image+".json"
-    return main(file).image.get('Id').split(':')[1]
+    return main(file).id
 
 if __name__ == "__main__":
     file=sys.argv[1]
