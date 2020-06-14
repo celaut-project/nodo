@@ -9,7 +9,7 @@ class Image:
     def __init__(self, image):
         self.isAbstract = True
         self.image = image
-        self.id_value = image.get('Merkle').get('Id')
+        self.id_value = image.get('Merkle').get('Id').split(':')[1]
 
     @staticmethod
     def makeImage(filename):
