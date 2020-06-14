@@ -218,4 +218,4 @@ if __name__ == "__main__":
 
     Hyperfile.makeMerkle()
     Hyperfile.save()
-    #run('docker rmi building --force')
+    run('docker rmi building --force')
