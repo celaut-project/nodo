@@ -42,7 +42,7 @@ class Image:
             myfile.write(workingdir())
             myfile.close()
         dockerfile()
-        run('docker build -t '+self.id+' .')
+        run('docker build -t '+self.id_value+' .')
         os.remove("Dockerfile")
 
 def isValidHyperFile(file):
