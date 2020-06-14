@@ -49,7 +49,7 @@ class Hyper:
             os.remove("inspect.json")
             return container
         def parseDockerfile(container):
-            Dockerfile = open("Dockerfile", "r")
+            Dockerfile = open("registry/for_build/Dockerfile", "r")
             layers_in_file = []
             for l in Dockerfile.readlines():
                 command = l.split()[0]
@@ -78,7 +78,7 @@ class Hyper:
         self.file.update({'Container' : container})
 
     def parseApi(self):
-        api = json.load(open("Api.json","r"))
+        api = json.load(open("registry/for_build/Api.json","r"))
         self.file.update({'Api' : api})
 
     def makeMerkle(self):

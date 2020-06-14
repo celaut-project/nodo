@@ -21,12 +21,20 @@ class Image:
 
     def build(self):
         def dockerfile():
+            def runs():
+                pass
+            def entrypoint():
+                pass
+            def workingdir():
+                pass
             myfile = open("Dockerfile", 'w')
-            myfile.write(self.image.get('Container').get('Build'))
+            myfile.write(runs())
+            myfile.write(entrypoint())
+            myfile.write(workingdir())
             myfile.close()
         dockerfile()
-        run('docker build -t '+self.id+' .')
-        os.remove("Dockerfile")
+        #run('docker build -t '+self.id+' .')
+        #os.remove("Dockerfile")
 
 def isValidHyperFile(file):
     def isValidBuild():
