@@ -25,7 +25,8 @@ class Image:
                 string = ""
                 for layer in self.image.get('Container').get('Layers'):
                     # Aqui se puede elegir el elemento de la lista que mejor te venga.
-                    if layer is not None: string = string+layer.get('Build')[0]+'\n'
+                    build = layer.get('Build')
+                    if build is not None: string = string+build[0]+'\n'
                 return string
             def entrypoint():
                 string = self.image.get('Container').get('Entrypoint')
