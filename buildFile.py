@@ -212,7 +212,7 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1:
         Hyperfile = Hyper( json.load(open(sys.argv[1],"r")) ) # Hyperfile
             
-    run('docker build -t building .')
+    run('docker build -t building registry/for_build/.')
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
 
