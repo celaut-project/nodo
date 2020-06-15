@@ -6,7 +6,7 @@ gateway_uri_delete = 'http://0.0.0.0:8080/delete/'
 def random_cnf():
     random_uri = get_image_uri('')
     response = requests.get(random_uri+'/')
-    return response.file    # cnf file
+    return response.file.get('cnf')    # cnf file
 
 def get_image_uri(image):
     response = requests.get(gateway_uri+image)
