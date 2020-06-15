@@ -10,6 +10,7 @@ class Image:
         self.isAbstract = True
         self.image = image
         self.id_value = image.get('Merkle').get('Id').split(':')[1]
+        self.api_port = image.get('API').get('Port')
 
     @staticmethod
     def makeImage(filename):
@@ -69,7 +70,8 @@ def select_port():
 
 def ok(image):
     file =  "registry/"+image+".json"
-    return main(file).id_value
+    img = main(file)
+    return img.id_value, img.api_port
 
 if __name__ == "__main__":
     file=sys.argv[1]
