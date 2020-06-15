@@ -70,8 +70,11 @@ def select_port():
 
 def ok(image):
     file =  "registry/"+image+".json"
-    img = main(file)
-    return img.id_value, img.api_port
+    if os.path.isfile(file) :
+        img = main(file)
+        return img.id_value, img.api_port
+    else:
+        return 404
 
 if __name__ == "__main__":
     file=sys.argv[1]
