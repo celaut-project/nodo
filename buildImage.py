@@ -10,7 +10,7 @@ class Image:
         self.isAbstract = True
         self.image = image
         self.id_value = image.get('Merkle').get('Id').split(':')[1]
-        self.api_port = image.get('API').get('Port')
+        self.api_port = image.get('Api').get('Port')
 
     @staticmethod
     def makeImage(filename):
