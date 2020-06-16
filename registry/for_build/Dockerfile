@@ -4,5 +4,5 @@ RUN apt-get update && apt-get -y install python3-tk
 RUN apt-get update && apt-get -y install python3-pip
 RUN apt-get update && apt-get -y install minisat
 WORKDIR /random/
-RUN apt-get update && apt-get -y install git && git clone --branch randomCNF https://github.com/josemibnf/sat-solver.git && mv sat-solver/* . && rm -rf sat-solver  && rm -rf .git
+RUN cd /random && apt-get update && apt-get -y install git && git clone --branch randomCNF https://github.com/josemibnf/sat-solver.git && mv sat-solver/* . && rm -rf sat-solver  && rm -rf .git
 ENTRYPOINT python3 start.py
