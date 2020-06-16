@@ -1,6 +1,6 @@
 from flask import Flask
 import buildImage
-from subprocess import run
+import os
 
 if __name__ == "__main__":
 
@@ -14,7 +14,7 @@ if __name__ == "__main__":
     def get(image):
         pod_id, api_port = buildImage.ok(str(image)) # Si no esta construido, lo construye.
         pod_port = buildImage.select_port()
-        run('docker run -p '+pod_port+':'+api_port+" "+pod_id+'.oci') # Ejecuta una instancia de la imagen con el puerto que sea.
+        os.system('docker run --detach -p '+pod_port+':'+api_port+" "+pod_id+'.oci') # Ejecuta una instancia de la imagen con el puerto que sea.
         return 'http://127.0.0.1:'+pod_port+'/'
 
     @app.route('/delete/<port_uri>')
