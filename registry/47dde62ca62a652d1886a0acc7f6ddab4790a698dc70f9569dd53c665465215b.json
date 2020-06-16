@@ -1,0 +1,398 @@
+{
+    "Api": {
+        "Methods": [
+            {
+                "Params": [],
+                "Path": "/",
+                "Return": "objetct.cnf",
+                "Type": "Get"
+            }
+        ],
+        "Port": "8000",
+        "Responses": {
+            "200": {
+                "description": "Product listing",
+                "schema": {
+                    "$ref": "#/definitions/Product"
+                }
+            },
+            "400": {
+                "description": "Bad request",
+                "schema": {
+                    "$ref": "#/definitions/Error"
+                }
+            },
+            "401": {
+                "description": "Unauthorized",
+                "schema": {
+                    "$ref": "#/definitions/Error"
+                }
+            },
+            "403": {
+                "description": "Forbidden",
+                "schema": {
+                    "$ref": "#/definitions/Error"
+                }
+            },
+            "404": {
+                "description": "Not found",
+                "schema": {
+                    "$ref": "#/definitions/Error"
+                }
+            },
+            "405": {
+                "description": "Method not allowed",
+                "schema": {
+                    "$ref": "#/definitions/Error"
+                }
+            }
+        },
+        "Type": "Rest"
+    },
+    "Container": {
+        "Entrypoint": "python3 start.py",
+        "Layers": [
+            {
+                "Build": null,
+                "ChainId": "sha256:7789f1a3d4e9258fbe5469a8d657deb6aba168d86967063e9b80ac3e1154333f",
+                "DiffId": "sha256:7789f1a3d4e9258fbe5469a8d657deb6aba168d86967063e9b80ac3e1154333f"
+            },
+            {
+                "Build": null,
+                "ChainId": "sha256:762e2e79bf74cd3ec0572cdf37c38a22a595753f3a9e35d476904d222f8b443f",
+                "DiffId": "sha256:9e53fd4895597d04f8871a68caea4c686011e1fbd0be32e57e89ada2ea5c24c4"
+            },
+            {
+                "Build": null,
+                "ChainId": "sha256:1b4cafb08b876f7235edabe393249cb181c6cc426a080bf4c5a1026db6d083c9",
+                "DiffId": "sha256:2a19bd70fcd4ce7fd73b37b1b2c710f8065817a9db821ff839fe0b4b4560e643"
+            },
+            {
+                "Build": null,
+                "ChainId": "sha256:181638ed60a63e587926e97926f5f8e150a5c426e6e08f7da87e4fb0134b1dd1",
+                "DiffId": "sha256:8891751e0a1733c5c214d17ad2b0040deccbdea0acebb963679735964d516ac2"
+            },
+            {
+                "Build": [
+                    "FROM ubuntu"
+                ],
+                "ChainId": "sha256:ca5d9380918e2e7771abba2d38009e78bc0ac0ea1636ddb3d00b41d6a5784e84",
+                "DiffId": "sha256:6b51a64d524b5ab737240daedaacd576d3c2921cdde2fc0a7f0b5c6fffcef773"
+            },
+            {
+                "Build": [
+                    "RUN apt-get update && apt-get -y install python3.6"
+                ],
+                "ChainId": "sha256:59f75aa78c72ebbc89dce80b77331e306e1010bcaf587655fbfc765a66c961cf",
+                "DiffId": "sha256:8e19720b50ccb1fb4dea747777f8ea564a8e7125e29caeec33f610565ddce12a"
+            },
+            {
+                "Build": [
+                    "RUN apt-get update && apt-get -y install python3-tk"
+                ],
+                "ChainId": "sha256:69372bcaa17575b9c87b55a7a67c1910a5385d7a0d86dde5465bf6f2e91de2dd",
+                "DiffId": "sha256:f3011b495f7f6092f4a5e16611d696905cbf97ac51b8d3f3d1058da2a9f5c254"
+            },
+            {
+                "Build": [
+                    "RUN apt-get update && apt-get -y install python3-pip"
+                ],
+                "ChainId": "sha256:8f453c11330a893f878939539f516fe5d63ac4717effc60a66221fde7a7adffe",
+                "DiffId": "sha256:b777e593811cf28956c5a38388a2480fe10e6a3f73efe500d785ff85ad3e4e3d"
+            },
+            {
+                "Build": [
+                    "RUN apt-get update && apt-get -y install minisat"
+                ],
+                "ChainId": "sha256:6cb24aa65d21e7a517acca98e4782b53bbebfd0a8edba09c9ff007024d1845b4",
+                "DiffId": "sha256:8f90d9598dd56f02d4adf773180e697673964f2c8ddc261c031c4b7baff0ed84"
+            },
+            {
+                "Build": [
+                    "RUN apt-get update && apt-get -y install git && git clone --branch randomCNF https://github.com/josemibnf/sat-solver.git && mv sat-solver/* . && rm -rf sat-solver && rm -rf .git"
+                ],
+                "ChainId": "sha256:0e3e3283ebbe0f134f54744ca990ffe04784e495873b74ec0b46298f8f67b043",
+                "DiffId": "sha256:e07a305d26acc72bbe969c17f5c4ef0b40bc50d38e477cceb0173f546d918275"
+            }
+        ],
+        "OsArch": null,
+        "Volumes": null,
+        "WorkingDir": "/random/"
+    },
+    "Contract": null,
+    "Import": null,
+    "Ledger": null,
+    "Merkle": {
+        "Func": "hash de la concatenacion en orden alfabetico de todos los atributos",
+        "Id": "sha256:47dde62ca62a652d1886a0acc7f6ddab4790a698dc70f9569dd53c665465215b",
+        "Merkle": [
+            {
+                "Func": null,
+                "Id": "sha256:"
+            },
+            {
+                "Func": null,
+                "Id": "sha256:fe0c2f78b3dfa64faf665e30c8e522ecddf28a56892165e0afb85aed0bb9172f",
+                "Merkle": [
+                    {
+                        "Func": "sha256(atr)",
+                        "Id": "sha256:b7cf73a23d95f767e278b3f50da383b9dd6b7e92d2e6e5ddf7a3351ec3dbf3c2"
+                    },
+                    {
+                        "Func": "Hacemos una cadena",
+                        "Id": "sha256:8999079926260640fcc2fa582f63049cf0ff7464ceddc1c9978951eb07185dcd",
+                        "Merkle": [
+                            {
+                                "Func": "Hacemos una cadena",
+                                "Id": "sha256:e3636a44bfc5431b7fd6fa22a2bdda8cfff4785df092f20387080bdfdb3b3b6c",
+                                "Merkle": [
+                                    {
+                                        "Func": "Hacemos una cadena",
+                                        "Id": "sha256:ffa2c6a4003567c2d5888800fe8baaa82d7b9d52dfe6e1b66bd27becf8fb4ac3",
+                                        "Merkle": [
+                                            {
+                                                "Func": "Hacemos una cadena",
+                                                "Id": "sha256:fcbce4f0e6225616e08f306138049787127efdeae0e68d04a018aed585e6faa5",
+                                                "Merkle": [
+                                                    {
+                                                        "Func": "Hacemos una cadena",
+                                                        "Id": "sha256:5e37b58363fcfbaf496f65ccb057168e4016876739bad5484b13d5c060c56c4a",
+                                                        "Merkle": [
+                                                            {
+                                                                "Func": "Hacemos una cadena",
+                                                                "Id": "sha256:394008f39cc7b30aaaeae38cf1df1d1ebd20a77d84dae374f57770315ccd903e",
+                                                                "Merkle": [
+                                                                    {
+                                                                        "Func": "Hacemos una cadena",
+                                                                        "Id": "sha256:9b80cf47765e65e71df0bddce61094852eaf910864686c32bbe312d606b639a2",
+                                                                        "Merkle": [
+                                                                            {
+                                                                                "Func": "Hacemos una cadena",
+                                                                                "Id": "sha256:28fc94edf63123eb6be952ce655af625844f602207d1491c407381e2c9ab8b79",
+                                                                                "Merkle": [
+                                                                                    {
+                                                                                        "Func": "Hacemos una cadena",
+                                                                                        "Id": "sha256:29ebb055d13e1016d667b65948b15ca44dc517a4d46feb6bb1cb3c223eb292cd",
+                                                                                        "Merkle": [
+                                                                                            {
+                                                                                                "Func": "Hacemos una cadena",
+                                                                                                "Id": "sha256:adeaa48ffb5360d42c34d315bca214e6e62488a372d8b2a075308f0d179a535a",
+                                                                                                "Merkle": [
+                                                                                                    {
+                                                                                                        "Func": "Hacemos una cadena",
+                                                                                                        "Id": "sha256:1b82b22b5179218d4f83768d32385b37b9a82b98a06687fd9e487483719884a2",
+                                                                                                        "Merkle": [
+                                                                                                            {
+                                                                                                                "Func": "esto es un build.",
+                                                                                                                "Id": "sha256:"
+                                                                                                            },
+                                                                                                            {
+                                                                                                                "Func": "sha256(atr)",
+                                                                                                                "Id": "sha256:423b4b34766803edb5dc5c6c9152619ece1a64f7aa88b090181352e3820c5ed0"
+                                                                                                            }
+                                                                                                        ]
+                                                                                                    }
+                                                                                                ]
+                                                                                            },
+                                                                                            {
+                                                                                                "Func": "Hacemos una cadena",
+                                                                                                "Id": "sha256:3455e15302645f5e4fa43eaab65c823b15c1d8ed604a696995ddf1fe49694e94",
+                                                                                                "Merkle": [
+                                                                                                    {
+                                                                                                        "Func": "esto es un build.",
+                                                                                                        "Id": "sha256:"
+                                                                                                    },
+                                                                                                    {
+                                                                                                        "Func": "sha256(atr)",
+                                                                                                        "Id": "sha256:151a6828dfb1a84dbe01885ac9ef0ef03127e7efad3cf0df8ca8da89cf3e41f8"
+                                                                                                    }
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    },
+                                                                                    {
+                                                                                        "Func": "Hacemos una cadena",
+                                                                                        "Id": "sha256:91dd39bf0e5d7187a40f3254be468dc9713cd5a558579c072d06d94363d7966c",
+                                                                                        "Merkle": [
+                                                                                            {
+                                                                                                "Func": "esto es un build.",
+                                                                                                "Id": "sha256:"
+                                                                                            },
+                                                                                            {
+                                                                                                "Func": "sha256(atr)",
+                                                                                                "Id": "sha256:b0d32d034360be5f395ec0cb7c5300724c33dacaa13a0e1d07dd6e7e25872ab3"
+                                                                                            }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "Func": "Hacemos una cadena",
+                                                                                "Id": "sha256:bb9581df8fc061b81b6bced4ec10665b5dc937cde82e3b67cecc9e2864877389",
+                                                                                "Merkle": [
+                                                                                    {
+                                                                                        "Func": "esto es un build.",
+                                                                                        "Id": "sha256:"
+                                                                                    },
+                                                                                    {
+                                                                                        "Func": "sha256(atr)",
+                                                                                        "Id": "sha256:d2f130f853e668921ab6979bc8545e3ee184f8c26229f9044de1fc4122fc91f0"
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "Func": "Hacemos una cadena",
+                                                                        "Id": "sha256:516bb4e87d120a23815446f2c00777b466219264d3040b6e91f46bb2be568e67",
+                                                                        "Merkle": [
+                                                                            {
+                                                                                "Func": "esto es un build.",
+                                                                                "Id": "sha256:dc24598b8f2a8601a5cd7c8d00d5d106b1ae61adbd84208058a207785711d027",
+                                                                                "Merkle": [
+                                                                                    {
+                                                                                        "Func": "sha256(atr)",
+                                                                                        "Id": "sha256:952b10c132f88e8cb89fb2344d9a8a22dceea58f7d100d809448c140c51973f9"
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "Func": "sha256(atr)",
+                                                                                "Id": "sha256:f5c117ce2ea59a0c6b81badce60235c244fe32692777c33a2cdb1c820d3c65df"
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "Func": "Hacemos una cadena",
+                                                                "Id": "sha256:08b8ba3b929d56c7ca225c109f3295695e3a7e55fafc8d32a736ca3889f994f7",
+                                                                "Merkle": [
+                                                                    {
+                                                                        "Func": "esto es un build.",
+                                                                        "Id": "sha256:b1a79715f25a6c35e6f6816df30f7ecf7c0b09364d1c0c6f615efc5310b7feba",
+                                                                        "Merkle": [
+                                                                            {
+                                                                                "Func": "sha256(atr)",
+                                                                                "Id": "sha256:6fbfc1c454d5b47516af18df0db2ed5d675fe7c556bc9665fd4b7096783e4e81"
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "Func": "sha256(atr)",
+                                                                        "Id": "sha256:3bf943961f65b99bcb943c499e32a45fcb5f78dccd6fc363359941140824714a"
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "Func": "Hacemos una cadena",
+                                                        "Id": "sha256:2b3f7b288e1e30535219d9fc8dd6ea8b15d7d4a41f28508f0feaa764b934982a",
+                                                        "Merkle": [
+                                                            {
+                                                                "Func": "esto es un build.",
+                                                                "Id": "sha256:8bdd75007f1c6c3c2291b03cc93d0a9a8958d21f1fb3ec913ec5905b2808125a",
+                                                                "Merkle": [
+                                                                    {
+                                                                        "Func": "sha256(atr)",
+                                                                        "Id": "sha256:fc3edb6cb92b210ea2fbff5d92f31cfddadbe93fbfeb66df7e2774a464b33ddc"
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "Func": "sha256(atr)",
+                                                                "Id": "sha256:ad19e210a5aca769284e1ec15d8475caafc548b4360e25abdedeb30c035ab7b8"
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "Func": "Hacemos una cadena",
+                                                "Id": "sha256:9a3fde2229809f1b028e7f7ee0e686fdecb3191e33288ba4342939957930eca5",
+                                                "Merkle": [
+                                                    {
+                                                        "Func": "esto es un build.",
+                                                        "Id": "sha256:af568ae4a9961f2c2bda685fb65eff003368758a8bd78e4d792e51317db74e33",
+                                                        "Merkle": [
+                                                            {
+                                                                "Func": "sha256(atr)",
+                                                                "Id": "sha256:6c6cfbe7747f4eee03386ab48370178c36ea02ee495dc4ad6cc9b6ef563cb2b6"
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "Func": "sha256(atr)",
+                                                        "Id": "sha256:1e7917816ece7e42c82055acde697ee186f77a71940ac049c446d0ce83da9af0"
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "Func": "Hacemos una cadena",
+                                        "Id": "sha256:55e3b1195fe4df22ec99ed7b1cfb1120c919858e8cf1eaba75da5612b895652d",
+                                        "Merkle": [
+                                            {
+                                                "Func": "esto es un build.",
+                                                "Id": "sha256:5ddbcc555abe08989ef8bcb59c315ba3a2babb0a0d345307301490a3c4e96cc0",
+                                                "Merkle": [
+                                                    {
+                                                        "Func": "sha256(atr)",
+                                                        "Id": "sha256:89b20cafaa3ce7be28d6b1d97c3eb2a7f58e317329a9a5b9471c6e11e49a4ab4"
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "Func": "sha256(atr)",
+                                                "Id": "sha256:b7049a398743b4ac00630a6a00ac2feb22c6f86f3eae228feb7a26f56afbbd0e"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "Func": "Hacemos una cadena",
+                                "Id": "sha256:9bf737a082ef3a6c9499e85adcba0a016a20a46511b22197cc873e8b6abb76ae",
+                                "Merkle": [
+                                    {
+                                        "Func": "esto es un build.",
+                                        "Id": "sha256:638ca90274243b7bda7db56165989041a3f10840d7969096aa227172b0c31f87",
+                                        "Merkle": [
+                                            {
+                                                "Func": "sha256(atr)",
+                                                "Id": "sha256:bea887bdd995a07911fafb3976936f4c49818a6a4afa04f2a15e215292fb3e4a"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "Func": "sha256(atr)",
+                                        "Id": "sha256:f3834556a083345155502d6b9a824a515ac4af3585cb6d52a58fbc8d650195c6"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "Func": null,
+                        "Id": "sha256:"
+                    },
+                    {
+                        "Func": null,
+                        "Id": "sha256:"
+                    },
+                    {
+                        "Func": null,
+                        "Id": "sha256:6171492376d04ef1d33d2209cd436703ddcae8d515afa7271adfb6977cb9d72f"
+                    }
+                ]
+            },
+            {
+                "Func": null,
+                "Id": "sha256:"
+            }
+        ]
+    },
+    "Tensor": null
+}
