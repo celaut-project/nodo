@@ -1,3 +1,2 @@
-inspect.json
-Dockerfile
-registry/
+./inspect.json
+./Dockerfile
