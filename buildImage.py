@@ -78,4 +78,5 @@ def ok(image):
 
 if __name__ == "__main__":
     file=sys.argv[1]
-    main(file)
+    img = main(file)
+    print(img.id_value)
