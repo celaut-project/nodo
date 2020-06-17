@@ -24,7 +24,7 @@ def get_image_uri(image):
     return response.text
 
 if __name__ == "__main__":
-    sovler_uri = get_image_uri('d32dad60a7e7dd247df6ffd1317dafd9060b5429de28ea5c4a4abfd17f56a058')
+    sovler_uri = get_image_uri('87e2c0b8244c84021f28d0043aade5c6d7e9eec0467f02faf26c38e0624c7a6b')
     cnf = random_cnf()
     response = requests.post( sovler_uri+'/', params={'cnf':cnf})
     print(response.json().get('interpretation'))
