@@ -5,7 +5,16 @@ gateway_uri_delete = 'http://127.0.0.1:8080/delete/'
 
 def random_cnf():
     random_uri = get_image_uri('3105f5e4d004bbc2ffe607aeb4940bd66f63cfe2f0cc392ca920150163a84df5')
-    response = requests.get(random_uri+'/')
+    docker_snail = True
+    while docker_snail=True:
+    try:
+        response = requests.get(random_uri+'/')
+        docker_snail = False
+        if response != 200:
+            print("Algo va mal ....")
+            exit()
+    except requests.exceptions.ConnectionError:
+        print('Docker va muy lento.....')
     cnf = response.json().get('cnf')
     print(cnf)
     return cnf
