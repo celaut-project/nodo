@@ -3,11 +3,11 @@
     "Methods": [
         {
             "Params": [
-                "cnf"
+                "{cnf:cnf}"
             ],
             "Path": "/",
-            "Return": "interpretation",
-            "Type": "Get"
+            "Return": "{interpretation:interpretation}",
+            "Type": "Post"
         }
     ],
     "Responses": {
