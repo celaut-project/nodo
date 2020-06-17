@@ -15,7 +15,7 @@ if __name__ == "__main__":
         pod_id, api_port = buildImage.ok(str(image)) # Si no esta construido, lo construye.
         pod_port = buildImage.select_port()
         os.system('docker run --detach -p 127.0.0.1:'+pod_port+':'+api_port+' '+pod_id+'.oci') # Ejecuta una instancia de la imagen con el puerto que sea.
-        return 'http://127.0.0.1:'+pod_port+'/'
+        return 'http://127.0.0.1:'+pod_port
 
     @app.route('/delete/<port_uri>')
     def delete(port_uri):
