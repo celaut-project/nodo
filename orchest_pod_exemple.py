@@ -4,7 +4,7 @@ gateway_uri = 'http://127.0.0.1:8080/'
 gateway_uri_delete = 'http://127.0.0.1:8080/delete/'
 
 def random_cnf():
-    random_uri = get_image_uri('3105f5e4d004bbc2ffe607aeb4940bd66f63cfe2f0cc392ca920150163a84df5')
+    random_uri = get_image_uri('f2aaf326eabb22b1775d0fbd91d9a7660394ca300bef3f4d63df6f955d60e0dd')
     docker_snail = True
     while docker_snail==True:
         try:
@@ -24,7 +24,7 @@ def get_image_uri(image):
     return response.text
 
 if __name__ == "__main__":
-    sovler_uri = get_image_uri('87e2c0b8244c84021f28d0043aade5c6d7e9eec0467f02faf26c38e0624c7a6b')
+    sovler_uri = get_image_uri('1f3e8ef0742e4c779a1d8cf0cabd05ab89796816edd5b867bc28d0b5955fef62')
     cnf = random_cnf()
     response = requests.post( sovler_uri+'/', params={'cnf':cnf})
     print(response.json().get('interpretation'))

@@ -1,13 +1,11 @@
 {
-    "Port":"8080",
+    "Port":"8000",
     "Methods": [
         {
-            "Params": [
-                "{cnf:cnf}"
-            ],
+            "Params": [],
             "Path": "/",
-            "Return": "{interpretation:interpretation}",
-            "Type": "Post"
+            "Return": "objetct.cnf",
+            "Type": "Get"
         }
     ],
     "Responses": {
