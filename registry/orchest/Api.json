@@ -1,0 +1,50 @@
+{
+    "Port":"8000",
+    "Methods": [
+        {
+            "Params": [],
+            "Path": "/",
+            "Return": "objetct.cnf",
+            "Type": "Get"
+        }
+    ],
+    "Responses": {
+        "200": {
+            "description": "Product listing",
+            "schema": {
+                "$ref": "#/definitions/Product"
+            }
+        },
+        "400": {
+            "description": "Bad request",
+            "schema": {
+                "$ref": "#/definitions/Error"
+            }
+        },
+        "401": {
+            "description": "Unauthorized",
+            "schema": {
+                "$ref": "#/definitions/Error"
+            }
+        },
+        "403": {
+            "description": "Forbidden",
+            "schema": {
+                "$ref": "#/definitions/Error"
+            }
+        },
+        "404": {
+            "description": "Not found",
+            "schema": {
+                "$ref": "#/definitions/Error"
+            }
+        },
+        "405": {
+            "description": "Method not allowed",
+            "schema": {
+                "$ref": "#/definitions/Error"
+            }
+        }
+    },
+    "Type": "Rest"
+}
