@@ -2,7 +2,6 @@ FROM ubuntu
 RUN apt-get update && apt-get -y install python3.6
 RUN apt-get update && apt-get -y install python3-tk
 RUN apt-get update && apt-get -y install python3-pip
-RUN apt-get update && apt-get -y install minisat
 RUN pip3 install flask
 RUN pip3 install pandas
 RUN pip3 install numpy
