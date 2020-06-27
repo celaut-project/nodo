@@ -5,9 +5,7 @@ import os
 
 class Image:
     image = None
-    isAbstract = None
     def __init__(self, image):
-        self.isAbstract = True
         self.image = image
         self.id_value = image.get('Merkle').get('Id').split(':')[1]
         self.api_port = image.get('Api').get('Port')
@@ -22,6 +20,10 @@ class Image:
         print(self.image.get('Container'))
 
     def build(self):
+        def dependency():
+            for dependency in self.image.get('Dependency'):
+                id = dependency.get('Merkle').get('Id').split(':')[:1]
+                ok(id)
         def dockerfile():
             def runs():
                 string = ""
@@ -43,6 +45,7 @@ class Image:
             myfile.write(entrypoint())
             myfile.write(workingdir())
             myfile.close()
+        dependency()
         dockerfile()
         run('docker build -t '+self.id_value+'.oci .')
         os.remove("Dockerfile")

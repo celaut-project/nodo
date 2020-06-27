@@ -26,6 +26,15 @@ class Hyper:
         self.file = file
         self.registry = 'registry/'
 
+    def parseDependency(self):
+        for file in os.listdir():
+            if file != 'Dockerfile' and file != 'Api.json':
+                image = json.load(open(file,"r"))
+                dependencies = self.file.get('Dependency')
+                if dependencies == None: dependencies=[]
+                dependencies.append(image)
+                self.file.update('Dependency':dependencies)
+
     def parseContainer(self):
         def parseInspect(container):
             os.system('powershell.exe docker inspect building > inspect.json')
