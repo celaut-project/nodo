@@ -115,6 +115,7 @@
         "WorkingDir": "/random/"
     },
     "Contract": null,
+    "Gateway": 8008,
     "Import": null,
     "Ledger": null,
     "Merkle": {
