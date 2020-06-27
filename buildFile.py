@@ -17,7 +17,7 @@ class Hyper:
                 "Container" : None, # dict
                 "Contract": None,   # list
                 "Merkle": None,     # dict
-                "Import": None,     # list
+                "Dependency": None,     # list
                 "Ledger": None, 
                 "Tensor": None,
                 "Gateway": '8080'

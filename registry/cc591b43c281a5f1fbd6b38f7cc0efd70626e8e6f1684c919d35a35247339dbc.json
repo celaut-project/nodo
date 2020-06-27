@@ -134,7 +134,7 @@
     },
     "Contract": null,
     "Gateway": 8008,
-    "Import": null,
+    "Dependency": null,
     "Ledger": null,
     "Merkle": {
         "Func": "hash de la concatenacion en orden alfabetico de todos los atributos",
