@@ -7,6 +7,13 @@ if __name__ == "__main__":
     app = Flask(__name__)
     gateway_node_port = 8080
 
+    def who_father_image_container_is(dependency):
+        # 1. Miro de que puerto viene la peticion
+        # 2. Miro que contenedor tiene asignado ese puerto en la subred docker0.
+        # 3. Miro de que imagen proviene ese contenedor.
+        # 4. Accedo al registro de father_image y obtengo el puerto de la dependencia.
+        return 2, 4
+
     @app.route('/')
     def hello():
         return 'HELLO HYPER'
@@ -15,7 +22,7 @@ if __name__ == "__main__":
     def get(image):
         api_port, gateway_port = buildImage.ok(str(image)) # Si no esta construido, lo construye.
         pod_port = buildImage.select_port()
-        father_container_id, image_port_from_father_container = who_father_image_container_is()
+        father_container_id, image_port_from_father_container = who_father_image_container_is(dependency = image)
         os.system('docker stop '+father_container_id)
         os.system('docker run --detach -p 127.0.0.1:'+pod_port+':'+api_port+' -p 127.0.0.1:'+gateway_node_port+':'+gateway_port+' '+image+'.oci') # Ejecuta una instancia de la imagen con el puerto pod_port.
         os.system('docker run --detach -p 127.0.0.1:'+pod_port+':'+image_port_from_father_container+' '+father_container_id)
