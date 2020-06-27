@@ -11,6 +11,7 @@ class Image:
         self.image = image
         self.id_value = image.get('Merkle').get('Id').split(':')[1]
         self.api_port = image.get('Api').get('Port')
+        self.gateway_port = image.get('Gateway')
 
     @staticmethod
     def makeImage(filename):
@@ -70,9 +71,12 @@ def select_port():
 
 def ok(image):
     file =  "registry/"+image+".json"
-    if os.path.isfile(file) :
+    if os.path.isfile(file):
         img = main(file)
-        return img.id_value, img.api_port
+        if img.id_value == image:
+            return img.api_port, img.gateway_port
+        else:
+            return 404
     else:
         return 404
 
