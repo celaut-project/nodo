@@ -19,7 +19,8 @@ class Hyper:
                 "Merkle": None,     # dict
                 "Import": None,     # list
                 "Ledger": None, 
-                "Tensor": None
+                "Tensor": None,
+                "Gateway": '8080'
             }):
         super().__init__()
         self.file = file
@@ -106,6 +107,8 @@ class Hyper:
                 "Id" : id,
                 "Func": None,
             }
+        def makeGateway():
+            return '8080'
         def makeContainer():
             def makeEntrypoint():
                 return makeElem(self.file.get('Container').get('Entrypoint'))
@@ -192,7 +195,8 @@ class Hyper:
         merkle = [
             makeApi(),
             makeContainer(),
-            makeContract()
+            makeContract(),
+            makeGateway()
         ]
         id = sha256(concat(merkle))
         func = "hash de la concatenacion en orden alfabetico de todos los atributos"
