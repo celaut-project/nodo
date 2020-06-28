@@ -12,9 +12,9 @@ if __name__ == "__main__":
         # 1. Miro de que puerto viene la peticion
         container_port = peticion.emisor.split(':')[:1]
         # 2. Miro que contenedor tiene asignado ese puerto en la subred docker0.
-        os.system('docker network | grep '+container_port) >> container
+        contaienr = subprocess.check_output('docker network | grep '+container_port)
         # 3. Miro de que imagen proviene ese contenedor.
-        os.system('docker ps | grep '+container) >> image_id
+        image_id = subprocess.check_output('docker ps | grep '+container)
         # 4. Accedo al registro de la imagen y obtengo el puerto de la dependencia.
         image = json.load(open("registry/"+image_id+".json","r"))
         for dependency in image.get('Dependency'):
