@@ -20,7 +20,7 @@ if __name__ == "__main__":
         for dependency in image.get('Dependency'):
             if dependency.get('Image').get('Merkle').get('Id').split(':')[:1] == dependency:
                 dependency_port = dependency.get('Port')
-        return 2, 4
+        return container, dependency_port
 
     @app.route('/')
     def hello():
