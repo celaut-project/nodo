@@ -27,12 +27,15 @@ class Hyper:
         self.registry = 'registry/'
 
     def parseDependency(self):
-        for file in os.listdir():
+        for file in os.listdir('registry/for_build'):
             if file != 'Dockerfile' and file != 'Api.json':
                 image = json.load(open(file,"r"))
                 dependencies = self.file.get('Dependency')
                 if dependencies == None: dependencies=[]
-                dependencies.append(image)
+                dependencies.append({
+                    'Port': None,
+                    'Image': image
+                })
                 self.file.update('Dependency':dependencies)
 
     def parseContainer(self):

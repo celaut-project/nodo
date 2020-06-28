@@ -22,7 +22,7 @@ class Image:
     def build(self):
         def dependency():
             for dependency in self.image.get('Dependency'):
-                id = dependency.get('Merkle').get('Id').split(':')[:1]
+                id = dependency.get('Image').get('Merkle').get('Id').split(':')[:1]
                 ok(id)
         def dockerfile():
             def runs():
