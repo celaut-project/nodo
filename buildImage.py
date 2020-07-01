@@ -9,7 +9,6 @@ class Image:
         self.image = image
         self.id_value = image.get('Merkle').get('Id').split(':')[1]
         self.api_port = image.get('Api').get('Port')
-        self.gateway_port = image.get('Gateway')
 
     @staticmethod
     def makeImage(filename):
@@ -22,7 +21,7 @@ class Image:
     def build(self):
         def dependency():
             for dependency in self.image.get('Dependency'):
-                id = dependency.get('Image').get('Merkle').get('Id').split(':')[:1]
+                id = dependency.get('Merkle').get('Id').split(':')[:1]
                 ok(id)
         def dockerfile():
             def runs():
@@ -62,22 +61,12 @@ def main(file):
         image.build() 
         return image   
 
-def select_port():
-    import socket
-    from contextlib import closing
-    def find_free_port():
-        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-            s.bind(('', 0))
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            return s.getsockname()[1]
-    return str(find_free_port())
-
 def ok(image):
     file =  "registry/"+image+".json"
     if os.path.isfile(file):
         img = main(file)
         if img.id_value == image:
-            return img.api_port, img.gateway_port
+            return img.api_port
         else:
             return 404
     else:

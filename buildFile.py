@@ -20,7 +20,6 @@ class Hyper:
                 "Dependency": None,     # list
                 "Ledger": None, 
                 "Tensor": None,
-                "Gateway": '8080'
             }):
         super().__init__()
         self.file = file
@@ -116,8 +115,6 @@ class Hyper:
                 "Id" : id,
                 "Func": None,
             }
-        def makeGateway():
-            return '8080'
         def makeContainer():
             def makeEntrypoint():
                 return makeElem(self.file.get('Container').get('Entrypoint'))
