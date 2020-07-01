@@ -32,10 +32,7 @@ class Hyper:
                 image = json.load(open(file,"r"))
                 dependencies = self.file.get('Dependency')
                 if dependencies == None: dependencies=[]
-                dependencies.append({
-                    'Port': None,
-                    'Image': image
-                })
+                dependencies.append(image)
                 self.file.update('Dependency':dependencies)
 
     def parseContainer(self):
