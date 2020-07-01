@@ -24,6 +24,6 @@ if __name__ == "__main__":
 
     @app.route('/<token>')
     def delete(token):
-        pass
+        subprocess.check_output('docker rm '+token+' --force')
 
     app.run(host='0.0.0.0', port=8080)
