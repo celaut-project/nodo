@@ -21,7 +21,6 @@ if __name__ == "__main__":
             'token': container_id
         }
 
-
     @app.route('/<token>')
     def delete(token):
         subprocess.check_output('docker rm '+token+' --force')
