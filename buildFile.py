@@ -27,12 +27,12 @@ class Hyper:
 
     def parseDependency(self):
         dependencies = []
-        for file in os.listdir('registry/for_build'):    
+        for file in os.listdir('registry/for_build'):
             if file != 'Dockerfile' and file != 'Api.json':
-                image = json.load(open(file,"r")
+                image = json.load(open(file,'r'))
                 dependencies.append(image)
         if len(dependencies)>0:
-            self.file.update('Dependency':dependencies)
+            self.file.update({'Dependency':dependencies})
 
     def parseContainer(self):
         def parseInspect(container):
@@ -201,8 +201,7 @@ class Hyper:
         merkle = [
             makeApi(),
             makeContainer(),
-            makeContract(),
-            makeGateway()
+            makeContract()
         ]
         id = sha256(concat(merkle))
         func = "hash de la concatenacion en orden alfabetico de todos los atributos"
