@@ -8,7 +8,12 @@ class Image:
     def __init__(self, image):
         self.image = image
         self.id_value = image.get('Merkle').get('Id').split(':')[1]
-        self.api_port = image.get('Api').get('Port')
+    
+    def api_port(self):
+        if self.image.get('Api')== None:
+            return None
+        else:
+            self.image.get('Api').get('Port')
 
     @staticmethod
     def makeImage(filename):
@@ -66,7 +71,7 @@ def ok(image):
     if os.path.isfile(file):
         img = main(file)
         if img.id_value == image:
-            return img.api_port
+            return img.api_port()
         else:
             return 404
     else:

@@ -87,8 +87,9 @@ class Hyper:
         self.file.update({'Container' : container})
 
     def parseApi(self):
-        api = json.load(open("registry/for_build/Api.json","r"))
-        self.file.update({'Api' : api})
+        if os.path.isfile("registry/for_build/Api.json"):
+            api = json.load(open("registry/for_build/Api.json","r"))
+            self.file.update({'Api' : api})
 
     def makeMerkle(self):
         def concat(merkle_list):

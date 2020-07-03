@@ -13,17 +13,20 @@ if __name__ == "__main__":
 
     @app.route('/<dependency>')
     def get(dependency):
-        if tieneAPI:
-            api_port = buildImage.ok(str(dependency)) # Si no esta construido, lo construye.
-            container_id = subprocess.check_output('docker run --detach '+dependency+'.oci') # Ejecuta una instancia de la imagen.
+        api_port = buildImage.ok(str(dependency)) # Si no esta construido, lo construye.
+        container_id = subprocess.check_output('docker run --detach '+dependency+'.oci') # Ejecuta una instancia de la imagen.
+        if api_port == None:
+            return {
+                'uri': None,
+                'token': container_id
+            }
+        else:
             container_ip = subprocess.check_output("docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "+container_id)
             return {
                 'uri': container_ip + api_port,
                 'token': container_id
             }
-        else:
-            pass
-        
+
     @app.route('/<token>')
     def delete(token):
         subprocess.check_output('docker rm '+token+' --force')
