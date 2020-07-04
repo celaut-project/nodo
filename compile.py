@@ -17,7 +17,7 @@ class Hyper:
                 "Container" : None, # dict
                 "Contract": None,   # list
                 "Merkle": None,     # dict
-                "Dependency": None,     # list
+                "Dependency": None, # list
                 "Ledger": None, 
                 "Tensor": None,
             }):
@@ -39,7 +39,6 @@ class Hyper:
             os.system('powershell.exe docker inspect building > inspect.json')
             inspect = json.load(open('inspect.json','r'))[0]
             container.update({'Volumes':inspect.get('Config').get('Volumes')})
-            container.update({'WorkingDir':inspect.get('Config').get('WorkingDir')})
             container.update({'Entrypoint' : inspect.get('Config').get('Entrypoint')[2]})
             if container.get('Layers') == None:
                 layers = []
@@ -73,17 +72,26 @@ class Hyper:
             container.update({'Layers' : layers[::-1]})
             Dockerfile.close()
             return container
+        def parseArchParams(container):
+            arch = json.load(open("registry/for_build/Arch.json","r"))
+            container.update({'Arch' : arch})
+            if os.path.isfile("registry/for_build/Params.json"):
+                params = json.load(open("registry/for_build/Params.json","r"))
+                container.update({'Params' : params})
+            return container
+
         container = self.file.get('Container')
         if container == None:
             container = {
                 "Volumes" : None,       # list
-                "WorkingDir" : None,    # array
-                "Entrypoint" : None,    # array
+                "Entrypoint" : None,    # string
                 "Layers" : None,        # list
-                "OsArch" : None         # list
+                "Arch" : None,          # list
+                "Params": None          # list
             }          
         container = parseInspect(container)
         container = parseDockerfile(container)
+        container = parseArchParams(container)
         self.file.update({'Container' : container})
 
     def parseApi(self):
@@ -162,8 +170,8 @@ class Hyper:
                         "Merkle": merkle
                     }
                 return makeLayer(len(self.file.get('Container').get('Layers'))-1)
-            def makeOsArch():
-                id = 'sha256:'+sha256(self.file.get('Container').get('OsArch'))
+            def makeArch():
+                id = 'sha256:'+sha256(self.file.get('Container').get('Arch'))
                 return {
                     "Id" : id,
                     "Func": None
@@ -174,8 +182,8 @@ class Hyper:
                     "Id" : id,
                     "Func": None
                 }
-            def makeWorkingDir():
-                id = 'sha256:'+sha256(self.file.get('Container').get('WorkingDir'))
+            def makeParams():
+                id = 'sha256:'+sha256(self.file.get('Container').get('Params'))
                 return {
                     "Id" : id,
                     "Func": None
@@ -183,9 +191,9 @@ class Hyper:
             merkle = [
                 makeEntrypoint(),
                 makeLayers(),
-                makeOsArch(),
+                makeArch(),
                 makeVolumes(),
-                makeWorkingDir()
+                makeParams()
             ]
             id = 'sha256:'+sha256(concat(merkle))
             return {
