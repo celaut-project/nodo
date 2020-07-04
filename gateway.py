@@ -1,6 +1,6 @@
 from flask import Flask, request
 import json
-import buildImage
+import build
 import subprocess, os
 
 if __name__ == "__main__":
@@ -17,7 +17,7 @@ if __name__ == "__main__":
 
     @app.route('/<dependency>')
     def get(dependency):
-        api_port = buildImage.ok(str(dependency)) # Si no esta construido, lo construye.
+        api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
         container_id = subprocess.check_output('docker run --detach '+dependency+'.oci') # Ejecuta una instancia de la imagen.
         if request.remote_addr in instance_cache.keys():
             father_token = instance_cache.get(request.remote_addr)
