@@ -54,7 +54,7 @@ if __name__ == "__main__":
             for d in token_cache:
                 if token_cache.get(d) == token:
                     token(d)
-                    del token_cache[d]
+                    del token_cache[d]  
 
     @app.route('/<hello>',  methods=['GET', 'POST'])
     def hello():
