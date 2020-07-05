@@ -11,6 +11,7 @@ def value(id):
 def sha256(val):
     if val is None: return ""
     return hashlib.sha256(val.encode()).hexdigest()
+
 class Hyper:
     def __init__(self, file={
                 "Api": None,        # list
@@ -183,10 +184,16 @@ class Hyper:
                     "Func": None
                 }
             def makeEnvs():
-                id = 'sha256:'+sha256(self.file.get('Container').get('Envs'))
+                envs = []
+                for env in self.file.get('Container').get('Envs'):
+                    envs.append({
+                        'Id':sha256(env),
+                        "Func": 'hash de la variable de entorno.'
+                    })
+                id = 'sha256:'+suma(envs)
                 return {
                     "Id" : id,
-                    "Func": None
+                    "Func": "suma de la hash de cada atributo de la lista."
                 }
             merkle = [
                 makeEntrypoint(),
