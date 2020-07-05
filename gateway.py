@@ -15,10 +15,20 @@ if __name__ == "__main__":
     def hello():
         return 'HELLO HYPER'
 
-    @app.route('/<dependency>')
+    @app.route('/<dependency>',  methods=['GET', 'POST'])
     def get(dependency):
         api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
-        container_id = subprocess.check_output('docker run --detach '+dependency+'.oci') # Ejecuta una instancia de la imagen.
+        
+        envs = request.json
+        if envs == None:
+            container_id = subprocess.check_output('docker run --detach '+dependency+'.oci') # Ejecuta una instancia de la imagen.
+        else:
+            command = 'docker run'
+            for env in envs:
+                command = command +' -e "'+env+'='+envs[env]+'"'
+            command = command + ' --detach '+dependency+'.oci'
+            container_id = subprocess.check_output(command) # Ejecuta una instancia de la imagen.
+
         if request.remote_addr in instance_cache.keys():
             father_token = instance_cache.get(request.remote_addr)
         else:

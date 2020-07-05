@@ -72,12 +72,12 @@ class Hyper:
             container.update({'Layers' : layers[::-1]})
             Dockerfile.close()
             return container
-        def parseArchParams(container):
+        def parseArchEnvs(container):
             arch = json.load(open("registry/for_build/Arch.json","r"))
             container.update({'Arch' : arch})
-            if os.path.isfile("registry/for_build/Params.json"):
-                params = json.load(open("registry/for_build/Params.json","r"))
-                container.update({'Params' : params})
+            if os.path.isfile("registry/for_build/Envs.json"):
+                envs = json.load(open("registry/for_build/Envs.json","r"))
+                container.update({'Envs' : envs})
             return container
 
         container = self.file.get('Container')
@@ -87,11 +87,11 @@ class Hyper:
                 "Entrypoint" : None,    # string
                 "Layers" : None,        # list
                 "Arch" : None,          # list
-                "Params": None          # list
+                "Envs": None          # list
             }          
         container = parseInspect(container)
         container = parseDockerfile(container)
-        container = parseArchParams(container)
+        container = parseArchEnvs(container)
         self.file.update({'Container' : container})
 
     def parseApi(self):
@@ -182,8 +182,8 @@ class Hyper:
                     "Id" : id,
                     "Func": None
                 }
-            def makeParams():
-                id = 'sha256:'+sha256(self.file.get('Container').get('Params'))
+            def makeEnvs():
+                id = 'sha256:'+sha256(self.file.get('Container').get('Envs'))
                 return {
                     "Id" : id,
                     "Func": None
@@ -193,7 +193,7 @@ class Hyper:
                 makeLayers(),
                 makeArch(),
                 makeVolumes(),
-                makeParams()
+                makeEnvs()
             ]
             id = 'sha256:'+sha256(concat(merkle))
             return {
