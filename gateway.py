@@ -11,12 +11,7 @@ if __name__ == "__main__":
 
     instance_cache = {}  # uri : token
 
-    @app.route('/')
-    def hello():
-        return 'HELLO HYPER'
-
-    @app.route('/<dependency>',  methods=['GET', 'POST'])
-    def get(dependency):
+    def dependency(dependency):
         api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
         
         envs = request.json
@@ -49,17 +44,23 @@ if __name__ == "__main__":
                 'token': container_id
             }
 
-    @app.route('/<token>')
     # Se puede usar una cache para la recursividad,
     #  para no estar buscando todo el tiempo lo mismo.
-    def delete(token):
+    def token(token):
         if token == 'tokenhoster':
             print('TOKENHOSTER NO SE TOCA')
         else:
             subprocess.check_output('docker rm '+token+' --force')
             for d in token_cache:
                 if token_cache.get(d) == token:
-                    delete(d)
+                    token(d)
                     del token_cache[d]
+
+    @app.route('/<hello>',  methods=['GET', 'POST'])
+    def hello():
+        if len(hello)==64:
+            dependency(hello)
+        else:
+            token(hello)
 
     app.run(host='0.0.0.0', port=8080)
