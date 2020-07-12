@@ -22,7 +22,7 @@ if __name__ == "__main__":
             for env in envs:
                 command = command +' -e "'+env+'='+envs[env]+'"'
             command = command + ' --detach '+dependency+'.oci'
-            container_id = subprocess.check_output(command) # Ejecuta una instancia de la imagen.
+            container_id = (subprocess.check_output(command)).decode("utf-8")
 
         if request.remote_addr in instance_cache.keys():
             father_token = instance_cache.get(request.remote_addr)
@@ -30,7 +30,7 @@ if __name__ == "__main__":
             father_token = 'tokenhoster'
             instance_cache.update({request.remote_addr:'tokenhoster'})
         token_cache.update({container_id:father_token})
-        container_ip = subprocess.check_output("docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "+container_id)
+        container_ip = (subprocess.check_output("docker inspect --format '{{ .NetworkSettings.IPAddress }}' "+container_id)).decode("utf-8")
         if api_port == None:
             instance_cache.update({container_ip:container_id})
             return {
@@ -57,18 +57,10 @@ if __name__ == "__main__":
                     del token_cache[d]  
 
     @app.route('/<hello>',  methods=['GET', 'POST'])
-    def hello():
+    def hello(hello):
         if len(hello)==64:
             dependency(hello)
-        elif len(hello)>0:
-            token(hello)
         else:
-            pass
-    
-    @app.route('/')
-    def tests():
-        return {
-            'hello':'paco'
-        }
+            token(hello)
 
     app.run(host='0.0.0.0', port=8080)

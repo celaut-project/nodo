@@ -25,12 +25,14 @@ class Image:
 
     def build(self):
         def dependency():
-            for dependency in self.image.get('Dependency'):
-                id = dependency.get('Merkle').get('Id').split(':')[:1]
-                if !os.path.isfile('registry/'+id+'.json'):
-                    with open(id+'.json','w') as file:
-                        file.write( json.dumps(dependency, indent=4, sort_keys=True) )
-                ok(id)
+            dependencies = self.image.get('Dependency')
+            if dependencies != None:
+                for dependency in dependencies:
+                    id = dependency.get('Merkle').get('Id').split(':')[:1]
+                    if os.path.isfile('registry/'+id+'.json') is False:
+                        with open(id+'.json','w') as file:
+                            file.write( json.dumps(dependency, indent=4, sort_keys=True) )
+                    ok(id)
         def dockerfile():
             def runs():
                 string = ""
