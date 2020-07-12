@@ -60,7 +60,15 @@ if __name__ == "__main__":
     def hello():
         if len(hello)==64:
             dependency(hello)
-        else:
+        elif len(hello)>0:
             token(hello)
+        else:
+            pass
+    
+    @app.route('/')
+    def tests():
+        return {
+            'hello':'paco'
+        }
 
     app.run(host='0.0.0.0', port=8080)
