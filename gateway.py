@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import json
 import build
 import subprocess, os
@@ -43,17 +43,17 @@ if __name__ == "__main__":
         if api_port == None:
             print('No retorna direccion, no hay api.', api_port)
             instance_cache.update({container_ip:container_id})
-            return {
+            return jsonify( {
                 'uri': None,
                 'token': container_id
-            }
+            } )
         else:
             print('Retorna la uri para usar la api.', api_port)
             instance_cache.update({container_ip:container_id})
-            return {
+            return jsonify( {
                 'uri': container_ip + api_port,
                 'token': container_id
-            }
+            } )
 
     # Se puede usar una cache para la recursividad,
     #  para no estar buscando todo el tiempo lo mismo.
@@ -70,8 +70,8 @@ if __name__ == "__main__":
     @app.route('/<hello>',  methods=['GET', 'POST'])
     def hello(hello):
         if len(hello)==64:
-            dependency(hello)
+            return dependency(hello)
         else:
-            token(hello)
+            return token(hello)
 
     app.run(host='0.0.0.0', port=8080)
