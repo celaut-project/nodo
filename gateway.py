@@ -51,7 +51,7 @@ if __name__ == "__main__":
             print('Retorna la uri para usar la api.', api_port)
             instance_cache.update({container_ip:container_id})
             return jsonify( {
-                'uri': 'http://'+container_ip + api_port,
+                'uri': 'http://'+container_ip + ':' + api_port,
                 'token': container_id
             } )
 
