@@ -12,7 +12,10 @@ if __name__ == "__main__":
     instance_cache = {}  # uri : token
 
     def dependency(dependency):
-        api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
+        try:
+            api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
+        except Exception as e:
+            print(e.output)
         
         envs = request.json
         if envs == None:
@@ -38,12 +41,14 @@ if __name__ == "__main__":
             except subprocess.CalledProcessError as e:
                 print(e.output)
         if api_port == None:
+            print('No retorna direccion, no hay api.', api_port)
             instance_cache.update({container_ip:container_id})
             return {
                 'uri': None,
                 'token': container_id
             }
         else:
+            print('Retorna la uri para usar la api.', api_port)
             instance_cache.update({container_ip:container_id})
             return {
                 'uri': container_ip + api_port,

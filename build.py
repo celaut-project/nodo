@@ -78,9 +78,9 @@ def ok(image):
         if img.id_value == image:
             return img.api_port()
         else:
-            return 404
+            raise Exception
     else:
-        return 404
+        raise Exception
 
 if __name__ == "__main__":
     file=sys.argv[1]
