@@ -30,7 +30,12 @@ if __name__ == "__main__":
             father_token = 'tokenhoster'
             instance_cache.update({request.remote_addr:'tokenhoster'})
         token_cache.update({container_id:father_token})
-        container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id ).decode('utf-8')
+        while 1:
+            try:
+                container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id ).decode('utf-8')
+                break
+            except subprocess.CalledProcessError as e:
+                print(e.output)
         if api_port == None:
             instance_cache.update({container_ip:container_id})
             return {
