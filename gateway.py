@@ -19,9 +19,9 @@ if __name__ == "__main__":
         
         envs = request.json
         if envs == None:
-            container_id = subprocess.check_output('docker run --detach '+dependency+'.oci').decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
+            container_id = subprocess.check_output('docker run --expose '+api_port+' --detach '+dependency+'.oci').decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
         else:
-            command = 'docker run'
+            command = 'docker run --expose '+api_port
             for env in envs:
                 command = command +' -e "'+env+'='+envs[env]+'"'
             command = command + ' --detach '+dependency+'.oci'
