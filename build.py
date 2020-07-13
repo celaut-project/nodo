@@ -13,7 +13,7 @@ class Image:
         if self.image.get('Api')== None:
             return None
         else:
-            self.image.get('Api').get('Port')
+            return self.image.get('Api').get('Port')
 
     @staticmethod
     def makeImage(filename):

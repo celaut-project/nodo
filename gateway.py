@@ -15,7 +15,7 @@ if __name__ == "__main__":
         try:
             api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
         except Exception as e:
-            print(e.output)
+            print(e)
         
         envs = request.json
         if envs == None:
