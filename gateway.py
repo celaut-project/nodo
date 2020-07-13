@@ -16,13 +16,13 @@ if __name__ == "__main__":
         
         envs = request.json
         if envs == None:
-            container_id = subprocess.check_output('docker run --detach '+dependency+'.oci').decode('utf-8') # Ejecuta una instancia de la imagen.
+            container_id = subprocess.check_output('docker run --detach '+dependency+'.oci').decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
         else:
             command = 'docker run'
             for env in envs:
                 command = command +' -e "'+env+'='+envs[env]+'"'
             command = command + ' --detach '+dependency+'.oci'
-            container_id = subprocess.check_output(command).decode('utf-8')
+            container_id = subprocess.check_output(command).decode('utf-8').replace('\n', '')
 
         if request.remote_addr in instance_cache.keys():
             father_token = instance_cache.get(request.remote_addr)
@@ -32,7 +32,8 @@ if __name__ == "__main__":
         token_cache.update({container_id:father_token})
         while 1:
             try:
-                container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id ).decode('utf-8')
+                container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id ).decode('utf-8').replace('\n', '')
+                print(container_ip)
                 break
             except subprocess.CalledProcessError as e:
                 print(e.output)
