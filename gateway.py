@@ -19,13 +19,13 @@ if __name__ == "__main__":
         
         envs = request.json
         if envs == None:
-            container_id = subprocess.check_output('sudo docker run --expose '+api_port+' --detach '+dependency+'.oci').decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
+            container_id = subprocess.check_output('sudo docker run --expose '+api_port+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
         else:
             command = 'sudo docker run --expose '+api_port
             for env in envs:
                 command = command +' -e "'+env+'='+envs[env]+'"'
             command = command + ' --detach '+dependency+'.oci'
-            container_id = subprocess.check_output(command).decode('utf-8').replace('\n', '')
+            container_id = subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
 
         if request.remote_addr in instance_cache.keys():
             father_token = instance_cache.get(request.remote_addr)
@@ -35,7 +35,7 @@ if __name__ == "__main__":
         token_cache.update({container_id:father_token})
         while 1:
             try:
-                container_ip = subprocess.check_output("sudo docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id ).decode('utf-8').replace('\n', '')
+                container_ip = subprocess.check_output("sudo docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
                 print(container_ip)
                 break
             except subprocess.CalledProcessError as e:
@@ -61,7 +61,7 @@ if __name__ == "__main__":
         if token == 'tokenhoster':
             print('TOKENHOSTER NO SE TOCA')
         else:
-            subprocess.check_output('sudo docker rm '+token+' --force')
+            subprocess.check_output('sudo docker rm '+token+' --force', shell=True)
             for d in token_cache:
                 if token_cache.get(d) == token:
                     token(d)
