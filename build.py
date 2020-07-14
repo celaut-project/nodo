@@ -56,7 +56,7 @@ class Image:
             myfile.close()
         dependency()
         dockerfile()
-        run('docker build -t '+self.id_value+'.oci .')
+        run('sudo docker build -t '+self.id_value+'.oci .')
         os.remove("Dockerfile")
 
 def isValidHyperFile(file):
