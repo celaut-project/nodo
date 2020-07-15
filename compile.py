@@ -39,6 +39,7 @@ class Hyper:
         def parseInspect(container):
             run('sudo docker inspect building > inspect.json', shell=True)
             inspect = json.load(open('inspect.json','r'))[0]
+            container.update({'Volumes':inspect.get('Config').get('Volumes')})
             container.update({'Entrypoint' : inspect.get('Config').get('Entrypoint')[2]})
             if container.get('Layers') == None:
                 layers = []
@@ -83,6 +84,7 @@ class Hyper:
         container = self.file.get('Container')
         if container == None:
             container = {
+                "Volumes" : None,       # list
                 "Entrypoint" : None,    # string
                 "Layers" : None,        # list
                 "Arch" : None,          # list
@@ -175,6 +177,12 @@ class Hyper:
                     "Id" : id,
                     "Func": None
                 }
+            def makeVolumes():
+                id = 'sha256:'+sha256(self.file.get('Container').get('Volumes'))
+                return {
+                    "Id" : id,
+                    "Func": None
+                }
             def makeEnvs():
                 envs = []
                 for env in self.file.get('Container').get('Envs'):
@@ -195,6 +203,7 @@ class Hyper:
                 makeEntrypoint(),
                 makeLayers(),
                 makeArch(),
+                makeVolumes(),
                 makeEnvs()
             ]
             id = 'sha256:'+sha256(concat(merkle))

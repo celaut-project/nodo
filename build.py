@@ -45,9 +45,14 @@ class Image:
                 string = 'ENTRYPOINT '+self.image.get('Container').get('Entrypoint')
                 if string is not None: return string +'\n'
                 else: return ""
+            def workingdir():
+                string = 'WORKDIR '+self.image.get('Container').get('WorkingDir')
+                if string is not None: return string +'\n'
+                else: return ""
             myfile = open("Dockerfile", 'w')
             myfile.write(runs())
             myfile.write(entrypoint())
+            myfile.write(workingdir())
             myfile.close()
         dependency()
         dockerfile()
@@ -65,11 +70,9 @@ def main(file):
         image.build() 
         return image   
 
-class ImageException(Exception):
-    print(Exception)
-
 def ok(image):
-
+    class ImageException(Exception):
+        print(Exception)
     file =  "registry/"+image+".json"
     if os.path.isfile(file):
         img = main(file)
