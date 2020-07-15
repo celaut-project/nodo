@@ -14,7 +14,8 @@ if __name__ == "__main__":
     def dependency(dependency):
         try:
             api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
-        except Exception as e:
+            print(api_port)
+        except ImageException as e:
             print('Salta la excepcion ',e)
         
         if api_port == None:

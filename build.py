@@ -67,11 +67,12 @@ def isValidHyperFile(file):
 def main(file):
     if isValidHyperFile(file):
         image = Image.makeImage(file)
-        image.show()
         image.build() 
         return image   
 
 def ok(image):
+    class ImageException(Exception):
+        print(Exception)
     file =  "registry/"+image+".json"
     if os.path.isfile(file):
         img = main(file)
@@ -80,11 +81,9 @@ def ok(image):
             print('Retorna el puerto de la API', api_port)
             return api_port
         else:
-            print('Imagen erronea..')
-            raise Exception
+            raise ImageException('Imagen erronea..')
     else:
-        print('No se encuentra en el registro ...')
-        raise Exception
+        raise ImageException('No se encuentra en el registro ...')
 
 if __name__ == "__main__":
     file=sys.argv[1]
