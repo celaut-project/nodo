@@ -76,7 +76,9 @@ def ok(image):
     if os.path.isfile(file):
         img = main(file)
         if img.id_value == image:
-            return img.api_port()
+            api_port = img.api_port()
+            print('Retorna el puerto de la API', api_port)
+            return api_port
         else:
             raise Exception
     else:
