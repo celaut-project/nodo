@@ -187,7 +187,7 @@ class Hyper:
                 envs = []
                 for env in self.file.get('Container').get('Envs'):
                     envs.append({
-                        'Id':sha256(env),
+                        'Id':'sha256:'+sha256(env),
                         "Func": 'hash de la variable de entorno.'
                     })
                 if envs == None:
