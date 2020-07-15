@@ -70,9 +70,11 @@ def main(file):
         image.build() 
         return image   
 
+class ImageException(Exception):
+    print(Exception)
+
 def ok(image):
-    class ImageException(Exception):
-        print(Exception)
+
     file =  "registry/"+image+".json"
     if os.path.isfile(file):
         img = main(file)
