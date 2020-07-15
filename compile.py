@@ -88,7 +88,7 @@ class Hyper:
                 "Entrypoint" : None,    # string
                 "Layers" : None,        # list
                 "Arch" : None,          # list
-                "Envs": None          # list
+                "Envs": None          # list or dict
             }          
         container = parseInspect(container)
         container = parseDockerfile(container)
@@ -190,11 +190,15 @@ class Hyper:
                         'Id':sha256(env),
                         "Func": 'hash de la variable de entorno.'
                     })
-                id = 'sha256:'+suma(envs)
-                return {
-                    "Id" : id,
-                    "Func": "suma de la hash de cada atributo de la lista."
-                }
+                if envs == None:
+                    return None
+                else:
+                    id = 'sha256:'+suma(envs)
+                    return {
+                        "Id" : id,
+                        "Func": "suma de la hash de cada atributo de la lista.",
+                        "Merkle": envs
+                    }
             merkle = [
                 makeEntrypoint(),
                 makeLayers(),
