@@ -80,8 +80,10 @@ def ok(image):
             print('Retorna el puerto de la API', api_port)
             return api_port
         else:
+            print('Imagen erronea..')
             raise Exception
     else:
+        print('No se encuentra en el registro ...')
         raise Exception
 
 if __name__ == "__main__":
