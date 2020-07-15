@@ -37,7 +37,7 @@ class Hyper:
 
     def parseContainer(self):
         def parseInspect(container):
-            os.system('powershell.exe docker inspect building > inspect.json')
+            os.system('sudo docker inspect building > inspect.json')
             inspect = json.load(open('inspect.json','r'))[0]
             container.update({'Volumes':inspect.get('Config').get('Volumes')})
             container.update({'Entrypoint' : inspect.get('Config').get('Entrypoint')[2]})
@@ -237,10 +237,10 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1:
         Hyperfile = Hyper( json.load(open(sys.argv[1],"r")) ) # Hyperfile
             
-    run('docker build -t building registry/for_build/.')
+    run('sudo docker build -t building registry/for_build/.')
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
 
     Hyperfile.makeMerkle()
     Hyperfile.save()
-    run('docker rmi building --force')
+    run('sudo docker rmi building --force')
