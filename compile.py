@@ -100,13 +100,90 @@ class Hyper:
             api = json.load(open("registry/for_build/Api.json","r"))
             self.file.update({'Api' : api})
 
+
+    # Esta es la forma en la que este compilador crea el árbol de Merkle.
+    # No tiene por que ser la única ...
+    
     def makeMerkle(self):
         def concat(merkle_list):
             id = merkle_list[0].get('Id')
             for merkle in merkle_list[1:]:
-                id = id+" "+value(merkle.get('Id'))
-            return id
-        
+                id = id+" "+merkle.get('Id')
+            return sha256(id)
+        def makeContainer():
+            def makeEntrypoint():
+                return {
+                    "Id":concat(self.file.get('Container').get('Entrypoint')),
+                    "$ref":"#/Container/Entrypoint"
+                }
+            def makeLayers():
+                def makeLayer(i):
+                    def makeBuEl(i):
+                        def makeBuild(i):
+                            build = self.file.get('Container').get('Layers')[i].get('Build')
+                            if build is None:
+                                return {
+                                    "Id":""
+                                }
+                            else:
+                                merkle = []
+                                for index,b in enumerate(build):
+                                    merkle.append({
+                                        "Id":concat(b),
+                                        "$ref":"#/Container/Layers[",i,"]/Build[",index,"]"
+                                    })
+                                return {
+                                    "Id":concat(merkle)
+                                    "Merkle": merkle
+                                }
+                        merkle = [
+                            makeBuild(i),
+                            {
+                                "id":sha256(self.file.get('Container').get('Layers')[i].get('ChainId')),
+                                "$ref":"#/Container/Layers[",i,"]/ChainId"
+                            }
+                        ]
+                        return {
+                            "Id" : concat(merkle),
+                            "Merkle": merkle
+                        }
+                    if i==0: merkle = [ makeBuEl(i) ]
+                    else: merkle = [
+                        makeLayer(i-1),
+                        makeBuEl(i)
+                    ]
+                    return {
+                        "Id":concat(merkle),
+                        "Merkle": merkle
+                    }
+                return makeLayer(len(self.file.get('Container').get('Layers'))-1)
+            def makeEnvs():
+                envs = []
+                if self.file.get('Container').get('Envs') == None:
+                    return None
+                for index, env in enumerate(self.file.get('Container').get('Envs')):
+                    envs.append({
+                        'Id':sha256(env),
+                        '$ref':"#/Container/Envs[",index,"]"
+                    })
+                return {
+                    "Id" : concat(envs)
+                    "Merkle": envs
+                }
+            merkle = [
+                makeEntrypoint(),
+                makeLayers(),
+                makeEnvs()
+            ]
+            merkle = [make for make in merkle if make != None] # No se concatenan los campos vacios.
+            return {
+                "Id" : concat(merkle)
+                "Merkle": merkle
+            }
+        merkle = [
+            makeContainer()
+        ]
+        self.file.update({'Merkle' : {'Id':concat(merkle), "Merkle":merkle}})
 
     def save(self):
         registry = self.registry + value(self.file.get('Merkle').get('Id')) + '.json'
@@ -115,6 +192,9 @@ class Hyper:
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
+        print("\nIMPORTANTE: el Dockerfile no soporta comandos de varias lineas.")
+        print("Dockerfile            --> Dejalo fuera.")
+        print("./buildFile.py Dockerfile Hyperfile  --> to update the Hyperfile. \n")
         Hyperfile = Hyper() # Hyperfile
     elif len(sys.argv) > 1:
         Hyperfile = Hyper( json.load(open(sys.argv[1],"r")) ) # Hyperfile
