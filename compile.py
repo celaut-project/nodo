@@ -103,7 +103,7 @@ class Hyper:
 
     # Esta es la forma en la que este compilador crea el árbol de Merkle.
     # No tiene por que ser la única ...
-    
+
     def makeMerkle(self):
         def concat(merkle_list):
             id = merkle_list[0].get('Id')
@@ -130,7 +130,7 @@ class Hyper:
                                 for index,b in enumerate(build):
                                     merkle.append({
                                         "Id":concat(b),
-                                        "$ref":"#/Container/Layers[",i,"]/Build[",index,"]"
+                                        "$ref":"#/Container/Layers["+str(i)+"]/Build["+str(index)+"]"
                                     })
                                 return {
                                     "Id":concat(merkle)
@@ -140,7 +140,7 @@ class Hyper:
                             makeBuild(i),
                             {
                                 "id":sha256(self.file.get('Container').get('Layers')[i].get('ChainId')),
-                                "$ref":"#/Container/Layers[",i,"]/ChainId"
+                                "$ref":"#/Container/Layers["+str(i)+"]/ChainId"
                             }
                         ]
                         return {
@@ -164,7 +164,7 @@ class Hyper:
                 for index, env in enumerate(self.file.get('Container').get('Envs')):
                     envs.append({
                         'Id':sha256(env),
-                        '$ref':"#/Container/Envs[",index,"]"
+                        '$ref':"#/Container/Envs["+str(index)+"]"
                     })
                 return {
                     "Id" : concat(envs)
