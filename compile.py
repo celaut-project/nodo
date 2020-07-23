@@ -185,20 +185,19 @@ class Hyper:
                 }
             def makeEnvs():
                 envs = []
+                if self.file.get('Container').get('Envs') == None:
+                    return None
                 for env in self.file.get('Container').get('Envs'):
                     envs.append({
                         'Id':'sha256:'+sha256(env),
                         "Func": 'hash de la variable de entorno.'
                     })
-                if envs == None:
-                    return None
-                else:
-                    id = 'sha256:'+suma(envs)
-                    return {
-                        "Id" : id,
-                        "Func": "suma de la hash de cada atributo de la lista.",
-                        "Merkle": envs
-                    }
+                id = 'sha256:'+suma(envs)
+                return {
+                    "Id" : id,
+                    "Func": "suma de la hash de cada atributo de la lista.",
+                    "Merkle": envs
+                }
             merkle = [
                 makeEntrypoint(),
                 makeLayers(),
@@ -206,6 +205,7 @@ class Hyper:
                 makeVolumes(),
                 makeEnvs()
             ]
+            merkle = [make for make in merkle if make != None] # No se concatenan los campos vacios.
             id = 'sha256:'+sha256(concat(merkle))
             return {
                 "Id" : id,
