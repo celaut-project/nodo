@@ -88,6 +88,7 @@ def ok(image):
         raise ImageException('No se encuentra en el registro ...')
 
 if __name__ == "__main__":
-    file=sys.argv[1]
+    image = sys.argv[1]
+    file =  "registry/"+image+".json"
     img = main(file)
     print(img.id_value)

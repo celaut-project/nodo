@@ -11,49 +11,11 @@
             }
         ],
         "Port": "8080",
-        "Responses": {
-            "200": {
-                "description": "Product listing",
-                "schema": {
-                    "$ref": "#/definitions/Product"
-                }
-            },
-            "400": {
-                "description": "Bad request",
-                "schema": {
-                    "$ref": "#/definitions/Error"
-                }
-            },
-            "401": {
-                "description": "Unauthorized",
-                "schema": {
-                    "$ref": "#/definitions/Error"
-                }
-            },
-            "403": {
-                "description": "Forbidden",
-                "schema": {
-                    "$ref": "#/definitions/Error"
-                }
-            },
-            "404": {
-                "description": "Not found",
-                "schema": {
-                    "$ref": "#/definitions/Error"
-                }
-            },
-            "405": {
-                "description": "Method not allowed",
-                "schema": {
-                    "$ref": "#/definitions/Error"
-                }
-            }
-        },
         "Type": "Rest"
     },
     "Container": {
         "Arch": "x86",
-        "Entrypoint": "python3 start.py",
+        "Entrypoint": "python3 /frontier/start.py",
         "Envs": null,
         "Layers": [
             {
@@ -122,10 +84,10 @@
             },
             {
                 "Build": [
-                    "RUN mkdir /frontier && cd /frontier && apt-get update && apt-get -y install git && git clone --branch frontier https://github.com/josemibnf/Solvers.git && mv Solvers/* . && rm -rf Solvers && rm -rf .git"
+                    "RUN mkdir /frontier && cd /frontier && apt-get update --fix-missing && apt-get -y install git && apt-get clean && git clone --branch frontier https://github.com/josemibnf/Solvers.git && mv Solvers/* . && rm -rf Solvers && rm -rf .git"
                 ],
-                "ChainId": "sha256:6b0b240e6704feeee92ed3446b2573b0df08fe3e309941feb71463e48a7ad62f",
-                "DiffId": "sha256:1af914e7fb97ed8fe4d4ca03d0bf4c6493f6ff6287b16f9ff830e9288dda6206"
+                "ChainId": "sha256:cf602aea0fc4de9f0a1d835b5014cc539a2c5a44fe4f48869a4a09280dede943",
+                "DiffId": "sha256:717c1e869db0fb44e84a34451e1086988406f493db2b537bb5d5ae5003d47875"
             }
         ],
         "Volumes": null
@@ -135,7 +97,7 @@
     "Ledger": null,
     "Merkle": {
         "Func": "hash de la concatenacion en orden alfabetico de todos los atributos",
-        "Id": "sha256:2b7a5ab0c7e893d9978a6b742822a5f76020c9bc4a2f714c7b2e810df0bd269c",
+        "Id": "sha256:4fe2bab7b0458393e5459212ac6af85b571bd7b2c20a90d7d4c0b6ffb75f6b43",
         "Merkle": [
             {
                 "Func": null,
@@ -143,15 +105,15 @@
             },
             {
                 "Func": null,
-                "Id": "sha256:879c7b77982fcbc6262efa7420cce72a6efd50eafb44fc742ddb819686584557",
+                "Id": "sha256:163155413c9f150201261e34b5f6bb00bf133caeb78229eea606d3975d5d70a2",
                 "Merkle": [
                     {
                         "Func": "sha256(atr)",
-                        "Id": "sha256:b7cf73a23d95f767e278b3f50da383b9dd6b7e92d2e6e5ddf7a3351ec3dbf3c2"
+                        "Id": "sha256:16cdd37b7051fcd95a14061e21882a666c175b21dba7b5cfff4bd864ff1f55cb"
                     },
                     {
                         "Func": "Hacemos una cadena",
-                        "Id": "sha256:43a7b91bc50791c3f7d1c3570aaf70c74d95bdd7df361d050bc1340030ca29ce",
+                        "Id": "sha256:e7aa9e720719fcf9d05005e0ae2c91b2cb2879962d4a606eece79f132317629a",
                         "Merkle": [
                             {
                                 "Func": "Hacemos una cadena",
@@ -397,21 +359,21 @@
                             },
                             {
                                 "Func": "Hacemos una cadena",
-                                "Id": "sha256:3a789942fb80e9ea5fa7a361cfaf96b1d1274673fcb252a70dec7c75665fee93",
+                                "Id": "sha256:54992a5fa2f7bfeda93c111918fbd8a75245c03ca5e97f6bd53e5e57416af2a2",
                                 "Merkle": [
                                     {
                                         "Func": "esto es un build.",
-                                        "Id": "sha256:727c97b9de5349894899cedfe2c69418683a92c22b8613c03023ad37b00db7b5",
+                                        "Id": "sha256:b6f20d00a1558d2fb036f8a098fd2e8d83e7c6cdc52e53cd90827dd6c9950678",
                                         "Merkle": [
                                             {
                                                 "Func": "sha256(atr)",
-                                                "Id": "sha256:cbde6336d8d580e67e1de39f091ef688f692e1a3cb9f1558d14028a066c67479"
+                                                "Id": "sha256:1593a8e9a61fe3f613bcbe16a3d445d527c664aeaa3c8c9ff9c1465775847073"
                                             }
                                         ]
                                     },
                                     {
                                         "Func": "sha256(atr)",
-                                        "Id": "sha256:c74ac3b491b88168fb4754faf218ec79dcfc56fcf7564b4a397736f7c35bf086"
+                                        "Id": "sha256:aaf757e0579520a69164dc27c16683a36ab296450653ecee64eecddf70922ba6"
                                     }
                                 ]
                             }
