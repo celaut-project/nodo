@@ -4,13 +4,10 @@ from subprocess import run
 import os
 import hashlib
 
-def value(id):
-    if id is "": return ""
-    else: return id.split(':')[1]
 
 def sha256(val):
     if val is None: return ""
-    return hashlib.sha256(val.encode()).hexdigest()
+    return "sha256:"+hashlib.sha256(val.encode()).hexdigest()
 
 class Hyper:
     def __init__(self, file={
@@ -46,7 +43,7 @@ class Hyper:
                 chainId = None
                 for layer in inspect.get('RootFS').get('Layers'):
                     if chainId is None: chainId = layer
-                    else: chainId = "sha256:"+sha256(value(chainId)+" "+value(layer))
+                    else: chainId = sha256(chainId+" "+layer)
                     layers.append({
                         "DiffId" : layer,
                         "ChainId" : chainId,
@@ -107,7 +104,6 @@ class Hyper:
     def makeMerkle(self):
         def concat(merkle_list):
             id = merkle_list[0].get('Id')
-            print(merkle_list)
             for merkle in merkle_list[1:]:
                 id = id+" "+merkle.get('Id')
             return sha256(id)
@@ -194,7 +190,8 @@ class Hyper:
         self.file.update({'Merkle' : {'Id':concat(merkle), "Merkle":merkle}})
 
     def save(self):
-        registry = self.registry + value(self.file.get('Merkle').get('Id')) + '.json'
+        print(self.file.get('Merkle'))
+        registry = self.registry + self.file.get('Merkle').get('Id').split(':')[1] + '.json'
         with open(registry,'w') as file:
             file.write( json.dumps(self.file, indent=4, sort_keys=True) )
 
