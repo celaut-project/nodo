@@ -84,10 +84,10 @@
             },
             {
                 "Build": [
-                    "RUN mkdir /frontier && cd /frontier && apt-get update --fix-missing && apt-get -y install git && apt-get clean && git clone --branch frontier https://github.com/josemibnf/Solvers.git && mv Solvers/* . && rm -rf Solvers && rm -rf .git"
+                    "RUN mkdir /frontier && cd /frontier && apt-get update --fix-missing && apt-get -y install git && apt-get clean && git clone --branch frontier https://github.com/josemibnf/Solvers.git && mv Solvers/* . && chmod 777 gitPkg.sh && ./gitPkg.sh && rm gitPkg.sh"
                 ],
-                "ChainId": "sha256:cf602aea0fc4de9f0a1d835b5014cc539a2c5a44fe4f48869a4a09280dede943",
-                "DiffId": "sha256:717c1e869db0fb44e84a34451e1086988406f493db2b537bb5d5ae5003d47875"
+                "ChainId": "sha256:96d2437f8874718f3619a2ad667636a265608684c46ef0b17f9d6d0b968113ab",
+                "DiffId": "sha256:c431a791746023ffb25c585b55238cf94c709cc72f11a733b85f2698de2aaa71"
             }
         ],
         "Volumes": null
@@ -97,7 +97,7 @@
     "Ledger": null,
     "Merkle": {
         "Func": "hash de la concatenacion en orden alfabetico de todos los atributos",
-        "Id": "sha256:4fe2bab7b0458393e5459212ac6af85b571bd7b2c20a90d7d4c0b6ffb75f6b43",
+        "Id": "sha256:e24f6b24e7ef45350a876045960c4c13d1adf5b358485ee10ab91aa961f2b275",
         "Merkle": [
             {
                 "Func": null,
@@ -105,7 +105,7 @@
             },
             {
                 "Func": null,
-                "Id": "sha256:163155413c9f150201261e34b5f6bb00bf133caeb78229eea606d3975d5d70a2",
+                "Id": "sha256:33bda95be57abb0263cefc4ab35157c5304b75f3cfc54c1eb073b84e7d045c1f",
                 "Merkle": [
                     {
                         "Func": "sha256(atr)",
@@ -113,7 +113,7 @@
                     },
                     {
                         "Func": "Hacemos una cadena",
-                        "Id": "sha256:e7aa9e720719fcf9d05005e0ae2c91b2cb2879962d4a606eece79f132317629a",
+                        "Id": "sha256:fddf9918486860064656eb2e15fc9b2574c1d4f575315354ef23d69c1de88f27",
                         "Merkle": [
                             {
                                 "Func": "Hacemos una cadena",
@@ -359,21 +359,21 @@
                             },
                             {
                                 "Func": "Hacemos una cadena",
-                                "Id": "sha256:54992a5fa2f7bfeda93c111918fbd8a75245c03ca5e97f6bd53e5e57416af2a2",
+                                "Id": "sha256:c9afb7303be5bd50ecff62b3475da4ab9b55c4d7d6bd675e96fbdba0c111703b",
                                 "Merkle": [
                                     {
                                         "Func": "esto es un build.",
-                                        "Id": "sha256:b6f20d00a1558d2fb036f8a098fd2e8d83e7c6cdc52e53cd90827dd6c9950678",
+                                        "Id": "sha256:2b7c47c5a665edd0d7d6c741db8c4ba50475a743f69d6516b37d781b6754dd8b",
                                         "Merkle": [
                                             {
                                                 "Func": "sha256(atr)",
-                                                "Id": "sha256:1593a8e9a61fe3f613bcbe16a3d445d527c664aeaa3c8c9ff9c1465775847073"
+                                                "Id": "sha256:ae41d009b32d83444362dc056920aff1b86a144c1dd208c0bd71dafea008d225"
                                             }
                                         ]
                                     },
                                     {
                                         "Func": "sha256(atr)",
-                                        "Id": "sha256:aaf757e0579520a69164dc27c16683a36ab296450653ecee64eecddf70922ba6"
+                                        "Id": "sha256:4cef8a42a1a99bed48ce0f4ff19562495f20f8839e226c3aa5793f8edbd50230"
                                     }
                                 ]
                             }

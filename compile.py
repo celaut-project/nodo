@@ -102,130 +102,11 @@ class Hyper:
 
     def makeMerkle(self):
         def concat(merkle_list):
-            id = value(merkle_list[0].get('Id'))
+            id = merkle_list[0].get('Id')
             for merkle in merkle_list[1:]:
                 id = id+" "+value(merkle.get('Id'))
-            return  id
-        def suma(merkle_list):
-            id = 0
-            for merkle in merkle_list:
-                id = id + int(value(merkle.get('Id')),16)
-            return hex(id)[2:-(len(hex(id))-64)] # Recorta el resultado de la suma a 64.
-
-        def makeElem(elem):
-            id = 'sha256:'+sha256(elem)
-            return {
-                "Id" : id,
-                "Func": "sha256(atr)"
-            }
-
-        def makeApi():
-            id = 'sha256:'
-            return {
-                "Id" : id,
-                "Func": None,
-            }
-        def makeContainer():
-            def makeEntrypoint():
-                return makeElem(self.file.get('Container').get('Entrypoint'))
-            def makeLayers():
-                def makeLayer(i):
-                    def makeBuEl(i):
-                        def makeBuild(i):
-                            build = self.file.get('Container').get('Layers')[i].get('Build')
-                            if build is None:
-                                id = 'sha256:'
-                                return {
-                                    "Id":id,
-                                    "Func": "esto es un build."
-                                }
-                            else:
-                                merkle = []
-                                for b in build:
-                                    merkle.append(makeElem(b))
-                                id = 'sha256:'+sha256(suma(merkle))
-                                return {
-                                    "Id":id,
-                                    "Func": "esto es un build.",
-                                    "Merkle": merkle
-                                }
-                        merkle = [
-                            makeBuild(i),
-                            makeElem(self.file.get('Container').get('Layers')[i].get('ChainId'))
-                        ]
-                        id = 'sha256:'+sha256(concat(merkle))
-                        return {
-                            "Id" : id,
-                            "Func": "Hacemos una cadena",
-                            "Merkle": merkle
-                        }
-                    if i==0: merkle = [ makeBuEl(i) ]
-                    else: merkle = [
-                        makeLayer(i-1),
-                        makeBuEl(i)
-                    ]
-                    id = 'sha256:'+sha256(concat(merkle))
-                    return {
-                        "Id":id,
-                        "Func": "Hacemos una cadena",
-                        "Merkle": merkle
-                    }
-                return makeLayer(len(self.file.get('Container').get('Layers'))-1)
-            def makeArch():
-                id = 'sha256:'+sha256(self.file.get('Container').get('Arch'))
-                return {
-                    "Id" : id,
-                    "Func": None
-                }
-            def makeVolumes():
-                id = 'sha256:'+sha256(self.file.get('Container').get('Volumes'))
-                return {
-                    "Id" : id,
-                    "Func": None
-                }
-            def makeEnvs():
-                envs = []
-                if self.file.get('Container').get('Envs') == None:
-                    return None
-                for env in self.file.get('Container').get('Envs'):
-                    envs.append({
-                        'Id':'sha256:'+sha256(env),
-                        "Func": 'hash de la variable de entorno.'
-                    })
-                id = 'sha256:'+suma(envs)
-                return {
-                    "Id" : id,
-                    "Func": "suma de la hash de cada atributo de la lista.",
-                    "Merkle": envs
-                }
-            merkle = [
-                makeEntrypoint(),
-                makeLayers(),
-                makeArch(),
-                makeVolumes(),
-                makeEnvs()
-            ]
-            merkle = [make for make in merkle if make != None] # No se concatenan los campos vacios.
-            id = 'sha256:'+sha256(concat(merkle))
-            return {
-                "Id" : id,
-                "Func" : None,
-                "Merkle": merkle
-            }
-        def makeContract():
-            id = 'sha256:'
-            return {
-                "Id" : id,
-                "Func": None,
-            }
-        merkle = [
-            makeApi(),
-            makeContainer(),
-            makeContract()
-        ]
-        id = sha256(concat(merkle))
-        func = "hash de la concatenacion en orden alfabetico de todos los atributos"
-        self.file.update({'Merkle' : {'Id':'sha256:'+id, "Func": func, "Merkle":merkle}})
+            return id
+        
 
     def save(self):
         registry = self.registry + value(self.file.get('Merkle').get('Id')) + '.json'
@@ -234,9 +115,6 @@ class Hyper:
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
-        print("\nIMPORTANTE: el Dockerfile no soporta comandos de varias lineas.")
-        print("Dockerfile            --> Dejalo fuera.")
-        print("./buildFile.py Dockerfile Hyperfile  --> to update the Hyperfile. \n")
         Hyperfile = Hyper() # Hyperfile
     elif len(sys.argv) > 1:
         Hyperfile = Hyper( json.load(open(sys.argv[1],"r")) ) # Hyperfile
