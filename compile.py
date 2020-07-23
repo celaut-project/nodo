@@ -113,7 +113,7 @@ class Hyper:
         def makeContainer():
             def makeEntrypoint():
                 return {
-                    "Id":concat(self.file.get('Container').get('Entrypoint')),
+                    "Id":sha256(self.file.get('Container').get('Entrypoint')),
                     "$ref":"#/Container/Entrypoint"
                 }
             def makeLayers():
@@ -129,11 +129,11 @@ class Hyper:
                                 merkle = []
                                 for index,b in enumerate(build):
                                     merkle.append({
-                                        "Id":concat(b),
+                                        "Id":sha256(b),
                                         "$ref":"#/Container/Layers["+str(i)+"]/Build["+str(index)+"]"
                                     })
                                 return {
-                                    "Id":concat(merkle)
+                                    "Id":concat(merkle),
                                     "Merkle": merkle
                                 }
                         merkle = [
@@ -167,7 +167,7 @@ class Hyper:
                         '$ref':"#/Container/Envs["+str(index)+"]"
                     })
                 return {
-                    "Id" : concat(envs)
+                    "Id" : concat(envs),
                     "Merkle": envs
                 }
             merkle = [
@@ -177,7 +177,7 @@ class Hyper:
             ]
             merkle = [make for make in merkle if make != None] # No se concatenan los campos vacios.
             return {
-                "Id" : concat(merkle)
+                "Id" : concat(merkle),
                 "Merkle": merkle
             }
         merkle = [
