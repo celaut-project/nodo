@@ -107,11 +107,14 @@ class Hyper:
     def makeMerkle(self):
         def concat(merkle_list):
             id = merkle_list[0].get('Id')
+            print(merkle_list)
             for merkle in merkle_list[1:]:
                 id = id+" "+merkle.get('Id')
             return sha256(id)
         def makeContainer():
             def makeEntrypoint():
+                if self.file.get('Container').get('Entrypoint') == None:
+                    return None
                 return {
                     "Id":sha256(self.file.get('Container').get('Entrypoint')),
                     "$ref":"#/Container/Entrypoint"
@@ -122,9 +125,7 @@ class Hyper:
                         def makeBuild(i):
                             build = self.file.get('Container').get('Layers')[i].get('Build')
                             if build is None:
-                                return {
-                                    "Id":""
-                                }
+                                return None
                             else:
                                 merkle = []
                                 for index,b in enumerate(build):
@@ -139,23 +140,30 @@ class Hyper:
                         merkle = [
                             makeBuild(i),
                             {
-                                "id":sha256(self.file.get('Container').get('Layers')[i].get('ChainId')),
+                                "Id":sha256(self.file.get('Container').get('Layers')[i].get('ChainId')),
                                 "$ref":"#/Container/Layers["+str(i)+"]/ChainId"
                             }
                         ]
+                        merkle = [make for make in merkle if make != None] # No se concatenan los campos vacios.
                         return {
                             "Id" : concat(merkle),
                             "Merkle": merkle
                         }
-                    if i==0: merkle = [ makeBuEl(i) ]
-                    else: merkle = [
-                        makeLayer(i-1),
-                        makeBuEl(i)
-                    ]
-                    return {
-                        "Id":concat(merkle),
-                        "Merkle": merkle
-                    }
+                    if i==0: 
+                        first = makeBuEl(i)
+                        return {
+                            "Id":sha256(first.get('Id')),
+                            "Merkle":first
+                        }
+                    else: 
+                        merkle = [
+                            makeLayer(i-1),
+                            makeBuEl(i)
+                        ]
+                        return {
+                            "Id":concat(merkle),
+                            "Merkle": merkle
+                        }
                 return makeLayer(len(self.file.get('Container').get('Layers'))-1)
             def makeEnvs():
                 envs = []
