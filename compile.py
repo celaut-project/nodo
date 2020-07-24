@@ -203,7 +203,10 @@ if __name__ == "__main__":
         Hyperfile = Hyper() # Hyperfile
     elif len(sys.argv) > 1:
         Hyperfile = Hyper( json.load(open(sys.argv[1],"r")) ) # Hyperfile
-            
+
+    if os.path.isfile('registry/for_build/Dockerfile') == False or os.path.isfile('registry/for_build/Arch.json') == False:
+        print('ForBuild invalido, Dockerfile y Arch.json OBLIGATORIOS ....')
+        exit()
     run('sudo docker build -t building registry/for_build/.', shell=True)
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
