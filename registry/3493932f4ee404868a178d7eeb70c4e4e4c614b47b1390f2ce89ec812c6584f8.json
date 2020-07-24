@@ -84,10 +84,10 @@
             },
             {
                 "Build": [
-                    "RUN mkdir /frontier && cd /frontier && apt-get update --fix-missing && apt-get -y install git && apt-get clean && git clone --branch frontier https://github.com/josemibnf/Solvers.git && mv Solvers/* . && chmod 777 gitPkg.sh && ./gitPkg.sh && rm gitPkg.sh"
+                    "RUN mkdir /frontier && cd /frontier && apt-get update --fix-missing && apt-get -y install git && apt-get clean && git clone --branch frontier https://github.com/josemibnf/Solvers.git && mv Solvers/* . && rm -rf Solvers && rm -rf .git"
                 ],
-                "ChainId": "sha256:3bcfa8361aa5cf08607c7fbfa2c7f146460e83d0d87d9ce7642883e4ddf1dffe",
-                "DiffId": "sha256:f5e798f828f592f578b78bbdce8c51d42e1b4b7f65f768e88ad8b7fad665d902"
+                "ChainId": "sha256:5337e3ab3e360d5e402f8d9b959fbda7d189885a5aa83f01315729c6ba6cd6fb",
+                "DiffId": "sha256:6f3c0b900eb4bcea658a086551bed584ba237df2c83c59619647f7a3a0ae1455"
             }
         ],
         "Volumes": null
@@ -96,17 +96,17 @@
     "Dependency": null,
     "Ledger": null,
     "Merkle": {
-        "Id": "sha256:2e227c91d3008a01926c4fe1ab684eb1053f0dc22c72bf8734176677b251995d",
+        "Id": "sha256:3493932f4ee404868a178d7eeb70c4e4e4c614b47b1390f2ce89ec812c6584f8",
         "Merkle": [
             {
-                "Id": "sha256:1c994b45115fcb96b7e898acd3fdb44e592b19e8ead802ad0bb56a2176abd1f1",
+                "Id": "sha256:ff19d2c74ed6361bd634651a8f7124852993267fc0cc67cf693922b1895afd3f",
                 "Merkle": [
                     {
                         "$ref": "#/Container/Entrypoint",
                         "Id": "sha256:16cdd37b7051fcd95a14061e21882a666c175b21dba7b5cfff4bd864ff1f55cb"
                     },
                     {
-                        "Id": "sha256:8f4e29be1f89163ef48ca62663f8dc053ff8496734db5b820780ebb92553b5ce",
+                        "Id": "sha256:e5567dc866413d47018294997a3c7928d9f369af6f18581e3c36802cfabb3870",
                         "Merkle": [
                             {
                                 "Id": "sha256:90da5b501e97e57ad90c41697c4f9762ecf90790b8c4846cdb3145e0e1a0ff40",
@@ -310,20 +310,20 @@
                                 ]
                             },
                             {
-                                "Id": "sha256:ec3c552716737df0199268377f65d892531dbca4b2f19811948237dafad25214",
+                                "Id": "sha256:bcddeb35013ddfc0bdf02aef8b452d805a8c06cf52f8af2d4ded110e3e4dd331",
                                 "Merkle": [
                                     {
-                                        "Id": "sha256:f816d6968300b3de77ff338d47d86cb15869efad4b3b774ca64c19cf0cadd1d9",
+                                        "Id": "sha256:5aa8332fccf3ab55e4646df0104b4531b2ae8e9c132ea3993f0ffa5c6e69d10f",
                                         "Merkle": [
                                             {
                                                 "$ref": "#/Container/Layers[10]/Build[0]",
-                                                "Id": "sha256:ae41d009b32d83444362dc056920aff1b86a144c1dd208c0bd71dafea008d225"
+                                                "Id": "sha256:1593a8e9a61fe3f613bcbe16a3d445d527c664aeaa3c8c9ff9c1465775847073"
                                             }
                                         ]
                                     },
                                     {
                                         "$ref": "#/Container/Layers[10]/ChainId",
-                                        "Id": "sha256:c63954ac638401b33fc371811f9be50fd4ac69b2bfe152bcb64a93ddffbf96db"
+                                        "Id": "sha256:f3c3578cd970a6a655d9df33f4120f5cacc4631f600cac7ca1e84e9d80f27f7c"
                                     }
                                 ]
                             }
