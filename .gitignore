@@ -1,6 +1,5 @@
 ./inspect.json
 ./Dockerfile
 __pycache__
-/registry/for_build
 .vscode
 inspect.json
