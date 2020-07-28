@@ -1,0 +1,303 @@
+{
+    "Api": {
+        "Methods": [
+            {
+                "Params": [
+                    "{cnf:cnf}"
+                ],
+                "Path": "/",
+                "Return": "{interpretation:interpretation}",
+                "Type": "Post"
+            }
+        ],
+        "Port": "8080",
+        "Type": "Rest"
+    },
+    "Container": {
+        "Arch": "x86",
+        "Entrypoint": "python3 /Solvers-frontier/start.py",
+        "Envs": null,
+        "Filesys": [""]
+    },
+    "Contract": null,
+    "Dependency": null,
+    "Ledger": null,
+    "Makeit":[
+            {
+                "Build": null,
+                "DiffId": "sha256:ce30112909569cead47eac188789d0cf95924b166405aa4b71fb500d6e4ae08d"
+            },
+            {
+                "Build": null,
+                "DiffId": "sha256:8eeb4a14bcb4379021c215017c94800a848a8203a8ce76aa1bd211d4c995f792"
+            },
+            {
+                "Build": null,
+                "DiffId": "sha256:a37e74863e723df4ddd599ef1b7d9a68e2301794a8c37c2370f8c2c8993ef72c"
+            },
+            {
+                "Build": [
+                    "FROM ubuntu"
+                ],
+                "ChainId": "sha256:7515ee845913c8df9826c988341a09e0240e291c66bdc436a067e070d7910a1f",
+                "DiffId": "sha256:095624243293a7dfdb582f8471d6e2d9d7772dd621bc57906b034c59f388ebac"
+            },
+            {
+                "Build": [
+                    "RUN apt-get update --fix-missing && apt-get -y install python3.6 && apt-get clean"
+                ],
+                "ChainId": "sha256:de8a68848217833e29063cc61312737eb5bf23e77a6f9a3bac5fc5ad7d2e7dce",
+                "DiffId": "sha256:0d58f9a1c4a45a909ecd7e970bf47cbcb735d0a31c5bfa44490fb04b6f24dced"
+            },
+            {
+                "Build": [
+                    "RUN apt-get update --fix-missing && apt-get -y install python3-tk && apt-get clean"
+                ],
+                "ChainId": "sha256:2c12aaf9999fe037acb072427260a8d457f79b0c95c634c69a2d6d2bbf936ffd",
+                "DiffId": "sha256:363b054ac51ce40cddf583850e06813d1873527995c7f683e4866af97e2b808b"
+            },
+            {
+                "Build": [
+                    "RUN apt-get update --fix-missing && apt-get -y install python3-pip && apt-get clean"
+                ],
+                "ChainId": "sha256:81f3f7d623a69e085258e21fe0d9ce1b01f68aa26a9f180d334ecfd34743a3bb",
+                "DiffId": "sha256:f783e85bf68fda8beb1a425801b545eed5ac39d59522cddd4c40d0db75c687b7"
+            },
+            {
+                "Build": [
+                    "RUN pip3 install flask"
+                ],
+                "DiffId": "sha256:7bf406b1742c6da121fae3e6dd642152a5ccd58a58f259b40ab279c40e97cb5d"
+            },
+            {
+                "Build": [
+                    "RUN apt-get update --fix-missing && apt-get -y install wget && apt-get clean"
+                ],
+                "ChainId": "sha256:31f7a42496d09494fd1ea7120f8892625d0ac2481b3a4e2f40843ea39d37c6ce",
+                "DiffId": "sha256:c66b48ffb117c27778dc2a735942d88a28af447b4c15438721a9b11d3cda0204"
+            },
+            {
+                "Build": [
+                    "RUN wget https://github.com/josemibnf/Solvers/archive/frontier.tar.gz && tar -xvzf frontier.tar.gz"
+                ],
+                "ChainId": "sha256:7aca5ec9db62ca5e35e1837cd693b410f51a55405e392e24d6e9f0512eae1363",
+                "DiffId": "sha256:ae9d7cc3ab12c84f76213dd3dd32430d78597a88b4caa903204a3bea81951a14"
+            }
+        ],
+    "Merkle": {
+        "Id": "sha256:a8600aeecaa550ef0d9bd998cca41f6f0947f4cf6746fdf8a1036568502238fe",
+        "Merkle": [
+            {
+                "Id": "sha256:a6cefb62e8e221f19e54ee7ac6a880a5112a8bda9cbe43b2ddc27a7c8fa21207",
+                "Merkle": [
+                    {
+                        "$ref": "#/Container/Entrypoint",
+                        "Id": "sha256:9a46cd71aa0d2cb68648c36c9f46e7abae1af6f1498f8c743875ce5473803108"
+                    },
+                    {
+                        "Id": "sha256:6890afaabc93cf3b02a60741c1e692d28602b4c6d0ee82297d3993a27c1b1390",
+                        "Merkle": [
+                            {
+                                "Id": "sha256:4b8a8495ad8ddbbe904d37143672cac2e9b2578a4382c6261cbccfb1b22fc36d",
+                                "Merkle": [
+                                    {
+                                        "Id": "sha256:1f848d106d4b02aa22100500f17fa8232a4d4eab2fa134bbccd3270c6855fd58",
+                                        "Merkle": [
+                                            {
+                                                "Id": "sha256:683c2146349d32c5f4d6ad3ce240cf21248404cb5b65a480bc1a00fed06c3a1a",
+                                                "Merkle": [
+                                                    {
+                                                        "Id": "sha256:1973261c2e99a4d880db2aeeb370046bb14036a62143342464e522ce4b74e3a9",
+                                                        "Merkle": [
+                                                            {
+                                                                "Id": "sha256:8a3d98acd176b31c78374ae7d028fb1f99273b5b19336c093b50825c95f92666",
+                                                                "Merkle": [
+                                                                    {
+                                                                        "Id": "sha256:c33bfeaf715906fb627e7ca540d7def89d1178bc1e0d7771a0ee16c8703f08f7",
+                                                                        "Merkle": [
+                                                                            {
+                                                                                "Id": "sha256:e9bbfa426ed55fdfdb874d42319a06efb26c35c3f5d04e4b9d46bf593ccad672",
+                                                                                "Merkle": [
+                                                                                    {
+                                                                                        "Id": "sha256:c31ad9fc1bfa636ca475c0558393a666793446463e047baa94ecee624de3cd2c",
+                                                                                        "Merkle": [
+                                                                                            {
+                                                                                                "Id": "sha256:0a5bf9f19dabe18cae96700150624e29351779dac974607f45d72b54939c55bb",
+                                                                                                "Merkle": {
+                                                                                                    "Id": "sha256:37055c7c3a0d53ae397444f0170586a99d8779877981432387f89a0d30c51041",
+                                                                                                    "Merkle": [
+                                                                                                        {
+                                                                                                            "$ref": "#/Container/Layers[0]/ChainId",
+                                                                                                            "Id": "sha256:e07705ef298b0ebd52e873195ac2a56c42d9e5c60a713a0ee1ea473ea61eb708"
+                                                                                                        }
+                                                                                                    ]
+                                                                                                }
+                                                                                            },
+                                                                                            {
+                                                                                                "Id": "sha256:324c319eeb1a563c72f312d17ae649c369b8e2d23d2ecc29f6de689f591dd479",
+                                                                                                "Merkle": [
+                                                                                                    {
+                                                                                                        "$ref": "#/Container/Layers[1]/ChainId",
+                                                                                                        "Id": "sha256:5bad80914253221769d17c07c3201392fe492edbb29132e3e8822f0ad136264f"
+                                                                                                    }
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    },
+                                                                                    {
+                                                                                        "Id": "sha256:de82852d6f85533662d9a33f657ad26d30c4b165fe522a89b51c336ec9068d03",
+                                                                                        "Merkle": [
+                                                                                            {
+                                                                                                "$ref": "#/Container/Layers[2]/ChainId",
+                                                                                                "Id": "sha256:5859590d529820b96c399e8e32902b11ec48e56502b53a77117653918336cbf8"
+                                                                                            }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "Id": "sha256:f6bebc8cc458580966818e4cf678612f019157580832561423dc061aa238a7ba",
+                                                                                "Merkle": [
+                                                                                    {
+                                                                                        "Id": "sha256:bb7439e558ad4dca7f0218455a76a95a779e78aa04ca719c34da811339accd4d",
+                                                                                        "Merkle": [
+                                                                                            {
+                                                                                                "$ref": "#/Container/Layers[3]/Build[0]",
+                                                                                                "Id": "sha256:952b10c132f88e8cb89fb2344d9a8a22dceea58f7d100d809448c140c51973f9"
+                                                                                            }
+                                                                                        ]
+                                                                                    },
+                                                                                    {
+                                                                                        "$ref": "#/Container/Layers[3]/ChainId",
+                                                                                        "Id": "sha256:e4ec8fad0f45a3f081be60f8be57071a04ca25b9b82906233d61cb7aa376035c"
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "Id": "sha256:826e39e0175a5539593cb9c7ebe38eb8fec048234dcd51d2233387623cf0c386",
+                                                                        "Merkle": [
+                                                                            {
+                                                                                "Id": "sha256:9b9327142507b460c6ac40e0e43879ee3f6b52bd5327e25efd89a79a742a4ad6",
+                                                                                "Merkle": [
+                                                                                    {
+                                                                                        "$ref": "#/Container/Layers[4]/Build[0]",
+                                                                                        "Id": "sha256:a934b5487bd719fa97072ef32d23f8f6e65bb0d6c81a8bdb0bbc0d3330154d64"
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "$ref": "#/Container/Layers[4]/ChainId",
+                                                                                "Id": "sha256:24a2b32611488b60a2bf4985108f00e4368a6cfd6ae55db7f3de0dfc6202761b"
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "Id": "sha256:d20001cdfd1f2f5d61f48ecbfb23846876820c6b360bd7a793780fff14992c58",
+                                                                "Merkle": [
+                                                                    {
+                                                                        "Id": "sha256:adf33d9ece72baac78109d7822b7cd9740af1ac5ad7b69f09e76c3d24a260569",
+                                                                        "Merkle": [
+                                                                            {
+                                                                                "$ref": "#/Container/Layers[5]/Build[0]",
+                                                                                "Id": "sha256:1d648393e657f756afb7a31c15dea93e099941d021b96e8844917e74479662ea"
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "$ref": "#/Container/Layers[5]/ChainId",
+                                                                        "Id": "sha256:d9dbb1aaa0838534d2de9a69276bcf0cad7c0dd8bd532b6df7de4947f0c01108"
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "Id": "sha256:f6083d055bd61d7d4f6397395346f07d7cc89f74cbfc0e8eb586aff1226fa80b",
+                                                        "Merkle": [
+                                                            {
+                                                                "Id": "sha256:ca4268069f70c9d1248ac809b14241ac69a1aac690800466cd073a36169ca4c1",
+                                                                "Merkle": [
+                                                                    {
+                                                                        "$ref": "#/Container/Layers[6]/Build[0]",
+                                                                        "Id": "sha256:76706cbfb000faf880a2265a1d0042ec423842da2775a4e627fbf56f914f6bad"
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "$ref": "#/Container/Layers[6]/ChainId",
+                                                                "Id": "sha256:d34fdc60b216ac776b12a75c1c22d43473ad0a988c8308c001cc2eeb51f537f1"
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "Id": "sha256:d2f1c765df0c842a1afe7f4560b8042469eea444e82f3179b4e501447a07e694",
+                                                "Merkle": [
+                                                    {
+                                                        "Id": "sha256:b378da5d48e70dc077e8ebb7cf9b1dca47b26c89d1be6d9bf991ff19beab9528",
+                                                        "Merkle": [
+                                                            {
+                                                                "$ref": "#/Container/Layers[7]/Build[0]",
+                                                                "Id": "sha256:927786c7519b14c0ddb4f83ff504093f9eda69df49998c8348a08e67969a7d18"
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "$ref": "#/Container/Layers[7]/ChainId",
+                                                        "Id": "sha256:d7e67e8112b4252a578e67e35f37ce9388e08868b7d3b4e4ecae01eedcd90765"
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "Id": "sha256:23df2a11585f9345f823cbe360453f0e86a3a4ee13221e804f4d8047d36bba72",
+                                        "Merkle": [
+                                            {
+                                                "Id": "sha256:5fecfd83d23fa8f03918f49e9de027f6555cacd622016b08d155927357240de1",
+                                                "Merkle": [
+                                                    {
+                                                        "$ref": "#/Container/Layers[8]/Build[0]",
+                                                        "Id": "sha256:71ba90626b1ad9932272883d140be319c0c30a0a345042f8309150c26bc0af8e"
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "$ref": "#/Container/Layers[8]/ChainId",
+                                                "Id": "sha256:4f3e18be4f6b720bc992b0e770159797e1dc76a1dafd1e90da53aa40eb43b27d"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "Id": "sha256:5a614fb20c9d76ba705407d4b6363c199de2b8e26c289c69c978964143b39437",
+                                "Merkle": [
+                                    {
+                                        "Id": "sha256:28986c37acf2fb05ae60938c850491c5af7abab069a45e12a36b2fd9e6a2857c",
+                                        "Merkle": [
+                                            {
+                                                "$ref": "#/Container/Layers[9]/Build[0]",
+                                                "Id": "sha256:0d63701ec416792a3f667f604219f41c7db428554be23b453bdb922b29696964"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "$ref": "#/Container/Layers[9]/ChainId",
+                                        "Id": "sha256:1baa434d2205bcacb53a25b96c386109c884f90d0a284a09bcc97a9c98de8d41"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    },
+    "Tensor": null
+}

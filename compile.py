@@ -14,6 +14,7 @@ class Hyper:
                 "Api": None,        # list
                 "Container" : None, # dict
                 "Contract": None,   # list
+                "Makeit": None,
                 "Merkle": None,     # dict
                 "Dependency": None, # list
                 "Ledger": None, 
@@ -21,75 +22,35 @@ class Hyper:
             }):
         super().__init__()
         self.file = file
+        self.Id = None
         self.registry = 'registry/'
 
     def parseDependency(self):
         dependencies = []
-        for file in os.listdir('registry/for_build'):
-            if file != 'Dockerfile' and file != 'Api.json':
+        if os.path.isdir('registry/for_build/dependencies'):
+            for file in os.listdir('registry/for_build/dependencies'):
                 image = json.load(open(file,'r'))
                 dependencies.append(image)
-        if len(dependencies)>0:
-            self.file.update({'Dependency':dependencies})
+            if len(dependencies)>0:
+                self.file.update({'Dependency':dependencies})
 
     def parseContainer(self):
-        def parseInspect(container):
-            run('sudo docker inspect building > inspect.json', shell=True)
-            inspect = json.load(open('inspect.json','r'))[0]
-            container.update({'Volumes':inspect.get('Config').get('Volumes')})
-            container.update({'Entrypoint' : inspect.get('Config').get('Entrypoint')[2]})
-            if container.get('Layers') == None:
-                layers = []
-                chainId = None
-                for layer in inspect.get('RootFS').get('Layers'):
-                    if chainId is None: chainId = layer
-                    else: chainId = sha256(chainId+" "+layer)
-                    layers.append({
-                        "DiffId" : layer,
-                        "ChainId" : chainId,
-                        "Build" : None
-                    })
-                container.update({'Layers' : layers})
-            else:
-                pass # Estaria bien comprobar las hashes.
-            os.remove("inspect.json")
-            return container
-        def parseDockerfile(container):
-            Dockerfile = open("registry/for_build/Dockerfile", "r")
-            layers_in_file = []
-            for l in Dockerfile.readlines():
-                command = l.split()[0]
-                if command == 'RUN' or command == 'FROM':
-                    layers_in_file.append(' '.join(l.split()))
-            layers = container.get('Layers')[::-1]
-            for i, l in enumerate(layers_in_file[::-1]):
-                build = layers[i].get('Build')
-                if build == None: build = []
-                build.append(l)
-                layers[i].update({'Build' : build})
-            container.update({'Layers' : layers[::-1]})
-            Dockerfile.close()
-            return container
-        def parseArchEnvs(container):
-            arch = json.load(open("registry/for_build/Arch.json","r"))
-            container.update({'Arch' : arch})
-            if os.path.isfile("registry/for_build/Envs.json"):
-                envs = json.load(open("registry/for_build/Envs.json","r"))
-                container.update({'Envs' : envs})
-            return container
-
         container = self.file.get('Container')
         if container == None:
             container = {
-                "Volumes" : None,       # list
                 "Entrypoint" : None,    # string
-                "Layers" : None,        # list
+                "Filesys" : None,        # string
                 "Arch" : None,          # list
-                "Envs": None          # list or dict
+                "Envs": None          # list
             }          
-        container = parseInspect(container)
-        container = parseDockerfile(container)
-        container = parseArchEnvs(container)
+        arch = json.load(open("registry/for_build/Arch.json","r"))
+        container.update({'Arch' : arch})
+        if os.path.isfile("registry/for_build/Envs.json"):
+            envs = json.load(open("registry/for_build/Envs.json","r"))
+            container.update({'Envs' : envs})
+        if os.path.isfile("registry/for_build/Entrypoint.json"):
+            entrypoint = json.load(open("registry/for_build/Entrypoint.json","r"))
+            container.update({'Entrypoint' : entrypoint})
         self.file.update({'Container' : container})
 
     def parseApi(self):
@@ -119,7 +80,7 @@ class Hyper:
                 def makeLayer(i):
                     def makeBuEl(i):
                         def makeBuild(i):
-                            build = self.file.get('Container').get('Layers')[i].get('Build')
+                            build = self.file.get('Makeit')[i].get('Build')
                             if build is None:
                                 return None
                             else:
@@ -127,7 +88,7 @@ class Hyper:
                                 for index,b in enumerate(build):
                                     merkle.append({
                                         "Id":sha256(b),
-                                        "$ref":"#/Container/Layers["+str(i)+"]/Build["+str(index)+"]"
+                                        "$ref":"#/Makeit["+str(i)+"]/Build["+str(index)+"]"
                                     })
                                 return {
                                     "Id":concat(merkle),
@@ -136,8 +97,8 @@ class Hyper:
                         merkle = [
                             makeBuild(i),
                             {
-                                "Id":sha256(self.file.get('Container').get('Layers')[i].get('ChainId')),
-                                "$ref":"#/Container/Layers["+str(i)+"]/ChainId"
+                                "Id":sha256(self.file.get('Makeit')[i].get('ChainId')),
+                                "$ref":"#/Makeit["+str(i)+"]/ChainId"
                             }
                         ]
                         merkle = [make for make in merkle if make != None] # No se concatenan los campos vacios.
@@ -160,7 +121,7 @@ class Hyper:
                             "Id":concat(merkle),
                             "Merkle": merkle
                         }
-                return makeLayer(len(self.file.get('Container').get('Layers'))-1)
+                return makeLayer(len(self.file.get('Makeit'))-1)
             def makeEnvs():
                 envs = []
                 if self.file.get('Container').get('Envs') == None:
@@ -189,28 +150,49 @@ class Hyper:
         ]
         self.file.update({'Merkle' : {'Id':concat(merkle), "Merkle":merkle}})
 
+    def parseMakeit(self):
+            Dockerfile = open("registry/for_build/Dockerfile", "r")
+            layers_in_file = []
+            for l in Dockerfile.readlines():
+                command = l.split()[0]
+                if command == 'RUN' or command == 'FROM':
+                    layers_in_file.append(' '.join(l.split()))
+            layers=[]
+            for i, l in enumerate(layers_in_file[::-1]):
+                build = [l]
+                layers.append({'Build':build})
+                build = layers[i].get('Build')
+            self.file.update({'Makeit' : layers[::-1]})
+            Dockerfile.close()
+
+    def calculateId(self):
+        self.Id = "sha256:ndslmfkoijnk"
+
     def save(self):
         print(self.file.get('Merkle'))
-        registry = self.registry + self.file.get('Merkle').get('Id').split(':')[1] + '.json'
+        registry = self.registry + self.Id + '.json'
         with open(registry,'w') as file:
             file.write( json.dumps(self.file, indent=4, sort_keys=True) )
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
         print("\nIMPORTANTE: el Dockerfile no soporta comandos de varias lineas.")
-        print("Dockerfile            --> Dejalo fuera.")
-        print("./buildFile.py Dockerfile Hyperfile  --> to update the Hyperfile. \n")
         Hyperfile = Hyper() # Hyperfile
-    elif len(sys.argv) > 1:
-        Hyperfile = Hyper( json.load(open(sys.argv[1],"r")) ) # Hyperfile
+    else:
+        print("\n NO HAY QUE USAR PARAMETROS.")
 
     if os.path.isfile('registry/for_build/Dockerfile') == False or os.path.isfile('registry/for_build/Arch.json') == False:
         print('ForBuild invalido, Dockerfile y Arch.json OBLIGATORIOS ....')
         exit()
-    run('sudo docker build -t building registry/for_build/.', shell=True)
+
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
+    Hyperfile.parseDependency()
+    ## Demas ..
+    Hyperfile.calculateId() # Aqui sha256
 
+    ##Actualizables
+    Hyperfile.parseMakeit()
     Hyperfile.makeMerkle()
+
     Hyperfile.save()
-    run('sudo docker rmi building --force', shell=True)

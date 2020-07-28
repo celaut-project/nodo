@@ -5,4 +5,3 @@ RUN apt-get update --fix-missing && apt-get -y install python3-pip && apt-get cl
 RUN pip3 install flask
 RUN apt-get update --fix-missing && apt-get -y install wget && apt-get clean
 RUN wget https://github.com/josemibnf/Solvers/archive/frontier.tar.gz && tar -xvzf frontier.tar.gz
-ENTRYPOINT python3 /Solvers-frontier/start.py
