@@ -1,6 +1,6 @@
 import sys
 import json
-from subprocess import run
+from subprocess import run, check_output
 import os
 import hashlib
 
@@ -35,6 +35,36 @@ class Hyper:
                 self.file.update({'Dependency':dependencies})
 
     def parseContainer(self):
+        def ordena(dirs):
+            print("....ORDENANDO....")
+            return dirs
+        def parseFilesys(container):
+            os.system("mkdir building")
+            os.system('sudo docker build -t building registry/for_build/.')
+            os.system("docker save building | gzip > building/building.tar.gz")
+            os.system("cd building && tar -xvf building.tar.gz")
+            dirs = [] # lista de todos los directorios para ordenar.
+            for layer in os.listdir("building/"):
+                if os.path.isdir("building/"+layer):
+                    print("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
+                    for dir in check_output("cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
+                        dirs.append(layer+"/"+dir)
+            print(dirs)
+            output=""
+            for adir in ordena(dirs=dirs):
+                if adir[-7:]!=".tar.gz":
+                    print("Directory --> "+adir[65:])
+                    if output=="":output = adir[65:]
+                    else: output =  output+"\n"+adir[65:]
+                    if adir[-1]!="/":
+                        print("Info from --> "+adir)
+                        info = open("building/"+adir).read()
+                        output = output+info
+            os.system("rm -rf building")
+            os.system("docker rmi building")
+            print(output)
+            container.update({'Filesys':sha256(output)})
+            return container
         container = self.file.get('Container')
         if container == None:
             container = {
@@ -51,6 +81,7 @@ class Hyper:
         if os.path.isfile("registry/for_build/Entrypoint.json"):
             entrypoint = json.load(open("registry/for_build/Entrypoint.json","r"))
             container.update({'Entrypoint' : entrypoint})
+        container = parseFilesys(container=container)
         self.file.update({'Container' : container})
 
     def parseApi(self):
@@ -166,7 +197,7 @@ class Hyper:
             Dockerfile.close()
 
     def calculateId(self):
-        self.Id = "sha256:ndslmfkoijnk"
+        self.Id = "Patata.json"
 
     def save(self):
         print(self.file.get('Merkle'))
