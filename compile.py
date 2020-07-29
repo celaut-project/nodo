@@ -33,39 +33,50 @@ class Hyper:
 
     def parseContainer(self):
         def parseFilesys(container):
-            def ordena(dirs):
-                print("....ORDENANDO....")
-                return dirs
             os.system("mkdir building")
             os.system('sudo docker build -t building registry/for_build/.')
             os.system("docker save building | gzip > building/building.tar.gz")
             os.system("cd building && tar -xvf building.tar.gz")
             dirs = [] # lista de todos los directorios para ordenar.
+            layers = []
             for layer in os.listdir("building/"):
                 if os.path.isdir("building/"+layer):
+                    layers.append(layer)
                     print("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
                     for dir in check_output("cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
-                        dirs.append(layer+"/"+dir)
-            print(dirs)
-            output=""
-            for adir in ordena(dirs=dirs):
-                if adir[-7:]!=".tar.gz":
-                    print("Directory --> "+adir[65:])
-                    if output=="":output = adir[65:]
-                    else: output =  output+"\n"+adir[65:]
-                    if os.path.isdir('building/'+adir)==False:
-                        print("Info from --> "+adir)
-                        try:
-                            info = open("building/"+adir,"r").read()
-                        except UnicodeDecodeError:
-                            info = open("building/"+adir,"br").read().decode('cp437')
-                        except FileNotFoundError:
-                            print(adir+" posiblemente vacio.")
-                        output = output+info
+                        dirs.append(dir)
+            def file_hash(adir, layers):
+                for layer in layers:
+                    if os.path.isfile('building/'+layer+'/'+adir):
+                        cdir = 'building/'+layer+'/'+adir
+                try:
+                    info = open(cdir,"r").read()
+                except UnicodeDecodeError:
+                    info = open(cdir,"br").read().decode('cp437')
+                except FileNotFoundError:
+                    print(adir+" posiblemente vacio.")
+                return info
+            def rec_hash(index, dirs, layers):
+                local_dirs={}
+                for dir in dirs:
+                    raiz = dir.split('/')[index]
+                    if raiz in local_dirs==False:
+                        local_dirs.update({raiz:[]})
+                    if dir!=raiz:
+                        lista = local_dirs.get(raiz).append(dir)
+                        local_dirs.update({raiz:lista})
+                for dir in local_dirs:
+                    if local_dirs[dir]==[]:
+                        local_dirs.update({dir:file_hash(adir=dir, layers=layers)})
+                    else:
+                        local_dirs.update({dir:rec_hash(index=index+1,dirs=local_dirs[dir], layers=layers)})
+                return local_dirs
+            merkle = rec_hash(index=0,dirs=dirs, layers=layers)
+            print(merkle)
             os.system("rm -rf building")
             os.system("docker rmi building")
-            print(output)
-            container.update({'Filesys':sha256(output)})
+            print(merkle)
+            container.update({'Filesys':merkle})
             return container
         container = self.file.get('Container')
         if container == None:
@@ -97,97 +108,6 @@ class Hyper:
 
     def parseTensor(self):
         pass
-
-    # Esta es la forma en la que este compilador crea el árbol de Merkle.
-    # No tiene por que ser la única ...
-
-    def makeMerkle(self):
-        def concat(merkle_list):
-            id = merkle_list[0].get('Id')
-            for merkle in merkle_list[1:]:
-                id = id+" "+merkle.get('Id')
-            return sha256(id)
-        def makeContainer():
-            def makeEntrypoint():
-                if self.file.get('Container').get('Entrypoint') == None:
-                    return None
-                return {
-                    "Id":sha256(self.file.get('Container').get('Entrypoint')),
-                    "$ref":"#/Container/Entrypoint"
-                }
-            def makeLayers():
-                def makeLayer(i):
-                    def makeBuEl(i):
-                        def makeBuild(i):
-                            build = self.file.get('Makeit')[i].get('Build')
-                            if build is None:
-                                return None
-                            else:
-                                merkle = []
-                                for index,b in enumerate(build):
-                                    merkle.append({
-                                        "Id":sha256(b),
-                                        "$ref":"#/Makeit["+str(i)+"]/Build["+str(index)+"]"
-                                    })
-                                return {
-                                    "Id":concat(merkle),
-                                    "Merkle": merkle
-                                }
-                        merkle = [
-                            makeBuild(i),
-                            {
-                                "Id":sha256(self.file.get('Makeit')[i].get('ChainId')),
-                                "$ref":"#/Makeit["+str(i)+"]/ChainId"
-                            }
-                        ]
-                        merkle = [make for make in merkle if make != None] # No se concatenan los campos vacios.
-                        return {
-                            "Id" : concat(merkle),
-                            "Merkle": merkle
-                        }
-                    if i==0: 
-                        first = makeBuEl(i)
-                        return {
-                            "Id":sha256(first.get('Id')),
-                            "Merkle":first
-                        }
-                    else: 
-                        merkle = [
-                            makeLayer(i-1),
-                            makeBuEl(i)
-                        ]
-                        return {
-                            "Id":concat(merkle),
-                            "Merkle": merkle
-                        }
-                return makeLayer(len(self.file.get('Makeit'))-1)
-            def makeEnvs():
-                envs = []
-                if self.file.get('Container').get('Envs') == None:
-                    return None
-                for index, env in enumerate(self.file.get('Container').get('Envs')):
-                    envs.append({
-                        'Id':sha256(env),
-                        '$ref':"#/Container/Envs["+str(index)+"]"
-                    })
-                return {
-                    "Id" : concat(envs),
-                    "Merkle": envs
-                }
-            merkle = [
-                makeEntrypoint(),
-                makeLayers(),
-                makeEnvs()
-            ]
-            merkle = [make for make in merkle if make != None] # No se concatenan los campos vacios.
-            return {
-                "Id" : concat(merkle),
-                "Merkle": merkle
-            }
-        merkle = [
-            makeContainer()
-        ]
-        self.file.update({'Merkle' : {'Id':concat(merkle), "Merkle":merkle}})
     
     @staticmethod
     def getId(hyper):
@@ -205,8 +125,8 @@ if __name__ == "__main__":
     else:
         print("\n NO HAY QUE USAR PARAMETROS.")
 
-    if os.path.isfile('registry/for_build/Dockerfile') == False or os.path.isfile('registry/for_build/Arch.json') == False:
-        print('ForBuild invalido, Dockerfile y Arch.json OBLIGATORIOS ....')
+    if os.path.isfile('registry/for_build/Arch.json') == False:
+        print('ForBuild invalido, Arch.json OBLIGATORIOS ....')
         exit()
 
     Hyperfile.parseContainer()
