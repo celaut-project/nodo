@@ -34,8 +34,13 @@ class Hyper:
     def parseContainer(self):
         def parseFilesys(container):
             os.system("mkdir building")
-            os.system('sudo docker build -t building registry/for_build/.')
-            os.system("docker save building | gzip > building/building.tar.gz")
+            if os.path.isfile("registry/for_build/Dockerfile"):
+                os.system('sudo docker build -t building registry/for_build/.')
+                os.system("docker save building | gzip > building/building.tar.gz")
+            elif os.path.isfile("registry/for_build/building.tar.gz"):
+                os.system("mv registry/for_build/building.tar.gz building/")
+            else:
+                print("Error: Dockerfile o building.tar.gz no encontrados.")
             os.system("cd building && tar -xvf building.tar.gz")
             dirs = [] # lista de todos los directorios para ordenar.
             layers = []
@@ -46,36 +51,46 @@ class Hyper:
                     for dir in check_output("cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
                         dirs.append(dir)
             def file_hash(adir, layers):
+                print("Archivo --> "+adir)
                 for layer in layers:
                     if os.path.isfile('building/'+layer+'/'+adir):
                         cdir = 'building/'+layer+'/'+adir
                 try:
                     info = open(cdir,"r").read()
-                except UnicodeDecodeError:
+                except UnicodeDecodeError: 
                     info = open(cdir,"br").read().decode('cp437')
                 except FileNotFoundError:
                     print(adir+" posiblemente vacio.")
+                except UnboundLocalError:
+                    print("Parece que "+adir+" no se encuentra en ninguna layer.")
                 return info
             def rec_hash(index, dirs, layers):
+                print("Nueva vuelta",index,", --> ",dirs)
                 local_dirs={}
                 for dir in dirs:
+                    print("Directory --> "+dir)
                     raiz = dir.split('/')[index]
-                    if raiz in local_dirs==False:
-                        local_dirs.update({raiz:[]})
-                    if dir!=raiz:
-                        lista = local_dirs.get(raiz).append(dir)
-                        local_dirs.update({raiz:lista})
-                for dir in local_dirs:
-                    if local_dirs[dir]==[]:
+                    if dir[-len(raiz):]==raiz:
                         local_dirs.update({dir:file_hash(adir=dir, layers=layers)})
                     else:
-                        local_dirs.update({dir:rec_hash(index=index+1,dirs=local_dirs[dir], layers=layers)})
+                        print("Raiz --> "+raiz)
+                        if (raiz in local_dirs) == False:
+                            print('   Nueva raiz --> '+raiz)  
+                            local_dirs.update({raiz:[]})
+                        try:
+                            if raiz!=dir.split('/')[-2]:
+                                lista = local_dirs.get(raiz)
+                                lista.append(dir)
+                                local_dirs.update({raiz:lista})
+                        except IndexError:
+                            pass # Es porque es un fichero y solo hay un elemento en la lista del split('/')
+                for dir in local_dirs:
+                    local_dirs.update({dir:rec_hash(index=index+1,dirs=local_dirs[dir], layers=layers)})
                 return local_dirs
             merkle = rec_hash(index=0,dirs=dirs, layers=layers)
             print(merkle)
             os.system("rm -rf building")
             os.system("docker rmi building")
-            print(merkle)
             container.update({'Filesys':merkle})
             return container
         container = self.file.get('Container')
@@ -120,7 +135,6 @@ class Hyper:
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
-        print("\nIMPORTANTE: el Dockerfile no soporta comandos de varias lineas.")
         Hyperfile = Hyper() # Hyperfile
     else:
         print("\n NO HAY QUE USAR PARAMETROS.")
