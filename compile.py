@@ -56,12 +56,14 @@ class Hyper:
                     print("Directory --> "+adir[65:])
                     if output=="":output = adir[65:]
                     else: output =  output+"\n"+adir[65:]
-                    if adir[-1]!="/":
+                    if os.path.isdir('building/'+adir)==False:
                         print("Info from --> "+adir)
                         try:
-                            info = open("building/"+adir,"r").read().decode('utf-8')
+                            info = open("building/"+adir,"r").read()
                         except UnicodeDecodeError:
-                            info = open("building/"+adir,"br").read()
+                            info = open("building/"+adir,"br").read().decode('cp437')
+                        except FileNotFoundError:
+                            print(adir+" posiblemente vacio.")
                         output = output+info
             os.system("rm -rf building")
             os.system("docker rmi building")
