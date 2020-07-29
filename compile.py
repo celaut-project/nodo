@@ -14,15 +14,12 @@ class Hyper:
                 "Api": None,        # list
                 "Container" : None, # dict
                 "Contract": None,   # list
-                "Makeit": None,
-                "Merkle": None,     # dict
                 "Dependency": None, # list
                 "Ledger": None, 
                 "Tensor": None,
             }):
         super().__init__()
         self.file = file
-        self.Id = None
         self.registry = 'registry/'
 
     def parseDependency(self):
@@ -74,10 +71,10 @@ class Hyper:
         if container == None:
             container = {
                 "Entrypoint" : None,    # string
-                "Filesys" : None,        # string
+                "Filesys" : None,        # Merkle
                 "Arch" : None,          # list
                 "Envs": None          # list
-            }          
+            }
         arch = json.load(open("registry/for_build/Arch.json","r"))
         container.update({'Arch' : arch})
         if os.path.isfile("registry/for_build/Envs.json"):
@@ -94,6 +91,12 @@ class Hyper:
             api = json.load(open("registry/for_build/Api.json","r"))
             self.file.update({'Api' : api})
 
+
+    def parseLedger(self):
+        pass
+
+    def parseTensor(self):
+        pass
 
     # Esta es la forma en la que este compilador crea el árbol de Merkle.
     # No tiene por que ser la única ...
@@ -185,28 +188,13 @@ class Hyper:
             makeContainer()
         ]
         self.file.update({'Merkle' : {'Id':concat(merkle), "Merkle":merkle}})
-
-    def parseMakeit(self):
-            Dockerfile = open("registry/for_build/Dockerfile", "r")
-            layers_in_file = []
-            for l in Dockerfile.readlines():
-                command = l.split()[0]
-                if command == 'RUN' or command == 'FROM':
-                    layers_in_file.append(' '.join(l.split()))
-            layers=[]
-            for i, l in enumerate(layers_in_file[::-1]):
-                build = [l]
-                layers.append({'Build':build})
-                build = layers[i].get('Build')
-            self.file.update({'Makeit' : layers[::-1]})
-            Dockerfile.close()
-
-    def calculateId(self):
-        self.Id = "Patata.json"
+    
+    @staticmethod
+    def getId(hyper):
+        return "hash256"
 
     def save(self):
-        print(self.file.get('Merkle'))
-        registry = self.registry + self.Id + '.json'
+        registry = self.registry + Hyper.getId(self.file) + '.json'
         with open(registry,'w') as file:
             file.write( json.dumps(self.file, indent=4, sort_keys=True) )
 
@@ -224,11 +212,7 @@ if __name__ == "__main__":
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
     Hyperfile.parseDependency()
-    ## Demas ..
-    Hyperfile.calculateId() # Aqui sha256
-
-    ##Actualizables
-    Hyperfile.parseMakeit()
-    Hyperfile.makeMerkle()
+    Hyperfile.parseLedger()
+    Hyperfile.parseTensor()
 
     Hyperfile.save()
