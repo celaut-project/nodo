@@ -35,10 +35,10 @@ class Hyper:
                 self.file.update({'Dependency':dependencies})
 
     def parseContainer(self):
-        def ordena(dirs):
-            print("....ORDENANDO....")
-            return dirs
         def parseFilesys(container):
+            def ordena(dirs):
+                print("....ORDENANDO....")
+                return dirs
             os.system("mkdir building")
             os.system('sudo docker build -t building registry/for_build/.')
             os.system("docker save building | gzip > building/building.tar.gz")
@@ -58,7 +58,10 @@ class Hyper:
                     else: output =  output+"\n"+adir[65:]
                     if adir[-1]!="/":
                         print("Info from --> "+adir)
-                        info = open("building/"+adir).read()
+                        try:
+                            info = open("building/"+adir,"r").read().decode('utf-8')
+                        except UnicodeDecodeError:
+                            info = open("building/"+adir,"br").read()
                         output = output+info
             os.system("rm -rf building")
             os.system("docker rmi building")
