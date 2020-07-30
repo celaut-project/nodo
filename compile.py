@@ -61,8 +61,10 @@ class Hyper:
                     info = open(cdir,"br").read().decode('cp437')
                 except FileNotFoundError:
                     print(adir+" posiblemente vacio.")
+                    exit
                 except UnboundLocalError:
                     print("Parece que "+adir+" no se encuentra en ninguna layer.")
+                    exit
                 return info
             def rec_hash(index, dirs, layers):
                 print("Nueva vuelta",index,", --> ",dirs)
