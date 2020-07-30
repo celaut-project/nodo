@@ -49,24 +49,24 @@ class Hyper:
                     layers.append(layer)
                     print("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
                     for dir in check_output("cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
-                        dirs.append(dir)
-            def file_hash(adir, layers):
-                print("Archivo --> "+adir)
-                for layer in layers:
-                    if os.path.isfile('building/'+layer+'/'+adir):
-                        cdir = 'building/'+layer+'/'+adir
-                try:
-                    info = open(cdir,"r").read()
-                except UnicodeDecodeError: 
-                    info = open(cdir,"br").read().decode('cp437')
-                except FileNotFoundError:
-                    print(adir+" posiblemente vacio.")
-                    exit
-                except UnboundLocalError:
-                    print("Parece que "+adir+" no se encuentra en ninguna layer.")
-                    exit
-                return info
+                        dirs.append(layer+"/"+dir)
             def rec_hash(index, dirs, layers):
+                def file_hash(adir, layers):
+                    print("Archivo --> "+adir)
+                    for layer in layers:
+                        if os.path.isfile('building/'+layer+'/'+adir):
+                            cdir = 'building/'+layer+'/'+adir
+                    try:
+                        info = open(cdir,"r").read()
+                    except UnicodeDecodeError: 
+                        info = open(cdir,"br").read().decode('cp437')
+                    except FileNotFoundError:
+                        print(adir+" posiblemente vacio.")
+                        exit
+                    except UnboundLocalError:
+                        print("Parece que "+adir+" no se encuentra en ninguna layer.")
+                        exit
+                    return info
                 print("Nueva vuelta",index,", --> ",dirs)
                 local_dirs={}
                 for dir in dirs:
@@ -89,6 +89,9 @@ class Hyper:
                 for dir in local_dirs:
                     local_dirs.update({dir:rec_hash(index=index+1,dirs=local_dirs[dir], layers=layers)})
                 return local_dirs
+            for dir in dirs:
+                print(dir)
+            exit()
             merkle = rec_hash(index=0,dirs=dirs, layers=layers)
             print(merkle)
             os.system("rm -rf building")
