@@ -48,14 +48,30 @@ class Hyper:
                 if os.path.isdir("building/"+layer):
                     layers.append(layer)
                     print("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
-                    for dir in check_output("cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
-                        dirs.append(layer+"/"+dir)
+                    for dir in check_output("sudo cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
+                        if True:# tiene accesos especiales:
+                            dirs.append(dir)+'/'
+                        dirs.append(dir)
             def rec_hash(index, dirs, layers):
                 def file_hash(adir, layers):
-                    print("Archivo --> "+adir)
                     for layer in layers:
-                        if os.path.isfile('building/'+layer+'/'+adir):
-                            cdir = 'building/'+layer+'/'+adir
+                        if os.path.exists('building/'+layer+'/'+adir):
+                            if os.path.isfile('building/'+layer+'/'+adir):
+                                print("Archivo --> "+adir)
+                                cdir = 'building/'+layer+'/'+adir
+                            elif os.path.islink('building/'+layer+'/'+adir):
+                                print("Link --> "+adir)
+                                return adir # y la direccion.
+                            elif os.path.ismount('building/'+layer+'/'+adir):
+                                print("Mount --> "+adir)
+                                print("ERROR: No deberiamos haber llegado aqui.")
+                            elif os.path.isabs('building/'+layer+'/'+adir):
+                                print("Abs -->"+adir)
+                                print("ERROR: No deberiamos haber llegado aqui.")
+                            else:
+                                print("ERROR: Tampoco deberiamos haber llegado aqui.")
+                        else:
+                            print("ERROR: esto vendra de algun sitio no=?? "+adir)
                     try:
                         info = open(cdir,"r").read()
                     except UnicodeDecodeError: 
@@ -89,9 +105,6 @@ class Hyper:
                 for dir in local_dirs:
                     local_dirs.update({dir:rec_hash(index=index+1,dirs=local_dirs[dir], layers=layers)})
                 return local_dirs
-            for dir in dirs:
-                print(dir)
-            exit()
             merkle = rec_hash(index=0,dirs=dirs, layers=layers)
             print(merkle)
             os.system("rm -rf building")
