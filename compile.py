@@ -48,9 +48,7 @@ class Hyper:
                 if os.path.isdir("building/"+layer):
                     layers.append(layer)
                     print("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
-                    for dir in check_output("sudo cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
-                        if True:# tiene accesos especiales:
-                            dirs.append(dir)+'/'
+                    for dir in check_output("cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
                         dirs.append(dir)
             def rec_hash(index, dirs, layers):
                 def file_hash(adir, layers):
@@ -65,27 +63,41 @@ class Hyper:
                             elif os.path.ismount('building/'+layer+'/'+adir):
                                 print("Mount --> "+adir)
                                 print("ERROR: No deberiamos haber llegado aqui.")
+                                os.system("rm -rf building")
+                                os.system("docker rmi building")
+                                exit()
                             elif os.path.isabs('building/'+layer+'/'+adir):
                                 print("Abs -->"+adir)
                                 print("ERROR: No deberiamos haber llegado aqui.")
+                                os.system("rm -rf building")
+                                os.system("docker rmi building")
+                                exit()
                             else:
                                 print("ERROR: Tampoco deberiamos haber llegado aqui.")
-                        else:
-                            print("ERROR: esto vendra de algun sitio no=?? "+adir)
+                                os.system("rm -rf building")
+                                os.system("docker rmi building")
+                                exit()
                     try:
                         info = open(cdir,"r").read()
                     except UnicodeDecodeError: 
                         info = open(cdir,"br").read().decode('cp437')
                     except FileNotFoundError:
                         print(adir+" posiblemente vacio.")
-                        exit
+                        os.system("rm -rf building")
+                        os.system("docker rmi building")
+                        exit()
                     except UnboundLocalError:
                         print("Parece que "+adir+" no se encuentra en ninguna layer.")
-                        exit
+                        os.system("rm -rf building")
+                        os.system("docker rmi building")
+                        exit()
                     return info
                 print("Nueva vuelta",index,", --> ",dirs)
                 local_dirs={}
                 for dir in dirs:
+                    if dir.split(' ')[0]=='/' or len(dir)==1:
+                        print("Ghost directory --> "+dir)
+                        continue
                     print("Directory --> "+dir)
                     raiz = dir.split('/')[index]
                     if dir[-len(raiz):]==raiz:
@@ -97,13 +109,13 @@ class Hyper:
                             local_dirs.update({raiz:[]})
                         try:
                             if raiz!=dir.split('/')[-2]:
-                                lista = local_dirs.get(raiz)
+                                lista = local_dirs[raiz]
                                 lista.append(dir)
                                 local_dirs.update({raiz:lista})
                         except IndexError:
-                            pass # Es porque es un fichero y solo hay un elemento en la lista del split('/')
-                for dir in local_dirs:
-                    local_dirs.update({dir:rec_hash(index=index+1,dirs=local_dirs[dir], layers=layers)})
+                            pass # Es porque es un fichero y solo hay un elemento en la lista del split('/') (está a index 0)
+                for raiz in local_dirs:
+                    local_dirs.update({raiz:rec_hash(index=index+1,dirs=local_dirs[raiz], layers=layers)})
                 return local_dirs
             merkle = rec_hash(index=0,dirs=dirs, layers=layers)
             print(merkle)
