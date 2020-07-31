@@ -125,7 +125,7 @@ class Hyper:
                 for raiz in local_dirs:
                     local_dirs.update({raiz:create_tree(index=index+1,dirs=local_dirs[raiz], layers=layers)})
                 return local_dirs
-            with open('dirs.txt', 'w') as json_file:
+            with open('dirs.json', 'w') as json_file:
                 json.dump(dirs, json_file)
             exit()
             fs_tree = create_tree(index=0,dirs=dirs, layers=layers)
