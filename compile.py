@@ -49,9 +49,12 @@ class Hyper:
                     layers.append(layer)
                     print("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
                     for dir in check_output("cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
+                        if dir.split(' ')[0]=='/' or len(dir)==1:
+                            print("Ghost directory --> "+dir)
+                            continue # Estos no se de donde salen.
                         dirs.append(dir)
-            def rec_hash(index, dirs, layers):
-                def file_hash(adir, layers):
+            def create_tree(index, dirs, layers):
+                def add_file(adir, layers):
                     for layer in layers:
                         if os.path.exists('building/'+layer+'/'+adir):
                             if os.path.isfile('building/'+layer+'/'+adir):
@@ -95,13 +98,10 @@ class Hyper:
                 print("Nueva vuelta",index,", --> ",dirs)
                 local_dirs={}
                 for dir in dirs:
-                    if dir.split(' ')[0]=='/' or len(dir)==1:
-                        print("Ghost directory --> "+dir)
-                        continue
                     print("Directory --> "+dir)
                     raiz = dir.split('/')[index]
                     if dir[-len(raiz):]==raiz:
-                        local_dirs.update({dir:file_hash(adir=dir, layers=layers)})
+                        local_dirs.update({raiz:add_file(adir=dir, layers=layers)})
                     else:
                         print("Raiz --> "+raiz)
                         if (raiz in local_dirs) == False:
@@ -115,13 +115,19 @@ class Hyper:
                         except IndexError:
                             pass # Es porque es un fichero y solo hay un elemento en la lista del split('/') (está a index 0)
                 for raiz in local_dirs:
-                    local_dirs.update({raiz:rec_hash(index=index+1,dirs=local_dirs[raiz], layers=layers)})
+                    local_dirs.update({raiz:create_tree(index=index+1,dirs=local_dirs[raiz], layers=layers)})
                 return local_dirs
-            merkle = rec_hash(index=0,dirs=dirs, layers=layers)
-            print(merkle)
+            fs_tree = create_tree(index=0,dirs=dirs, layers=layers)
+            def reorder_tree(tree):
+                return tree
+            fs_tree = reorder_tree(fs_tree)
+            def calculate_hash(tree):
+                return tree
+            fs_tree = calculate_hash(fs_tree)
+            print(fs_tree)
             os.system("rm -rf building")
             os.system("docker rmi building")
-            container.update({'Filesys':merkle})
+            container.update({'Filesys':fs_tree})
             return container
         container = self.file.get('Container')
         if container == None:
