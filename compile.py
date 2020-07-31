@@ -61,7 +61,7 @@ class Hyper:
                                 print("Archivo --> "+adir)
                                 cdir = 'building/'+layer+'/'+adir
                             elif os.path.islink('building/'+layer+'/'+adir):
-                                link = check_output('ls -l building/'+layer+'/'+adir).split(" ")[-1]
+                                link = check_output('ls -l building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
                                 print("Link --> "+adir)
                                 return {
                                     "Dir":adir,
@@ -107,14 +107,15 @@ class Hyper:
                 for dir in dirs:
                     print("Directory --> "+dir)
                     raiz = dir.split('/')[index]
+                    print("Raiz --> "+raiz)
                     if dir[-len(raiz):]==raiz:
                         local_dirs.update({raiz:add_file(adir=dir, layers=layers)})
                     else:
-                        print("Raiz --> "+raiz)
                         if (raiz in local_dirs) == False:
                             print('   Nueva raiz --> '+raiz)  
                             local_dirs.update({raiz:[]})
                         try:
+                            print(local_dirs[raiz])
                             if raiz!=dir.split('/')[-2]:
                                 lista = local_dirs[raiz]
                                 lista.append(dir)
@@ -124,16 +125,22 @@ class Hyper:
                 for raiz in local_dirs:
                     local_dirs.update({raiz:create_tree(index=index+1,dirs=local_dirs[raiz], layers=layers)})
                 return local_dirs
+            with open('dirs.txt', 'w') as json_file:
+                json.dump(dirs, json_file)
+            exit()
             fs_tree = create_tree(index=0,dirs=dirs, layers=layers)
+            os.system("rm -rf building")
+            os.system("docker rmi building")
             def reorder_tree(tree):
-                return tree
+                l = []
+                for v in tree:
+                    l.append(reorder_tree(tree[v]))
+                return l
             fs_tree = reorder_tree(fs_tree)
             def calculate_hash(tree):
                 return tree
             fs_tree = calculate_hash(fs_tree)
             print(fs_tree)
-            os.system("rm -rf building")
-            os.system("docker rmi building")
             container.update({'Filesys':fs_tree})
             return container
         container = self.file.get('Container')
