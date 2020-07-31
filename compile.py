@@ -48,11 +48,11 @@ class Hyper:
                 if os.path.isdir("building/"+layer):
                     layers.append(layer)
                     print("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
-                    for dir in check_output("cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
+                    """for dir in check_output("cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
                         if dir.split(' ')[0]=='/' or len(dir)==1:
                             print("Ghost directory --> "+dir)
                             continue # Estos no se de donde salen.
-                        dirs.append(dir)
+                        dirs.append(dir)"""
             def create_tree(index, dirs, layers):
                 def add_file(adir, layers):
                     for layer in layers:
@@ -125,9 +125,7 @@ class Hyper:
                 for raiz in local_dirs:
                     local_dirs.update({raiz:create_tree(index=index+1,dirs=local_dirs[raiz], layers=layers)})
                 return local_dirs
-            with open('dirs.json', 'w') as json_file:
-                json.dump(dirs, json_file)
-            exit()
+            dirs = open("dirs.json","r").read()
             fs_tree = create_tree(index=0,dirs=dirs, layers=layers)
             os.system("rm -rf building")
             os.system("docker rmi building")
