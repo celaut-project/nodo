@@ -61,8 +61,12 @@ class Hyper:
                                 print("Archivo --> "+adir)
                                 cdir = 'building/'+layer+'/'+adir
                             elif os.path.islink('building/'+layer+'/'+adir):
+                                link = check_output('ls -l building/'+layer+'/'+adir).split(" ")[-1]
                                 print("Link --> "+adir)
-                                return adir # y la direccion.
+                                return {
+                                    "Dir":adir,
+                                    "Id":sha256(link)
+                                } # y la direccion.
                             elif os.path.ismount('building/'+layer+'/'+adir):
                                 print("Mount --> "+adir)
                                 print("ERROR: No deberiamos haber llegado aqui.")
@@ -94,7 +98,10 @@ class Hyper:
                         os.system("rm -rf building")
                         os.system("docker rmi building")
                         exit()
-                    return info
+                    return {
+                        "Dir":adir,
+                        "Id":sha256(info)
+                    }
                 print("Nueva vuelta",index,", --> ",dirs)
                 local_dirs={}
                 for dir in dirs:
