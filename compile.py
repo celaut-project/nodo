@@ -94,15 +94,12 @@ class Hyper:
                         os.system("docker rmi building")
                         exit()
                     except UnboundLocalError:
-                        print("Parece que "+adir+" no se encuentra en ninguna layer.")
-                        os.system("rm -rf building")
-                        os.system("docker rmi building")
-                        exit()
+                        return None
                     return {
                         "Dir":adir,
                         "Id":sha256(info)
                     }
-                print("Nueva vuelta",index,", --> ",dirs)
+                print("           Nueva vuelta",index)
                 local_dirs={}
                 for dir in dirs:
                     print("Directory --> "+dir)
@@ -115,7 +112,6 @@ class Hyper:
                             print('   Nueva raiz --> '+raiz)  
                             local_dirs.update({raiz:[]})
                         try:
-                            print(local_dirs[raiz])
                             if raiz!=dir.split('/')[-2]:
                                 lista = local_dirs[raiz]
                                 lista.append(dir)
@@ -125,7 +121,8 @@ class Hyper:
                 for raiz in local_dirs:
                     local_dirs.update({raiz:create_tree(index=index+1,dirs=local_dirs[raiz], layers=layers)})
                 return local_dirs
-            dirs = open("dirs.json","r").read()
+            with open('dirs.json') as f:
+                dirs = json.load(f)
             fs_tree = create_tree(index=0,dirs=dirs, layers=layers)
             os.system("rm -rf building")
             os.system("docker rmi building")
