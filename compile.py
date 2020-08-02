@@ -100,7 +100,6 @@ class Hyper:
                                 os.system("docker rmi building")
                                 exit()"""
                     print("Algo fue mal. No se encontro en ninguna capa ¿?")
-                    exit()
                 print("           Nueva vuelta",index)
                 local_dirs={}
                 local_files={}
