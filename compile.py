@@ -60,14 +60,34 @@ class Hyper:
                             if os.path.isfile('building/'+layer+'/'+adir):
                                 print("Archivo --> "+adir)
                                 cdir = 'building/'+layer+'/'+adir
+                                try:
+                                    info = open(cdir,"r").read()
+                                except UnicodeDecodeError: 
+                                    info = open(cdir,"br").read().decode('cp437')
+                                except FileNotFoundError:
+                                    print(adir+" posiblemente vacio.")
+                                    exit()
+                                except UnboundLocalError:
+                                    print("UnboundError")
+                                    print(cdir)
+                                    exit()
+                                return {
+                                    "Dir":adir,
+                                    "Id":sha256(info)
+                                }
                             elif os.path.islink('building/'+layer+'/'+adir):
                                 link = check_output('ls -l building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
                                 print("Link --> "+adir)
                                 return {
                                     "Dir":adir,
                                     "Id":sha256(link)
-                                } # y la direccion.
-                            elif os.path.ismount('building/'+layer+'/'+adir):
+                                }
+                            else:
+                                print("ERROR: No deberiamos haber llegado aqui.")
+                                os.system("rm -rf building")
+                                os.system("docker rmi building")
+                                exit()
+                            """elif os.path.ismount('building/'+layer+'/'+adir):
                                 print("Mount --> "+adir)
                                 print("ERROR: No deberiamos haber llegado aqui.")
                                 os.system("rm -rf building")
@@ -78,54 +98,34 @@ class Hyper:
                                 print("ERROR: No deberiamos haber llegado aqui.")
                                 os.system("rm -rf building")
                                 os.system("docker rmi building")
-                                exit()
-                            else:
-                                print("ERROR: Tampoco deberiamos haber llegado aqui.")
-                                os.system("rm -rf building")
-                                os.system("docker rmi building")
-                                exit()
-                    try:
-                        info = open(cdir,"r").read()
-                    except UnicodeDecodeError: 
-                        info = open(cdir,"br").read().decode('cp437')
-                    except FileNotFoundError:
-                        print(adir+" posiblemente vacio.")
-                        os.system("rm -rf building")
-                        os.system("docker rmi building")
-                        exit()
-                    except UnboundLocalError:
-                        return None
-                    return {
-                        "Dir":adir,
-                        "Id":sha256(info)
-                    }
+                                exit()"""
+                    print("Algo fue mal. No se encontro en ninguna capa ¿?")
+                    exit()
                 print("           Nueva vuelta",index)
                 local_dirs={}
+                local_files={}
                 for dir in dirs:
                     print("Directory --> "+dir)
                     raiz = dir.split('/')[index]
                     print("Raiz --> "+raiz)
-                    if dir[-len(raiz):]==raiz:
-                        local_dirs.update({raiz:add_file(adir=dir, layers=layers)})
+                    if dir[-1]!="/" and dir.split('/')[-1]==raiz:
+                        local_files.update({raiz:add_file(adir=dir, layers=layers)})
                     else:
                         if (raiz in local_dirs) == False:
                             print('   Nueva raiz --> '+raiz)  
                             local_dirs.update({raiz:[]})
-                        try:
-                            if raiz!=dir.split('/')[-2]:
-                                lista = local_dirs[raiz]
-                                lista.append(dir)
-                                local_dirs.update({raiz:lista})
-                        except IndexError:
-                            pass # Es porque es un fichero y solo hay un elemento en la lista del split('/') (está a index 0)
+                        if dir[-1]!="/" or raiz!=dir.split('/')[-2]: # No introducimos usr/ si la raiz es usr.
+                            lista = local_dirs[raiz]
+                            lista.append(dir)
+                            local_dirs.update({raiz:lista})
                 for raiz in local_dirs:
                     local_dirs.update({raiz:create_tree(index=index+1,dirs=local_dirs[raiz], layers=layers)})
-                return local_dirs
+                return local_dirs.update(local_files)
             with open('dirs.json') as f:
                 dirs = json.load(f)
             fs_tree = create_tree(index=0,dirs=dirs, layers=layers)
-            os.system("rm -rf building")
-            os.system("docker rmi building")
+            print(fs_tree)
+            exit()
             def reorder_tree(tree):
                 l = []
                 for v in tree:
