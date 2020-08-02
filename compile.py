@@ -123,18 +123,15 @@ class Hyper:
             with open('dirs.json') as f:
                 dirs = json.load(f)
             fs_tree = create_tree(index=0,dirs=dirs, layers=layers)
-            print(fs_tree)
-            exit()
             def reorder_tree(tree):
                 l = []
                 for v in tree:
                     l.append(reorder_tree(tree[v]))
                 return l
-            fs_tree = reorder_tree(fs_tree)
+            f#s_tree = reorder_tree(fs_tree)
             def calculate_hash(tree):
                 return tree
             fs_tree = calculate_hash(fs_tree)
-            print(fs_tree)
             container.update({'Filesys':fs_tree})
             return container
         container = self.file.get('Container')
