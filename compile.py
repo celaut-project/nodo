@@ -58,6 +58,8 @@ class Hyper:
                     for layer in layers:
                         if os.path.exists('building/'+layer+'/'+adir):
                             if os.path.isfile('building/'+layer+'/'+adir):
+                                if adir == '.wh..wh..opq':
+                                    return None
                                 print("Archivo --> "+adir)
                                 cdir = 'building/'+layer+'/'+adir
                                 try:
@@ -108,7 +110,9 @@ class Hyper:
                     raiz = dir.split('/')[index]
                     print("Raiz --> "+raiz)
                     if dir[-1]!="/" and dir.split('/')[-1]==raiz:
-                        local_files.update({raiz:add_file(adir=dir, layers=layers)})
+                        d = add_file(adir=dir, layers=layers)
+                        if d is not None:
+                            local_files.update({raiz:d})
                     else:
                         if (raiz in local_dirs) == False:
                             print('   Nueva raiz --> '+raiz)  
