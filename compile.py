@@ -190,7 +190,8 @@ class Hyper:
     
     @staticmethod
     def getId(hyperfile):
-        info = hyperfile.toString
+        info = json.dumps(hyperfile)
+        print(info)
         return sha256(info)
 
     def save(self):
