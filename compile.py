@@ -125,13 +125,13 @@ class Hyper:
                     local_dirs.update({raiz:create_tree(index=index+1,dirs=local_dirs[raiz], layers=layers)})
                 return {**local_dirs, **local_files}
             fs_tree = create_tree(index=0,dirs=dirs, layers=layers)
+            def make_hash(merkle):
+                s=None
+                for i in merkle:
+                    if s == None: s = i.get('Id')
+                    s = s+' '+i.get('Id')
+                return sha256(s)
             def reorder_tree(tree):
-                def make_tree_hash(merkle):
-                    s=None
-                    for i in merkle:
-                        if s == None: s = i.get('Id')
-                        s = s+' '+i.get('Id')
-                    return sha256(s)
                 l = []
                 for d in sorted(tree.items(), key=lambda x: x[0]):
                     v = d[1]
@@ -139,7 +139,7 @@ class Hyper:
                         if ('Dir' in v and 'Id' in v)==False: # No es un directorio ..
                             merkle = reorder_tree(tree=v)
                             if merkle == []: continue
-                            id = make_tree_hash(merkle=merkle)
+                            id = make_hash(merkle=merkle)
                             l.append({
                                 'Id' : id,
                                 'Merkle': merkle
@@ -151,9 +151,10 @@ class Hyper:
                         exit()
                 return l
             fs_tree = reorder_tree(fs_tree)
-            def calculate_hash(tree):
-                return tree
-            fs_tree = calculate_hash(fs_tree)
+            fs_tree = {
+                "Id": make_hash(fs_tree),
+                "Merkle": fs_tree
+            }
             container.update({'Filesys':fs_tree})
             return container
         container = self.file.get('Container')
