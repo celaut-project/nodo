@@ -127,21 +127,27 @@ class Hyper:
             fs_tree = create_tree(index=0,dirs=dirs, layers=layers)
             def reorder_tree(tree):
                 def make_tree_hash(merkle):
+                    s=None
                     for i in merkle:
-                        if s==None: s = i.get('Id')
+                        if s == None: s = i.get('Id')
                         s = s+' '+i.get('Id')
                     return sha256(s)
                 l = []
-                for v in sorted(tree.items(), key=lambda x: x[0]): # No es asi, v pasa como dict.
-                    if 'Dir' not in tree[v] or 'Id' not in tree[v]:
-                        merkle = reorder_tree(tree=tree[v])
-                        id = make_tree_hash(merkle=merkle)
-                        l.append({
-                            'Id' : id,
-                            'Merkle': merkle
-                            })
-                    else:
-                        l.append(tree[v])
+                for d in sorted(tree.items(), key=lambda x: x[0]):
+                    v = d[1]
+                    try:
+                        if ('Dir' in v and 'Id' in v)==False: # No es un directorio ..
+                            merkle = reorder_tree(tree=v)
+                            id = make_tree_hash(merkle=merkle)
+                            l.append({
+                                'Id' : id,
+                                'Merkle': merkle
+                                })
+                        else:
+                            l.append(v)
+                    except AttributeError:
+                        print(v)
+                        exit()
                 return l
             fs_tree = reorder_tree(fs_tree)
             def calculate_hash(tree):
