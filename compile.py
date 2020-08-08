@@ -189,11 +189,12 @@ class Hyper:
         pass
     
     @staticmethod
-    def getId(hyper):
-        return "hash256"
+    def getId(hyperfile):
+        info = hyperfile.toString
+        return sha256(info)
 
     def save(self):
-        registry = self.registry + Hyper.getId(self.file) + '.json'
+        registry = self.registry + Hyper.getId(hyperfile=self.file) + '.json'
         with open(registry,'w') as file:
             file.write( json.dumps(self.file, indent=4, sort_keys=True) )
 
