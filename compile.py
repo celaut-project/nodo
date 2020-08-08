@@ -138,6 +138,7 @@ class Hyper:
                     try:
                         if ('Dir' in v and 'Id' in v)==False: # No es un directorio ..
                             merkle = reorder_tree(tree=v)
+                            if merkle == []: continue
                             id = make_tree_hash(merkle=merkle)
                             l.append({
                                 'Id' : id,
