@@ -10,7 +10,7 @@
                 "Type": "Post"
             }
         ],
-        "Port": "8080",
+        "Port": "8080", 
         "Type": "Rest"
     },
     "Container": {
