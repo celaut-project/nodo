@@ -195,9 +195,12 @@ class Hyper:
         return sha256(info)
 
     def save(self):
-        registry = self.registry + Hyper.getId(hyperfile=self.file) + '.json'
-        with open(registry,'w') as file:
-            file.write( json.dumps(self.file, indent=4, sort_keys=True) )
+        id = Hyper.getId(hyperfile=self.file) 
+        file_dir = self.registry +id+ '.json'
+        with open(file_dir,'w') as f:
+            f.write( json.dumps(self.file) )
+        os.system('mkdir '+self.registry+'/'+id)
+        os.system('mv '+self.registry+'for_build/Dockerfile '+self.registry+'/'+id+'/')
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
