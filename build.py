@@ -41,11 +41,11 @@ class Image:
         run('sudo docker build -t '+self.id+'.oci ./registry/'+self.id+'/', shell=True)
         verify_filesys()
 
-def isValidHyperFile(file):
+def isValidHyperFile(filename):
     return True
 
 def main(filename, id):
-    if isValidHyperFile(file):
+    if isValidHyperFile(filename=filename):
         image = Image.makeImage(filename=file, id=id)
         image.build()
         return image
