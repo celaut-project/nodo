@@ -7,7 +7,7 @@ import hashlib
 
 def sha256(val):
     if val is None: return ""
-    return "sha256:"+hashlib.sha256(val.encode()).hexdigest()
+    return hashlib.sha256(val.encode()).hexdigest()
 
 class Hyper:
     def __init__(self, file={
