@@ -20,6 +20,7 @@ if __name__ == "__main__":
         
         with open('registry/'+dependency+'.json') as file:
             entrypoint = json.load(file).get('Container').get('Entrypoint')
+            if entrypoint == None: raise build.ImageException('No tenemos entrypoint ...') 
 
         if api_port == None:
             print('No retorna direccion, no hay api.')

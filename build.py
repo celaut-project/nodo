@@ -46,7 +46,7 @@ def isValidHyperFile(filename):
 
 def main(filename, id):
     if isValidHyperFile(filename=filename):
-        image = Image.makeImage(filename=file, id=id)
+        image = Image.makeImage(filename=filename, id=id)
         image.build()
         return image
 
