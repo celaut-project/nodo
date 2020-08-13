@@ -26,7 +26,7 @@ class Hyper:
         dependencies = []
         if os.path.isdir('registry/for_build/dependencies'):
             for file in os.listdir('registry/for_build/dependencies'):
-                image = json.load(open(file,'r'))
+                image = json.load(open('registry/for_build/dependencies/'+file,'r'))
                 dependencies.append(image)
             if len(dependencies)>0:
                 self.file.update({'Dependency':dependencies})
