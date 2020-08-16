@@ -27,9 +27,9 @@ if __name__ == "__main__":
 
             envs = request.json
             if envs == None:
-                container_id = subprocess.check_output('sudo docker run --entrypoint '+entrypoint+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
+                container_id = subprocess.check_output('sudo docker run -rm --entrypoint '+entrypoint+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
             else:
-                command = 'sudo docker run'
+                command = 'sudo docker run -rm'
                 for env in envs:
                     command = command +' -e "'+env+'='+envs[env]+'"'
                 command = command +' --entrypoint '+entrypoint +' --detach '+dependency+'.oci'
@@ -61,9 +61,9 @@ if __name__ == "__main__":
         
             envs = request.json
             if envs == None:
-                container_id = subprocess.check_output('sudo docker run --entrypoint '+entrypoint+' --expose '+api_port+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
+                container_id = subprocess.check_output('sudo docker run -rm --entrypoint '+entrypoint+' --expose '+api_port+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
             else:
-                command = 'sudo docker run --expose '+api_port
+                command = 'sudo docker run -rm --expose '+api_port
                 for env in envs:
                     command = command +' -e "'+env+'='+envs[env]+'"'
                 command = command +' --entrypoint '+entrypoint+' --detach '+dependency+'.oci'
