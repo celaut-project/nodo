@@ -20,35 +20,34 @@ class Hyper:
             }):
         super().__init__()
         self.file = file
-        self.registry = '__registry__/'
 
     def parseDependency(self):
         dependencies = []
-        if os.path.isdir('__registry__/for_build/dependencies'):
-            for file in os.listdir('__registry__/for_build/dependencies'):
-                image = json.load(open('__registry__/for_build/dependencies/'+file,'r'))
+        if os.path.isdir('__hycache__/for_build/dependencies'):
+            for file in os.listdir('__hycache__/for_build/dependencies'):
+                image = json.load(open('__hycache__/for_build/dependencies/'+file,'r'))
                 dependencies.append(image)
             if len(dependencies)>0:
                 self.file.update({'Dependency':dependencies})
 
     def parseContainer(self):
         def parseFilesys(container):
-            os.system("mkdir building")
-            if os.path.isfile("__registry__/for_build/Dockerfile"):
-                os.system('sudo docker build -t building __registry__/for_build/.')
-                os.system("docker save building | gzip > building/building.tar.gz")
-            elif os.path.isfile("__registry__/for_build/building.tar.gz"):
-                os.system("mv __registry__/for_build/building.tar.gz building/")
+            os.system("mkdir __hycache__/building")
+            if os.path.isfile("__hycache__/for_build/Dockerfile"):
+                os.system('sudo docker build -t building __hycache__/for_build/.')
+                os.system("docker save building | gzip > __hycache__/building/building.tar.gz")
+            elif os.path.isfile("__hycache__/for_build/building.tar.gz"):
+                os.system("mv __hycache__/for_build/building.tar.gz __hycache__/building/")
             else:
                 print("Error: Dockerfile o building.tar.gz no encontrados.")
-            os.system("cd building && tar -xvf building.tar.gz")
+            os.system("cd __hycache__/building && tar -xvf building.tar.gz")
             dirs = [] # lista de todos los directorios para ordenar.
             layers = []
-            for layer in os.listdir("building/"):
-                if os.path.isdir("building/"+layer):
+            for layer in os.listdir("__hycache__/building/"):
+                if os.path.isdir("__hycache__/building/"+layer):
                     layers.append(layer)
                     print("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
-                    for dir in check_output("cd building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
+                    for dir in check_output("cd __hycache__/building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
                         if dir.split(' ')[0]=='/' or len(dir)==1:
                             print("Ghost directory --> "+dir)
                             continue # Estos no se de donde salen.
@@ -56,12 +55,12 @@ class Hyper:
             def create_tree(index, dirs, layers):
                 def add_file(adir, layers):
                     for layer in layers:
-                        if os.path.exists('building/'+layer+'/'+adir):
-                            if os.path.isfile('building/'+layer+'/'+adir):
+                        if os.path.exists('__hycache__/building/'+layer+'/'+adir):
+                            if os.path.isfile('__hycache__/building/'+layer+'/'+adir):
                                 if adir == '.wh..wh..opq':
                                     return None
                                 print("Archivo --> "+adir)
-                                cdir = 'building/'+layer+'/'+adir
+                                cdir = '__hycache__/building/'+layer+'/'+adir
                                 try:
                                     info = open(cdir,"r").read()
                                 except UnicodeDecodeError: 
@@ -77,8 +76,8 @@ class Hyper:
                                     "Dir":adir,
                                     "Id":sha256(info)
                                 }
-                            elif os.path.islink('building/'+layer+'/'+adir):
-                                link = check_output('ls -l building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
+                            elif os.path.islink('__hycache__/building/'+layer+'/'+adir):
+                                link = check_output('ls -l __hycache__/building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
                                 print("Link --> "+adir)
                                 return {
                                     "Dir":adir,
@@ -86,20 +85,20 @@ class Hyper:
                                 }
                             else:
                                 print("ERROR: No deberiamos haber llegado aqui.")
-                                os.system("rm -rf building")
-                                os.system("docker rmi building")
+                                os.system("rm -rf __hycache__/building")
+                                os.system("docker rmi __hycache__/building")
                                 exit()
-                            """elif os.path.ismount('building/'+layer+'/'+adir):
+                            """elif os.path.ismount('__hycache__/building/'+layer+'/'+adir):
                                 print("Mount --> "+adir)
                                 print("ERROR: No deberiamos haber llegado aqui.")
-                                os.system("rm -rf building")
-                                os.system("docker rmi building")
+                                os.system("rm -rf __hycache__/building")
+                                os.system("docker rmi __hycache__/building")
                                 exit()
-                            elif os.path.isabs('building/'+layer+'/'+adir):
+                            elif os.path.isabs('__hycache__/building/'+layer+'/'+adir):
                                 print("Abs -->"+adir)
                                 print("ERROR: No deberiamos haber llegado aqui.")
-                                os.system("rm -rf building")
-                                os.system("docker rmi building")
+                                os.system("rm -rf __hycache__/building")
+                                os.system("docker rmi __hycache__/building")
                                 exit()"""
                     print("Algo fue mal. No se encontro en ninguna capa ¿?")
                 print("           Nueva vuelta",index)
@@ -165,20 +164,20 @@ class Hyper:
                 "Arch" : None,          # list
                 "Envs": None          # list
             }
-        arch = json.load(open("__registry__/for_build/Arch.json", "r"))
+        arch = json.load(open("__hycache__/for_build/Arch.json", "r"))
         container.update({'Arch' : arch})
-        if os.path.isfile("__registry__/for_build/Envs.json"):
-            envs = json.load(open("__registry__/for_build/Envs.json", "r"))
+        if os.path.isfile("__hycache__/for_build/Envs.json"):
+            envs = json.load(open("__hycache__/for_build/Envs.json", "r"))
             container.update({'Envs' : envs})
-        if os.path.isfile("__registry__/for_build/Entrypoint.json"):
-            entrypoint = json.load(open("__registry__/for_build/Entrypoint.json", "r"))
+        if os.path.isfile("__hycache__/for_build/Entrypoint.json"):
+            entrypoint = json.load(open("__hycache__/for_build/Entrypoint.json", "r"))
             container.update({'Entrypoint' : entrypoint})
         container = parseFilesys(container=container)
         self.file.update({'Container' : container})
 
     def parseApi(self):
-        if os.path.isfile("__registry__/for_build/Api.json"):
-            api = json.load(open("__registry__/for_build/Api.json", "r"))
+        if os.path.isfile("__hycache__/for_build/Api.json"):
+            api = json.load(open("__hycache__/for_build/Api.json", "r"))
             self.file.update({'Api' : api})
 
 
@@ -196,11 +195,11 @@ class Hyper:
 
     def save(self):
         id = Hyper.getId(hyperfile=self.file) 
-        file_dir = self.registry +id+ '.json'
+        file_dir = '__hycache__/' +id+ '.json'
         with open(file_dir,'w') as f:
             f.write( json.dumps(self.file) )
-        os.system('mkdir '+self.registry+'/'+id)
-        os.system('mv '+self.registry+'for_build/Dockerfile '+self.registry+'/'+id+'/')
+        os.system('mkdir __hycache__/'+id)
+        os.system('mv __hycache__/for_build/Dockerfile __hycache__/'+id+'/')
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
@@ -208,7 +207,7 @@ if __name__ == "__main__":
     else:
         print("\n NO HAY QUE USAR PARAMETROS.")
 
-    if os.path.isfile('__registry__/for_build/Arch.json') == False:
+    if os.path.isfile('__hycache__/for_build/Arch.json') == False:
         print('ForBuild invalido, Arch.json OBLIGATORIOS ....')
         exit()
 
