@@ -195,11 +195,11 @@ class Hyper:
 
     def save(self):
         id = Hyper.getId(hyperfile=self.file) 
-        file_dir = '__hycache__/' +id+ '.json'
+        file_dir = '__registry__/' +id+ '.json'
         with open(file_dir,'w') as f:
             f.write( json.dumps(self.file) )
-        os.system('mkdir __hycache__/'+id)
-        os.system('mv __hycache__/for_build/Dockerfile __hycache__/'+id+'/')
+        os.system('mkdir __registry__/'+id)
+        os.system('mv __hycache__/for_build/Dockerfile __registry__/'+id+'/')
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
