@@ -28,19 +28,19 @@ class Image:
         def verify_filesys():
             pass
         def dependency():
-            # Add dependencies on the registry.
+            # Add dependencies on the __registry__.
             dependencies = self.image.get('Dependency')
             if dependencies != None:
                 for dependency in dependencies:
                     file = json.dumps(dependency)
                     id = sha256(file)
-                    if os.path.isfile('registry/'+id+'.json') is False:
-                        with open('registry/'+id+'.json','w') as file:
+                    if os.path.isfile('__registry__/'+id+'.json') is False:
+                        with open('__registry__/'+id+'.json','w') as file:
                             file.write(file)
         dependency()
         # Add Entrypoint.
         with open('__hycache__/Dockerfile', 'w') as file:
-            file.write( open('./registry/'+self.id+'/Dockerfile', 'r') )
+            file.write( open('./__registry__/'+self.id+'/Dockerfile', 'r') )
         with open('__hycache__/Dockerfile', 'a') as file: 
             file.write('ENTRYPOINT '+self.image['Container']['Entrypoint'])
         run('sudo docker build -t '+self.id+'.oci __hycache__', shell=True)
@@ -60,7 +60,7 @@ class ImageException(Exception):
 
 def ok(image):
 
-    filename =  "registry/"+image+".json"
+    filename =  "__registry__/"+image+".json"
     if os.path.isfile(filename):
         img = main(filename=filename, id=image)
         if img.id == image:
@@ -74,6 +74,6 @@ def ok(image):
 
 if __name__ == "__main__":
     image = sys.argv[1]
-    file =  "registry/"+image+".json"
+    file =  "__registry__/"+image+".json"
     img = main(filename=file, id=image)
     print(img.id)

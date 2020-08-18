@@ -20,13 +20,13 @@ class Hyper:
             }):
         super().__init__()
         self.file = file
-        self.registry = 'registry/'
+        self.registry = '__registry__/'
 
     def parseDependency(self):
         dependencies = []
-        if os.path.isdir('registry/for_build/dependencies'):
-            for file in os.listdir('registry/for_build/dependencies'):
-                image = json.load(open('registry/for_build/dependencies/'+file,'r'))
+        if os.path.isdir('__registry__/for_build/dependencies'):
+            for file in os.listdir('__registry__/for_build/dependencies'):
+                image = json.load(open('__registry__/for_build/dependencies/'+file,'r'))
                 dependencies.append(image)
             if len(dependencies)>0:
                 self.file.update({'Dependency':dependencies})
@@ -34,11 +34,11 @@ class Hyper:
     def parseContainer(self):
         def parseFilesys(container):
             os.system("mkdir building")
-            if os.path.isfile("registry/for_build/Dockerfile"):
-                os.system('sudo docker build -t building registry/for_build/.')
+            if os.path.isfile("__registry__/for_build/Dockerfile"):
+                os.system('sudo docker build -t building __registry__/for_build/.')
                 os.system("docker save building | gzip > building/building.tar.gz")
-            elif os.path.isfile("registry/for_build/building.tar.gz"):
-                os.system("mv registry/for_build/building.tar.gz building/")
+            elif os.path.isfile("__registry__/for_build/building.tar.gz"):
+                os.system("mv __registry__/for_build/building.tar.gz building/")
             else:
                 print("Error: Dockerfile o building.tar.gz no encontrados.")
             os.system("cd building && tar -xvf building.tar.gz")
@@ -165,20 +165,20 @@ class Hyper:
                 "Arch" : None,          # list
                 "Envs": None          # list
             }
-        arch = json.load(open("registry/for_build/Arch.json","r"))
+        arch = json.load(open("__registry__/for_build/Arch.json", "r"))
         container.update({'Arch' : arch})
-        if os.path.isfile("registry/for_build/Envs.json"):
-            envs = json.load(open("registry/for_build/Envs.json","r"))
+        if os.path.isfile("__registry__/for_build/Envs.json"):
+            envs = json.load(open("__registry__/for_build/Envs.json", "r"))
             container.update({'Envs' : envs})
-        if os.path.isfile("registry/for_build/Entrypoint.json"):
-            entrypoint = json.load(open("registry/for_build/Entrypoint.json","r"))
+        if os.path.isfile("__registry__/for_build/Entrypoint.json"):
+            entrypoint = json.load(open("__registry__/for_build/Entrypoint.json", "r"))
             container.update({'Entrypoint' : entrypoint})
         container = parseFilesys(container=container)
         self.file.update({'Container' : container})
 
     def parseApi(self):
-        if os.path.isfile("registry/for_build/Api.json"):
-            api = json.load(open("registry/for_build/Api.json","r"))
+        if os.path.isfile("__registry__/for_build/Api.json"):
+            api = json.load(open("__registry__/for_build/Api.json", "r"))
             self.file.update({'Api' : api})
 
 
@@ -208,7 +208,7 @@ if __name__ == "__main__":
     else:
         print("\n NO HAY QUE USAR PARAMETROS.")
 
-    if os.path.isfile('registry/for_build/Arch.json') == False:
+    if os.path.isfile('__registry__/for_build/Arch.json') == False:
         print('ForBuild invalido, Arch.json OBLIGATORIOS ....')
         exit()
 

@@ -18,7 +18,7 @@ if __name__ == "__main__":
         except build.ImageException as e:
             print('Salta la excepcion ',e)
         
-        with open('registry/'+dependency+'.json') as file:
+        with open('__registry__/'+dependency+'.json') as file:
             entrypoint = json.load(file).get('Container').get('Entrypoint')
             if entrypoint == None: raise build.ImageException('No tenemos entrypoint ...') 
 
