@@ -38,13 +38,12 @@ class Image:
                         with open('registry/'+id+'.json','w') as file:
                             file.write(file)
         dependency()
-        Dockerfile_path = './registry/'+self.id+'/'
-        Dockerfile = open(Dockerfile_path, 'r')
-        with open(Dockerfile_path, 'a') as file:
+        # Add Entrypoint.
+        with open('__hycache__/Dockerfile', 'w') as file:
+            file.write( open('./registry/'+self.id+'/Dockerfile', 'r') )
+        with open('__hycache__/Dockerfile', 'a') as file: 
             file.write('ENTRYPOINT '+self.image['Container']['Entrypoint'])
-        run('sudo docker build -t '+self.id+'.oci '+Dockerfile_path , shell=True)
-        with open(Dockerfile_path, 'w') as file:
-            file.write(Dockerfile)
+        run('sudo docker build -t '+self.id+'.oci __hycache__', shell=True)
         verify_filesys()
 
 def isValidHyperFile(filename):
