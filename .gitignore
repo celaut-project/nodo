@@ -5,4 +5,4 @@ __pycache__
 inspect.json
 building/
 .idea
-__hycache__
+__hycache__/*
