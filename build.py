@@ -40,7 +40,9 @@ class Image:
         dependency()
         # Add Entrypoint.
         with open('__hycache__/Dockerfile', 'w') as file:
-            file.write( open('./__registry__/'+self.id+'/Dockerfile', 'r') )
+            with open('./__registry__/'+self.id+'/Dockerfile', 'r') as df:
+                data = df.read()
+            file.write( data )
         with open('__hycache__/Dockerfile', 'a') as file: 
             file.write('ENTRYPOINT '+self.image['Container']['Entrypoint'])
         run('sudo docker build -t '+self.id+'.oci __hycache__', shell=True)
