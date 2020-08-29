@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, abort
 import json
 import build
 import subprocess, os
@@ -58,36 +58,80 @@ if __name__ == "__main__":
 
         else:
             print('Retorna la uri para usar la api.', api_port)
-        
-            envs = request.json
-            if envs == None:
-                container_id = subprocess.check_output('sudo docker run --entrypoint --expose '+api_port+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
-            else:
-                command = 'sudo docker run --expose '+api_port
-                for env in envs:
-                    command = command +' -e "'+env+'='+envs[env]+'"'
-                command = command +' --detach '+dependency+'.oci'
-                container_id = subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
 
-            if request.remote_addr in instance_cache.keys():
-                father_token = instance_cache.get(request.remote_addr)
-            else:
-                father_token = 'tokenhoster'
-                instance_cache.update({request.remote_addr:'tokenhoster'})
-            token_cache.update({container_id:father_token})
-            while 1:
-                try:
-                    container_ip = subprocess.check_output("sudo docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
-                    print(container_ip)
-                    break
-                except subprocess.CalledProcessError as e:
-                    print(e.output)
+            if (request.remote_addr)[:7] == '172.17.':
+                envs = request.json
+                if envs == None:
+                    container_id = subprocess.check_output('sudo docker run --entrypoint --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
+                else:
+                    command = 'sudo docker run'
+                    for env in envs:
+                        command = command +' -e "'+env+'='+envs[env]+'"'
+                    command = command +' --detach '+dependency+'.oci'
+                    container_id = subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
 
-            instance_cache.update({container_ip:container_id})
-            return jsonify( {
-                'uri': 'http://'+container_ip + ':' + api_port,
-                'token': container_id
-            } )
+                if request.remote_addr in instance_cache.keys():
+                    father_token = instance_cache.get(request.remote_addr)
+                else:
+                    father_token = 'tokenhoster'
+                    instance_cache.update({request.remote_addr:'tokenhoster'})
+                token_cache.update({container_id:father_token})
+                while 1:
+                    try:
+                        container_ip = subprocess.check_output("sudo docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
+                        print(container_ip)
+                        break
+                    except subprocess.CalledProcessError as e:
+                        print(e.output)
+
+                instance_cache.update({container_ip:container_id})
+                return jsonify( {
+                    'uri': container_ip + ':' + api_port,
+                    'token': container_id
+                } )
+            elif (request.remote_addr)[:4] == '192.':
+                def get_host_ip():
+                    import socket
+                    host_name = socket.gethostname()
+                    return socket.gethostbyname( hostname=host_name )
+                def get_free_port():
+                    from socket import socket
+                    with socket() as s:
+                        s.bind(('',0))
+                        return s.getsockname()[1]
+                host_ip = get_host_ip()
+                free_port = get_free_port()
+                envs = request.json
+                if envs == None:
+                    container_id = subprocess.check_output('sudo docker run --entrypoint -p '+free_port+':'+api_port+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
+                else:
+                    command = 'sudo docker run --expose '+free_port+':'+api_port
+                    for env in envs:
+                        command = command +' -e "'+env+'='+envs[env]+'"'
+                    command = command +' --detach '+dependency+'.oci'
+                    container_id = subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
+
+                if request.remote_addr in instance_cache.keys():
+                    father_token = instance_cache.get(request.remote_addr)
+                else:
+                    father_token = 'tokenhoster'
+                    instance_cache.update({request.remote_addr:'tokenhoster'})
+                token_cache.update({container_id:father_token})
+                while 1:
+                    try:
+                        container_ip = subprocess.check_output("sudo docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
+                        print(container_ip)
+                        break
+                    except subprocess.CalledProcessError as e:
+                        print(e.output)
+
+                instance_cache.update({container_ip:container_id})
+                return jsonify( {
+                    'uri': host_ip + ':' + free_port,
+                    'token': container_id
+                } )
+            else:
+                abort('400','THIS NETWORK IS NOT SUPPORTED')
 
     # Se puede usar una cache para la recursividad,
     #  para no estar buscando todo el tiempo lo mismo.
