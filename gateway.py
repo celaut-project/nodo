@@ -17,10 +17,6 @@ if __name__ == "__main__":
             print(api_port)
         except build.ImageException as e:
             print('Salta la excepcion ',e)
-        
-        with open('__registry__/'+dependency+'.json') as file:
-            entrypoint = json.load(file).get('Container').get('Entrypoint')
-            if entrypoint == None: raise build.ImageException('No tenemos entrypoint ...') 
 
         if api_port == None:
             print('No retorna direccion, no hay api.')
@@ -62,7 +58,7 @@ if __name__ == "__main__":
             if (request.remote_addr)[:7] == '172.17.':
                 envs = request.json
                 if envs == None:
-                    container_id = subprocess.check_output('sudo docker run --entrypoint --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
+                    container_id = subprocess.check_output('sudo docker run --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
                 else:
                     command = 'sudo docker run'
                     for env in envs:
@@ -103,7 +99,7 @@ if __name__ == "__main__":
                 free_port = get_free_port()
                 envs = request.json
                 if envs == None:
-                    container_id = subprocess.check_output('sudo docker run --entrypoint -p '+free_port+':'+api_port+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
+                    container_id = subprocess.check_output('sudo docker run -p '+free_port+':'+api_port+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
                 else:
                     command = 'sudo docker run --expose '+free_port+':'+api_port
                     for env in envs:
