@@ -141,9 +141,17 @@ if __name__ == "__main__":
                     token(d)
                     del token_cache[d]  
 
+    def query():
+        response = {}
+        for query_service in os.listdir('__nodes__'):
+            response.update( request.post(query_service, json=request.json) )
+        return response
+
     @app.route('/<hello>',  methods=['GET', 'POST'])
     def hello(hello):
-        if len(hello)==64:
+        if hello=='?':
+            return query()
+        elif len(hello)==64:
             return dependency(hello)
         else:
             return token(hello)
