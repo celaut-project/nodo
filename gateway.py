@@ -87,14 +87,13 @@ if __name__ == "__main__":
                 } )
             elif (request.remote_addr)[:4] == '192.':
                 def get_host_ip():
-                    import socket
-                    host_name = socket.gethostname()
-                    return socket.gethostbyname( hostname=host_name )
+                    import socket as s
+                    return s.gethostbyname( s.gethostname() )
                 def get_free_port():
                     from socket import socket
                     with socket() as s:
                         s.bind(('',0))
-                        return s.getsockname()[1]
+                        return str(s.getsockname()[1])
                 host_ip = get_host_ip()
                 free_port = get_free_port()
                 envs = request.json
