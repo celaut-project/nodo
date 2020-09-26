@@ -55,7 +55,7 @@ if __name__ == "__main__":
         else:
             print('Retorna la uri para usar la api.', api_port)
 
-            if (request.remote_addr)[:7] == '172.17.':
+            if (request.remote_addr)[:7] == '172.17.' or (request.remote_addr) == '127.0.0.1':
                 envs = request.json
                 if envs == None:
                     container_id = subprocess.check_output('sudo docker run --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
