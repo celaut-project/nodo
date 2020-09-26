@@ -13,6 +13,7 @@ def check_gateway():
 
 
 
+
 def launch_instance(image):
     with open('__registry__/'+image+'.json') as file:
         envs = {}
@@ -30,8 +31,11 @@ def clean_cache():
 
 def delete_instance(docker_name):
     token = docker_container_id_from_name(docker_name)
-    response = requests.get('http://'+gateway_host+'/'+token)
-    if response == 200: print('DO IT.')
+    print('Confirm to delete '+docker_name+' [Yes/No] ')
+    inpt = input()
+    if inpt == 'Y' or inpt == 'y' or inpt == 'yes' or inpt == 'Yes':
+        if requests.get('http://'+gateway_host+'/'+token) == 200: print('DO IT.')
+    else: print('Canceled.')
 
 def clean_image(image):
     print('borra la imagen de Docker.')
