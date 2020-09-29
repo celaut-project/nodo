@@ -39,8 +39,17 @@ def delete_instance(docker_name):
         if requests.get('http://'+GATEWAY_HOST+'/'+token) == 200: print('DO IT.')
     else: print('Canceled.')
 
-def clean_image(image):
-    print('borra la imagen de Docker.')
+def delete_image(image):
+    import os
+    print('Confirm to delete '+image+' [Yes/No] ')
+    inpt = input()
+    if inpt == 'Y' or inpt == 'y' or inpt == 'yes' or inpt == 'Yes':
+        pass
+    else: print('Canceled.')
+
+def compile_image(image):
+    import compile
+    compile.ok(image)
 
 def images_list():
     import os
@@ -51,7 +60,7 @@ def images_list():
 
 def instances_list():
     import os
-    os.system('docker ps')
+    os.system('sudo docker ps')
 
 def instance_output(docker_name):
     import os

@@ -10,7 +10,7 @@ def sha256(val):
     return hashlib.sha256(val.encode()).hexdigest()
 
 class Hyper:
-    def __init__(self, file={
+    def __init__(self, path, file={
                 "Api": None,        # list
                 "Container" : None, # dict
                 "Contract": None,   # list
@@ -20,12 +20,13 @@ class Hyper:
             }):
         super().__init__()
         self.file = file
+        self.path = path
 
     def parseDependency(self):
         dependencies = []
-        if os.path.isdir('__hycache__/for_build/dependencies'):
-            for file in os.listdir('__hycache__/for_build/dependencies'):
-                image = json.load(open('__hycache__/for_build/dependencies/'+file,'r'))
+        if os.path.isdir(self.path+'dependencies'):
+            for file in os.listdir(self.path+'dependencies'):
+                image = json.load(open(self.path+'dependencies/'+file,'r'))
                 dependencies.append(image)
             if len(dependencies)>0:
                 self.file.update({'Dependency':dependencies})
@@ -33,11 +34,11 @@ class Hyper:
     def parseContainer(self):
         def parseFilesys(container):
             os.system("mkdir __hycache__/building")
-            if os.path.isfile("__hycache__/for_build/Dockerfile"):
-                os.system('sudo docker build -t building __hycache__/for_build/.')
+            if os.path.isfile(self.path+'Dockerfile'):
+                os.system('sudo docker build -t building '+self.path)
                 os.system("docker save building | gzip > __hycache__/building/building.tar.gz")
-            elif os.path.isfile("__hycache__/for_build/building.tar.gz"):
-                os.system("mv __hycache__/for_build/building.tar.gz __hycache__/building/")
+            elif os.path.isfile(self.path+'building.tar.gz'):
+                os.system("mv "+self.path+"building.tar.gz __hycache__/building/")
             else:
                 print("Error: Dockerfile o building.tar.gz no encontrados.")
             os.system("cd __hycache__/building && tar -xvf building.tar.gz")
@@ -164,20 +165,20 @@ class Hyper:
                 "Arch" : None,          # list
                 "Envs": None          # list
             }
-        arch = json.load(open("__hycache__/for_build/Arch.json", "r"))
+        arch = json.load(open(self.path+"Arch.json", "r"))
         container.update({'Arch' : arch})
-        if os.path.isfile("__hycache__/for_build/Envs.json"):
-            envs = json.load(open("__hycache__/for_build/Envs.json", "r"))
+        if os.path.isfile(self.path+"Envs.json"):
+            envs = json.load(open(self.path+"Envs.json", "r"))
             container.update({'Envs' : envs})
-        if os.path.isfile("__hycache__/for_build/Entrypoint.json"):
-            entrypoint = json.load(open("__hycache__/for_build/Entrypoint.json", "r"))
+        if os.path.isfile(self.path+"Entrypoint.json"):
+            entrypoint = json.load(open(self.path+"Entrypoint.json", "r"))
             container.update({'Entrypoint' : entrypoint})
         container = parseFilesys(container=container)
         self.file.update({'Container' : container})
 
     def parseApi(self):
-        if os.path.isfile("__hycache__/for_build/Api.json"):
-            api = json.load(open("__hycache__/for_build/Api.json", "r"))
+        if os.path.isfile(self.path+"Api.json"):
+            api = json.load(open(self.path+"Api.json", "r"))
             self.file.update({'Api' : api})
 
 
@@ -199,18 +200,11 @@ class Hyper:
         with open(file_dir,'w') as f:
             f.write( json.dumps(self.file) )
         os.system('mkdir __registry__/'+id)
-        os.system('mv __hycache__/for_build/Dockerfile __registry__/'+id+'/')
+        os.system('mv '+self.path+'Dockerfile __registry__/'+id+'/')
 
-if __name__ == "__main__":
-    if len(sys.argv) == 1:
-        Hyperfile = Hyper() # Hyperfile
-    else:
-        print("\n NO HAY QUE USAR PARAMETROS.")
-
-    if os.path.isfile('__hycache__/for_build/Arch.json') == False:
-        print('ForBuild invalido, Arch.json OBLIGATORIOS ....')
-        exit()
-
+def ok(path):
+    Hyperfile = Hyper(path=path)
+        
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
     Hyperfile.parseDependency()
@@ -218,3 +212,13 @@ if __name__ == "__main__":
     Hyperfile.parseTensor()
 
     Hyperfile.save()
+
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        ok(path='__hycache__/for_build/') # Hyperfile
+    else:
+        print("\n NO HAY QUE USAR PARAMETROS.")
+
+    if os.path.isfile('__hycache__/for_build/Arch.json') == False:
+        print('ForBuild invalido, Arch.json OBLIGATORIOS ....')
+        exit()
