@@ -200,7 +200,7 @@ class Hyper:
         with open(file_dir,'w') as f:
             f.write( json.dumps(self.file) )
         os.system('mkdir __registry__/'+id)
-        os.system('mv '+self.path+'Dockerfile __registry__/'+id+'/')
+        os.system('mv '+self.path+' __registry__/'+id+'/')
 
 def ok(path):
     Hyperfile = Hyper(path=path)
