@@ -50,7 +50,8 @@ def images_list():
 
 
 def instances_list():
-    pass
+    import os
+    os.system('docker ps')
 
 def instance_output(docker_name):
     import os
