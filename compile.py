@@ -165,7 +165,7 @@ class Hyper:
                 "Arch" : None,          # list
                 "Envs": None          # list
             }
-        arch = json.load(open(self.path+"Arch.json", "r"))
+        arch = json.load(open(self.path+".json", "r"))
         container.update({'Arch' : arch})
         if os.path.isfile(self.path+"Envs.json"):
             envs = json.load(open(self.path+"Envs.json", "r"))
