@@ -47,7 +47,7 @@ def delete_image(image):
         pass
     else: print('Canceled.')
 
-def compile_image(image):
+def recompile_image(image):
     import compile
     compile.ok(image)
 
