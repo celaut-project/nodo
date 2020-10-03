@@ -54,8 +54,8 @@ def compile_image(image):
 def images_list():
     import os
     for l in os.listdir('__registry__'):
-        if len(l.split('.'))==1:
-            print(l)
+        if len(l.split('.'))==2:
+            print(l.split('.')[0])
 
 
 def instances_list():
