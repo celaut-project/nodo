@@ -97,7 +97,7 @@ if __name__ == "__main__":
                 host_ip = get_host_ip()
                 free_port = get_free_port()
                 envs = request.json
-                if envs == None:
+                if envs == None or envs == {}:
                     container_id = subprocess.check_output('sudo docker run -p '+free_port+':'+api_port+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
                 else:
                     command = 'sudo docker run --expose '+free_port+':'+api_port
