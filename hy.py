@@ -49,7 +49,7 @@ def delete_image(image):
 
 def recompile_image(image):
     import compile
-    compile.ok(image)
+    compile.ok('__registry__/'+image)
 
 def images_list():
     import os
