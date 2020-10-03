@@ -14,9 +14,11 @@ def check_gateway():
 
 def launch_instance(image):
     import requests
+    import json
     with open('__registry__/'+image+'.json') as file:
+        file = json.load(file)
         envs = {}
-        for env in file.Container.Envs:
+        for env in file['Container']['Envs']:
             print('Valor para: '+env)
             envs.update({
                 env:input()
