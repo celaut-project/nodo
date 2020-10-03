@@ -36,7 +36,7 @@ class Image:
                     id = sha256(file)
                     if os.path.isfile('__registry__/'+id+'.json') is False:
                         with open('__registry__/'+id+'.json','w') as file:
-                            file.write(file)
+                            file.write(file.read())
         dependency()
         # Add Entrypoint.
         with open('__hycache__/Dockerfile', 'w') as file:
