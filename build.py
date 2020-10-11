@@ -34,16 +34,16 @@ class Image:
                 for dependency in dependencies:
                     file = json.dumps(dependency)
                     id = sha256(file)
-                    if os.path.isfile('__registry__/'+id+'.json') is False:
-                        with open('__registry__/'+id+'.json','w') as file:
+                    if os.path.isfile('/node/__registry__/'+id+'.json') is False:
+                        with open('/node/__registry__/'+id+'.json','w') as file:
                             file.write(file.read())
         dependency()
         # Add Entrypoint.
-        with open('__hycache__/Dockerfile', 'w') as file:
-            with open('./__registry__/'+self.id+'/Dockerfile', 'r') as df:
+        with open('/node/__hycache__/Dockerfile', 'w') as file:
+            with open('/node/__registry__/'+self.id+'/Dockerfile', 'r') as df:
                 data = df.read()
             file.write( data + '\nENTRYPOINT '+self.image['Container']['Entrypoint'])
-        run('sudo docker build -t '+self.id+'.oci __hycache__/.', shell=True)
+        run('sudo docker build -t '+self.id+'.oci /node/__hycache__/.', shell=True)
         verify_filesys()
 
 def isValidHyperFile(filename):
@@ -60,7 +60,7 @@ class ImageException(Exception):
 
 def ok(image):
 
-    filename =  "__registry__/"+image+".json"
+    filename =  "/node/__registry__/"+image+".json"
     if os.path.isfile(filename):
         img = main(filename=filename, id=image)
         if img.id == image:
@@ -74,6 +74,6 @@ def ok(image):
 
 if __name__ == "__main__":
     image = sys.argv[1]
-    file =  "__registry__/"+image+".json"
+    file =  "/node/__registry__/"+image+".json"
     img = main(filename=file, id=image)
     print(img.id)

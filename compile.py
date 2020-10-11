@@ -33,22 +33,22 @@ class Hyper:
 
     def parseContainer(self):
         def parseFilesys(container):
-            os.system("mkdir __hycache__/building")
+            os.system("mkdir /node/__hycache__/building")
             if os.path.isfile(self.path+'Dockerfile'):
                 os.system('sudo docker build -t building '+self.path)
-                os.system("docker save building | gzip > __hycache__/building/building.tar.gz")
+                os.system("docker save building | gzip > /node/__hycache__/building/building.tar.gz")
             elif os.path.isfile(self.path+'building.tar.gz'):
                 os.system("mv "+self.path+"building.tar.gz __hycache__/building/")
             else:
                 print("Error: Dockerfile o building.tar.gz no encontrados.")
-            os.system("cd __hycache__/building && tar -xvf building.tar.gz")
+            os.system("cd /node/__hycache__/building && tar -xvf building.tar.gz")
             dirs = [] # lista de todos los directorios para ordenar.
             layers = []
-            for layer in os.listdir("__hycache__/building/"):
-                if os.path.isdir("__hycache__/building/"+layer):
+            for layer in os.listdir("/node/__hycache__/building/"):
+                if os.path.isdir("/node/__hycache__/building/"+layer):
                     layers.append(layer)
                     print("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
-                    for dir in check_output("cd __hycache__/building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
+                    for dir in check_output("cd /node/__hycache__/building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
                         if dir.split(' ')[0]=='/' or len(dir)==1:
                             print("Ghost directory --> "+dir)
                             continue # Estos no se de donde salen.
@@ -56,12 +56,12 @@ class Hyper:
             def create_tree(index, dirs, layers):
                 def add_file(adir, layers):
                     for layer in layers:
-                        if os.path.exists('__hycache__/building/'+layer+'/'+adir):
-                            if os.path.isfile('__hycache__/building/'+layer+'/'+adir):
+                        if os.path.exists('/node/__hycache__/building/'+layer+'/'+adir):
+                            if os.path.isfile('/node/__hycache__/building/'+layer+'/'+adir):
                                 if adir == '.wh..wh..opq':
                                     return None
                                 print("Archivo --> "+adir)
-                                cdir = '__hycache__/building/'+layer+'/'+adir
+                                cdir = '/node/__hycache__/building/'+layer+'/'+adir
                                 try:
                                     info = open(cdir,"r").read()
                                 except UnicodeDecodeError: 
@@ -77,8 +77,8 @@ class Hyper:
                                     "Dir":adir,
                                     "Id":sha256(info)
                                 }
-                            elif os.path.islink('__hycache__/building/'+layer+'/'+adir):
-                                link = check_output('ls -l __hycache__/building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
+                            elif os.path.islink('/node/__hycache__/building/'+layer+'/'+adir):
+                                link = check_output('ls -l /node/__hycache__/building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
                                 print("Link --> "+adir)
                                 return {
                                     "Dir":adir,
@@ -86,8 +86,8 @@ class Hyper:
                                 }
                             else:
                                 print("ERROR: No deberiamos haber llegado aqui.")
-                                os.system("rm -rf __hycache__/building")
-                                os.system("docker rmi __hycache__/building")
+                                os.system("rm -rf /node/__hycache__/building")
+                                os.system("docker rmi /node/__hycache__/building")
                                 exit()
                             """elif os.path.ismount('__hycache__/building/'+layer+'/'+adir):
                                 print("Mount --> "+adir)
@@ -196,11 +196,11 @@ class Hyper:
 
     def save(self):
         id = Hyper.getId(hyperfile=self.file) 
-        file_dir = '__registry__/' +id+ '.json'
+        file_dir = '/node/__registry__/' +id+ '.json'
         with open(file_dir,'w') as f:
             f.write( json.dumps(self.file) )
-        os.system('mkdir __registry__/'+id)
-        os.system('mv '+self.path+' __registry__/'+id+'/')
+        os.system('mkdir /node/__registry__/'+id)
+        os.system('mv '+self.path+' /node/__registry__/'+id+'/')
 
 def ok(path):
     Hyperfile = Hyper(path=path)
@@ -215,7 +215,7 @@ def ok(path):
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
-        ok(path='__hycache__/for_build/') # Hyperfile
+        ok(path='/node/__hycache__/for_build/') # Hyperfile
     else:
         print("\n NO HAY QUE USAR PARAMETROS.")
 
