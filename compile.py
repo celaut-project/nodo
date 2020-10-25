@@ -215,9 +215,13 @@ def ok(path):
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
-        ok(path='/home/node/__hycache__/for_build/') # Hyperfile
+        ok(path='/home/node/__hycache__/for_build/')  # Hyperfile
+    elif len(sys.argv) == 2:
+        repo = str(sys.argv[1])
+        os.system('git clone '+repo+' /home/node/__hycache__/for_build/')
+        ok(path='/home/node/__hycache__/for_build/'+repo.split('/')[-1].split('.')[0]+'/.hy/')  # Hyperfile
     else:
-        print("\n NO HAY QUE USAR PARAMETROS.")
+        print('NO SE ACPTAN MAS PARÁMETROS..')
 
     if os.path.isfile('__hycache__/for_build/Arch.json') == False:
         print('ForBuild invalido, Arch.json OBLIGATORIOS ....')
