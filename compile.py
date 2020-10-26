@@ -136,7 +136,7 @@ class Hyper:
                 for d in sorted(tree.items(), key=lambda x: x[0]):
                     v = d[1]
                     try:
-                        if ('Dir' in v and 'Id' in v)==False: # No es un directorio ..
+                        if ('Dir' in v and 'Id' in v)==False: # No es un directorio ...
                             merkle = reorder_tree(tree=v)
                             if merkle == []: continue
                             id = make_hash(merkle=merkle)
@@ -165,7 +165,7 @@ class Hyper:
                 "Arch" : None,          # list
                 "Envs": None          # list
             }
-        arch = json.load(open(self.path+".json", "r"))
+        arch = json.load(open(self.path+"Arch.json", "r"))
         container.update({'Arch' : arch})
         if os.path.isfile(self.path+"Envs.json"):
             envs = json.load(open(self.path+"Envs.json", "r"))
@@ -200,7 +200,7 @@ class Hyper:
         with open(file_dir,'w') as f:
             f.write( json.dumps(self.file) )
         os.system('mkdir /home/node/__registry__/'+id)
-        os.system('mv '+self.path+' /home/node/__registry__/'+id+'/')
+        os.system('mv '+self.path+' home/node/__registry__/'+id+'/')
 
 def ok(path):
     Hyperfile = Hyper(path=path)
@@ -219,7 +219,7 @@ if __name__ == "__main__":
     elif len(sys.argv) == 2:
         repo = str(sys.argv[1])
         os.system('git clone '+repo+' /home/node/__hycache__/for_build/')
-        ok(path='/home/node/__hycache__/for_build/'+repo.split('/')[-1].split('.')[0]+'/.hy/')  # Hyperfile
+        ok(path='/home/node/__hycache__/for_build/'+repo.split('/')[-1].split('.')[0]+'/hy/')  # Hyperfile
     else:
         print('NO SE ACPTAN MAS PARÁMETROS..')
 
