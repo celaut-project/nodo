@@ -219,7 +219,7 @@ if __name__ == "__main__":
     elif len(sys.argv) == 2:
         repo = str(sys.argv[1])
         os.system('git clone '+repo+' /home/node/__hycache__/for_build/')
-        ok(path='/home/node/__hycache__/for_build/'+repo.split('/')[-1].split('.')[0]+'/hy/')  # Hyperfile
+        ok(path='/home/node/__hycache__/for_build/'+repo.split('/')[-1].split('.')[0]+'/.hy/')  # Hyperfile
     else:
         print('NO SE ACPTAN MAS PARÁMETROS..')
 
