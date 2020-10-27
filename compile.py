@@ -204,7 +204,7 @@ class Hyper:
 
 def ok(path):
     Hyperfile = Hyper(path=path)
-        
+
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
     Hyperfile.parseDependency()
@@ -217,9 +217,12 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:
         ok(path='/home/node/__hycache__/for_build/')  # Hyperfile
     elif len(sys.argv) == 2:
-        repo = str(sys.argv[1])
-        os.system('git clone '+repo+' /home/node/__hycache__/for_build/')
-        ok(path='/home/node/__hycache__/for_build/'+repo.split('/')[-1].split('.')[0]+'/.hy/')  # Hyperfile
+        git = str(sys.argv[1])
+        repo = git.split('::')[0]
+        branch = git.split('::')[1]
+        os.system('git clone --branch '+branch+' '+repo+' /home/node/__hycache__/for_build/git')
+        print(os.listdir('/home/node/__hycache__/for_build/git/.hy/'))
+        ok(path='/home/node/__hycache__/for_build/git/.hy/')  # Hyperfile
     else:
         print('NO SE ACPTAN MAS PARÁMETROS..')
 
