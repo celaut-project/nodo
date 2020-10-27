@@ -2,7 +2,14 @@ import sys
 
 class string(str):
     def like(self, other: str) -> bool:
-        return self.lower() in other.lower()
+        a = self.lower()
+        b = other.lower()
+        return a in b or b in a
+    
+    def common(self, others: list(str)) -> str:
+        best = None
+        for other in others:
+            
 
 # La mejor forma de resolver el problema podria ser con redes neuronales,
 #  pero un algoritmo podria salvarnos de los casos mas simples.
