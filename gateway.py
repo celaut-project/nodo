@@ -3,7 +3,7 @@ import json
 import build
 import subprocess, os
 
-if __name__ == "__main__":
+def run():
 
     app = Flask(__name__)
 
@@ -159,5 +159,4 @@ if __name__ == "__main__":
             return dependency(hello)
         else:
             return token(hello)
-
-    app.run(host='0.0.0.0', port=8080)
+    return app
