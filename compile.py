@@ -7,7 +7,7 @@ import hashlib
 SHAKE = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(256)
 
 # ALERT: Its not async.
-SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(99999)
+SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(99999999)
 
 class Hyper:
     def __init__(self, path, file={
