@@ -149,14 +149,14 @@ def run():
             })
         return response
 
-    @app.route('/<hello>',  methods=['GET', 'POST'])
-    def hello(hello):
-        if hello=='@?':
+    @app.route('/',  methods=['GET', 'POST', 'PUT'])
+    def hello():
+        if request.text=='@?':
             return node_list()
-        elif hello == '@!':
-            return 'HEY.'
-        elif len(hello)==64:
-            return dependency(hello)
+        elif request.text == '@!' or request.text == 'HEY':
+            return 'HY.'
+        elif len(request.text)==64:
+            return dependency(request.text)
         else:
-            return token(hello)
+            return token(request.text)
     return app
