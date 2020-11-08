@@ -2,7 +2,7 @@ import sys
 from subprocess import run
 import json
 import os
-from compile import sha256
+from compile import SHAKE
 
 class Image:
     image = None
@@ -33,7 +33,7 @@ class Image:
             if dependencies != None:
                 for dependency in dependencies:
                     file = json.dumps(dependency)
-                    id = sha256(file)
+                    id = SHAKE(file)
                     if os.path.isfile('/home/node/__registry__/'+id+'.json') is False:
                         with open('/home/node/__registry__/'+id+'.json','w') as file:
                             file.write(file.read())
