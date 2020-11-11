@@ -4,10 +4,10 @@ from subprocess import run, check_output
 import os
 import hashlib
 
+SHAKE = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(256)
 
-def sha256(val):
-    if val is None: return ""
-    return hashlib.sha256(val.encode()).hexdigest()
+# ALERT: Its not async.
+SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(99999999)
 
 class Hyper:
     def __init__(self, path, file={
@@ -75,14 +75,14 @@ class Hyper:
                                     exit()
                                 return {
                                     "Dir":adir,
-                                    "Id":sha256(info)
+                                    "Id":SHAKE(info)
                                 }
                             elif os.path.islink('/home/node/__hycache__/building/'+layer+'/'+adir):
                                 link = check_output('ls -l /home/node/__hycache__/building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
                                 print("Link --> "+adir)
                                 return {
                                     "Dir":adir,
-                                    "Id":sha256(link)
+                                    "Id":SHAKE(link)
                                 }
                             else:
                                 print("ERROR: No deberiamos haber llegado aqui.")
@@ -130,7 +130,7 @@ class Hyper:
                 for i in merkle:
                     if s == None: s = i.get('Id')
                     s = s+' '+i.get('Id')
-                return sha256(s)
+                return SHAKE(s)
             def reorder_tree(tree):
                 l = []
                 for d in sorted(tree.items(), key=lambda x: x[0]):
@@ -192,7 +192,7 @@ class Hyper:
     def getId(hyperfile):
         info = json.dumps(hyperfile)
         print(info)
-        return sha256(info)
+        return SHAKE(info)
 
     def save(self):
         id = Hyper.getId(hyperfile=self.file) 
