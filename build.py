@@ -4,6 +4,10 @@ import json
 import os
 from compile import SHAKE
 
+import logging
+logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
+LOGGER = lambda message: logging.getLogger(__name__).debug(message)
+
 class Image:
     image = None
     def __init__(self, image, id):
@@ -22,7 +26,7 @@ class Image:
         return Image(image=file, id=id)
 
     def show(self):
-        print(self.image)
+        LOGGER(self.image)
 
     def build(self):
         def verify_filesys():
@@ -56,7 +60,7 @@ def main(filename, id):
         return image
 
 class ImageException(Exception):
-    print(Exception)
+    LOGGER(Exception)
 
 def ok(image):
 
@@ -65,7 +69,7 @@ def ok(image):
         img = main(filename=filename, id=image)
         if img.id == image:
             api_port = img.api_port()
-            print('Retorna el puerto de la API', api_port)
+            LOGGER('Retorna el puerto de la API', api_port)
             return api_port
         else:
             raise ImageException('Imagen erronea..')
@@ -76,4 +80,4 @@ if __name__ == "__main__":
     image = sys.argv[1]
     file =  "/home/node/__registry__/"+image+".json"
     img = main(filename=file, id=image)
-    print(img.id)
+    LOGGER(img.id)

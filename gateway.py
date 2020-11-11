@@ -3,6 +3,10 @@ import json
 import build
 import subprocess, os
 
+import logging
+logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
+LOGGER = lambda message: logging.getLogger(__name__).debug(message)
+
 app = Flask(__name__)
 
 token_cache = {} # token : token del padre  ( si es tokenhoster es que no tiene padre..)
@@ -12,12 +16,12 @@ instance_cache = {}  # uri : token
 def dependency(dependency):
     try:
         api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
-        print(api_port)
+        LOGGER(api_port)
     except build.ImageException as e:
-        print('Salta la excepcion ',e)
+        LOGGER('Salta la excepcion ',e)
 
     if api_port == None:
-        print('No retorna direccion, no hay api.')
+        LOGGER('No retorna direccion, no hay api.')
 
         envs = request.json
         if envs == None:
@@ -38,10 +42,10 @@ def dependency(dependency):
         while 1:
             try:
                 container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
-                print(container_ip)
+                LOGGER(container_ip)
                 break
             except subprocess.CalledProcessError as e:
-                print(e.output)            
+                LOGGER(e.output)
 
 
         instance_cache.update({container_ip:container_id})
@@ -51,7 +55,7 @@ def dependency(dependency):
         } )
 
     else:
-        print('Retorna la uri para usar la api.', api_port)
+        LOGGER('Retorna la uri para usar la api.', api_port)
 
         if (request.remote_addr)[:7] == '172.17.' or (request.remote_addr) == '127.0.0.1':
             envs = request.json
@@ -73,10 +77,10 @@ def dependency(dependency):
             while 1:
                 try:
                     container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
-                    print(container_ip)
+                    LOGGER(container_ip)
                     break
                 except subprocess.CalledProcessError as e:
-                    print(e.output)
+                    LOGGER(e.output)
 
             instance_cache.update({container_ip:container_id})
             return jsonify( {
@@ -113,10 +117,10 @@ def dependency(dependency):
             while 1:
                 try:
                     container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
-                    print(container_ip)
+                    LOGGER(container_ip)
                     break
                 except subprocess.CalledProcessError as e:
-                    print(e.output)
+                    LOGGER(e.output)
 
             instance_cache.update({container_ip:container_id})
             return jsonify( {
@@ -130,7 +134,7 @@ def dependency(dependency):
 #  para no estar buscando todo el tiempo lo mismo.
 def token(token):
     if token == 'tokenhoster':
-        print('TOKENHOSTER NO SE TOCA')
+        LOGGER('TOKENHOSTER NO SE TOCA')
     else:
         subprocess.check_output('docker rm '+token+' --force', shell=True)
         for d in token_cache:

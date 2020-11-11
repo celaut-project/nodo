@@ -4,6 +4,10 @@ from subprocess import run, check_output
 import os
 import hashlib
 
+import logging
+logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
+LOGGER = lambda message: logging.getLogger(__name__).debug(message)
+
 SHAKE = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(256)
 
 # ALERT: Its not async.
@@ -40,17 +44,17 @@ class Hyper:
             elif os.path.isfile(self.path+'building.tar.gz'):
                 os.system("mv "+self.path+"building.tar.gz __hycache__/building/")
             else:
-                print("Error: Dockerfile o building.tar.gz no encontrados.")
+                ("Error: Dockerfile o building.tar.gz no encontrados.")
             os.system("cd /home/node/__hycache__/building && tar -xvf building.tar.gz")
             dirs = [] # lista de todos los directorios para ordenar.
             layers = []
             for layer in os.listdir("/home/node/__hycache__/building/"):
                 if os.path.isdir("/home/node/__hycache__/building/"+layer):
                     layers.append(layer)
-                    print("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
+                    LOGGER("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
                     for dir in check_output("cd /home/node/__hycache__/building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
                         if dir.split(' ')[0]=='/' or len(dir)==1:
-                            print("Ghost directory --> "+dir)
+                            LOGGER("Ghost directory --> "+dir)
                             continue # Estos no se de donde salen.
                         dirs.append(dir)
             def create_tree(index, dirs, layers):
@@ -60,18 +64,18 @@ class Hyper:
                             if os.path.isfile('/home/node/__hycache__/building/'+layer+'/'+adir):
                                 if adir == '.wh..wh..opq':
                                     return None
-                                print("Archivo --> "+adir)
+                                LOGGER("Archivo --> "+adir)
                                 cdir = '/home/node/__hycache__/building/'+layer+'/'+adir
                                 try:
                                     info = open(cdir,"r").read()
                                 except UnicodeDecodeError: 
                                     info = open(cdir,"br").read().decode('cp437')
                                 except FileNotFoundError:
-                                    print(adir+" posiblemente vacio.")
+                                    LOGGER(adir+" posiblemente vacio.")
                                     exit()
                                 except UnboundLocalError:
-                                    print("UnboundError")
-                                    print(cdir)
+                                    LOGGER("UnboundError")
+                                    LOGGER(cdir)
                                     exit()
                                 return {
                                     "Dir":adir,
@@ -79,43 +83,43 @@ class Hyper:
                                 }
                             elif os.path.islink('/home/node/__hycache__/building/'+layer+'/'+adir):
                                 link = check_output('ls -l /home/node/__hycache__/building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
-                                print("Link --> "+adir)
+                                LOGGER("Link --> "+adir)
                                 return {
                                     "Dir":adir,
                                     "Id":SHAKE(link)
                                 }
                             else:
-                                print("ERROR: No deberiamos haber llegado aqui.")
+                                LOGGER("ERROR: No deberiamos haber llegado aqui.")
                                 os.system("rm -rf /home/node/__hycache__/building")
                                 os.system("docker rmi /home/node/__hycache__/building")
                                 exit()
                             """elif os.path.ismount('__hycache__/building/'+layer+'/'+adir):
-                                print("Mount --> "+adir)
-                                print("ERROR: No deberiamos haber llegado aqui.")
+                                LOOGGER("Mount --> "+adir)
+                                LOGGER("ERROR: No deberiamos haber llegado aqui.")
                                 os.system("rm -rf __hycache__/building")
                                 os.system("docker rmi __hycache__/building")
                                 exit()
                             elif os.path.isabs('__hycache__/building/'+layer+'/'+adir):
-                                print("Abs -->"+adir)
-                                print("ERROR: No deberiamos haber llegado aqui.")
+                                LOGGER("Abs -->"+adir)
+                                LOGGER("ERROR: No deberiamos haber llegado aqui.")
                                 os.system("rm -rf __hycache__/building")
                                 os.system("docker rmi __hycache__/building")
                                 exit()"""
-                    print("Algo fue mal. No se encontro en ninguna capa ¿?")
-                print("           Nueva vuelta",index)
+                    LOGGER("Algo fue mal. No se encontro en ninguna capa ¿?")
+                LOGGER("           Nueva vuelta",index)
                 local_dirs={}
                 local_files={}
                 for dir in dirs:
-                    print("Directory --> "+dir)
+                    LOGGER("Directory --> "+dir)
                     raiz = dir.split('/')[index]
-                    print("Raiz --> "+raiz)
+                    LOGGER("Raiz --> "+raiz)
                     if dir[-1]!="/" and dir.split('/')[-1]==raiz:
                         d = add_file(adir=dir, layers=layers)
                         if d is not None:
                             local_files.update({raiz:d})
                     else:
                         if (raiz in local_dirs) == False:
-                            print('   Nueva raiz --> '+raiz)  
+                            LOGGER('   Nueva raiz --> '+raiz)
                             local_dirs.update({raiz:[]})
                         if dir[-1]!="/" or raiz!=dir.split('/')[-2]: # No introducimos usr/ si la raiz es usr.
                             lista = local_dirs[raiz]
@@ -147,7 +151,7 @@ class Hyper:
                         else:
                             l.append(v)
                     except AttributeError:
-                        print(v)
+                        LOGGER(v)
                         exit()
                 return l
             fs_tree = reorder_tree(fs_tree)
@@ -191,7 +195,7 @@ class Hyper:
     @staticmethod
     def getId(hyperfile):
         info = json.dumps(hyperfile)
-        print(info)
+        LOGGER(info)
         return SHAKE(info)
 
     def save(self):
@@ -221,11 +225,11 @@ if __name__ == "__main__":
         repo = git.split('::')[0]
         branch = git.split('::')[1]
         os.system('git clone --branch '+branch+' '+repo+' /home/node/__hycache__/for_build/git')
-        print(os.listdir('/home/node/__hycache__/for_build/git/.hy/'))
+        LOGGER(os.listdir('/home/node/__hycache__/for_build/git/.hy/'))
         ok(path='/home/node/__hycache__/for_build/git/.hy/')  # Hyperfile
     else:
-        print('NO SE ACPTAN MAS PARÁMETROS..')
+        LOGGER('NO SE ACPTAN MAS PARÁMETROS..')
 
     if os.path.isfile('__hycache__/for_build/Arch.json') == False:
-        print('ForBuild invalido, Arch.json OBLIGATORIOS ....')
+        LOGGER('ForBuild invalido, Arch.json OBLIGATORIOS ....')
         exit()
