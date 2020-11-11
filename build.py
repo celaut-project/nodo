@@ -43,7 +43,7 @@ class Image:
             with open('/home/node/__registry__/'+self.id+'/Dockerfile', 'r') as df:
                 data = df.read()
             file.write( data + '\nENTRYPOINT '+self.image['Container']['Entrypoint'])
-        run('sudo docker build -t '+self.id+'.oci /home/node/__hycache__/.', shell=True)
+        run('docker build -t '+self.id+'.oci /home/node/__hycache__/.', shell=True)
         verify_filesys()
 
 def isValidHyperFile(filename):

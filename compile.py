@@ -35,7 +35,7 @@ class Hyper:
         def parseFilesys(container):
             os.system("mkdir /home/node/__hycache__/building")
             if os.path.isfile(self.path+'Dockerfile'):
-                os.system('sudo docker build -t building '+self.path)
+                os.system('docker build -t building '+self.path)
                 os.system("docker save building | gzip > /home/node/__hycache__/building/building.tar.gz")
             elif os.path.isfile(self.path+'building.tar.gz'):
                 os.system("mv "+self.path+"building.tar.gz __hycache__/building/")
