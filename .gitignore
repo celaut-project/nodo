@@ -1,8 +1,0 @@
-./inspect.json
-./Dockerfile
-__pycache__
-.vscode
-inspect.json
-building/
-.idea
-__hycache__/*

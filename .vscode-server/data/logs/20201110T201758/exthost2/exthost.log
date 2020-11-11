@@ -1,0 +1,16 @@
+[2020-11-10 20:19:56.301] [exthost] [info] extension host started
+[2020-11-10 20:19:56.466] [exthost] [info] ExtensionService#_doActivateExtension vscode.debug-auto-launch {"startup":true,"extensionId":{"value":"vscode.debug-auto-launch","_lower":"vscode.debug-auto-launch"},"activationEvent":"*"}
+[2020-11-10 20:19:56.467] [exthost] [info] ExtensionService#loadCommonJSModule file:///home/pi/.vscode-server/bin/fcac248b077b55bae4ba5bab613fd6e9156c2f0c/extensions/debug-auto-launch/dist/extension
+[2020-11-10 20:19:56.483] [exthost] [info] ExtensionService#_doActivateExtension vscode.emmet {"startup":true,"extensionId":{"value":"vscode.emmet","_lower":"vscode.emmet"},"activationEvent":"*"}
+[2020-11-10 20:19:56.483] [exthost] [info] ExtensionService#loadCommonJSModule file:///home/pi/.vscode-server/bin/fcac248b077b55bae4ba5bab613fd6e9156c2f0c/extensions/emmet/dist/node/emmetNodeMain
+[2020-11-10 20:19:56.581] [exthost] [info] ExtensionService#_doActivateExtension vscode.git {"startup":true,"extensionId":{"value":"vscode.github","_lower":"vscode.github"},"activationEvent":"*"}
+[2020-11-10 20:19:56.581] [exthost] [info] ExtensionService#loadCommonJSModule file:///home/pi/.vscode-server/bin/fcac248b077b55bae4ba5bab613fd6e9156c2f0c/extensions/git/dist/main
+[2020-11-10 20:19:56.748] [exthost] [info] ExtensionService#_doActivateExtension vscode.merge-conflict {"startup":true,"extensionId":{"value":"vscode.merge-conflict","_lower":"vscode.merge-conflict"},"activationEvent":"*"}
+[2020-11-10 20:19:56.749] [exthost] [info] ExtensionService#loadCommonJSModule file:///home/pi/.vscode-server/bin/fcac248b077b55bae4ba5bab613fd6e9156c2f0c/extensions/merge-conflict/dist/mergeConflictMain
+[2020-11-10 20:19:56.760] [exthost] [info] ExtensionService#_doActivateExtension vscode.search-result {"startup":true,"extensionId":{"value":"vscode.search-result","_lower":"vscode.search-result"},"activationEvent":"*"}
+[2020-11-10 20:19:56.760] [exthost] [info] ExtensionService#loadCommonJSModule file:///home/pi/.vscode-server/bin/fcac248b077b55bae4ba5bab613fd6e9156c2f0c/extensions/search-result/dist/extension.js
+[2020-11-10 20:19:57.338] [exthost] [info] ExtensionService#_doActivateExtension vscode.github {"startup":true,"extensionId":{"value":"vscode.github","_lower":"vscode.github"},"activationEvent":"*"}
+[2020-11-10 20:19:57.338] [exthost] [info] ExtensionService#loadCommonJSModule file:///home/pi/.vscode-server/bin/fcac248b077b55bae4ba5bab613fd6e9156c2f0c/extensions/github/dist/extension.js
+[2020-11-10 20:19:57.481] [exthost] [info] ExtensionService#_doActivateExtension ms-vscode.js-debug {"startup":false,"extensionId":{"value":"ms-vscode.js-debug","_lower":"ms-vscode.js-debug"},"activationEvent":"onCommand:extension.js-debug.clearAutoAttachVariables"}
+[2020-11-10 20:19:57.481] [exthost] [info] ExtensionService#loadCommonJSModule file:///home/pi/.vscode-server/bin/fcac248b077b55bae4ba5bab613fd6e9156c2f0c/extensions/ms-vscode.js-debug/src/extension.js
+[2020-11-10 20:19:57.956] [exthost] [info] eager extensions activated

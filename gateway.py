@@ -147,13 +147,15 @@ def node_list():
         })
     return response
 
-@app.route('/',  methods=['GET', 'POST', 'PUT'])
+@app.route('/',  methods=['POST'])
 def hello():
-    if request.text=='@?':
+    response = request.json
+    if type(response) is not str: return 'HY.'
+    if response=='@?':
         return node_list()
-    elif request.text == '@!' or request.text == 'HEY':
+    elif response == '@!' or response == 'HEY':
         return 'HY.'
-    elif len(request.text)==64:
-        return dependency(request.text)
+    elif len(response)==64:
+        return dependency(response)
     else:
-        return token(request.text)
+        return token(response)
