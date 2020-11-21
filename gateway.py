@@ -151,7 +151,7 @@ def node_list():
         })
     return response
 
-@app.route('/',  methods=['POST'])
+@app.route('/',  methods=['POST', 'GET', 'PUT'])
 def hello():
     response = request.json
     if type(response) is not str: return 'HY.'
