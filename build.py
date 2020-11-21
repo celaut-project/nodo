@@ -39,8 +39,8 @@ class Image:
                     file = json.dumps(dependency)
                     id = SHAKE(file)
                     if os.path.isfile('/home/pi/__registry__/'+id+'.json') is False:
-                        with open('/home/pi/__registry__/'+id+'.json','w') as file:
-                            file.write(file.read())
+                        with open('/home/pi/__registry__/'+id+'.json','w') as f:
+                            f.write(file)
         dependency()
         # Add Entrypoint.
         with open('/home/pi/__hycache__/Dockerfile', 'w') as file:
