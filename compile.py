@@ -8,7 +8,7 @@ import logging
 logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
 LOGGER = lambda message: logging.getLogger(__name__).debug(message)
 
-SHAKE = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(256)
+SHAKE = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(32)
 
 # ALERT: Its not async.
 SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(99999999)
