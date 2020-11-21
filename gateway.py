@@ -154,7 +154,9 @@ def node_list():
 @app.route('/',  methods=['POST', 'GET', 'PUT'])
 def hello():
     response = request.json
-    if type(response) is not str: return 'HY.'
+    if type(response) is not str:
+        LOGGER('HY '+request.remote_addr)
+        return 'HY.'
     if response=='@?':
         return node_list()
     elif response == '@!' or response == 'HEY':
