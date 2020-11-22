@@ -23,7 +23,7 @@ def dependency(dependency):
     if api_port == None:
         LOGGER('No retorna direccion, no hay api.')
 
-        envs = request.json['envs'] # TODO adaptative_api
+        envs = request.json.get('envs') or None # TODO adaptative_api
         if envs == None:
             container_id = subprocess.check_output('docker run --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
         else:
@@ -153,9 +153,9 @@ def node_list():
 
 @app.route('/',  methods=['POST', 'GET', 'PUT'])
 def hello():
-    servicio = request.json().get('service') or None # TODO adaptative_api
+    servicio = request.json.get('service') or None # TODO adaptative_api
     if servicio is None:
-        token = request.json().get('token')
+        token = request.json.get('token')
         return token if token is not None else 'HY.'
     if type(servicio) is not str:
         LOGGER('HY '+request.remote_addr)

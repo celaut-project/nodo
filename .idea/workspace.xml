@@ -26,12 +26,7 @@
     </select>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5c96d19e-6a88-4dba-bc96-b0c24894d883" name="Default Changelist" comment="archivos con 32 digitos de SHAKE.">
-      <change afterPath="$PROJECT_DIR$/.idea/HyperNode.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    <list default="true" id="5c96d19e-6a88-4dba-bc96-b0c24894d883" name="Default Changelist" comment="service, token or envs in the json. Without adaptative api yet.">
       <change beforePath="$PROJECT_DIR$/gateway.py" beforeDir="false" afterPath="$PROJECT_DIR$/gateway.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -104,7 +99,14 @@
       <option name="project" value="LOCAL" />
       <updated>1605977319282</updated>
     </task>
-    <option name="localTasksCounter" value="7" />
+    <task id="LOCAL-00007" summary="service, token or envs in the json. Without adaptative api yet.">
+      <created>1606073419671</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1606073419671</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -137,7 +139,8 @@
     <MESSAGE value=".hy" />
     <MESSAGE value="user pi" />
     <MESSAGE value="archivos con 32 digitos de SHAKE." />
-    <option name="LAST_COMMIT_MESSAGE" value="archivos con 32 digitos de SHAKE." />
+    <MESSAGE value="service, token or envs in the json. Without adaptative api yet." />
+    <option name="LAST_COMMIT_MESSAGE" value="service, token or envs in the json. Without adaptative api yet." />
   </component>
   <component name="WindowStateProjectService">
     <state x="184" y="90" key="DiffContextDialog" timestamp="1605975844827">
@@ -156,10 +159,10 @@
       <screen x="0" y="0" width="1920" height="1080" />
     </state>
     <state x="461" y="185" key="SettingsEditor/0.0.1920.1080@0.0.1920.1080" timestamp="1605121089841" />
-    <state x="552" y="272" key="Vcs.Push.Dialog.v2" timestamp="1605977326020">
+    <state x="552" y="272" key="Vcs.Push.Dialog.v2" timestamp="1606073424063">
       <screen x="0" y="0" width="1920" height="1080" />
     </state>
-    <state x="552" y="272" key="Vcs.Push.Dialog.v2/0.0.1920.1080@0.0.1920.1080" timestamp="1605977326020" />
+    <state x="552" y="272" key="Vcs.Push.Dialog.v2/0.0.1920.1080@0.0.1920.1080" timestamp="1606073424063" />
     <state x="777" y="454" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2" timestamp="1606065096258">
       <screen x="0" y="0" width="1920" height="1080" />
     </state>
