@@ -69,7 +69,7 @@ def ok(image):
         img = main(filename=filename, id=image)
         if img.id == image:
             api_port = img.api_port()
-            LOGGER('Retorna el puerto de la API', api_port)
+            LOGGER('Retorna el puerto de la API'+ str(api_port))
             return api_port
         else:
             raise ImageException('Imagen erronea..')
@@ -80,4 +80,4 @@ if __name__ == "__main__":
     image = sys.argv[1]
     file =  "/home/hy/node/__registry__/"+image+".json"
     img = main(filename=file, id=image)
-    LOGGER(img.id)
+    LOGGER(str(img.id))

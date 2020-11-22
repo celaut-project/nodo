@@ -16,9 +16,9 @@ instance_cache = {}  # uri : token
 def dependency(dependency):
     try:
         api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
-        LOGGER(api_port)
+        LOGGER(str(api_port))
     except build.ImageException as e:
-        LOGGER('Salta la excepcion ',e)
+        LOGGER('Salta la excepcion '+str(e))
 
     if api_port == None:
         LOGGER('No retorna direccion, no hay api.')
@@ -42,7 +42,7 @@ def dependency(dependency):
         while 1:
             try:
                 container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
-                LOGGER(container_ip)
+                LOGGER(str(container_ip))
                 break
             except subprocess.CalledProcessError as e:
                 LOGGER(e.output)
@@ -55,7 +55,7 @@ def dependency(dependency):
         } )
 
     else:
-        LOGGER('Retorna la uri para usar la api.', api_port)
+        LOGGER('Retorna la uri para usar la api.'+ str(api_port))
 
         if (request.remote_addr)[:7] == '172.17.' or (request.remote_addr) == '127.0.0.1':
             envs = request.json
@@ -117,7 +117,7 @@ def dependency(dependency):
             while 1:
                 try:
                     container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
-                    LOGGER(container_ip)
+                    LOGGER(str(container_ip))
                     break
                 except subprocess.CalledProcessError as e:
                     LOGGER(e.output)

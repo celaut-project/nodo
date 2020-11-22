@@ -51,7 +51,7 @@ class Hyper:
             for layer in os.listdir("/home/hy/node/__hycache__/building/"):
                 if os.path.isdir("/home/hy/node/__hycache__/building/"+layer):
                     layers.append(layer)
-                    LOGGER("Layer --> ",layer) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
+                    LOGGER("Layer --> "+str(layer)) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
                     for dir in check_output("cd /home/hy/node/__hycache__/building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
                         if dir.split(' ')[0]=='/' or len(dir)==1:
                             LOGGER("Ghost directory --> "+dir)
@@ -106,7 +106,7 @@ class Hyper:
                                 os.system("docker rmi __hycache__/building")
                                 exit()"""
                     LOGGER("Algo fue mal. No se encontro en ninguna capa ¿?")
-                LOGGER("           Nueva vuelta",index)
+                LOGGER("           Nueva vuelta"+str(index))
                 local_dirs={}
                 local_files={}
                 for dir in dirs:
