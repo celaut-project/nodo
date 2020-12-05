@@ -102,10 +102,11 @@ def dependency(dependency):
             if envs == None or envs == {}:
                 container_id = subprocess.check_output('docker run -p '+free_port+':'+api_port+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
             else:
-                command = 'docker run --expose '+free_port+':'+api_port
+                command = 'docker run'
                 for env in envs:
                     command = command +' -e "'+env+'='+envs[env]+'"'
                 command = command +' --detach '+dependency+'.oci'
+                command = command +'  --expose '+free_port+':'+api_port
                 container_id = subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
 
             if request.remote_addr in instance_cache.keys():
