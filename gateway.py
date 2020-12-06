@@ -98,16 +98,12 @@ def dependency(dependency):
                     return str(s.getsockname()[1])
             host_ip = get_host_ip()
             free_port = get_free_port()
-            envs = request.json
-            if envs == None or envs == {}:
-                container_id = subprocess.check_output('docker run -p '+free_port+':'+api_port+' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
-            else:
-                command = 'docker run'
+            command = 'docker run -p '+free_port+':'+api_port+' --detach'
+            if envs:
                 for env in envs:
                     command = command +' -e "'+env+'='+envs[env]+'"'
-                command = command +' --detach '+dependency+'.oci'
-                command = command +'  --expose '+free_port+':'+api_port
-                container_id = subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
+            command = command+' '+dependency+'.oci'
+            container_id = subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
 
             if request.remote_addr in instance_cache.keys():
                 father_token = instance_cache.get(request.remote_addr)
