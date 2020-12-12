@@ -163,3 +163,7 @@ def hello():
         return 'HY.'
     else:
         return dependency(servicio)
+
+if __name__ == "__main__":
+    print('HELLO TO GATEWAY ON DEVELOPER MODE.')
+    app.run()
