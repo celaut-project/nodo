@@ -107,7 +107,14 @@
       <option name="project" value="LOCAL" />
       <updated>1606073419671</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="envs &quot;&quot; fix">
+      <created>1607787585875</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1607787585875</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -141,7 +148,8 @@
     <MESSAGE value="user pi" />
     <MESSAGE value="archivos con 32 digitos de SHAKE." />
     <MESSAGE value="service, token or envs in the json. Without adaptative api yet." />
-    <option name="LAST_COMMIT_MESSAGE" value="service, token or envs in the json. Without adaptative api yet." />
+    <MESSAGE value="envs &quot;&quot; fix" />
+    <option name="LAST_COMMIT_MESSAGE" value="envs &quot;&quot; fix" />
   </component>
   <component name="WindowStateProjectService">
     <state x="184" y="90" key="DiffContextDialog" timestamp="1605975844827">
@@ -160,17 +168,13 @@
       <screen x="0" y="0" width="1920" height="1080" />
     </state>
     <state x="461" y="185" key="SettingsEditor/0.0.1920.1080@0.0.1920.1080" timestamp="1605121089841" />
-    <state x="552" y="272" key="Vcs.Push.Dialog.v2" timestamp="1606073424063">
+    <state x="552" y="272" key="Vcs.Push.Dialog.v2" timestamp="1607787595017">
       <screen x="0" y="0" width="1920" height="1080" />
     </state>
-    <state x="552" y="272" key="Vcs.Push.Dialog.v2/0.0.1920.1080@0.0.1920.1080" timestamp="1606073424063" />
+    <state x="552" y="272" key="Vcs.Push.Dialog.v2/0.0.1920.1080@0.0.1920.1080" timestamp="1607787595017" />
     <state x="777" y="454" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2" timestamp="1606065096258">
       <screen x="0" y="0" width="1920" height="1080" />
     </state>
     <state x="777" y="454" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/0.0.1920.1080@0.0.1920.1080" timestamp="1606065096258" />
-    <state x="682" y="452" key="vcs.readOnlyHandler.ReadOnlyStatusDialog" timestamp="1597776001053">
-      <screen x="0" y="0" width="1920" height="1080" />
-    </state>
-    <state x="682" y="452" key="vcs.readOnlyHandler.ReadOnlyStatusDialog/0.0.1920.1080@0.0.1920.1080" timestamp="1597776001053" />
   </component>
 </project>

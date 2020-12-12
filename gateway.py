@@ -13,18 +13,18 @@ token_cache = {} # token : token del padre  ( si es tokenhoster es que no tiene 
 
 instance_cache = {}  # uri : token
 
-def dependency(dependency):
+def dependency( dependency ):
     try:
         api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
         LOGGER(str(api_port))
     except build.ImageException as e:
         LOGGER('Salta la excepcion '+str(e))
 
-    if api_port == None:
+    if api_port is None:
         LOGGER('No retorna direccion, no hay api.')
 
         envs = request.json.get('envs') or None # TODO adaptative_api
-        if envs == None:
+        if envs is None:
             container_id = subprocess.check_output('docker run --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
         else:
             command = 'docker run'
