@@ -14,6 +14,22 @@ token_cache = {} # token : token del padre  ( si es tokenhoster es que no tiene 
 instance_cache = {}  # uri : token
 
 def dependency( dependency ):
+    def start_container(api_port=None, free_port=None):
+        envs = request.json.get('envs') or None # TODO adaptative_api
+
+        command = 'docker run'
+        if envs is not None:
+            for env in envs:
+                command = command +' -e '+env+'='+envs[env]
+
+        if api_port is not None and free_port is not None:
+            command = command + ' -p '+free_port+':'+api_port
+
+        return subprocess.check_output(command +' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '')
+
+
+
+
     try:
         api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
         LOGGER(str(api_port))
@@ -23,15 +39,7 @@ def dependency( dependency ):
     if api_port is None:
         LOGGER('No retorna direccion, no hay api.')
 
-        envs = request.json.get('envs') or None # TODO adaptative_api
-        if envs is None:
-            container_id = subprocess.check_output('docker run --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
-        else:
-            command = 'docker run'
-            for env in envs:
-                command = command +' -e '+env+'='+envs[env]
-            command = command +' --detach '+dependency+'.oci'
-            container_id = subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
+        container_id = start_container()
 
         if request.remote_addr in instance_cache.keys():
             father_token = instance_cache.get(request.remote_addr)
@@ -57,17 +65,9 @@ def dependency( dependency ):
     else:
         LOGGER('Retorna la uri para usar la api.'+ str(api_port))
 
-        envs = request.json.get('envs') or None # TODO adaptative_api
         if (request.remote_addr)[:7] == '172.17.' or (request.remote_addr) == '127.0.0.1':
-            envs = request.json
-            if envs == None:
-                container_id = subprocess.check_output('docker run --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '') # Ejecuta una instancia de la imagen.
-            else:
-                command = 'docker run'
-                for env in envs:
-                    command = command +' -e "'+env+'='+envs[env]+'"'
-                command = command +' --detach '+dependency+'.oci'
-                container_id = subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
+            
+            container_id = start_container()
 
             if request.remote_addr in instance_cache.keys():
                 father_token = instance_cache.get(request.remote_addr)
@@ -97,14 +97,11 @@ def dependency( dependency ):
                 with socket() as s:
                     s.bind(('',0))
                     return str(s.getsockname()[1])
+
             host_ip = get_host_ip()
             free_port = get_free_port()
-            command = 'docker run -p '+free_port+':'+api_port+' --detach'
-            if envs:
-                for env in envs:
-                    command = command +' -e "'+env+'='+envs[env]+'"'
-            command = command+' '+dependency+'.oci'
-            container_id = subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
+            
+            container_id = start_container( api_port=api_port, free_port=free_port)
 
             if request.remote_addr in instance_cache.keys():
                 father_token = instance_cache.get(request.remote_addr)
