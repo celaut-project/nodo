@@ -57,6 +57,7 @@ def dependency( dependency ):
     else:
         LOGGER('Retorna la uri para usar la api.'+ str(api_port))
 
+        envs = request.json.get('envs') or None # TODO adaptative_api
         if (request.remote_addr)[:7] == '172.17.' or (request.remote_addr) == '127.0.0.1':
             envs = request.json
             if envs == None:
