@@ -27,6 +27,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="5c96d19e-6a88-4dba-bc96-b0c24894d883" name="Default Changelist" comment="service, token or envs in the json. Without adaptative api yet.">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/gateway.py" beforeDir="false" afterPath="$PROJECT_DIR$/gateway.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />

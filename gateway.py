@@ -29,7 +29,7 @@ def dependency(dependency):
         else:
             command = 'docker run'
             for env in envs:
-                command = command +' -e "'+env+'='+envs[env]+'"'
+                command = command +' -e '+env+'='+envs[env]
             command = command +' --detach '+dependency+'.oci'
             container_id = subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
 
