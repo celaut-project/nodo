@@ -163,5 +163,6 @@ def hello():
         return dependency(servicio)
 
 if __name__ == "__main__":
+    import sys
     print('HELLO TO GATEWAY ON DEVELOPER MODE.')
-    app.run()
+    app.run(host='0.0.0.0', port=int(sys.argv[1]))
