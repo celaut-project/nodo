@@ -17,7 +17,7 @@ def dependency( dependency ):
     def start_container(api_port=None, free_port=None):
         envs = request.json.get('envs') or None # TODO adaptative_api
 
-        command = 'docker run'
+        command = '/usr/bin/docker run'
         if envs is not None:
             for env in envs:
                 command = command +' -e '+env+'='+envs[env]
@@ -49,7 +49,7 @@ def dependency( dependency ):
         token_cache.update({container_id:father_token})
         while 1:
             try:
-                container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
+                container_ip = subprocess.check_output("/usr/bin/docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
                 LOGGER(str(container_ip))
                 break
             except subprocess.CalledProcessError as e:
@@ -77,7 +77,7 @@ def dependency( dependency ):
             token_cache.update({container_id:father_token})
             while 1:
                 try:
-                    container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
+                    container_ip = subprocess.check_output("/usr/bin/docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
                     LOGGER(container_ip)
                     break
                 except subprocess.CalledProcessError as e:
@@ -111,7 +111,7 @@ def dependency( dependency ):
             token_cache.update({container_id:father_token})
             while 1:
                 try:
-                    container_ip = subprocess.check_output("docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
+                    container_ip = subprocess.check_output("/usr/bin/docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" "+container_id , shell=True).decode('utf-8').replace('\n', '')
                     LOGGER(str(container_ip))
                     break
                 except subprocess.CalledProcessError as e:
@@ -131,7 +131,7 @@ def token(token):
     if token == 'tokenhoster':
         LOGGER('TOKENHOSTER NO SE TOCA')
     else:
-        subprocess.check_output('docker rm '+token+' --force', shell=True)
+        subprocess.check_output('/usr/bin/docker rm '+token+' --force', shell=True)
         for d in token_cache:
             if token_cache.get(d) == token:
                 token(d)
