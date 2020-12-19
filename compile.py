@@ -39,8 +39,8 @@ class Hyper:
         def parseFilesys(container):
             os.system("mkdir /home/hy/node/__hycache__/building")
             if os.path.isfile(self.path+'Dockerfile'):
-                os.system('docker build -t building '+self.path)
-                os.system("docker save building | gzip > /home/hy/node/__hycache__/building/building.tar.gz")
+                os.system('/usr/bin/docker build -t building '+self.path)
+                os.system("/usr/bin/docker save building | gzip > /home/hy/node/__hycache__/building/building.tar.gz")
             elif os.path.isfile(self.path+'building.tar.gz'):
                 os.system("mv "+self.path+"building.tar.gz __hycache__/building/")
             else:
@@ -91,19 +91,19 @@ class Hyper:
                             else:
                                 LOGGER("ERROR: No deberiamos haber llegado aqui.")
                                 os.system("rm -rf /home/hy/node/__hycache__/building")
-                                os.system("docker rmi /home/hy/node/__hycache__/building")
+                                os.system("/usr/bin/docker rmi /home/hy/node/__hycache__/building")
                                 exit()
                             """elif os.path.ismount('__hycache__/building/'+layer+'/'+adir):
                                 LOOGGER("Mount --> "+adir)
                                 LOGGER("ERROR: No deberiamos haber llegado aqui.")
                                 os.system("rm -rf __hycache__/building")
-                                os.system("docker rmi __hycache__/building")
+                                os.system("/usr/bin/docker rmi __hycache__/building")
                                 exit()
                             elif os.path.isabs('__hycache__/building/'+layer+'/'+adir):
                                 LOGGER("Abs -->"+adir)
                                 LOGGER("ERROR: No deberiamos haber llegado aqui.")
                                 os.system("rm -rf __hycache__/building")
-                                os.system("docker rmi __hycache__/building")
+                                os.system("/usr/bin/docker rmi __hycache__/building")
                                 exit()"""
                     LOGGER("Algo fue mal. No se encontro en ninguna capa ¿?")
                 LOGGER("           Nueva vuelta"+str(index))
