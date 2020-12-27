@@ -204,7 +204,7 @@ class Hyper:
         with open(file_dir,'w') as f:
             f.write( json.dumps(self.file) )
         os.system('mkdir /home/hy/node/__registry__/'+id)
-        os.system('mv '+self.path+' home/hy/node/__registry__/'+id+'/')
+        os.system('mv '+self.path+'* /home/hy/node/__registry__/'+id+'/')
 
 def ok(path):
     Hyperfile = Hyper(path=path)
