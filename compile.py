@@ -219,8 +219,8 @@ def ok(path):
 
 if __name__ == "__main__":
     if os.path.isfile('__hycache__/for_build/Arch.json') == False:
-    LOGGER('ForBuild invalido, Arch.json OBLIGATORIOS ....')
-    exit()
+        LOGGER('ForBuild invalido, Arch.json OBLIGATORIOS ....')
+        exit()
 
     if len(sys.argv) == 1:
         ok(path='/home/hy/node/__hycache__/for_build/')  # Hyperfile
