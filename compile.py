@@ -218,10 +218,6 @@ def ok(path):
     Hyperfile.save()
 
 if __name__ == "__main__":
-    if os.path.isfile('__hycache__/for_build/Arch.json') == False:
-        LOGGER('ForBuild invalido, Arch.json OBLIGATORIOS ....')
-        exit()
-
     if len(sys.argv) == 1:
         ok(path='/home/hy/node/__hycache__/for_build/')  # Hyperfile
     elif len(sys.argv) == 2:
@@ -236,4 +232,3 @@ if __name__ == "__main__":
 
     os.system('/usr/bin/docker rmi building')
     os.system('rm -rf /home/hy/node/__hycache__/*')
-    os.system('rm -rf /home/hy/node/__registry__/*')
