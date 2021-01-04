@@ -136,6 +136,7 @@ def token(token):
             if token_cache.get(d) == token:
                 token(d)
                 del token_cache[d]
+        return 'DoIt'
 
 def node_list():
     response = {}
@@ -151,7 +152,7 @@ def hello():
     servicio = request.json.get('service') or None # TODO adaptative_api
     if servicio is None:
         token = request.json.get('token')
-        return token if token is not None else 'HY.'
+        return token(token) if token is not None else 'HY.'
     if type(servicio) is not str:
         LOGGER('HY '+request.remote_addr)
         return 'HY.'

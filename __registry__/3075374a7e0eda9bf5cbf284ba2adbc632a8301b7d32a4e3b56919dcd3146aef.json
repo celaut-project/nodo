@@ -1,1 +1,0 @@
-{"Api": {"Port": "8080", "Methods": [{"Params": ["{cnf:cnf}"], "Path": "/", "Return": "{interpretation:interpretation}", "Type": "Post"}], "Type": "Rest"}, "Container": {"Entrypoint": "python3 /wall/start.py", "Filesys": {"Id": "", "Merkle": []}, "Arch": "x86", "Envs": null}, "Contract": null, "Dependency": null, "Ledger": null, "Tensor": null}
