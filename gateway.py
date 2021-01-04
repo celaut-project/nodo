@@ -151,8 +151,8 @@ def node_list():
 def hello():
     servicio = request.json.get('service') or None # TODO adaptative_api
     if servicio is None:
-        token = request.json.get('token')
-        return token(token) if token is not None else 'HY.'
+        t = request.json.get('token')
+        return token(t) if t is not None else 'HY.'
     if type(servicio) is not str:
         LOGGER('HY '+request.remote_addr)
         return 'HY.'
