@@ -20,7 +20,7 @@ class Hyper:
                 "Contract": None,   # list
                 "Dependency": None, # list
                 "Ledger": None, 
-                "Tensor": None,
+                "Tensor": None, # dict
             }):
         super().__init__()
         self.file = file
@@ -187,11 +187,15 @@ class Hyper:
 
 
     def parseLedger(self):
-        pass
+        if os.path.isfile(self.path+"Ledger.json"):
+            ledger = json.load(open(self.path+"Ledger.json", "r"))
+            self.file.update({'Ledger' : ledger})
 
     def parseTensor(self):
-        pass
-    
+        if os.path.isfile(self.path+"Tensor.json"):
+            tensor = json.load(open(self.path+"Tensor.json", "r"))
+            self.file.update({'Tensor' : tensor})
+
     @staticmethod
     def getId(hyperfile):
         info = json.dumps(hyperfile)
