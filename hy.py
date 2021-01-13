@@ -10,8 +10,6 @@ def check_gateway():
     except ConnectionError:
         return False
 
-
-
 def launch_instance(image):
     import requests
     import json
@@ -49,26 +47,15 @@ def delete_image(image):
         pass
     else: print('Canceled.')
 
-def recompile_image(image):
-    import compile
-    compile.ok('__registry__/'+image)
-
 def images_list():
     import os
     for l in os.listdir('__registry__'):
         if len(l.split('.'))==2:
             print(l.split('.')[0])
 
-
 def instances_list():
     import os
     os.system('sudo docker ps')
-
-def instance_output(docker_name):
-    import os
-    os.system(
-        'sudo docker logs --follow '+docker_name
-    )
 
 if __name__ == "__main__":
     import os
