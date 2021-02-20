@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+import "ipss.proto";
+
+message Token {
+    oneof oneOf {
+        int32 value = 1;
+        int64 value = 2;
+        string value = 3;
+    }   
+}
+
+message Empty {}
+
+message Instance {
+    string ip = 1;
+    Token token = 2;
+}
+
+message ServiceExtended {
+    oneof oneOf{
+        Multihash multihash = 1;
+        Service service = 2;   
+    }
+}
+
+service Gateway {
+    rpc StartService(stream ServiceExtended) returns (Instance) {}
+    rpc StopService(Token) returns (Empty) {}
+}

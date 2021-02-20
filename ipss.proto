@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+// Hash Table ( IPDL ?)
+message Multihash {
+    map<string, string> hashes = 1;
+}
+
+// API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
+message Method {
+    string name = 1;
+    string input = 2;
+    string output = 3;
+    optional string cost_function = 4;
+}
+
+message ProtocolMesh {
+    string something = 1;
+}
+
+message Slot {
+    int32 port = 1;
+    repeated Method methods = 2;
+    ProtocolMesh protocol = 3;
+}
+
+message Api {
+    repeated Slot slot = 1;
+}
+
+// Container: Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
+message Architecture {
+    string something = 1;
+}
+
+message Container {
+    Architecture architecture = 1;
+    Multihash filesystem = 2;
+    repeated string enviroment_variables = 3;
+    string entrypoint = 4;
+}
+
+// Tensor: Defines “intelligence” that the service can provide, I think it would be a description of a polynomial (without coefficients and describing the variables).
+message Tensor {
+    map<string, string> variables = 1;
+    repeated string function = 2;
+}
+
+// Ledger: Defines the database used by the service, it would be a class diagram and a consensus algorithm.
+message Ledger {
+    string something = 1;
+}
+
+message Service {
+    Container container = 1;
+    Api api = 2;
+    optional Tensor tensor = 3;
+    optional Ledger ledger = 4;
+    repeated Multihash depencencies = 5;
+}
+
+// The __config__ file is mounted on each service on the filesystem's root.
+
+message Gateway {
+    string ip = 1;
+    Api api = 2;
+}
+
+message Configuration{
+    Gateway host_gateway = 1;
+    repeated string enviroment_variables = 2;
+    repeated Slot slot = 3; // Only some of the specified ports and the protocol submesh for each slot.
+}
