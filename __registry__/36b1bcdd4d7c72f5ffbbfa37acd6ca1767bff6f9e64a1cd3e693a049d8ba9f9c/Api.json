@@ -1,1 +1,0 @@
-{"Port": "8080", "Methods": [{"Params": ["{cnf:cnf}"], "Path": "/", "Return": "{interpretation:interpretation}", "Type": "Post"}], "Type": "Rest"}
