@@ -1,9 +1,10 @@
 syntax = "proto3";
+import "google/protobuf/descriptor.proto";
 
 // IPSS
 // Hash Table ( IPDL ?)
 message Multihash {
-    map<string, string> hashes = 1;
+    map<string, string> hash = 1;
 }
 
 // API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
@@ -37,7 +38,7 @@ message Container {
 message Tensor {
     message Variable {
         repeated string tag = 1;
-        optional google.protobuf.FileDescriptorSet field = 2;
+        google.protobuf.FileDescriptorSet field = 2;
     }
     repeated Variable output_variable = 1;
     repeated Variable input_variable = 2;
@@ -45,15 +46,21 @@ message Tensor {
 
 // Ledger: Defines the database used by the service, it would be a class diagram and a consensus algorithm.
 message Ledger {
-    string something = 1;
+    string tag = 1;
 }
 
 message Service {
-    Container container = 1;
-    Api api = 2;
-    optional TensorSpec tensor = 3;
-    optional Ledger ledger = 4;
-    repeated Multihash depencencies = 5;
+    google.protobuf.FileDescriptorSet syntax = 1;
+    Container container = 2;
+    Api api = 3;
+    Tensor tensor = 4;
+    Ledger ledger = 5;
+    repeated Multihash depencencies = 6;
+}
+
+message ExtendedService {
+    Multihash multihash = 1;
+    Service service = 2;
 }
 
 // The __config__ file is mounted on each service on the filesystem's root.

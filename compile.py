@@ -9,7 +9,8 @@ import logging
 logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
 LOGGER = lambda message: logging.getLogger(__name__).debug(message)
 
-SHAKE = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(32)
+SHAKE_256 = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(32)
+SHA3_256 = lambda value: "" if value is None else hashlib.sha3_256(value.encode()).hexdigest(32)
 
 # ALERT: Its not async.
 SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(99999999)
@@ -17,7 +18,7 @@ SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value.en
 class Hyper:
     def __init__(self, path):
         super().__init__()
-        self.file = ipss_pb2.Service()
+        self.file = ipss_pb2.ExtendedService()
         self.path = path
 
     def parseDependency(self):
@@ -27,7 +28,7 @@ class Hyper:
                 image = json.load(open(self.path+'dependencies/'+file,'r'))
                 dependencies.append(image)
             if len(dependencies)>0:
-                self.file.update({'Dependency':dependencies})
+                self.file.service.update({'Dependency':dependencies})
 
     def parseFilesys(self):
         os.system("mkdir /home/hy/node/__hycache__/building")
@@ -155,50 +156,63 @@ class Hyper:
 
     def parseContainer(self):
         # Arch
-        self.file.container.architecture.tag.extend( json.load(open(self.path+"Arch.json", "r")) )
+        self.file.service.container.architecture.tag.extend( json.load(open(self.path+"Arch.json", "r")) )
         # Envs
         if os.path.isfile(self.path+"Envs.json"):
-            self.file.container.enviroment_variables.extend( json.load(open(self.path+"Envs.json", "r")) )
+            self.file.service.container.enviroment_variables.extend( json.load(open(self.path+"Envs.json", "r")) )
         # Entrypoint
         if os.path.isfile(self.path+"Entrypoint.json"):
-            self.file.container.entrypoint = json.load(open(self.path+"Entrypoint.json", "r"))
+            self.file.service.container.entrypoint = json.load(open(self.path+"Entrypoint.json", "r"))
         # Filesystem
-        self.parseFilesys()
+        self.parseFilesys() # TODO
 
     def parseApi(self):
         if os.path.isfile(self.path+"Api.json"):
             for item in json.load(open(self.path+"Api.json", "r")):
                 slot = ipss_pb2.Slot()
                 slot.port = item.get('port')
-                slot.protocol.tag.extend(item.get('protocol'))  # Solo toma una lista de tags ...
-                if os.path.isfile(self.path+" "+slot.port+".proto"): # los proto file son del tipo 8080.proto
-                    slot.
-                self.file.api.slot.append(slot)
-
+                slot.transport_protocol.tag.extend(item.get('protocol'))  # Solo toma una lista de tags ...
+                if os.path.isfile(self.path+" "+slot.port+".desc"): # los proto file son del tipo 8080.proto
+                    with open(self.path+" "+slot.port+".desc") as api_desc:
+                        slot.aplication_protocol.ParseFromString(api_desc.read())
+                self.file.service.api.slot.append(slot)
 
     def parseLedger(self):
         if os.path.isfile(self.path+"Ledger.json"):
-            ledger = json.load(open(self.path+"Ledger.json", "r"))
-            self.file.update({'Ledger' : ledger})
+            self.file.service.ledger.tag = json.load(open(self.path+"Ledger.json", "r"))
 
     def parseTensor(self):
         if os.path.isfile(self.path+"Tensor.json"):
             tensor = json.load(open(self.path+"Tensor.json", "r"))
-            self.file.update({'Tensor' : tensor})
+            for var in tensor.get('output_variables'):
+                variable = ipss_pb2.Tensor.Variable()
+                variable.tag.extend(var.get("tags"))
+                # Aun no se especifica el cuerpo field para este compilador.
+                self.file.service.tensor.output_variable.append(variable)
+            for var in tensor.get('input_variables'):
+                variable.tag.extend(var.get("tags"))
+                # Aun no se especifica el cuerpo field para este compilador.
+                self.file.service.tensor.input_variable.append(variable)
 
     @staticmethod
-    def getId(hyperfile):
-        info = json.dumps(hyperfile)
-        LOGGER(info)
-        return SHAKE(info)
+    def calculateMultihash(data):
+        multihash = ipss_pb2.Multihash()
+        multihash.hash["SHA3_256"] = SHA3_256(data)
+        multihash.hash["SHAKE_256"] = SHAKE_256(data)
+        return multihash
 
     def save(self):
-        id = Hyper.getId(hyperfile=self.file) 
-        file_dir = '/home/hy/node/__registry__/' +id+ '.json'
-        with open(file_dir,'w') as f:
-            f.write( json.dumps(self.file) )
-        os.system('mkdir /home/hy/node/__registry__/'+id)
-        os.system('mv '+self.path+'* /home/hy/node/__registry__/'+id+'/')
+        self.file.multihash.CopyFrom(
+            Hyper.calculateMultihash(
+                data = self.file.service.SerializeFromString()
+            )
+        )
+        id = SHA3_256( self.file.service.SerializeFromString() )
+        file_dir = '/home/hy/node/__registry__/' +id+ '.bin'
+        with open(file_dir,'wb') as f:
+            f.write( self.file.SerializeToString() )
+        os.system('mkdir /home/hy/node/__registry__/'+ id)
+        os.system('mv '+self.path+'* /home/hy/node/__registry__/'+ id +'/')
 
 def ok(path):
     Hyperfile = Hyper(path=path)
