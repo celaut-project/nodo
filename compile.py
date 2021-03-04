@@ -20,6 +20,7 @@ class Hyper:
         super().__init__()
         self.file = ipss_pb2.ExtendedService()
         self.path = path
+        self.aux_id = aux_id
 
     def parseDependency(self):
         dependencies = []
@@ -31,22 +32,22 @@ class Hyper:
                 self.file.service.update({'Dependency':dependencies})
 
     def parseFilesys(self):
-        os.system("mkdir /home/hy/node/__hycache__/building")
+        os.system("mkdir /home/hy/node/__hycache__/"+self.aux_id+"/building")
         if os.path.isfile(self.path+'Dockerfile'):
             os.system('/usr/bin/docker build -t building '+self.path)
-            os.system("/usr/bin/docker save building | gzip > /home/hy/node/__hycache__/building/building.tar.gz")
+            os.system("/usr/bin/docker save building | gzip > /home/hy/node/__hycache__/"+self.aux_id+"/building/building.tar.gz")
         elif os.path.isfile(self.path+'building.tar.gz'):
-            os.system("mv "+self.path+"building.tar.gz __hycache__/building/")
+            os.system("mv "+self.path+"building.tar.gz __hycache__/"+self.aux_id+"/building/")
         else:
             ("Error: Dockerfile o building.tar.gz no encontrados.")
-        os.system("cd /home/hy/node/__hycache__/building && tar -xvf building.tar.gz")
+        os.system("cd /home/hy/node/__hycache__/"+self.aux_id+"/building && tar -xvf building.tar.gz")
         dirs = [] # lista de todos los directorios para ordenar.
         layers = []
-        for layer in os.listdir("/home/hy/node/__hycache__/building/"):
-            if os.path.isdir("/home/hy/node/__hycache__/building/"+layer):
+        for layer in os.listdir("/home/hy/node/__hycache__/"+self.aux_id+"/building/"):
+            if os.path.isdir("/home/hy/node/__hycache__/"+self.aux_id+"/building/"+layer):
                 layers.append(layer)
                 LOGGER("Layer --> "+str(layer)) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
-                for dir in check_output("cd /home/hy/node/__hycache__/building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
+                for dir in check_output("cd /home/hy/node/__hycache__/"+self.aux_id+"/building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
                     if dir.split(' ')[0]=='/' or len(dir)==1:
                         LOGGER("Ghost directory --> "+dir)
                         continue # Estos no se de donde salen.
@@ -54,12 +55,12 @@ class Hyper:
         def create_tree(index, dirs, layers):
             def add_file(adir, layers):
                 for layer in layers:
-                    if os.path.exists('/home/hy/node/__hycache__/building/'+layer+'/'+adir):
-                        if os.path.isfile('/home/hy/node/__hycache__/building/'+layer+'/'+adir):
+                    if os.path.exists('/home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir):
+                        if os.path.isfile('/home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir):
                             if adir == '.wh..wh..opq':
                                 return None
                             LOGGER("Archivo --> "+adir)
-                            cdir = '/home/hy/node/__hycache__/building/'+layer+'/'+adir
+                            cdir = '/home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir
                             try:
                                 info = open(cdir,"r").read()
                             except UnicodeDecodeError: 
@@ -75,8 +76,8 @@ class Hyper:
                                 "Dir":adir,
                                 "Id":SHAKE(info)
                             }
-                        elif os.path.islink('/home/hy/node/__hycache__/building/'+layer+'/'+adir):
-                            link = check_output('ls -l /home/hy/node/__hycache__/building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
+                        elif os.path.islink('/home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir):
+                            link = check_output('ls -l /home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
                             LOGGER("Link --> "+adir)
                             return {
                                 "Dir":adir,
@@ -84,8 +85,8 @@ class Hyper:
                             }
                         else:
                             LOGGER("ERROR: No deberiamos haber llegado aqui.")
-                            os.system("rm -rf /home/hy/node/__hycache__/building")
-                            os.system("/usr/bin/docker rmi /home/hy/node/__hycache__/building")
+                            os.system("rm -rf /home/hy/node/__hycache__/"+self.aux_id+"/building")
+                            os.system("/usr/bin/docker rmi /home/hy/node/__hycache__/"+self.aux_id+"/building")
                             exit()
                         """elif os.path.ismount('__hycache__/building/'+layer+'/'+adir):
                             LOOGGER("Mount --> "+adir)
@@ -214,8 +215,8 @@ class Hyper:
         os.system('mkdir /home/hy/node/__registry__/'+ id)
         os.system('mv '+self.path+'* /home/hy/node/__registry__/'+ id +'/')
 
-def ok(path):
-    Hyperfile = Hyper(path=path)
+def ok(path, aux_id):
+    Hyperfile = Hyper(path=path, aux_id=aux_id)
 
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
@@ -226,17 +227,19 @@ def ok(path):
     Hyperfile.save()
 
 if __name__ == "__main__":
+    import random
+    aux_id = str(random.random())
     if len(sys.argv) == 1:
-        ok(path='/home/hy/node/__hycache__/for_build/')  # Hyperfile
+        ok(path='/home/hy/node/__hycache__/'+aux_id+'/for_build/', aux_id=aux_id)  # Hyperfile
     elif len(sys.argv) == 2:
         git = str(sys.argv[1])
         repo = git.split('::')[0]
         branch = git.split('::')[1]
-        os.system('git clone --branch '+branch+' '+repo+' /home/hy/node/__hycache__/for_build/git')
-        LOGGER(os.listdir('/home/hy/node/__hycache__/for_build/git/.hy/'))
-        ok(path='/home/hy/node/__hycache__/for_build/git/.hy/')  # Hyperfile
+        os.system('git clone --branch '+branch+' '+repo+' /home/hy/node/__hycache__/'+aux_id+'/for_build/git')
+        LOGGER(os.listdir('/home/hy/node/__hycache__/'+aux_id+'/for_build/git/.service/'))
+        ok(path='/home/hy/node/__hycache__/'+aux_id+'/for_build/git/.service/', aux_id=aux_id)  # Hyperfile
     else:
         LOGGER('NO SE ACPTAN MAS PARÁMETROS..')
 
-    os.system('/usr/bin/docker rmi building')
-    os.system('rm -rf /home/hy/node/__hycache__/*')
+    os.system('/usr/bin/docker rmi builder'+aux_id)
+    os.system('rm -rf /home/hy/node/__hycache__/'+aux_id+'/*')

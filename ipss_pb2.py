@@ -16,34 +16,34 @@ from google.protobuf import descriptor_pb2 as google_dot_protobuf_dot_descriptor
 
 DESCRIPTOR = _descriptor.FileDescriptor(
   name='ipss.proto',
-  package='',
+  package='ipss',
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\nipss.proto\x1a google/protobuf/descriptor.proto\"b\n\tMultihash\x12&\n\x06hashes\x18\x01 \x03(\x0b\x32\x16.Multihash.HashesEntry\x1a-\n\x0bHashesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"!\n\x0cProtocolMesh\x12\x11\n\tsomething\x18\x01 \x01(\t\"\x80\x01\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12?\n\x13\x61plication_protocol\x18\x02 \x01(\x0b\x32\".google.protobuf.FileDescriptorSet\x12)\n\x12transport_protocol\x18\x03 \x01(\x0b\x32\r.ProtocolMesh\"\x1a\n\x03\x41pi\x12\x13\n\x04slot\x18\x01 \x03(\x0b\x32\x05.Slot\"!\n\x0c\x41rchitecture\x12\x11\n\tsomething\x18\x01 \x01(\t\"\x82\x01\n\tContainer\x12#\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\r.Architecture\x12\x1e\n\nfilesystem\x18\x02 \x01(\x0b\x32\n.Multihash\x12\x1c\n\x14\x65nviroment_variables\x18\x03 \x03(\t\x12\x12\n\nentrypoint\x18\x04 \x01(\t\"\xa9\x01\n\x06Tensor\x12)\n\x0foutput_variable\x18\x01 \x03(\x0b\x32\x10.Tensor.Variable\x12(\n\x0einput_variable\x18\x02 \x03(\x0b\x32\x10.Tensor.Variable\x1aJ\n\x08Variable\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x31\n\x05\x66ield\x18\x02 \x01(\x0b\x32\".google.protobuf.FileDescriptorSet\"\x15\n\x06Ledger\x12\x0b\n\x03tag\x18\x01 \x01(\t\"\xc3\x01\n\x07Service\x12\x32\n\x06syntax\x18\x01 \x01(\x0b\x32\".google.protobuf.FileDescriptorSet\x12\x1d\n\tcontainer\x18\x02 \x01(\x0b\x32\n.Container\x12\x11\n\x03\x61pi\x18\x03 \x01(\x0b\x32\x04.Api\x12\x17\n\x06tensor\x18\x04 \x01(\x0b\x32\x07.Tensor\x12\x17\n\x06ledger\x18\x05 \x01(\x0b\x32\x07.Ledger\x12 \n\x0c\x64\x65pencencies\x18\x06 \x03(\x0b\x32\n.Multihash\"K\n\x0f\x45xtendedService\x12\x1d\n\tmultihash\x18\x01 \x01(\x0b\x32\n.Multihash\x12\x19\n\x07service\x18\x02 \x01(\x0b\x32\x08.Service\"(\n\x07Gateway\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x11\n\x03\x61pi\x18\x02 \x01(\x0b\x32\x04.Api\"b\n\rConfiguration\x12\x1e\n\x0chost_gateway\x18\x01 \x01(\x0b\x32\x08.Gateway\x12\x1c\n\x14\x65nviroment_variables\x18\x02 \x03(\t\x12\x13\n\x04slot\x18\x03 \x03(\x0b\x32\x05.Slotb\x06proto3'
+  serialized_pb=b'\n\nipss.proto\x12\x04ipss\x1a google/protobuf/descriptor.proto\"a\n\tMultihash\x12\'\n\x04hash\x18\x01 \x03(\x0b\x32\x19.ipss.Multihash.HashEntry\x1a+\n\tHashEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"!\n\x0cProtocolMesh\x12\x11\n\tsomething\x18\x01 \x01(\t\"\x85\x01\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12?\n\x13\x61plication_protocol\x18\x02 \x01(\x0b\x32\".google.protobuf.FileDescriptorSet\x12.\n\x12transport_protocol\x18\x03 \x01(\x0b\x32\x12.ipss.ProtocolMesh\"\x1f\n\x03\x41pi\x12\x18\n\x04slot\x18\x01 \x03(\x0b\x32\n.ipss.Slot\"!\n\x0c\x41rchitecture\x12\x11\n\tsomething\x18\x01 \x01(\t\"\x8c\x01\n\tContainer\x12(\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\x12.ipss.Architecture\x12#\n\nfilesystem\x18\x02 \x01(\x0b\x32\x0f.ipss.Multihash\x12\x1c\n\x14\x65nviroment_variables\x18\x03 \x03(\t\x12\x12\n\nentrypoint\x18\x04 \x01(\t\"\xbf\x01\n\x06Tensor\x12.\n\x0foutput_variable\x18\x01 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x12-\n\x0einput_variable\x18\x02 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x1aV\n\x08Variable\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x31\n\x05\x66ield\x18\x03 \x01(\x0b\x32\".google.protobuf.FileDescriptorSet\"\x15\n\x06Ledger\x12\x0b\n\x03tag\x18\x01 \x01(\t\"\xdc\x01\n\x07Service\x12\x32\n\x06syntax\x18\x01 \x01(\x0b\x32\".google.protobuf.FileDescriptorSet\x12\"\n\tcontainer\x18\x02 \x01(\x0b\x32\x0f.ipss.Container\x12\x16\n\x03\x61pi\x18\x03 \x01(\x0b\x32\t.ipss.Api\x12\x1c\n\x06tensor\x18\x04 \x01(\x0b\x32\x0c.ipss.Tensor\x12\x1c\n\x06ledger\x18\x05 \x01(\x0b\x32\x0c.ipss.Ledger\x12%\n\x0c\x64\x65pencencies\x18\x06 \x03(\x0b\x32\x0f.ipss.Multihash\"\x97\x01\n\x0f\x45xtendedService\x12$\n\tmultihash\x18\x01 \x01(\x0b\x32\x0f.ipss.MultihashH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneofB\t\n\x07_config\"-\n\x07Gateway\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x16\n\x03\x61pi\x18\x02 \x01(\x0b\x32\t.ipss.Api\"l\n\rConfiguration\x12#\n\x0chost_gateway\x18\x01 \x01(\x0b\x32\r.ipss.Gateway\x12\x1c\n\x14\x65nviroment_variables\x18\x02 \x03(\t\x12\x18\n\x04slot\x18\x03 \x03(\x0b\x32\n.ipss.Slotb\x06proto3'
   ,
   dependencies=[google_dot_protobuf_dot_descriptor__pb2.DESCRIPTOR,])
 
 
 
 
-_MULTIHASH_HASHESENTRY = _descriptor.Descriptor(
-  name='HashesEntry',
-  full_name='Multihash.HashesEntry',
+_MULTIHASH_HASHENTRY = _descriptor.Descriptor(
+  name='HashEntry',
+  full_name='ipss.Multihash.HashEntry',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='key', full_name='Multihash.HashesEntry.key', index=0,
+      name='key', full_name='ipss.Multihash.HashEntry.key', index=0,
       number=1, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='value', full_name='Multihash.HashesEntry.value', index=1,
+      name='value', full_name='ipss.Multihash.HashEntry.value', index=1,
       number=2, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
@@ -61,20 +61,20 @@ _MULTIHASH_HASHESENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=101,
-  serialized_end=146,
+  serialized_start=108,
+  serialized_end=151,
 )
 
 _MULTIHASH = _descriptor.Descriptor(
   name='Multihash',
-  full_name='Multihash',
+  full_name='ipss.Multihash',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='hashes', full_name='Multihash.hashes', index=0,
+      name='hash', full_name='ipss.Multihash.hash', index=0,
       number=1, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
@@ -83,7 +83,7 @@ _MULTIHASH = _descriptor.Descriptor(
   ],
   extensions=[
   ],
-  nested_types=[_MULTIHASH_HASHESENTRY, ],
+  nested_types=[_MULTIHASH_HASHENTRY, ],
   enum_types=[
   ],
   serialized_options=None,
@@ -92,21 +92,21 @@ _MULTIHASH = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=48,
-  serialized_end=146,
+  serialized_start=54,
+  serialized_end=151,
 )
 
 
 _PROTOCOLMESH = _descriptor.Descriptor(
   name='ProtocolMesh',
-  full_name='ProtocolMesh',
+  full_name='ipss.ProtocolMesh',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='something', full_name='ProtocolMesh.something', index=0,
+      name='something', full_name='ipss.ProtocolMesh.something', index=0,
       number=1, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
@@ -124,35 +124,35 @@ _PROTOCOLMESH = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=148,
-  serialized_end=181,
+  serialized_start=153,
+  serialized_end=186,
 )
 
 
 _SLOT = _descriptor.Descriptor(
   name='Slot',
-  full_name='Slot',
+  full_name='ipss.Slot',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='port', full_name='Slot.port', index=0,
+      name='port', full_name='ipss.Slot.port', index=0,
       number=1, type=5, cpp_type=1, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='aplication_protocol', full_name='Slot.aplication_protocol', index=1,
+      name='aplication_protocol', full_name='ipss.Slot.aplication_protocol', index=1,
       number=2, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='transport_protocol', full_name='Slot.transport_protocol', index=2,
+      name='transport_protocol', full_name='ipss.Slot.transport_protocol', index=2,
       number=3, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
@@ -170,21 +170,21 @@ _SLOT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=184,
-  serialized_end=312,
+  serialized_start=189,
+  serialized_end=322,
 )
 
 
 _API = _descriptor.Descriptor(
   name='Api',
-  full_name='Api',
+  full_name='ipss.Api',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='slot', full_name='Api.slot', index=0,
+      name='slot', full_name='ipss.Api.slot', index=0,
       number=1, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
@@ -202,21 +202,21 @@ _API = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=314,
-  serialized_end=340,
+  serialized_start=324,
+  serialized_end=355,
 )
 
 
 _ARCHITECTURE = _descriptor.Descriptor(
   name='Architecture',
-  full_name='Architecture',
+  full_name='ipss.Architecture',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='something', full_name='Architecture.something', index=0,
+      name='something', full_name='ipss.Architecture.something', index=0,
       number=1, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
@@ -234,42 +234,42 @@ _ARCHITECTURE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=342,
-  serialized_end=375,
+  serialized_start=357,
+  serialized_end=390,
 )
 
 
 _CONTAINER = _descriptor.Descriptor(
   name='Container',
-  full_name='Container',
+  full_name='ipss.Container',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='architecture', full_name='Container.architecture', index=0,
+      name='architecture', full_name='ipss.Container.architecture', index=0,
       number=1, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='filesystem', full_name='Container.filesystem', index=1,
+      name='filesystem', full_name='ipss.Container.filesystem', index=1,
       number=2, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='enviroment_variables', full_name='Container.enviroment_variables', index=2,
+      name='enviroment_variables', full_name='ipss.Container.enviroment_variables', index=2,
       number=3, type=9, cpp_type=9, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='entrypoint', full_name='Container.entrypoint', index=3,
+      name='entrypoint', full_name='ipss.Container.entrypoint', index=3,
       number=4, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
@@ -287,29 +287,36 @@ _CONTAINER = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=378,
-  serialized_end=508,
+  serialized_start=393,
+  serialized_end=533,
 )
 
 
 _TENSOR_VARIABLE = _descriptor.Descriptor(
   name='Variable',
-  full_name='Tensor.Variable',
+  full_name='ipss.Tensor.Variable',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='tag', full_name='Tensor.Variable.tag', index=0,
-      number=1, type=9, cpp_type=9, label=3,
+      name='id', full_name='ipss.Tensor.Variable.id', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"".decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='tag', full_name='ipss.Tensor.Variable.tag', index=1,
+      number=2, type=9, cpp_type=9, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='field', full_name='Tensor.Variable.field', index=1,
-      number=2, type=11, cpp_type=10, label=1,
+      name='field', full_name='ipss.Tensor.Variable.field', index=2,
+      number=3, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -326,27 +333,27 @@ _TENSOR_VARIABLE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=606,
-  serialized_end=680,
+  serialized_start=641,
+  serialized_end=727,
 )
 
 _TENSOR = _descriptor.Descriptor(
   name='Tensor',
-  full_name='Tensor',
+  full_name='ipss.Tensor',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='output_variable', full_name='Tensor.output_variable', index=0,
+      name='output_variable', full_name='ipss.Tensor.output_variable', index=0,
       number=1, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='input_variable', full_name='Tensor.input_variable', index=1,
+      name='input_variable', full_name='ipss.Tensor.input_variable', index=1,
       number=2, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
@@ -364,21 +371,21 @@ _TENSOR = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=511,
-  serialized_end=680,
+  serialized_start=536,
+  serialized_end=727,
 )
 
 
 _LEDGER = _descriptor.Descriptor(
   name='Ledger',
-  full_name='Ledger',
+  full_name='ipss.Ledger',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='tag', full_name='Ledger.tag', index=0,
+      name='tag', full_name='ipss.Ledger.tag', index=0,
       number=1, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
@@ -396,56 +403,56 @@ _LEDGER = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=682,
-  serialized_end=703,
+  serialized_start=729,
+  serialized_end=750,
 )
 
 
 _SERVICE = _descriptor.Descriptor(
   name='Service',
-  full_name='Service',
+  full_name='ipss.Service',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='syntax', full_name='Service.syntax', index=0,
+      name='syntax', full_name='ipss.Service.syntax', index=0,
       number=1, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='container', full_name='Service.container', index=1,
+      name='container', full_name='ipss.Service.container', index=1,
       number=2, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='api', full_name='Service.api', index=2,
+      name='api', full_name='ipss.Service.api', index=2,
       number=3, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='tensor', full_name='Service.tensor', index=3,
+      name='tensor', full_name='ipss.Service.tensor', index=3,
       number=4, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='ledger', full_name='Service.ledger', index=4,
+      name='ledger', full_name='ipss.Service.ledger', index=4,
       number=5, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='depencencies', full_name='Service.depencencies', index=5,
+      name='depencencies', full_name='ipss.Service.depencencies', index=5,
       number=6, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
@@ -463,29 +470,36 @@ _SERVICE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=706,
-  serialized_end=901,
+  serialized_start=753,
+  serialized_end=973,
 )
 
 
 _EXTENDEDSERVICE = _descriptor.Descriptor(
   name='ExtendedService',
-  full_name='ExtendedService',
+  full_name='ipss.ExtendedService',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='multihash', full_name='ExtendedService.multihash', index=0,
+      name='multihash', full_name='ipss.ExtendedService.multihash', index=0,
       number=1, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='service', full_name='ExtendedService.service', index=1,
+      name='service', full_name='ipss.ExtendedService.service', index=1,
       number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='config', full_name='ipss.ExtendedService.config', index=2,
+      number=3, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -501,29 +515,39 @@ _EXTENDEDSERVICE = _descriptor.Descriptor(
   syntax='proto3',
   extension_ranges=[],
   oneofs=[
+    _descriptor.OneofDescriptor(
+      name='oneof', full_name='ipss.ExtendedService.oneof',
+      index=0, containing_type=None,
+      create_key=_descriptor._internal_create_key,
+    fields=[]),
+    _descriptor.OneofDescriptor(
+      name='_config', full_name='ipss.ExtendedService._config',
+      index=1, containing_type=None,
+      create_key=_descriptor._internal_create_key,
+    fields=[]),
   ],
-  serialized_start=903,
-  serialized_end=978,
+  serialized_start=976,
+  serialized_end=1127,
 )
 
 
 _GATEWAY = _descriptor.Descriptor(
   name='Gateway',
-  full_name='Gateway',
+  full_name='ipss.Gateway',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='ip', full_name='Gateway.ip', index=0,
+      name='ip', full_name='ipss.Gateway.ip', index=0,
       number=1, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='api', full_name='Gateway.api', index=1,
+      name='api', full_name='ipss.Gateway.api', index=1,
       number=2, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
@@ -541,35 +565,35 @@ _GATEWAY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=980,
-  serialized_end=1020,
+  serialized_start=1129,
+  serialized_end=1174,
 )
 
 
 _CONFIGURATION = _descriptor.Descriptor(
   name='Configuration',
-  full_name='Configuration',
+  full_name='ipss.Configuration',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='host_gateway', full_name='Configuration.host_gateway', index=0,
+      name='host_gateway', full_name='ipss.Configuration.host_gateway', index=0,
       number=1, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='enviroment_variables', full_name='Configuration.enviroment_variables', index=1,
+      name='enviroment_variables', full_name='ipss.Configuration.enviroment_variables', index=1,
       number=2, type=9, cpp_type=9, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='slot', full_name='Configuration.slot', index=2,
+      name='slot', full_name='ipss.Configuration.slot', index=2,
       number=3, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
@@ -587,12 +611,12 @@ _CONFIGURATION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1022,
-  serialized_end=1120,
+  serialized_start=1176,
+  serialized_end=1284,
 )
 
-_MULTIHASH_HASHESENTRY.containing_type = _MULTIHASH
-_MULTIHASH.fields_by_name['hashes'].message_type = _MULTIHASH_HASHESENTRY
+_MULTIHASH_HASHENTRY.containing_type = _MULTIHASH
+_MULTIHASH.fields_by_name['hash'].message_type = _MULTIHASH_HASHENTRY
 _SLOT.fields_by_name['aplication_protocol'].message_type = google_dot_protobuf_dot_descriptor__pb2._FILEDESCRIPTORSET
 _SLOT.fields_by_name['transport_protocol'].message_type = _PROTOCOLMESH
 _API.fields_by_name['slot'].message_type = _SLOT
@@ -610,6 +634,16 @@ _SERVICE.fields_by_name['ledger'].message_type = _LEDGER
 _SERVICE.fields_by_name['depencencies'].message_type = _MULTIHASH
 _EXTENDEDSERVICE.fields_by_name['multihash'].message_type = _MULTIHASH
 _EXTENDEDSERVICE.fields_by_name['service'].message_type = _SERVICE
+_EXTENDEDSERVICE.fields_by_name['config'].message_type = _CONFIGURATION
+_EXTENDEDSERVICE.oneofs_by_name['oneof'].fields.append(
+  _EXTENDEDSERVICE.fields_by_name['multihash'])
+_EXTENDEDSERVICE.fields_by_name['multihash'].containing_oneof = _EXTENDEDSERVICE.oneofs_by_name['oneof']
+_EXTENDEDSERVICE.oneofs_by_name['oneof'].fields.append(
+  _EXTENDEDSERVICE.fields_by_name['service'])
+_EXTENDEDSERVICE.fields_by_name['service'].containing_oneof = _EXTENDEDSERVICE.oneofs_by_name['oneof']
+_EXTENDEDSERVICE.oneofs_by_name['_config'].fields.append(
+  _EXTENDEDSERVICE.fields_by_name['config'])
+_EXTENDEDSERVICE.fields_by_name['config'].containing_oneof = _EXTENDEDSERVICE.oneofs_by_name['_config']
 _GATEWAY.fields_by_name['api'].message_type = _API
 _CONFIGURATION.fields_by_name['host_gateway'].message_type = _GATEWAY
 _CONFIGURATION.fields_by_name['slot'].message_type = _SLOT
@@ -629,51 +663,51 @@ _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 Multihash = _reflection.GeneratedProtocolMessageType('Multihash', (_message.Message,), {
 
-  'HashesEntry' : _reflection.GeneratedProtocolMessageType('HashesEntry', (_message.Message,), {
-    'DESCRIPTOR' : _MULTIHASH_HASHESENTRY,
+  'HashEntry' : _reflection.GeneratedProtocolMessageType('HashEntry', (_message.Message,), {
+    'DESCRIPTOR' : _MULTIHASH_HASHENTRY,
     '__module__' : 'ipss_pb2'
-    # @@protoc_insertion_point(class_scope:Multihash.HashesEntry)
+    # @@protoc_insertion_point(class_scope:ipss.Multihash.HashEntry)
     })
   ,
   'DESCRIPTOR' : _MULTIHASH,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:Multihash)
+  # @@protoc_insertion_point(class_scope:ipss.Multihash)
   })
 _sym_db.RegisterMessage(Multihash)
-_sym_db.RegisterMessage(Multihash.HashesEntry)
+_sym_db.RegisterMessage(Multihash.HashEntry)
 
 ProtocolMesh = _reflection.GeneratedProtocolMessageType('ProtocolMesh', (_message.Message,), {
   'DESCRIPTOR' : _PROTOCOLMESH,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:ProtocolMesh)
+  # @@protoc_insertion_point(class_scope:ipss.ProtocolMesh)
   })
 _sym_db.RegisterMessage(ProtocolMesh)
 
 Slot = _reflection.GeneratedProtocolMessageType('Slot', (_message.Message,), {
   'DESCRIPTOR' : _SLOT,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:Slot)
+  # @@protoc_insertion_point(class_scope:ipss.Slot)
   })
 _sym_db.RegisterMessage(Slot)
 
 Api = _reflection.GeneratedProtocolMessageType('Api', (_message.Message,), {
   'DESCRIPTOR' : _API,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:Api)
+  # @@protoc_insertion_point(class_scope:ipss.Api)
   })
 _sym_db.RegisterMessage(Api)
 
 Architecture = _reflection.GeneratedProtocolMessageType('Architecture', (_message.Message,), {
   'DESCRIPTOR' : _ARCHITECTURE,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:Architecture)
+  # @@protoc_insertion_point(class_scope:ipss.Architecture)
   })
 _sym_db.RegisterMessage(Architecture)
 
 Container = _reflection.GeneratedProtocolMessageType('Container', (_message.Message,), {
   'DESCRIPTOR' : _CONTAINER,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:Container)
+  # @@protoc_insertion_point(class_scope:ipss.Container)
   })
 _sym_db.RegisterMessage(Container)
 
@@ -682,12 +716,12 @@ Tensor = _reflection.GeneratedProtocolMessageType('Tensor', (_message.Message,),
   'Variable' : _reflection.GeneratedProtocolMessageType('Variable', (_message.Message,), {
     'DESCRIPTOR' : _TENSOR_VARIABLE,
     '__module__' : 'ipss_pb2'
-    # @@protoc_insertion_point(class_scope:Tensor.Variable)
+    # @@protoc_insertion_point(class_scope:ipss.Tensor.Variable)
     })
   ,
   'DESCRIPTOR' : _TENSOR,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:Tensor)
+  # @@protoc_insertion_point(class_scope:ipss.Tensor)
   })
 _sym_db.RegisterMessage(Tensor)
 _sym_db.RegisterMessage(Tensor.Variable)
@@ -695,38 +729,38 @@ _sym_db.RegisterMessage(Tensor.Variable)
 Ledger = _reflection.GeneratedProtocolMessageType('Ledger', (_message.Message,), {
   'DESCRIPTOR' : _LEDGER,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:Ledger)
+  # @@protoc_insertion_point(class_scope:ipss.Ledger)
   })
 _sym_db.RegisterMessage(Ledger)
 
 Service = _reflection.GeneratedProtocolMessageType('Service', (_message.Message,), {
   'DESCRIPTOR' : _SERVICE,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:Service)
+  # @@protoc_insertion_point(class_scope:ipss.Service)
   })
 _sym_db.RegisterMessage(Service)
 
 ExtendedService = _reflection.GeneratedProtocolMessageType('ExtendedService', (_message.Message,), {
   'DESCRIPTOR' : _EXTENDEDSERVICE,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:ExtendedService)
+  # @@protoc_insertion_point(class_scope:ipss.ExtendedService)
   })
 _sym_db.RegisterMessage(ExtendedService)
 
 Gateway = _reflection.GeneratedProtocolMessageType('Gateway', (_message.Message,), {
   'DESCRIPTOR' : _GATEWAY,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:Gateway)
+  # @@protoc_insertion_point(class_scope:ipss.Gateway)
   })
 _sym_db.RegisterMessage(Gateway)
 
 Configuration = _reflection.GeneratedProtocolMessageType('Configuration', (_message.Message,), {
   'DESCRIPTOR' : _CONFIGURATION,
   '__module__' : 'ipss_pb2'
-  # @@protoc_insertion_point(class_scope:Configuration)
+  # @@protoc_insertion_point(class_scope:ipss.Configuration)
   })
 _sym_db.RegisterMessage(Configuration)
 
 
-_MULTIHASH_HASHESENTRY._options = None
+_MULTIHASH_HASHENTRY._options = None
 # @@protoc_insertion_point(module_scope)

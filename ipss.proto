@@ -1,7 +1,12 @@
 syntax = "proto3";
+
 import "google/protobuf/descriptor.proto";
 
+package ipss;
+
+//  --------------------
 // IPSS
+//  --------------------
 // Hash Table ( IPDL ?)
 message Multihash {
     map<string, string> hash = 1;
@@ -37,8 +42,9 @@ message Container {
 // Tensor: Defines “intelligence” that the service can provide, I think it would be a description of a polynomial (without coefficients and describing the variables).
 message Tensor {
     message Variable {
-        repeated string tag = 1;
-        google.protobuf.FileDescriptorSet field = 2;
+        string id = 1;
+        repeated string tag = 2;
+        google.protobuf.FileDescriptorSet field = 3;
     }
     repeated Variable output_variable = 1;
     repeated Variable input_variable = 2;
@@ -59,8 +65,11 @@ message Service {
 }
 
 message ExtendedService {
-    Multihash multihash = 1;
-    Service service = 2;
+    oneof oneof{
+        Multihash multihash = 1;
+        Service service = 2;        
+    }
+    optional Configuration config = 3;
 }
 
 // The __config__ file is mounted on each service on the filesystem's root.
