@@ -10,74 +10,57 @@ LOGGER = lambda message: logging.getLogger(__name__).debug(message)
 
 class Image:
     image = None
-    def __init__(self, image, id):
-        self.image = image
+    def __init__(self, service, id):
+        self.service = service
         self.id = id
     
     def api_port(self):
-        if self.image.get('Api')== None:
-            return None
-        else:
-            return self.image.get('Api').get('Port')
-
-    @staticmethod
-    def makeImage(filename, id):
-        file = json.load(open(filename,"r"))
-        return Image(image=file, id=id)
+        return self.service.api.port
 
     def show(self):
-        LOGGER(self.image)
+        LOGGER(self.service)
 
     def build(self):
         def verify_filesys():
             pass
         def dependency():
             # Add dependencies on the __registry__.
-            dependencies = self.image.get('Dependency')
-            if dependencies != None:
-                for dependency in dependencies:
-                    file = json.dumps(dependency)
-                    id = SHAKE(file)
-                    if os.path.isfile('/home/hy/node/__registry__/'+id+'.json') is False:
-                        with open('/home/hy/node/__registry__/'+id+'.json','w') as f:
-                            f.write(file)
+            for dependency in self.service.dependencie:
+                file = json.dumps(dependency)
+                id = SHAKE(file)
+                if os.path.isfile('/home/hy/node/__registry__/'+id+'.json') is False:
+                    with open('/home/hy/node/__registry__/'+id+'.json','w') as f:
+                        f.write(file)
         dependency()
         # Add Entrypoint.
         with open('/home/hy/node/__hycache__/Dockerfile', 'w') as file:
             with open('/home/hy/node/__registry__/'+self.id+'/Dockerfile', 'r') as df:
                 data = df.read()
-            file.write( data + '\nENTRYPOINT '+self.image['Container']['Entrypoint'])
+            file.write( data + '\nENTRYPOINT '+self.service.container.entrypoint)
         run('/usr/bin/docker build -t '+self.id+'.oci /home/hy/node/__hycache__/.', shell=True)
         verify_filesys()
 
-def isValidHyperFile(filename):
+def isValidHyperFile(service):
     return True
 
-def main(filename, id):
-    if isValidHyperFile(filename=filename):
-        image = Image.makeImage(filename=filename, id=id)
+def main(service, id=None):
+    if isValidHyperFile(service=service):
+        image = Image(service=service, id=id)
         image.build()
         return image
 
 class ImageException(Exception):
     LOGGER(Exception)
 
-def ok(image):
-
-    filename =  "/home/hy/node/__registry__/"+image+".json"
-    if os.path.isfile(filename):
-        img = main(filename=filename, id=image)
-        if img.id == image:
-            api_port = img.api_port()
-            LOGGER('Retorna el puerto de la API'+ str(api_port))
-            return api_port
-        else:
-            raise ImageException('Imagen erronea..')
-    else:
-        raise ImageException('No se encuentra en el registro ...')
+def ok(service):
+    img = main(service=service)
+    api_port = img.api_port()
+    LOGGER('Retorna el puerto de la API'+ str(api_port))
+    return api_port
 
 if __name__ == "__main__":
-    image = sys.argv[1]
-    file =  "/home/hy/node/__registry__/"+image+".json"
-    img = main(filename=file, id=image)
+    id = sys.argv[1]
+    with open("/home/hy/node/__registry__/"+id+".service", "rb") as file:
+        service = file.read()
+    img = main(service=service, id=id)
     LOGGER(str(img.id))

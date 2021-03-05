@@ -209,7 +209,7 @@ class Hyper:
             )
         )
         id = SHA3_256( self.file.service.SerializeFromString() )
-        file_dir = '/home/hy/node/__registry__/' +id+ '.bin'
+        file_dir = '/home/hy/node/__registry__/' +id+ '.service'
         with open(file_dir,'wb') as f:
             f.write( self.file.SerializeToString() )
         os.system('mkdir /home/hy/node/__registry__/'+ id)
