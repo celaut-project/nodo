@@ -74,14 +74,14 @@ class Hyper:
                                 exit()
                             return {
                                 "Dir":adir,
-                                "Id":SHAKE(info)
+                                "Id":SHA3_256(info)
                             }
                         elif os.path.islink('/home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir):
                             link = check_output('ls -l /home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
                             LOGGER("Link --> "+adir)
                             return {
                                 "Dir":adir,
-                                "Id":SHAKE(link)
+                                "Id":SHA3_256(link)
                             }
                         else:
                             LOGGER("ERROR: No deberiamos haber llegado aqui.")
@@ -129,7 +129,7 @@ class Hyper:
             for i in merkle:
                 if s == None: s = i.get('Id')
                 s = s+' '+i.get('Id')
-            return SHAKE(s)
+            return SHA3_256(s)
         def reorder_tree(tree):
             l = []
             for d in sorted(tree.items(), key=lambda x: x[0]):
@@ -209,11 +209,11 @@ class Hyper:
             )
         )
         id = SHA3_256( self.file.service.SerializeFromString() )
-        file_dir = '/home/hy/node/__registry__/' +id+ '.service'
+        file_dir = '/home/hy/node/__registry__/' +id+ '/' +id+ '.service'
         with open(file_dir,'wb') as f:
             f.write( self.file.SerializeToString() )
-        os.system('mkdir /home/hy/node/__registry__/'+ id)
-        os.system('mv '+self.path+'* /home/hy/node/__registry__/'+ id +'/')
+        os.system('mkdir /home/hy/node/__registry__/' +id+ '/' + id)
+        os.system('mv '+self.path+'* /home/hy/node/__registry__/' +id+ '/' + id +'/')
 
 def ok(path, aux_id):
     Hyperfile = Hyper(path=path, aux_id=aux_id)

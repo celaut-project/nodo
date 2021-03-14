@@ -13,13 +13,13 @@ message Token {
 message Empty {}
 
 message Instance {
-    string ip = 1;
+    map<int32, ipss.Gateway.Uri> uris = 1; // map like [ 8080 -> 192.17.0.4:6899, ]
     Token token = 2;
 }
 
 message ServiceExtended {
     oneof oneOf{
-        ipss.Multihash multihash = 1;
+        ipss.hash hash = 1;
         ipss.Service service = 2;
     }
     optional ipss.Configuration config = 3;

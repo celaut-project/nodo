@@ -8,8 +8,9 @@ package ipss;
 // IPSS
 //  --------------------
 // Hash Table ( IPDL ?)
-message Multihash {
-    map<string, string> hash = 1;
+message Hash {
+    string algorithm = 1;
+    string hash = 2;
 }
 
 // API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
@@ -19,8 +20,8 @@ message ProtocolMesh {
 
 message Slot {
     int32 port = 1;
-    google.protobuf.FileDescriptorSet aplication_protocol = 2;
-    ProtocolMesh transport_protocol = 3;
+    ProtocolMesh transport_protocol = 2;
+    google.protobuf.FileDescriptorSet aplication_protocol = 3;
 }
 
 message Api {
@@ -34,7 +35,7 @@ message Architecture {
 
 message Container {
     Architecture architecture = 1;
-    Multihash filesystem = 2;
+    Hash filesystem = 2;
     repeated string enviroment_variables = 3;
     string entrypoint = 4;
 }
@@ -61,12 +62,12 @@ message Service {
     Api api = 3;
     Tensor tensor = 4;
     Ledger ledger = 5;
-    repeated Multihash depencencies = 6;
+    repeated Hash depencencies = 6;
 }
 
 message ExtendedService {
     oneof oneof{
-        Multihash multihash = 1;
+        Hash hash = 1;
         Service service = 2;        
     }
     optional Configuration config = 3;
@@ -74,12 +75,20 @@ message ExtendedService {
 
 // The __config__ file is mounted on each service on the filesystem's root.
 message Gateway {
-    string ip = 1;
+    message Uri {
+        string direction = 1;
+        int32 port = 2;
+    }
+    Uri uri = 1; // format ip:port
     Api api = 2;
 }
 
 message Configuration{
+    message SlotSpec {
+        int32 port = 1;
+        ProtocolMesh transport_protocol = 2;
+    }
     Gateway host_gateway = 1;
-    repeated string enviroment_variables = 2;
-    repeated Slot slot = 3; // Only some of the specified ports and the protocol submesh for each slot.
+    map<string, string> enviroment_variables = 2;
+    repeated SlotSpec slot = 3; // Only some of the specified ports and the protocol submesh for each slot.
 }

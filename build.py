@@ -9,13 +9,9 @@ logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(level
 LOGGER = lambda message: logging.getLogger(__name__).debug(message)
 
 class Image:
-    image = None
     def __init__(self, service, id):
         self.service = service
         self.id = id
-    
-    def api_port(self):
-        return self.service.api.port
 
     def show(self):
         LOGGER(self.service)
@@ -51,12 +47,6 @@ def main(service, id=None):
 
 class ImageException(Exception):
     LOGGER(Exception)
-
-def ok(service):
-    img = main(service=service)
-    api_port = img.api_port()
-    LOGGER('Retorna el puerto de la API'+ str(api_port))
-    return api_port
 
 if __name__ == "__main__":
     id = sys.argv[1]

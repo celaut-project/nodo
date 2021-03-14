@@ -1,45 +1,42 @@
-from flask import Flask, request, jsonify, abort
+from flask import request, jsonify, abort
 import json
 import build
 import subprocess, os
-
+import grpc, gateway_pb2, gateway_pb2_grpc
+from concurrent import futures
 import logging
 logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
 LOGGER = lambda message: logging.getLogger(__name__).debug(message)
-
-app = Flask(__name__)
 
 token_cache = {} # token : token del padre  ( si es tokenhoster es que no tiene padre..)
 
 instance_cache = {}  # uri : token
 
-def dependency( dependency ):
-    def start_container(api_port=None, free_port=None):
-        envs = request.json.get('envs') or None # TODO adaptative_api
+def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration ):
+    def start_container(config, use_other_ports=None):
 
         command = '/usr/bin/docker run'
-        if envs is not None:
-            for env in envs:
-                command = command +' -e '+env+'='+envs[env]
+        if config.HasField('enviroment_variables') is not None:
+            for env in config.enviroment_variables:
+                command = command +' -e '+env+'='+config.enviroment_variables[env]
 
-        if api_port is not None and free_port is not None:
-            command = command + ' -p '+free_port+':'+api_port
+        if use_other_ports is not None:
+            for port in use_other_ports:
+                command = command + ' -p '+use_other_ports[port]+':'+port
 
-        return subprocess.check_output(command +' --detach '+dependency+'.oci', shell=True).decode('utf-8').replace('\n', '')
-
-
-
+        return subprocess.check_output(command +' --detach '+launch_service+'.oci', shell=True).decode('utf-8').replace('\n', '')
 
     try:
-        api_port = build.ok(str(dependency)) # Si no esta construido, lo construye.
-        LOGGER(str(api_port))
+        build.main(service=service) # Si no esta construido, lo construye.
+        service_ports = [ slot.port for slot in service.api.slot ]
+        LOGGER(str(service_ports))
     except build.ImageException as e:
         LOGGER('Salta la excepcion '+str(e))
 
-    if api_port is None:
+    if service_ports is None:
         LOGGER('No retorna direccion, no hay api.')
 
-        container_id = start_container()
+        container_id = start_container(config=config)
 
         if request.remote_addr in instance_cache.keys():
             father_token = instance_cache.get(request.remote_addr)
@@ -57,17 +54,16 @@ def dependency( dependency ):
 
 
         instance_cache.update({container_ip:container_id})
-        return jsonify( {
-            'uri': None,
-            'token': container_id
-        } )
-
+        instance = gateway_pb2.Instance()
+        instance.token.string = container_id
+        return instance
     else:
-        LOGGER('Retorna la uri para usar la api.'+ str(api_port))
+        LOGGER('Retorna la uri para usar la api.'+ str(service_ports))
 
+        # Si se trata de un servicio local.
         if (request.remote_addr)[:7] == '172.17.' or (request.remote_addr) == '127.0.0.1':
             
-            container_id = start_container()
+            container_id = start_container(config=config)
 
             if request.remote_addr in instance_cache.keys():
                 father_token = instance_cache.get(request.remote_addr)
@@ -84,24 +80,27 @@ def dependency( dependency ):
                     LOGGER(e.output)
 
             instance_cache.update({container_ip:container_id})
-            return jsonify( {
-                'uri': container_ip + ':' + api_port,
-                'token': container_id
-            } )
+            instance = gateway_pb2.Instance()
+            for port in service_ports:
+                uri = gateway_pb2.ipss__pb2.Gateway.Uri()
+                uri.direction = container_id
+                uri.port = port
+                instance.uris.append( port, uri)
+            instance.token.string = container_id
+            return instance
+
+        # Si se trata de un servicio en otro nodo.
         elif (request.remote_addr)[:4] == '192.':
-            def get_host_ip():
-                import socket as s
-                return s.gethostbyname( s.gethostname() )
             def get_free_port():
                 from socket import socket
                 with socket() as s:
                     s.bind(('',0))
-                    return str(s.getsockname()[1])
+                    return int(s.getsockname()[1])  
 
-            host_ip = get_host_ip()
-            free_port = get_free_port()
-            
-            container_id = start_container( api_port=api_port, free_port=free_port)
+            import socket as s
+            host_ip = s.gethostbyname( s.gethostname() )
+            assigment_ports = { port:get_free_port() for port in service_ports }
+            container_id = start_container( use_other_ports = assigment_ports, config=config)
 
             if request.remote_addr in instance_cache.keys():
                 father_token = instance_cache.get(request.remote_addr)
@@ -118,52 +117,69 @@ def dependency( dependency ):
                     LOGGER(e.output)
 
             instance_cache.update({container_ip:container_id})
-            return jsonify( {
-                'uri': host_ip + ':' + free_port,
-                'token': container_id
-            } )
+            instance = gateway_pb2.Instance()
+            for port in assigment_ports:
+                uri = gateway_pb2.ipss__pb2.Gateway.Uri()
+                uri.direction = host_ip
+                uri.port = assigment_ports[port]
+                instance.uris.append( port, uri)
+            instance.token.string = container_id
+            return instance
         else:
             abort('400','THIS NETWORK IS NOT SUPPORTED')
 
-# Se puede usar una cache para la recursividad,
-#  para no estar buscando todo el tiempo lo mismo.
-def token(token):
-    if token == 'tokenhoster':
-        LOGGER('TOKENHOSTER NO SE TOCA')
-    else:
-        subprocess.check_output('/usr/bin/docker rm '+token+' --force', shell=True)
-        for d in token_cache:
-            if token_cache.get(d) == token:
-                token(d)
-                del token_cache[d]
-        return 'DoIt'
-
-def node_list():
-    response = {}
-    for query_service in os.listdir('__nodes__'):
-        response.update({
-            'uri': query_service.uri,
-            'json': query_service.json
-        })
-    return response
-
-@app.route('/',  methods=['POST', 'GET', 'PUT'])
-def hello():
-    servicio = request.json.get('service') or None # TODO adaptative_api
-    if servicio is None:
-        t = request.json.get('token')
-        return token(t) if t is not None else 'HY.'
-    if type(servicio) is not str:
-        LOGGER('HY '+request.remote_addr)
-        return 'HY.'
-    if servicio=='@?':
-        return node_list()
-    elif servicio == '@!' or servicio == 'HEY':
-        return 'HY.'
-    else:
-        return dependency(servicio)
+def get_from_registry(hash):
+    try:
+        with open('./__registry__/'+hash+'/'+hash+'.service', "rb") as file:
+            return file.read()
+    except IOError:
+        print("Service "+hash+" not accessible.")
+        # Init Search Service.
 
 if __name__ == "__main__":
-    import sys
-    print('HELLO TO GATEWAY ON DEVELOPER MODE.')
-    app.run(host='0.0.0.0', port=int(sys.argv[1]))
+   print('Starting server.')
+   class Gateway(gateway_pb2_grpc.Gateway):
+        def StartService(self, request_iterator, context):
+            configuration = None
+            service_registry = [service for service in os.listdir('./__registry__')]
+            for r in request_iterator:
+                # Captura la configuracion si puede.
+                if r.HasField('configuration'): configuration = r.configuration 
+                # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
+                if r.HasField('hash') and configuration and r.hash.algorithm == "sha2_256" \
+                 and r.hash.hash in service_registry:
+                    return launch_service(
+                        service = get_from_registry(r.hash.hash),
+                        config = configuration
+                        )
+                # Si me da servicio.
+                if r.HasField('service') and configuration:
+                    return launch_service(service = r.service, config = configuration)
+
+        def StopService(self, request, context):   
+            # Se puede usar una cache para la recursividad,
+            #  para no estar buscando todo el tiempo lo mismo.
+            token = request.string
+            if token == 'tokenhoster':
+                LOGGER('TOKENHOSTER NO SE TOCA')
+            else:
+                subprocess.check_output('/usr/bin/docker rm '+token+' --force', shell=True)
+                for d in token_cache:
+                    if token_cache.get(d) == token:
+                        token(d)
+                        del token_cache[d]
+                return gateway_pb2.Empty()
+
+   print('Imported libs.')
+
+   # create a gRPC server
+   server = grpc.server(futures.ThreadPoolExecutor(max_workers=30))
+   gateway_pb2_grpc.add_GatewayServicer_to_server(
+       Gateway(), server=server
+   )
+
+   print('Listening on port 8000.')
+
+   server.add_insecure_port('[::]:8000')
+   server.start()
+   server.wait_for_termination()
