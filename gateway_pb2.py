@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"\x07\n\x05\x45mpty\"-\n\x08Instance\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x15\n\x05token\x18\x02 \x01(\x0b\x32\x06.Token\"\x97\x01\n\x0fServiceExtended\x12$\n\tmultihash\x18\x01 \x01(\x0b\x32\x0f.ipss.MultihashH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config2[\n\x07Gateway\x12/\n\x0cStartService\x12\x10.ServiceExtended\x1a\t.Instance\"\x00(\x01\x12\x1f\n\x0bStopService\x12\x06.Token\x1a\x06.Empty\"\x00\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"\x07\n\x05\x45mpty\"\x84\x01\n\x08Instance\x12!\n\x04uris\x18\x01 \x03(\x0b\x32\x13.Instance.UrisEntry\x12\x15\n\x05token\x18\x02 \x01(\x0b\x32\x06.Token\x1a>\n\tUrisEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12 \n\x05value\x18\x02 \x01(\x0b\x32\x11.ipss.Gateway.Uri:\x02\x38\x01\"\x8d\x01\n\x0fServiceExtended\x12\x1a\n\x04hash\x18\x01 \x01(\x0b\x32\n.ipss.HashH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config2[\n\x07Gateway\x12/\n\x0cStartService\x12\x10.ServiceExtended\x1a\t.Instance\"\x00(\x01\x12\x1f\n\x0bStopService\x12\x06.Token\x1a\x06.Empty\"\x00\x62\x06proto3'
   ,
   dependencies=[ipss__pb2.DESCRIPTOR,])
 
@@ -103,6 +103,44 @@ _EMPTY = _descriptor.Descriptor(
 )
 
 
+_INSTANCE_URISENTRY = _descriptor.Descriptor(
+  name='UrisEntry',
+  full_name='Instance.UrisEntry',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='key', full_name='Instance.UrisEntry.key', index=0,
+      number=1, type=5, cpp_type=1, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='value', full_name='Instance.UrisEntry.value', index=1,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=b'8\001',
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=197,
+  serialized_end=259,
+)
+
 _INSTANCE = _descriptor.Descriptor(
   name='Instance',
   full_name='Instance',
@@ -112,9 +150,9 @@ _INSTANCE = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='ip', full_name='Instance.ip', index=0,
-      number=1, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=b"".decode('utf-8'),
+      name='uris', full_name='Instance.uris', index=0,
+      number=1, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
@@ -128,7 +166,7 @@ _INSTANCE = _descriptor.Descriptor(
   ],
   extensions=[
   ],
-  nested_types=[],
+  nested_types=[_INSTANCE_URISENTRY, ],
   enum_types=[
   ],
   serialized_options=None,
@@ -137,8 +175,8 @@ _INSTANCE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=126,
-  serialized_end=171,
+  serialized_start=127,
+  serialized_end=259,
 )
 
 
@@ -151,7 +189,7 @@ _SERVICEEXTENDED = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='multihash', full_name='ServiceExtended.multihash', index=0,
+      name='hash', full_name='ServiceExtended.hash', index=0,
       number=1, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
@@ -193,8 +231,8 @@ _SERVICEEXTENDED = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=174,
-  serialized_end=325,
+  serialized_start=262,
+  serialized_end=403,
 )
 
 _TOKEN.oneofs_by_name['oneOf'].fields.append(
@@ -206,13 +244,16 @@ _TOKEN.fields_by_name['value_int64'].containing_oneof = _TOKEN.oneofs_by_name['o
 _TOKEN.oneofs_by_name['oneOf'].fields.append(
   _TOKEN.fields_by_name['value_string'])
 _TOKEN.fields_by_name['value_string'].containing_oneof = _TOKEN.oneofs_by_name['oneOf']
+_INSTANCE_URISENTRY.fields_by_name['value'].message_type = ipss__pb2._GATEWAY_URI
+_INSTANCE_URISENTRY.containing_type = _INSTANCE
+_INSTANCE.fields_by_name['uris'].message_type = _INSTANCE_URISENTRY
 _INSTANCE.fields_by_name['token'].message_type = _TOKEN
-_SERVICEEXTENDED.fields_by_name['multihash'].message_type = ipss__pb2._MULTIHASH
+_SERVICEEXTENDED.fields_by_name['hash'].message_type = ipss__pb2._HASH
 _SERVICEEXTENDED.fields_by_name['service'].message_type = ipss__pb2._SERVICE
 _SERVICEEXTENDED.fields_by_name['config'].message_type = ipss__pb2._CONFIGURATION
 _SERVICEEXTENDED.oneofs_by_name['oneOf'].fields.append(
-  _SERVICEEXTENDED.fields_by_name['multihash'])
-_SERVICEEXTENDED.fields_by_name['multihash'].containing_oneof = _SERVICEEXTENDED.oneofs_by_name['oneOf']
+  _SERVICEEXTENDED.fields_by_name['hash'])
+_SERVICEEXTENDED.fields_by_name['hash'].containing_oneof = _SERVICEEXTENDED.oneofs_by_name['oneOf']
 _SERVICEEXTENDED.oneofs_by_name['oneOf'].fields.append(
   _SERVICEEXTENDED.fields_by_name['service'])
 _SERVICEEXTENDED.fields_by_name['service'].containing_oneof = _SERVICEEXTENDED.oneofs_by_name['oneOf']
@@ -240,11 +281,19 @@ Empty = _reflection.GeneratedProtocolMessageType('Empty', (_message.Message,), {
 _sym_db.RegisterMessage(Empty)
 
 Instance = _reflection.GeneratedProtocolMessageType('Instance', (_message.Message,), {
+
+  'UrisEntry' : _reflection.GeneratedProtocolMessageType('UrisEntry', (_message.Message,), {
+    'DESCRIPTOR' : _INSTANCE_URISENTRY,
+    '__module__' : 'gateway_pb2'
+    # @@protoc_insertion_point(class_scope:Instance.UrisEntry)
+    })
+  ,
   'DESCRIPTOR' : _INSTANCE,
   '__module__' : 'gateway_pb2'
   # @@protoc_insertion_point(class_scope:Instance)
   })
 _sym_db.RegisterMessage(Instance)
+_sym_db.RegisterMessage(Instance.UrisEntry)
 
 ServiceExtended = _reflection.GeneratedProtocolMessageType('ServiceExtended', (_message.Message,), {
   'DESCRIPTOR' : _SERVICEEXTENDED,
@@ -254,6 +303,7 @@ ServiceExtended = _reflection.GeneratedProtocolMessageType('ServiceExtended', (_
 _sym_db.RegisterMessage(ServiceExtended)
 
 
+_INSTANCE_URISENTRY._options = None
 
 _GATEWAY = _descriptor.ServiceDescriptor(
   name='Gateway',
@@ -262,8 +312,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=327,
-  serialized_end=418,
+  serialized_start=405,
+  serialized_end=496,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',

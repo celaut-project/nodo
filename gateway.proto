@@ -19,7 +19,7 @@ message Instance {
 
 message ServiceExtended {
     oneof oneOf{
-        ipss.hash hash = 1;
+        ipss.Hash hash = 1;
         ipss.Service service = 2;
     }
     optional ipss.Configuration config = 3;
