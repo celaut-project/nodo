@@ -25,6 +25,11 @@ message ServiceExtended {
     optional ipss.Configuration config = 3;
 }
 
+message ServiceFile {
+    repeated ipss.Hash multihash = 1;
+    ipss.Service service = 2;
+}
+
 service Gateway {
     rpc StartService(stream ServiceExtended) returns (Instance) {}
     rpc StopService(Token) returns (Empty) {}

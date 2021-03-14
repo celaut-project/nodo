@@ -3,22 +3,34 @@ import json
 from subprocess import run, check_output
 import os
 import hashlib
-import ipss_pb2
+import gateway_pb2
 
 import logging
 logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
 LOGGER = lambda message: logging.getLogger(__name__).debug(message)
 
+# -- HASH FUNCTIONS --
 SHAKE_256 = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(32)
 SHA3_256 = lambda value: "" if value is None else hashlib.sha3_256(value.encode()).hexdigest(32)
 
 # ALERT: Its not async.
 SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(99999999)
 
+def calculate_service_hash(service, hash_function: str):
+    aux_service = gateway_pb2.ipss__pb2.Service()
+    aux_service.CopyFrom(service)
+    aux_fs = gateway_pb2.ipss__pb2.Container.Filesystem()
+    for hash in aux_service.container.filesystem:
+        if hash.algorithm == hash_function:
+            aux_fs.append(hash)
+    aux_service.container.filesystem.CopyFrom(aux_fs)
+    HASH = eval(hash_function)
+    return HASH(aux_service.SerializeToString())
+
 class Hyper:
-    def __init__(self, path):
+    def __init__(self, path, aux_id):
         super().__init__()
-        self.file = ipss_pb2.ExtendedService()
+        self.file = gateway_pb2.ServiceFile()
         self.path = path
         self.aux_id = aux_id
 
@@ -170,7 +182,7 @@ class Hyper:
     def parseApi(self):
         if os.path.isfile(self.path+"Api.json"):
             for item in json.load(open(self.path+"Api.json", "r")):
-                slot = ipss_pb2.Slot()
+                slot = gateway_pb2.ipss__pb2.Slot()
                 slot.port = item.get('port')
                 slot.transport_protocol.tag.extend(item.get('protocol'))  # Solo toma una lista de tags ...
                 if os.path.isfile(self.path+" "+slot.port+".desc"): # los proto file son del tipo 8080.proto
@@ -186,7 +198,7 @@ class Hyper:
         if os.path.isfile(self.path+"Tensor.json"):
             tensor = json.load(open(self.path+"Tensor.json", "r"))
             for var in tensor.get('output_variables'):
-                variable = ipss_pb2.Tensor.Variable()
+                variable = gateway_pb2.ipss__pb2.Tensor.Variable()
                 variable.tag.extend(var.get("tags"))
                 # Aun no se especifica el cuerpo field para este compilador.
                 self.file.service.tensor.output_variable.append(variable)
@@ -195,20 +207,19 @@ class Hyper:
                 # Aun no se especifica el cuerpo field para este compilador.
                 self.file.service.tensor.input_variable.append(variable)
 
-    @staticmethod
-    def calculateMultihash(data):
-        multihash = ipss_pb2.Multihash()
-        multihash.hash["SHA3_256"] = SHA3_256(data)
-        multihash.hash["SHAKE_256"] = SHAKE_256(data)
-        return multihash
 
     def save(self):
-        self.file.multihash.CopyFrom(
-            Hyper.calculateMultihash(
-                data = self.file.service.SerializeFromString()
-            )
-        )
-        id = SHA3_256( self.file.service.SerializeFromString() )
+        # Calculate multi-hash.
+        list_of_hashes = ["SHAKE_256", "SHA3_256"]
+        for hash_name in list_of_hashes:
+            hash = gateway_pb2.ipss__pb2.Hash()
+            hash.algorithm = hash_name
+            hash.hash = calculate_service_hash(service=self.file.service, hash_function=hash_name)
+            self.file.multihash.append(hash)
+
+        for hash in self.file.multihash:
+            if hash.algorithm == "SHA3_256":
+                id = hash.algorithm
         file_dir = '/home/hy/node/__registry__/' +id+ '/' +id+ '.service'
         with open(file_dir,'wb') as f:
             f.write( self.file.SerializeToString() )

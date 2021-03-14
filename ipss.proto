@@ -24,10 +24,6 @@ message Slot {
     google.protobuf.FileDescriptorSet aplication_protocol = 3;
 }
 
-message Api {
-    repeated Slot slot = 1;
-}
-
 // Container: Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
 message Architecture {
     string something = 1;
@@ -35,7 +31,7 @@ message Architecture {
 
 message Container {
     Architecture architecture = 1;
-    Hash filesystem = 2;
+    repeated Hash filesystem = 2;
     repeated string enviroment_variables = 3;
     string entrypoint = 4;
 }
@@ -59,18 +55,9 @@ message Ledger {
 message Service {
     google.protobuf.FileDescriptorSet syntax = 1;
     Container container = 2;
-    Api api = 3;
+    repeated Slot api = 3;
     Tensor tensor = 4;
     Ledger ledger = 5;
-    repeated Hash depencencies = 6;
-}
-
-message ExtendedService {
-    oneof oneof{
-        Hash hash = 1;
-        Service service = 2;        
-    }
-    optional Configuration config = 3;
 }
 
 // The __config__ file is mounted on each service on the filesystem's root.
@@ -80,7 +67,7 @@ message Gateway {
         int32 port = 2;
     }
     Uri uri = 1; // format ip:port
-    Api api = 2;
+    repeated Slot api = 2;
 }
 
 message Configuration{

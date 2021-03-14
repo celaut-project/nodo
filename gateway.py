@@ -26,12 +26,9 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
 
         return subprocess.check_output(command +' --detach '+launch_service+'.oci', shell=True).decode('utf-8').replace('\n', '')
 
-    try:
-        build.main(service=service) # Si no esta construido, lo construye.
-        service_ports = [ slot.port for slot in service.api.slot ]
-        LOGGER(str(service_ports))
-    except build.ImageException as e:
-        LOGGER('Salta la excepcion '+str(e))
+    build.build(service=service) # Si no esta construido, lo construye.
+    service_ports = [ slot.port for slot in service.api.slot ]
+    LOGGER(str(service_ports))
 
     if service_ports is None:
         LOGGER('No retorna direccion, no hay api.')
@@ -131,7 +128,9 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
 def get_from_registry(hash):
     try:
         with open('./__registry__/'+hash+'/'+hash+'.service', "rb") as file:
-            return file.read()
+            file = gateway_pb2.ServiceFile()
+            file.ParseFromString(file.read())
+            return file.service
     except IOError:
         print("Service "+hash+" not accessible.")
         # Init Search Service.
