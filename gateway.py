@@ -92,7 +92,7 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
                 from socket import socket
                 with socket() as s:
                     s.bind(('',0))
-                    return int(s.getsockname()[1])  
+                    return int(s.getsockname()[1])
 
             import socket as s
             host_ip = s.gethostbyname( s.gethostname() )
@@ -127,13 +127,13 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
 
 def get_from_registry(hash):
     try:
-        with open('./__registry__/'+hash+'/'+hash+'.service', "rb") as file:
+        with open('./__registry__/'+hash+'.service', "rb") as file:
             file = gateway_pb2.ServiceFile()
             file.ParseFromString(file.read())
             return file.service
     except IOError:
         print("Service "+hash+" not accessible.")
-        # Init Search Service.
+        # search service in IPFS service.
 
 if __name__ == "__main__":
    print('Starting server.')

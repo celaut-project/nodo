@@ -32,26 +32,16 @@ class Hyper:
         super().__init__()
         self.file = gateway_pb2.ServiceFile()
         self.path = path
+        self.json = json.load(open(self.path+"service.json", "r"))
         self.aux_id = aux_id
-
-    def parseDependency(self):
-        dependencies = []
-        if os.path.isdir(self.path+'dependencies'):
-            for file in os.listdir(self.path+'dependencies'):
-                image = json.load(open(self.path+'dependencies/'+file,'r'))
-                dependencies.append(image)
-            if len(dependencies)>0:
-                self.file.service.update({'Dependency':dependencies})
 
     def parseFilesys(self):
         os.system("mkdir /home/hy/node/__hycache__/"+self.aux_id+"/building")
         if os.path.isfile(self.path+'Dockerfile'):
-            os.system('/usr/bin/docker build -t building '+self.path)
-            os.system("/usr/bin/docker save building | gzip > /home/hy/node/__hycache__/"+self.aux_id+"/building/building.tar.gz")
-        elif os.path.isfile(self.path+'building.tar.gz'):
-            os.system("mv "+self.path+"building.tar.gz __hycache__/"+self.aux_id+"/building/")
+            os.system('/usr/bin/docker build -t builder'+self.aux_id+' '+self.path)
+            os.system("/usr/bin/docker save builder"+self.aux_id+" | gzip > /home/hy/node/__hycache__/"+self.aux_id+"/building/building.tar.gz")
         else:
-            ("Error: Dockerfile o building.tar.gz no encontrados.")
+            ("Error: Dockerfile no encontrado.")
         os.system("cd /home/hy/node/__hycache__/"+self.aux_id+"/building && tar -xvf building.tar.gz")
         dirs = [] # lista de todos los directorios para ordenar.
         layers = []
@@ -166,22 +156,26 @@ class Hyper:
             "Id": make_hash(fs_tree),
             "Merkle": fs_tree
         }
+        hash = gateway_pb2.ipss__pb2.Hash()
+        hash.algorithm = "SHA3_256"
+        hash.hash = fs_tree["Id"]
+        self.file.service.container.filsystem.append(hash)
 
     def parseContainer(self):
         # Arch
-        self.file.service.container.architecture.tag.extend( json.load(open(self.path+"Arch.json", "r")) )
+        self.file.service.container.architecture.tag.extend( self.json.get('arquitecture') )
         # Envs
-        if os.path.isfile(self.path+"Envs.json"):
-            self.file.service.container.enviroment_variables.extend( json.load(open(self.path+"Envs.json", "r")) )
+        if self.json.get('envs'):
+            self.file.service.container.enviroment_variables.extend( self.json.get('envs') )
         # Entrypoint
-        if os.path.isfile(self.path+"Entrypoint.json"):
-            self.file.service.container.entrypoint = json.load(open(self.path+"Entrypoint.json", "r"))
+        if self.json.get('entrypoint'):
+            self.file.service.container.entrypoint = self.json.get('entrypoint')
         # Filesystem
         self.parseFilesys() # TODO
 
     def parseApi(self):
-        if os.path.isfile(self.path+"Api.json"):
-            for item in json.load(open(self.path+"Api.json", "r")):
+        if self.json.get('api'):
+            for item in self.json.get('api'):
                 slot = gateway_pb2.ipss__pb2.Slot()
                 slot.port = item.get('port')
                 slot.transport_protocol.tag.extend(item.get('protocol'))  # Solo toma una lista de tags ...
@@ -191,12 +185,12 @@ class Hyper:
                 self.file.service.api.slot.append(slot)
 
     def parseLedger(self):
-        if os.path.isfile(self.path+"Ledger.json"):
-            self.file.service.ledger.tag = json.load(open(self.path+"Ledger.json", "r"))
+        if self.json.get('ledger'):
+            self.file.service.ledger.tag = self.json.get('ledger')
 
     def parseTensor(self):
-        if os.path.isfile(self.path+"Tensor.json"):
-            tensor = json.load(open(self.path+"Tensor.json", "r"))
+        tensor = self.json.get('tensor')
+        if tensor:    
             for var in tensor.get('output_variables'):
                 variable = gateway_pb2.ipss__pb2.Tensor.Variable()
                 variable.tag.extend(var.get("tags"))
@@ -220,37 +214,35 @@ class Hyper:
         for hash in self.file.multihash:
             if hash.algorithm == "SHA3_256":
                 id = hash.algorithm
-        file_dir = '/home/hy/node/__registry__/' +id+ '/' +id+ '.service'
-        with open(file_dir,'wb') as f:
+        with open( '/home/hy/node/__registry__/' +id+ '.service', 'wb') as f:
             f.write( self.file.SerializeToString() )
-        os.system('mkdir /home/hy/node/__registry__/' +id+ '/' + id)
-        os.system('mv '+self.path+'* /home/hy/node/__registry__/' +id+ '/' + id +'/')
+        return id
 
 def ok(path, aux_id):
     Hyperfile = Hyper(path=path, aux_id=aux_id)
 
     Hyperfile.parseContainer()
     Hyperfile.parseApi()
-    Hyperfile.parseDependency()
     Hyperfile.parseLedger()
     Hyperfile.parseTensor()
 
-    Hyperfile.save()
+    return Hyperfile.save()
 
 if __name__ == "__main__":
     import random
     aux_id = str(random.random())
     if len(sys.argv) == 1:
-        ok(path='/home/hy/node/__hycache__/'+aux_id+'/for_build/', aux_id=aux_id)  # Hyperfile
+        id = ok(path='/home/hy/node/__hycache__/'+aux_id+'/for_build/', aux_id=aux_id)  # Hyperfile
     elif len(sys.argv) == 2:
         git = str(sys.argv[1])
         repo = git.split('::')[0]
         branch = git.split('::')[1]
         os.system('git clone --branch '+branch+' '+repo+' /home/hy/node/__hycache__/'+aux_id+'/for_build/git')
         LOGGER(os.listdir('/home/hy/node/__hycache__/'+aux_id+'/for_build/git/.service/'))
-        ok(path='/home/hy/node/__hycache__/'+aux_id+'/for_build/git/.service/', aux_id=aux_id)  # Hyperfile
+        id = ok(path='/home/hy/node/__hycache__/'+aux_id+'/for_build/git/.service/', aux_id=aux_id)  # Hyperfile
     else:
         LOGGER('NO SE ACPTAN MAS PARÁMETROS..')
 
+    os.system('/usr/bin/docker tag builder'+aux_id+' '+id)
     os.system('/usr/bin/docker rmi builder'+aux_id)
     os.system('rm -rf /home/hy/node/__hycache__/'+aux_id+'/*')
