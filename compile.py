@@ -159,7 +159,7 @@ class Hyper:
         hash = gateway_pb2.ipss__pb2.Hash()
         hash.algorithm = "SHA3_256"
         hash.hash = fs_tree["Id"]
-        self.file.service.container.filsystem.append(hash)
+        self.file.service.container.filesystem.append(hash)
 
     def parseContainer(self):
         # Arch
