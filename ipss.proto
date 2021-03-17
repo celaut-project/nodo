@@ -15,7 +15,7 @@ message Hash {
 
 // API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
 message ProtocolMesh {
-    string something = 1;
+    repeated string tag = 1;
 }
 
 message Slot {
@@ -26,7 +26,7 @@ message Slot {
 
 // Container: Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
 message Architecture {
-    string something = 1;
+    repeated string tag = 1;
 }
 
 message Container {
