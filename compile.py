@@ -241,7 +241,7 @@ if __name__ == "__main__":
         LOGGER(os.listdir('/home/hy/node/__hycache__/'+aux_id+'/for_build/git/.service/'))
         id = ok(path='/home/hy/node/__hycache__/'+aux_id+'/for_build/git/.service/', aux_id=aux_id)  # Hyperfile
     else:
-        LOGGER('NO SE ACPTAN MAS PARÁMETROS..')
+        LOGGER('NO SE ACEPTAN MAS PARÁMETROS..')
 
     os.system('/usr/bin/docker tag builder'+aux_id+' '+id)
     os.system('/usr/bin/docker rmi builder'+aux_id)
