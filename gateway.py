@@ -1,4 +1,3 @@
-from flask import request, jsonify, abort
 import json
 import build
 import subprocess, os
@@ -12,7 +11,7 @@ token_cache = {} # token : token del padre  ( si es tokenhoster es que no tiene 
 
 instance_cache = {}  # uri : token
 
-def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration ):
+def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str ):
     def start_container(config, use_other_ports=None):
 
         command = '/usr/bin/docker run'
@@ -35,11 +34,11 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
 
         container_id = start_container(config=config)
 
-        if request.remote_addr in instance_cache.keys():
-            father_token = instance_cache.get(request.remote_addr)
+        if peer_ip in instance_cache.keys():
+            father_token = instance_cache.get(peer_ip)
         else:
             father_token = 'tokenhoster'
-            instance_cache.update({request.remote_addr:'tokenhoster'})
+            instance_cache.update({peer_ip:'tokenhoster'})
         token_cache.update({container_id:father_token})
         while 1:
             try:
@@ -58,15 +57,15 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
         LOGGER('Retorna la uri para usar la api.'+ str(service_ports))
 
         # Si se trata de un servicio local.
-        if (request.remote_addr)[:7] == '172.17.' or (request.remote_addr) == '127.0.0.1':
+        if (peer_ip)[:7] == '172.17.' or (peer_ip) == '127.0.0.1':
             
             container_id = start_container(config=config)
 
-            if request.remote_addr in instance_cache.keys():
-                father_token = instance_cache.get(request.remote_addr)
+            if peer_ip in instance_cache.keys():
+                father_token = instance_cache.get(peer_ip)
             else:
                 father_token = 'tokenhoster'
-                instance_cache.update({request.remote_addr:'tokenhoster'})
+                instance_cache.update({peer_ip:'tokenhoster'})
             token_cache.update({container_id:father_token})
             while 1:
                 try:
@@ -87,7 +86,7 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
             return instance
 
         # Si se trata de un servicio en otro nodo.
-        elif (request.remote_addr)[:4] == '192.':
+        elif (peer_ip)[:4] == '192.':
             def get_free_port():
                 from socket import socket
                 with socket() as s:
@@ -99,11 +98,11 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
             assigment_ports = { port:get_free_port() for port in service_ports }
             container_id = start_container( use_other_ports = assigment_ports, config=config)
 
-            if request.remote_addr in instance_cache.keys():
-                father_token = instance_cache.get(request.remote_addr)
+            if peer_ip in instance_cache.keys():
+                father_token = instance_cache.get(peer_ip)
             else:
                 father_token = 'tokenhoster'
-                instance_cache.update({request.remote_addr:'tokenhoster'})
+                instance_cache.update({peer_ip:'tokenhoster'})
             token_cache.update({container_id:father_token})
             while 1:
                 try:
@@ -123,7 +122,7 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
             instance.token.string = container_id
             return instance
         else:
-            abort('400','THIS NETWORK IS NOT SUPPORTED')
+            LOGGER('THIS NETWORK IS NOT SUPPORTED')
 
 def get_from_registry(hash):
     try:
@@ -149,11 +148,16 @@ if __name__ == "__main__":
                  and r.hash.hash in service_registry:
                     return launch_service(
                         service = get_from_registry(r.hash.hash),
-                        config = configuration
+                        config = configuration,
+                        peer_ip = context.peer()[5:]  # Lleva el formato 'ipv4:49.123.106.100:44420', no queremos 'ipv4:'.
                         )
                 # Si me da servicio.
                 if r.HasField('service') and configuration:
-                    return launch_service(service = r.service, config = configuration)
+                    return launch_service(
+                        service = r.service,
+                        config = configuration,
+                        peer_ip = context.peer()[5:]  # Lleva el formato 'ipv4:49.123.106.100:44420', no queremos 'ipv4:'.
+                        )
 
         def StopService(self, request, context):   
             # Se puede usar una cache para la recursividad,
