@@ -183,8 +183,8 @@ class Hyper:
                 # transport protocol.
                 slot.transport_protocol.tag.extend(item.get('protocol'))  # Solo toma una lista de tags ...
                 # aplication protocol.
-                if os.path.isfile(self.path+" "+str(slot.port)+".api"): # los proto file son del tipo 8080.api
-                    with open(self.path+" "+str(slot.port)+".api") as api_desc:
+                if os.path.isfile(self.path+" "+str(slot.port)+".desc"): # los proto file son del tipo 8080.api
+                    with open(self.path+" "+str(slot.port)+".desc") as api_desc:
                         slot.aplication_protocol.ParseFromString(api_desc.read())
                 self.file.service.api.slot.append(slot)
 
