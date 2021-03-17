@@ -175,12 +175,16 @@ class Hyper:
 
     def parseApi(self):
         if self.json.get('api'):
+            # iterate slots.
             for item in self.json.get('api'):
                 slot = gateway_pb2.ipss__pb2.Slot()
+                # port.
                 slot.port = item.get('port')
+                # transport protocol.
                 slot.transport_protocol.tag.extend(item.get('protocol'))  # Solo toma una lista de tags ...
-                if os.path.isfile(self.path+" "+slot.port+".desc"): # los proto file son del tipo 8080.proto
-                    with open(self.path+" "+slot.port+".desc") as api_desc:
+                # aplication protocol.
+                if os.path.isfile(self.path+" "+str(slot.port)+".api"): # los proto file son del tipo 8080.api
+                    with open(self.path+" "+str(slot.port)+".api") as api_desc:
                         slot.aplication_protocol.ParseFromString(api_desc.read())
                 self.file.service.api.slot.append(slot)
 
