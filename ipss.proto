@@ -41,7 +41,7 @@ message Tensor {
     message Variable {
         string id = 1;
         repeated string tag = 2;
-        google.protobuf.FileDescriptorSet field = 3;
+        google.protobuf.DescriptorProto field = 3;
     }
     repeated Variable output_variable = 1;
     repeated Variable input_variable = 2;

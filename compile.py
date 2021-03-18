@@ -31,6 +31,8 @@ class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
         self.file = gateway_pb2.ServiceFile()
+        with open('home/hy/node/syntax.desc', 'rb') as syntax:
+            self.file.service.syntax.ParseFromString(syntax.read())
         self.path = path
         self.json = json.load(open(self.path+"service.json", "r"))
         self.aux_id = aux_id
@@ -183,9 +185,8 @@ class Hyper:
                 # transport protocol.
                 slot.transport_protocol.tag.extend(item.get('protocol'))  # Solo toma una lista de tags ...
                 # aplication protocol.
-                if os.path.isfile(self.path+" "+str(slot.port)+".desc"): # los proto file son del tipo 8080.api
-                    with open(self.path+" "+str(slot.port)+".desc") as api_desc:
-                        slot.aplication_protocol.ParseFromString(api_desc.read())
+                with open(self.path+str(slot.port)+".desc", "rb") as api_desc:
+                    slot.aplication_protocol.ParseFromString(api_desc.read())
                 self.file.service.api.append(slot)
 
     def parseLedger(self):
@@ -193,18 +194,28 @@ class Hyper:
             self.file.service.ledger.tag = self.json.get('ledger')
 
     def parseTensor(self):
-        tensor = self.json.get('tensor')
-        if tensor:    
-            for var in tensor.get('output_variables'):
-                variable = gateway_pb2.ipss__pb2.Tensor.Variable()
-                variable.tag.extend(var.get("tags"))
-                # Aun no se especifica el cuerpo field para este compilador.
-                self.file.service.tensor.output_variable.append(variable)
-            for var in tensor.get('input_variables'):
-                variable.tag.extend(var.get("tags"))
-                # Aun no se especifica el cuerpo field para este compilador.
-                self.file.service.tensor.input_variable.append(variable)
-
+        tensor = self.json.get('tensor') or None
+        if tensor:
+            input = tensor.get('input') or None
+            if input:
+                for var in input:
+                    variable = gateway_pb2.ipss__pb2.Tensor.Variable()
+                    variable.id = var
+                    for tag in input[var]:
+                        variable.tag.append(tag)
+                    with open(self.path+var+".desc", "rb") as var_desc:
+                        variable.field.ParseFromString(var_desc.read())
+                    self.file.service.tensor.input_variable.append(variable)
+            output = tensor.get('input') or None
+            if output:
+                for var in output:
+                    variable = gateway_pb2.ipss__pb2.Tensor.Variable()
+                    variable.id = var
+                    for tag in output[var]:
+                        variable.tag.append(tag)
+                    with open(self.path+var+".desc", "rb") as var_desc:
+                        variable.field.ParseFromString(var_desc.read())
+                    self.file.service.tensor.output_variable.append(variable)
 
     def save(self):
         # Calculate multi-hash.
