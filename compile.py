@@ -19,7 +19,7 @@ SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value.en
 def calculate_service_hash(service, hash_function: str):
     aux = gateway_pb2.ipss__pb2.Service()
     aux.CopyFrom(service)
-    aux.ClearField('filesystem')
+    aux.container.ClearField('filesystem')
     for hash in service.container.filesystem:
         if hash.algorithm == hash_function:
             aux.container.filesystem.append(hash)
