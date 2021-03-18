@@ -206,6 +206,7 @@ class Hyper:
                     try:
                         with open(self.path+var+".desc", "rb") as var_desc:
                             variable.field.ParseFromString(var_desc.read())
+                    except FileNotFoundError: pass
                     self.file.service.tensor.input_variable.append(variable)
             output = tensor.get('input') or None
             if output:
@@ -217,6 +218,7 @@ class Hyper:
                     try:
                         with open(self.path+var+".desc", "rb") as var_desc:
                             variable.field.ParseFromString(var_desc.read())
+                    except FileNotFoundError: pass
                     self.file.service.tensor.output_variable.append(variable)
 
     def save(self):
