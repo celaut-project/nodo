@@ -10,11 +10,11 @@ logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(level
 LOGGER = lambda message: logging.getLogger(__name__).debug(message)
 
 # -- HASH FUNCTIONS --
-SHAKE_256 = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(32)
-SHA3_256 = lambda value: "" if value is None else hashlib.sha3_256(value.encode()).hexdigest(32)
+SHAKE_256 = lambda value: "" if value is None else hashlib.shake_256(value).hexdigest(32)
+SHA3_256 = lambda value: "" if value is None else hashlib.sha3_256(value).hexdigest(32)
 
 # ALERT: Its not async.
-SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(99999999)
+SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value).hexdigest(99999999)
 
 def calculate_service_hash(service, hash_function: str):
     aux = gateway_pb2.ipss__pb2.Service()
