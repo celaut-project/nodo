@@ -62,21 +62,13 @@ message Service {
 }
 
 // The __config__ file is mounted on each service on the filesystem's root.
-message Gateway {
-    message Uri {
-        string direction = 1;
-        int32 port = 2;
-    }
-    Uri uri = 1; // format ip:port
-    repeated Slot api = 2;
-}
-
 message Configuration{
     message SlotSpec {
         int32 port = 1;
         ProtocolMesh transport_protocol = 2;
     }
-    Gateway host_gateway = 1;
+    string gateway_ip = 1;
+    repeated Slot gateway_slot = 2;
     map<string, string> enviroment_variables = 2;
     repeated SlotSpec slot = 3; // Only some of the specified ports and the protocol submesh for each slot.
 }
