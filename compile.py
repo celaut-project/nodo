@@ -31,7 +31,7 @@ class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
         self.file = gateway_pb2.ServiceFile()
-        with open('home/hy/node/syntax.desc', 'rb') as syntax:
+        with open('/home/hy/node/syntax.desc', 'rb') as syntax:
             self.file.service.syntax.ParseFromString(syntax.read())
         self.path = path
         self.json = json.load(open(self.path+"service.json", "r"))
