@@ -17,15 +17,14 @@ SHA3_256 = lambda value: "" if value is None else hashlib.sha3_256(value.encode(
 SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value.encode()).hexdigest(99999999)
 
 def calculate_service_hash(service, hash_function: str):
-    aux_service = gateway_pb2.ipss__pb2.Service()
-    aux_service.CopyFrom(service)
-    aux_fs = gateway_pb2.ipss__pb2.Container.Filesystem()
-    for hash in aux_service.container.filesystem:
+    aux = gateway_pb2.ipss__pb2.Service()
+    aux.CopyFrom(service)
+    aux.ClearField('filesystem')
+    for hash in service.container.filesystem:
         if hash.algorithm == hash_function:
-            aux_fs.append(hash)
-    aux_service.container.filesystem.CopyFrom(aux_fs)
+            aux.container.filesystem.append(hash)
     HASH = eval(hash_function)
-    return HASH(aux_service.SerializeToString())
+    return HASH(aux.SerializeToString())
 
 class Hyper:
     def __init__(self, path, aux_id):
