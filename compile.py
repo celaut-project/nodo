@@ -186,7 +186,7 @@ class Hyper:
                 if os.path.isfile(self.path+" "+str(slot.port)+".desc"): # los proto file son del tipo 8080.api
                     with open(self.path+" "+str(slot.port)+".desc") as api_desc:
                         slot.aplication_protocol.ParseFromString(api_desc.read())
-                self.file.service.api.slot.append(slot)
+                self.file.service.api.append(slot)
 
     def parseLedger(self):
         if self.json.get('ledger'):
