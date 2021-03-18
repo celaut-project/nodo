@@ -22,6 +22,7 @@ message Slot {
     int32 port = 1;
     ProtocolMesh transport_protocol = 2;
     google.protobuf.FileDescriptorSet aplication_protocol = 3;
+    optional string cost_function = 4;
 }
 
 // Container: Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
