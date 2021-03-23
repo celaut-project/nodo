@@ -1,12 +1,10 @@
 syntax = "proto3";
-
 import "google/protobuf/descriptor.proto";
-
 package ipss;
 
-//  --------------------
-// SPECIFICATION.
-//  --------------------
+//  -----------------------
+//  SERVICE SPECIFICATION.
+//  -----------------------
 // Hash Table ( IPDL ?)
 message Hash {
     string hash = 1;
@@ -40,7 +38,7 @@ message Container {
     string entrypoint = 4;
 }
 
-// Tensor: Defines “intelligence” that the service can provide, I think it would be a description of a polynomial (without coefficients and describing the variables).
+// Tensor: Defines the “intelligence” that the service can provide, I think it would be a description of a polynomial (without coefficients and describing the variables).
 message Tensor {
     message Variable {
         string id = 1;
@@ -51,10 +49,11 @@ message Tensor {
     repeated Variable input_variable = 2;
 }
 
-// Ledger: Defines the database used by the service, it would be a class diagram and a consensus algorithm.
+// Ledger: Defines the database that the service can provide.
 message Ledger {
     repeated string tag = 1;
     // Ledger specification can be applied. <- must be optional
+    //  it would be a class diagram and a consensus algorithm.
 }
 
 message Service {
@@ -65,18 +64,31 @@ message Service {
     Ledger ledger = 5;
 }
 
+//  ------------------------
+//  INSTANCE SPECIFICATION.
+//  ------------------------
+// Used for specify node peers, node-host instancies, ledger-nodes instancies and tensor instancies.
+message Instance {
+    String ip = 1;
+    repeated Slot api = 2;
+}
 
-//  --------------------
-// CONFIGURATION.
-//  --------------------
+//  -------------------------------
+//  SERVICE INITIAL CONFIGURATION.
+//  -------------------------------
 // The __config__ file is mounted on each service on the filesystem's root.
 message Configuration{
     message SlotSpec {
         int32 port = 1;
         ProtocolMesh transport_protocol = 2;
     }
-    string gateway_ip = 1;
-    repeated Slot gateway_slot = 2;
+    Instance gateway = 1;
     map<string, string> enviroment_variables = 2;
     repeated SlotSpec slot = 3; // Only some of the specified ports and the protocol submesh for each slot.
+
+    // Un servicio puede solicitar instancias de servicios con un ledger o un tensor aunque este no los ofrezca, y por tanto no aparezcan estos en su especificacion.
+    // Pero para los tensores y ledgers que si se especifican en la descripcion del servicio se puede concluir que van a ser requeridas instancias de los mismos al nodo,
+    // por lo tanto, el nodo tiene la opcion de añadir estas instancias de manera opcional en la configuracion de arranque del servicio.
+    repeated Instance tensor_instances = 4;
+    repeated Instance ledger_instances = 5;
 }
