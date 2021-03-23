@@ -69,26 +69,33 @@ message Service {
 //  ------------------------
 // Used for specify node peers, node-host instancies, ledger-nodes instancies and tensor instancies.
 message Instance {
-    String ip = 1;
-    repeated Slot api = 2;
+    message Uri {
+        string ip = 1;
+        int32 port = 2;
+    }
+    repeated Slot api = 1;
+    map<int32, Uri> uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899, ]
 }
 
 //  -------------------------------
 //  SERVICE INITIAL CONFIGURATION.
 //  -------------------------------
 // The __config__ file is mounted on each service on the filesystem's root.
-message Configuration{
+message Configuration {
     message SlotSpec {
         int32 port = 1;
         ProtocolMesh transport_protocol = 2;
     }
-    Instance gateway = 1;
     map<string, string> enviroment_variables = 2;
-    repeated SlotSpec slot = 3; // Only some of the specified ports and the protocol submesh for each slot.
+    repeated SlotSpec slot = 3; // Only some of the specified ports and the protocol submesh for each slot.    
+}
 
+message ConfigurationFile{
+    Instance gateway = 1;
+    Configuration config = 2;
     // Un servicio puede solicitar instancias de servicios con un ledger o un tensor aunque este no los ofrezca, y por tanto no aparezcan estos en su especificacion.
     // Pero para los tensores y ledgers que si se especifican en la descripcion del servicio se puede concluir que van a ser requeridas instancias de los mismos al nodo,
     // por lo tanto, el nodo tiene la opcion de añadir estas instancias de manera opcional en la configuracion de arranque del servicio.
-    repeated Instance tensor_instances = 4;
-    repeated Instance ledger_instances = 5;
+    repeated Instance tensor_instances = 3;
+    repeated Instance ledger_instances = 4;
 }

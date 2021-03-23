@@ -3,6 +3,7 @@
 import grpc
 
 import gateway_pb2 as gateway__pb2
+import ipss_pb2 as ipss__pb2
 
 
 class GatewayStub(object):
@@ -17,7 +18,7 @@ class GatewayStub(object):
         self.StartService = channel.stream_unary(
                 '/Gateway/StartService',
                 request_serializer=gateway__pb2.ServiceExtended.SerializeToString,
-                response_deserializer=gateway__pb2.Instance.FromString,
+                response_deserializer=ipss__pb2.Instance.FromString,
                 )
         self.StopService = channel.unary_unary(
                 '/Gateway/StopService',
@@ -47,7 +48,7 @@ def add_GatewayServicer_to_server(servicer, server):
             'StartService': grpc.stream_unary_rpc_method_handler(
                     servicer.StartService,
                     request_deserializer=gateway__pb2.ServiceExtended.FromString,
-                    response_serializer=gateway__pb2.Instance.SerializeToString,
+                    response_serializer=ipss__pb2.Instance.SerializeToString,
             ),
             'StopService': grpc.unary_unary_rpc_method_handler(
                     servicer.StopService,
@@ -77,7 +78,7 @@ class Gateway(object):
             metadata=None):
         return grpc.experimental.stream_unary(request_iterator, target, '/Gateway/StartService',
             gateway__pb2.ServiceExtended.SerializeToString,
-            gateway__pb2.Instance.FromString,
+            ipss__pb2.Instance.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

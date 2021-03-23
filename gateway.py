@@ -51,7 +51,7 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
 
         instance_cache.update({container_ip:container_id})
         instance = gateway_pb2.Instance()
-        instance.token.string = container_id
+        instance.token.value_string = container_id
         return instance
     else:
         LOGGER('Retorna la uri para usar la api.'+ str(service_ports))
@@ -82,7 +82,7 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
                 uri.direction = container_id
                 uri.port = port
                 instance.uris.append( port, uri)
-            instance.token.string = container_id
+            instance.token.value_string = container_id
             return instance
 
         # Si se trata de un servicio en otro nodo.
@@ -119,7 +119,7 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
                 uri.direction = host_ip
                 uri.port = assigment_ports[port]
                 instance.uris.append( port, uri)
-            instance.token.string = container_id
+            instance.token.value_string = container_id
             return instance
         else:
             LOGGER('THIS NETWORK IS NOT SUPPORTED')

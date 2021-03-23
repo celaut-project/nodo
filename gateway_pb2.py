@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"\x07\n\x05\x45mpty\"\x84\x01\n\x08Instance\x12!\n\x04uris\x18\x01 \x03(\x0b\x32\x13.Instance.UrisEntry\x12\x15\n\x05token\x18\x02 \x01(\x0b\x32\x06.Token\x1a>\n\tUrisEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12 \n\x05value\x18\x02 \x01(\x0b\x32\x11.ipss.Gateway.Uri:\x02\x38\x01\"\x8d\x01\n\x0fServiceExtended\x12\x1a\n\x04hash\x18\x01 \x01(\x0b\x32\n.ipss.HashH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"L\n\x0bServiceFile\x12\x1d\n\tmultihash\x18\x01 \x03(\x0b\x32\n.ipss.Hash\x12\x1e\n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.Service2[\n\x07Gateway\x12/\n\x0cStartService\x12\x10.ServiceExtended\x1a\t.Instance\"\x00(\x01\x12\x1f\n\x0bStopService\x12\x06.Token\x1a\x06.Empty\"\x00\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"\x07\n\x05\x45mpty\"\x8d\x01\n\x0fServiceExtended\x12\x1a\n\x04hash\x18\x01 \x01(\x0b\x32\n.ipss.HashH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"L\n\x0bServiceFile\x12\x1d\n\tmultihash\x18\x01 \x03(\x0b\x32\n.ipss.Hash\x12\x1e\n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.Service2`\n\x07Gateway\x12\x34\n\x0cStartService\x12\x10.ServiceExtended\x1a\x0e.ipss.Instance\"\x00(\x01\x12\x1f\n\x0bStopService\x12\x06.Token\x1a\x06.Empty\"\x00\x62\x06proto3'
   ,
   dependencies=[ipss__pb2.DESCRIPTOR,])
 
@@ -103,83 +103,6 @@ _EMPTY = _descriptor.Descriptor(
 )
 
 
-_INSTANCE_URISENTRY = _descriptor.Descriptor(
-  name='UrisEntry',
-  full_name='Instance.UrisEntry',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  create_key=_descriptor._internal_create_key,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='key', full_name='Instance.UrisEntry.key', index=0,
-      number=1, type=5, cpp_type=1, label=1,
-      has_default_value=False, default_value=0,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='value', full_name='Instance.UrisEntry.value', index=1,
-      number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  serialized_options=b'8\001',
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=197,
-  serialized_end=259,
-)
-
-_INSTANCE = _descriptor.Descriptor(
-  name='Instance',
-  full_name='Instance',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  create_key=_descriptor._internal_create_key,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='uris', full_name='Instance.uris', index=0,
-      number=1, type=11, cpp_type=10, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='token', full_name='Instance.token', index=1,
-      number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-  ],
-  extensions=[
-  ],
-  nested_types=[_INSTANCE_URISENTRY, ],
-  enum_types=[
-  ],
-  serialized_options=None,
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=127,
-  serialized_end=259,
-)
-
-
 _SERVICEEXTENDED = _descriptor.Descriptor(
   name='ServiceExtended',
   full_name='ServiceExtended',
@@ -231,8 +154,8 @@ _SERVICEEXTENDED = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=262,
-  serialized_end=403,
+  serialized_start=127,
+  serialized_end=268,
 )
 
 
@@ -270,8 +193,8 @@ _SERVICEFILE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=405,
-  serialized_end=481,
+  serialized_start=270,
+  serialized_end=346,
 )
 
 _TOKEN.oneofs_by_name['oneOf'].fields.append(
@@ -283,10 +206,6 @@ _TOKEN.fields_by_name['value_int64'].containing_oneof = _TOKEN.oneofs_by_name['o
 _TOKEN.oneofs_by_name['oneOf'].fields.append(
   _TOKEN.fields_by_name['value_string'])
 _TOKEN.fields_by_name['value_string'].containing_oneof = _TOKEN.oneofs_by_name['oneOf']
-_INSTANCE_URISENTRY.fields_by_name['value'].message_type = ipss__pb2._GATEWAY_URI
-_INSTANCE_URISENTRY.containing_type = _INSTANCE
-_INSTANCE.fields_by_name['uris'].message_type = _INSTANCE_URISENTRY
-_INSTANCE.fields_by_name['token'].message_type = _TOKEN
 _SERVICEEXTENDED.fields_by_name['hash'].message_type = ipss__pb2._HASH
 _SERVICEEXTENDED.fields_by_name['service'].message_type = ipss__pb2._SERVICE
 _SERVICEEXTENDED.fields_by_name['config'].message_type = ipss__pb2._CONFIGURATION
@@ -303,7 +222,6 @@ _SERVICEFILE.fields_by_name['multihash'].message_type = ipss__pb2._HASH
 _SERVICEFILE.fields_by_name['service'].message_type = ipss__pb2._SERVICE
 DESCRIPTOR.message_types_by_name['Token'] = _TOKEN
 DESCRIPTOR.message_types_by_name['Empty'] = _EMPTY
-DESCRIPTOR.message_types_by_name['Instance'] = _INSTANCE
 DESCRIPTOR.message_types_by_name['ServiceExtended'] = _SERVICEEXTENDED
 DESCRIPTOR.message_types_by_name['ServiceFile'] = _SERVICEFILE
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
@@ -322,21 +240,6 @@ Empty = _reflection.GeneratedProtocolMessageType('Empty', (_message.Message,), {
   })
 _sym_db.RegisterMessage(Empty)
 
-Instance = _reflection.GeneratedProtocolMessageType('Instance', (_message.Message,), {
-
-  'UrisEntry' : _reflection.GeneratedProtocolMessageType('UrisEntry', (_message.Message,), {
-    'DESCRIPTOR' : _INSTANCE_URISENTRY,
-    '__module__' : 'gateway_pb2'
-    # @@protoc_insertion_point(class_scope:Instance.UrisEntry)
-    })
-  ,
-  'DESCRIPTOR' : _INSTANCE,
-  '__module__' : 'gateway_pb2'
-  # @@protoc_insertion_point(class_scope:Instance)
-  })
-_sym_db.RegisterMessage(Instance)
-_sym_db.RegisterMessage(Instance.UrisEntry)
-
 ServiceExtended = _reflection.GeneratedProtocolMessageType('ServiceExtended', (_message.Message,), {
   'DESCRIPTOR' : _SERVICEEXTENDED,
   '__module__' : 'gateway_pb2'
@@ -352,7 +255,6 @@ ServiceFile = _reflection.GeneratedProtocolMessageType('ServiceFile', (_message.
 _sym_db.RegisterMessage(ServiceFile)
 
 
-_INSTANCE_URISENTRY._options = None
 
 _GATEWAY = _descriptor.ServiceDescriptor(
   name='Gateway',
@@ -361,8 +263,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=483,
-  serialized_end=574,
+  serialized_start=348,
+  serialized_end=444,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',
@@ -370,7 +272,7 @@ _GATEWAY = _descriptor.ServiceDescriptor(
     index=0,
     containing_service=None,
     input_type=_SERVICEEXTENDED,
-    output_type=_INSTANCE,
+    output_type=ipss__pb2._INSTANCE,
     serialized_options=None,
     create_key=_descriptor._internal_create_key,
   ),
