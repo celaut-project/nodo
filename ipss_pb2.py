@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\nipss.proto\x12\x04ipss\x1a google/protobuf/descriptor.proto\"!\n\x04Hash\x12\x0c\n\x04hash\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\"\x1b\n\x0cProtocolMesh\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\x85\x01\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12.\n\x12transport_protocol\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh\x12?\n\x13\x61plication_protocol\x18\x03 \x01(\x0b\x32\".google.protobuf.FileDescriptorSet\"\x1b\n\x0c\x41rchitecture\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\x87\x01\n\tContainer\x12(\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\x12.ipss.Architecture\x12\x1e\n\nfilesystem\x18\x02 \x03(\x0b\x32\n.ipss.Hash\x12\x1c\n\x14\x65nviroment_variables\x18\x03 \x03(\t\x12\x12\n\nentrypoint\x18\x04 \x01(\t\"\xcc\x01\n\x06Tensor\x12.\n\x0foutput_variable\x18\x01 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x12-\n\x0einput_variable\x18\x02 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x1a\x63\n\x08Variable\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x34\n\x05\x66ield\x18\x03 \x01(\x0b\x32 .google.protobuf.DescriptorProtoH\x00\x88\x01\x01\x42\x08\n\x06_field\"\x15\n\x06Ledger\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\xb6\x01\n\x07Service\x12\x32\n\x06syntax\x18\x01 \x01(\x0b\x32\".google.protobuf.FileDescriptorSet\x12\"\n\tcontainer\x18\x02 \x01(\x0b\x32\x0f.ipss.Container\x12\x17\n\x03\x61pi\x18\x03 \x03(\x0b\x32\n.ipss.Slot\x12\x1c\n\x06tensor\x18\x04 \x01(\x0b\x32\x0c.ipss.Tensor\x12\x1c\n\x06ledger\x18\x05 \x01(\x0b\x32\x0c.ipss.Ledger\"\xb7\x01\n\x08Instance\x12\x17\n\x03\x61pi\x18\x01 \x03(\x0b\x32\n.ipss.Slot\x12-\n\x08uri_slot\x18\x02 \x03(\x0b\x32\x1b.ipss.Instance.UriSlotEntry\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x42\n\x0cUriSlotEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.ipss.Instance.Uri:\x02\x38\x01\"\x82\x03\n\rConfiguration\x12\x1f\n\x07gateway\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12J\n\x14\x65nviroment_variables\x18\x02 \x03(\x0b\x32,.ipss.Configuration.EnviromentVariablesEntry\x12*\n\x04slot\x18\x03 \x03(\x0b\x32\x1c.ipss.Configuration.SlotSpec\x12(\n\x10tensor_instances\x18\x04 \x03(\x0b\x32\x0e.ipss.Instance\x12(\n\x10ledger_instances\x18\x05 \x03(\x0b\x32\x0e.ipss.Instance\x1aH\n\x08SlotSpec\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12.\n\x12transport_protocol\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh\x1a:\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x62\x06proto3'
+  serialized_pb=b'\n\nipss.proto\x12\x04ipss\x1a google/protobuf/descriptor.proto\"!\n\x04Hash\x12\x0c\n\x04hash\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\"\x1b\n\x0cProtocolMesh\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\x85\x01\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12.\n\x12transport_protocol\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh\x12?\n\x13\x61plication_protocol\x18\x03 \x01(\x0b\x32\".google.protobuf.FileDescriptorSet\"\x1b\n\x0c\x41rchitecture\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\x87\x01\n\tContainer\x12(\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\x12.ipss.Architecture\x12\x1e\n\nfilesystem\x18\x02 \x03(\x0b\x32\n.ipss.Hash\x12\x1c\n\x14\x65nviroment_variables\x18\x03 \x03(\t\x12\x12\n\nentrypoint\x18\x04 \x01(\t\"\xcc\x01\n\x06Tensor\x12.\n\x0foutput_variable\x18\x01 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x12-\n\x0einput_variable\x18\x02 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x1a\x63\n\x08Variable\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x34\n\x05\x66ield\x18\x03 \x01(\x0b\x32 .google.protobuf.DescriptorProtoH\x00\x88\x01\x01\x42\x08\n\x06_field\"\x15\n\x06Ledger\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\xb6\x01\n\x07Service\x12\x32\n\x06syntax\x18\x01 \x01(\x0b\x32\".google.protobuf.FileDescriptorSet\x12\"\n\tcontainer\x18\x02 \x01(\x0b\x32\x0f.ipss.Container\x12\x17\n\x03\x61pi\x18\x03 \x03(\x0b\x32\n.ipss.Slot\x12\x1c\n\x06tensor\x18\x04 \x01(\x0b\x32\x0c.ipss.Tensor\x12\x1c\n\x06ledger\x18\x05 \x01(\x0b\x32\x0c.ipss.Ledger\"\xb7\x01\n\x08Instance\x12\x17\n\x03\x61pi\x18\x01 \x03(\x0b\x32\n.ipss.Slot\x12-\n\x08uri_slot\x18\x02 \x03(\x0b\x32\x1b.ipss.Instance.UriSlotEntry\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x42\n\x0cUriSlotEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.ipss.Instance.Uri:\x02\x38\x01\"\x92\x02\n\rConfiguration\x12J\n\x14\x65nviroment_variables\x18\x01 \x03(\x0b\x32,.ipss.Configuration.EnviromentVariablesEntry\x12\x34\n\tspec_slot\x18\x02 \x03(\x0b\x32!.ipss.Configuration.SpecSlotEntry\x1a:\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x1a\x43\n\rSpecSlotEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh:\x02\x38\x01\"\xad\x01\n\x11\x43onfigurationFile\x12\x1f\n\x07gateway\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12#\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x13.ipss.Configuration\x12(\n\x10tensor_instances\x18\x03 \x03(\x0b\x32\x0e.ipss.Instance\x12(\n\x10ledger_instances\x18\x04 \x03(\x0b\x32\x0e.ipss.Instanceb\x06proto3'
   ,
   dependencies=[google_dot_protobuf_dot_descriptor__pb2.DESCRIPTOR,])
 
@@ -525,44 +525,6 @@ _INSTANCE = _descriptor.Descriptor(
 )
 
 
-_CONFIGURATION_SLOTSPEC = _descriptor.Descriptor(
-  name='SlotSpec',
-  full_name='ipss.Configuration.SlotSpec',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  create_key=_descriptor._internal_create_key,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='port', full_name='ipss.Configuration.SlotSpec.port', index=0,
-      number=1, type=5, cpp_type=1, label=1,
-      has_default_value=False, default_value=0,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='transport_protocol', full_name='ipss.Configuration.SlotSpec.transport_protocol', index=1,
-      number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  serialized_options=None,
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=1277,
-  serialized_end=1349,
-)
-
 _CONFIGURATION_ENVIROMENTVARIABLESENTRY = _descriptor.Descriptor(
   name='EnviromentVariablesEntry',
   full_name='ipss.Configuration.EnviromentVariablesEntry',
@@ -597,8 +559,46 @@ _CONFIGURATION_ENVIROMENTVARIABLESENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1351,
-  serialized_end=1409,
+  serialized_start=1170,
+  serialized_end=1228,
+)
+
+_CONFIGURATION_SPECSLOTENTRY = _descriptor.Descriptor(
+  name='SpecSlotEntry',
+  full_name='ipss.Configuration.SpecSlotEntry',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='key', full_name='ipss.Configuration.SpecSlotEntry.key', index=0,
+      number=1, type=5, cpp_type=1, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='value', full_name='ipss.Configuration.SpecSlotEntry.value', index=1,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=b'8\001',
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1230,
+  serialized_end=1297,
 )
 
 _CONFIGURATION = _descriptor.Descriptor(
@@ -610,36 +610,15 @@ _CONFIGURATION = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='gateway', full_name='ipss.Configuration.gateway', index=0,
-      number=1, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
+      name='enviroment_variables', full_name='ipss.Configuration.enviroment_variables', index=0,
+      number=1, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='enviroment_variables', full_name='ipss.Configuration.enviroment_variables', index=1,
+      name='spec_slot', full_name='ipss.Configuration.spec_slot', index=1,
       number=2, type=11, cpp_type=10, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='slot', full_name='ipss.Configuration.slot', index=2,
-      number=3, type=11, cpp_type=10, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='tensor_instances', full_name='ipss.Configuration.tensor_instances', index=3,
-      number=4, type=11, cpp_type=10, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='ledger_instances', full_name='ipss.Configuration.ledger_instances', index=4,
-      number=5, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -647,7 +626,7 @@ _CONFIGURATION = _descriptor.Descriptor(
   ],
   extensions=[
   ],
-  nested_types=[_CONFIGURATION_SLOTSPEC, _CONFIGURATION_ENVIROMENTVARIABLESENTRY, ],
+  nested_types=[_CONFIGURATION_ENVIROMENTVARIABLESENTRY, _CONFIGURATION_SPECSLOTENTRY, ],
   enum_types=[
   ],
   serialized_options=None,
@@ -657,7 +636,60 @@ _CONFIGURATION = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=1023,
-  serialized_end=1409,
+  serialized_end=1297,
+)
+
+
+_CONFIGURATIONFILE = _descriptor.Descriptor(
+  name='ConfigurationFile',
+  full_name='ipss.ConfigurationFile',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='gateway', full_name='ipss.ConfigurationFile.gateway', index=0,
+      number=1, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='config', full_name='ipss.ConfigurationFile.config', index=1,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='tensor_instances', full_name='ipss.ConfigurationFile.tensor_instances', index=2,
+      number=3, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='ledger_instances', full_name='ipss.ConfigurationFile.ledger_instances', index=3,
+      number=4, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1300,
+  serialized_end=1473,
 )
 
 _SLOT.fields_by_name['transport_protocol'].message_type = _PROTOCOLMESH
@@ -681,14 +713,15 @@ _INSTANCE_URISLOTENTRY.fields_by_name['value'].message_type = _INSTANCE_URI
 _INSTANCE_URISLOTENTRY.containing_type = _INSTANCE
 _INSTANCE.fields_by_name['api'].message_type = _SLOT
 _INSTANCE.fields_by_name['uri_slot'].message_type = _INSTANCE_URISLOTENTRY
-_CONFIGURATION_SLOTSPEC.fields_by_name['transport_protocol'].message_type = _PROTOCOLMESH
-_CONFIGURATION_SLOTSPEC.containing_type = _CONFIGURATION
 _CONFIGURATION_ENVIROMENTVARIABLESENTRY.containing_type = _CONFIGURATION
-_CONFIGURATION.fields_by_name['gateway'].message_type = _INSTANCE
+_CONFIGURATION_SPECSLOTENTRY.fields_by_name['value'].message_type = _PROTOCOLMESH
+_CONFIGURATION_SPECSLOTENTRY.containing_type = _CONFIGURATION
 _CONFIGURATION.fields_by_name['enviroment_variables'].message_type = _CONFIGURATION_ENVIROMENTVARIABLESENTRY
-_CONFIGURATION.fields_by_name['slot'].message_type = _CONFIGURATION_SLOTSPEC
-_CONFIGURATION.fields_by_name['tensor_instances'].message_type = _INSTANCE
-_CONFIGURATION.fields_by_name['ledger_instances'].message_type = _INSTANCE
+_CONFIGURATION.fields_by_name['spec_slot'].message_type = _CONFIGURATION_SPECSLOTENTRY
+_CONFIGURATIONFILE.fields_by_name['gateway'].message_type = _INSTANCE
+_CONFIGURATIONFILE.fields_by_name['config'].message_type = _CONFIGURATION
+_CONFIGURATIONFILE.fields_by_name['tensor_instances'].message_type = _INSTANCE
+_CONFIGURATIONFILE.fields_by_name['ledger_instances'].message_type = _INSTANCE
 DESCRIPTOR.message_types_by_name['Hash'] = _HASH
 DESCRIPTOR.message_types_by_name['ProtocolMesh'] = _PROTOCOLMESH
 DESCRIPTOR.message_types_by_name['Slot'] = _SLOT
@@ -699,6 +732,7 @@ DESCRIPTOR.message_types_by_name['Ledger'] = _LEDGER
 DESCRIPTOR.message_types_by_name['Service'] = _SERVICE
 DESCRIPTOR.message_types_by_name['Instance'] = _INSTANCE
 DESCRIPTOR.message_types_by_name['Configuration'] = _CONFIGURATION
+DESCRIPTOR.message_types_by_name['ConfigurationFile'] = _CONFIGURATIONFILE
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 Hash = _reflection.GeneratedProtocolMessageType('Hash', (_message.Message,), {
@@ -790,17 +824,17 @@ _sym_db.RegisterMessage(Instance.UriSlotEntry)
 
 Configuration = _reflection.GeneratedProtocolMessageType('Configuration', (_message.Message,), {
 
-  'SlotSpec' : _reflection.GeneratedProtocolMessageType('SlotSpec', (_message.Message,), {
-    'DESCRIPTOR' : _CONFIGURATION_SLOTSPEC,
-    '__module__' : 'ipss_pb2'
-    # @@protoc_insertion_point(class_scope:ipss.Configuration.SlotSpec)
-    })
-  ,
-
   'EnviromentVariablesEntry' : _reflection.GeneratedProtocolMessageType('EnviromentVariablesEntry', (_message.Message,), {
     'DESCRIPTOR' : _CONFIGURATION_ENVIROMENTVARIABLESENTRY,
     '__module__' : 'ipss_pb2'
     # @@protoc_insertion_point(class_scope:ipss.Configuration.EnviromentVariablesEntry)
+    })
+  ,
+
+  'SpecSlotEntry' : _reflection.GeneratedProtocolMessageType('SpecSlotEntry', (_message.Message,), {
+    'DESCRIPTOR' : _CONFIGURATION_SPECSLOTENTRY,
+    '__module__' : 'ipss_pb2'
+    # @@protoc_insertion_point(class_scope:ipss.Configuration.SpecSlotEntry)
     })
   ,
   'DESCRIPTOR' : _CONFIGURATION,
@@ -808,10 +842,18 @@ Configuration = _reflection.GeneratedProtocolMessageType('Configuration', (_mess
   # @@protoc_insertion_point(class_scope:ipss.Configuration)
   })
 _sym_db.RegisterMessage(Configuration)
-_sym_db.RegisterMessage(Configuration.SlotSpec)
 _sym_db.RegisterMessage(Configuration.EnviromentVariablesEntry)
+_sym_db.RegisterMessage(Configuration.SpecSlotEntry)
+
+ConfigurationFile = _reflection.GeneratedProtocolMessageType('ConfigurationFile', (_message.Message,), {
+  'DESCRIPTOR' : _CONFIGURATIONFILE,
+  '__module__' : 'ipss_pb2'
+  # @@protoc_insertion_point(class_scope:ipss.ConfigurationFile)
+  })
+_sym_db.RegisterMessage(ConfigurationFile)
 
 
 _INSTANCE_URISLOTENTRY._options = None
 _CONFIGURATION_ENVIROMENTVARIABLESENTRY._options = None
+_CONFIGURATION_SPECSLOTENTRY._options = None
 # @@protoc_insertion_point(module_scope)

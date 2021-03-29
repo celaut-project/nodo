@@ -1,58 +1,0 @@
-
-ª
-
-ipss.protoipss google/protobuf/descriptor.proto"8
-Hash
-	algorithm (	R	algorithm
-hash (	Rhash" 
-ProtocolMesh
-tag (	Rtag"²
-Slot
-port (RportA
-transport_protocol (2.ipss.ProtocolMeshRtransportProtocolS
-aplication_protocol (2".google.protobuf.FileDescriptorSetRaplicationProtocol" 
-Architecture
-tag (	Rtag"Â
-	Container6
-architecture (2.ipss.ArchitectureRarchitecture*
-
-filesystem (2
-.ipss.HashR
-filesystem1
-enviroment_variables (	RenviromentVariables
-
-entrypoint (	R
-entrypoint"ì
-Tensor>
-output_variable (2.ipss.Tensor.VariableRoutputVariable<
-input_variable (2.ipss.Tensor.VariableRinputVariabled
-Variable
-id (	Rid
-tag (	Rtag6
-field (2 .google.protobuf.DescriptorProtoRfield"
-Ledger
-tag (	Rtag"Ş
-Service:
-syntax (2".google.protobuf.FileDescriptorSetRsyntax-
-	container (2.ipss.ContainerR	container
-api (2
-.ipss.SlotRapi$
-tensor (2.ipss.TensorRtensor$
-ledger (2.ipss.LedgerRledger"…
-Gateway#
-uri (2.ipss.Gateway.UriRuri
-api (2
-.ipss.SlotRapi7
-Uri
-	direction (	R	direction
-port (Rport"ÿ
-Configuration0
-host_gateway (2.ipss.GatewayRhostGateway_
-enviroment_variables (2,.ipss.Configuration.EnviromentVariablesEntryRenviromentVariables0
-slot (2.ipss.Configuration.SlotSpecRslota
-SlotSpec
-port (RportA
-transport_protocol (2.ipss.ProtocolMeshRtransportProtocolF
-EnviromentVariablesEntry
-key (	Rkey
-value (	Rvalue:8bproto3

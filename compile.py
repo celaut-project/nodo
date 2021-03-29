@@ -30,8 +30,6 @@ class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
         self.file = gateway_pb2.ServiceFile()
-        with open('/home/hy/node/syntax.desc', 'rb') as syntax:
-            self.file.service.syntax.ParseFromString(syntax.read())
         self.path = path
         self.json = json.load(open(self.path+"service.json", "r"))
         self.aux_id = aux_id
@@ -184,7 +182,7 @@ class Hyper:
                 # transport protocol.
                 slot.transport_protocol.tag.extend(item.get('protocol'))  # Solo toma una lista de tags ...
                 # aplication protocol.
-                with open(self.path+str(slot.port)+".desc", "rb") as api_desc:
+                with open(self.path+str(slot.port)+".application", "rb") as api_desc:
                     slot.aplication_protocol.ParseFromString(api_desc.read())
                 self.file.service.api.append(slot)
 
@@ -203,7 +201,7 @@ class Hyper:
                     for tag in input[var]:
                         variable.tag.append(tag)
                     try:
-                        with open(self.path+var+".desc", "rb") as var_desc:
+                        with open(self.path+var+".field", "rb") as var_desc:
                             variable.field.ParseFromString(var_desc.read())
                     except FileNotFoundError: pass
                     self.file.service.tensor.input_variable.append(variable)
@@ -215,7 +213,7 @@ class Hyper:
                     for tag in output[var]:
                         variable.tag.append(tag)
                     try:
-                        with open(self.path+var+".desc", "rb") as var_desc:
+                        with open(self.path+var+".field", "rb") as var_desc:
                             variable.field.ParseFromString(var_desc.read())
                     except FileNotFoundError: pass
                     self.file.service.tensor.output_variable.append(variable)

@@ -1,14 +1,60 @@
 syntax = "proto3";
-import "google/protobuf/descriptor.proto";
 package ipss;
+
+//  -----------------------
+//  DEFINITIONS.
+//  -----------------------
+message PrimitiveDef {
+    repeated string tag = 1; // INT32, ...
+    optional string regex = 2; // {0-10}, ...
+    // Primitive specification can be applied. <- must be optional
+}
+
+message FieldDef {
+    oneof value{
+        MessageDef message = 1;
+        PrimitiveDef primitive = 2;
+    }
+}
+
+message ParamDef {
+    repeated string tag = 1;
+    FieldDef field = 2;
+    bool repeated = 3;
+    bool optional = 4;
+}
+
+message MessageDef {
+    repeated string tag = 1;
+    map<int32, ParamDef> field = 2;
+}
+
+message MethodDef {
+    repeated string tag = 1;
+    MessageDef input_message = 2;
+    bool is_input_stream = 3;
+    MessageDef output_message = 4;
+    bool is_output_stream = 5;
+}
+
+message ApplicationDef {
+    repeated string tag = 1;
+    map<int32, MethodDef> method = 2; // Exemple of method call: 8080.1()
+}
+
+message Any {
+    optional FieldDef field = 1;
+    bytes value = 2;
+}
+
 
 //  -----------------------
 //  SERVICE SPECIFICATION.
 //  -----------------------
 // Hash Table ( IPDL ?)
 message Hash {
-    string hash = 1;
-    repeated string tag = 2;
+    string hash = 1; // d5tr ...
+    repeated string tag = 2; // SHA256 ...
     // Mesh specification can be applied. <- must be optional
 }
 
@@ -21,7 +67,7 @@ message ProtocolMesh {
 message Slot {
     int32 port = 1;
     ProtocolMesh transport_protocol = 2;
-    google.protobuf.FileDescriptorSet aplication_protocol = 3;
+    ApplicationDef application_protocol = 3;
     // Cost function can be applied. <- must be optional
 }
 
@@ -34,7 +80,7 @@ message Architecture {
 message Container {
     Architecture architecture = 1;
     repeated Hash filesystem = 2;
-    repeated string enviroment_variables = 3;
+    map<string, FieldDef> enviroment_variables = 3;
     string entrypoint = 4;
 }
 
@@ -43,7 +89,7 @@ message Tensor {
     message Variable {
         string id = 1;
         repeated string tag = 2;
-        optional google.protobuf.DescriptorProto field = 3;
+        optional FieldDef field = 3;
     }
     repeated Variable output_variable = 1;
     repeated Variable input_variable = 2;
@@ -57,12 +103,13 @@ message Ledger {
 }
 
 message Service {
-    google.protobuf.FileDescriptorSet syntax = 1;
+    MessageDef syntax = 1;
     Container container = 2;
     repeated Slot api = 3;
     Tensor tensor = 4;
     Ledger ledger = 5;
 }
+
 
 //  ------------------------
 //  INSTANCE SPECIFICATION.
@@ -82,12 +129,8 @@ message Instance {
 //  -------------------------------
 // The __config__ file is mounted on each service on the filesystem's root.
 message Configuration {
-    message SlotSpec {
-        int32 port = 1;
-        ProtocolMesh transport_protocol = 2;
-    }
-    map<string, string> enviroment_variables = 2;
-    repeated SlotSpec slot = 3; // Only some of the specified ports and the protocol submesh for each slot.    
+    map<string, Any> enviroment_variables = 1;
+    map<int32, ProtocolMesh> spec_slot = 2; // Only some of the specified ports and a protocol-submesh subgroup of the protocol-submesh of each slot.    
 }
 
 message ConfigurationFile{
