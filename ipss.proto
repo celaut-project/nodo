@@ -10,40 +10,58 @@ message PrimitiveDef {
     // Primitive specification can be applied. <- must be optional
 }
 
+message EnumDef {
+    repeated string tag = 1;
+    map<string, int32> value = 2;
+}
+
 message FieldDef {
     oneof value{
         MessageDef message = 1;
         PrimitiveDef primitive = 2;
+        EnumDef enum = 3;
     }
 }
 
 message ParamDef {
+    int32 index = 1;
     repeated string tag = 1;
+    // In order to avoid loops, 
+    // in the definition of a message only
+    // the sub-messages must be fully 
+    // specified the first time they appear,
+    // if they are repeated again only the tags are added.
     FieldDef field = 2;
     bool repeated = 3;
     bool optional = 4;
 }
 
+message OneofDef {
+    repeated int32 index = 1;
+}
+
 message MessageDef {
     repeated string tag = 1;
-    map<int32, ParamDef> field = 2;
+    repeated ParamDef param = 2;
+    repeated OneofDef oneof = 3; // have a list of oneof's params' index.
 }
 
 message MethodDef {
+    int32 index = 1;
     repeated string tag = 1;
-    MessageDef input_message = 2;
+    FieldDef input_message = 2;
     bool is_input_stream = 3;
-    MessageDef output_message = 4;
+    FieldDef output_message = 4;
     bool is_output_stream = 5;
 }
 
 message ApplicationDef {
     repeated string tag = 1;
-    map<int32, MethodDef> method = 2; // Exemple of method call: 8080.1()
+    repeated method = 2; // Exemple of method call: 8080.1()
 }
 
 message Any {
-    optional FieldDef field = 1;
+    FieldDef field = 1;
     bytes value = 2;
 }
 
@@ -51,13 +69,6 @@ message Any {
 //  -----------------------
 //  SERVICE SPECIFICATION.
 //  -----------------------
-// Hash Table ( IPDL ?)
-message Hash {
-    string hash = 1; // d5tr ...
-    repeated string tag = 2; // SHA256 ...
-    // Mesh specification can be applied. <- must be optional
-}
-
 // API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
 message ProtocolMesh {
     repeated string tag = 1;
@@ -77,9 +88,21 @@ message Architecture {
     // Architecture specification can be applied. <- must be optional.
 }
 
+message Filesystem {
+    message Branch { 
+        oneof item {
+            bytes file = 1;
+            Filesystem filesystem = 2;
+        }
+        string name = 3;
+        // ¿ more params ... ?
+    }
+    repeated Branch branch = 1;
+}
+
 message Container {
     Architecture architecture = 1;
-    repeated Hash filesystem = 2;
+    Filesystem filesystem = 2;
     map<string, FieldDef> enviroment_variables = 3;
     string entrypoint = 4;
 }
@@ -89,7 +112,7 @@ message Tensor {
     message Variable {
         string id = 1;
         repeated string tag = 2;
-        optional FieldDef field = 3;
+        FieldDef field = 3;
     }
     repeated Variable output_variable = 1;
     repeated Variable input_variable = 2;

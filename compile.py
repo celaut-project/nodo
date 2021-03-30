@@ -205,7 +205,7 @@ class Hyper:
                             variable.field.ParseFromString(var_desc.read())
                     except FileNotFoundError: pass
                     self.file.service.tensor.input_variable.append(variable)
-            output = tensor.get('input') or None
+            output = tensor.get('output') or None
             if output:
                 for var in output:
                     variable = gateway_pb2.ipss__pb2.Tensor.Variable()
