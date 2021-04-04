@@ -9,6 +9,10 @@ import logging
 logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
 LOGGER = lambda message: logging.getLogger(__name__).debug(message)
 
+# DIRECTORIES
+HYCACHE = "/home/hy/node/__hycache__/"
+REGISTRY = "/home/hy/node/__registry__/"
+
 # -- HASH FUNCTIONS --
 SHAKE_256 = lambda value: "" if value is None else hashlib.shake_256(value).hexdigest(32)
 SHA3_256 = lambda value: "" if value is None else hashlib.sha3_256(value).hexdigest(32)
