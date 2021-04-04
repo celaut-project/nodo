@@ -24,21 +24,6 @@ message Instance {
     Token token = 2;
 }
 
-message MinimalContainer {
-    ipss.Architecture architecture = 1;
-    repeated Hash filesystem = 2;
-    map<string, ipss.FieldDef> enviroment_variables = 3;
-    ipss.string entrypoint = 4;
-}
-
-message MinimalService {
-    ipss.MessageDef syntax = 1;
-    MinimalContainer container = 2;
-    repeated ipss.Slot api = 3;
-    ipss.Tensor tensor = 4;
-    ipss.Ledger ledger = 5;   
-}
-
 message ServiceExtended {
     oneof oneOf{
         Hash hash = 1;
@@ -50,6 +35,5 @@ message ServiceExtended {
 service Gateway {
     rpc StartService( ipss.Service) returns (Instance) {}
     rpc StartServiceWithExtended( stream ServiceExtended) returns (Instance) {}
-    rpc StartServiceWithMinimal(MinimalService) returns (Instance) {}
     rpc StopService(Token) returns (Empty) {}
 }

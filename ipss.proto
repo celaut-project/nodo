@@ -25,15 +25,15 @@ message FieldDef {
 
 message ParamDef {
     int32 index = 1;
-    repeated string tag = 1;
+    repeated string tag = 2;
     // In order to avoid loops, 
     // in the definition of a message only
     // the sub-messages must be fully 
     // specified the first time they appear,
     // if they are repeated again only the tags are added.
-    FieldDef field = 2;
-    bool repeated = 3;
-    bool optional = 4;
+    FieldDef field = 3;
+    bool repeated = 4;
+    bool optional = 5;
 }
 
 message OneofDef {
@@ -48,16 +48,16 @@ message MessageDef {
 
 message MethodDef {
     int32 index = 1;
-    repeated string tag = 1;
-    FieldDef input_message = 2;
-    bool is_input_stream = 3;
-    FieldDef output_message = 4;
-    bool is_output_stream = 5;
+    repeated string tag = 2;
+    FieldDef input_message = 3;
+    bool is_input_stream = 4;
+    FieldDef output_message = 5;
+    bool is_output_stream = 6;
 }
 
 message ApplicationDef {
     repeated string tag = 1;
-    repeated method = 2; // Exemple of method call: 8080.1()
+    repeated MethodDef method = 2; // Exemple of method call: 8080.1()
 }
 
 message Any {

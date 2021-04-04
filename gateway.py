@@ -137,7 +137,7 @@ def get_from_registry(hash):
 if __name__ == "__main__":
    print('Starting server.')
    class Gateway(gateway_pb2_grpc.Gateway):
-        def StartService(self, request_iterator, context):
+        def StartServiceWithExtended(self, request_iterator, context):
             configuration = None
             service_registry = [service for service in os.listdir('./__registry__')]
             for r in request_iterator:
