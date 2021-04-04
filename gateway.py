@@ -25,11 +25,11 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
 
         return subprocess.check_output(command +' --detach '+launch_service+'.oci', shell=True).decode('utf-8').replace('\n', '')
 
-    build.build(service=service) # Si no esta construido, lo construye.
-    service_ports = [ slot.port for slot in service.api.slot ]
+    build.build(service=service) # Si no esta construido el contenedor, lo construye.
+    service_ports = [ slot.port for slot in service.api ]
     LOGGER(str(service_ports))
 
-    if service_ports is None:
+    if service_ports == []:
         LOGGER('No retorna direccion, no hay api.')
 
         container_id = start_container(config=config)
@@ -77,11 +77,12 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
 
             instance_cache.update({container_ip:container_id})
             instance = gateway_pb2.Instance()
+            instance.instance.api.extend(service.api)
             for port in service_ports:
-                uri = gateway_pb2.ipss__pb2.Gateway.Uri()
-                uri.direction = container_id
+                uri = gateway_pb2.ipss__pb2.Instance.Uri()
+                uri.ip = container_ip
                 uri.port = port
-                instance.uris.append( port, uri)
+                instance.instance.uri_slot[port].CopyFrom(uri)
             instance.token.value_string = container_id
             return instance
 
@@ -115,10 +116,10 @@ def launch_service( service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.
             instance_cache.update({container_ip:container_id})
             instance = gateway_pb2.Instance()
             for port in assigment_ports:
-                uri = gateway_pb2.ipss__pb2.Gateway.Uri()
-                uri.direction = host_ip
+                uri = gateway_pb2.ipss__pb2.Instance.Uri()
+                uri.ip = host_ip
                 uri.port = assigment_ports[port]
-                instance.uris.append( port, uri)
+                instance.instance.uri_slot[port].CopyFrom(uri)
             instance.token.value_string = container_id
             return instance
         else:
@@ -139,12 +140,12 @@ if __name__ == "__main__":
    class Gateway(gateway_pb2_grpc.Gateway):
         def StartServiceWithExtended(self, request_iterator, context):
             configuration = None
-            service_registry = [service for service in os.listdir('./__registry__')]
+            service_registry = [service[:-8] for service in os.listdir('./__registry__')]
             for r in request_iterator:
                 # Captura la configuracion si puede.
                 if r.HasField('configuration'): configuration = r.configuration 
                 # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-                if r.HasField('hash') and configuration and r.hash.algorithm == "sha2_256" \
+                if r.HasField('hash') and configuration and "SHA3_256" in r.hash.tag \
                  and r.hash.hash in service_registry:
                     return launch_service(
                         service = get_from_registry(r.hash.hash),

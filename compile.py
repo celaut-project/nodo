@@ -16,16 +16,6 @@ SHA3_256 = lambda value: "" if value is None else hashlib.sha3_256(value).hexdig
 # ALERT: Its not async.
 SHAKE_STREAM = lambda value: "" if value is None else hashlib.shake_256(value).hexdigest(99999999)
 
-def calculate_service_hash(service, hash_function: str):
-    aux = gateway_pb2.ipss__pb2.Service()
-    aux.CopyFrom(service)
-    aux.container.ClearField('filesystem')
-    for hash in service.container.filesystem:
-        if hash.algorithm == hash_function:
-            aux.container.filesystem.append(hash)
-    HASH = eval(hash_function)
-    return HASH(aux.SerializeToString())
-
 class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
@@ -222,14 +212,14 @@ class Hyper:
         # Calculate multi-hash.
         list_of_hashes = ["SHAKE_256", "SHA3_256"]
         for hash_name in list_of_hashes:
-            hash = gateway_pb2.ipss__pb2.Hash()
-            hash.algorithm = hash_name
-            hash.hash = calculate_service_hash(service=self.file.service, hash_function=hash_name)
-            self.file.multihash.append(hash)
+            hash = gateway_pb2.Hash()
+            hash.tag.append(hash_name)
+            hash.hash = eval(hash_name)(self.file.service.SerializeToString())
+            self.file.hash.append(hash)
 
-        for hash in self.file.multihash:
-            if hash.algorithm == "SHA3_256":
-                id = hash.algorithm
+        for hash in self.file.hash:
+            if "SHA3_256" in hash.tag:
+                id = hash.hash
         with open( '/home/hy/node/__registry__/' +id+ '.service', 'wb') as f:
             f.write( self.file.SerializeToString() )
         return id

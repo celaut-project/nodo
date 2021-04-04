@@ -1,4 +1,4 @@
-from compile import calculate_service_hash
+from compile import SHA3_256
 from subprocess import check_output, CalledProcessError
 
 import logging
@@ -9,7 +9,7 @@ def verify():
     pass
 
 def build(service):
-    id = calculate_service_hash(service.SerializeFromString(), "SHA3_256")
+    id = eval("SHA3_256")(service.SerializeFromString())
     # it's locally?
     try:
         check_output('/usr/bin/docker inspect '+id)
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     with open("/home/hy/node/__registry__/"+id+".service", "rb") as file:
         file = gateway_pb2.ServiceFile()
         file.ParseFromString(file.read())
-        if calculate_service_hash(file.service, "SHA3_256") == id:
+        if eval("SHA3_256")(file.service.SerializeToString()) == id:
             build(file.service)
         else:
             print('Error: asignacion de servicio erronea en el registro.')

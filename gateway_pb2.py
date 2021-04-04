@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"!\n\x04Hash\x12\x0c\n\x04hash\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\"\x07\n\x05\x45mpty\"K\n\x08Instance\x12 \n\x08instance\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12\x1d\n\x05token\x18\x02 \x01(\x0b\x32\x0e.gateway.Token\"\x90\x01\n\x0fServiceExtended\x12\x1d\n\x04hash\x18\x01 \x01(\x0b\x32\r.gateway.HashH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config2\xbb\x01\n\x07Gateway\x12\x32\n\x0cStartService\x12\r.ipss.Service\x1a\x11.gateway.Instance\"\x00\x12K\n\x18StartServiceWithExtended\x12\x18.gateway.ServiceExtended\x1a\x11.gateway.Instance\"\x00(\x01\x12/\n\x0bStopService\x12\x0e.gateway.Token\x1a\x0e.gateway.Empty\"\x00\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"!\n\x04Hash\x12\x0c\n\x04hash\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\"\x07\n\x05\x45mpty\"K\n\x08Instance\x12 \n\x08instance\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12\x1d\n\x05token\x18\x02 \x01(\x0b\x32\x0e.gateway.Token\"\x90\x01\n\x0fServiceExtended\x12\x1d\n\x04hash\x18\x01 \x01(\x0b\x32\r.gateway.HashH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"J\n\x0bServiceFile\x12\x1b\n\x04hash\x18\x01 \x03(\x0b\x32\r.gateway.Hash\x12\x1e\n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.Service2\xbb\x01\n\x07Gateway\x12\x32\n\x0cStartService\x12\r.ipss.Service\x1a\x11.gateway.Instance\"\x00\x12K\n\x18StartServiceWithExtended\x12\x18.gateway.ServiceExtended\x1a\x11.gateway.Instance\"\x00(\x01\x12/\n\x0bStopService\x12\x0e.gateway.Token\x1a\x0e.gateway.Empty\"\x00\x62\x06proto3'
   ,
   dependencies=[ipss__pb2.DESCRIPTOR,])
 
@@ -236,6 +236,45 @@ _SERVICEEXTENDED = _descriptor.Descriptor(
   serialized_end=392,
 )
 
+
+_SERVICEFILE = _descriptor.Descriptor(
+  name='ServiceFile',
+  full_name='gateway.ServiceFile',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='hash', full_name='gateway.ServiceFile.hash', index=0,
+      number=1, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='service', full_name='gateway.ServiceFile.service', index=1,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=394,
+  serialized_end=468,
+)
+
 _TOKEN.oneofs_by_name['oneOf'].fields.append(
   _TOKEN.fields_by_name['value_int32'])
 _TOKEN.fields_by_name['value_int32'].containing_oneof = _TOKEN.oneofs_by_name['oneOf']
@@ -259,11 +298,14 @@ _SERVICEEXTENDED.fields_by_name['service'].containing_oneof = _SERVICEEXTENDED.o
 _SERVICEEXTENDED.oneofs_by_name['_config'].fields.append(
   _SERVICEEXTENDED.fields_by_name['config'])
 _SERVICEEXTENDED.fields_by_name['config'].containing_oneof = _SERVICEEXTENDED.oneofs_by_name['_config']
+_SERVICEFILE.fields_by_name['hash'].message_type = _HASH
+_SERVICEFILE.fields_by_name['service'].message_type = ipss__pb2._SERVICE
 DESCRIPTOR.message_types_by_name['Token'] = _TOKEN
 DESCRIPTOR.message_types_by_name['Hash'] = _HASH
 DESCRIPTOR.message_types_by_name['Empty'] = _EMPTY
 DESCRIPTOR.message_types_by_name['Instance'] = _INSTANCE
 DESCRIPTOR.message_types_by_name['ServiceExtended'] = _SERVICEEXTENDED
+DESCRIPTOR.message_types_by_name['ServiceFile'] = _SERVICEFILE
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 Token = _reflection.GeneratedProtocolMessageType('Token', (_message.Message,), {
@@ -301,6 +343,13 @@ ServiceExtended = _reflection.GeneratedProtocolMessageType('ServiceExtended', (_
   })
 _sym_db.RegisterMessage(ServiceExtended)
 
+ServiceFile = _reflection.GeneratedProtocolMessageType('ServiceFile', (_message.Message,), {
+  'DESCRIPTOR' : _SERVICEFILE,
+  '__module__' : 'gateway_pb2'
+  # @@protoc_insertion_point(class_scope:gateway.ServiceFile)
+  })
+_sym_db.RegisterMessage(ServiceFile)
+
 
 
 _GATEWAY = _descriptor.ServiceDescriptor(
@@ -310,8 +359,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=395,
-  serialized_end=582,
+  serialized_start=471,
+  serialized_end=658,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',

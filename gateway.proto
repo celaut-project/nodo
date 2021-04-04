@@ -32,6 +32,11 @@ message ServiceExtended {
     optional ipss.Configuration config = 3;
 }
 
+message ServiceFile {
+    repeated Hash hash = 1;
+    ipss.Service service = 2;
+}
+
 service Gateway {
     rpc StartService( ipss.Service) returns (Instance) {}
     rpc StartServiceWithExtended( stream ServiceExtended) returns (Instance) {}
