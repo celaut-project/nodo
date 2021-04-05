@@ -1,9 +1,6 @@
-from compile import SHA3_256
+from compile import SHA3_256, LOGGER
 from subprocess import check_output, CalledProcessError
 
-import logging
-logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
-LOGGER = lambda message: logging.getLogger(__name__).debug(message)
 
 def verify():
     pass

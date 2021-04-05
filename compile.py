@@ -159,7 +159,12 @@ class Hyper:
         self.file.service.container.architecture.tag.extend( self.json.get('arquitecture') )
         # Envs
         if self.json.get('envs'):
-            self.file.service.container.enviroment_variables.extend( self.json.get('envs') )
+            for env in self.json.get('envs'):
+                try:
+                    with open(self.path+env+".field", "rb") as env_desc:
+                        self.file.service.container.enviroment_variables[env].ParseFromString(env_desc.read())
+                except FileNotFoundError:
+                    self.file.service.container.enviroment_variables[env]
         # Entrypoint
         if self.json.get('entrypoint'):
             self.file.service.container.entrypoint = self.json.get('entrypoint')
