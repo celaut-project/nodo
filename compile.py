@@ -29,134 +29,55 @@ class Hyper:
         self.aux_id = aux_id
 
     def parseFilesys(self):
-        os.system("mkdir /home/hy/node/__hycache__/"+self.aux_id+"/building")
+        # Directories are created on cache.
+        os.system("mkdir "+HYCACHE+self.aux_id+"/building")
+        os.system("mkdir "+HYCACHE+self.aux_id+"/filesystem")
+
+        # Build container and get compressed layers.
         if os.path.isfile(self.path+'Dockerfile'):
             os.system('/usr/bin/docker build -t builder'+self.aux_id+' '+self.path)
-            os.system("/usr/bin/docker save builder"+self.aux_id+" | gzip > /home/hy/node/__hycache__/"+self.aux_id+"/building/building.tar.gz")
+            os.system("/usr/bin/docker save builder"+self.aux_id+" > "+HYCACHE+self.aux_id+"/building/container.tar")
         else:
             ("Error: Dockerfile no encontrado.")
-        os.system("cd /home/hy/node/__hycache__/"+self.aux_id+"/building && tar -xvf building.tar.gz")
-        dirs = [] # lista de todos los directorios para ordenar.
-        layers = []
-        for layer in os.listdir("/home/hy/node/__hycache__/"+self.aux_id+"/building/"):
-            if os.path.isdir("/home/hy/node/__hycache__/"+self.aux_id+"/building/"+layer):
-                layers.append(layer)
-                LOGGER("Layer --> "+str(layer)) # Si accedemos directamente, en vez de descomprimir, será bastante mas rapido.
-                for dir in check_output("cd /home/hy/node/__hycache__/"+self.aux_id+"/building/"+layer+" && tar -xvf layer.tar", shell=True).decode('utf-8').split("\n")[:-1]:
-                    if dir.split(' ')[0]=='/' or len(dir)==1:
-                        LOGGER("Ghost directory --> "+dir)
-                        continue # Estos no se de donde salen.
-                    dirs.append(dir)
-        def create_tree(index, dirs, layers):
-            def add_file(adir, layers):
-                for layer in layers:
-                    if os.path.exists('/home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir):
-                        if os.path.isfile('/home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir):
-                            if adir == '.wh..wh..opq':
-                                return None
-                            LOGGER("Archivo --> "+adir)
-                            cdir = '/home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir
-                            try:
-                                info = open(cdir,"r").read()
-                            except UnicodeDecodeError: 
-                                info = open(cdir,"br").read().decode('cp437')
-                            except FileNotFoundError:
-                                LOGGER(adir+" posiblemente vacio.")
-                                exit()
-                            except UnboundLocalError:
-                                LOGGER("UnboundError")
-                                LOGGER(cdir)
-                                exit()
-                            return {
-                                "Dir":adir,
-                                "Id":SHA3_256(info)
-                            }
-                        elif os.path.islink('/home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir):
-                            link = check_output('ls -l /home/hy/node/__hycache__/'+self.aux_id+'/building/'+layer+'/'+adir, shell=True).decode('utf-8').split(" ")[-1]
-                            LOGGER("Link --> "+adir)
-                            return {
-                                "Dir":adir,
-                                "Id":SHA3_256(link)
-                            }
-                        else:
-                            LOGGER("ERROR: No deberiamos haber llegado aqui.")
-                            os.system("rm -rf /home/hy/node/__hycache__/"+self.aux_id+"/building")
-                            os.system("/usr/bin/docker rmi /home/hy/node/__hycache__/"+self.aux_id+"/building")
-                            exit()
-                        """elif os.path.ismount('__hycache__/building/'+layer+'/'+adir):
-                            LOOGGER("Mount --> "+adir)
-                            LOGGER("ERROR: No deberiamos haber llegado aqui.")
-                            os.system("rm -rf __hycache__/building")
-                            os.system("/usr/bin/docker rmi __hycache__/building")
-                            exit()
-                        elif os.path.isabs('__hycache__/building/'+layer+'/'+adir):
-                            LOGGER("Abs -->"+adir)
-                            LOGGER("ERROR: No deberiamos haber llegado aqui.")
-                            os.system("rm -rf __hycache__/building")
-                            os.system("/usr/bin/docker rmi __hycache__/building")
-                            exit()"""
-                LOGGER("Algo fue mal. No se encontro en ninguna capa ¿?")
-            LOGGER("           Nueva vuelta"+str(index))
-            local_dirs={}
-            local_files={}
-            for dir in dirs:
-                LOGGER("Directory --> "+dir)
-                raiz = dir.split('/')[index]
-                LOGGER("Raiz --> "+raiz)
-                if dir[-1]!="/" and dir.split('/')[-1]==raiz:
-                    d = add_file(adir=dir, layers=layers)
-                    if d is not None:
-                        local_files.update({raiz:d})
-                else:
-                    if (raiz in local_dirs) == False:
-                        LOGGER('   Nueva raiz --> '+raiz)
-                        local_dirs.update({raiz:[]})
-                    if dir[-1]!="/" or raiz!=dir.split('/')[-2]: # No introducimos usr/ si la raiz es usr.
-                        lista = local_dirs[raiz]
-                        lista.append(dir)
-                        local_dirs.update({raiz:lista})
-            for raiz in local_dirs:
-                local_dirs.update({raiz:create_tree(index=index+1,dirs=local_dirs[raiz], layers=layers)})
-            return {**local_dirs, **local_files}
-        fs_tree = create_tree(index=0,dirs=dirs, layers=layers)
-        def make_hash(merkle):
-            s=None
-            for i in merkle:
-                if s == None: s = i.get('Id')
-                s = s+' '+i.get('Id')
-            return SHA3_256(s)
-        def reorder_tree(tree):
-            l = []
-            for d in sorted(tree.items(), key=lambda x: x[0]):
-                v = d[1]
-                try:
-                    if ('Dir' in v and 'Id' in v)==False: # No es un directorio ...
-                        merkle = reorder_tree(tree=v)
-                        if merkle == []: continue
-                        id = make_hash(merkle=merkle)
-                        l.append({
-                            'Id' : id,
-                            'Merkle': merkle
-                            })
-                    else:
-                        l.append(v)
-                except AttributeError:
-                    LOGGER(v)
-                    exit()
-            return l
-        fs_tree = reorder_tree(fs_tree)
-        fs_tree = {
-            "Id": make_hash(fs_tree),
-            "Merkle": fs_tree
-        }
-        hash = gateway_pb2.ipss__pb2.Hash()
-        hash.algorithm = "SHA3_256"
-        hash.hash = fs_tree["Id"]
-        self.file.service.container.filesystem.append(hash)
+        os.system("tar -xvf container.tar -C "+HYCACHE+self.aux_id+"/building/")
+
+        # Save his filesystem on cache.
+        for layer in os.listdir(HYCACHE+self.aux_id+"/building/"):
+            if os.path.isdir(HYCACHE+self.aux_id+"/building/"+layer):
+                LOGGER('Unzipping layer '+layer)
+                os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/"+layer+"/layer.tar -C "+HYCACHE+self.aux_id+"/filesystem/")
+
+        # Add filesystem data to filesystem buffer object.
+        def recursive_parsing(directory: str) -> gateway_pb2.ipss__pb2.Filesystem:
+            filesystem = gateway_pb2.ipss__pb2.Filesystem()
+            for b_name in os.listdir(directory):
+               
+                if b_name == '.wh..wh..opq': continue  # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
+                branch = gateway_pb2.ipss__pb2.Filesystem.Branch()
+                branch.name = b_name
+
+                # It's a file.
+                if os.path.isfile(directory+b_name):
+                    with open(directory+b_name, 'rb') as file:
+                        branch.file = file.read()
+                    filesystem.branch.append(branch)
+                    continue
+
+                # It's a folder.
+                if os.path.isdir(directory+b_name):
+                    branch.filesytem.CopyFrom(directory=directory+b_name+'/')
+                    filesystem.branch.append(branch)
+                    continue
+            return filesystem
+        
+        self.file.service.container.filesystem.CopyFrom(
+            recursive_parsing(directory=HYCACHE+self.aux_id+"/filesystem/")
+        )
 
     def parseContainer(self):
         # Arch
         self.file.service.container.architecture.tag.extend( self.json.get('arquitecture') )
+        
         # Envs
         if self.json.get('envs'):
             for env in self.json.get('envs'):
@@ -165,9 +86,11 @@ class Hyper:
                         self.file.service.container.enviroment_variables[env].ParseFromString(env_desc.read())
                 except FileNotFoundError:
                     self.file.service.container.enviroment_variables[env]
+        
         # Entrypoint
         if self.json.get('entrypoint'):
             self.file.service.container.entrypoint = self.json.get('entrypoint')
+        
         # Filesystem
         self.parseFilesys() # TODO
 
