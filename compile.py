@@ -152,7 +152,7 @@ class Hyper:
         for hash in self.file.hash:
             if "SHA3_256" in hash.tag:
                 id = hash.hash
-        with open( '/home/hy/node/__registry__/' +id+ '.service', 'wb') as f:
+        with open( REGISTRY +id+ '.service', 'wb') as f:
             f.write( self.file.SerializeToString() )
         return id
 
