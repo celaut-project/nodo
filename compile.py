@@ -105,7 +105,7 @@ class Hyper:
                 slot.transport_protocol.tag.extend(item.get('protocol'))  # Solo toma una lista de tags ...
                 # aplication protocol.
                 with open(self.path+str(slot.port)+".application", "rb") as api_desc:
-                    slot.aplication_protocol.ParseFromString(api_desc.read())
+                    slot.application_protocol.ParseFromString(api_desc.read())
                 self.file.service.api.append(slot)
 
     def parseLedger(self):
