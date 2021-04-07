@@ -51,23 +51,25 @@ class Hyper:
         def recursive_parsing(directory: str) -> gateway_pb2.ipss__pb2.Filesystem:
             filesystem = gateway_pb2.ipss__pb2.Filesystem()
             for b_name in os.listdir(directory):
-               
+                
                 if b_name == '.wh..wh..opq': continue  # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
                 branch = gateway_pb2.ipss__pb2.Filesystem.Branch()
                 branch.name = b_name
 
                 # It's a file.
                 if os.path.isfile(directory+b_name):
+                    LOGGER('    Adding file '+ b_name)
                     with open(directory+b_name, 'rb') as file:
                         branch.file = file.read()
-                    filesystem.branch.append(branch)
-                    continue
 
                 # It's a folder.
                 if os.path.isdir(directory+b_name):
-                    branch.filesytem.CopyFrom(directory=directory+b_name+'/')
-                    filesystem.branch.append(branch)
-                    continue
+                    LOGGER('    Adding directory '+ b_name)
+                    branch.filesytem.CopyFrom(
+                        recursive_parsing(directory=directory+b_name+'/')
+                        )
+                    
+                filesystem.branch.append(branch)
             return filesystem
         
         self.file.service.container.filesystem.CopyFrom(

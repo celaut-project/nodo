@@ -143,8 +143,12 @@ message Instance {
         string ip = 1;
         int32 port = 2;
     }
+    message Uri_Slot {
+        int32 internal_port = 1;
+        repeated Uri uri = 2;
+    }
     repeated Slot api = 1;
-    map<int32, Uri> uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899, ]
+    Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899, ]
 }
 
 //  -------------------------------

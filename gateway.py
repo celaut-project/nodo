@@ -132,10 +132,16 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         )
 
         for port in service_ports:
+            uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
+            uri_slot.internal_port = port
+
+            # Al ser interno sabemos que solo tendrá una dirección posible por slot.
             uri = gateway_pb2.ipss__pb2.Instance.Uri()
             uri.ip = container_ip
             uri.port = port
-            instance.instance.uri_slot[port].CopyFrom(uri)
+            uri_slot.uri.append(uri)
+
+            instance.instance.uri_slot.append(uri_slot)
 
     # Si se trata de un servicio de otro nodo.
     else:
@@ -144,7 +150,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
                 s.bind(('', 0))
                 return int(s.getsockname()[1])
 
-        host_ip = socket.gethostbyname(socket.gethostname())
+        host_ip = socket.gethostbyname(socket.gethostname()) # Debería ser una lista.
         assigment_ports = {port: get_free_port() for port in service_ports}
 
         container_id = start_container(
@@ -163,10 +169,16 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         )
 
         for port in assigment_ports:
+            uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
+            uri_slot.port = port
+
+            # for host_ip in host_ip_list:
             uri = gateway_pb2.ipss__pb2.Instance.Uri()
             uri.ip = host_ip
             uri.port = assigment_ports[port]
-            instance.instance.uri_slot[port].CopyFrom(uri)
+            uri_slot.uri.append(uri)
+
+            instance.instance.uri_slot.append(uri_slot)
 
     instance.token.value_string = peer_ip + ':' + container_id + ':' + container_ip
     return instance
