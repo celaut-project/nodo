@@ -19,7 +19,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\nipss.proto\x12\x04ipss\"9\n\x0cPrimitiveDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x12\n\x05regex\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x08\n\x06_regex\"m\n\x07\x45numDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\'\n\x05value\x18\x02 \x03(\x0b\x32\x18.ipss.EnumDef.ValueEntry\x1a,\n\nValueEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x05:\x02\x38\x01\"\x80\x01\n\x08\x46ieldDef\x12#\n\x07message\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDefH\x00\x12\'\n\tprimitive\x18\x02 \x01(\x0b\x32\x12.ipss.PrimitiveDefH\x00\x12\x1d\n\x04\x65num\x18\x03 \x01(\x0b\x32\r.ipss.EnumDefH\x00\x42\x07\n\x05value\"i\n\x08ParamDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x1d\n\x05\x66ield\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x10\n\x08repeated\x18\x04 \x01(\x08\x12\x10\n\x08optional\x18\x05 \x01(\x08\"\x19\n\x08OneofDef\x12\r\n\x05index\x18\x01 \x03(\x05\"W\n\nMessageDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1d\n\x05param\x18\x02 \x03(\x0b\x32\x0e.ipss.ParamDef\x12\x1d\n\x05oneof\x18\x03 \x03(\x0b\x32\x0e.ipss.OneofDef\"\xa9\x01\n\tMethodDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12%\n\rinput_message\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x17\n\x0fis_input_stream\x18\x04 \x01(\x08\x12&\n\x0eoutput_message\x18\x05 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x18\n\x10is_output_stream\x18\x06 \x01(\x08\">\n\x0e\x41pplicationDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1f\n\x06method\x18\x02 \x03(\x0b\x32\x0f.ipss.MethodDef\"3\n\x03\x41ny\x12\x1d\n\x05\x66ield\x18\x01 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\r\n\x05value\x18\x02 \x01(\x0c\"\x1b\n\x0cProtocolMesh\x12\x0b\n\x03tag\x18\x01 \x03(\t\"x\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12.\n\x12transport_protocol\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh\x12\x32\n\x14\x61pplication_protocol\x18\x03 \x01(\x0b\x32\x14.ipss.ApplicationDef\"\x1b\n\x0c\x41rchitecture\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\x8d\x01\n\nFilesystem\x12\'\n\x06\x62ranch\x18\x01 \x03(\x0b\x32\x17.ipss.Filesystem.Branch\x1aV\n\x06\x42ranch\x12\x0e\n\x04\x66ile\x18\x01 \x01(\x0cH\x00\x12&\n\nfilesystem\x18\x02 \x01(\x0b\x32\x10.ipss.FilesystemH\x00\x12\x0c\n\x04name\x18\x03 \x01(\tB\x06\n\x04item\"\x83\x02\n\tContainer\x12(\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\x12.ipss.Architecture\x12$\n\nfilesystem\x18\x02 \x01(\x0b\x32\x10.ipss.Filesystem\x12\x46\n\x14\x65nviroment_variables\x18\x03 \x03(\x0b\x32(.ipss.Container.EnviromentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x01(\t\x1aJ\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1d\n\x05value\x18\x02 \x01(\x0b\x32\x0e.ipss.FieldDef:\x02\x38\x01\"\xab\x01\n\x06Tensor\x12.\n\x0foutput_variable\x18\x01 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x12-\n\x0einput_variable\x18\x02 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x1a\x42\n\x08Variable\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x1d\n\x05\x66ield\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\"\x15\n\x06Ledger\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\xa4\x01\n\x07Service\x12 \n\x06syntax\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDef\x12\"\n\tcontainer\x18\x02 \x01(\x0b\x32\x0f.ipss.Container\x12\x17\n\x03\x61pi\x18\x03 \x03(\x0b\x32\n.ipss.Slot\x12\x1c\n\x06tensor\x18\x04 \x01(\x0b\x32\x0c.ipss.Tensor\x12\x1c\n\x06ledger\x18\x05 \x01(\x0b\x32\x0c.ipss.Ledger\"\xb7\x01\n\x08Instance\x12\x17\n\x03\x61pi\x18\x01 \x03(\x0b\x32\n.ipss.Slot\x12-\n\x08uri_slot\x18\x02 \x03(\x0b\x32\x1b.ipss.Instance.UriSlotEntry\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x42\n\x0cUriSlotEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.ipss.Instance.Uri:\x02\x38\x01\"\x9d\x02\n\rConfiguration\x12J\n\x14\x65nviroment_variables\x18\x01 \x03(\x0b\x32,.ipss.Configuration.EnviromentVariablesEntry\x12\x34\n\tspec_slot\x18\x02 \x03(\x0b\x32!.ipss.Configuration.SpecSlotEntry\x1a\x45\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x18\n\x05value\x18\x02 \x01(\x0b\x32\t.ipss.Any:\x02\x38\x01\x1a\x43\n\rSpecSlotEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh:\x02\x38\x01\"\xad\x01\n\x11\x43onfigurationFile\x12\x1f\n\x07gateway\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12#\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x13.ipss.Configuration\x12(\n\x10tensor_instances\x18\x03 \x03(\x0b\x32\x0e.ipss.Instance\x12(\n\x10ledger_instances\x18\x04 \x03(\x0b\x32\x0e.ipss.Instanceb\x06proto3'
+  serialized_pb=b'\n\nipss.proto\x12\x04ipss\"9\n\x0cPrimitiveDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x12\n\x05regex\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x08\n\x06_regex\"m\n\x07\x45numDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\'\n\x05value\x18\x02 \x03(\x0b\x32\x18.ipss.EnumDef.ValueEntry\x1a,\n\nValueEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x05:\x02\x38\x01\"\x80\x01\n\x08\x46ieldDef\x12#\n\x07message\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDefH\x00\x12\'\n\tprimitive\x18\x02 \x01(\x0b\x32\x12.ipss.PrimitiveDefH\x00\x12\x1d\n\x04\x65num\x18\x03 \x01(\x0b\x32\r.ipss.EnumDefH\x00\x42\x07\n\x05value\"i\n\x08ParamDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x1d\n\x05\x66ield\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x10\n\x08repeated\x18\x04 \x01(\x08\x12\x10\n\x08optional\x18\x05 \x01(\x08\"\x19\n\x08OneofDef\x12\r\n\x05index\x18\x01 \x03(\x05\"W\n\nMessageDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1d\n\x05param\x18\x02 \x03(\x0b\x32\x0e.ipss.ParamDef\x12\x1d\n\x05oneof\x18\x03 \x03(\x0b\x32\x0e.ipss.OneofDef\"\xa9\x01\n\tMethodDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12%\n\rinput_message\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x17\n\x0fis_input_stream\x18\x04 \x01(\x08\x12&\n\x0eoutput_message\x18\x05 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x18\n\x10is_output_stream\x18\x06 \x01(\x08\">\n\x0e\x41pplicationDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1f\n\x06method\x18\x02 \x03(\x0b\x32\x0f.ipss.MethodDef\"3\n\x03\x41ny\x12\x1d\n\x05\x66ield\x18\x01 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\r\n\x05value\x18\x02 \x01(\x0c\"\x1b\n\x0cProtocolMesh\x12\x0b\n\x03tag\x18\x01 \x03(\t\"x\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12.\n\x12transport_protocol\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh\x12\x32\n\x14\x61pplication_protocol\x18\x03 \x01(\x0b\x32\x14.ipss.ApplicationDef\"\x1b\n\x0c\x41rchitecture\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\x8d\x01\n\nFilesystem\x12\'\n\x06\x62ranch\x18\x01 \x03(\x0b\x32\x17.ipss.Filesystem.Branch\x1aV\n\x06\x42ranch\x12\x0e\n\x04\x66ile\x18\x01 \x01(\x0cH\x00\x12&\n\nfilesystem\x18\x02 \x01(\x0b\x32\x10.ipss.FilesystemH\x00\x12\x0c\n\x04name\x18\x03 \x01(\tB\x06\n\x04item\"\x83\x02\n\tContainer\x12(\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\x12.ipss.Architecture\x12$\n\nfilesystem\x18\x02 \x01(\x0b\x32\x10.ipss.Filesystem\x12\x46\n\x14\x65nviroment_variables\x18\x03 \x03(\x0b\x32(.ipss.Container.EnviromentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x01(\t\x1aJ\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1d\n\x05value\x18\x02 \x01(\x0b\x32\x0e.ipss.FieldDef:\x02\x38\x01\"\xab\x01\n\x06Tensor\x12.\n\x0foutput_variable\x18\x01 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x12-\n\x0einput_variable\x18\x02 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x1a\x42\n\x08Variable\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x1d\n\x05\x66ield\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\"\x15\n\x06Ledger\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\xa4\x01\n\x07Service\x12 \n\x06syntax\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDef\x12\"\n\tcontainer\x18\x02 \x01(\x0b\x32\x0f.ipss.Container\x12\x17\n\x03\x61pi\x18\x03 \x03(\x0b\x32\n.ipss.Slot\x12\x1c\n\x06tensor\x18\x04 \x01(\x0b\x32\x0c.ipss.Tensor\x12\x1c\n\x06ledger\x18\x05 \x01(\x0b\x32\x0c.ipss.Ledger\"\xb3\x01\n\x08Instance\x12\x17\n\x03\x61pi\x18\x01 \x03(\x0b\x32\n.ipss.Slot\x12)\n\x08uri_slot\x18\x02 \x01(\x0b\x32\x17.ipss.Instance.Uri_Slot\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x42\n\x08Uri_Slot\x12\x15\n\rinternal_port\x18\x01 \x01(\x05\x12\x1f\n\x03uri\x18\x02 \x03(\x0b\x32\x12.ipss.Instance.Uri\"\x9d\x02\n\rConfiguration\x12J\n\x14\x65nviroment_variables\x18\x01 \x03(\x0b\x32,.ipss.Configuration.EnviromentVariablesEntry\x12\x34\n\tspec_slot\x18\x02 \x03(\x0b\x32!.ipss.Configuration.SpecSlotEntry\x1a\x45\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x18\n\x05value\x18\x02 \x01(\x0b\x32\t.ipss.Any:\x02\x38\x01\x1a\x43\n\rSpecSlotEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh:\x02\x38\x01\"\xad\x01\n\x11\x43onfigurationFile\x12\x1f\n\x07gateway\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12#\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x13.ipss.Configuration\x12(\n\x10tensor_instances\x18\x03 \x03(\x0b\x32\x0e.ipss.Instance\x12(\n\x10ledger_instances\x18\x04 \x03(\x0b\x32\x0e.ipss.Instanceb\x06proto3'
 )
 
 
@@ -973,29 +973,29 @@ _INSTANCE_URI = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1868,
-  serialized_end=1899,
+  serialized_start=1864,
+  serialized_end=1895,
 )
 
-_INSTANCE_URISLOTENTRY = _descriptor.Descriptor(
-  name='UriSlotEntry',
-  full_name='ipss.Instance.UriSlotEntry',
+_INSTANCE_URI_SLOT = _descriptor.Descriptor(
+  name='Uri_Slot',
+  full_name='ipss.Instance.Uri_Slot',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='key', full_name='ipss.Instance.UriSlotEntry.key', index=0,
+      name='internal_port', full_name='ipss.Instance.Uri_Slot.internal_port', index=0,
       number=1, type=5, cpp_type=1, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='value', full_name='ipss.Instance.UriSlotEntry.value', index=1,
-      number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
+      name='uri', full_name='ipss.Instance.Uri_Slot.uri', index=1,
+      number=2, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
@@ -1005,14 +1005,14 @@ _INSTANCE_URISLOTENTRY = _descriptor.Descriptor(
   nested_types=[],
   enum_types=[
   ],
-  serialized_options=b'8\001',
+  serialized_options=None,
   is_extendable=False,
   syntax='proto3',
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1901,
-  serialized_end=1967,
+  serialized_start=1897,
+  serialized_end=1963,
 )
 
 _INSTANCE = _descriptor.Descriptor(
@@ -1032,15 +1032,15 @@ _INSTANCE = _descriptor.Descriptor(
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
       name='uri_slot', full_name='ipss.Instance.uri_slot', index=1,
-      number=2, type=11, cpp_type=10, label=3,
-      has_default_value=False, default_value=[],
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
   ],
   extensions=[
   ],
-  nested_types=[_INSTANCE_URI, _INSTANCE_URISLOTENTRY, ],
+  nested_types=[_INSTANCE_URI, _INSTANCE_URI_SLOT, ],
   enum_types=[
   ],
   serialized_options=None,
@@ -1050,7 +1050,7 @@ _INSTANCE = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=1784,
-  serialized_end=1967,
+  serialized_end=1963,
 )
 
 
@@ -1088,8 +1088,8 @@ _CONFIGURATION_ENVIROMENTVARIABLESENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2117,
-  serialized_end=2186,
+  serialized_start=2113,
+  serialized_end=2182,
 )
 
 _CONFIGURATION_SPECSLOTENTRY = _descriptor.Descriptor(
@@ -1126,8 +1126,8 @@ _CONFIGURATION_SPECSLOTENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2188,
-  serialized_end=2255,
+  serialized_start=2184,
+  serialized_end=2251,
 )
 
 _CONFIGURATION = _descriptor.Descriptor(
@@ -1164,8 +1164,8 @@ _CONFIGURATION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1970,
-  serialized_end=2255,
+  serialized_start=1966,
+  serialized_end=2251,
 )
 
 
@@ -1217,8 +1217,8 @@ _CONFIGURATIONFILE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2258,
-  serialized_end=2431,
+  serialized_start=2254,
+  serialized_end=2427,
 )
 
 _PRIMITIVEDEF.oneofs_by_name['_regex'].fields.append(
@@ -1271,10 +1271,10 @@ _SERVICE.fields_by_name['api'].message_type = _SLOT
 _SERVICE.fields_by_name['tensor'].message_type = _TENSOR
 _SERVICE.fields_by_name['ledger'].message_type = _LEDGER
 _INSTANCE_URI.containing_type = _INSTANCE
-_INSTANCE_URISLOTENTRY.fields_by_name['value'].message_type = _INSTANCE_URI
-_INSTANCE_URISLOTENTRY.containing_type = _INSTANCE
+_INSTANCE_URI_SLOT.fields_by_name['uri'].message_type = _INSTANCE_URI
+_INSTANCE_URI_SLOT.containing_type = _INSTANCE
 _INSTANCE.fields_by_name['api'].message_type = _SLOT
-_INSTANCE.fields_by_name['uri_slot'].message_type = _INSTANCE_URISLOTENTRY
+_INSTANCE.fields_by_name['uri_slot'].message_type = _INSTANCE_URI_SLOT
 _CONFIGURATION_ENVIROMENTVARIABLESENTRY.fields_by_name['value'].message_type = _ANY
 _CONFIGURATION_ENVIROMENTVARIABLESENTRY.containing_type = _CONFIGURATION
 _CONFIGURATION_SPECSLOTENTRY.fields_by_name['value'].message_type = _PROTOCOLMESH
@@ -1467,10 +1467,10 @@ Instance = _reflection.GeneratedProtocolMessageType('Instance', (_message.Messag
     })
   ,
 
-  'UriSlotEntry' : _reflection.GeneratedProtocolMessageType('UriSlotEntry', (_message.Message,), {
-    'DESCRIPTOR' : _INSTANCE_URISLOTENTRY,
+  'Uri_Slot' : _reflection.GeneratedProtocolMessageType('Uri_Slot', (_message.Message,), {
+    'DESCRIPTOR' : _INSTANCE_URI_SLOT,
     '__module__' : 'ipss_pb2'
-    # @@protoc_insertion_point(class_scope:ipss.Instance.UriSlotEntry)
+    # @@protoc_insertion_point(class_scope:ipss.Instance.Uri_Slot)
     })
   ,
   'DESCRIPTOR' : _INSTANCE,
@@ -1479,7 +1479,7 @@ Instance = _reflection.GeneratedProtocolMessageType('Instance', (_message.Messag
   })
 _sym_db.RegisterMessage(Instance)
 _sym_db.RegisterMessage(Instance.Uri)
-_sym_db.RegisterMessage(Instance.UriSlotEntry)
+_sym_db.RegisterMessage(Instance.Uri_Slot)
 
 Configuration = _reflection.GeneratedProtocolMessageType('Configuration', (_message.Message,), {
 
@@ -1514,7 +1514,6 @@ _sym_db.RegisterMessage(ConfigurationFile)
 
 _ENUMDEF_VALUEENTRY._options = None
 _CONTAINER_ENVIROMENTVARIABLESENTRY._options = None
-_INSTANCE_URISLOTENTRY._options = None
 _CONFIGURATION_ENVIROMENTVARIABLESENTRY._options = None
 _CONFIGURATION_SPECSLOTENTRY._options = None
 # @@protoc_insertion_point(module_scope)
