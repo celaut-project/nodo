@@ -148,7 +148,7 @@ message Instance {
         repeated Uri uri = 2;
     }
     repeated Slot api = 1;
-    Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899, ]
+    repeated Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899, ]
 }
 
 //  -------------------------------
