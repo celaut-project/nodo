@@ -65,7 +65,7 @@ class Hyper:
                 # It's a folder.
                 if os.path.isdir(directory+b_name):
                     LOGGER('    Adding directory '+ b_name)
-                    branch.filesytem.CopyFrom(
+                    branch.filesystem.CopyFrom(
                         recursive_parsing(directory=directory+b_name+'/')
                         )
                     
