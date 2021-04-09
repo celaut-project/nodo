@@ -39,7 +39,7 @@ class Hyper:
             os.system("/usr/bin/docker save builder"+self.aux_id+" > "+HYCACHE+self.aux_id+"/building/container.tar")
         else:
             ("Error: Dockerfile no encontrado.")
-        os.system("tar -xvf container.tar -C "+HYCACHE+self.aux_id+"/building/")
+        os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/container.tar -C "+HYCACHE+self.aux_id+"/building/")
 
         # Save his filesystem on cache.
         for layer in os.listdir(HYCACHE+self.aux_id+"/building/"):
