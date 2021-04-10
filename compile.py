@@ -196,6 +196,6 @@ if __name__ == "__main__":
     else:
         LOGGER('NO SE ACEPTAN MAS PARÁMETROS..')
 
-    os.system('/usr/bin/docker tag builder'+aux_id+' '+id)
+    os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.service')
     os.system('/usr/bin/docker rmi builder'+aux_id)
     os.system('rm -rf /home/hy/node/__hycache__/'+aux_id+'/*')
