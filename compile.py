@@ -46,9 +46,6 @@ class Hyper:
             if os.path.isdir(HYCACHE+self.aux_id+"/building/"+layer):
                 LOGGER('Unzipping layer '+layer)
                 os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/"+layer+"/layer.tar -C "+HYCACHE+self.aux_id+"/filesystem/")
-
-        # Give permissions to the filesystem folder.
-        os.system("sudo chown -R hy "+HYCACHE+self.aux_id+"/filesystem/")
         
         # Add filesystem data to filesystem buffer object.
         def recursive_parsing(directory: str) -> gateway_pb2.ipss__pb2.Filesystem:
@@ -60,13 +57,22 @@ class Hyper:
                     LOGGER('docker opaque witeout file.')
                     continue
                 branch = gateway_pb2.ipss__pb2.Filesystem.Branch()
-                branch.name = b_name
+                branch.name = os.path.basename(b_name)
+                
+                # It's a link.
+                if os.path.islink(directory+b_name):
+                    LOGGER('    Adding link '+ b_name)
+                    branch.link = os.path.realpath(directory+b_name)
+                    filesystem.branch.append(branch)
+                    continue
 
                 # It's a file.
                 if os.path.isfile(directory+b_name):
                     LOGGER('    Adding file '+ b_name)
                     with open(directory+b_name, 'rb') as file:
                         branch.file = file.read()
+                    filesystem.branch.append(branch)
+                    continue
 
                 # It's a folder.
                 if os.path.isdir(directory+b_name):
@@ -74,8 +80,9 @@ class Hyper:
                     branch.filesystem.CopyFrom(
                         recursive_parsing(directory=directory+b_name+'/')
                         )
+                    filesystem.branch.append(branch)
+                    continue
                     
-                filesystem.branch.append(branch)
             return filesystem
         
         self.file.service.container.filesystem.CopyFrom(
