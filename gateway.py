@@ -103,7 +103,7 @@ def start_container(id: str, use_other_ports=None):
     if use_other_ports is not None:
         for port in use_other_ports:
             command = command + ' -p ' + str(use_other_ports[port]) + ':' + str(port)
-    return subprocess.check_output(command + ' --detach ' + id, shell=True).decode('utf-8').replace('\n', '')
+    return subprocess.check_output(command + ' --detach ' + id+'.service', shell=True).decode('utf-8').replace('\n', '')
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
