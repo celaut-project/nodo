@@ -19,7 +19,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\nipss.proto\x12\x04ipss\"9\n\x0cPrimitiveDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x12\n\x05regex\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x08\n\x06_regex\"m\n\x07\x45numDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\'\n\x05value\x18\x02 \x03(\x0b\x32\x18.ipss.EnumDef.ValueEntry\x1a,\n\nValueEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x05:\x02\x38\x01\"\x80\x01\n\x08\x46ieldDef\x12#\n\x07message\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDefH\x00\x12\'\n\tprimitive\x18\x02 \x01(\x0b\x32\x12.ipss.PrimitiveDefH\x00\x12\x1d\n\x04\x65num\x18\x03 \x01(\x0b\x32\r.ipss.EnumDefH\x00\x42\x07\n\x05value\"i\n\x08ParamDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x1d\n\x05\x66ield\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x10\n\x08repeated\x18\x04 \x01(\x08\x12\x10\n\x08optional\x18\x05 \x01(\x08\"\x19\n\x08OneofDef\x12\r\n\x05index\x18\x01 \x03(\x05\"W\n\nMessageDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1d\n\x05param\x18\x02 \x03(\x0b\x32\x0e.ipss.ParamDef\x12\x1d\n\x05oneof\x18\x03 \x03(\x0b\x32\x0e.ipss.OneofDef\"\xa9\x01\n\tMethodDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12%\n\rinput_message\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x17\n\x0fis_input_stream\x18\x04 \x01(\x08\x12&\n\x0eoutput_message\x18\x05 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x18\n\x10is_output_stream\x18\x06 \x01(\x08\">\n\x0e\x41pplicationDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1f\n\x06method\x18\x02 \x03(\x0b\x32\x0f.ipss.MethodDef\"3\n\x03\x41ny\x12\x1d\n\x05\x66ield\x18\x01 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\r\n\x05value\x18\x02 \x01(\x0c\"\x1b\n\x0cProtocolMesh\x12\x0b\n\x03tag\x18\x01 \x03(\t\"x\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12.\n\x12transport_protocol\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh\x12\x32\n\x14\x61pplication_protocol\x18\x03 \x01(\x0b\x32\x14.ipss.ApplicationDef\"\x1b\n\x0c\x41rchitecture\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\x8d\x01\n\nFilesystem\x12\'\n\x06\x62ranch\x18\x01 \x03(\x0b\x32\x17.ipss.Filesystem.Branch\x1aV\n\x06\x42ranch\x12\x0e\n\x04\x66ile\x18\x01 \x01(\x0cH\x00\x12&\n\nfilesystem\x18\x02 \x01(\x0b\x32\x10.ipss.FilesystemH\x00\x12\x0c\n\x04name\x18\x03 \x01(\tB\x06\n\x04item\"\x83\x02\n\tContainer\x12(\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\x12.ipss.Architecture\x12$\n\nfilesystem\x18\x02 \x01(\x0b\x32\x10.ipss.Filesystem\x12\x46\n\x14\x65nviroment_variables\x18\x03 \x03(\x0b\x32(.ipss.Container.EnviromentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x01(\t\x1aJ\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1d\n\x05value\x18\x02 \x01(\x0b\x32\x0e.ipss.FieldDef:\x02\x38\x01\"\xab\x01\n\x06Tensor\x12.\n\x0foutput_variable\x18\x01 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x12-\n\x0einput_variable\x18\x02 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x1a\x42\n\x08Variable\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x1d\n\x05\x66ield\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\"\x15\n\x06Ledger\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\xa4\x01\n\x07Service\x12 \n\x06syntax\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDef\x12\"\n\tcontainer\x18\x02 \x01(\x0b\x32\x0f.ipss.Container\x12\x17\n\x03\x61pi\x18\x03 \x03(\x0b\x32\n.ipss.Slot\x12\x1c\n\x06tensor\x18\x04 \x01(\x0b\x32\x0c.ipss.Tensor\x12\x1c\n\x06ledger\x18\x05 \x01(\x0b\x32\x0c.ipss.Ledger\"\xb3\x01\n\x08Instance\x12\x17\n\x03\x61pi\x18\x01 \x03(\x0b\x32\n.ipss.Slot\x12)\n\x08uri_slot\x18\x02 \x03(\x0b\x32\x17.ipss.Instance.Uri_Slot\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x42\n\x08Uri_Slot\x12\x15\n\rinternal_port\x18\x01 \x01(\x05\x12\x1f\n\x03uri\x18\x02 \x03(\x0b\x32\x12.ipss.Instance.Uri\"\x9d\x02\n\rConfiguration\x12J\n\x14\x65nviroment_variables\x18\x01 \x03(\x0b\x32,.ipss.Configuration.EnviromentVariablesEntry\x12\x34\n\tspec_slot\x18\x02 \x03(\x0b\x32!.ipss.Configuration.SpecSlotEntry\x1a\x45\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x18\n\x05value\x18\x02 \x01(\x0b\x32\t.ipss.Any:\x02\x38\x01\x1a\x43\n\rSpecSlotEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh:\x02\x38\x01\"\xad\x01\n\x11\x43onfigurationFile\x12\x1f\n\x07gateway\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12#\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x13.ipss.Configuration\x12(\n\x10tensor_instances\x18\x03 \x03(\x0b\x32\x0e.ipss.Instance\x12(\n\x10ledger_instances\x18\x04 \x03(\x0b\x32\x0e.ipss.Instanceb\x06proto3'
+  serialized_pb=b'\n\nipss.proto\x12\x04ipss\"9\n\x0cPrimitiveDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x12\n\x05regex\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x08\n\x06_regex\"m\n\x07\x45numDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\'\n\x05value\x18\x02 \x03(\x0b\x32\x18.ipss.EnumDef.ValueEntry\x1a,\n\nValueEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x05:\x02\x38\x01\"\x80\x01\n\x08\x46ieldDef\x12#\n\x07message\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDefH\x00\x12\'\n\tprimitive\x18\x02 \x01(\x0b\x32\x12.ipss.PrimitiveDefH\x00\x12\x1d\n\x04\x65num\x18\x03 \x01(\x0b\x32\r.ipss.EnumDefH\x00\x42\x07\n\x05value\"i\n\x08ParamDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x1d\n\x05\x66ield\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x10\n\x08repeated\x18\x04 \x01(\x08\x12\x10\n\x08optional\x18\x05 \x01(\x08\"\x19\n\x08OneofDef\x12\r\n\x05index\x18\x01 \x03(\x05\"W\n\nMessageDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1d\n\x05param\x18\x02 \x03(\x0b\x32\x0e.ipss.ParamDef\x12\x1d\n\x05oneof\x18\x03 \x03(\x0b\x32\x0e.ipss.OneofDef\"\xa9\x01\n\tMethodDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12%\n\rinput_message\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x17\n\x0fis_input_stream\x18\x04 \x01(\x08\x12&\n\x0eoutput_message\x18\x05 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x18\n\x10is_output_stream\x18\x06 \x01(\x08\">\n\x0e\x41pplicationDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1f\n\x06method\x18\x02 \x03(\x0b\x32\x0f.ipss.MethodDef\"3\n\x03\x41ny\x12\x1d\n\x05\x66ield\x18\x01 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\r\n\x05value\x18\x02 \x01(\x0c\"\x1b\n\x0cProtocolMesh\x12\x0b\n\x03tag\x18\x01 \x03(\t\"x\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12.\n\x12transport_protocol\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh\x12\x32\n\x14\x61pplication_protocol\x18\x03 \x01(\x0b\x32\x14.ipss.ApplicationDef\"\x1b\n\x0c\x41rchitecture\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\x9d\x01\n\nFilesystem\x12\'\n\x06\x62ranch\x18\x01 \x03(\x0b\x32\x17.ipss.Filesystem.Branch\x1a\x66\n\x06\x42ranch\x12\x0e\n\x04\x66ile\x18\x01 \x01(\x0cH\x00\x12\x0e\n\x04link\x18\x02 \x01(\tH\x00\x12&\n\nfilesystem\x18\x03 \x01(\x0b\x32\x10.ipss.FilesystemH\x00\x12\x0c\n\x04name\x18\x04 \x01(\tB\x06\n\x04item\"\x83\x02\n\tContainer\x12(\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\x12.ipss.Architecture\x12$\n\nfilesystem\x18\x02 \x01(\x0b\x32\x10.ipss.Filesystem\x12\x46\n\x14\x65nviroment_variables\x18\x03 \x03(\x0b\x32(.ipss.Container.EnviromentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x01(\t\x1aJ\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1d\n\x05value\x18\x02 \x01(\x0b\x32\x0e.ipss.FieldDef:\x02\x38\x01\"\xab\x01\n\x06Tensor\x12.\n\x0foutput_variable\x18\x01 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x12-\n\x0einput_variable\x18\x02 \x03(\x0b\x32\x15.ipss.Tensor.Variable\x1a\x42\n\x08Variable\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x1d\n\x05\x66ield\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\"\x15\n\x06Ledger\x12\x0b\n\x03tag\x18\x01 \x03(\t\"\xa4\x01\n\x07Service\x12 \n\x06syntax\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDef\x12\"\n\tcontainer\x18\x02 \x01(\x0b\x32\x0f.ipss.Container\x12\x17\n\x03\x61pi\x18\x03 \x03(\x0b\x32\n.ipss.Slot\x12\x1c\n\x06tensor\x18\x04 \x01(\x0b\x32\x0c.ipss.Tensor\x12\x1c\n\x06ledger\x18\x05 \x01(\x0b\x32\x0c.ipss.Ledger\"\xb3\x01\n\x08Instance\x12\x17\n\x03\x61pi\x18\x01 \x03(\x0b\x32\n.ipss.Slot\x12)\n\x08uri_slot\x18\x02 \x03(\x0b\x32\x17.ipss.Instance.Uri_Slot\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x42\n\x08Uri_Slot\x12\x15\n\rinternal_port\x18\x01 \x01(\x05\x12\x1f\n\x03uri\x18\x02 \x03(\x0b\x32\x12.ipss.Instance.Uri\"\x9d\x02\n\rConfiguration\x12J\n\x14\x65nviroment_variables\x18\x01 \x03(\x0b\x32,.ipss.Configuration.EnviromentVariablesEntry\x12\x34\n\tspec_slot\x18\x02 \x03(\x0b\x32!.ipss.Configuration.SpecSlotEntry\x1a\x45\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x18\n\x05value\x18\x02 \x01(\x0b\x32\t.ipss.Any:\x02\x38\x01\x1a\x43\n\rSpecSlotEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh:\x02\x38\x01\"\xad\x01\n\x11\x43onfigurationFile\x12\x1f\n\x07gateway\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12#\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x13.ipss.Configuration\x12(\n\x10tensor_instances\x18\x03 \x03(\x0b\x32\x0e.ipss.Instance\x12(\n\x10ledger_instances\x18\x04 \x03(\x0b\x32\x0e.ipss.Instanceb\x06proto3'
 )
 
 
@@ -606,15 +606,22 @@ _FILESYSTEM_BRANCH = _descriptor.Descriptor(
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='filesystem', full_name='ipss.Filesystem.Branch.filesystem', index=1,
-      number=2, type=11, cpp_type=10, label=1,
+      name='link', full_name='ipss.Filesystem.Branch.link', index=1,
+      number=2, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"".decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='filesystem', full_name='ipss.Filesystem.Branch.filesystem', index=2,
+      number=3, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='name', full_name='ipss.Filesystem.Branch.name', index=2,
-      number=3, type=9, cpp_type=9, label=1,
+      name='name', full_name='ipss.Filesystem.Branch.name', index=3,
+      number=4, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -637,7 +644,7 @@ _FILESYSTEM_BRANCH = _descriptor.Descriptor(
     fields=[]),
   ],
   serialized_start=1069,
-  serialized_end=1155,
+  serialized_end=1171,
 )
 
 _FILESYSTEM = _descriptor.Descriptor(
@@ -668,7 +675,7 @@ _FILESYSTEM = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=1014,
-  serialized_end=1155,
+  serialized_end=1171,
 )
 
 
@@ -706,8 +713,8 @@ _CONTAINER_ENVIROMENTVARIABLESENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1343,
-  serialized_end=1417,
+  serialized_start=1359,
+  serialized_end=1433,
 )
 
 _CONTAINER = _descriptor.Descriptor(
@@ -758,8 +765,8 @@ _CONTAINER = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1158,
-  serialized_end=1417,
+  serialized_start=1174,
+  serialized_end=1433,
 )
 
 
@@ -804,8 +811,8 @@ _TENSOR_VARIABLE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1525,
-  serialized_end=1591,
+  serialized_start=1541,
+  serialized_end=1607,
 )
 
 _TENSOR = _descriptor.Descriptor(
@@ -842,8 +849,8 @@ _TENSOR = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1420,
-  serialized_end=1591,
+  serialized_start=1436,
+  serialized_end=1607,
 )
 
 
@@ -874,8 +881,8 @@ _LEDGER = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1593,
-  serialized_end=1614,
+  serialized_start=1609,
+  serialized_end=1630,
 )
 
 
@@ -934,8 +941,8 @@ _SERVICE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1617,
-  serialized_end=1781,
+  serialized_start=1633,
+  serialized_end=1797,
 )
 
 
@@ -973,8 +980,8 @@ _INSTANCE_URI = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1864,
-  serialized_end=1895,
+  serialized_start=1880,
+  serialized_end=1911,
 )
 
 _INSTANCE_URI_SLOT = _descriptor.Descriptor(
@@ -1011,8 +1018,8 @@ _INSTANCE_URI_SLOT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1897,
-  serialized_end=1963,
+  serialized_start=1913,
+  serialized_end=1979,
 )
 
 _INSTANCE = _descriptor.Descriptor(
@@ -1049,8 +1056,8 @@ _INSTANCE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1784,
-  serialized_end=1963,
+  serialized_start=1800,
+  serialized_end=1979,
 )
 
 
@@ -1088,8 +1095,8 @@ _CONFIGURATION_ENVIROMENTVARIABLESENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2113,
-  serialized_end=2182,
+  serialized_start=2129,
+  serialized_end=2198,
 )
 
 _CONFIGURATION_SPECSLOTENTRY = _descriptor.Descriptor(
@@ -1126,8 +1133,8 @@ _CONFIGURATION_SPECSLOTENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2184,
-  serialized_end=2251,
+  serialized_start=2200,
+  serialized_end=2267,
 )
 
 _CONFIGURATION = _descriptor.Descriptor(
@@ -1164,8 +1171,8 @@ _CONFIGURATION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1966,
-  serialized_end=2251,
+  serialized_start=1982,
+  serialized_end=2267,
 )
 
 
@@ -1217,8 +1224,8 @@ _CONFIGURATIONFILE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2254,
-  serialized_end=2427,
+  serialized_start=2270,
+  serialized_end=2443,
 )
 
 _PRIMITIVEDEF.oneofs_by_name['_regex'].fields.append(
@@ -1252,6 +1259,9 @@ _FILESYSTEM_BRANCH.containing_type = _FILESYSTEM
 _FILESYSTEM_BRANCH.oneofs_by_name['item'].fields.append(
   _FILESYSTEM_BRANCH.fields_by_name['file'])
 _FILESYSTEM_BRANCH.fields_by_name['file'].containing_oneof = _FILESYSTEM_BRANCH.oneofs_by_name['item']
+_FILESYSTEM_BRANCH.oneofs_by_name['item'].fields.append(
+  _FILESYSTEM_BRANCH.fields_by_name['link'])
+_FILESYSTEM_BRANCH.fields_by_name['link'].containing_oneof = _FILESYSTEM_BRANCH.oneofs_by_name['item']
 _FILESYSTEM_BRANCH.oneofs_by_name['item'].fields.append(
   _FILESYSTEM_BRANCH.fields_by_name['filesystem'])
 _FILESYSTEM_BRANCH.fields_by_name['filesystem'].containing_oneof = _FILESYSTEM_BRANCH.oneofs_by_name['item']
