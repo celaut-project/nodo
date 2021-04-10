@@ -92,7 +92,8 @@ message Filesystem {
     message Branch { 
         oneof item {
             bytes file = 1;
-            Filesystem filesystem = 2;
+            string link = 2;
+            Filesystem filesystem = 3;
         }
         string name = 3;
         // ¿ more params ... ?
