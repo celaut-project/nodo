@@ -95,7 +95,7 @@ message Filesystem {
             string link = 2;
             Filesystem filesystem = 3;
         }
-        string name = 3;
+        string name = 4;
         // ¿ more params ... ?
     }
     repeated Branch branch = 1;
