@@ -48,7 +48,7 @@ class Hyper:
                 os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/"+layer+"/layer.tar -C "+HYCACHE+self.aux_id+"/filesystem/")
 
         # Give permissions to the filesystem folder.
-        os.system("sudo chown -R "+HYCACHE+self.aux_id+"/filesystem/")
+        os.system("sudo chown -R hy "+HYCACHE+self.aux_id+"/filesystem/")
         
         # Add filesystem data to filesystem buffer object.
         def recursive_parsing(directory: str) -> gateway_pb2.ipss__pb2.Filesystem:
