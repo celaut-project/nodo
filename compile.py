@@ -47,12 +47,18 @@ class Hyper:
                 LOGGER('Unzipping layer '+layer)
                 os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/"+layer+"/layer.tar -C "+HYCACHE+self.aux_id+"/filesystem/")
 
+        # Give permissions to the filesystem folder.
+        os.system("sudo chown -R "+HYCACHE+self.aux_id+"/filesystem/")
+        
         # Add filesystem data to filesystem buffer object.
         def recursive_parsing(directory: str) -> gateway_pb2.ipss__pb2.Filesystem:
             filesystem = gateway_pb2.ipss__pb2.Filesystem()
             for b_name in os.listdir(directory):
                 
-                if b_name == '.wh..wh..opq': continue  # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
+                if b_name == '.wh..wh..opq': 
+                    # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
+                    LOGGER('docker opaque witeout file.')
+                    continue
                 branch = gateway_pb2.ipss__pb2.Filesystem.Branch()
                 branch.name = b_name
 
