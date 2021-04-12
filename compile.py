@@ -6,7 +6,7 @@ import hashlib
 import gateway_pb2
 
 import logging
-logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(filename='/home/hy/node/app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
 LOGGER = lambda message: logging.getLogger(__name__).debug(message)
 
 # DIRECTORIES
