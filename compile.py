@@ -93,18 +93,12 @@ class Hyper:
             recursive_parsing(directory=HYCACHE+self.aux_id+"/filesystem/")
         )
         
-        self.service_with_hashes.container.filesystem.CopyFrom(
-            self.service.container.filesystem
-            )
         self.service_with_hashes.container.filesystem.hash.extend(
             calculate_hashes( self.service.container.filesystem.SerializeToString() )
             )
         
 
     def parseContainer(self):
-        # Arch
-        self.service_with_hashes.container.architecture.hash.extend( self.json.get('arquitecture') )
-        
         # Envs
         if self.json.get('envs'):
             for env in self.json.get('envs'):
@@ -119,7 +113,10 @@ class Hyper:
             self.service.container.entrypoint = self.json.get('entrypoint')
         
         self.service_with_hashes.MergeFrom(self.service)
-        
+
+        # Arch
+        self.service_with_hashes.container.architecture.hash.extend( self.json.get('arquitecture') )
+
         # Filesystem
         self.parseFilesys() # TODO
 
