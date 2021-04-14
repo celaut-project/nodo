@@ -115,7 +115,7 @@ class Hyper:
         self.service_with_hashes.MergeFrom(self.service)
 
         # Arch
-        self.service_with_hashes.container.architecture.hash.append( self.json.get('arquitecture') )
+        self.service_with_hashes.container.architecture.hash.append( self.json.get('architecture') )
 
         # Filesystem
         self.parseFilesys() # TODO
