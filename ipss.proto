@@ -65,13 +65,17 @@ message Any {
     bytes value = 2;
 }
 
-
 //  -----------------------
 //  SERVICE SPECIFICATION.
 //  -----------------------
+
+// Hashing repeated string hash = 15;
+//  It's used for give the option to prune the specification.
+//  Index 15 is the maximum that use only 1 byte.
+
 // API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
 message ProtocolMesh {
-    repeated string tag = 1;
+    repeated string hash = 15;
     // Mesh specification can be applied. <- must be optional
 }
 
@@ -84,7 +88,7 @@ message Slot {
 
 // Container: Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
 message Architecture {
-    repeated string tag = 1;
+    repeated string hash = 15;
     // Architecture specification can be applied. <- must be optional.
 }
 
@@ -98,6 +102,7 @@ message Filesystem {
         string name = 4;
         // ¿ more params ... ?
     }
+    repeated string hash = 15;
     repeated Branch branch = 1;
 }
 
@@ -115,18 +120,20 @@ message Tensor {
         repeated string tag = 2;
         FieldDef field = 3;
     }
+    repeated string hash = 15;
     repeated Variable output_variable = 1;
     repeated Variable input_variable = 2;
 }
 
 // Ledger: Defines the database that the service can provide.
 message Ledger {
-    repeated string tag = 1;
+    repeated string hash = 15;
     // Ledger specification can be applied. <- must be optional
     //  it would be a class diagram and a consensus algorithm.
 }
 
 message Service {
+    repeated string hash = 15;
     MessageDef syntax = 1;
     Container container = 2;
     repeated Slot api = 3;
