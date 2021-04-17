@@ -1,6 +1,5 @@
 import hashlib
 from ipss_pb2 import Service
-from compile import LOGGER
 
 # -- HASH FUNCTIONS --
 SHAKE_256 = lambda value: "" if value is None else 'shake-256:0x'+hashlib.shake_256(value).hexdigest(32)
@@ -28,6 +27,7 @@ def prune_hashes_of_service(service: Service) -> Service:
         except AttributeError: pass
 
 def get_service_hash(service: Service, hash_type: str) -> list:
+    from compile import LOGGER
     if hash_type == "sha3-256":
         return SHA3_256(
             value=prune_hashes_of_service(
