@@ -251,7 +251,7 @@ if __name__ == "__main__":
     uri = gateway_pb2.ipss__pb2.Instance.Uri()
     uri.ip = '172.17.0.1'
     uri.port = GATEWAY_PORT
-    uri_slot = gatewa_pb2.ipss__pb2.Instance.Uri_Slot()
+    uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT
     uri_slot.uri.append(uri)
     GATEWAY_INSTANCE.uri_slot.append(uri_slot)
