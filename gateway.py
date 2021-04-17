@@ -1,5 +1,6 @@
 import build
-from compile import SHA3_256, REGISTRY, HYCACHE, LOGGER
+from compile import REGISTRY, HYCACHE, LOGGER
+from verify import get_service_hash
 import subprocess, os, socket, threading
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
@@ -118,7 +119,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     # Si se trata de un servicio local.
     if IS_FROM_DOCKER_SUBNET(peer_ip):
         container_id = start_container(
-            id=eval("SHA3_256")(service.SerializeFromString())
+            id=get_service_hash(service=service, hash_type="sha3-256")
         )
 
         container_ip = get_container_ip(container_id=container_id)
@@ -155,7 +156,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
         container_id = start_container(
             use_other_ports=assigment_ports,
-            id=eval("SHA3_256")(service.SerializeFromString())
+            id=get_service_hash(service=service, hash_type="sha3-256")
         )
 
         container_ip = get_container_ip(container_id=container_id)
@@ -186,10 +187,10 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
 def get_from_registry(hash):
     try:
-        with open(REGISTRY + hash + '.service', "rb") as file:
-            file = gateway_pb2.ServiceFile()
-            file.ParseFromString(file.read())
-            return file.service
+        with open(REGISTRY + hash + '.service', 'rb') as file:
+            service = gateway_pb2.ipss__pb2.Service()
+            service.ParseFromString(file.read())
+            return service
     except IOError:
         print("Service " + hash + " not accessible.")
         # search service in IPFS service.
@@ -198,31 +199,30 @@ def get_from_registry(hash):
 if __name__ == "__main__":
     print('Starting server.')
 
-
     class Gateway(gateway_pb2_grpc.Gateway):
-        def StartService(self, request, context):
-            return launch_service(
-                service=request.service,
-                config=request.config,
-                peer_ip=context.peer()[5:]  # Lleva el formato 'ipv4:49.123.106.100:44420', no queremos 'ipv4:'.
-            )
 
-        def StartServiceWithExtended(self, request_iterator, context):
+        def StartService(self, request_iterator, context):
             configuration = None
             service_registry = [service[:-8] for service in os.listdir('./__registry__')]
             for r in request_iterator:
                 # Captura la configuracion si puede.
                 if r.HasField('configuration'): configuration = r.configuration
                 # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-                if r.HasField('hash') and configuration and "SHA3_256" in r.hash.tag \
-                        and r.hash.hash in service_registry:
+                if r.HasField('hash') and configuration and "sha3-256" in r.hash.split(':')[0] \
+                        and r.hash.split(':')[1] in service_registry:
                     return launch_service(
-                        service=get_from_registry(r.hash.hash),
+                        service=get_from_registry(r.hash.split(':')[1]),
                         config=configuration,
                         peer_ip=context.peer()[5:]  # Lleva el formato 'ipv4:49.123.106.100:44420', no queremos 'ipv4:'.
                     )
                 # Si me da servicio.
                 if r.HasField('service') and configuration:
+                    # If the service is not on the registry, save it.
+                    hash = get_service_hash(service=r.service, hash_type="sha3-256")
+                    if not os.path.isfile(REGISTRY+hash+'.service'):
+                        with open(REGISTRY+hash+'.service') as file:
+                            file.write(r.service.SerializeToString())
+                    
                     return launch_service(
                         service=r.service,
                         config=configuration,

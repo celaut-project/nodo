@@ -2,8 +2,8 @@ import sys
 import json
 from subprocess import run, check_output
 import os
-import hashlib
 import gateway_pb2
+from verify import calculate_hashes
 
 import logging
 logging.basicConfig(filename='/home/hy/node/app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
@@ -12,16 +12,6 @@ LOGGER = lambda message: logging.getLogger(__name__).debug(message)
 # DIRECTORIES
 HYCACHE = "/home/hy/node/__hycache__/"
 REGISTRY = "/home/hy/node/__registry__/"
-
-# -- HASH FUNCTIONS --
-SHAKE_256 = lambda value: "" if value is None else 'shake-256:0x'+hashlib.shake_256(value).hexdigest(32)
-SHA3_256 = lambda value: "" if value is None else 'sha3-256:0x'+hashlib.sha3_256(value).hexdigest()
-
-def calculate_hashes(value):
-    return [
-        SHA3_256(value),
-        SHAKE_256(value)
-    ]
 
 class Hyper:
     def __init__(self, path, aux_id):
