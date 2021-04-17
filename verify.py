@@ -1,5 +1,6 @@
 import hashlib
 from ipss_pb2 import Service
+from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 
 # -- HASH FUNCTIONS --
 SHAKE_256 = lambda value: "" if value is None else 'shake-256:0x'+hashlib.shake_256(value).hexdigest(32)
@@ -21,7 +22,10 @@ def prune_hashes_of_service(service: Service) -> Service:
                     field.ClearField(attribute[0].name) # 'name' is the field's name on our serializer.
                 else:
                     recursive_prune(field=attribute[1])
-        except AttributeError: pass
+        except AttributeError:
+            if type(field) == RepeatedCompositeFieldContainer:
+                for elem in field:
+                    recursive_prune(field=elem)
 
     s = Service()
     s.CopyFrom(service)
