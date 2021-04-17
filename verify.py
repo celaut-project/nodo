@@ -12,11 +12,6 @@ def calculate_hashes(value) -> list:
     ]
 
 def prune_hashes_of_service(service: Service) -> Service:
-    s = Service()
-    s.CopyFrom(service)
-    recursive_prune(field=s)
-    return s
-
     def recursive_prune(field: any) -> any:
         try:
             for attribute in field.ListFields():
@@ -26,12 +21,17 @@ def prune_hashes_of_service(service: Service) -> Service:
                     recursive_prune(field=attribute[1])
         except AttributeError: pass
 
+    s = Service()
+    s.CopyFrom(service)
+    recursive_prune(field=s)
+    return s
+
 def get_service_hash(service: Service, hash_type: str) -> str:
     from compile import LOGGER
     if hash_type == "sha3-256":
         return SHA3_256(
             value=prune_hashes_of_service(
-                service=Service
+                service=service
             ).SerializeToString().split(':')[1]
         )
     else:
