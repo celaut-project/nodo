@@ -14,10 +14,8 @@ def calculate_hashes(value) -> list:
 
 def prune_hashes_of_service(service: Service) -> Service:
     def recursive_prune(field: any) -> any:
-        print('\n')
         try:
             for attribute in field.ListFields():
-                print(attribute[0].name)
                 if attribute[0].number == 15: # The hash field is always on index 15.
                     field.ClearField(attribute[0].name) # 'name' is the field's name on our serializer.
                 else:
