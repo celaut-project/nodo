@@ -13,10 +13,9 @@ def calculate_hashes(value) -> list:
 
 def prune_hashes_of_service(service: Service) -> Service:
     def recursive_prune(field: any) -> any:
-        print(field)
         try:
             for attribute in field.ListFields():
-                print('     '+str(attribute))
+                print(attribute[0].number)
                 if attribute[0].number == 15: # The hash field is always on index 15.
                     field.ClearField(attribute[0].name) # 'name' is the field's name on our serializer.
                 else:
@@ -34,8 +33,8 @@ def get_service_hash(service: Service, hash_type: str) -> str:
         return SHA3_256(
             value=prune_hashes_of_service(
                 service=service
-            ).SerializeToString().split(':')[1]
-        )
+            ).SerializeToString()
+        ).split(':')[1]
     else:
         LOGGER(hash_type+' hash function is not implemented on this method.')
         return ''
