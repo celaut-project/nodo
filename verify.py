@@ -33,7 +33,7 @@ def get_service_hash(service: Service, hash_type: str) -> str:
     if hash_type == "sha3-256":
         return SHA3_256(
             value=prune_hashes_of_service(
-                service=(Service) service
+                service=service
             ).SerializeToString().split(':')[1]
         )
     else:
