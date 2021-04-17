@@ -26,14 +26,14 @@ def prune_hashes_of_service(service: Service) -> Service:
                     recursive_prune(field=attribute[1])
         except AttributeError: pass
 
-def get_service_hash(service: Service, hash_type: str) -> list:
+def get_service_hash(service: Service, hash_type: str) -> str:
     from compile import LOGGER
     if hash_type == "sha3-256":
         return SHA3_256(
             value=prune_hashes_of_service(
                 service=Service
-            ).SerializeToString()
+            ).SerializeToString().split(':')[1]
         )
     else:
         LOGGER(hash_type+' hash function is not implemented on this method.')
-        return Service
+        return ''
