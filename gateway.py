@@ -206,7 +206,7 @@ if __name__ == "__main__":
             service_registry = [service[:-8] for service in os.listdir('./__registry__')]
             for r in request_iterator:
                 # Captura la configuracion si puede.
-                if r.HasField('configuration'): configuration = r.configuration
+                if r.HasField('config'): configuration = r.config
                 # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
                 if r.HasField('hash') and configuration and "sha3-256" in r.hash.split(':')[0] \
                         and r.hash.split(':')[1] in service_registry:
