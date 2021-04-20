@@ -111,7 +111,6 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     # De momento lo hace el y ya.
     build.build(service=service)  # Si no esta construido el contenedor, lo construye.
-
     service_ports = [slot.port for slot in service.api]
     instance = gateway_pb2.Instance()
     instance.instance.api.extend(service.api)
@@ -192,12 +191,10 @@ def get_from_registry(hash):
             service.ParseFromString(file.read())
             return service
     except IOError:
-        print("Service " + hash + " not accessible.")
         # search service in IPFS service.
 
 
 if __name__ == "__main__":
-    print('Starting server.')
 
     class Gateway(gateway_pb2_grpc.Gateway):
 
@@ -206,9 +203,10 @@ if __name__ == "__main__":
             service_registry = [service[:-8] for service in os.listdir('./__registry__')]
             for r in request_iterator:
                 # Captura la configuracion si puede.
-                if r.HasField('config'): configuration = r.config
+                if r.HasField('config'):
+                    configuration = r.config
                 # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-                if r.HasField('hash') and configuration and "sha3-256" in r.hash.split(':')[0] \
+                if r.HasField('hash') and configuration and "sha3-256" == r.hash.split(':')[0] \
                         and r.hash.split(':')[1] in service_registry:
                     return launch_service(
                         service=get_from_registry(r.hash.split(':')[1]),
@@ -261,8 +259,6 @@ if __name__ == "__main__":
     gateway_pb2_grpc.add_GatewayServicer_to_server(
         Gateway(), server=server
     )
-
-    print('Listening on port ' + str(GATEWAY_PORT))
 
     server.add_insecure_port('[::]:' + str(GATEWAY_PORT))
     server.start()

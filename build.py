@@ -2,19 +2,15 @@ from compile import LOGGER
 from verify import get_service_hash
 from subprocess import check_output, CalledProcessError
 
-
-def verify():
-    pass
-
 def build(service):
     id = get_service_hash(service=service, hash_type='sha3-256')
     # it's locally?
     try:
-        check_output('/usr/bin/docker inspect '+id)
+        check_output('/usr/bin/docker inspect '+id+'.service', shell=True)
     except CalledProcessError:
         pass
         # search container in IPFS service. (docker-tar, docker-tar.gz, filesystem, ....)
-    verify()
+    #verify()
 
 if __name__ == "__main__":
     import gateway_pb2, sys

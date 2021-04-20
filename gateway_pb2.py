@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"!\n\x04Hash\x12\x0c\n\x04hash\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x03(\t\"\x07\n\x05\x45mpty\"K\n\x08Instance\x12 \n\x08instance\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12\x1d\n\x05token\x18\x02 \x01(\x0b\x32\x0e.gateway.Token\"\x90\x01\n\x0fServiceExtended\x12\x1d\n\x04hash\x18\x01 \x01(\x0b\x32\r.gateway.HashH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"X\n\x11ServiceWithConfig\x12\x1e\n\x07service\x18\x01 \x01(\x0b\x32\r.ipss.Service\x12#\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x13.ipss.Configuration\"J\n\x0bServiceFile\x12\x1b\n\x04hash\x18\x01 \x03(\x0b\x32\r.gateway.Hash\x12\x1e\n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.Service2\xc8\x01\n\x07Gateway\x12?\n\x0cStartService\x12\x1a.gateway.ServiceWithConfig\x1a\x11.gateway.Instance\"\x00\x12K\n\x18StartServiceWithExtended\x12\x18.gateway.ServiceExtended\x1a\x11.gateway.Instance\"\x00(\x01\x12/\n\x0bStopService\x12\x0e.gateway.Token\x1a\x0e.gateway.Empty\"\x00\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"\x07\n\x05\x45mpty\"K\n\x08Instance\x12 \n\x08instance\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12\x1d\n\x05token\x18\x02 \x01(\x0b\x32\x0e.gateway.Token\"\x82\x01\n\x10ServiceTransport\x12\x0e\n\x04hash\x18\x01 \x01(\tH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config2|\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12/\n\x0bStopService\x12\x0e.gateway.Token\x1a\x0e.gateway.Empty\"\x00\x62\x06proto3'
   ,
   dependencies=[ipss__pb2.DESCRIPTOR,])
 
@@ -78,45 +78,6 @@ _TOKEN = _descriptor.Descriptor(
 )
 
 
-_HASH = _descriptor.Descriptor(
-  name='Hash',
-  full_name='gateway.Hash',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  create_key=_descriptor._internal_create_key,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='hash', full_name='gateway.Hash.hash', index=0,
-      number=1, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=b"".decode('utf-8'),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='tag', full_name='gateway.Hash.tag', index=1,
-      number=2, type=9, cpp_type=9, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  serialized_options=None,
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=126,
-  serialized_end=159,
-)
-
-
 _EMPTY = _descriptor.Descriptor(
   name='Empty',
   full_name='gateway.Empty',
@@ -137,8 +98,8 @@ _EMPTY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=161,
-  serialized_end=168,
+  serialized_start=126,
+  serialized_end=133,
 )
 
 
@@ -176,35 +137,35 @@ _INSTANCE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=170,
-  serialized_end=245,
+  serialized_start=135,
+  serialized_end=210,
 )
 
 
-_SERVICEEXTENDED = _descriptor.Descriptor(
-  name='ServiceExtended',
-  full_name='gateway.ServiceExtended',
+_SERVICETRANSPORT = _descriptor.Descriptor(
+  name='ServiceTransport',
+  full_name='gateway.ServiceTransport',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='hash', full_name='gateway.ServiceExtended.hash', index=0,
-      number=1, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
+      name='hash', full_name='gateway.ServiceTransport.hash', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='service', full_name='gateway.ServiceExtended.service', index=1,
+      name='service', full_name='gateway.ServiceTransport.service', index=1,
       number=2, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='config', full_name='gateway.ServiceExtended.config', index=2,
+      name='config', full_name='gateway.ServiceTransport.config', index=2,
       number=3, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
@@ -222,96 +183,18 @@ _SERVICEEXTENDED = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
     _descriptor.OneofDescriptor(
-      name='oneOf', full_name='gateway.ServiceExtended.oneOf',
+      name='oneOf', full_name='gateway.ServiceTransport.oneOf',
       index=0, containing_type=None,
       create_key=_descriptor._internal_create_key,
     fields=[]),
     _descriptor.OneofDescriptor(
-      name='_config', full_name='gateway.ServiceExtended._config',
+      name='_config', full_name='gateway.ServiceTransport._config',
       index=1, containing_type=None,
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=248,
-  serialized_end=392,
-)
-
-
-_SERVICEWITHCONFIG = _descriptor.Descriptor(
-  name='ServiceWithConfig',
-  full_name='gateway.ServiceWithConfig',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  create_key=_descriptor._internal_create_key,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='service', full_name='gateway.ServiceWithConfig.service', index=0,
-      number=1, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='config', full_name='gateway.ServiceWithConfig.config', index=1,
-      number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  serialized_options=None,
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=394,
-  serialized_end=482,
-)
-
-
-_SERVICEFILE = _descriptor.Descriptor(
-  name='ServiceFile',
-  full_name='gateway.ServiceFile',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  create_key=_descriptor._internal_create_key,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='hash', full_name='gateway.ServiceFile.hash', index=0,
-      number=1, type=11, cpp_type=10, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='service', full_name='gateway.ServiceFile.service', index=1,
-      number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  serialized_options=None,
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=484,
-  serialized_end=558,
+  serialized_start=213,
+  serialized_end=343,
 )
 
 _TOKEN.oneofs_by_name['oneOf'].fields.append(
@@ -325,29 +208,21 @@ _TOKEN.oneofs_by_name['oneOf'].fields.append(
 _TOKEN.fields_by_name['value_string'].containing_oneof = _TOKEN.oneofs_by_name['oneOf']
 _INSTANCE.fields_by_name['instance'].message_type = ipss__pb2._INSTANCE
 _INSTANCE.fields_by_name['token'].message_type = _TOKEN
-_SERVICEEXTENDED.fields_by_name['hash'].message_type = _HASH
-_SERVICEEXTENDED.fields_by_name['service'].message_type = ipss__pb2._SERVICE
-_SERVICEEXTENDED.fields_by_name['config'].message_type = ipss__pb2._CONFIGURATION
-_SERVICEEXTENDED.oneofs_by_name['oneOf'].fields.append(
-  _SERVICEEXTENDED.fields_by_name['hash'])
-_SERVICEEXTENDED.fields_by_name['hash'].containing_oneof = _SERVICEEXTENDED.oneofs_by_name['oneOf']
-_SERVICEEXTENDED.oneofs_by_name['oneOf'].fields.append(
-  _SERVICEEXTENDED.fields_by_name['service'])
-_SERVICEEXTENDED.fields_by_name['service'].containing_oneof = _SERVICEEXTENDED.oneofs_by_name['oneOf']
-_SERVICEEXTENDED.oneofs_by_name['_config'].fields.append(
-  _SERVICEEXTENDED.fields_by_name['config'])
-_SERVICEEXTENDED.fields_by_name['config'].containing_oneof = _SERVICEEXTENDED.oneofs_by_name['_config']
-_SERVICEWITHCONFIG.fields_by_name['service'].message_type = ipss__pb2._SERVICE
-_SERVICEWITHCONFIG.fields_by_name['config'].message_type = ipss__pb2._CONFIGURATION
-_SERVICEFILE.fields_by_name['hash'].message_type = _HASH
-_SERVICEFILE.fields_by_name['service'].message_type = ipss__pb2._SERVICE
+_SERVICETRANSPORT.fields_by_name['service'].message_type = ipss__pb2._SERVICE
+_SERVICETRANSPORT.fields_by_name['config'].message_type = ipss__pb2._CONFIGURATION
+_SERVICETRANSPORT.oneofs_by_name['oneOf'].fields.append(
+  _SERVICETRANSPORT.fields_by_name['hash'])
+_SERVICETRANSPORT.fields_by_name['hash'].containing_oneof = _SERVICETRANSPORT.oneofs_by_name['oneOf']
+_SERVICETRANSPORT.oneofs_by_name['oneOf'].fields.append(
+  _SERVICETRANSPORT.fields_by_name['service'])
+_SERVICETRANSPORT.fields_by_name['service'].containing_oneof = _SERVICETRANSPORT.oneofs_by_name['oneOf']
+_SERVICETRANSPORT.oneofs_by_name['_config'].fields.append(
+  _SERVICETRANSPORT.fields_by_name['config'])
+_SERVICETRANSPORT.fields_by_name['config'].containing_oneof = _SERVICETRANSPORT.oneofs_by_name['_config']
 DESCRIPTOR.message_types_by_name['Token'] = _TOKEN
-DESCRIPTOR.message_types_by_name['Hash'] = _HASH
 DESCRIPTOR.message_types_by_name['Empty'] = _EMPTY
 DESCRIPTOR.message_types_by_name['Instance'] = _INSTANCE
-DESCRIPTOR.message_types_by_name['ServiceExtended'] = _SERVICEEXTENDED
-DESCRIPTOR.message_types_by_name['ServiceWithConfig'] = _SERVICEWITHCONFIG
-DESCRIPTOR.message_types_by_name['ServiceFile'] = _SERVICEFILE
+DESCRIPTOR.message_types_by_name['ServiceTransport'] = _SERVICETRANSPORT
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 Token = _reflection.GeneratedProtocolMessageType('Token', (_message.Message,), {
@@ -356,13 +231,6 @@ Token = _reflection.GeneratedProtocolMessageType('Token', (_message.Message,), {
   # @@protoc_insertion_point(class_scope:gateway.Token)
   })
 _sym_db.RegisterMessage(Token)
-
-Hash = _reflection.GeneratedProtocolMessageType('Hash', (_message.Message,), {
-  'DESCRIPTOR' : _HASH,
-  '__module__' : 'gateway_pb2'
-  # @@protoc_insertion_point(class_scope:gateway.Hash)
-  })
-_sym_db.RegisterMessage(Hash)
 
 Empty = _reflection.GeneratedProtocolMessageType('Empty', (_message.Message,), {
   'DESCRIPTOR' : _EMPTY,
@@ -378,26 +246,12 @@ Instance = _reflection.GeneratedProtocolMessageType('Instance', (_message.Messag
   })
 _sym_db.RegisterMessage(Instance)
 
-ServiceExtended = _reflection.GeneratedProtocolMessageType('ServiceExtended', (_message.Message,), {
-  'DESCRIPTOR' : _SERVICEEXTENDED,
+ServiceTransport = _reflection.GeneratedProtocolMessageType('ServiceTransport', (_message.Message,), {
+  'DESCRIPTOR' : _SERVICETRANSPORT,
   '__module__' : 'gateway_pb2'
-  # @@protoc_insertion_point(class_scope:gateway.ServiceExtended)
+  # @@protoc_insertion_point(class_scope:gateway.ServiceTransport)
   })
-_sym_db.RegisterMessage(ServiceExtended)
-
-ServiceWithConfig = _reflection.GeneratedProtocolMessageType('ServiceWithConfig', (_message.Message,), {
-  'DESCRIPTOR' : _SERVICEWITHCONFIG,
-  '__module__' : 'gateway_pb2'
-  # @@protoc_insertion_point(class_scope:gateway.ServiceWithConfig)
-  })
-_sym_db.RegisterMessage(ServiceWithConfig)
-
-ServiceFile = _reflection.GeneratedProtocolMessageType('ServiceFile', (_message.Message,), {
-  'DESCRIPTOR' : _SERVICEFILE,
-  '__module__' : 'gateway_pb2'
-  # @@protoc_insertion_point(class_scope:gateway.ServiceFile)
-  })
-_sym_db.RegisterMessage(ServiceFile)
+_sym_db.RegisterMessage(ServiceTransport)
 
 
 
@@ -408,25 +262,15 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=561,
-  serialized_end=761,
+  serialized_start=345,
+  serialized_end=469,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',
     full_name='gateway.Gateway.StartService',
     index=0,
     containing_service=None,
-    input_type=_SERVICEWITHCONFIG,
-    output_type=_INSTANCE,
-    serialized_options=None,
-    create_key=_descriptor._internal_create_key,
-  ),
-  _descriptor.MethodDescriptor(
-    name='StartServiceWithExtended',
-    full_name='gateway.Gateway.StartServiceWithExtended',
-    index=1,
-    containing_service=None,
-    input_type=_SERVICEEXTENDED,
+    input_type=_SERVICETRANSPORT,
     output_type=_INSTANCE,
     serialized_options=None,
     create_key=_descriptor._internal_create_key,
@@ -434,7 +278,7 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   _descriptor.MethodDescriptor(
     name='StopService',
     full_name='gateway.Gateway.StopService',
-    index=2,
+    index=1,
     containing_service=None,
     input_type=_TOKEN,
     output_type=_EMPTY,
