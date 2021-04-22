@@ -194,10 +194,12 @@ def get_from_registry(hash):
         # search service in IPFS service.
 
 
+
+
 if __name__ == "__main__":
 
     class Gateway(gateway_pb2_grpc.Gateway):
-
+        
         def StartService(self, request_iterator, context):
             configuration = None
             service_registry = [service[:-8] for service in os.listdir('./__registry__')]

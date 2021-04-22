@@ -3,7 +3,7 @@ import json
 from subprocess import run, check_output
 import os
 import gateway_pb2
-from verify import calculate_hashes
+from verify import get_service_list_of_hashes, calculate_hashes
 
 import logging
 logging.basicConfig(filename='/home/hy/node/app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
@@ -17,7 +17,6 @@ class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
         self.service =  gateway_pb2.ipss__pb2.Service()
-        self.service_with_hashes = gateway_pb2.ipss__pb2.Service()
         self.path = path
         self.json = json.load(open(self.path+"service.json", "r"))
         self.aux_id = aux_id
@@ -83,7 +82,7 @@ class Hyper:
             recursive_parsing(directory=HYCACHE+self.aux_id+"/filesystem/")
         )
         
-        self.service_with_hashes.container.filesystem.hash.extend(
+        self.service.container.filesystem.hash.extend(
             calculate_hashes( self.service.container.filesystem.SerializeToString() )
             )
         
@@ -101,14 +100,12 @@ class Hyper:
         # Entrypoint
         if self.json.get('entrypoint'):
             self.service.container.entrypoint = self.json.get('entrypoint')
-        
-        self.service_with_hashes.MergeFrom(self.service)
 
         # Arch
-        self.service_with_hashes.container.architecture.hash.append( self.json.get('architecture') )
+        self.service.container.architecture.hash.append( self.json.get('architecture') )
 
         # Filesystem
-        self.parseFilesys() # TODO
+        self.parseFilesys()
 
 
     def parseApi(self):
@@ -121,18 +118,13 @@ class Hyper:
                 # aplication protocol.
                 with open(self.path+str(slot.port)+".application", "rb") as api_desc:
                     slot.application_protocol.ParseFromString(api_desc.read())
-                self.service.api.append(slot)
-
                 # transport protocol.
-                slot_with_hash = gateway_pb2.ipss__pb2.Slot()
-                slot_with_hash.CopyFrom(slot)
-                slot_with_hash.transport_protocol.hash.extend(item.get('protocol'))
-
-                self.service_with_hashes.api.append(slot_with_hash)
+                slot.transport_protocol.hash.extend(item.get('protocol'))
+                self.service.api.append(slot)
 
     def parseLedger(self):
         if self.json.get('ledger'):
-            self.service_with_hashes.ledger.hash = self.json.get('ledger')
+            self.service.ledger.hash = self.json.get('ledger')
 
     def parseTensor(self):
         tensor = self.json.get('tensor') or None
@@ -161,17 +153,16 @@ class Hyper:
                             variable.field.ParseFromString(var_desc.read())
                     except FileNotFoundError: pass
                     self.service.tensor.output_variable.append(variable)
-            self.service_with_hashes.tensor.CopyFrom(self.service.tensor)
 
     def save(self):
-        self.service_with_hashes.hash.extend(
-            calculate_hashes(self.service.SerializeToString())
+        self.service.hash.extend(
+            get_service_list_of_hashes(self.service)
         )
-        for hash in self.service_with_hashes.hash:
+        for hash in self.service.hash:
             if "sha3-256" == hash[:8]:
                 id = hash[9:]
         with open( REGISTRY +id+ '.service', 'wb') as f:
-            f.write( self.service_with_hashes.SerializeToString() )
+            f.write( self.service.SerializeToString() )
         return id
 
 def ok(path, aux_id):

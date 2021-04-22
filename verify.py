@@ -34,10 +34,17 @@ def get_service_hash(service: Service, hash_type: str) -> str:
     from compile import LOGGER
     if hash_type == "sha3-256":
         return SHA3_256(
-            value=prune_hashes_of_service(
+            value = prune_hashes_of_service(
                 service=service
             ).SerializeToString()
         ).split(':')[1]
     else:
         LOGGER(hash_type+' hash function is not implemented on this method.')
         return ''
+
+def get_service_list_of_hashes(service: Service) -> list:
+    return calculate_hashes(
+        value = prune_hashes_of_service(
+            service=service
+        ).SerializeToString()
+    )
