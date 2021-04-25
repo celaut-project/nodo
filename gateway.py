@@ -95,7 +95,7 @@ def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
             break
         except subprocess.CalledProcessError as e:
             LOGGER(e.output)
-    os.read(HYCACHE + container_id + '/__config__')
+    os.remove(HYCACHE + container_id + '/__config__')
     os.rmdir(HYCACHE + container_id)
 
 
@@ -191,6 +191,7 @@ def get_from_registry(hash):
             service.ParseFromString(file.read())
             return service
     except IOError:
+        pass
         # search service in IPFS service.
 
 
@@ -226,6 +227,9 @@ if __name__ == "__main__":
                         config=configuration,
                         peer_ip=context.peer()[5:]  # Lleva el formato 'ipv4:49.123.106.100:44420', no queremos 'ipv4:'.
                     )
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_detail('Imposible to launch this service')
+            return context
 
         def StopService(self, request, context):
             if IS_FROM_DOCKER_SUBNET(request.string):
@@ -260,5 +264,6 @@ if __name__ == "__main__":
     )
 
     server.add_insecure_port('[::]:' + str(GATEWAY_PORT))
+    LOGGER('Starting gateway at port'+ str(GATEWAY_PORT))
     server.start()
     server.wait_for_termination()
