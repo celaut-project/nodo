@@ -195,11 +195,9 @@ def get_from_registry(hash):
 
 
 
-
 if __name__ == "__main__":
 
     class Gateway(gateway_pb2_grpc.Gateway):
-        
         def StartService(self, request_iterator, context):
             configuration = None
             service_registry = [service[:-8] for service in os.listdir('./__registry__')]
@@ -222,7 +220,7 @@ if __name__ == "__main__":
                     if not os.path.isfile(REGISTRY+hash+'.service'):
                         with open(REGISTRY+hash+'.service') as file:
                             file.write(r.service.SerializeToString())
-                    
+
                     return launch_service(
                         service=r.service,
                         config=configuration,
@@ -242,7 +240,6 @@ if __name__ == "__main__":
                     token=request.string.split(':')[1]
                 )
             return gateway_pb2.Empty()
-
 
     slot = gateway_pb2.ipss__pb2.Slot()
     slot.port = GATEWAY_PORT

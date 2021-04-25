@@ -39,19 +39,19 @@ class Hyper:
             if os.path.isdir(HYCACHE+self.aux_id+"/building/"+layer):
                 LOGGER('Unzipping layer '+layer)
                 os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/"+layer+"/layer.tar -C "+HYCACHE+self.aux_id+"/filesystem/")
-        
+
         # Add filesystem data to filesystem buffer object.
         def recursive_parsing(directory: str) -> gateway_pb2.ipss__pb2.Filesystem:
             filesystem = gateway_pb2.ipss__pb2.Filesystem()
             for b_name in os.listdir(directory):
-                
+
                 if b_name == '.wh..wh..opq': 
                     # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
                     LOGGER('docker opaque witeout file.')
                     continue
                 branch = gateway_pb2.ipss__pb2.Filesystem.Branch()
                 branch.name = os.path.basename(b_name)
-                
+
                 # It's a link.
                 if os.path.islink(directory+b_name):
                     LOGGER('    Adding link '+ b_name)
@@ -75,17 +75,17 @@ class Hyper:
                         )
                     filesystem.branch.append(branch)
                     continue
-                    
+
             return filesystem
-        
-        self.service.container.filesystem.CopyFrom(
-            recursive_parsing(directory=HYCACHE+self.aux_id+"/filesystem/")
-        )
-        
+
+        filesystem = recursive_parsing(directory=HYCACHE+self.aux_id+"/filesystem/")
+
+        # self.service.container.filesystem.CopyFrom( filesystem )
+
         self.service.container.filesystem.hash.extend(
-            calculate_hashes( self.service.container.filesystem.SerializeToString() )
-            )
-        
+            calculate_hashes( filesystem.SerializeToString() )
+        )
+
 
     def parseContainer(self):
         # Envs
