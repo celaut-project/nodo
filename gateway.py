@@ -258,15 +258,12 @@ if __name__ == "__main__":
                 )
             return gateway_pb2.Empty()
 
-    slot = gateway_pb2.ipss__pb2.Slot()
-    slot.port = GATEWAY_PORT
-    # ¡¡ Empty protocol_mesh and application_def !!
-    GATEWAY_INSTANCE.api.append(slot)
     uri = gateway_pb2.ipss__pb2.Instance.Uri()
     uri.ip = '172.17.0.1'
     uri.port = GATEWAY_PORT
     uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT
+    # ¡¡ Empty protocol_mesh and application_def !!
     uri_slot.uri.append(uri)
     GATEWAY_INSTANCE.uri_slot.append(uri_slot)
 
