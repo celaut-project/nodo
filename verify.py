@@ -31,6 +31,11 @@ def prune_hashes_of_service(service: Service) -> Service:
     return s
 
 def get_service_hash(service: Service, hash_type: str) -> str:
+    for hash in service.hash:
+        if hash_type == hash.split(':')[0]:
+            return hash.split(':')[1]
+    
+    # if not is_complete_service(service=service): return ''
     from compile import LOGGER
     if hash_type == "sha3-256":
         return SHA3_256(
@@ -43,6 +48,7 @@ def get_service_hash(service: Service, hash_type: str) -> str:
         return ''
 
 def get_service_list_of_hashes(service: Service) -> list:
+    # if not is_complete_service(service=service): return []
     return calculate_hashes(
         value = prune_hashes_of_service(
             service=service
