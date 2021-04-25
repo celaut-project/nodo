@@ -115,9 +115,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     # De momento lo hace el y ya.
     build.build(service=service)  # Si no esta construido el contenedor, lo construye.
-    service_ports = [slot.port for slot in service.api]
     instance = gateway_pb2.Instance()
-    instance.instance.api.extend(service.api)
 
     # Si se trata de un servicio local.
     if IS_FROM_DOCKER_SUBNET(peer_ip):
@@ -136,9 +134,11 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             container_ip=container_ip
         )
 
-        for port in service_ports:
+        for slot in service.api:
             uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
-            uri_slot.internal_port = port
+            uri_slot.internal_port = slot.port
+            uri_slot.transport_protocol.CopyFrom(slot.transport_protocol)
+            uri_slot.application_protocol.CopyFrom(slot.application_protocol)
 
             # Al ser interno sabemos que solo tendrá una dirección posible por slot.
             uri = gateway_pb2.ipss__pb2.Instance.Uri()
@@ -156,7 +156,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
                 return int(s.getsockname()[1])
 
         host_ip = socket.gethostbyname(socket.gethostname()) # Debería ser una lista.
-        assigment_ports = {port: get_free_port() for port in service_ports}
+        assigment_ports = {slot.port: get_free_port() for slot in service.api}
 
         container_id = start_container(
             use_other_ports=assigment_ports,
@@ -177,6 +177,10 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         for port in assigment_ports:
             uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
             uri_slot.internal_port = port
+            for slot in service.api:
+                if slot.port == port:
+                    uri_slot.transport_protocol.CopyFrom(slot.transport_protocol)
+                    uri_slot.application_protocol.CopyFrom(slot.application_protocol)
 
             # for host_ip in host_ip_list:
             uri = gateway_pb2.ipss__pb2.Instance.Uri()

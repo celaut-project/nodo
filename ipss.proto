@@ -154,9 +154,11 @@ message Instance {
     message Uri_Slot {
         int32 internal_port = 1;
         repeated Uri uri = 2;
+        ProtocolMesh transport_protocol = 3;
+        ApplicationDef application_protocol = 4;
+        // Cost function can be applied. <- must be optional
     }
-    repeated Slot api = 1;
-    repeated Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899, ]
+    repeated Uri_Slot uri_slot = 1;
 }
 
 //  -------------------------------
