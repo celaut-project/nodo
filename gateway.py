@@ -101,7 +101,7 @@ def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
 
 def start_container(id: str, entrypoint: str, use_other_ports=None):
     entrypoint = entrypoint.split(' ')
-    command = '/usr/bin/docker run --entrypoint '+entrypoint[0]
+    command = '/usr/bin/docker create --entrypoint '+entrypoint[0]
     if use_other_ports is not None:
         for port in use_other_ports:
             command = command + ' -p ' + str(use_other_ports[port]) + ':' + str(port)
@@ -187,6 +187,9 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             instance.instance.uri_slot.append(uri_slot)
 
     instance.token.value_string = peer_ip + ':' + container_id + ':' + container_ip
+    
+    # init container.
+    subprocess.run('/usr/bin/docker start '+container_id, shell=True)
     return instance
 
 
