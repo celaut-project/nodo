@@ -170,7 +170,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
         for port in assigment_ports:
             uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
-            uri_slot.port = port
+            uri_slot.internal_port = port
 
             # for host_ip in host_ip_list:
             uri = gateway_pb2.ipss__pb2.Instance.Uri()
