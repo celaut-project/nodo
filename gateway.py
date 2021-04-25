@@ -5,6 +5,8 @@ import subprocess, os, socket, threading
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
 
+from grpc_reflection.v1alpha import reflection
+
 IS_FROM_DOCKER_SUBNET = lambda s: s[:7] == '172.17.'
 
 GATEWAY_INSTANCE = gateway_pb2.ipss__pb2.Instance()
@@ -95,8 +97,8 @@ def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
             break
         except subprocess.CalledProcessError as e:
             LOGGER(e.output)
-    os.remove(HYCACHE + container_id + '/__config__')
-    os.rmdir(HYCACHE + container_id)
+    #os.remove(HYCACHE + container_id + '/__config__')
+    #os.rmdir(HYCACHE + container_id)
 
 
 def start_container(id: str, entrypoint: str, use_other_ports=None):
@@ -272,6 +274,12 @@ if __name__ == "__main__":
     gateway_pb2_grpc.add_GatewayServicer_to_server(
         Gateway(), server=server
     )
+
+    SERVICE_NAMES = (
+        gateway_pb2.DESCRIPTOR.services_by_name['Gateway'].full_name,
+        reflection.SERVICE_NAME,
+    )
+    reflection.enable_server_reflection(SERVICE_NAMES, server)
 
     server.add_insecure_port('[::]:' + str(GATEWAY_PORT))
     LOGGER('Starting gateway at port'+ str(GATEWAY_PORT))
