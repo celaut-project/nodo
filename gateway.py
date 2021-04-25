@@ -99,12 +99,16 @@ def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
     os.rmdir(HYCACHE + container_id)
 
 
-def start_container(id: str, use_other_ports=None):
-    command = '/usr/bin/docker run'
+def start_container(id: str, entrypoint: str, use_other_ports=None):
+    entrypoint = entrypoint.split(' ')
+    command = '/usr/bin/docker run --entrypoint '+entrypoint[0]
     if use_other_ports is not None:
         for port in use_other_ports:
             command = command + ' -p ' + str(use_other_ports[port]) + ':' + str(port)
-    return subprocess.check_output(command + ' --detach ' + id+'.service', shell=True).decode('utf-8').replace('\n', '')
+    command = command + ' --detach ' + id+'.service'
+    for param in entrypoint[1:]:
+        command = command + ' '+param
+    return subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
@@ -118,7 +122,8 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     # Si se trata de un servicio local.
     if IS_FROM_DOCKER_SUBNET(peer_ip):
         container_id = start_container(
-            id=get_service_hash(service=service, hash_type="sha3-256")
+            id=get_service_hash(service=service, hash_type="sha3-256"),
+            entrypoint=service.container.entrypoint
         )
 
         container_ip = get_container_ip(container_id=container_id)
@@ -155,7 +160,8 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
         container_id = start_container(
             use_other_ports=assigment_ports,
-            id=get_service_hash(service=service, hash_type="sha3-256")
+            id=get_service_hash(service=service, hash_type="sha3-256"),
+            entrypoint=service.container.entrypoint
         )
 
         container_ip = get_container_ip(container_id=container_id)
