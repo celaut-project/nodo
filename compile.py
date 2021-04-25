@@ -80,7 +80,7 @@ class Hyper:
 
         filesystem = recursive_parsing(directory=HYCACHE+self.aux_id+"/filesystem/")
 
-        # self.service.container.filesystem.CopyFrom( filesystem )
+        self.service.container.filesystem.CopyFrom( filesystem )
 
         self.service.container.filesystem.hash.extend(
             calculate_hashes( filesystem.SerializeToString() )
@@ -158,6 +158,8 @@ class Hyper:
         self.service.hash.extend(
             get_service_list_of_hashes(self.service)
         )
+        # Once service hashes are calculated, we prune the filesystem for save storage.
+        self.service.container.filesystem.ClearField('branch')
         for hash in self.service.hash:
             if "sha3-256" == hash[:8]:
                 id = hash[9:]
