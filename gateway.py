@@ -205,8 +205,8 @@ def get_from_registry(hash):
             service = gateway_pb2.ipss__pb2.Service()
             service.ParseFromString(file.read())
             return service
-    except IOError:
-        pass
+    except (IOError, FileNotFoundError) as e:
+        LOGGER('Error opening the service on registry, '+str(e))
         # search service in IPFS service.
 
 
