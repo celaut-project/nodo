@@ -234,7 +234,8 @@ if __name__ == "__main__":
                     # If the service is not on the registry, save it.
                     hash = get_service_hash(service=r.service, hash_type="sha3-256")
                     if not os.path.isfile(REGISTRY+hash+'.service'):
-                        with open(REGISTRY+hash+'.service') as file:
+                        print('No existe el archivo, por lo tanto me dispongo a crearlo.')
+                        with open(REGISTRY+hash+'.service', 'wb') as file:
                             file.write(r.service.SerializeToString())
 
                     return launch_service(

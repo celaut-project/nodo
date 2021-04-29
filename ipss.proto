@@ -167,7 +167,7 @@ message Instance {
 // The __config__ file is mounted on each service on the filesystem's root.
 message Configuration {
     map<string, Any> enviroment_variables = 1;
-    map<int32, ProtocolMesh> spec_slot = 2; // Only some of the specified ports and a protocol-submesh subgroup of the protocol-submesh of each slot.    
+    repeated int32 spec_slot = 2;    
 }
 
 message ConfigurationFile{
