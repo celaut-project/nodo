@@ -241,7 +241,6 @@ if __name__ == "__main__":
                     # If the service is not on the registry, save it.
                     hash = get_service_hash(service=r.service, hash_type="sha3-256")
                     if not os.path.isfile(REGISTRY+hash+'.service'):
-                        print('No existe el archivo, por lo tanto me dispongo a crearlo.')
                         with open(REGISTRY+hash+'.service', 'wb') as file:
                             file.write(r.service.SerializeToString())
 
@@ -255,7 +254,6 @@ if __name__ == "__main__":
             return context
 
         def StopService(self, request, context):
-            print('DO YOU WANT TO STOP THE SERVICE WITH TOKEN -> ', request)
             if IS_FROM_DOCKER_SUBNET(request.value_string.split('##')[1]): # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
                 purgue_internal(
                     peer_ip=request.value_string.split('##')[0],
