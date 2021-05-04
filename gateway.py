@@ -4,8 +4,11 @@ from verify import get_service_hash
 import subprocess, os, socket, threading
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
-
 from grpc_reflection.v1alpha import reflection
+
+import docker as docker_lib
+DOCKER_CLIENT = docker_lib.from_env()
+
 
 IS_FROM_DOCKER_SUBNET = lambda s: s[:7] == '172.17.'
 
@@ -16,13 +19,13 @@ cache_lock = threading.Lock()
 cache = {}  # ip:[dependencies]
 
 
-# internal token -> str( peer_ip:container_id:container_ip )
-# external token -> str( node_ip:his_token )
+# internal token -> str( peer_ip##container_ip##container_id )   peer_ip se refiere a la direccion del servicio padre (que puede ser interno o no).
+# external token -> str( node_ip##his_token )
 
 # En caso de mandarle la tarea a otro nodo:
 #   En cache se añadirá el servicio como dependencia del nodo elegido,
 #   en vez de usar la ip del servico se pone el token que nos dió ese servicio,
-#   nosotros a nuestro servicio solicitante le daremos un token con el formato node_ip:his_token.
+#   nosotros a nuestro servicio solicitante le daremos un token con el formato node_ip##his_token.
 
 def set_on_cache(peer_ip, container_id, container_ip):
     cache_lock.acquire()
@@ -34,7 +37,7 @@ def set_on_cache(peer_ip, container_id, container_ip):
         # debería estar en el registro.
 
     # Añade el nuevo servicio como dependencia.
-    cache[peer_ip].append(container_id + ':' + container_ip)
+    cache[peer_ip].append(container_ip + '##' + container_id)
 
     # Añade el servicio creado en el registro.
     cache.update({container_ip: []})
@@ -43,22 +46,25 @@ def set_on_cache(peer_ip, container_id, container_ip):
 
 
 def purgue_internal(peer_ip, container_id, container_ip):
-    subprocess.run('/usr/bin/docker rm ' + container_id + ' --force', shell=True)
+    try:
+        DOCKER_CLIENT.containers.get(container_id).kill()
+    except docker_lib.errors.APIError:
+        LOGGER('CONTAINER '+ container_id+' IS NOT RUNNING.')
     cache_lock.acquire()
-    cache[peer_ip].remove(container_id + ':' + container_ip)
-    for dependency in cache[container_id]:
+    cache[peer_ip].remove(container_ip + '##' + container_id)
+    for dependency in cache[container_ip]:
         # Si la dependencia esta en local.
-        if IS_FROM_DOCKER_SUBNET(dependency.split(':')[0]):
+        if IS_FROM_DOCKER_SUBNET(dependency.split('##')[0]):
             purgue_internal(
                 peer_ip=container_id,
-                container_id=dependency.split(':')[0],
-                container_ip=dependency.split(':')[1]
+                container_id=dependency.split('##')[1],
+                container_ip=dependency.split('##')[0]
             )
         # Si la dependencia se encuentra en otro nodo.
         else:
             purgue_external(
-                node_ip=dependency.split(':')[0],
-                token=dependency[len(dependency.split(':')[0]) + 1:]
+                node_ip=dependency.split('##')[0],
+                token=dependency[len(dependency.split('##')[0]) + 1:]
             )
     cache_lock.release()
 
@@ -66,19 +72,8 @@ def purgue_internal(peer_ip, container_id, container_ip):
 def purgue_external(node_ip, token):
     cache_lock.acquire()
     cache[node_ip].remove(token)
-    # peer_stubs[node_ip](token)
+    # peer_stubs[node_ip](token) # Le manda al otro nodo que elimine esa instancia.
     cache_lock.release()
-
-
-def get_container_ip(container_id: str):
-    while 1:
-        try:
-            return subprocess.check_output(
-                "/usr/bin/docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" " + container_id,
-                shell=True
-            ).decode('utf-8').replace('\n', '')
-        except subprocess.CalledProcessError as e:
-            LOGGER(e.output)
 
 
 def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
@@ -97,20 +92,21 @@ def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
             break
         except subprocess.CalledProcessError as e:
             LOGGER(e.output)
-    #os.remove(HYCACHE + container_id + '/__config__')
-    #os.rmdir(HYCACHE + container_id)
+    os.remove(HYCACHE + container_id + '/__config__')
+    os.rmdir(HYCACHE + container_id)
 
 
-def start_container(id: str, entrypoint: str, use_other_ports=None):
-    entrypoint = entrypoint.split(' ')
-    command = '/usr/bin/docker create --entrypoint '+entrypoint[0]
-    if use_other_ports is not None:
-        for port in use_other_ports:
-            command = command + ' -p ' + str(use_other_ports[port]) + ':' + str(port)
-    command = command + ' ' + id+'.service'
-    for param in entrypoint[1:]:
-        command = command + ' '+param
-    return subprocess.check_output(command, shell=True).decode('utf-8').replace('\n', '')
+def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_lib.models.containers.Container:
+    try:
+        return DOCKER_CLIENT.containers.create(
+            image = id+'.service',
+            entrypoint = entrypoint,
+            ports = use_other_ports
+        )
+    except docker_lib.errors.ImageNotFound:
+        LOGGER('IMAGE WOULD BE IN DOCKER REGISTRY. BUT NOT FOUND.')     # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
+    except docker_lib.errors.APIError:
+        LOGGER('DOCKER API ERROR ')
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
@@ -119,21 +115,30 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     build.build(service=service)  # Si no esta construido el contenedor, lo construye.
     instance = gateway_pb2.Instance()
 
-    # Si se trata de un servicio local.
+    # Si hace la peticion un servicio local.
     if IS_FROM_DOCKER_SUBNET(peer_ip):
-        container_id = start_container(
+        container = create_container(
             id=get_service_hash(service=service, hash_type="sha3-256"),
             entrypoint=service.container.entrypoint
         )
 
-        container_ip = get_container_ip(container_id=container_id)
+        set_config(container_id=container.id, config=config)
 
-        set_config(container_id=container_id, config=config)
+        # El contenedor se debe de iniciar tras añadir el fichero de configuración y 
+        #  antes de requerir su direccion IP, puesto que docker se la asigna al inicio.
+
+        try:
+            container.start()
+        except docker.errors.APIError as e:
+            LOGGER('ERROR ON CONTAINER '+ container.id + ' '+str(e)) # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
+
+        # Reload this object from the server again and update attrs with the new data.
+        container.reload()
 
         set_on_cache(
             peer_ip=peer_ip,
-            container_id=container_id,
-            container_ip=container_ip
+            container_id=container.id,
+            container_ip=container.attrs['NetworkSettings']['IPAddress']
         )
 
         for slot in service.api:
@@ -150,7 +155,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
             instance.instance.uri_slot.append(uri_slot)
 
-    # Si se trata de un servicio de otro nodo.
+    # Si hace la peticion un servicio de otro nodo.
     else:
         def get_free_port():
             with socket.socket() as s:
@@ -160,20 +165,25 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         host_ip = socket.gethostbyname(socket.gethostname()) # Debería ser una lista.
         assigment_ports = {slot.port: get_free_port() for slot in service.api}
 
-        container_id = start_container(
+        container = create_container(
             use_other_ports=assigment_ports,
             id=get_service_hash(service=service, hash_type="sha3-256"),
             entrypoint=service.container.entrypoint
         )
+        set_config(container_id=container.id, config=config)
 
-        container_ip = get_container_ip(container_id=container_id)
+        try:
+            container.start()
+        except docker.errors.APIError as e:
+            LOGGER('ERROR ON CONTAINER '+ container.id + ' '+str(e)) # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
 
-        set_config(container_id=container_id, config=config)
+        # Reload this object from the server again and update attrs with the new data.
+        container.reload()
 
         set_on_cache(
             peer_ip=peer_ip,
-            container_id=container_id,
-            container_ip=container_ip
+            container_id=container.id,
+            container_ip=container.attrs['NetworkSettings']['IPAddress']
         )
 
         for port in assigment_ports:
@@ -192,10 +202,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
             instance.instance.uri_slot.append(uri_slot)
 
-    instance.token.value_string = peer_ip + ':' + container_id + ':' + container_ip
-    
-    # init container.
-    subprocess.run('/usr/bin/docker start '+container_id, shell=True)
+    instance.token.value_string = peer_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
     return instance
 
 
@@ -227,7 +234,7 @@ if __name__ == "__main__":
                     return launch_service(
                         service=get_from_registry(r.hash.split(':')[1]),
                         config=configuration,
-                        peer_ip=context.peer()[5:]  # Lleva el formato 'ipv4:49.123.106.100:44420', no queremos 'ipv4:'.
+                        peer_ip=context.peer()[5:-1*(len(context.peer().split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
                     )
                 # Si me da servicio.
                 if r.HasField('service') and configuration:
@@ -241,23 +248,24 @@ if __name__ == "__main__":
                     return launch_service(
                         service=r.service,
                         config=configuration,
-                        peer_ip=context.peer()[5:]  # Lleva el formato 'ipv4:49.123.106.100:44420', no queremos 'ipv4:'.
+                        peer_ip=context.peer()[5:-1*(len(context.peer().split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
                     )
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_detail('Imposible to launch this service')
             return context
 
         def StopService(self, request, context):
-            if IS_FROM_DOCKER_SUBNET(request.string):
+            print('DO YOU WANT TO STOP THE SERVICE WITH TOKEN -> ', request)
+            if IS_FROM_DOCKER_SUBNET(request.value_string.split('##')[1]): # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
                 purgue_internal(
-                    peer_ip=request.string.split(':')[0],
-                    container_id=request.string.split(':')[1],
-                    container_ip=request.string.split(':')[2]
+                    peer_ip=request.value_string.split('##')[0],
+                    container_id=request.value_string.split('##')[2],
+                    container_ip=request.value_string.split('##')[1]
                 )
             else:
                 purgue_external(
-                    node_ip=request.string.split(':')[0],
-                    token=request.string.split(':')[1]
+                    node_ip=request.value_string.split('##')[0],
+                    token=request.value_string.split('##')[1]
                 )
             return gateway_pb2.Empty()
 
