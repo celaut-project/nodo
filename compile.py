@@ -135,7 +135,7 @@ class Hyper:
                 for var in index:
                     variable = gateway_pb2.ipss__pb2.Tensor.Index()
                     variable.id = var
-                    for tag in input[var]:
+                    for tag in index[var]:
                         variable.tag.append(tag)
                     try:
                         with open(self.path+var+".field", "rb") as var_desc:
