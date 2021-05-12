@@ -115,14 +115,14 @@ message Container {
 
 // Tensor: Defines the “intelligence” that the service can provide, I think it would be a description of a polynomial (without coefficients and describing the variables).
 message Tensor {
-    message Variable {
+    message Index {
         string id = 1;
-        repeated string tag = 2;
-        FieldDef field = 3;
+        FieldDef field = 2;
+        repeated string tag = 15;
     }
     repeated string hash = 15;
-    repeated Variable output_variable = 1;
-    repeated Variable input_variable = 2;
+    repeated Index index = 1;
+    int32 rank = 2;
 }
 
 // Ledger: Defines the database that the service can provide.
@@ -167,7 +167,7 @@ message Instance {
 // The __config__ file is mounted on each service on the filesystem's root.
 message Configuration {
     map<string, Any> enviroment_variables = 1;
-    repeated int32 spec_slot = 2;    
+    repeated int32 spec_slot = 2;
 }
 
 message ConfigurationFile{

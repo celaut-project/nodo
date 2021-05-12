@@ -129,10 +129,11 @@ class Hyper:
     def parseTensor(self):
         tensor = self.json.get('tensor') or None
         if tensor:
-            input = tensor.get('input') or None
-            if input:
-                for var in input:
-                    variable = gateway_pb2.ipss__pb2.Tensor.Variable()
+            self.service.tensor.rank = tensor["rank"] or None
+            index = tensor.get('index') or None
+            if index:
+                for var in index:
+                    variable = gateway_pb2.ipss__pb2.Tensor.Index()
                     variable.id = var
                     for tag in input[var]:
                         variable.tag.append(tag)
@@ -140,19 +141,7 @@ class Hyper:
                         with open(self.path+var+".field", "rb") as var_desc:
                             variable.field.ParseFromString(var_desc.read())
                     except FileNotFoundError: pass
-                    self.service.tensor.input_variable.append(variable)
-            output = tensor.get('output') or None
-            if output:
-                for var in output:
-                    variable = gateway_pb2.ipss__pb2.Tensor.Variable()
-                    variable.id = var
-                    for tag in output[var]:
-                        variable.tag.append(tag)
-                    try:
-                        with open(self.path+var+".field", "rb") as var_desc:
-                            variable.field.ParseFromString(var_desc.read())
-                    except FileNotFoundError: pass
-                    self.service.tensor.output_variable.append(variable)
+                    self.service.tensor.index.append(variable)
 
     def save(self):
         self.service.hash.extend(
