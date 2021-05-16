@@ -3,8 +3,8 @@ from ipss_pb2 import Service
 from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 
 # -- HASH FUNCTIONS --
-SHAKE_256 = lambda value: "" if value is None else 'shake-256:0x'+hashlib.shake_256(value).hexdigest(32)
-SHA3_256 = lambda value: "" if value is None else 'sha3-256:0x'+hashlib.sha3_256(value).hexdigest()
+SHAKE_256 = lambda value: "" if value is None else 'shake-256:'+hashlib.shake_256(value).hexdigest(32)
+SHA3_256 = lambda value: "" if value is None else 'sha3-256:'+hashlib.sha3_256(value).hexdigest()
 
 def calculate_hashes(value) -> list:
     return [
