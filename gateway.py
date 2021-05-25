@@ -151,7 +151,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             # Al ser interno sabemos que solo tendrá una dirección posible por slot.
             uri = gateway_pb2.ipss__pb2.Instance.Uri()
             uri.ip = container_ip
-            uri.port = port
+            uri.port = slot.port
             uri_slot.uri.append(uri)
 
             instance.instance.uri_slot.append(uri_slot)
