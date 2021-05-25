@@ -134,11 +134,12 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
         # Reload this object from the server again and update attrs with the new data.
         container.reload()
-
+        container_ip=container.attrs['NetworkSettings']['IPAddress']
+        
         set_on_cache(
             peer_ip=peer_ip,
             container_id=container.id,
-            container_ip=container.attrs['NetworkSettings']['IPAddress']
+            container_ip=container_ip
         )
 
         for slot in service.api:
