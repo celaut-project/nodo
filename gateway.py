@@ -224,7 +224,7 @@ if __name__ == "__main__":
     class Gateway(gateway_pb2_grpc.Gateway):
         def StartService(self, request_iterator, context):
             configuration = None
-            service_registry = [service[:-8] for service in os.listdir('./__registry__')]
+            service_registry = [service[:-8] for service in os.listdir(REGISTRY)]
             for r in request_iterator:
                 # Captura la configuracion si puede.
                 if r.HasField('config'):
