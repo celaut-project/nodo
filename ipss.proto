@@ -82,8 +82,12 @@ message ProtocolMesh {
 message Slot {
     int32 port = 1;
     ProtocolMesh transport_protocol = 2;
-    ApplicationDef application_protocol = 3;
-    // Cost function can be applied. <- must be optional
+}
+
+message Api{
+    ApplicationDef app_protocol = 1;
+    repeated Slot slot = 2;
+    // Cost function can be applied. <- must be optional (index 3).
 }
 
 // Container: Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
@@ -136,7 +140,7 @@ message Service {
     repeated string hash = 15;
     MessageDef syntax = 1;
     Container container = 2;
-    repeated Slot api = 3;
+    Api api = 3;
     Tensor tensor = 4;
     Ledger ledger = 5;
 }
@@ -154,11 +158,9 @@ message Instance {
     message Uri_Slot {
         int32 internal_port = 1;
         repeated Uri uri = 2;
-        ProtocolMesh transport_protocol = 3;
-        ApplicationDef application_protocol = 4;
-        // Cost function can be applied. <- must be optional
     }
-    repeated Uri_Slot uri_slot = 1;
+    Api api = 1;
+    repeated Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899, ]
 }
 
 //  -------------------------------
@@ -167,7 +169,7 @@ message Instance {
 // The __config__ file is mounted on each service on the filesystem's root.
 message Configuration {
     map<string, Any> enviroment_variables = 1;
-    repeated int32 spec_slot = 2;
+    map<int32, ProtocolMesh> spec_slot = 2; // Only some of the specified ports and a protocol-submesh subgroup of the protocol-submesh of each slot.    
 }
 
 message ConfigurationFile{

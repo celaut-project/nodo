@@ -47,9 +47,9 @@ def set_on_cache(peer_ip, container_id, container_ip):
 
 def purgue_internal(peer_ip, container_id, container_ip):
     try:
-        DOCKER_CLIENT.containers.get(container_id).kill()
+        DOCKER_CLIENT.containers.get(container_id).remove(force=True)
     except docker_lib.errors.APIError:
-        LOGGER('CONTAINER '+ container_id+' IS NOT RUNNING.')
+        LOGGER('ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
     cache_lock.acquire()
     cache[peer_ip].remove(container_ip + '##' + container_id)
     for dependency in cache[container_ip]:
@@ -129,7 +129,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
         try:
             container.start()
-        except docker.errors.APIError as e:
+        except docker_lib.errors.APIError as e:
             LOGGER('ERROR ON CONTAINER '+ container.id + ' '+str(e)) # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
 
         # Reload this object from the server again and update attrs with the new data.
@@ -142,11 +142,9 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             container_ip=container_ip
         )
 
-        for slot in service.api:
+        for slot in service.api.slot:
             uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
             uri_slot.internal_port = slot.port
-            uri_slot.transport_protocol.CopyFrom(slot.transport_protocol)
-            uri_slot.application_protocol.CopyFrom(slot.application_protocol)
 
             # Al ser interno sabemos que solo tendrá una dirección posible por slot.
             uri = gateway_pb2.ipss__pb2.Instance.Uri()
@@ -164,7 +162,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
                 return int(s.getsockname()[1])
 
         host_ip = socket.gethostbyname(socket.gethostname()) # Debería ser una lista.
-        assigment_ports = {slot.port: get_free_port() for slot in service.api}
+        assigment_ports = {slot.port: get_free_port() for slot in service.api.slot}
 
         container = create_container(
             use_other_ports=assigment_ports,
@@ -175,8 +173,9 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
         try:
             container.start()
-        except docker.errors.APIError as e:
-            LOGGER('ERROR ON CONTAINER '+ container.id + ' '+str(e)) # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
+        except docker_lib.errors.APIError as e:
+            # LOS ERRORES DEBERÍAN LANZAR UNA EXCEPCION QUE LLEGUE HASTA EL GRPC.
+            LOGGER('ERROR ON CONTAINER '+ container.id + ' '+str(e)) 
 
         # Reload this object from the server again and update attrs with the new data.
         container.reload()
@@ -190,10 +189,6 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         for port in assigment_ports:
             uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
             uri_slot.internal_port = port
-            for slot in service.api:
-                if slot.port == port:
-                    uri_slot.transport_protocol.CopyFrom(slot.transport_protocol)
-                    uri_slot.application_protocol.CopyFrom(slot.application_protocol)
 
             # for host_ip in host_ip_list:
             uri = gateway_pb2.ipss__pb2.Instance.Uri()
@@ -202,8 +197,10 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             uri_slot.uri.append(uri)
 
             instance.instance.uri_slot.append(uri_slot)
-
+        
+    instance.instance.api.CopyFrom(service.api)
     instance.token.value_string = peer_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
+    LOGGER('Thrown out a new instance by ' + peer_ip + ' of the container_id ' + container.id)
     return instance
 
 
@@ -215,7 +212,7 @@ def get_from_registry(hash):
             return service
     except (IOError, FileNotFoundError) as e:
         LOGGER('Error opening the service on registry, '+str(e))
-        # search service in IPFS service.
+        # search service in a IPFS service.
 
 
 
@@ -266,6 +263,7 @@ if __name__ == "__main__":
                     node_ip=request.value_string.split('##')[0],
                     token=request.value_string.split('##')[1]
                 )
+            LOGGER('Stopped the instance with token -> ' + request.value_string)
             return gateway_pb2.Empty()
 
     uri = gateway_pb2.ipss__pb2.Instance.Uri()

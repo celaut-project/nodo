@@ -109,15 +109,14 @@ class Hyper:
 
 
     def parseApi(self):
+        with open(self.path + "api.application", "rb") as api_desc:
+            self.service.api.app_protocol.ParseFromString(api_desc.read())
         if self.json.get('api'):
             # iterate slots.
             for item in self.json.get('api'):
                 slot = gateway_pb2.ipss__pb2.Slot()
                 # port.
                 slot.port = item.get('port')
-                # aplication protocol.
-                with open(self.path+str(slot.port)+".application", "rb") as api_desc:
-                    slot.application_protocol.ParseFromString(api_desc.read())
                 # transport protocol.
                 slot.transport_protocol.hash.extend(item.get('protocol'))
                 self.service.api.append(slot)

@@ -21,4 +21,4 @@ if __name__ == "__main__":
         if get_service_hash(service=service, hash_type='sha3-256') == id:
             build(service=service)
         else:
-            print('Error: asignacion de servicio erronea en el registro.')
+            LOGGER('Error: asignacion de servicio erronea en el registro.')
