@@ -168,17 +168,12 @@ def ok(path, aux_id):
 if __name__ == "__main__":
     import random
     aux_id = str(random.random())
-    if len(sys.argv) == 1:
-        id = ok(path='/home/hy/node/__hycache__/'+aux_id+'/for_build/', aux_id=aux_id)  # Hyperfile
-    elif len(sys.argv) == 2:
-        git = str(sys.argv[1])
-        repo = git.split('::')[0]
-        branch = git.split('::')[1]
-        os.system('git clone --branch '+branch+' '+repo+' '+HYCACHE+aux_id+'/for_build/git')
-        LOGGER(os.listdir(HYCACHE+aux_id+'/for_build/git/.service/'))
-        id = ok(path=HYCACHE+aux_id+'/for_build/git/.service/', aux_id=aux_id)  # Hyperfile
-    else:
-        LOGGER('NO SE ACEPTAN MAS PARÁMETROS..')
+    git = str(sys.argv[1])
+    repo = git.split('::')[0]
+    branch = git.split('::')[1]
+    os.system('git clone --branch '+branch+' '+repo+' '+HYCACHE+aux_id+'/for_build/git')
+    LOGGER(os.listdir(HYCACHE+aux_id+'/for_build/git/.service/'))
+    id = ok(path=HYCACHE+aux_id+'/for_build/git/.service/', aux_id=aux_id)  # Hyperfile
 
     os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.service')
     os.system('/usr/bin/docker rmi builder'+aux_id)
