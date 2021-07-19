@@ -119,7 +119,7 @@ class Hyper:
                 slot.port = item.get('port')
                 # transport protocol.
                 slot.transport_protocol.hash.extend(item.get('protocol'))
-                self.service.api.append(slot)
+                self.service.api.slot.append(slot)
 
     def parseLedger(self):
         if self.json.get('ledger'):
