@@ -109,8 +109,11 @@ class Hyper:
 
 
     def parseApi(self):
-        with open(self.path + "api.application", "rb") as api_desc:
-            self.service.api.app_protocol.ParseFromString(api_desc.read())
+        try:
+            with open(self.path + "api.application", "rb") as api_desc:
+                self.service.api.app_protocol.ParseFromString(api_desc.read())
+        except google.protobuf.message.DecodeError:
+            pass
         if self.json.get('api'):
             # iterate slots.
             for item in self.json.get('api'):
