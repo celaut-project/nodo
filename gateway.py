@@ -201,7 +201,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     instance.instance.api.CopyFrom(service.api)
     instance.token.value_string = peer_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
     LOGGER('Thrown out a new instance by ' + peer_ip + ' of the container_id ' + container.id)
-    LOGGER('Instance --> ', instance)
+    LOGGER('Instance --> '+ str(instance))
     print(instance)
     return instance
 
