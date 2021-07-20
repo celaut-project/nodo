@@ -48,6 +48,7 @@ def set_on_cache(peer_ip, container_id, container_ip):
 def purgue_internal(peer_ip, container_id, container_ip):
     try:
         DOCKER_CLIENT.containers.get(container_id).remove(force=True)
+        DOCKER_CLIENT.containers.get(container_id).kill()
     except docker_lib.errors.APIError:
         LOGGER('ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
     cache_lock.acquire()
