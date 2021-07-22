@@ -12,8 +12,19 @@ DOCKER_CLIENT = docker_lib.from_env()
 
 IS_FROM_DOCKER_SUBNET = lambda s: s[:7] == '172.17.'
 
-GATEWAY_INSTANCE = gateway_pb2.ipss__pb2.Instance()
 GATEWAY_PORT = 8080
+GATEWAY_IP = '172.17.0.1'
+
+def generate_gateway_instance():
+    instance = gateway_pb2.ipss__pb2.Instance()
+    uri = gateway_pb2.ipss__pb2.Instance.Uri()
+    uri.ip = GATEWAY_IP
+    uri.port = GATEWAY_PORT
+    uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
+    uri_slot.internal_port = GATEWAY_PORT
+    uri_slot.uri.append(uri)
+    instance.uri_slot.append(uri_slot)
+    return instance
 
 cache_lock = threading.Lock()
 cache = {}  # ip:[dependencies]
@@ -79,7 +90,7 @@ def purgue_external(node_ip, token):
 
 def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
     __config__ = gateway_pb2.ipss__pb2.ConfigurationFile()
-    __config__.gateway.CopyFrom(GATEWAY_INSTANCE)
+    __config__.gateway.CopyFrom(gateway_instance)
     __config__.config.CopyFrom(config)
     os.mkdir(HYCACHE + container_id)
     with open(HYCACHE + container_id + '/__config__', 'wb') as file:
@@ -288,18 +299,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
     
     def Hynode(self, request: gateway_pb2.ipss__pb2.Instance):
         set_peer_instance(instance = request)
-        return GATEWAY_INSTANCE
+        return gateway_instance
 
 if __name__ == "__main__":
     from zeroconf import Zeroconf
 
-    uri = gateway_pb2.ipss__pb2.Instance.Uri()
-    uri.ip = '172.17.0.1'
-    uri.port = GATEWAY_PORT
-    uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
-    uri_slot.internal_port = GATEWAY_PORT
-    uri_slot.uri.append(uri)
-    GATEWAY_INSTANCE.uri_slot.append(uri_slot)
+    global gateway_instance
+    gateway_instance = generate_gateway_instance()
 
     # Zeroconf for connect to the network (one per network).
     global peer_instances
@@ -307,7 +313,7 @@ if __name__ == "__main__":
     peer_instances_lock = threading.Lock()
     peer_instances = []
     peer_instances.extend(
-        Zeroconf(local_instance=GATEWAY_INSTANCE)
+        Zeroconf(local_instance=gateway_instance)
     )
 
     # create a gRPC server

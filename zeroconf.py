@@ -3,8 +3,8 @@ from gateway import LOGGER
 
 def Zeroconf(local_instance) -> list:
     
-    IPVERSION_IS_4 = True
-    get_peer_ip = lambda peer: peer.split(':')[-2] if IPVERSION_IS_4 else peer[1:].split(']')[0]
+    ipversion_is_4 = True
+    get_peer_ip = lambda peer: peer.split(':')[-2] if ipversion_is_4 else peer[1:].split(']')[0]
         
     # an ipv4 with port is 126.4.5.7:8034
     # an ipv6 with port is [2001:db8:1f70::999:de8:7648:6e8]:8034
@@ -46,11 +46,11 @@ def Zeroconf(local_instance) -> list:
 
 if __name__ == "__main__":
     import sys
-    from gateway import set_peer_instance, GATEWAY_INSTANCE
+    from gateway import set_peer_instance, generate_gateway_instance
     set_peer_instance(
         gateway_pb2_grpc.GatewayStub(
             grpc.insecure_channel(
                 sys.argv[1]
             )
-        ).Hynode(GATEWAY_INSTANCE)
+        ).Hynode(generate_gateway_instance())
     )
