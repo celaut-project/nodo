@@ -15,7 +15,7 @@ IS_FROM_DOCKER_SUBNET = lambda s: s[:7] == '172.17.'
 GATEWAY_PORT = 8080
 GATEWAY_IP = '172.17.0.1'
 
-def generate_gateway_instance():
+def generate_gateway_instance() -> gateway_pb2.ipss__pb2.Instance:
     instance = gateway_pb2.ipss__pb2.Instance()
     uri = gateway_pb2.ipss__pb2.Instance.Uri()
     uri.ip = GATEWAY_IP
@@ -282,7 +282,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         context.set_detail('Imposible to launch this service')
         return context
 
-    def StopService(self, request):
+    def StopService(self, request, context):
         if IS_FROM_DOCKER_SUBNET(request.value_string.split('##')[1]): # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
             purgue_internal(
                 peer_ip=request.value_string.split('##')[0],
@@ -297,7 +297,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         LOGGER('Stopped the instance with token -> ' + request.value_string)
         return gateway_pb2.Empty()
     
-    def Hynode(self, request: gateway_pb2.ipss__pb2.Instance):
+    def Hynode(self, request: gateway_pb2.ipss__pb2.Instance, context):
         set_peer_instance(instance = request)
         return gateway_instance
 
