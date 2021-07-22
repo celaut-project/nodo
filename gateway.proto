@@ -29,4 +29,5 @@ service Gateway {
     rpc StartService( stream ServiceTransport) returns (Instance) {}
     rpc StopService(Token) returns (Empty) {}
     rpc Hynode(ipss.Instance) returns (ipss.Instance) {}
+    rpc GetServiceZip(ipss.Service) returns (bytes) {}
 }
