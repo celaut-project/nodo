@@ -135,7 +135,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         # Reload this object from the server again and update attrs with the new data.
         container.reload()
         container_ip=container.attrs['NetworkSettings']['IPAddress']
-        
+
         set_on_cache(
             peer_ip=peer_ip,
             container_id=container.id,
@@ -197,12 +197,10 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             uri_slot.uri.append(uri)
 
             instance.instance.uri_slot.append(uri_slot)
-        
+
     instance.instance.api.CopyFrom(service.api)
     instance.token.value_string = peer_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
     LOGGER('Thrown out a new instance by ' + peer_ip + ' of the container_id ' + container.id)
-    LOGGER('Instance --> '+ str(instance))
-    print(instance)
     return instance
 
 
