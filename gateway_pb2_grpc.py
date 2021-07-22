@@ -30,6 +30,11 @@ class GatewayStub(object):
                 request_serializer=ipss__pb2.Instance.SerializeToString,
                 response_deserializer=ipss__pb2.Instance.FromString,
                 )
+        self.GetServiceZip = channel.unary_unary(
+                '/gateway.Gateway/GetServiceZip',
+                request_serializer=ipss__pb2.Service.SerializeToString,
+                response_deserializer=gateway__pb2.ContainerZip.FromString,
+                )
 
 
 class GatewayServicer(object):
@@ -53,6 +58,12 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetServiceZip(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_GatewayServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -70,6 +81,11 @@ def add_GatewayServicer_to_server(servicer, server):
                     servicer.Hynode,
                     request_deserializer=ipss__pb2.Instance.FromString,
                     response_serializer=ipss__pb2.Instance.SerializeToString,
+            ),
+            'GetServiceZip': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetServiceZip,
+                    request_deserializer=ipss__pb2.Service.FromString,
+                    response_serializer=gateway__pb2.ContainerZip.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -129,5 +145,22 @@ class Gateway(object):
         return grpc.experimental.unary_unary(request, target, '/gateway.Gateway/Hynode',
             ipss__pb2.Instance.SerializeToString,
             ipss__pb2.Instance.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetServiceZip(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/gateway.Gateway/GetServiceZip',
+            ipss__pb2.Service.SerializeToString,
+            gateway__pb2.ContainerZip.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

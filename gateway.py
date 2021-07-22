@@ -117,6 +117,7 @@ def service_balancer():
     ])
 
 def set_peer_instance(instance: gateway_pb2.ipss__pb2.Instance):
+    LOGGER('Adding new peer.')
     global peer_instances
     global peer_instances_lock
     peer_instances_lock.acquire()

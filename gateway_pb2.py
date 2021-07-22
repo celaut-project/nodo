@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"\x07\n\x05\x45mpty\"K\n\x08Instance\x12 \n\x08instance\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12\x1d\n\x05token\x18\x02 \x01(\x0b\x32\x0e.gateway.Token\"\x82\x01\n\x10ServiceTransport\x12\x0e\n\x04hash\x18\x01 \x01(\tH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config2\xa8\x01\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12/\n\x0bStopService\x12\x0e.gateway.Token\x1a\x0e.gateway.Empty\"\x00\x12*\n\x06Hynode\x12\x0e.ipss.Instance\x1a\x0e.ipss.Instance\"\x00\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"\x07\n\x05\x45mpty\"K\n\x08Instance\x12 \n\x08instance\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12\x1d\n\x05token\x18\x02 \x01(\x0b\x32\x0e.gateway.Token\"\x82\x01\n\x10ServiceTransport\x12\x0e\n\x04hash\x18\x01 \x01(\tH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"\x1e\n\x0c\x43ontainerZip\x12\x0e\n\x06\x62uffer\x18\x01 \x01(\x0c\x32\xe1\x01\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12/\n\x0bStopService\x12\x0e.gateway.Token\x1a\x0e.gateway.Empty\"\x00\x12*\n\x06Hynode\x12\x0e.ipss.Instance\x1a\x0e.ipss.Instance\"\x00\x12\x37\n\rGetServiceZip\x12\r.ipss.Service\x1a\x15.gateway.ContainerZip\"\x00\x62\x06proto3'
   ,
   dependencies=[ipss__pb2.DESCRIPTOR,])
 
@@ -197,6 +197,38 @@ _SERVICETRANSPORT = _descriptor.Descriptor(
   serialized_end=343,
 )
 
+
+_CONTAINERZIP = _descriptor.Descriptor(
+  name='ContainerZip',
+  full_name='gateway.ContainerZip',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='buffer', full_name='gateway.ContainerZip.buffer', index=0,
+      number=1, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"",
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=345,
+  serialized_end=375,
+)
+
 _TOKEN.oneofs_by_name['oneOf'].fields.append(
   _TOKEN.fields_by_name['value_int32'])
 _TOKEN.fields_by_name['value_int32'].containing_oneof = _TOKEN.oneofs_by_name['oneOf']
@@ -223,6 +255,7 @@ DESCRIPTOR.message_types_by_name['Token'] = _TOKEN
 DESCRIPTOR.message_types_by_name['Empty'] = _EMPTY
 DESCRIPTOR.message_types_by_name['Instance'] = _INSTANCE
 DESCRIPTOR.message_types_by_name['ServiceTransport'] = _SERVICETRANSPORT
+DESCRIPTOR.message_types_by_name['ContainerZip'] = _CONTAINERZIP
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 Token = _reflection.GeneratedProtocolMessageType('Token', (_message.Message,), {
@@ -253,6 +286,13 @@ ServiceTransport = _reflection.GeneratedProtocolMessageType('ServiceTransport', 
   })
 _sym_db.RegisterMessage(ServiceTransport)
 
+ContainerZip = _reflection.GeneratedProtocolMessageType('ContainerZip', (_message.Message,), {
+  'DESCRIPTOR' : _CONTAINERZIP,
+  '__module__' : 'gateway_pb2'
+  # @@protoc_insertion_point(class_scope:gateway.ContainerZip)
+  })
+_sym_db.RegisterMessage(ContainerZip)
+
 
 
 _GATEWAY = _descriptor.ServiceDescriptor(
@@ -262,8 +302,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=346,
-  serialized_end=514,
+  serialized_start=378,
+  serialized_end=603,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',
@@ -292,6 +332,16 @@ _GATEWAY = _descriptor.ServiceDescriptor(
     containing_service=None,
     input_type=ipss__pb2._INSTANCE,
     output_type=ipss__pb2._INSTANCE,
+    serialized_options=None,
+    create_key=_descriptor._internal_create_key,
+  ),
+  _descriptor.MethodDescriptor(
+    name='GetServiceZip',
+    full_name='gateway.Gateway.GetServiceZip',
+    index=3,
+    containing_service=None,
+    input_type=ipss__pb2._SERVICE,
+    output_type=_CONTAINERZIP,
     serialized_options=None,
     create_key=_descriptor._internal_create_key,
   ),
