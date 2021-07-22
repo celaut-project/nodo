@@ -1,7 +1,8 @@
+from zeroconf import Zeroconf
 import build
 from compile import REGISTRY, HYCACHE, LOGGER
 from verify import get_service_hash
-import subprocess, os, socket, threading
+import subprocess, os, socket, threading, random, utils
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
 from grpc_reflection.v1alpha import reflection
@@ -26,6 +27,7 @@ cache = {}  # ip:[dependencies]
 #   En cache se añadirá el servicio como dependencia del nodo elegido,
 #   en vez de usar la ip del servico se pone el token que nos dió ese servicio,
 #   nosotros a nuestro servicio solicitante le daremos un token con el formato node_ip##his_token.
+
 
 def set_on_cache(peer_ip, container_id, container_ip):
     cache_lock.acquire()
@@ -108,17 +110,37 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
     except docker_lib.errors.APIError:
         LOGGER('DOCKER API ERROR ')
 
+def service_balancer():
+    global peer_instances
+    return random.choice([
+        random.choice(peer_instances),
+        [None]
+    ])
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
+
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
-    # De momento lo hace el y ya.
+    node_instance = service_balancer()
+    if node_instance:
+        node_uri = utils.get_grpc_uri(node_instance.gateway) #  Supone que el primer slot usa grpc sobre http/2.
+        LOGGER('El servicio se lanza en el nodo ' + str(node_uri))
+        return gateway_pb2_grpc.GatewayStub(
+            grpc.insecure_channel(
+                node_uri.ip + ':' +  str(node_uri.port)
+            )
+        ).StartService(
+            utils.service_extended()
+        )
+
+    #  El nodo lanza localmente el servicio.
+    LOGGER('El nodo lanza el servicio localmente.')
     build.build(service=service)  # Si no esta construido el contenedor, lo construye.
     instance = gateway_pb2.Instance()
 
     # Si hace la peticion un servicio local.
     if IS_FROM_DOCKER_SUBNET(peer_ip):
         container = create_container(
-            id=get_service_hash(service=service, hash_type="sha3-256"),
+            id = get_service_hash(service=service, hash_type="sha3-256"),
             entrypoint=service.container.entrypoint
         )
 
@@ -156,13 +178,8 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
     # Si hace la peticion un servicio de otro nodo.
     else:
-        def get_free_port():
-            with socket.socket() as s:
-                s.bind(('', 0))
-                return int(s.getsockname()[1])
-
         host_ip = socket.gethostbyname(socket.gethostname()) # Debería ser una lista.
-        assigment_ports = {slot.port: get_free_port() for slot in service.api.slot}
+        assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
 
         container = create_container(
             use_other_ports=assigment_ports,
@@ -253,7 +270,7 @@ if __name__ == "__main__":
             context.set_detail('Imposible to launch this service')
             return context
 
-        def StopService(self, request, context):
+        def StopService(self, request):
             if IS_FROM_DOCKER_SUBNET(request.value_string.split('##')[1]): # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
                 purgue_internal(
                     peer_ip=request.value_string.split('##')[0],
@@ -267,15 +284,32 @@ if __name__ == "__main__":
                 )
             LOGGER('Stopped the instance with token -> ' + request.value_string)
             return gateway_pb2.Empty()
+        
+        def Hynode(self, request: gateway_pb2.ipss__pb2.Instance):
+            global peer_instances
+            global peer_instances_lock
+            peer_instances_lock.acquire()
+            peer_instances.append(request)
+            peer_instances_lock.release()
+            return GATEWAY_INSTANCE
+            
 
     uri = gateway_pb2.ipss__pb2.Instance.Uri()
     uri.ip = '172.17.0.1'
     uri.port = GATEWAY_PORT
     uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT
-    # ¡¡ Empty protocol_mesh and application_def !!
     uri_slot.uri.append(uri)
     GATEWAY_INSTANCE.uri_slot.append(uri_slot)
+
+    # Zeroconf for connect to the network (one per network).
+    global peer_instances
+    global peer_instances_lock
+    peer_instances_lock = threading.Lock()
+    peer_instances = []
+    peer_instances.extend(
+        Zeroconf(local_instance=GATEWAY_INSTANCE)
+    )
 
     # create a gRPC server
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=30))

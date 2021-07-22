@@ -28,4 +28,5 @@ message ServiceTransport {
 service Gateway {
     rpc StartService( stream ServiceTransport) returns (Instance) {}
     rpc StopService(Token) returns (Empty) {}
+    rpc Hynode(ipss.Instance) returns (ipss.Instance) {}
 }
