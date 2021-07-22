@@ -1,4 +1,3 @@
-from zeroconf import Zeroconf
 import build
 from compile import REGISTRY, HYCACHE, LOGGER
 from verify import get_service_hash
@@ -291,6 +290,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         return GATEWAY_INSTANCE
 
 if __name__ == "__main__":
+    from zeroconf import Zeroconf
 
     uri = gateway_pb2.ipss__pb2.Instance.Uri()
     uri.ip = '172.17.0.1'
