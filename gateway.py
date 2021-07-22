@@ -117,6 +117,13 @@ def service_balancer():
         [None]
     ])
 
+def set_peer_instance(instance: gateway_pb2.ipss__pb2.Instance):
+    global peer_instances
+    global peer_instances_lock
+    peer_instances_lock.acquire()
+    peer_instances.append(instance)
+    peer_instances_lock.release()
+
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
@@ -231,66 +238,59 @@ def get_from_registry(hash):
         LOGGER('Error opening the service on registry, '+str(e))
         # search service in a IPFS service.
 
+class Gateway(gateway_pb2_grpc.Gateway):
+    def StartService(self, request_iterator, context):
+        configuration = None
+        service_registry = [service[:-8] for service in os.listdir(REGISTRY)]
+        for r in request_iterator:
+            # Captura la configuracion si puede.
+            if r.HasField('config'):
+                configuration = r.config
+            # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
+            if r.HasField('hash') and configuration and "sha3-256" == r.hash.split(':')[0] \
+                    and r.hash.split(':')[1] in service_registry:
+                return launch_service(
+                    service=get_from_registry(r.hash.split(':')[1]),
+                    config=configuration,
+                    peer_ip=context.peer()[5:-1*(len(context.peer().split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
+                )
+            # Si me da servicio.
+            if r.HasField('service') and configuration:
+                # If the service is not on the registry, save it.
+                hash = get_service_hash(service=r.service, hash_type="sha3-256")
+                if not os.path.isfile(REGISTRY+hash+'.service'):
+                    with open(REGISTRY+hash+'.service', 'wb') as file:
+                        file.write(r.service.SerializeToString())
 
+                return launch_service(
+                    service=r.service,
+                    config=configuration,
+                    peer_ip=context.peer()[5:-1*(len(context.peer().split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
+                )
+        context.set_code(grpc.StatusCode.INTERNAL)
+        context.set_detail('Imposible to launch this service')
+        return context
+
+    def StopService(self, request):
+        if IS_FROM_DOCKER_SUBNET(request.value_string.split('##')[1]): # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
+            purgue_internal(
+                peer_ip=request.value_string.split('##')[0],
+                container_id=request.value_string.split('##')[2],
+                container_ip=request.value_string.split('##')[1]
+            )
+        else:
+            purgue_external(
+                node_ip=request.value_string.split('##')[0],
+                token=request.value_string.split('##')[1]
+            )
+        LOGGER('Stopped the instance with token -> ' + request.value_string)
+        return gateway_pb2.Empty()
+    
+    def Hynode(self, request: gateway_pb2.ipss__pb2.Instance):
+        set_peer_instance(instance = request)
+        return GATEWAY_INSTANCE
 
 if __name__ == "__main__":
-
-    class Gateway(gateway_pb2_grpc.Gateway):
-        def StartService(self, request_iterator, context):
-            configuration = None
-            service_registry = [service[:-8] for service in os.listdir(REGISTRY)]
-            for r in request_iterator:
-                # Captura la configuracion si puede.
-                if r.HasField('config'):
-                    configuration = r.config
-                # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-                if r.HasField('hash') and configuration and "sha3-256" == r.hash.split(':')[0] \
-                        and r.hash.split(':')[1] in service_registry:
-                    return launch_service(
-                        service=get_from_registry(r.hash.split(':')[1]),
-                        config=configuration,
-                        peer_ip=context.peer()[5:-1*(len(context.peer().split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
-                    )
-                # Si me da servicio.
-                if r.HasField('service') and configuration:
-                    # If the service is not on the registry, save it.
-                    hash = get_service_hash(service=r.service, hash_type="sha3-256")
-                    if not os.path.isfile(REGISTRY+hash+'.service'):
-                        with open(REGISTRY+hash+'.service', 'wb') as file:
-                            file.write(r.service.SerializeToString())
-
-                    return launch_service(
-                        service=r.service,
-                        config=configuration,
-                        peer_ip=context.peer()[5:-1*(len(context.peer().split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
-                    )
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_detail('Imposible to launch this service')
-            return context
-
-        def StopService(self, request):
-            if IS_FROM_DOCKER_SUBNET(request.value_string.split('##')[1]): # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
-                purgue_internal(
-                    peer_ip=request.value_string.split('##')[0],
-                    container_id=request.value_string.split('##')[2],
-                    container_ip=request.value_string.split('##')[1]
-                )
-            else:
-                purgue_external(
-                    node_ip=request.value_string.split('##')[0],
-                    token=request.value_string.split('##')[1]
-                )
-            LOGGER('Stopped the instance with token -> ' + request.value_string)
-            return gateway_pb2.Empty()
-        
-        def Hynode(self, request: gateway_pb2.ipss__pb2.Instance):
-            global peer_instances
-            global peer_instances_lock
-            peer_instances_lock.acquire()
-            peer_instances.append(request)
-            peer_instances_lock.release()
-            return GATEWAY_INSTANCE
-            
 
     uri = gateway_pb2.ipss__pb2.Instance.Uri()
     uri.ip = '172.17.0.1'
