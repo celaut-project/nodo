@@ -5,6 +5,10 @@ import subprocess, os, socket, threading, random, utils
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
 from grpc_reflection.v1alpha import reflection
+import pymongo
+from google.protobuf.json_format import MessageToJson
+from google.protobuf.json_format import Parse
+
 
 import docker as docker_lib
 DOCKER_CLIENT = docker_lib.from_env()
@@ -121,26 +125,26 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
         LOGGER('DOCKER API ERROR ')
 
 def service_balancer():
-    global peer_instances
+    # 50% prob. local, 50% prob. other peer.
     return random.choice([
-        random.choice(peer_instances),
-        [None]
+        Parse(
+            random.choice(
+                pymongo.MongoClient(
+                    "mongodb://localhost:27017/"
+                )["mongo"]["peerInstances"].find()
+            ),
+            gateway_pb2.ipss__pb2.Instance()
+        ),
+        None
     ])
 
-def set_peer_instance(instance: gateway_pb2.ipss__pb2.Instance):
-    LOGGER('Adding new peer.')
-    global peer_instances
-    global peer_instances_lock
-    peer_instances_lock.acquire()
-    peer_instances.append(instance)
-    peer_instances_lock.release()
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer()
     if node_instance:
-        node_uri = utils.get_grpc_uri(node_instance.gateway) #  Supone que el primer slot usa grpc sobre http/2.
+        node_uri = utils.get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
         LOGGER('El servicio se lanza en el nodo ' + str(node_uri))
         return gateway_pb2_grpc.GatewayStub(
             grpc.insecure_channel(
@@ -298,7 +302,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
         return gateway_pb2.Empty()
     
     def Hynode(self, request: gateway_pb2.ipss__pb2.Instance, context):
-        set_peer_instance(instance = request)
+        pymongo.MongoClient(
+            "mongodb://localhost:27017/"
+        )["mongo"]["peerInstances"].insertOne(
+            MessageToJson(request)
+        )
         return gateway_instance
 
 if __name__ == "__main__":
@@ -308,13 +316,7 @@ if __name__ == "__main__":
     gateway_instance = generate_gateway_instance()
 
     # Zeroconf for connect to the network (one per network).
-    global peer_instances
-    global peer_instances_lock
-    peer_instances_lock = threading.Lock()
-    peer_instances = []
-    peer_instances.extend(
-        Zeroconf(local_instance=gateway_instance)
-    )
+    Zeroconf(local_instance=gateway_instance)
 
     # create a gRPC server
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=30))
