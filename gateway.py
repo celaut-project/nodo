@@ -304,7 +304,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def Hynode(self, request: gateway_pb2.ipss__pb2.Instance, context):
         pymongo.MongoClient(
             "mongodb://localhost:27017/"
-        )["mongo"]["peerInstances"].insertOne(
+        )["mongo"]["peerInstances"].insert_one(
             MessageToJson(request)
         )
         return gateway_instance

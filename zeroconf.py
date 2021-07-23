@@ -47,14 +47,14 @@ def Zeroconf(local_instance) -> list:
 
     pymongo.MongoClient(
         "mongodb://localhost:27017/"
-    )["mongo"]["peerInstances"].insertMany(peer_instances)
+    )["mongo"]["peerInstances"].insert_many(peer_instances)
 
 if __name__ == "__main__":
     import sys
     from gateway import generate_gateway_instance
     pymongo.MongoClient(
         "mongodb://localhost:27017/"
-    )["mongo"]["peerInstances"].insertOne(
+    )["mongo"]["peerInstances"].insert_one(
         MessageToJson(
             gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
