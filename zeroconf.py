@@ -44,10 +44,10 @@ def Zeroconf(local_instance) -> list:
     for peer_uri in http1__peers:
         pass
 
-
-    pymongo.MongoClient(
-        "mongodb://localhost:27017/"
-    )["mongo"]["peerInstances"].insert_many(peer_instances)
+    if len(peer_instances)>0:
+        pymongo.MongoClient(
+            "mongodb://localhost:27017/"
+        )["mongo"]["peerInstances"].insert_many(peer_instances)
 
 if __name__ == "__main__":
     import sys
