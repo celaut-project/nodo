@@ -45,6 +45,7 @@ def Zeroconf(local_instance) -> list:
         pass
 
     if len(peer_instances)>0:
+        LOGGER('\nAdding peers '+str(peer_instances))
         pymongo.MongoClient(
             "mongodb://localhost:27017/"
         )["mongo"]["peerInstances"].insert_many(peer_instances)
@@ -65,3 +66,4 @@ if __name__ == "__main__":
             )
         ))
     )
+    LOGGER('\nAdded peer '+sys.argv[1])

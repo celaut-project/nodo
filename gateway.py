@@ -143,6 +143,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer()
+    LOGGER('\nBalancer to peer ' + node_instance)
     if node_instance:
         node_uri = utils.get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
         LOGGER('El servicio se lanza en el nodo ' + str(node_uri))
@@ -302,6 +303,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         return gateway_pb2.Empty()
     
     def Hynode(self, request: gateway_pb2.ipss__pb2.Instance, context):
+        LOGGER('\nAdding peer ' + str(request))
         pymongo.MongoClient(
             "mongodb://localhost:27017/"
         )["mongo"]["peerInstances"].insert_one(
