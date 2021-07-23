@@ -5,7 +5,7 @@ import subprocess, os, socket, threading, random, utils
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
 from grpc_reflection.v1alpha import reflection
-import pymongo
+import pymongo, json
 from google.protobuf.json_format import MessageToJson
 from google.protobuf.json_format import Parse
 
@@ -305,7 +305,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         pymongo.MongoClient(
             "mongodb://localhost:27017/"
         )["mongo"]["peerInstances"].insert_one(
-            MessageToJson(request)
+            json.loads(MessageToJson(request))
         )
         return gateway_instance
 

@@ -1,4 +1,4 @@
-import gateway_pb2_grpc, grpc, pymongo
+import gateway_pb2_grpc, grpc, pymongo, json
 from google.protobuf.json_format import MessageToJson
 from gateway import LOGGER
 
@@ -30,11 +30,11 @@ def Zeroconf(local_instance) -> list:
             total_peers.append(peer_ip)
             try:
                 peer_instances.append (
-                    MessageToJson(
+                    json.loads(MessageToJson(
                         gateway_pb2_grpc.GatewayStub(
                             grpc.insecure_channel(peer_uri)
                         ).Hynode(local_instance)                       
-                    )
+                    ))
                 )
             except grpc.RpcError:
                 LOGGER('Node ' + peer_uri + ' not response.')
@@ -55,7 +55,7 @@ if __name__ == "__main__":
     pymongo.MongoClient(
         "mongodb://localhost:27017/"
     )["mongo"]["peerInstances"].insert_one(
-        MessageToJson(
+        json.loads(MessageToJson(
             gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
                     sys.argv[1]
@@ -63,5 +63,5 @@ if __name__ == "__main__":
             ).Hynode(
                 generate_gateway_instance()
             )
-        )
+        ))
     )
