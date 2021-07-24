@@ -313,6 +313,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             "mongodb://localhost:27017/"
         )["mongo"]["peerInstances"].update_one(
             filter = json.loads(MessageToJson(request)),
+            update={},
             upsert = True
         )
         return generate_gateway_instance(network='external')

@@ -65,6 +65,7 @@ if __name__ == "__main__":
                 generate_gateway_instance(network='external')
             )
         )),
+        update={},
         upsert = True
     )
     LOGGER('\nAdded peer ' + sys.argv[1])
