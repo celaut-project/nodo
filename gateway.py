@@ -1,4 +1,4 @@
-import build
+import build, socket
 from compile import REGISTRY, HYCACHE, LOGGER
 from verify import get_service_hash
 import subprocess, os, socket, threading, random, utils
@@ -17,12 +17,18 @@ DOCKER_CLIENT = docker_lib.from_env()
 IS_FROM_DOCKER_SUBNET = lambda s: s[:7] == '172.17.'
 
 GATEWAY_PORT = 8080
-GATEWAY_IP = '172.17.0.1'
+GATEWAY_IP = {
+    'docker' : '172.17.0.1',
+    'external': socket.gethostbyname(socket.gethostname())
+    }
 
-def generate_gateway_instance() -> gateway_pb2.ipss__pb2.Instance:
+def generate_gateway_instance(network) -> gateway_pb2.ipss__pb2.Instance:
+    if network not in GATEWAY_IP:
+        LOGGER('Network not exists ' + network)
+        raise Exception('Network not exists')
     instance = gateway_pb2.ipss__pb2.Instance()
     uri = gateway_pb2.ipss__pb2.Instance.Uri()
-    uri.ip = GATEWAY_IP
+    uri.ip = GATEWAY_IP[network]
     uri.port = GATEWAY_PORT
     uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT
@@ -94,7 +100,7 @@ def purgue_external(node_ip, token):
 
 def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
     __config__ = gateway_pb2.ipss__pb2.ConfigurationFile()
-    __config__.gateway.CopyFrom(gateway_instance)
+    __config__.gateway.CopyFrom(generate_gateway_instance(network='docker'))
     __config__.config.CopyFrom(config)
     os.mkdir(HYCACHE + container_id)
     with open(HYCACHE + container_id + '/__config__', 'wb') as file:
@@ -201,7 +207,6 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
     # Si hace la peticion un servicio de otro nodo.
     else:
-        host_ip = socket.gethostbyname(socket.gethostname()) # Debería ser una lista.
         assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
 
         container = create_container(
@@ -232,7 +237,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
             # for host_ip in host_ip_list:
             uri = gateway_pb2.ipss__pb2.Instance.Uri()
-            uri.ip = host_ip
+            uri.ip = GATEWAY_IP['extern']
             uri.port = assigment_ports[port]
             uri_slot.uri.append(uri)
 
@@ -310,16 +315,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
             filter = json.loads(MessageToJson(request)),
             upsert = True
         )
-        return gateway_instance
+        return generate_gateway_instance(network='external')
 
 if __name__ == "__main__":
     from zeroconf import Zeroconf
 
-    global gateway_instance
-    gateway_instance = generate_gateway_instance()
-
     # Zeroconf for connect to the network (one per network).
-    Zeroconf(local_instance=gateway_instance)
+    Zeroconf(local_instance=generate_gateway_instance(network='external'))
 
     # create a gRPC server
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=30))

@@ -62,7 +62,7 @@ if __name__ == "__main__":
                     sys.argv[1]
                 )
             ).Hynode(
-                generate_gateway_instance()
+                generate_gateway_instance(network='extern')
             )
         )),
         upsert = True
