@@ -306,8 +306,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
         LOGGER('\nAdding peer ' + str(request))
         pymongo.MongoClient(
             "mongodb://localhost:27017/"
-        )["mongo"]["peerInstances"].insert_one(
-            json.loads(MessageToJson(request))
+        )["mongo"]["peerInstances"].update_one(
+            filter = json.loads(MessageToJson(request)),
+            upsert = True
         )
         return gateway_instance
 
