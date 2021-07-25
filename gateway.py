@@ -165,7 +165,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
                 node_uri.ip + ':' +  str(node_uri.port)
             )
         ).StartService(
-            service_extended()
+            service_extended(service=service, config=config)
         )
 
     #  El nodo lanza localmente el servicio.
@@ -265,7 +265,7 @@ def get_from_registry(hash):
             service.ParseFromString(file.read())
             return service
     except (IOError, FileNotFoundError) as e:
-        LOGGER('Error opening the service on registry, '+str(e))
+        LOGGER('Error opening the service on registry, ' + str(e))
         # search service in a IPFS service.
 
 class Gateway(gateway_pb2_grpc.Gateway):
