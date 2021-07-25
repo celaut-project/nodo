@@ -52,8 +52,12 @@ def address_in_network(ip,net):
         string2=ni.ifaddresses(net)[ni.AF_INET][0]['broadcast']
     ) in ip
 
+
 def get_network_name(ip:str) -> str:
     #  https://stackoverflow.com/questions/819355/how-can-i-check-if-an-ip-is-in-a-network-in-python
     for network in ni.interfaces():
-        if address_in_network(ip=ip, net=network):
-            return network
+        try:
+            if address_in_network(ip=ip, net=network):
+                return network
+        except KeyError:
+            continue
