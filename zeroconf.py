@@ -1,8 +1,8 @@
-import gateway_pb2_grpc, grpc, pymongo, json
-from google.protobuf.json_format import MessageToJson
-from gateway import LOGGER
+import gateway_pb2_grpc, grpc
+from gateway import LOGGER, generate_gateway_instance, insert_instance_on_mongo
+from utils import get_network_name
 
-def Zeroconf(local_instance) -> list:
+def Zeroconf(network: str) -> list:
     
     ipversion_is_4 = True
     get_peer_ip = lambda peer: peer.split(':')[-2] if ipversion_is_4 else peer[1:].split(']')[0]
@@ -30,11 +30,13 @@ def Zeroconf(local_instance) -> list:
             total_peers.append(peer_ip)
             try:
                 peer_instances.append (
-                    json.loads(MessageToJson(
-                        gateway_pb2_grpc.GatewayStub(
-                            grpc.insecure_channel(peer_uri)
-                        ).Hynode(local_instance)                       
-                    ))
+                    gateway_pb2_grpc.GatewayStub(
+                        grpc.insecure_channel(peer_uri)
+                    ).Hynode(
+                        generate_gateway_instance(
+                            network=network
+                        )
+                    )
                 )
             except grpc.RpcError:
                 LOGGER('Node ' + peer_uri + ' not response.')
@@ -44,31 +46,22 @@ def Zeroconf(local_instance) -> list:
     for peer_uri in http1__peers:
         pass
 
-    if len(peer_instances)>0:
-        LOGGER('\nAdding peers ' + str(peer_instances))
-        pymongo.MongoClient(
-            "mongodb://localhost:27017/"
-        )["mongo"]["peerInstances"].insert_many(peer_instances)
+    # Insert the instances.
+    for peer_instance in peer_instances:
+        insert_instance_on_mongo(instance=peer_instance)
+
 
 if __name__ == "__main__":
     import sys
-    from gateway import generate_gateway_instance
-    instance = json.loads(
-        MessageToJson(
-            gateway_pb2_grpc.GatewayStub(
+    insert_instance_on_mongo(
+        instance = gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
                     sys.argv[1]
                 )
             ).Hynode(
-                generate_gateway_instance(network='external')
+                generate_gateway_instance(
+                    network=get_network_name(ip=sys.argv[1])
+                )
             )
-        )
-    )
-    pymongo.MongoClient(
-        "mongodb://localhost:27017/"
-    )["mongo"]["peerInstances"].update_one(
-        filter = instance,
-        update={'$setOnInsert': instance},
-        upsert = True
     )
     LOGGER('\nAdded peer ' + sys.argv[1])

@@ -1,34 +1,31 @@
-import build, socket
+import build
 from compile import REGISTRY, HYCACHE, LOGGER
 from verify import get_service_hash
-import subprocess, os, socket, threading, random, utils
+import subprocess, os, socket, threading, random
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
 from grpc_reflection.v1alpha import reflection
 import pymongo, json
 from google.protobuf.json_format import MessageToJson
 from google.protobuf.json_format import Parse
-
-
 import docker as docker_lib
+import netifaces as ni
+from utils import get_grpc_uri, get_network_name, get_free_port, get_local_ip_from_network, get_only_the_ip_from_context, service_extended
+
 DOCKER_CLIENT = docker_lib.from_env()
-
-
-IS_FROM_DOCKER_SUBNET = lambda s: s[:7] == '172.17.'
-
+DOCKER_NETWORK = 'docker0'
+LOCAL_NETWORK = 'lo'
 GATEWAY_PORT = 8080
-GATEWAY_IP = {
-    'docker' : '172.17.0.1',
-    'external': socket.gethostbyname(socket.gethostname())
-    }
 
-def generate_gateway_instance(network) -> gateway_pb2.ipss__pb2.Instance:
-    if network not in GATEWAY_IP:
-        LOGGER('Network not exists ' + network)
-        raise Exception('Network not exists')
+
+def generate_gateway_instance(network: str) -> gateway_pb2.ipss__pb2.Instance:
     instance = gateway_pb2.ipss__pb2.Instance()
     uri = gateway_pb2.ipss__pb2.Instance.Uri()
-    uri.ip = GATEWAY_IP[network]
+    try:
+        uri.ip = ni.ifaddresses(network)[ni.AF_INET][0]['addr']
+    except ValueError as e:
+        LOGGER('You must specify a valid interface name ' + network)
+        raise Exception('Error generating gateway instance --> ' + str(e))        
     uri.port = GATEWAY_PORT
     uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT
@@ -36,9 +33,19 @@ def generate_gateway_instance(network) -> gateway_pb2.ipss__pb2.Instance:
     instance.uri_slot.append(uri_slot)
     return instance
 
+# Insert the instance if it does not exists.
+def insert_instance_on_mongo(instance: gateway_pb2.ipss__pb2.Instance):
+    parsed_instance = json.loads(MessageToJson(instance))
+    pymongo.MongoClient(
+        "mongodb://localhost:27017/"
+    )["mongo"]["peerInstances"].update_one(
+        filter = parsed_instance,
+        update={'$setOnInsert': parsed_instance},
+        upsert = True
+    )
+
 cache_lock = threading.Lock()
 cache = {}  # ip:[dependencies]
-
 
 # internal token -> str( peer_ip##container_ip##container_id )   peer_ip se refiere a la direccion del servicio padre (que puede ser interno o no).
 # external token -> str( node_ip##his_token )
@@ -76,7 +83,7 @@ def purgue_internal(peer_ip, container_id, container_ip):
     cache[peer_ip].remove(container_ip + '##' + container_id)
     for dependency in cache[container_ip]:
         # Si la dependencia esta en local.
-        if IS_FROM_DOCKER_SUBNET(dependency.split('##')[0]):
+        if get_network_name(ip = dependency.split('##')[0]) == DOCKER_NETWORK:
             purgue_internal(
                 peer_ip=container_id,
                 container_id=dependency.split('##')[1],
@@ -100,7 +107,7 @@ def purgue_external(node_ip, token):
 
 def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
     __config__ = gateway_pb2.ipss__pb2.ConfigurationFile()
-    __config__.gateway.CopyFrom(generate_gateway_instance(network='docker'))
+    __config__.gateway.CopyFrom(generate_gateway_instance(network=DOCKER_NETWORK))
     __config__.config.CopyFrom(config)
     os.mkdir(HYCACHE + container_id)
     with open(HYCACHE + container_id + '/__config__', 'wb') as file:
@@ -151,14 +158,14 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     node_instance = service_balancer()
     LOGGER('\nBalancer to peer ' + node_instance)
     if node_instance:
-        node_uri = utils.get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
+        node_uri = get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
         LOGGER('El servicio se lanza en el nodo ' + str(node_uri))
         return gateway_pb2_grpc.GatewayStub(
             grpc.insecure_channel(
                 node_uri.ip + ':' +  str(node_uri.port)
             )
         ).StartService(
-            utils.service_extended()
+            service_extended()
         )
 
     #  El nodo lanza localmente el servicio.
@@ -167,7 +174,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     instance = gateway_pb2.Instance()
 
     # Si hace la peticion un servicio local.
-    if IS_FROM_DOCKER_SUBNET(peer_ip):
+    if get_network_name(peer_ip) == DOCKER_NETWORK:
         container = create_container(
             id = get_service_hash(service=service, hash_type="sha3-256"),
             entrypoint=service.container.entrypoint
@@ -207,7 +214,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
     # Si hace la peticion un servicio de otro nodo.
     else:
-        assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
+        assigment_ports = {slot.port: get_free_port() for slot in service.api.slot}
 
         container = create_container(
             use_other_ports=assigment_ports,
@@ -237,7 +244,9 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
             # for host_ip in host_ip_list:
             uri = gateway_pb2.ipss__pb2.Instance.Uri()
-            uri.ip = GATEWAY_IP['extern']
+            uri.ip = get_local_ip_from_network(
+                network=get_network_name(ip=peer_ip)
+            )
             uri.port = assigment_ports[port]
             uri_slot.uri.append(uri)
 
@@ -273,7 +282,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 return launch_service(
                     service=get_from_registry(r.hash.split(':')[1]),
                     config=configuration,
-                    peer_ip=context.peer()[5:-1*(len(context.peer().split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
+                    peer_ip=get_only_the_ip_from_context(context_peer=context.peer())
                 )
             # Si me da servicio.
             if r.HasField('service') and configuration:
@@ -286,14 +295,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 return launch_service(
                     service=r.service,
                     config=configuration,
-                    peer_ip=context.peer()[5:-1*(len(context.peer().split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
+                    peer_ip=get_only_the_ip_from_context(context_peer=context.peer())
                 )
         context.set_code(grpc.StatusCode.INTERNAL)
         context.set_detail('Imposible to launch this service')
         return context
 
     def StopService(self, request, context):
-        if IS_FROM_DOCKER_SUBNET(request.value_string.split('##')[1]): # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
+        if get_network_name(request.value_string.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
             purgue_internal(
                 peer_ip=request.value_string.split('##')[0],
                 container_id=request.value_string.split('##')[2],
@@ -309,21 +318,22 @@ class Gateway(gateway_pb2_grpc.Gateway):
     
     def Hynode(self, request: gateway_pb2.ipss__pb2.Instance, context):
         LOGGER('\nAdding peer ' + str(request))
-        instance = json.loads(MessageToJson(request))
-        pymongo.MongoClient(
-            "mongodb://localhost:27017/"
-        )["mongo"]["peerInstances"].update_one(
-            filter = instance,
-            update = {'$setOnInsert': instance},
-            upsert = True
+        insert_instance_on_mongo(instance=request)
+        return generate_gateway_instance(
+            network = get_network_name(
+                ip=get_only_the_ip_from_context(
+                    context_peer=context.peer()
+                )
+            )
         )
-        return generate_gateway_instance(network='external')
 
 if __name__ == "__main__":
     from zeroconf import Zeroconf
 
     # Zeroconf for connect to the network (one per network).
-    Zeroconf(local_instance=generate_gateway_instance(network='external'))
+    for network in ni.interfaces():
+        if network != DOCKER_NETWORK and network != LOCAL_NETWORK:
+            Zeroconf(network=network)
 
     # create a gRPC server
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=30))
