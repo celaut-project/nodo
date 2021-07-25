@@ -1,4 +1,4 @@
-import socket, struct
+import socket
 import ipss_pb2, gateway_pb2
 import netifaces as ni
 
@@ -55,5 +55,5 @@ def address_in_network(ip,net):
 def get_network_name(ip:str) -> str:
     #  https://stackoverflow.com/questions/819355/how-can-i-check-if-an-ip-is-in-a-network-in-python
     for network in ni.interfaces():
-        if address_in_network(ip=ip, network=network):
+        if address_in_network(ip=ip, net=network):
             return network
