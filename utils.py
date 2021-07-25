@@ -28,35 +28,32 @@ def get_free_port():
         s.bind(('', 0))
         return int(s.getsockname()[1])
 
+def longestSubstringFinder(string1, string2):
+    answer = ""
+    len1, len2 = len(string1), len(string2)
+    for i in range(len1):
+        match = ""
+        for j in range(len2):
+            if (i + j < len1 and string1[i + j] == string2[j]):
+                match += string2[j]
+            else:
+                if (len(match) > len(answer)): answer = match
+                match = ""
+    return answer
+
 get_only_the_ip_from_context = lambda context_peer: context_peer[5:-1*(len(context_peer.split(':')[-1])+1)] if context_peer.slit(':')[0] == 'ipv4' else None  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
 
 get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
 
-def makeMask(n):
-    "return a mask of n bits as a long integer"
-    return (2L<<n-1) - 1
-
-def dottedQuadToNum(ip):
-    "convert decimal dotted quad string to long integer"
-    return struct.unpack('L',socket.inet_aton(ip))[0]
-
-def networkMask(ip, bits):
-    "Convert a network address to a long integer" 
-    return dottedQuadToNum(ip) & makeMask(bits)
-
-def addressInNetwork(ip, net):
-   "Is an address in a network"
-   return ip & net == net
+def address_in_network(ip,net):
+    #  Return if the ip network portion (addr and broadcast common) is in the ip.
+    return longestSubstringFinder(
+        string1=ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
+        string2=ni.ifaddresses(net)[ni.AF_INET][0]['broadcast']
+    ) in ip
 
 def get_network_name(ip:str) -> str:
     #  https://stackoverflow.com/questions/819355/how-can-i-check-if-an-ip-is-in-a-network-in-python
     for network in ni.interfaces():
-        if addressInNetwork(
-            ip=dottedQuadToNum(
-                ip=ip
-            ),
-            net=networkMask(
-                ip=get_local_ip_from_network(network),
-                bits=24
-            )
-        ): return network
+        if address_in_network(ip=ip, network=network):
+            return network
