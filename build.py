@@ -27,18 +27,18 @@ def build(service: gateway_pb2.ipss__pb2.Service):
                 
                 #  Write the buffer to a file.
                 open(
-                    file=HYCACHE+id+'.tar',
+                    file=HYCACHE + id + '.tar',
                     mode='wb'
                 ).write(
                     gateway_pb2_grpc.GatewayStub(
-                        grpc.insecure_channel(peer_uri['ip'] + ':' + peer_uri['port'])
+                        grpc.insecure_channel(peer_uri['ip'] + ':' + str(peer_uri['port']))
                     ).GetServiceTar(
                         service_extended(service=service)
                     ).buffer
                 )
                 break
             except grpc.RpcError: # Other exception is raised.
-                LOGGER('\nThe container with hash ' + id + ' is not in peer ' + peer_uri)
+                LOGGER('\nThe container with hash ' + id + ' is not in peer ' + str(peer_uri))
                 continue
         LOGGER('Finded the container, go to build it.')
 

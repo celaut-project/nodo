@@ -369,6 +369,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         )
 
     def GetServiceDef(self, request_iterator, context):
+        LOGGER('Request for give a service definition')
         service_registry = [service[:-8] for service in os.listdir(REGISTRY)]
         for r in request_iterator:
 
@@ -391,6 +392,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         raise Exception('Was imposible get the service definition.')
 
     def GetServiceTar(self, request_iterator, context):
+        LOGGER('Request for give a service container.')
         service_registry = [service[:-8] for service in os.listdir(REGISTRY)]
         for r in request_iterator:
 
