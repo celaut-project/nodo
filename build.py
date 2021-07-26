@@ -1,4 +1,4 @@
-import random, pymongo, gateway_pb2_grpc, grpc, os
+import random, pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os
 from utils import service_extended
 from compile import LOGGER, HYCACHE
 from verify import get_service_hash
