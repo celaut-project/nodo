@@ -169,7 +169,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
                 service_extended(service=service, config=config)
             )
         except Exception as e:
-            LOGGER('Failed starting a service on ' + node_uri + ' peer, occurs the eror ' + e)
+            LOGGER('Failed starting a service on ' + node_uri + ' peer, occurs the eror ' + str(e))
 
     #  El nodo lanza localmente el servicio.
     LOGGER('El nodo lanza el servicio localmente.')
@@ -316,7 +316,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         peer_ip=get_only_the_ip_from_context(context_peer=context.peer())
                     )
                 except Exception as e:
-                    LOGGER('Exception launching a service ' + e)
+                    LOGGER('Exception launching a service ' + str(e))
                     continue
             # Si me da servicio.
             if r.HasField('service') and configuration:
