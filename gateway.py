@@ -154,7 +154,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer()
-    LOGGER('\nBalancer to peer ' + node_instance)
+    LOGGER('\nBalancer to peer ' + str(node_instance))
     if node_instance:
         try:
             node_uri = get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
@@ -167,7 +167,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
                 service_extended(service=service, config=config)
             )
         except Exception as e:
-            LOGGER('Failed starting a service on ' + node_uri + ' peer, occurs the eror ' + str(e))
+            LOGGER('Failed starting a service on ' + str(node_uri) + ' peer, occurs the eror ' + str(e))
 
     #  El nodo lanza localmente el servicio.
     LOGGER('El nodo lanza el servicio localmente.')
@@ -189,7 +189,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         try:
             container.start()
         except docker_lib.errors.APIError as e:
-            LOGGER('ERROR ON CONTAINER '+ container.id + ' '+str(e)) # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
+            LOGGER('ERROR ON CONTAINER '+ str(container.id) + ' '+str(e)) # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
 
         # Reload this object from the server again and update attrs with the new data.
         container.reload()
@@ -228,7 +228,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             container.start()
         except docker_lib.errors.APIError as e:
             # LOS ERRORES DEBERÍAN LANZAR UNA EXCEPCION QUE LLEGUE HASTA EL GRPC.
-            LOGGER('ERROR ON CONTAINER '+ container.id + ' '+str(e)) 
+            LOGGER('ERROR ON CONTAINER '+ str(container.id) + ' '+str(e)) 
 
         # Reload this object from the server again and update attrs with the new data.
         container.reload()
@@ -295,13 +295,16 @@ def get_from_registry(hash):
         return service
 
 class Gateway(gateway_pb2_grpc.Gateway):
+
     def StartService(self, request_iterator, context):
         configuration = None
         service_registry = [service[:-8] for service in os.listdir(REGISTRY)]
         for r in request_iterator:
+
             # Captura la configuracion si puede.
             if r.HasField('config'):
                 configuration = r.config
+            
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if r.HasField('hash') and configuration and "sha3-256" == r.hash.split(':')[0] \
                     and r.hash.split(':')[1] in service_registry:
@@ -314,6 +317,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 except Exception as e:
                     LOGGER('Exception launching a service ' + str(e))
                     continue
+            
             # Si me da servicio.
             if r.HasField('service') and configuration:
                 # If the service is not on the registry, save it.
@@ -327,20 +331,24 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     config=configuration,
                     peer_ip=get_only_the_ip_from_context(context_peer=context.peer())
                 )
-        grpc.ServicerContext.abort()
+        
+        raise Exception('Was imposible start the service.')
 
     def StopService(self, request, context):
+        
         if get_network_name(request.value_string.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
             purgue_internal(
                 peer_ip=request.value_string.split('##')[0],
                 container_id=request.value_string.split('##')[2],
                 container_ip=request.value_string.split('##')[1]
             )
+        
         else:
             purgue_external(
                 node_ip=request.value_string.split('##')[0],
                 token=request.value_string.split('##')[1]
             )
+        
         LOGGER('Stopped the instance with token -> ' + request.value_string)
         return gateway_pb2.Empty()
     
@@ -374,7 +382,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         return get_from_registry(hash=hash)
             except:
                 pass
-        grpc.ServicerContext.abort()
+
+        raise Exception('Was imposible get the service definition.')
 
     def GetServiceTar(self, request_iterator, context):
         service_registry = [service[:-8] for service in os.listdir(REGISTRY)]
@@ -405,7 +414,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 LOGGER('Error saving the container ' + hash)
         else:
             LOGGER('The service '+ hash + ' was not found.')
-        grpc.ServicerContext.abort()
+
+        raise Exception('Was imposible get the service container.')
 
 if __name__ == "__main__":
     from zeroconf import Zeroconf
