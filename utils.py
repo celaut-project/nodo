@@ -11,9 +11,9 @@ def get_grpc_uri(instance: ipss_pb2.Instance) -> ipss_pb2.Instance.Uri:
 
 def service_extended(
     service: gateway_pb2.ipss__pb2.Service, 
-    config: gateway_pb2.ipss__pb2.Configuration
+    config: gateway_pb2.ipss__pb2.Configuration = None
     ) -> gateway_pb2.ServiceTransport:
-    set_config = True
+    set_config = True if config else False
     transport = gateway_pb2.ServiceTransport()
     for hash in service.hash:
         transport.hash = hash
