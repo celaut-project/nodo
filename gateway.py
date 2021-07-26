@@ -155,6 +155,7 @@ def service_balancer():
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
+    LOGGER('Go to launch a service.')
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer()
@@ -329,7 +330,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if not os.path.isfile(REGISTRY+hash+'.service'):
                     with open(REGISTRY+hash+'.service', 'wb') as file:
                         file.write(r.service.SerializeToString())
-
+                
                 return launch_service(
                     service=r.service,
                     config=configuration,
