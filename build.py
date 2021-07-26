@@ -31,7 +31,7 @@ def build(service: gateway_pb2.ipss__pb2.Service):
                     mode='wb'
                 ).write(
                     gateway_pb2_grpc.GatewayStub(
-                        grpc.insecure_channel(peer_uri['uri'] + ':' + peer_uri['port'])
+                        grpc.insecure_channel(peer_uri['ip'] + ':' + peer_uri['port'])
                     ).GetServiceTar(
                         service_extended(service=service)
                     ).buffer

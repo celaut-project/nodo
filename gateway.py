@@ -283,7 +283,7 @@ def get_from_registry(hash):
             LOGGER('Looking for the service ' + hash + ' on peer ' + peer)
             peer_uri = peer['uriSlot'][0]['uri'][0]
             service = gateway_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(peer_uri['uri'] + ':' + peer_uri['port'])
+                grpc.insecure_channel(peer_uri['ip'] + ':' + peer_uri['port'])
             ).GetServiceDef(
                 transport
             )
