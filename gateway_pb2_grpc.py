@@ -30,10 +30,10 @@ class GatewayStub(object):
                 request_serializer=ipss__pb2.Instance.SerializeToString,
                 response_deserializer=ipss__pb2.Instance.FromString,
                 )
-        self.GetServiceTar = channel.stream_unary(
+        self.GetServiceTar = channel.stream_stream(
                 '/gateway.Gateway/GetServiceTar',
                 request_serializer=gateway__pb2.ServiceTransport.SerializeToString,
-                response_deserializer=gateway__pb2.ContainerTar.FromString,
+                response_deserializer=gateway__pb2.Chunk.FromString,
                 )
         self.GetServiceDef = channel.stream_unary(
                 '/gateway.Gateway/GetServiceDef',
@@ -93,10 +93,10 @@ def add_GatewayServicer_to_server(servicer, server):
                     request_deserializer=ipss__pb2.Instance.FromString,
                     response_serializer=ipss__pb2.Instance.SerializeToString,
             ),
-            'GetServiceTar': grpc.stream_unary_rpc_method_handler(
+            'GetServiceTar': grpc.stream_stream_rpc_method_handler(
                     servicer.GetServiceTar,
                     request_deserializer=gateway__pb2.ServiceTransport.FromString,
-                    response_serializer=gateway__pb2.ContainerTar.SerializeToString,
+                    response_serializer=gateway__pb2.Chunk.SerializeToString,
             ),
             'GetServiceDef': grpc.stream_unary_rpc_method_handler(
                     servicer.GetServiceDef,
@@ -175,9 +175,9 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_unary(request_iterator, target, '/gateway.Gateway/GetServiceTar',
+        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GetServiceTar',
             gateway__pb2.ServiceTransport.SerializeToString,
-            gateway__pb2.ContainerTar.FromString,
+            gateway__pb2.Chunk.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

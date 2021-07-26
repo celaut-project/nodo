@@ -1,5 +1,5 @@
 import random, pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os
-from utils import service_extended
+from utils import service_extended, save_chunks_to_file
 from compile import LOGGER, HYCACHE
 from verify import get_service_hash
 from subprocess import check_output, CalledProcessError
@@ -26,15 +26,13 @@ def build(service: gateway_pb2.ipss__pb2.Service):
                 LOGGER('\nUsing the peer ' + str(peer_uri) + ' for get the container of '+ id)
                 
                 #  Write the buffer to a file.
-                open(
-                    file=HYCACHE + id + '.tar',
-                    mode='wb'
-                ).write(
-                    gateway_pb2_grpc.GatewayStub(
-                        grpc.insecure_channel(peer_uri['ip'] + ':' + str(peer_uri['port']))
-                    ).GetServiceTar(
-                        service_extended(service=service)
-                    ).buffer
+                save_chunks_to_file(
+                    filename=HYCACHE + id + '.tar',
+                    chunks = gateway_pb2_grpc.GatewayStub(
+                                grpc.insecure_channel(peer_uri['ip'] + ':' + str(peer_uri['port']))
+                            ).GetServiceTar(
+                                service_extended(service=service)
+                            )
                 )
                 break
             except grpc.RpcError: # Other exception is raised.

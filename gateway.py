@@ -1,4 +1,4 @@
-import build
+import build, utils
 from compile import REGISTRY, HYCACHE, LOGGER
 from verify import get_service_hash
 import subprocess, os, socket, threading, random
@@ -10,7 +10,6 @@ from google.protobuf.json_format import MessageToJson
 from google.protobuf.json_format import Parse
 import docker as docker_lib
 import netifaces as ni
-from utils import get_grpc_uri, get_network_name, get_free_port, get_local_ip_from_network, get_only_the_ip_from_context, service_extended
 
 DOCKER_CLIENT = docker_lib.from_env()
 DOCKER_NETWORK = 'docker0'
@@ -83,7 +82,7 @@ def purgue_internal(peer_ip, container_id, container_ip):
     cache[peer_ip].remove(container_ip + '##' + container_id)
     for dependency in cache[container_ip]:
         # Si la dependencia esta en local.
-        if get_network_name(ip = dependency.split('##')[0]) == DOCKER_NETWORK:
+        if utils.get_network_name(ip = dependency.split('##')[0]) == DOCKER_NETWORK:
             purgue_internal(
                 peer_ip=container_id,
                 container_id=dependency.split('##')[1],
@@ -162,14 +161,14 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     LOGGER('\nBalancer select peer ' + str(node_instance))
     if node_instance:
         try:
-            node_uri = get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
+            node_uri = utils.get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
             LOGGER('El servicio se lanza en el nodo ' + str(node_uri))
             return gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
                     node_uri.ip + ':' +  str(node_uri.port)
                 )
             ).StartService(
-                service_extended(service=service, config=config)
+                utils.service_extended(service=service, config=config)
             )
         except Exception as e:
             LOGGER('Failed starting a service on ' + str(node_uri) + ' peer, occurs the eror ' + str(e))
@@ -180,7 +179,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     instance = gateway_pb2.Instance()
 
     # Si hace la peticion un servicio local.
-    if get_network_name(peer_ip) == DOCKER_NETWORK:
+    if utils.get_network_name(peer_ip) == DOCKER_NETWORK:
         container = create_container(
             id = get_service_hash(service=service, hash_type="sha3-256"),
             entrypoint=service.container.entrypoint
@@ -220,7 +219,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
     # Si hace la peticion un servicio de otro nodo.
     else:
-        assigment_ports = {slot.port: get_free_port() for slot in service.api.slot}
+        assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
 
         container = create_container(
             use_other_ports=assigment_ports,
@@ -250,8 +249,8 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
             # for host_ip in host_ip_list:
             uri = gateway_pb2.ipss__pb2.Instance.Uri()
-            uri.ip = get_local_ip_from_network(
-                network=get_network_name(ip=peer_ip)
+            uri.ip = utils.get_local_ip_from_network(
+                network = utils.get_network_name(ip=peer_ip)
             )
             uri.port = assigment_ports[port]
             uri_slot.uri.append(uri)
@@ -315,9 +314,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     and r.hash.split(':')[1] in service_registry:
                 try:
                     return launch_service(
-                        service=get_from_registry(r.hash.split(':')[1]),
-                        config=configuration,
-                        peer_ip=get_only_the_ip_from_context(context_peer=context.peer())
+                        service = get_from_registry(r.hash.split(':')[1]),
+                        config = configuration,
+                        peer_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
                     )
                 except Exception as e:
                     LOGGER('Exception launching a service ' + str(e))
@@ -332,16 +331,16 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         file.write(r.service.SerializeToString())
                 
                 return launch_service(
-                    service=r.service,
-                    config=configuration,
-                    peer_ip=get_only_the_ip_from_context(context_peer=context.peer())
+                    service = r.service,
+                    config = configuration,
+                    peer_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
                 )
         
         raise Exception('Was imposible start the service.')
 
     def StopService(self, request, context):
         
-        if get_network_name(request.value_string.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
+        if utils.get_network_name(request.value_string.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
             purgue_internal(
                 peer_ip=request.value_string.split('##')[0],
                 container_id=request.value_string.split('##')[2],
@@ -361,8 +360,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
         LOGGER('\nAdding peer ' + str(request))
         insert_instance_on_mongo(instance=request)
         return generate_gateway_instance(
-            network = get_network_name(
-                ip=get_only_the_ip_from_context(
+            network = utils.get_network_name(
+                ip = utils.get_only_the_ip_from_context(
                     context_peer=context.peer()
                 )
             )
@@ -410,13 +409,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     continue
                 if hash in service_registry:
                     break
-            
+        LOGGER('Getting the container of service ' + hash)
         if hash:
             try:
                 os.system('docker save ' + hash + '.service > ' + HYCACHE + hash + '.tar')
-                b = gateway_pb2.ContainerTar()
-                b.buffer = bytes(open(HYCACHE + hash + '.tar', 'rb').read())
-                return b
+                LOGGER('Returned the tar container buffer.')
+                return utils.get_file_chunks(filename = HYCACHE + hash + '.tar')
             except:
                 LOGGER('Error saving the container ' + hash)
         else:

@@ -64,3 +64,19 @@ def get_network_name(ip:str) -> str:
                 return network
         except KeyError:
             continue
+
+CHUNK_SIZE = 1024 * 1024  # 1MB
+
+def get_file_chunks(filename):
+    with open(filename, 'rb') as f:
+        while True:
+            piece = f.read(CHUNK_SIZE);
+            if len(piece) == 0:
+                return
+            yield gateway_pb2.Chunk(buffer=piece)
+
+
+def save_chunks_to_file(chunks, filename):
+    with open(filename, 'wb') as f:
+        for chunk in chunks:
+            f.write(chunk.buffer)

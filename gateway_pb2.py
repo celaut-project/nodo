@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"\x07\n\x05\x45mpty\"K\n\x08Instance\x12 \n\x08instance\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12\x1d\n\x05token\x18\x02 \x01(\x0b\x32\x0e.gateway.Token\"\x82\x01\n\x10ServiceTransport\x12\x0e\n\x04hash\x18\x01 \x01(\tH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"\x1e\n\x0c\x43ontainerTar\x12\x0e\n\x06\x62uffer\x18\x01 \x01(\x0c\x32\xae\x02\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12/\n\x0bStopService\x12\x0e.gateway.Token\x1a\x0e.gateway.Empty\"\x00\x12*\n\x06Hynode\x12\x0e.ipss.Instance\x1a\x0e.ipss.Instance\"\x00\x12\x45\n\rGetServiceTar\x12\x19.gateway.ServiceTransport\x1a\x15.gateway.ContainerTar\"\x00(\x01\x12=\n\rGetServiceDef\x12\x19.gateway.ServiceTransport\x1a\r.ipss.Service\"\x00(\x01\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\nipss.proto\"V\n\x05Token\x12\x15\n\x0bvalue_int32\x18\x01 \x01(\x05H\x00\x12\x15\n\x0bvalue_int64\x18\x02 \x01(\x03H\x00\x12\x16\n\x0cvalue_string\x18\x03 \x01(\tH\x00\x42\x07\n\x05oneOf\"\x07\n\x05\x45mpty\"K\n\x08Instance\x12 \n\x08instance\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12\x1d\n\x05token\x18\x02 \x01(\x0b\x32\x0e.gateway.Token\"\x82\x01\n\x10ServiceTransport\x12\x0e\n\x04hash\x18\x01 \x01(\tH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"\x17\n\x05\x43hunk\x12\x0e\n\x06\x62uffer\x18\x01 \x01(\x0c\x32\xa9\x02\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12/\n\x0bStopService\x12\x0e.gateway.Token\x1a\x0e.gateway.Empty\"\x00\x12*\n\x06Hynode\x12\x0e.ipss.Instance\x1a\x0e.ipss.Instance\"\x00\x12@\n\rGetServiceTar\x12\x19.gateway.ServiceTransport\x1a\x0e.gateway.Chunk\"\x00(\x01\x30\x01\x12=\n\rGetServiceDef\x12\x19.gateway.ServiceTransport\x1a\r.ipss.Service\"\x00(\x01\x62\x06proto3'
   ,
   dependencies=[ipss__pb2.DESCRIPTOR,])
 
@@ -198,16 +198,16 @@ _SERVICETRANSPORT = _descriptor.Descriptor(
 )
 
 
-_CONTAINERTAR = _descriptor.Descriptor(
-  name='ContainerTar',
-  full_name='gateway.ContainerTar',
+_CHUNK = _descriptor.Descriptor(
+  name='Chunk',
+  full_name='gateway.Chunk',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='buffer', full_name='gateway.ContainerTar.buffer', index=0,
+      name='buffer', full_name='gateway.Chunk.buffer', index=0,
       number=1, type=12, cpp_type=9, label=1,
       has_default_value=False, default_value=b"",
       message_type=None, enum_type=None, containing_type=None,
@@ -226,7 +226,7 @@ _CONTAINERTAR = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=345,
-  serialized_end=375,
+  serialized_end=368,
 )
 
 _TOKEN.oneofs_by_name['oneOf'].fields.append(
@@ -255,7 +255,7 @@ DESCRIPTOR.message_types_by_name['Token'] = _TOKEN
 DESCRIPTOR.message_types_by_name['Empty'] = _EMPTY
 DESCRIPTOR.message_types_by_name['Instance'] = _INSTANCE
 DESCRIPTOR.message_types_by_name['ServiceTransport'] = _SERVICETRANSPORT
-DESCRIPTOR.message_types_by_name['ContainerTar'] = _CONTAINERTAR
+DESCRIPTOR.message_types_by_name['Chunk'] = _CHUNK
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 Token = _reflection.GeneratedProtocolMessageType('Token', (_message.Message,), {
@@ -286,12 +286,12 @@ ServiceTransport = _reflection.GeneratedProtocolMessageType('ServiceTransport', 
   })
 _sym_db.RegisterMessage(ServiceTransport)
 
-ContainerTar = _reflection.GeneratedProtocolMessageType('ContainerTar', (_message.Message,), {
-  'DESCRIPTOR' : _CONTAINERTAR,
+Chunk = _reflection.GeneratedProtocolMessageType('Chunk', (_message.Message,), {
+  'DESCRIPTOR' : _CHUNK,
   '__module__' : 'gateway_pb2'
-  # @@protoc_insertion_point(class_scope:gateway.ContainerTar)
+  # @@protoc_insertion_point(class_scope:gateway.Chunk)
   })
-_sym_db.RegisterMessage(ContainerTar)
+_sym_db.RegisterMessage(Chunk)
 
 
 
@@ -302,8 +302,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=378,
-  serialized_end=680,
+  serialized_start=371,
+  serialized_end=668,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',
@@ -341,7 +341,7 @@ _GATEWAY = _descriptor.ServiceDescriptor(
     index=3,
     containing_service=None,
     input_type=_SERVICETRANSPORT,
-    output_type=_CONTAINERTAR,
+    output_type=_CHUNK,
     serialized_options=None,
     create_key=_descriptor._internal_create_key,
   ),
