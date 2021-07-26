@@ -4,7 +4,7 @@ from compile import LOGGER, HYCACHE
 from verify import get_service_hash
 from subprocess import check_output, CalledProcessError
 
-def build(service: gateway_pb2.ipss_pb2.Service):
+def build(service: gateway_pb2.ipss__pb2.Service):
     id = get_service_hash(service=service, hash_type='sha3-256')
     LOGGER('Building ' + id)
     # it's locally?
@@ -49,7 +49,7 @@ def build(service: gateway_pb2.ipss_pb2.Service):
     # verify()
 
 if __name__ == "__main__":
-    import gateway_pb2, sys
+    import sys
     id = sys.argv[1]
     with open("/home/hy/node/__registry__/"+id+".service", "rb") as file:
         service = gateway_pb2.ipss__pb2.Service()
