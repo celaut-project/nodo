@@ -21,10 +21,10 @@ def build(service: gateway_pb2.ipss__pb2.Service):
         )["mongo"]["peerInstances"].find()
 
         for peer in peers:
-            LOGGER('\nUsing the peer ' + str(peer) + ' for get the container of '+ id)
             try:
-                peer_uri = peer['uri_slot'][0]['uri'][0]
-
+                peer_uri = peer['uriSlot'][0]['uri'][0]
+                LOGGER('\nUsing the peer ' + str(peer_uri) + ' for get the container of '+ id)
+                
                 #  Write the buffer to a file.
                 open(
                     file=HYCACHE+id+'.tar',

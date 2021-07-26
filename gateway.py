@@ -281,7 +281,7 @@ def get_from_registry(hash):
                 )["mongo"]["peerInstances"].find()
         for peer in peers:
             LOGGER('Looking for the service ' + hash + ' on peer ' + peer)
-            peer_uri = peer['uri_slot'][0]['uri'][0]
+            peer_uri = peer['uriSlot'][0]['uri'][0]
             service = gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(peer_uri['uri'] + ':' + peer_uri['port'])
             ).GetServiceDef(
