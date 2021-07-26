@@ -139,17 +139,15 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
 
 def service_balancer():
     # 50% prob. local, 50% prob. other peer.
-    return random.choice([
-        Parse(
-            random.choice(
-                pymongo.MongoClient(
+    peer_list = pymongo.MongoClient(
                     "mongodb://localhost:27017/"
                 )["mongo"]["peerInstances"].find()
-            ),
+    
+    i = random.randint(0, peer_list.count())
+    return Parse(
+            peer_list[i],
             gateway_pb2.ipss__pb2.Instance()
-        ),
-        None
-    ])
+        ) if i < peer_list.count() else None
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
@@ -273,11 +271,9 @@ def get_from_registry(hash):
         transport.hash = hash
 
         #  Search the service description.
-        peers = random.choice(
-            pymongo.MongoClient(
-                "mongodb://localhost:27017/"
-            )["mongo"]["peerInstances"].find()
-        )
+        peers = pymongo.MongoClient(
+                    "mongodb://localhost:27017/"
+                )["mongo"]["peerInstances"].find()
         for peer in peers:
             LOGGER('Looking for the service ' + hash + ' on peer ' + peer)
             peer_uri = peer['uri_slot'][0]['uri'][0]
