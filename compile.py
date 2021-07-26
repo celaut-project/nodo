@@ -7,7 +7,8 @@ from verify import get_service_list_of_hashes, calculate_hashes
 
 import logging
 logging.basicConfig(filename='/home/hy/node/app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
-LOGGER = lambda message: logging.getLogger(__name__).debug(message)
+#LOGGER = lambda message: logging.getLogger(__name__).debug(message)
+LOGGER = lambda message: print(message)
 
 # DIRECTORIES
 HYCACHE = "/home/hy/node/__hycache__/"

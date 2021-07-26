@@ -138,23 +138,27 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
         LOGGER('DOCKER API ERROR ')
 
 def service_balancer():
-    # 50% prob. local, 50% prob. other peer.
-    peer_list = pymongo.MongoClient(
-                    "mongodb://localhost:27017/"
-                )["mongo"]["peerInstances"].find()
-    peer_list_length = len(list(peer_list))
-    i = random.randint(0, peer_list_length)
-    return Parse(
-            peer_list[i],
-            gateway_pb2.ipss__pb2.Instance()
-        ) if i < peer_list_length else None
+    try:
+        # 50% prob. local, 50% prob. other peer.
+        peer_list = pymongo.MongoClient(
+                        "mongodb://localhost:27017/"
+                    )["mongo"]["peerInstances"].find()
+        peer_list_length = len(list(peer_list))
+        i = random.randint(0, peer_list_length)
+        return Parse(
+                peer_list[i],
+                gateway_pb2.ipss__pb2.Instance()
+            ) if i < peer_list_length else None
+    except Exception as e:
+        LOGGER('Error during balancer, ' + str(e))
+        return None
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer()
-    LOGGER('\nBalancer to peer ' + str(node_instance))
+    LOGGER('\nBalancer select peer ' + str(node_instance))
     if node_instance:
         try:
             node_uri = get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
