@@ -6,21 +6,22 @@ from subprocess import check_output, CalledProcessError
 
 def build(service: gateway_pb2.ipss__pb2.Service):
     id = get_service_hash(service=service, hash_type='sha3-256')
-    LOGGER('Building ' + id)
-    # it's locally?
+    LOGGER('\nBuilding ' + id)
+    
     try:
+        # it's locally?
         check_output('/usr/bin/docker inspect '+id+'.service', shell=True)
         
     except CalledProcessError:
         # search container in IPFS service. (docker-tar, docker-tar.gz, filesystem, ....)
 
-        LOGGER('Imposible to build ' + id + ' go to search the container in other node.')
+        LOGGER('\nIt is not locally, ' + id + ' go to search the container in other node.')
         peers = pymongo.MongoClient(
             "mongodb://localhost:27017/"
         )["mongo"]["peerInstances"].find()
 
         for peer in peers:
-            LOGGER('Using the peer ' + peer + ' for get the container of '+ id)
+            LOGGER('\nUsing the peer ' + str(peer) + ' for get the container of '+ id)
             try:
                 peer_uri = peer['uri_slot'][0]['uri'][0]
 
@@ -37,13 +38,19 @@ def build(service: gateway_pb2.ipss__pb2.Service):
                 )
                 break
             except grpc.RpcError:
-                LOGGER('The container with hash ' + id + ' is not in peer ' + peer_uri)
+                LOGGER('\nThe container with hash ' + id + ' is not in peer ' + peer_uri)
                 continue
-        
+        LOGGER('Finded the container, go to build it.')
+
         #  Load the tar file to a docker container.
-        os.system('docker load < ' + HYCACHE+id+'.tar')
-        os.system('docker tag ' + id + ' ' + id + '.service')
-        check_output('/usr/bin/docker inspect ' + id + '.service', shell=True)
+        try:
+            os.system('docker load < ' + HYCACHE + id + '.tar')
+            os.system('docker tag ' + id + ' ' + id + '.service')
+            check_output('/usr/bin/docker inspect ' + id + '.service', shell=True)
+        except Exception as e:
+            LOGGER('Exception during load the tar ' + id)
+            raise Exception('Error building the container.')
+
         LOGGER('Build process finished ' + id)
     
     # verify()
