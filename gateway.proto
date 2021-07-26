@@ -25,7 +25,7 @@ message ServiceTransport {
     optional ipss.Configuration config = 3;
 }
 
-message ContainerZip {
+message ContainerTar {
     bytes buffer = 1;
 }
 
@@ -33,5 +33,7 @@ service Gateway {
     rpc StartService( stream ServiceTransport) returns (Instance) {}
     rpc StopService(Token) returns (Empty) {}
     rpc Hynode(ipss.Instance) returns (ipss.Instance) {}
-    rpc GetServiceZip(ipss.Service) returns (ContainerZip) {}
+    
+    rpc GetServiceTar(stream ServiceTransport) returns (ContainerTar) {}
+    rpc GetServiceDef(stream ServiceTransport) returns (ipss.Service) {}
 }

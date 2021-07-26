@@ -158,15 +158,18 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     node_instance = service_balancer()
     LOGGER('\nBalancer to peer ' + node_instance)
     if node_instance:
-        node_uri = get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
-        LOGGER('El servicio se lanza en el nodo ' + str(node_uri))
-        return gateway_pb2_grpc.GatewayStub(
-            grpc.insecure_channel(
-                node_uri.ip + ':' +  str(node_uri.port)
+        try:
+            node_uri = get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
+            LOGGER('El servicio se lanza en el nodo ' + str(node_uri))
+            return gateway_pb2_grpc.GatewayStub(
+                grpc.insecure_channel(
+                    node_uri.ip + ':' +  str(node_uri.port)
+                )
+            ).StartService(
+                service_extended(service=service, config=config)
             )
-        ).StartService(
-            service_extended(service=service, config=config)
-        )
+        except Exception as e:
+            LOGGER('Failed starting a service on ' + node_uri + ' peer, occurs the eror ' + e)
 
     #  El nodo lanza localmente el servicio.
     LOGGER('El nodo lanza el servicio localmente.')
@@ -266,7 +269,34 @@ def get_from_registry(hash):
             return service
     except (IOError, FileNotFoundError) as e:
         LOGGER('Error opening the service on registry, ' + str(e))
-        # search service in a IPFS service.
+        transport = gateway_pb2.ServiceTransport()
+        transport.hash = hash
+
+        #  Search the service description.
+        peers = random.choice(
+            pymongo.MongoClient(
+                "mongodb://localhost:27017/"
+            )["mongo"]["peerInstances"].find()
+        )
+        for peer in peers:
+            LOGGER('Looking for the service ' + hash + ' on peer ' + peer)
+            peer_uri = peer['uri_slot'][0]['uri'][0]
+            service = gateway_pb2_grpc.GatewayStub(
+                grpc.insecure_channel(peer_uri['uri'] + ':' + peer_uri['port'])
+            ).GetServiceDef(
+                transport
+            )
+        
+        if service:
+            #  Save the service on the registry.
+            with open(REGISTRY + hash + '.service', 'wb') as file:
+                file.write(service.SerializeToString())
+
+        else:
+            LOGGER('The service '+ hash + ' was not found.')
+            raise Exception('The service ' + hash + ' was not found.')
+
+        return service
 
 class Gateway(gateway_pb2_grpc.Gateway):
     def StartService(self, request_iterator, context):
@@ -279,11 +309,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if r.HasField('hash') and configuration and "sha3-256" == r.hash.split(':')[0] \
                     and r.hash.split(':')[1] in service_registry:
-                return launch_service(
-                    service=get_from_registry(r.hash.split(':')[1]),
-                    config=configuration,
-                    peer_ip=get_only_the_ip_from_context(context_peer=context.peer())
-                )
+                try:
+                    return launch_service(
+                        service=get_from_registry(r.hash.split(':')[1]),
+                        config=configuration,
+                        peer_ip=get_only_the_ip_from_context(context_peer=context.peer())
+                    )
+                except Exception as e:
+                    LOGGER('Exception launching a service ' + e)
+                    continue
             # Si me da servicio.
             if r.HasField('service') and configuration:
                 # If the service is not on the registry, save it.
@@ -326,6 +360,59 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 )
             )
         )
+
+    def GetServiceDef(self, request_iterator, context):
+        service_registry = [service[:-8] for service in os.listdir(REGISTRY)]
+        for r in request_iterator:
+
+            try:
+                # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
+                if r.HasField('hash') and "sha3-256" == r.hash.split(':')[0] \
+                        and r.hash.split(':')[1] in service_registry:
+                    return get_from_registry(
+                        hash=r.hash.split(':')[1]
+                    )
+                
+                # Si me da servicio.
+                if r.HasField('service'):
+                    hash = get_service_hash(service=r.service, hash_type="sha3-256") 
+                    if hash in service_registry:
+                        return get_from_registry(hash=hash)
+            except:
+                pass
+        
+        grpc.ServicerContext.abort()
+
+    def GetServiceTar(self, request_iterator, context):
+        service_registry = [service[:-8] for service in os.listdir(REGISTRY)]
+        for r in request_iterator:
+
+            # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
+            if r.HasField('hash') and "sha3-256" == r.hash.split(':')[0] \
+                    and r.hash.split(':')[1] in service_registry:
+                hash = r.hash.split(':')[1]
+                break
+            
+            # Si me da servicio.
+            if r.HasField('service'):
+                try:
+                    hash = get_service_hash(service=r.service, hash_type="sha3-256")
+                except:
+                    continue
+                if hash in service_registry:
+                    break
+            
+        if hash:
+            try:
+                os.system('docker save ' + hash + '.service > ' + HYCACHE + hash + '.tar')
+                b = gateway_pb2.ContainerTar()
+                b.buffer = bytes(open(HYCACHE + hash + '.tar', 'rb').read())
+                return b
+            except:
+                LOGGER('Error saving the container ' + hash)
+        else:
+            LOGGER('The service '+ hash + ' was not found.')
+        grpc.ServicerContext.abort()
 
 if __name__ == "__main__":
     from zeroconf import Zeroconf
