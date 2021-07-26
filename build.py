@@ -37,7 +37,7 @@ def build(service: gateway_pb2.ipss__pb2.Service):
                     ).buffer
                 )
                 break
-            except grpc.RpcError:
+            except grpc.RpcError: # Other exception is raised.
                 LOGGER('\nThe container with hash ' + id + ' is not in peer ' + peer_uri)
                 continue
         LOGGER('Finded the container, go to build it.')

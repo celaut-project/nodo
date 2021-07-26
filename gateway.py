@@ -425,6 +425,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
 if __name__ == "__main__":
     from zeroconf import Zeroconf
 
+    # Create __hycache__ if it does not exists.
+    try:
+        os.system('mkdir ' + HYCACHE)
+    except:
+        pass
+
     # Zeroconf for connect to the network (one per network).
     for network in ni.interfaces():
         if network != DOCKER_NETWORK and network != LOCAL_NETWORK:
