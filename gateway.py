@@ -142,12 +142,12 @@ def service_balancer():
     peer_list = pymongo.MongoClient(
                     "mongodb://localhost:27017/"
                 )["mongo"]["peerInstances"].find()
-    
-    i = random.randint(0, peer_list.count())
+    peer_list_length = len(list(peer_list))
+    i = random.randint(0, peer_list_length)
     return Parse(
             peer_list[i],
             gateway_pb2.ipss__pb2.Instance()
-        ) if i < peer_list.count() else None
+        ) if i < peer_list_length else None
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
