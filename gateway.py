@@ -331,9 +331,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     config=configuration,
                     peer_ip=get_only_the_ip_from_context(context_peer=context.peer())
                 )
-        context.set_code(grpc.StatusCode.INTERNAL)
-        context.set_detail('Imposible to launch this service')
-        return context
+        grpc.ServicerContext.abort()
 
     def StopService(self, request, context):
         if get_network_name(request.value_string.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
@@ -380,7 +378,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         return get_from_registry(hash=hash)
             except:
                 pass
-        
         grpc.ServicerContext.abort()
 
     def GetServiceTar(self, request_iterator, context):
