@@ -25,19 +25,14 @@ def build(service: gateway_pb2.ipss__pb2.Service):
                 peer_uri = peer['uriSlot'][0]['uri'][0]
                 LOGGER('\nUsing the peer ' + str(peer_uri) + ' for get the container of '+ id)
                 
-                #  Get the chunk buffer.
-                LOGGER('    Get the chunk buffer')
-                response = gateway_pb2_grpc.GatewayStub(
+                #  Write the buffer to a file.
+                save_chunks_to_file(
+                    filename = HYCACHE + id + '.tar',
+                    chunks = gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(peer_uri['ip'] + ':' + str(peer_uri['port']))
                             ).GetServiceTar(
                                 service_extended(service=service)
                             )
-                
-                #  Write the buffer to a file.
-                LOGGER('    Write the buffer to a file.')
-                save_chunks_to_file(
-                    filename = HYCACHE + id + '.tar',
-                    chunks = response
                 )
                 
                 LOGGER('    Buffer on file.')
