@@ -18,7 +18,7 @@ def build(service: gateway_pb2.ipss__pb2.Service):
         LOGGER('\nIt is not locally, ' + id + ' go to search the container in other node.')
         peers = list(pymongo.MongoClient(
                     "mongodb://localhost:27017/"
-                )["mongo"]["peerInstances"].find({}))
+                )["mongo"]["peerInstances"].find())
 
         for peer in peers:
             try:

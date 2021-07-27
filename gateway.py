@@ -141,7 +141,7 @@ def service_balancer():
         # 50% prob. local, 50% prob. other peer.
         peer_list = list(pymongo.MongoClient(
                         "mongodb://localhost:27017/"
-                    )["mongo"]["peerInstances"].find({}))
+                    )["mongo"]["peerInstances"].find())
         peer_list_length = len(peer_list)
         LOGGER('    Peer list length of ' + str(peer_list_length))
         i = random.randint(0, peer_list_length)
@@ -278,7 +278,7 @@ def get_from_registry(hash):
         #  Search the service description.
         peers = list(pymongo.MongoClient(
                     "mongodb://localhost:27017/"
-                )["mongo"]["peerInstances"].find({}))
+                )["mongo"]["peerInstances"].find())
         for peer in peers:
             LOGGER('Looking for the service ' + hash + ' on peer ' + peer)
             peer_uri = peer['uriSlot'][0]['uri'][0]
