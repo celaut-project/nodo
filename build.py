@@ -16,9 +16,9 @@ def build(service: gateway_pb2.ipss__pb2.Service):
         # search container in IPFS service. (docker-tar, docker-tar.gz, filesystem, ....)
 
         LOGGER('\nIt is not locally, ' + id + ' go to search the container in other node.')
-        peers = pymongo.MongoClient(
-            "mongodb://localhost:27017/"
-        )["mongo"]["peerInstances"].find()
+        peers = list(pymongo.MongoClient(
+                    "mongodb://localhost:27017/"
+                )["mongo"]["peerInstances"].find({}))
 
         for peer in peers:
             try:
