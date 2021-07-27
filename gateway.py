@@ -143,6 +143,7 @@ def service_balancer():
                         "mongodb://localhost:27017/"
                     )["mongo"]["peerInstances"].find({}))
         peer_list_length = len(peer_list)
+        LOGGER('    Peer list length of ' + str(peer_list_length))
         i = random.randint(0, peer_list_length)
         return Parse(
                 peer_list[i],
@@ -154,11 +155,11 @@ def service_balancer():
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
-    LOGGER('Go to launch a service.')
+    LOGGER('Go to launch a service.\n')
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer()
-    LOGGER('\nBalancer select peer ' + str(node_instance))
+    LOGGER('Balancer select peer ' + str(node_instance))
     if node_instance:
         try:
             node_uri = utils.get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
