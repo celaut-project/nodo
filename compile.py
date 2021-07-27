@@ -1,14 +1,20 @@
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("/home/hy/node/app.log"),
+        logging.StreamHandler()
+    ]
+    )
+LOGGER = lambda message: logging.getLogger(__name__).debug(message)
+
 import sys
 import json
 from subprocess import run, check_output
 import os
 import gateway_pb2
 from verify import get_service_list_of_hashes, calculate_hashes
-
-import logging
-logging.basicConfig(filename='/home/hy/node/app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
-#LOGGER = lambda message: logging.getLogger(__name__).debug(message)
-LOGGER = lambda message: print(message)
 
 # DIRECTORIES
 HYCACHE = "/home/hy/node/__hycache__/"
