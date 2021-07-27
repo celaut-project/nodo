@@ -138,17 +138,23 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
 
 def service_balancer():
     try:
-        # 50% prob. local, 50% prob. other peer.
         peer_list = list(pymongo.MongoClient(
                         "mongodb://localhost:27017/"
                     )["mongo"]["peerInstances"].find())
         peer_list_length = len(peer_list)
         LOGGER('    Peer list length of ' + str(peer_list_length))
+
         i = random.randint(0, peer_list_length)
-        return Parse(
-                peer_list[i],
-                gateway_pb2.ipss__pb2.Instance()
-            ) if i < peer_list_length else None
+        if i < peer_list_length:
+            del peer_list[i]['_id']
+            return Parse(
+                text = peer_list[i],
+                message = gateway_pb2.ipss__pb2.Instance(),
+                ignore_unknown_fields = True
+            )
+        else:
+            return None
+            
     except Exception as e:
         LOGGER('Error during balancer, ' + str(e))
         return None
