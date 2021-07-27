@@ -145,23 +145,24 @@ def service_balancer():
         LOGGER('    Peer list length of ' + str(peer_list_length))
 
         i = random.randint(0, peer_list_length)
+        LOGGER('    Using the peer ' + str(i))
         if i < peer_list_length:
             del peer_list[i]['_id']
             return Parse(
-                text = peer_list[i],
+                text = json.dumps(peer_list[i]),
                 message = gateway_pb2.ipss__pb2.Instance(),
                 ignore_unknown_fields = True
             )
         else:
             return None
-            
+
     except Exception as e:
         LOGGER('Error during balancer, ' + str(e))
         return None
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
-    LOGGER('Go to launch a service.\n')
+    LOGGER('\nGo to launch a service.\n')
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer()
