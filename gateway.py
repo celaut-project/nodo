@@ -1,3 +1,4 @@
+from ipss_pb2 import Slot
 import build, utils
 from compile import REGISTRY, HYCACHE, LOGGER
 from verify import get_service_hash
@@ -19,6 +20,7 @@ GATEWAY_PORT = 8080
 
 def generate_gateway_instance(network: str) -> gateway_pb2.ipss__pb2.Instance:
     instance = gateway_pb2.ipss__pb2.Instance()
+
     uri = gateway_pb2.ipss__pb2.Instance.Uri()
     try:
         uri.ip = ni.ifaddresses(network)[ni.AF_INET][0]['addr']
@@ -30,6 +32,11 @@ def generate_gateway_instance(network: str) -> gateway_pb2.ipss__pb2.Instance:
     uri_slot.internal_port = GATEWAY_PORT
     uri_slot.uri.append(uri)
     instance.uri_slot.append(uri_slot)
+    
+    slot = gateway_pb2.ipss__pb2.Slot()
+    slot.port = GATEWAY_PORT
+    slot.transport_protocol.hash.extend(['http2', 'grpc'])
+    instance.api.slot.append(slot)
     return instance
 
 # Insert the instance if it does not exists.
@@ -166,7 +173,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer()
-    LOGGER('Balancer select peer ' + str(node_instance))
+    LOGGER('\nBalancer select peer ' + str(node_instance))
     if node_instance:
         try:
             node_uri = utils.get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
@@ -179,7 +186,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
                 utils.service_extended(service=service, config=config)
             )
         except Exception as e:
-            LOGGER('Failed starting a service on ' + str(node_uri) + ' peer, occurs the eror ' + str(e))
+            LOGGER('Failed starting a service on peer, occurs the eror ' + str(e))
 
     #  El nodo lanza localmente el servicio.
     LOGGER('El nodo lanza el servicio localmente.')

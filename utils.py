@@ -3,10 +3,12 @@ import ipss_pb2, gateway_pb2
 import netifaces as ni
 
 def get_grpc_uri(instance: ipss_pb2.Instance) -> ipss_pb2.Instance.Uri:
-    #  Supone que el primer slot usa grpc sobre http/2.
     for slot in instance.api.slot:
         if 'grpc' in slot.transport_protocol.hash and 'http2' in slot.transport_protocol.hash:
-            return instance.uri_slot[slot.port]
+            # If the protobuf lib. supported map for this message it could be O(n).
+            for uri_slot in instance.uri_slot:
+                if uri_slot.internal_port == slot.port:
+                    return uri_slot
     raise Exception('Grpc over Http/2 not supported on this service ' + str(instance))
 
 def service_extended(
