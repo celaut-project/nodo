@@ -1,5 +1,6 @@
 import gateway_pb2_grpc, grpc
-from gateway import LOGGER, generate_gateway_instance, insert_instance_on_mongo
+import logger as l
+from gateway import generate_gateway_instance, insert_instance_on_mongo
 from utils import get_network_name
 
 def Zeroconf(network: str) -> list:
@@ -39,7 +40,7 @@ def Zeroconf(network: str) -> list:
                     )
                 )
             except grpc.RpcError:
-                LOGGER('Node ' + peer_uri + ' not response.')
+                l.LOGGER('Node ' + peer_uri + ' not response.')
                 continue
         
     # Check if is a hynode with http/1.
@@ -64,4 +65,4 @@ if __name__ == "__main__":
                 )
             )
     )
-    LOGGER('\nAdded peer ' + sys.argv[1])
+    l.LOGGER('\nAdded peer ' + sys.argv[1])
