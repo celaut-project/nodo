@@ -8,7 +8,7 @@ def get_grpc_uri(instance: ipss_pb2.Instance) -> ipss_pb2.Instance.Uri:
             # If the protobuf lib. supported map for this message it could be O(n).
             for uri_slot in instance.uri_slot:
                 if uri_slot.internal_port == slot.port:
-                    return uri_slot
+                    return uri_slot.uri[0]
     raise Exception('Grpc over Http/2 not supported on this service ' + str(instance))
 
 def service_extended(

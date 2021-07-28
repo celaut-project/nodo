@@ -178,7 +178,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     if node_instance:
         try:
             node_uri = utils.get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
-            l.LOGGER('El servicio se lanza en el nodo ' + str(node_uri))
+            l.LOGGER('El servicio se lanza en el nodo con uri ' + str(node_uri))
             return gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
                     node_uri.ip + ':' +  str(node_uri.port)
