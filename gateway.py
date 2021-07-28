@@ -76,7 +76,7 @@ def set_on_cache( father_ip : str, id_or_token: str, ip: str, internal: bool):
     cache[father_ip].append(ip + '##' + id_or_token)
 
     # Si es interno Añade el servicio creado en el registro.
-    cache.update({ip: []}) if internal else l.LOGGER('Se trata de un servicio externo. --> ' + cache[father_ip])
+    cache.update({ip: []}) if internal else l.LOGGER('Se trata de un servicio externo. --> ' + str(cache[father_ip]))
 
     cache_lock.release()
 
@@ -211,7 +211,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             service_instance.token.value_string = father_ip + '##' + node_uri + '##' + service_instance.token.value_string
             return service_instance
         except Exception as e:
-            l.LOGGER('Failed starting a service on peer, occurs the eror ' + str(e))
+            l.LOGGER('Failed starting a service on peer, occurs the eror: ' + str(e))
 
     #  El nodo lanza localmente el servicio.
     l.LOGGER('El nodo lanza el servicio localmente.')
