@@ -191,20 +191,20 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     if node_instance:
         try:
             node_uri = utils.get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
+            node_uri = node_uri.ip + ':' +  str(node_uri.port)
             l.LOGGER('El servicio se lanza en el nodo con uri ' + str(node_uri))
             service_instance =  gateway_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(
-                    node_uri.ip + ':' +  str(node_uri.port)
-                )
+                grpc.insecure_channel(node_uri)
             ).StartService(
                 utils.service_extended(service=service, config=config)
             )
             set_on_cache(
                 father_ip = father_ip,
-                ip = node_uri.ip + ':' +  str(node_uri.port),
+                ip = node_uri,
                 id_or_token = service_instance.token.value_string,
                 internal = False
             )
+            service_instance.token.value_string = father_ip + '##' + node_uri + '##' + service_instance.token.value_string
             return service_instance
         except Exception as e:
             l.LOGGER('Failed starting a service on peer, occurs the eror ' + str(e))
