@@ -76,7 +76,7 @@ def set_on_cache( father_ip : str, id_or_token: str, ip: str, internal: bool):
     cache[father_ip].append(ip + '##' + id_or_token)
 
     # Si es interno Añade el servicio creado en el registro.
-    cache.update({ip: []}) if internal else None
+    cache.update({ip: []}) if internal else l.LOGGER('Se trata de un servicio externo. --> ' + cache[father_ip])
 
     cache_lock.release()
 
@@ -113,7 +113,11 @@ def purgue_internal(father_ip, container_id, container_ip):
 def purgue_external(father_ip, node_ip, token):
     cache_lock.acquire()
 
-    cache[father_ip].remove(node_ip + '##' + token)
+    try:
+        cache[father_ip].remove(node_ip + '##' + token)
+    except ValueError as e:
+        l.LOGGER(str(e) + cache[father_ip] + '\n')
+
     # Le manda al otro nodo que elimine esa instancia.
     try:
         gateway_pb2_grpc.Gateway(
