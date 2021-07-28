@@ -1,6 +1,7 @@
 from ipss_pb2 import Slot
 import build, utils
-from compile import REGISTRY, HYCACHE, LOGGER
+from compile import REGISTRY, HYCACHE
+import logger as l
 from verify import get_service_hash
 import subprocess, os, socket, threading, random
 import grpc, gateway_pb2, gateway_pb2_grpc
@@ -25,7 +26,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.ipss__pb2.Instance:
     try:
         uri.ip = ni.ifaddresses(network)[ni.AF_INET][0]['addr']
     except ValueError as e:
-        LOGGER('You must specify a valid interface name ' + network)
+        l.LOGGER('You must specify a valid interface name ' + network)
         raise Exception('Error generating gateway instance --> ' + str(e))        
     uri.port = GATEWAY_PORT
     uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
@@ -84,7 +85,7 @@ def purgue_internal(peer_ip, container_id, container_ip):
     try:
         DOCKER_CLIENT.containers.get(container_id).remove(force=True)
     except docker_lib.errors.APIError:
-        LOGGER('ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
+        l.LOGGER('ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
     cache_lock.acquire()
     cache[peer_ip].remove(container_ip + '##' + container_id)
     for dependency in cache[container_ip]:
@@ -126,7 +127,7 @@ def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
             )
             break
         except subprocess.CalledProcessError as e:
-            LOGGER(e.output)
+            l.LOGGER(e.output)
     os.remove(HYCACHE + container_id + '/__config__')
     os.rmdir(HYCACHE + container_id)
 
@@ -139,9 +140,9 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
             ports = use_other_ports
         )
     except docker_lib.errors.ImageNotFound:
-        LOGGER('IMAGE WOULD BE IN DOCKER REGISTRY. BUT NOT FOUND.')     # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
+        l.LOGGER('IMAGE WOULD BE IN DOCKER REGISTRY. BUT NOT FOUND.')     # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
     except docker_lib.errors.APIError:
-        LOGGER('DOCKER API ERROR ')
+        l.LOGGER('DOCKER API ERROR ')
 
 def service_balancer():
     try:
@@ -149,10 +150,10 @@ def service_balancer():
                         "mongodb://localhost:27017/"
                     )["mongo"]["peerInstances"].find())
         peer_list_length = len(peer_list)
-        LOGGER('    Peer list length of ' + str(peer_list_length))
+        l.LOGGER('    Peer list length of ' + str(peer_list_length))
 
         i = random.randint(0, peer_list_length)
-        LOGGER('    Using the peer ' + str(i))
+        l.LOGGER('    Using the peer ' + str(i))
         if i < peer_list_length:
             del peer_list[i]['_id']
             return Parse(
@@ -164,20 +165,20 @@ def service_balancer():
             return None
 
     except Exception as e:
-        LOGGER('Error during balancer, ' + str(e))
+        l.LOGGER('Error during balancer, ' + str(e))
         return None
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
-    LOGGER('\nGo to launch a service.\n')
+    l.LOGGER('\nGo to launch a service.\n')
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer()
-    LOGGER('\nBalancer select peer ' + str(node_instance))
+    l.LOGGER('\nBalancer select peer ' + str(node_instance))
     if node_instance:
         try:
             node_uri = utils.get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
-            LOGGER('El servicio se lanza en el nodo ' + str(node_uri))
+            l.LOGGER('El servicio se lanza en el nodo ' + str(node_uri))
             return gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
                     node_uri.ip + ':' +  str(node_uri.port)
@@ -186,10 +187,10 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
                 utils.service_extended(service=service, config=config)
             )
         except Exception as e:
-            LOGGER('Failed starting a service on peer, occurs the eror ' + str(e))
+            l.LOGGER('Failed starting a service on peer, occurs the eror ' + str(e))
 
     #  El nodo lanza localmente el servicio.
-    LOGGER('El nodo lanza el servicio localmente.')
+    l.LOGGER('El nodo lanza el servicio localmente.')
     build.build(service=service)  # Si no esta construido el contenedor, lo construye.
     instance = gateway_pb2.Instance()
 
@@ -208,7 +209,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         try:
             container.start()
         except docker_lib.errors.APIError as e:
-            LOGGER('ERROR ON CONTAINER '+ str(container.id) + ' '+str(e)) # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
+            l.LOGGER('ERROR ON CONTAINER '+ str(container.id) + ' '+str(e)) # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
 
         # Reload this object from the server again and update attrs with the new data.
         container.reload()
@@ -247,7 +248,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             container.start()
         except docker_lib.errors.APIError as e:
             # LOS ERRORES DEBERÍAN LANZAR UNA EXCEPCION QUE LLEGUE HASTA EL GRPC.
-            LOGGER('ERROR ON CONTAINER '+ str(container.id) + ' '+str(e)) 
+            l.LOGGER('ERROR ON CONTAINER '+ str(container.id) + ' '+str(e)) 
 
         # Reload this object from the server again and update attrs with the new data.
         container.reload()
@@ -274,7 +275,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
     instance.instance.api.CopyFrom(service.api)
     instance.token.value_string = peer_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
-    LOGGER('Thrown out a new instance by ' + peer_ip + ' of the container_id ' + container.id)
+    l.LOGGER('Thrown out a new instance by ' + peer_ip + ' of the container_id ' + container.id)
     return instance
 
 
@@ -285,7 +286,7 @@ def get_from_registry(hash):
             service.ParseFromString(file.read())
             return service
     except (IOError, FileNotFoundError) as e:
-        LOGGER('Error opening the service on registry, ' + str(e))
+        l.LOGGER('Error opening the service on registry, ' + str(e))
         transport = gateway_pb2.ServiceTransport()
         transport.hash = hash
 
@@ -294,7 +295,7 @@ def get_from_registry(hash):
                     "mongodb://localhost:27017/"
                 )["mongo"]["peerInstances"].find())
         for peer in peers:
-            LOGGER('Looking for the service ' + hash + ' on peer ' + peer)
+            l.LOGGER('Looking for the service ' + hash + ' on peer ' + peer)
             peer_uri = peer['uriSlot'][0]['uri'][0]
             service = gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(peer_uri['ip'] + ':' + peer_uri['port'])
@@ -308,7 +309,7 @@ def get_from_registry(hash):
                 file.write(service.SerializeToString())
 
         else:
-            LOGGER('The service '+ hash + ' was not found.')
+            l.LOGGER('The service '+ hash + ' was not found.')
             raise Exception('The service ' + hash + ' was not found.')
 
         return service
@@ -334,7 +335,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         peer_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
                     )
                 except Exception as e:
-                    LOGGER('Exception launching a service ' + str(e))
+                    l.LOGGER('Exception launching a service ' + str(e))
                     continue
             
             # Si me da servicio.
@@ -368,11 +369,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 token=request.value_string.split('##')[1]
             )
         
-        LOGGER('Stopped the instance with token -> ' + request.value_string)
+        l.LOGGER('Stopped the instance with token -> ' + request.value_string)
         return gateway_pb2.Empty()
     
     def Hynode(self, request: gateway_pb2.ipss__pb2.Instance, context):
-        LOGGER('\nAdding peer ' + str(request))
+        l.LOGGER('\nAdding peer ' + str(request))
         insert_instance_on_mongo(instance=request)
         return generate_gateway_instance(
             network = utils.get_network_name(
@@ -383,7 +384,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         )
 
     def GetServiceDef(self, request_iterator, context):
-        LOGGER('Request for give a service definition')
+        l.LOGGER('Request for give a service definition')
         service_registry = [service[:-8] for service in os.listdir(REGISTRY)]
         for r in request_iterator:
 
@@ -406,7 +407,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         raise Exception('Was imposible get the service definition.')
 
     def GetServiceTar(self, request_iterator, context):
-        LOGGER('Request for give a service container.')
+        l.LOGGER('Request for give a service container.')
         service_registry = [service[:-8] for service in os.listdir(REGISTRY)]
         for r in request_iterator:
 
@@ -424,16 +425,16 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     continue
                 if hash in service_registry:
                     break
-        LOGGER('Getting the container of service ' + hash)
+        l.LOGGER('Getting the container of service ' + hash)
         if hash:
             try:
                 os.system('docker save ' + hash + '.service > ' + HYCACHE + hash + '.tar')
-                LOGGER('Returned the tar container buffer.')
+                l.LOGGER('Returned the tar container buffer.')
                 return utils.get_file_chunks(filename = HYCACHE + hash + '.tar')
             except:
-                LOGGER('Error saving the container ' + hash)
+                l.LOGGER('Error saving the container ' + hash)
         else:
-            LOGGER('The service '+ hash + ' was not found.')
+            l.LOGGER('The service '+ hash + ' was not found.')
 
         raise Exception('Was imposible get the service container.')
 
@@ -464,6 +465,6 @@ if __name__ == "__main__":
     reflection.enable_server_reflection(SERVICE_NAMES, server)
 
     server.add_insecure_port('[::]:' + str(GATEWAY_PORT))
-    LOGGER('Starting gateway at port'+ str(GATEWAY_PORT))
+    l.LOGGER('Starting gateway at port'+ str(GATEWAY_PORT))
     server.start()
     server.wait_for_termination()

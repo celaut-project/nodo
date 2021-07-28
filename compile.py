@@ -1,14 +1,4 @@
-import logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("/home/hy/node/app.log"),
-        logging.StreamHandler()
-    ]
-    )
-LOGGER = lambda message: logging.getLogger(__name__).debug(message)
-
+import logger as l
 import sys
 import json
 import os
@@ -37,13 +27,13 @@ class Hyper:
             os.system('/usr/bin/docker build -t builder'+self.aux_id+' '+self.path)
             os.system("/usr/bin/docker save builder"+self.aux_id+" > "+HYCACHE+self.aux_id+"/building/container.tar")
         else:
-            LOGGER("Error: Dockerfile no encontrado.")
+            l.LOGGER("Error: Dockerfile no encontrado.")
         os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/container.tar -C "+HYCACHE+self.aux_id+"/building/")
 
         # Save his filesystem on cache.
         for layer in os.listdir(HYCACHE+self.aux_id+"/building/"):
             if os.path.isdir(HYCACHE+self.aux_id+"/building/"+layer):
-                LOGGER('Unzipping layer '+layer)
+                l.LOGGER('Unzipping layer '+layer)
                 os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/"+layer+"/layer.tar -C "+HYCACHE+self.aux_id+"/filesystem/")
 
         # Add filesystem data to filesystem buffer object.
@@ -53,21 +43,21 @@ class Hyper:
 
                 if b_name == '.wh..wh..opq': 
                     # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
-                    LOGGER('docker opaque witeout file.')
+                    l.LOGGER('docker opaque witeout file.')
                     continue
                 branch = gateway_pb2.ipss__pb2.Filesystem.Branch()
                 branch.name = os.path.basename(b_name)
 
                 # It's a link.
                 if os.path.islink(directory+b_name):
-                    LOGGER('    Adding link '+ b_name)
+                    l.LOGGER('    Adding link '+ b_name)
                     branch.link = os.path.realpath(directory+b_name)
                     filesystem.branch.append(branch)
                     continue
 
                 # It's a file.
                 if os.path.isfile(directory+b_name):
-                    LOGGER('    Adding file '+ b_name)
+                    l.LOGGER('    Adding file '+ b_name)
                     with open(directory+b_name, 'rb') as file:
                         branch.file = file.read()
                     filesystem.branch.append(branch)
@@ -75,7 +65,7 @@ class Hyper:
 
                 # It's a folder.
                 if os.path.isdir(directory+b_name):
-                    LOGGER('    Adding directory '+ b_name)
+                    l.LOGGER('    Adding directory '+ b_name)
                     branch.filesystem.CopyFrom(
                         recursive_parsing(directory=directory+b_name+'/')
                         )
@@ -181,7 +171,7 @@ if __name__ == "__main__":
     repo = git.split('::')[0]
     branch = git.split('::')[1]
     os.system('git clone --branch '+branch+' '+repo+' '+HYCACHE+aux_id+'/for_build/git')
-    LOGGER(os.listdir(HYCACHE+aux_id+'/for_build/git/.service/'))
+    l.LOGGER(os.listdir(HYCACHE+aux_id+'/for_build/git/.service/'))
     id = ok(path=HYCACHE+aux_id+'/for_build/git/.service/', aux_id=aux_id)  # Hyperfile
 
     os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.service')
