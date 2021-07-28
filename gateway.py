@@ -55,33 +55,33 @@ cache_lock = threading.Lock()
 cache = {}  # ip:[dependencies]
 
 # internal token -> str( peer_ip##container_ip##container_id )   peer_ip se refiere a la direccion del servicio padre (que puede ser interno o no).
-# external token -> str( node_ip##his_token )
+# external token -> str( peer_ip##node_ip##his_token )
 
 # En caso de mandarle la tarea a otro nodo:
 #   En cache se añadirá el servicio como dependencia del nodo elegido,
-#   en vez de usar la ip del servico se pone el token que nos dió ese servicio,
+#   en vez de usar la ip del servicio se pone el token que nos dió ese servicio,
 #   nosotros a nuestro servicio solicitante le daremos un token con el formato node_ip##his_token.
 
 
-def set_on_cache(peer_ip, container_id, container_ip):
+def set_on_cache( father_ip : str, id_or_token: str, ip: str, internal: bool):
     cache_lock.acquire()
 
     # En caso de ser un nodo externo:
-    if not peer_ip in cache:
-        cache.update({peer_ip: []})
+    if not father_ip in cache:
+        cache.update({father_ip: []})
         # Si peer_ip es un servicio del nodo ya
         # debería estar en el registro.
 
     # Añade el nuevo servicio como dependencia.
-    cache[peer_ip].append(container_ip + '##' + container_id)
+    cache[father_ip].append(ip + '##' + id_or_token)
 
-    # Añade el servicio creado en el registro.
-    cache.update({container_ip: []})
+    # Si es interno Añade el servicio creado en el registro.
+    cache.update({ip: []}) if internal else None
 
     cache_lock.release()
 
 
-def purgue_internal(peer_ip, container_id, container_ip):
+def purgue_internal(father_ip, container_id, container_ip):
     try:
         DOCKER_CLIENT.containers.get(container_id).remove(force=True)
     except docker_lib.errors.APIError:
@@ -89,30 +89,31 @@ def purgue_internal(peer_ip, container_id, container_ip):
 
     cache_lock.acquire()
 
-    cache[peer_ip].remove(container_ip + '##' + container_id)
+    cache[father_ip].remove(container_ip + '##' + container_id)
     for dependency in cache[container_ip]:
         # Si la dependencia esta en local.
         if utils.get_network_name(ip = dependency.split('##')[0]) == DOCKER_NETWORK:
             purgue_internal(
-                peer_ip=container_ip,
-                container_id=dependency.split('##')[1],
-                container_ip=dependency.split('##')[0]
+                father_ip = container_ip,
+                container_id = dependency.split('##')[1],
+                container_ip = dependency.split('##')[0]
             )
         # Si la dependencia se encuentra en otro nodo.
         else:
             purgue_external(
-                node_ip=dependency.split('##')[0],
-                token=dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
+                father_ip = father_ip,
+                node_ip = dependency.split('##')[0],
+                token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
             )
     del cache[container_ip]
 
     cache_lock.release()
 
 
-def purgue_external(node_ip, token):
+def purgue_external(father_ip, node_ip, token):
     cache_lock.acquire()
 
-    cache[node_ip].remove(token)
+    cache[father_ip].remove(node_ip + '##' + token)
     # Le manda al otro nodo que elimine esa instancia.
     try:
         gateway_pb2_grpc.Gateway(
@@ -181,7 +182,7 @@ def service_balancer():
         return None
 
 
-def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, peer_ip: str):
+def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, father_ip: str):
     l.LOGGER('\nGo to launch a service.\n')
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
@@ -191,29 +192,36 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         try:
             node_uri = utils.get_grpc_uri(node_instance) #  Supone que el primer slot usa grpc sobre http/2.
             l.LOGGER('El servicio se lanza en el nodo con uri ' + str(node_uri))
-            return gateway_pb2_grpc.GatewayStub(
+            service_instance =  gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
                     node_uri.ip + ':' +  str(node_uri.port)
                 )
             ).StartService(
                 utils.service_extended(service=service, config=config)
             )
+            set_on_cache(
+                father_ip = father_ip,
+                ip = node_uri.ip + ':' +  str(node_uri.port),
+                id_or_token = service_instance.token.value_string,
+                internal = False
+            )
+            return service_instance
         except Exception as e:
             l.LOGGER('Failed starting a service on peer, occurs the eror ' + str(e))
 
     #  El nodo lanza localmente el servicio.
     l.LOGGER('El nodo lanza el servicio localmente.')
-    build.build(service=service)  # Si no esta construido el contenedor, lo construye.
+    build.build(service = service)  # Si no esta construido el contenedor, lo construye.
     instance = gateway_pb2.Instance()
 
     # Si hace la peticion un servicio local.
-    if utils.get_network_name(peer_ip) == DOCKER_NETWORK:
+    if utils.get_network_name(father_ip) == DOCKER_NETWORK:
         container = create_container(
-            id = get_service_hash(service=service, hash_type="sha3-256"),
-            entrypoint=service.container.entrypoint
+            id = get_service_hash(service = service, hash_type = "sha3-256"),
+            entrypoint = service.container.entrypoint
         )
 
-        set_config(container_id=container.id, config=config)
+        set_config(container_id = container.id, config = config)
 
         # El contenedor se debe de iniciar tras añadir el fichero de configuración y 
         #  antes de requerir su direccion IP, puesto que docker se la asigna al inicio.
@@ -221,16 +229,17 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         try:
             container.start()
         except docker_lib.errors.APIError as e:
-            l.LOGGER('ERROR ON CONTAINER '+ str(container.id) + ' '+str(e)) # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
+            l.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' '+str(e)) # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
 
         # Reload this object from the server again and update attrs with the new data.
         container.reload()
         container_ip=container.attrs['NetworkSettings']['IPAddress']
 
         set_on_cache(
-            peer_ip=peer_ip,
-            container_id=container.id,
-            container_ip=container_ip
+            father_ip=father_ip,
+            id_or_token=container.id,
+            ip=container_ip,
+            internal = True
         )
 
         for slot in service.api.slot:
@@ -250,11 +259,11 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
 
         container = create_container(
-            use_other_ports=assigment_ports,
-            id=get_service_hash(service=service, hash_type="sha3-256"),
-            entrypoint=service.container.entrypoint
+            use_other_ports = assigment_ports,
+            id = get_service_hash( service = service, hash_type = "sha3-256"),
+            entrypoint = service.container.entrypoint
         )
-        set_config(container_id=container.id, config=config)
+        set_config(container_id = container.id, config = config)
 
         try:
             container.start()
@@ -266,9 +275,10 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         container.reload()
 
         set_on_cache(
-            peer_ip=peer_ip,
-            container_id=container.id,
-            container_ip=container.attrs['NetworkSettings']['IPAddress']
+            father_ip=father_ip,
+            id_or_token=container.id,
+            ip=container.attrs['NetworkSettings']['IPAddress'],
+            internal = True
         )
 
         for port in assigment_ports:
@@ -278,7 +288,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             # for host_ip in host_ip_list:
             uri = gateway_pb2.ipss__pb2.Instance.Uri()
             uri.ip = utils.get_local_ip_from_network(
-                network = utils.get_network_name(ip=peer_ip)
+                network = utils.get_network_name(ip=father_ip)
             )
             uri.port = assigment_ports[port]
             uri_slot.uri.append(uri)
@@ -286,8 +296,8 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             instance.instance.uri_slot.append(uri_slot)
 
     instance.instance.api.CopyFrom(service.api)
-    instance.token.value_string = peer_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
-    l.LOGGER('Thrown out a new instance by ' + peer_ip + ' of the container_id ' + container.id)
+    instance.token.value_string = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
+    l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
     return instance
 
 
@@ -344,7 +354,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     return launch_service(
                         service = get_from_registry(r.hash.split(':')[1]),
                         config = configuration,
-                        peer_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
+                        father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
                     )
                 except Exception as e:
                     l.LOGGER('Exception launching a service ' + str(e))
@@ -361,7 +371,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 return launch_service(
                     service = r.service,
                     config = configuration,
-                    peer_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
+                    father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
                 )
         
         raise Exception('Was imposible start the service.')
@@ -370,15 +380,16 @@ class Gateway(gateway_pb2_grpc.Gateway):
         
         if utils.get_network_name(request.value_string.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
             purgue_internal(
-                peer_ip=request.value_string.split('##')[0],
-                container_id=request.value_string.split('##')[2],
-                container_ip=request.value_string.split('##')[1]
+                father_ip = request.value_string.split('##')[0],
+                container_id = request.value_string.split('##')[2],
+                container_ip = request.value_string.split('##')[1]
             )
         
         else:
             purgue_external(
-                node_ip=request.value_string.split('##')[0],
-                token=request.value_string.split('##')[1]
+                father_ip = request.value_string.split('##')[0],
+                node_ip = request.value_string.split('##')[1],
+                token = request.value_string[len( request.value_string.split('##')[1] ) + 1:] # Por si el token comienza en # ...
             )
         
         l.LOGGER('Stopped the instance with token -> ' + request.value_string)
@@ -386,11 +397,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
     
     def Hynode(self, request: gateway_pb2.ipss__pb2.Instance, context):
         l.LOGGER('\nAdding peer ' + str(request))
-        insert_instance_on_mongo(instance=request)
+        insert_instance_on_mongo(instance = request)
         return generate_gateway_instance(
             network = utils.get_network_name(
                 ip = utils.get_only_the_ip_from_context(
-                    context_peer=context.peer()
+                    context_peer = context.peer()
                 )
             )
         )
@@ -405,14 +416,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if r.HasField('hash') and "sha3-256" == r.hash.split(':')[0] \
                         and r.hash.split(':')[1] in service_registry:
                     return get_from_registry(
-                        hash=r.hash.split(':')[1]
+                        hash = r.hash.split(':')[1]
                     )
                 
                 # Si me da servicio.
                 if r.HasField('service'):
-                    hash = get_service_hash(service=r.service, hash_type="sha3-256") 
+                    hash = get_service_hash(service = r.service, hash_type="sha3-256") 
                     if hash in service_registry:
-                        return get_from_registry(hash=hash)
+                        return get_from_registry(hash = hash)
             except:
                 pass
 
