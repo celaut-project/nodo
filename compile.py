@@ -11,7 +11,6 @@ LOGGER = lambda message: logging.getLogger(__name__).debug(message)
 
 import sys
 import json
-from subprocess import run, check_output
 import os
 import gateway_pb2
 from verify import get_service_list_of_hashes, calculate_hashes
