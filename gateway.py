@@ -86,13 +86,15 @@ def purgue_internal(peer_ip, container_id, container_ip):
         DOCKER_CLIENT.containers.get(container_id).remove(force=True)
     except docker_lib.errors.APIError:
         l.LOGGER('ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
+
     cache_lock.acquire()
+
     cache[peer_ip].remove(container_ip + '##' + container_id)
     for dependency in cache[container_ip]:
         # Si la dependencia esta en local.
         if utils.get_network_name(ip = dependency.split('##')[0]) == DOCKER_NETWORK:
             purgue_internal(
-                peer_ip=container_id,
+                peer_ip=container_ip,
                 container_id=dependency.split('##')[1],
                 container_ip=dependency.split('##')[0]
             )
@@ -100,15 +102,25 @@ def purgue_internal(peer_ip, container_id, container_ip):
         else:
             purgue_external(
                 node_ip=dependency.split('##')[0],
-                token=dependency[len(dependency.split('##')[0]) + 1:]
+                token=dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
             )
+    del cache[container_ip]
+
     cache_lock.release()
 
 
 def purgue_external(node_ip, token):
     cache_lock.acquire()
+
     cache[node_ip].remove(token)
-    # peer_stubs[node_ip](token) # Le manda al otro nodo que elimine esa instancia.
+    # Le manda al otro nodo que elimine esa instancia.
+    try:
+        gateway_pb2_grpc.Gateway(
+            grpc.insecure_channel(node_ip)
+        ).StopService(token)
+    except grpc.RpcError as e:
+        l.LOGGER('Error during remove a container on ' + node_ip + str(e))
+
     cache_lock.release()
 
 
