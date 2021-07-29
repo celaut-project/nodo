@@ -91,6 +91,8 @@ def purgue_internal(father_ip, container_id, container_ip):
         cache[father_ip].remove(container_ip + '##' + container_id)
     except ValueError as e:
         l.LOGGER(str(e) + str(cache[father_ip]) + 'trying to remove ' + container_ip + '##' + container_id)
+    except KeyError as e:
+        l.LOGGER(str(e) + father_ip + ' not in ' + str(cache.keys()))
 
     if container_ip in cache:
         for dependency in cache[container_ip]:
@@ -124,6 +126,8 @@ def purgue_external(father_ip, node_uri, token):
         cache[father_ip].remove(node_uri + '##' + token)
     except ValueError as e:
         l.LOGGER(str(e) + str(cache[father_ip]) + 'trying to remove ' + node_uri + '##' + token)
+    except KeyError as e:
+        l.LOGGER(str(e) + father_ip + ' not in ' + str(cache.keys()))
 
     # Le manda al otro nodo que elimine esa instancia.
     try:
