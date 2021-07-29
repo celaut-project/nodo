@@ -22,7 +22,7 @@ class GatewayStub(object):
                 )
         self.StopService = channel.unary_unary(
                 '/gateway.Gateway/StopService',
-                request_serializer=gateway__pb2.Token.SerializeToString,
+                request_serializer=gateway__pb2.TokenMessage.SerializeToString,
                 response_deserializer=gateway__pb2.Empty.FromString,
                 )
         self.Hynode = channel.unary_unary(
@@ -85,7 +85,7 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'StopService': grpc.unary_unary_rpc_method_handler(
                     servicer.StopService,
-                    request_deserializer=gateway__pb2.Token.FromString,
+                    request_deserializer=gateway__pb2.TokenMessage.FromString,
                     response_serializer=gateway__pb2.Empty.SerializeToString,
             ),
             'Hynode': grpc.unary_unary_rpc_method_handler(
@@ -142,7 +142,7 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/gateway.Gateway/StopService',
-            gateway__pb2.Token.SerializeToString,
+            gateway__pb2.TokenMessage.SerializeToString,
             gateway__pb2.Empty.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
