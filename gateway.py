@@ -403,7 +403,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             purgue_external(
                 father_ip = request.token.split('##')[0],
                 node_uri = request.token.split('##')[1],
-                token = request[len( request.token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
+                token = request.token[len( request.token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
             )
         
         l.LOGGER('Stopped the instance with token -> ' + request.token)
