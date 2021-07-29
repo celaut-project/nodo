@@ -392,21 +392,21 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def StopService(self, request, context):
         
-        if utils.get_network_name(ip_or_uri = request.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
+        if utils.get_network_name(ip_or_uri = request.token.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
             purgue_internal(
-                father_ip = request.split('##')[0],
-                container_id = request.split('##')[2],
-                container_ip = request.split('##')[1]
+                father_ip = request.token.split('##')[0],
+                container_id = request.token.split('##')[2],
+                container_ip = request.token.split('##')[1]
             )
         
         else:
             purgue_external(
-                father_ip = request.split('##')[0],
-                node_uri = request.split('##')[1],
-                token = request[len( request.split('##')[1] ) + 1:] # Por si el token comienza en # ...
+                father_ip = request.token.split('##')[0],
+                node_uri = request.token.split('##')[1],
+                token = request[len( request.token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
             )
         
-        l.LOGGER('Stopped the instance with token -> ' + request)
+        l.LOGGER('Stopped the instance with token -> ' + request.token)
         return gateway_pb2.Empty()
     
     def Hynode(self, request: gateway_pb2.ipss__pb2.Instance, context):
