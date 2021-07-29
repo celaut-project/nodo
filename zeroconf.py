@@ -61,7 +61,7 @@ if __name__ == "__main__":
                 )
             ).Hynode(
                 generate_gateway_instance(
-                    network=get_network_name(ip=sys.argv[1])
+                    network=get_network_name(ip_or_uri=sys.argv[1])
                 )
             )
     )

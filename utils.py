@@ -50,19 +50,19 @@ get_only_the_ip_from_context = lambda context_peer: context_peer[5:-1*(len(conte
 
 get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
 
-def address_in_network(ip,net):
+def address_in_network( ip_or_uri, net):
     #  Return if the ip network portion (addr and broadcast common) is in the ip.
     return longestSubstringFinder(
         string1=ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
         string2=ni.ifaddresses(net)[ni.AF_INET][0]['broadcast']
-    ) in ip
+    ) in ip_or_uri
 
 
-def get_network_name(ip:str) -> str:
+def get_network_name( ip_or_uri: str) -> str:
     #  https://stackoverflow.com/questions/819355/how-can-i-check-if-an-ip-is-in-a-network-in-python
     for network in ni.interfaces():
         try:
-            if address_in_network(ip=ip, net=network):
+            if address_in_network(ip_or_uri = ip_or_uri, net = network):
                 return network
         except KeyError:
             continue
