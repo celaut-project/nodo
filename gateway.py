@@ -63,7 +63,7 @@ cache = {}  # ip:[dependencies]
 #   nosotros a nuestro servicio solicitante le daremos un token con el formato node_ip##his_token.
 
 
-def set_on_cache( father_ip : str, id_or_token: str, ip: str, node_port: str = None):
+def set_on_cache( father_ip : str, id_or_token: str, ip_or_uri: str):
     
 
     # En caso de ser un nodo externo:
@@ -74,20 +74,9 @@ def set_on_cache( father_ip : str, id_or_token: str, ip: str, node_port: str = N
         # Si peer_ip es un servicio del nodo ya
         # debería estar en el registro.
 
-    # Añade el nuevo servicio como dependencia.
-    
-    # En caso de ser un servicio que se ejecuta en otro nodo, se le añade tambien el puerto de este.
-    if node_port:
-        cache[father_ip].append(ip + ':' + node_port + '##' + id_or_token)
-    
-    # En caso de ser un servicio local añade la ip del servicio en cache (por si se le añaden dependencias).
-    else:
-        cache[father_ip].append(ip + '##' + id_or_token)
 
-        # Si es interno Añade el servicio creado en el registro.
-        cache_lock.acquire()
-        cache.update({ip: []})
-        cache_lock.release()
+    # Añade el nuevo servicio como dependencia.
+    cache[father_ip].append(ip_or_uri + '##' + id_or_token)
 
 
 def purgue_internal(father_ip, container_id, container_ip):
@@ -98,23 +87,32 @@ def purgue_internal(father_ip, container_id, container_ip):
 
     cache_lock.acquire()
 
-    cache[father_ip].remove(container_ip + '##' + container_id)
-    for dependency in cache[container_ip]:
-        # Si la dependencia esta en local.
-        if utils.get_network_name(ip_or_uri = dependency.split('##')[0]) == DOCKER_NETWORK:
-            purgue_internal(
-                father_ip = container_ip,
-                container_id = dependency.split('##')[1],
-                container_ip = dependency.split('##')[0]
-            )
-        # Si la dependencia se encuentra en otro nodo.
-        else:
-            purgue_external(
-                father_ip = father_ip,
-                node_uri = dependency.split('##')[0],
-                token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
-            )
-    del cache[container_ip]
+    try:
+        cache[father_ip].remove(container_ip + '##' + container_id)
+    except ValueError as e:
+        l.LOGGER(str(e) + str(cache[father_ip]) + 'trying to remove ' + container_ip + '##' + container_id)
+
+    if container_ip in cache:
+        for dependency in cache[container_ip]:
+            # Si la dependencia esta en local.
+            if utils.get_network_name(ip_or_uri = dependency.split('##')[0]) == DOCKER_NETWORK:
+                purgue_internal(
+                    father_ip = container_ip,
+                    container_id = dependency.split('##')[1],
+                    container_ip = dependency.split('##')[0]
+                )
+            # Si la dependencia se encuentra en otro nodo.
+            else:
+                purgue_external(
+                    father_ip = father_ip,
+                    node_uri = dependency.split('##')[0],
+                    token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
+                )
+
+        try:
+            del cache[container_ip]
+        except KeyError as e:
+            l.LOGGER(str(e) + container_ip + ' not in ' + str(cache.keys()))
 
     cache_lock.release()
 
@@ -125,15 +123,19 @@ def purgue_external(father_ip, node_uri, token):
     try:
         cache[father_ip].remove(node_uri + '##' + token)
     except ValueError as e:
-        l.LOGGER(str(e) + cache[father_ip] + '\n')
+        l.LOGGER(str(e) + str(cache[father_ip]) + 'trying to remove ' + node_uri + '##' + token)
 
     # Le manda al otro nodo que elimine esa instancia.
     try:
         gateway_pb2_grpc.Gateway(
             grpc.insecure_channel(node_uri)
-        ).StopService(token)
+        ).StopService(
+             gateway_pb2.TokenMessage(
+                token = token
+            )
+        )
     except grpc.RpcError as e:
-        l.LOGGER('Error during remove a container on ' + node_uri + str(e))
+        l.LOGGER('Error during remove a container on ' + node_uri + ' ' + str(e))
 
     cache_lock.release()
 
@@ -170,6 +172,7 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
     except docker_lib.errors.APIError:
         l.LOGGER('DOCKER API ERROR ')
 
+
 def service_balancer():
     try:
         peer_list = list(pymongo.MongoClient(
@@ -196,7 +199,7 @@ def service_balancer():
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, father_ip: str):
-    l.LOGGER('\nGo to launch a service.\n')
+    l.LOGGER('\nGo to launch a service.')
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer()
@@ -214,11 +217,10 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             )
             set_on_cache(
                 father_ip = father_ip,
-                ip = node_uri.ip,
-                id_or_token = service_instance.token.value_string,
-                node_port = str(node_uri.port)
+                ip_or_uri =  node_uri.ip + ':' +  str(node_uri.port), # Add node_uri.
+                id_or_token = service_instance.token  # Add token.
             )
-            service_instance.token.value_string = father_ip + '##' + node_uri.ip + '##' + service_instance.token.value_string
+            service_instance.token = father_ip + '##' + node_uri.ip + '##' + service_instance.token
             return service_instance
         except Exception as e:
             l.LOGGER('Failed starting a service on peer, occurs the eror: ' + str(e))
@@ -247,12 +249,12 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
 
         # Reload this object from the server again and update attrs with the new data.
         container.reload()
-        container_ip=container.attrs['NetworkSettings']['IPAddress']
+        container_ip = container.attrs['NetworkSettings']['IPAddress']
 
         set_on_cache(
-            father_ip=father_ip,
-            id_or_token=container.id,
-            ip=container_ip
+            father_ip = father_ip,
+            id_or_token = container.id, 
+            ip_or_uri = container_ip
         )
 
         for slot in service.api.slot:
@@ -288,9 +290,9 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
         container.reload()
 
         set_on_cache(
-            father_ip=father_ip,
-            id_or_token=container.id,
-            ip=container.attrs['NetworkSettings']['IPAddress']
+            father_ip = father_ip,
+            id_or_token = container.id,
+            ip_or_uri = container.attrs['NetworkSettings']['IPAddress']
         )
 
         for port in assigment_ports:
@@ -308,7 +310,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
             instance.instance.uri_slot.append(uri_slot)
 
     instance.instance.api.CopyFrom(service.api)
-    instance.token.value_string = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
+    instance.token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
     l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
     return instance
 
@@ -390,21 +392,21 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def StopService(self, request, context):
         
-        if utils.get_network_name(ip_or_uri = request.value_string.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
+        if utils.get_network_name(ip_or_uri = request.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
             purgue_internal(
-                father_ip = request.value_string.split('##')[0],
-                container_id = request.value_string.split('##')[2],
-                container_ip = request.value_string.split('##')[1]
+                father_ip = request.split('##')[0],
+                container_id = request.split('##')[2],
+                container_ip = request.split('##')[1]
             )
         
         else:
             purgue_external(
-                father_ip = request.value_string.split('##')[0],
-                node_uri = request.value_string.split('##')[1],
-                token = request.value_string[len( request.value_string.split('##')[1] ) + 1:] # Por si el token comienza en # ...
+                father_ip = request.split('##')[0],
+                node_uri = request.split('##')[1],
+                token = request[len( request.split('##')[1] ) + 1:] # Por si el token comienza en # ...
             )
         
-        l.LOGGER('Stopped the instance with token -> ' + request.value_string)
+        l.LOGGER('Stopped the instance with token -> ' + request)
         return gateway_pb2.Empty()
     
     def Hynode(self, request: gateway_pb2.ipss__pb2.Instance, context):

@@ -2,19 +2,15 @@ syntax = "proto3";
 package gateway;
 import "ipss.proto";
 
-message Token {
-    oneof oneOf {
-        int32 value_int32 = 1;
-        int64 value_int64 = 2;
-        string value_string = 3;
-    }   
-}
-
 message Empty {}
+
+message TokenMessage {
+    string token = 1;
+}
 
 message Instance {
     ipss.Instance instance = 1;
-    Token token = 2;
+    string token = 2;
 }
 
 message ServiceTransport {
@@ -31,7 +27,7 @@ message Chunk  {
 
 service Gateway {
     rpc StartService( stream ServiceTransport) returns (Instance) {}
-    rpc StopService(Token) returns (Empty) {}
+    rpc StopService(TokenMessage) returns (Empty) {}
     rpc Hynode(ipss.Instance) returns (ipss.Instance) {}
     
     rpc GetServiceTar(stream ServiceTransport) returns (stream Chunk) {}
