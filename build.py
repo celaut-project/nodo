@@ -33,7 +33,7 @@ def build(service: gateway_pb2.ipss__pb2.Service):
                     chunks = gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(peer_uri['ip'] + ':' + str(peer_uri['port']))
                             ).GetServiceTar(
-                                service_extended(service=service)
+                                service_extended(service = service)
                             )
                 )
                 

@@ -13,7 +13,7 @@ from google.protobuf.json_format import Parse
 import docker as docker_lib
 import netifaces as ni
 
-DOCKER_CLIENT = docker_lib.from_env()
+DOCKER_CLIENT = lambda: docker_lib.from_env()
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 GATEWAY_PORT = 8080
@@ -82,7 +82,7 @@ def set_on_cache( father_ip : str, id_or_token: str, ip_or_uri: str):
 
 def purgue_internal(father_ip, container_id, container_ip):
     try:
-        DOCKER_CLIENT.containers.get(container_id).remove(force=True)
+        DOCKER_CLIENT().containers.get(container_id).remove(force=True)
     except docker_lib.errors.APIError:
         l.LOGGER('ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
 
@@ -172,7 +172,7 @@ def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
 
 def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_lib.models.containers.Container:
     try:
-        return DOCKER_CLIENT.containers.create(
+        return DOCKER_CLIENT().containers.create(
             image = id+'.service',
             entrypoint = entrypoint,
             ports = use_other_ports
