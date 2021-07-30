@@ -77,6 +77,7 @@ def set_on_cache( father_ip : str, id_or_token: str, ip_or_uri: str):
 
     # Añade el nuevo servicio como dependencia.
     cache[father_ip].append(ip_or_uri + '##' + id_or_token)
+    l.LOGGER('Set on cache ' + ip_or_uri + '##' + id_or_token + ' as dependency of ' + father_ip )
 
 
 def purgue_internal(father_ip, container_id, container_ip):
@@ -120,12 +121,17 @@ def purgue_internal(father_ip, container_id, container_ip):
 
 
 def purgue_external(father_ip, node_uri, token):
+    # EN NODE_URI LLEGA UNA IP ¿?
+    if len(node_uri.split(':')) < 2:
+        l.LOGGER('Should be an uri not an ip. Something was wrong. The node uri is ' + node_uri)
+        return None
+    
     cache_lock.acquire()
-
+    
     try:
         cache[father_ip].remove(node_uri + '##' + token)
     except ValueError as e:
-        l.LOGGER(str(e) + str(cache[father_ip]) + 'trying to remove ' + node_uri + '##' + token)
+        l.LOGGER(str(e) + str(cache[father_ip]) + ' trying to remove ' + node_uri + '##' + token)
     except KeyError as e:
         l.LOGGER(str(e) + father_ip + ' not in ' + str(cache.keys()))
 
@@ -395,6 +401,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
         raise Exception('Was imposible start the service.')
 
     def StopService(self, request, context):
+
+        l.LOGGER('Stopping the service with toke ' + request.token)
         
         if utils.get_network_name(ip_or_uri = request.token.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
             purgue_internal(
