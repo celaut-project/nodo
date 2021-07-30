@@ -40,6 +40,11 @@ class GatewayStub(object):
                 request_serializer=gateway__pb2.ServiceTransport.SerializeToString,
                 response_deserializer=ipss__pb2.Service.FromString,
                 )
+        self.GetServiceCost = channel.stream_unary(
+                '/gateway.Gateway/GetServiceCost',
+                request_serializer=gateway__pb2.ServiceTransport.SerializeToString,
+                response_deserializer=gateway__pb2.CostMessage.FromString,
+                )
 
 
 class GatewayServicer(object):
@@ -75,6 +80,12 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetServiceCost(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_GatewayServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -102,6 +113,11 @@ def add_GatewayServicer_to_server(servicer, server):
                     servicer.GetServiceDef,
                     request_deserializer=gateway__pb2.ServiceTransport.FromString,
                     response_serializer=ipss__pb2.Service.SerializeToString,
+            ),
+            'GetServiceCost': grpc.stream_unary_rpc_method_handler(
+                    servicer.GetServiceCost,
+                    request_deserializer=gateway__pb2.ServiceTransport.FromString,
+                    response_serializer=gateway__pb2.CostMessage.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -195,5 +211,22 @@ class Gateway(object):
         return grpc.experimental.stream_unary(request_iterator, target, '/gateway.Gateway/GetServiceDef',
             gateway__pb2.ServiceTransport.SerializeToString,
             ipss__pb2.Service.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetServiceCost(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(request_iterator, target, '/gateway.Gateway/GetServiceCost',
+            gateway__pb2.ServiceTransport.SerializeToString,
+            gateway__pb2.CostMessage.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

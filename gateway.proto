@@ -8,6 +8,11 @@ message TokenMessage {
     string token = 1;
 }
 
+message CostMessage {
+    int32 cost = 1;
+}
+
+
 message Instance {
     ipss.Instance instance = 1;
     string token = 2;
@@ -32,4 +37,5 @@ service Gateway {
     
     rpc GetServiceTar(stream ServiceTransport) returns (stream Chunk) {}
     rpc GetServiceDef(stream ServiceTransport) returns (ipss.Service) {}
+    rpc GetServiceCost(stream ServiceTransport) returns (CostMessage) {}
 }

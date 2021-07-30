@@ -183,25 +183,38 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
         l.LOGGER('DOCKER API ERROR ')
 
 
-def service_balancer():
+execution_cost = lambda: len(DOCKER_CLIENT().containers.list())
+
+def service_balancer() -> gateway_pb2.ipss__pb2.Instance or None:
     try:
         peer_list = list(pymongo.MongoClient(
                         "mongodb://localhost:27017/"
                     )["mongo"]["peerInstances"].find())
         peer_list_length = len(peer_list)
         l.LOGGER('    Peer list length of ' + str(peer_list_length))
-
-        i = random.randint(0, peer_list_length*2) # Tiene mas probabilidades de que toque en local que en un nodo externo.
-        l.LOGGER('    Using the peer ' + str(i))
-        if i < peer_list_length:
-            del peer_list[i]['_id']
-            return Parse(
-                text = json.dumps(peer_list[i]),
+        
+        min_cost = execution_cost()
+        best_peer = None
+        for peer in peer_list:
+            del peer['_id']
+            peer_instance = Parse(
+                text = json.dumps(peer),
                 message = gateway_pb2.ipss__pb2.Instance(),
                 ignore_unknown_fields = True
             )
-        else:
-            return None
+            peer_uri = utils.get_grpc_uri(instance = peer_instance)
+            cost = gateway_pb2_grpc.GatewayStub(
+                grpc.insecure_channel(
+                    peer_uri.ip + ':' +  str(peer_uri.port)
+                )
+            ).GetServiceCost(
+                gateway_pb2.ServiceTransport() # No le especifica el servicio que quiere ejecutar en él.
+            )
+            if cost < min_cost: 
+                min_cost = cost
+                best_peer = peer_instance
+
+        return best_peer
 
     except Exception as e:
         l.LOGGER('Error during balancer, ' + str(e))
@@ -209,11 +222,11 @@ def service_balancer():
 
 
 def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, father_ip: str):
-    l.LOGGER('\nGo to launch a service.')
+    l.LOGGER('Go to launch a service.')
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer()
-    l.LOGGER('\nBalancer select peer ' + str(node_instance))
+    l.LOGGER('Balancer select peer ' + str(node_instance))
     if node_instance:
         try:
             node_uri = utils.get_grpc_uri(node_instance)
@@ -486,6 +499,18 @@ class Gateway(gateway_pb2_grpc.Gateway):
             l.LOGGER('The service '+ hash + ' was not found.')
 
         raise Exception('Was imposible get the service container.')
+
+
+    def GetServiceCost(self, request_iterator, context):
+        # It does not use the service.
+
+        cost = execution_cost()
+        l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
+        return gateway_pb2.CostMessage(
+            cost = cost
+        )
+
+
 
 if __name__ == "__main__":
     from zeroconf import Zeroconf

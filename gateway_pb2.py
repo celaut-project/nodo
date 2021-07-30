@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\nipss.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\";\n\x08Instance\x12 \n\x08instance\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12\r\n\x05token\x18\x02 \x01(\t\"\x82\x01\n\x10ServiceTransport\x12\x0e\n\x04hash\x18\x01 \x01(\tH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"\x17\n\x05\x43hunk\x12\x0e\n\x06\x62uffer\x18\x01 \x01(\x0c\x32\xb0\x02\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12\x36\n\x0bStopService\x12\x15.gateway.TokenMessage\x1a\x0e.gateway.Empty\"\x00\x12*\n\x06Hynode\x12\x0e.ipss.Instance\x1a\x0e.ipss.Instance\"\x00\x12@\n\rGetServiceTar\x12\x19.gateway.ServiceTransport\x1a\x0e.gateway.Chunk\"\x00(\x01\x30\x01\x12=\n\rGetServiceDef\x12\x19.gateway.ServiceTransport\x1a\r.ipss.Service\"\x00(\x01\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\nipss.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"\x1b\n\x0b\x43ostMessage\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x05\";\n\x08Instance\x12 \n\x08instance\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12\r\n\x05token\x18\x02 \x01(\t\"\x82\x01\n\x10ServiceTransport\x12\x0e\n\x04hash\x18\x01 \x01(\tH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"\x17\n\x05\x43hunk\x12\x0e\n\x06\x62uffer\x18\x01 \x01(\x0c\x32\xf7\x02\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12\x36\n\x0bStopService\x12\x15.gateway.TokenMessage\x1a\x0e.gateway.Empty\"\x00\x12*\n\x06Hynode\x12\x0e.ipss.Instance\x1a\x0e.ipss.Instance\"\x00\x12@\n\rGetServiceTar\x12\x19.gateway.ServiceTransport\x1a\x0e.gateway.Chunk\"\x00(\x01\x30\x01\x12=\n\rGetServiceDef\x12\x19.gateway.ServiceTransport\x1a\r.ipss.Service\"\x00(\x01\x12\x45\n\x0eGetServiceCost\x12\x19.gateway.ServiceTransport\x1a\x14.gateway.CostMessage\"\x00(\x01\x62\x06proto3'
   ,
   dependencies=[ipss__pb2.DESCRIPTOR,])
 
@@ -84,6 +84,38 @@ _TOKENMESSAGE = _descriptor.Descriptor(
 )
 
 
+_COSTMESSAGE = _descriptor.Descriptor(
+  name='CostMessage',
+  full_name='gateway.CostMessage',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='cost', full_name='gateway.CostMessage.cost', index=0,
+      number=1, type=5, cpp_type=1, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=78,
+  serialized_end=105,
+)
+
+
 _INSTANCE = _descriptor.Descriptor(
   name='Instance',
   full_name='gateway.Instance',
@@ -118,8 +150,8 @@ _INSTANCE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=78,
-  serialized_end=137,
+  serialized_start=107,
+  serialized_end=166,
 )
 
 
@@ -174,8 +206,8 @@ _SERVICETRANSPORT = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=140,
-  serialized_end=270,
+  serialized_start=169,
+  serialized_end=299,
 )
 
 
@@ -206,8 +238,8 @@ _CHUNK = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=272,
-  serialized_end=295,
+  serialized_start=301,
+  serialized_end=324,
 )
 
 _INSTANCE.fields_by_name['instance'].message_type = ipss__pb2._INSTANCE
@@ -224,6 +256,7 @@ _SERVICETRANSPORT.oneofs_by_name['_config'].fields.append(
 _SERVICETRANSPORT.fields_by_name['config'].containing_oneof = _SERVICETRANSPORT.oneofs_by_name['_config']
 DESCRIPTOR.message_types_by_name['Empty'] = _EMPTY
 DESCRIPTOR.message_types_by_name['TokenMessage'] = _TOKENMESSAGE
+DESCRIPTOR.message_types_by_name['CostMessage'] = _COSTMESSAGE
 DESCRIPTOR.message_types_by_name['Instance'] = _INSTANCE
 DESCRIPTOR.message_types_by_name['ServiceTransport'] = _SERVICETRANSPORT
 DESCRIPTOR.message_types_by_name['Chunk'] = _CHUNK
@@ -242,6 +275,13 @@ TokenMessage = _reflection.GeneratedProtocolMessageType('TokenMessage', (_messag
   # @@protoc_insertion_point(class_scope:gateway.TokenMessage)
   })
 _sym_db.RegisterMessage(TokenMessage)
+
+CostMessage = _reflection.GeneratedProtocolMessageType('CostMessage', (_message.Message,), {
+  'DESCRIPTOR' : _COSTMESSAGE,
+  '__module__' : 'gateway_pb2'
+  # @@protoc_insertion_point(class_scope:gateway.CostMessage)
+  })
+_sym_db.RegisterMessage(CostMessage)
 
 Instance = _reflection.GeneratedProtocolMessageType('Instance', (_message.Message,), {
   'DESCRIPTOR' : _INSTANCE,
@@ -273,8 +313,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=298,
-  serialized_end=602,
+  serialized_start=327,
+  serialized_end=702,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',
@@ -323,6 +363,16 @@ _GATEWAY = _descriptor.ServiceDescriptor(
     containing_service=None,
     input_type=_SERVICETRANSPORT,
     output_type=ipss__pb2._SERVICE,
+    serialized_options=None,
+    create_key=_descriptor._internal_create_key,
+  ),
+  _descriptor.MethodDescriptor(
+    name='GetServiceCost',
+    full_name='gateway.Gateway.GetServiceCost',
+    index=5,
+    containing_service=None,
+    input_type=_SERVICETRANSPORT,
+    output_type=_COSTMESSAGE,
     serialized_options=None,
     create_key=_descriptor._internal_create_key,
   ),
