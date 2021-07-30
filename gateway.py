@@ -209,7 +209,7 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
                 )
             ).GetServiceCost(
                 utils.service_extended(service = service)
-            )
+            ).cost
             if cost < min_cost: 
                 min_cost = cost
                 best_peer = peer_instance
