@@ -3,7 +3,7 @@ import build, utils
 from compile import REGISTRY, HYCACHE
 import logger as l
 from verify import get_service_hash
-import subprocess, os, socket, threading, random
+import subprocess, os, threading, random
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
 from grpc_reflection.v1alpha import reflection
@@ -27,7 +27,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.ipss__pb2.Instance:
         uri.ip = ni.ifaddresses(network)[ni.AF_INET][0]['addr']
     except ValueError as e:
         l.LOGGER('You must specify a valid interface name ' + network)
-        raise Exception('Error generating gateway instance --> ' + str(e))        
+        raise Exception('Error generating gateway instance --> ' + str(e))
     uri.port = GATEWAY_PORT
     uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT
