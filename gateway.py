@@ -185,7 +185,7 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
 
 execution_cost = lambda: len(DOCKER_CLIENT().containers.list())
 
-def service_balancer() -> gateway_pb2.ipss__pb2.Instance or None:
+def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss__pb2.Instance or None:
     try:
         peer_list = list(pymongo.MongoClient(
                         "mongodb://localhost:27017/"
@@ -208,7 +208,7 @@ def service_balancer() -> gateway_pb2.ipss__pb2.Instance or None:
                     peer_uri.ip + ':' +  str(peer_uri.port)
                 )
             ).GetServiceCost(
-                gateway_pb2.ServiceTransport() # No le especifica el servicio que quiere ejecutar en él.
+                utils.service_extended(service = service)
             )
             if cost < min_cost: 
                 min_cost = cost
@@ -225,7 +225,9 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
     l.LOGGER('Go to launch a service.')
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
-    node_instance = service_balancer()
+    node_instance = service_balancer(
+        service = service
+    )
     l.LOGGER('Balancer select peer ' + str(node_instance))
     if node_instance:
         try:
@@ -236,7 +238,10 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.i
                     node_uri.ip + ':' +  str(node_uri.port)
                 )
             ).StartService(
-                utils.service_extended(service=service, config=config)
+                utils.service_extended(
+                    service = service, 
+                    config = config
+                )
             )
             set_on_cache(
                 father_ip = father_ip,
