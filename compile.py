@@ -171,7 +171,7 @@ if __name__ == "__main__":
     repo = git.split('::')[0]
     branch = git.split('::')[1]
     os.system('git clone --branch '+branch+' '+repo+' '+HYCACHE+aux_id+'/for_build/git')
-    l.LOGGER(os.listdir(HYCACHE+aux_id+'/for_build/git/.service/'))
+    l.LOGGER(str(os.listdir(HYCACHE+aux_id+'/for_build/git/.service/')))
     id = ok(path=HYCACHE+aux_id+'/for_build/git/.service/', aux_id=aux_id)  # Hyperfile
 
     os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.service')
