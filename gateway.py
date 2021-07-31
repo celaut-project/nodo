@@ -363,6 +363,7 @@ def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.i
     if ignore_network: raise Exception # Not implemented now.
 
     #  Search a service description.
+    service = None
     peers = list(pymongo.MongoClient(
                 "mongodb://localhost:27017/"
             )["mongo"]["peerInstances"].find())
@@ -420,7 +421,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             if r.HasField('hash'):
                 hashes.append(r.hash)
                 if configuration and "sha3-256" == r.hash.split(':')[0] and \
-                    r.hash in [s[:-8] for s in os.listdir(REGISTRY)]:
+                    r.hash.split(':')[1] in [s[:-8] for s in os.listdir(REGISTRY)]:
                     try:
                         return launch_service(
                             service = get_from_registry(
@@ -494,8 +495,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
                 if r.HasField('hash'):
                     hashes.append(r.hash)
-                    if "sha3-256" == r.hash.split(':')[0] and\
-                        r.hash in [s[:-8] for s in os.listdir(REGISTRY)]:
+                    if "sha3-256" == r.hash.split(':')[0] and \
+                        r.hash.split(':')[1] in [s[:-8] for s in os.listdir(REGISTRY)]:
                         return get_from_registry(
                             hash = r.hash.split(':')[1]
                         )
