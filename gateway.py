@@ -222,7 +222,7 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
         return None
 
 
-def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration = None, father_ip: str):
+def launch_service(service: gateway_pb2.ipss__pb2.Service, father_ip: str, config: gateway_pb2.ipss__pb2.Configuration = None):
     l.LOGGER('Go to launch a service.')
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
