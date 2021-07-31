@@ -1,3 +1,4 @@
+from typing import Generator
 from ipss_pb2 import Slot
 import build, utils
 from compile import REGISTRY, HYCACHE
@@ -221,7 +222,7 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
         return None
 
 
-def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration, father_ip: str):
+def launch_service(service: gateway_pb2.ipss__pb2.Service, config: gateway_pb2.ipss__pb2.Configuration = None, father_ip: str):
     l.LOGGER('Go to launch a service.')
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
@@ -354,55 +355,61 @@ def save_service(service: gateway_pb2.ipss__pb2.Service):
             file.write(service.SerializeToString())
 
 
-def search_container(ignore_network, service: gateway_pb2.ipss__pb2.Service):
-    # Not implemented now.
-    raise Exception
+def search_container(ignore_network: str, service: gateway_pb2.ipss__pb2.Service) -> Generator:
+    raise Exception # Not implemented now.
 
 
-def search_definition(hash):
-    l.LOGGER('The service was not on registry.')
-    transport = gateway_pb2.ServiceTransport()
-    transport.hash = hash
+def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.ipss__pb2.Service:
+    if ignore_network: raise Exception # Not implemented now.
 
-    #  Search the service description.
+    #  Search a service description.
     peers = list(pymongo.MongoClient(
                 "mongodb://localhost:27017/"
             )["mongo"]["peerInstances"].find())
     for peer in peers:
         l.LOGGER('Looking for the service ' + hash + ' on peer ' + str(peer))
         peer_uri = peer['uriSlot'][0]['uri'][0]
-        service = gateway_pb2_grpc.GatewayStub(
-            grpc.insecure_channel(peer_uri['ip'] + ':' + str( peer_uri['port']))
-        ).GetServiceDef(
-            transport
-        )
+        try:
+            service = gateway_pb2_grpc.GatewayStub(
+                grpc.insecure_channel(peer_uri['ip'] + ':' + str( peer_uri['port']))
+            ).GetServiceDef(
+                utils.service_extended(
+                    service = gateway_pb2.ipss__pb2.Service(
+                        hash = hashes
+                    )
+                )
+            )
+            break
+        except: pass
     
     if service:
         #  Save the service on the registry.
         save_service(
             service = service
         )
+        return service 
 
     else:
         l.LOGGER('The service '+ hash + ' was not found.')
         raise Exception('The service ' + hash + ' was not found.')
 
-    return service 
 
-def get_from_registry(hash, search_out = False):
+def get_from_registry(hash):
     try:
         with open(REGISTRY + hash + '.service', 'rb') as file:
             service = gateway_pb2.ipss__pb2.Service()
             service.ParseFromString(file.read())
             return service
     except (IOError, FileNotFoundError):
-        return search_definition(hash = hash) if search_out else None
+        l.LOGGER('The service was not on registry.')
+        raise FileNotFoundError
 
 
 class Gateway(gateway_pb2_grpc.Gateway):
 
     def StartService(self, request_iterator, context):
         configuration = None
+        hashes = []
         for r in request_iterator:
 
             # Captura la configuracion si puede.
@@ -410,19 +417,21 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 configuration = r.config
             
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-            if r.HasField('hash') and configuration and "sha3-256" == r.hash.split(':')[0]:
-                try:
-                    return launch_service(
-                        service = get_from_registry(
-                            hash = r.hash.split(':')[1],
-                            search_out = True
-                        ),
-                        config = configuration,
-                        father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
-                    )
-                except Exception as e:
-                    l.LOGGER('Exception launching a service ' + str(e))
-                    continue
+            if r.HasField('hash'):
+                hashes.append(r.hash)
+                if configuration and "sha3-256" == r.hash.split(':')[0] and \
+                    r.hash in [s[:-8] for s in os.listdir(REGISTRY)]:
+                    try:
+                        return launch_service(
+                            service = get_from_registry(
+                                hash = r.hash.split(':')[1]
+                            ),
+                            config = configuration,
+                            father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
+                        )
+                    except Exception as e:
+                        l.LOGGER('Exception launching a service ' + str(e))
+                        continue
             
             # Si me da servicio.
             if r.HasField('service') and configuration:
@@ -433,7 +442,16 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
                 )
         
-        raise Exception('Was imposible start the service.')
+        l.LOGGER('The service is not in the registry and the request does not have the definition.')
+        
+        try:
+            return launch_service(
+                service = search_definition(hashes = hashes),
+                config = configuration,
+                father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
+            ) 
+        except Exception as e:
+            raise Exception('Was imposible start the service. ' + str(e))
 
 
     def StopService(self, request, context):
@@ -470,18 +488,27 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetServiceDef(self, request_iterator, context):
         l.LOGGER('Request for give a service definition')
+        hashes = []
         for r in request_iterator:
             try:
                 # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-                if r.HasField('hash') and "sha3-256" == r.hash.split(':')[0]:
-                    return get_from_registry(
-                        hash = r.hash.split(':')[1],
-                        search_out = False
-                    )
-            except:
-                pass
-
-        raise Exception('Was imposible get the service definition.')
+                if r.HasField('hash'):
+                    hashes.append(r.hash)
+                    if "sha3-256" == r.hash.split(':')[0] and\
+                        r.hash in [s[:-8] for s in os.listdir(REGISTRY)]:
+                        return get_from_registry(
+                            hash = r.hash.split(':')[1]
+                        )
+            except: pass
+        
+        # Puede buscar el contenedor en otra red distinta a la del solicitante.
+        try:
+            return search_definition(
+                ignore_network = utils.get_network_name(ip_or_uri = context.peer()),
+                hashes = hashes
+            )
+        except:
+            raise Exception('Was imposible get the service definition.')
 
     def GetServiceTar(self, request_iterator, context):
         l.LOGGER('Request for give a service container.')
