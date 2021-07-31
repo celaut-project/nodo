@@ -420,8 +420,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         config = configuration,
                         father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
                     )
-                except Exception as e:
-                    l.LOGGER('Exception launching a service ' + str(e))
+                except Exception as i:
+                    l.LOGGER('Exception launching a service ' + str(i))
                     continue
             
             # Si me da servicio.
