@@ -1,3 +1,4 @@
+from logger import LOGGER
 import hashlib
 from ipss_pb2 import Service
 from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
@@ -36,7 +37,6 @@ def get_service_hash(service: Service, hash_type: str) -> str:
             return hash.split(':')[1]
     
     # if not is_complete_service(service=service): return ''
-    from compile import LOGGER
     if hash_type == "sha3-256":
         return SHA3_256(
             value = prune_hashes_of_service(
