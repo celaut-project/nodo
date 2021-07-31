@@ -372,7 +372,7 @@ def search_definition(hash):
         l.LOGGER('Looking for the service ' + hash + ' on peer ' + str(peer))
         peer_uri = peer['uriSlot'][0]['uri'][0]
         service = gateway_pb2_grpc.GatewayStub(
-            grpc.insecure_channel(peer_uri['ip'] + ':' + peer_uri['port'])
+            grpc.insecure_channel(peer_uri['ip'] + ':' + str( peer_uri['port']))
         ).GetServiceDef(
             transport
         )
