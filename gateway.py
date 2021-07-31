@@ -360,7 +360,7 @@ def search_container(ignore_network, service: gateway_pb2.ipss__pb2.Service):
 
 
 def search_definition(hash):
-    l.LOGGER('Error opening the service on registry, ' + str(e))
+    l.LOGGER('The service was not on registry.')
     transport = gateway_pb2.ServiceTransport()
     transport.hash = hash
 
@@ -395,7 +395,7 @@ def get_from_registry(hash, search_out = False):
             service = gateway_pb2.ipss__pb2.Service()
             service.ParseFromString(file.read())
             return service
-    except (IOError, FileNotFoundError) as e:
+    except (IOError, FileNotFoundError):
         return search_definition(hash = hash) if search_out else None
 
 
@@ -420,8 +420,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         config = configuration,
                         father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
                     )
-                except Exception as i:
-                    l.LOGGER('Exception launching a service ' + str(i))
+                except Exception as e:
+                    l.LOGGER('Exception launching a service ' + str(e))
                     continue
             
             # Si me da servicio.
