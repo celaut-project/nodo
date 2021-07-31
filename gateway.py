@@ -367,7 +367,7 @@ def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.i
                 "mongodb://localhost:27017/"
             )["mongo"]["peerInstances"].find())
     for peer in peers:
-        l.LOGGER('Looking for the service ' + hash + ' on peer ' + str(peer))
+        l.LOGGER('  Looking for a service on peer ' + str(peer))
         peer_uri = peer['uriSlot'][0]['uri'][0]
         try:
             service = gateway_pb2_grpc.GatewayStub(
