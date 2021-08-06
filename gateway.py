@@ -457,7 +457,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def StopService(self, request, context):
 
-        l.LOGGER('Stopping the service with toke ' + request.token)
+        l.LOGGER('Stopping the service with token ' + request.token)
         
         if utils.get_network_name(ip_or_uri = request.token.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
             purgue_internal(
