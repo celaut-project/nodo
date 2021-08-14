@@ -3,7 +3,7 @@ import sys
 import json
 import os
 import gateway_pb2
-from verify import get_service_list_of_hashes, calculate_hashes
+from verify import SHA3_256, SHA3_256_ID, get_service_list_of_hashes, calculate_hashes, get_service_hex_hash
 
 # DIRECTORIES
 HYCACHE = "/home/hy/node/__hycache__/"
@@ -78,7 +78,7 @@ class Hyper:
 
         self.service.container.filesystem.CopyFrom( filesystem )
 
-        self.service.container.filesystem.hash.extend(
+        self.service.container.filesystem.hashtag.hash.extend(
             calculate_hashes( filesystem.SerializeToString() )
         )
 
@@ -98,7 +98,7 @@ class Hyper:
             self.service.container.entrypoint = self.json.get('entrypoint')
 
         # Arch
-        self.service.container.architecture.hash.append( self.json.get('architecture') )
+        self.service.container.architecture.hashtag.tag.append( self.json.get('architecture') )
 
         # Filesystem
         self.parseFilesys()
@@ -117,12 +117,12 @@ class Hyper:
                 # port.
                 slot.port = item.get('port')
                 # transport protocol.
-                slot.transport_protocol.hash.extend(item.get('protocol'))
+                slot.transport_protocol.hashtag.tag.extend(item.get('protocol'))
                 self.service.api.slot.append(slot)
 
     def parseLedger(self):
         if self.json.get('ledger'):
-            self.service.ledger.hash = self.json.get('ledger')
+            self.service.ledger.hashtag.tag = self.json.get('ledger')
 
     def parseTensor(self):
         tensor = self.json.get('tensor') or None
@@ -142,14 +142,12 @@ class Hyper:
                     self.service.tensor.index.append(variable)
 
     def save(self):
-        self.service.hash.extend(
+        self.service.hashtag.hash.extend(
             get_service_list_of_hashes(self.service)
         )
         # Once service hashes are calculated, we prune the filesystem for save storage.
         self.service.container.filesystem.ClearField('branch')
-        for hash in self.service.hash:
-            if "sha3-256" == hash[:8]:
-                id = hash[9:]
+        id = self.service.hashtag.hash[SHA3_256_ID].hex()
         with open( REGISTRY +id+ '.service', 'wb') as f:
             f.write( self.service.SerializeToString() )
         return id

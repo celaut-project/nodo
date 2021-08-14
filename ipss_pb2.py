@@ -19,7 +19,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\nipss.proto\x12\x04ipss\"9\n\x0cPrimitiveDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x12\n\x05regex\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x08\n\x06_regex\"m\n\x07\x45numDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\'\n\x05value\x18\x02 \x03(\x0b\x32\x18.ipss.EnumDef.ValueEntry\x1a,\n\nValueEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x05:\x02\x38\x01\"\x80\x01\n\x08\x46ieldDef\x12#\n\x07message\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDefH\x00\x12\'\n\tprimitive\x18\x02 \x01(\x0b\x32\x12.ipss.PrimitiveDefH\x00\x12\x1d\n\x04\x65num\x18\x03 \x01(\x0b\x32\r.ipss.EnumDefH\x00\x42\x07\n\x05value\"i\n\x08ParamDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x1d\n\x05\x66ield\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x10\n\x08repeated\x18\x04 \x01(\x08\x12\x10\n\x08optional\x18\x05 \x01(\x08\"\x19\n\x08OneofDef\x12\r\n\x05index\x18\x01 \x03(\x05\"W\n\nMessageDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1d\n\x05param\x18\x02 \x03(\x0b\x32\x0e.ipss.ParamDef\x12\x1d\n\x05oneof\x18\x03 \x03(\x0b\x32\x0e.ipss.OneofDef\"\xa9\x01\n\tMethodDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12%\n\rinput_message\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x17\n\x0fis_input_stream\x18\x04 \x01(\x08\x12&\n\x0eoutput_message\x18\x05 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x18\n\x10is_output_stream\x18\x06 \x01(\x08\">\n\x0e\x41pplicationDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1f\n\x06method\x18\x02 \x03(\x0b\x32\x0f.ipss.MethodDef\"3\n\x03\x41ny\x12\x1d\n\x05\x66ield\x18\x01 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\r\n\x05value\x18\x02 \x01(\x0c\"\x1c\n\x0cProtocolMesh\x12\x0c\n\x04hash\x18\x0f \x03(\t\"D\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12.\n\x12transport_protocol\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh\"K\n\x03\x41pi\x12*\n\x0c\x61pp_protocol\x18\x01 \x01(\x0b\x32\x14.ipss.ApplicationDef\x12\x18\n\x04slot\x18\x02 \x03(\x0b\x32\n.ipss.Slot\"\x1c\n\x0c\x41rchitecture\x12\x0c\n\x04hash\x18\x0f \x03(\t\"\xab\x01\n\nFilesystem\x12\x0c\n\x04hash\x18\x0f \x03(\t\x12\'\n\x06\x62ranch\x18\x01 \x03(\x0b\x32\x17.ipss.Filesystem.Branch\x1a\x66\n\x06\x42ranch\x12\x0e\n\x04\x66ile\x18\x01 \x01(\x0cH\x00\x12\x0e\n\x04link\x18\x02 \x01(\tH\x00\x12&\n\nfilesystem\x18\x03 \x01(\x0b\x32\x10.ipss.FilesystemH\x00\x12\x0c\n\x04name\x18\x04 \x01(\tB\x06\n\x04item\"\x83\x02\n\tContainer\x12(\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\x12.ipss.Architecture\x12$\n\nfilesystem\x18\x02 \x01(\x0b\x32\x10.ipss.Filesystem\x12\x46\n\x14\x65nviroment_variables\x18\x03 \x03(\x0b\x32(.ipss.Container.EnviromentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x01(\t\x1aJ\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1d\n\x05value\x18\x02 \x01(\x0b\x32\x0e.ipss.FieldDef:\x02\x38\x01\"\x88\x01\n\x06Tensor\x12\x0c\n\x04hash\x18\x0f \x03(\t\x12!\n\x05index\x18\x01 \x03(\x0b\x32\x12.ipss.Tensor.Index\x12\x0c\n\x04rank\x18\x02 \x01(\x05\x1a?\n\x05Index\x12\n\n\x02id\x18\x01 \x01(\t\x12\x1d\n\x05\x66ield\x18\x02 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x0b\n\x03tag\x18\x0f \x03(\t\"\x16\n\x06Ledger\x12\x0c\n\x04hash\x18\x0f \x03(\t\"\xb1\x01\n\x07Service\x12\x0c\n\x04hash\x18\x0f \x03(\t\x12 \n\x06syntax\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDef\x12\"\n\tcontainer\x18\x02 \x01(\x0b\x32\x0f.ipss.Container\x12\x16\n\x03\x61pi\x18\x03 \x01(\x0b\x32\t.ipss.Api\x12\x1c\n\x06tensor\x18\x04 \x01(\x0b\x32\x0c.ipss.Tensor\x12\x1c\n\x06ledger\x18\x05 \x01(\x0b\x32\x0c.ipss.Ledger\"\xb2\x01\n\x08Instance\x12\x16\n\x03\x61pi\x18\x01 \x01(\x0b\x32\t.ipss.Api\x12)\n\x08uri_slot\x18\x02 \x03(\x0b\x32\x17.ipss.Instance.Uri_Slot\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x42\n\x08Uri_Slot\x12\x15\n\rinternal_port\x18\x01 \x01(\x05\x12\x1f\n\x03uri\x18\x02 \x03(\x0b\x32\x12.ipss.Instance.Uri\"\x9d\x02\n\rConfiguration\x12J\n\x14\x65nviroment_variables\x18\x01 \x03(\x0b\x32,.ipss.Configuration.EnviromentVariablesEntry\x12\x34\n\tspec_slot\x18\x02 \x03(\x0b\x32!.ipss.Configuration.SpecSlotEntry\x1a\x45\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x18\n\x05value\x18\x02 \x01(\x0b\x32\t.ipss.Any:\x02\x38\x01\x1a\x43\n\rSpecSlotEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh:\x02\x38\x01\"\xad\x01\n\x11\x43onfigurationFile\x12\x1f\n\x07gateway\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12#\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x13.ipss.Configuration\x12(\n\x10tensor_instances\x18\x03 \x03(\x0b\x32\x0e.ipss.Instance\x12(\n\x10ledger_instances\x18\x04 \x03(\x0b\x32\x0e.ipss.Instanceb\x06proto3'
+  serialized_pb=b'\n\nipss.proto\x12\x04ipss\"9\n\x0cPrimitiveDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x12\n\x05regex\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x08\n\x06_regex\"m\n\x07\x45numDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\'\n\x05value\x18\x02 \x03(\x0b\x32\x18.ipss.EnumDef.ValueEntry\x1a,\n\nValueEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x05:\x02\x38\x01\"\x80\x01\n\x08\x46ieldDef\x12#\n\x07message\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDefH\x00\x12\'\n\tprimitive\x18\x02 \x01(\x0b\x32\x12.ipss.PrimitiveDefH\x00\x12\x1d\n\x04\x65num\x18\x03 \x01(\x0b\x32\r.ipss.EnumDefH\x00\x42\x07\n\x05value\"i\n\x08ParamDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x1d\n\x05\x66ield\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x10\n\x08repeated\x18\x04 \x01(\x08\x12\x10\n\x08optional\x18\x05 \x01(\x08\"\x19\n\x08OneofDef\x12\r\n\x05index\x18\x01 \x03(\x05\"W\n\nMessageDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1d\n\x05param\x18\x02 \x03(\x0b\x32\x0e.ipss.ParamDef\x12\x1d\n\x05oneof\x18\x03 \x03(\x0b\x32\x0e.ipss.OneofDef\"\xa9\x01\n\tMethodDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12%\n\rinput_message\x18\x03 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x17\n\x0fis_input_stream\x18\x04 \x01(\x08\x12&\n\x0eoutput_message\x18\x05 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x18\n\x10is_output_stream\x18\x06 \x01(\x08\">\n\x0e\x41pplicationDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1f\n\x06method\x18\x02 \x03(\x0b\x32\x0f.ipss.MethodDef\"3\n\x03\x41ny\x12\x1d\n\x05\x66ield\x18\x01 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\r\n\x05value\x18\x02 \x01(\x0c\"]\n\x07HashTag\x12 \n\x04hash\x18\x01 \x03(\x0b\x32\x12.ipss.HashTag.Hash\x12\x0b\n\x03tag\x18\x02 \x03(\t\x1a#\n\x04Hash\x12\x0c\n\x04type\x18\x01 \x01(\x0c\x12\r\n\x05value\x18\x02 \x01(\x0c\".\n\x0cProtocolMesh\x12\x1e\n\x07hashtag\x18\x0f \x03(\x0b\x32\r.ipss.HashTag\"D\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12.\n\x12transport_protocol\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh\"K\n\x03\x41pi\x12*\n\x0c\x61pp_protocol\x18\x01 \x01(\x0b\x32\x14.ipss.ApplicationDef\x12\x18\n\x04slot\x18\x02 \x03(\x0b\x32\n.ipss.Slot\".\n\x0c\x41rchitecture\x12\x1e\n\x07hashtag\x18\x0f \x03(\x0b\x32\r.ipss.HashTag\"\xbd\x01\n\nFilesystem\x12\x1e\n\x07hashtag\x18\x0f \x03(\x0b\x32\r.ipss.HashTag\x12\'\n\x06\x62ranch\x18\x01 \x03(\x0b\x32\x17.ipss.Filesystem.Branch\x1a\x66\n\x06\x42ranch\x12\x0e\n\x04\x66ile\x18\x01 \x01(\x0cH\x00\x12\x0e\n\x04link\x18\x02 \x01(\tH\x00\x12&\n\nfilesystem\x18\x03 \x01(\x0b\x32\x10.ipss.FilesystemH\x00\x12\x0c\n\x04name\x18\x04 \x01(\tB\x06\n\x04item\"\x83\x02\n\tContainer\x12(\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\x12.ipss.Architecture\x12$\n\nfilesystem\x18\x02 \x01(\x0b\x32\x10.ipss.Filesystem\x12\x46\n\x14\x65nviroment_variables\x18\x03 \x03(\x0b\x32(.ipss.Container.EnviromentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x01(\t\x1aJ\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1d\n\x05value\x18\x02 \x01(\x0b\x32\x0e.ipss.FieldDef:\x02\x38\x01\"\xad\x01\n\x06Tensor\x12\x1e\n\x07hashtag\x18\x0f \x01(\x0b\x32\r.ipss.HashTag\x12!\n\x05index\x18\x01 \x03(\x0b\x32\x12.ipss.Tensor.Index\x12\x0c\n\x04rank\x18\x02 \x01(\x05\x1aR\n\x05Index\x12\n\n\x02id\x18\x01 \x01(\t\x12\x1d\n\x05\x66ield\x18\x02 \x01(\x0b\x32\x0e.ipss.FieldDef\x12\x1e\n\x07hashtag\x18\x0f \x03(\x0b\x32\r.ipss.HashTag\"(\n\x06Ledger\x12\x1e\n\x07hashtag\x18\x0f \x01(\x0b\x32\r.ipss.HashTag\"\xc3\x01\n\x07Service\x12\x1e\n\x07hashtag\x18\x0f \x01(\x0b\x32\r.ipss.HashTag\x12 \n\x06syntax\x18\x01 \x01(\x0b\x32\x10.ipss.MessageDef\x12\"\n\tcontainer\x18\x02 \x01(\x0b\x32\x0f.ipss.Container\x12\x16\n\x03\x61pi\x18\x03 \x01(\x0b\x32\t.ipss.Api\x12\x1c\n\x06tensor\x18\x04 \x01(\x0b\x32\x0c.ipss.Tensor\x12\x1c\n\x06ledger\x18\x05 \x01(\x0b\x32\x0c.ipss.Ledger\"\xb2\x01\n\x08Instance\x12\x16\n\x03\x61pi\x18\x01 \x01(\x0b\x32\t.ipss.Api\x12)\n\x08uri_slot\x18\x02 \x03(\x0b\x32\x17.ipss.Instance.Uri_Slot\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x42\n\x08Uri_Slot\x12\x15\n\rinternal_port\x18\x01 \x01(\x05\x12\x1f\n\x03uri\x18\x02 \x03(\x0b\x32\x12.ipss.Instance.Uri\"\x9d\x02\n\rConfiguration\x12J\n\x14\x65nviroment_variables\x18\x01 \x03(\x0b\x32,.ipss.Configuration.EnviromentVariablesEntry\x12\x34\n\tspec_slot\x18\x02 \x03(\x0b\x32!.ipss.Configuration.SpecSlotEntry\x1a\x45\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x18\n\x05value\x18\x02 \x01(\x0b\x32\t.ipss.Any:\x02\x38\x01\x1a\x43\n\rSpecSlotEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.ipss.ProtocolMesh:\x02\x38\x01\"\xad\x01\n\x11\x43onfigurationFile\x12\x1f\n\x07gateway\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12#\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x13.ipss.Configuration\x12(\n\x10tensor_instances\x18\x03 \x03(\x0b\x32\x0e.ipss.Instance\x12(\n\x10ledger_instances\x18\x04 \x03(\x0b\x32\x0e.ipss.Instanceb\x06proto3'
 )
 
 
@@ -480,6 +480,83 @@ _ANY = _descriptor.Descriptor(
 )
 
 
+_HASHTAG_HASH = _descriptor.Descriptor(
+  name='Hash',
+  full_name='ipss.HashTag.Hash',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='type', full_name='ipss.HashTag.Hash.type', index=0,
+      number=1, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"",
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='value', full_name='ipss.HashTag.Hash.value', index=1,
+      number=2, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"",
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=891,
+  serialized_end=926,
+)
+
+_HASHTAG = _descriptor.Descriptor(
+  name='HashTag',
+  full_name='ipss.HashTag',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='hash', full_name='ipss.HashTag.hash', index=0,
+      number=1, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='tag', full_name='ipss.HashTag.tag', index=1,
+      number=2, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[_HASHTAG_HASH, ],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=833,
+  serialized_end=926,
+)
+
+
 _PROTOCOLMESH = _descriptor.Descriptor(
   name='ProtocolMesh',
   full_name='ipss.ProtocolMesh',
@@ -489,8 +566,8 @@ _PROTOCOLMESH = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='hash', full_name='ipss.ProtocolMesh.hash', index=0,
-      number=15, type=9, cpp_type=9, label=3,
+      name='hashtag', full_name='ipss.ProtocolMesh.hashtag', index=0,
+      number=15, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -507,8 +584,8 @@ _PROTOCOLMESH = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=833,
-  serialized_end=861,
+  serialized_start=928,
+  serialized_end=974,
 )
 
 
@@ -546,8 +623,8 @@ _SLOT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=863,
-  serialized_end=931,
+  serialized_start=976,
+  serialized_end=1044,
 )
 
 
@@ -585,8 +662,8 @@ _API = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=933,
-  serialized_end=1008,
+  serialized_start=1046,
+  serialized_end=1121,
 )
 
 
@@ -599,8 +676,8 @@ _ARCHITECTURE = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='hash', full_name='ipss.Architecture.hash', index=0,
-      number=15, type=9, cpp_type=9, label=3,
+      name='hashtag', full_name='ipss.Architecture.hashtag', index=0,
+      number=15, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -617,8 +694,8 @@ _ARCHITECTURE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1010,
-  serialized_end=1038,
+  serialized_start=1123,
+  serialized_end=1169,
 )
 
 
@@ -675,8 +752,8 @@ _FILESYSTEM_BRANCH = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=1110,
-  serialized_end=1212,
+  serialized_start=1259,
+  serialized_end=1361,
 )
 
 _FILESYSTEM = _descriptor.Descriptor(
@@ -688,8 +765,8 @@ _FILESYSTEM = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='hash', full_name='ipss.Filesystem.hash', index=0,
-      number=15, type=9, cpp_type=9, label=3,
+      name='hashtag', full_name='ipss.Filesystem.hashtag', index=0,
+      number=15, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -713,8 +790,8 @@ _FILESYSTEM = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1041,
-  serialized_end=1212,
+  serialized_start=1172,
+  serialized_end=1361,
 )
 
 
@@ -752,8 +829,8 @@ _CONTAINER_ENVIROMENTVARIABLESENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1400,
-  serialized_end=1474,
+  serialized_start=1549,
+  serialized_end=1623,
 )
 
 _CONTAINER = _descriptor.Descriptor(
@@ -804,8 +881,8 @@ _CONTAINER = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1215,
-  serialized_end=1474,
+  serialized_start=1364,
+  serialized_end=1623,
 )
 
 
@@ -832,8 +909,8 @@ _TENSOR_INDEX = _descriptor.Descriptor(
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='tag', full_name='ipss.Tensor.Index.tag', index=2,
-      number=15, type=9, cpp_type=9, label=3,
+      name='hashtag', full_name='ipss.Tensor.Index.hashtag', index=2,
+      number=15, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -850,8 +927,8 @@ _TENSOR_INDEX = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1550,
-  serialized_end=1613,
+  serialized_start=1717,
+  serialized_end=1799,
 )
 
 _TENSOR = _descriptor.Descriptor(
@@ -863,9 +940,9 @@ _TENSOR = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='hash', full_name='ipss.Tensor.hash', index=0,
-      number=15, type=9, cpp_type=9, label=3,
-      has_default_value=False, default_value=[],
+      name='hashtag', full_name='ipss.Tensor.hashtag', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
@@ -895,8 +972,8 @@ _TENSOR = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1477,
-  serialized_end=1613,
+  serialized_start=1626,
+  serialized_end=1799,
 )
 
 
@@ -909,9 +986,9 @@ _LEDGER = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='hash', full_name='ipss.Ledger.hash', index=0,
-      number=15, type=9, cpp_type=9, label=3,
-      has_default_value=False, default_value=[],
+      name='hashtag', full_name='ipss.Ledger.hashtag', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
@@ -927,8 +1004,8 @@ _LEDGER = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1615,
-  serialized_end=1637,
+  serialized_start=1801,
+  serialized_end=1841,
 )
 
 
@@ -941,9 +1018,9 @@ _SERVICE = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='hash', full_name='ipss.Service.hash', index=0,
-      number=15, type=9, cpp_type=9, label=3,
-      has_default_value=False, default_value=[],
+      name='hashtag', full_name='ipss.Service.hashtag', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
@@ -994,8 +1071,8 @@ _SERVICE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1640,
-  serialized_end=1817,
+  serialized_start=1844,
+  serialized_end=2039,
 )
 
 
@@ -1033,8 +1110,8 @@ _INSTANCE_URI = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1899,
-  serialized_end=1930,
+  serialized_start=2121,
+  serialized_end=2152,
 )
 
 _INSTANCE_URI_SLOT = _descriptor.Descriptor(
@@ -1071,8 +1148,8 @@ _INSTANCE_URI_SLOT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1932,
-  serialized_end=1998,
+  serialized_start=2154,
+  serialized_end=2220,
 )
 
 _INSTANCE = _descriptor.Descriptor(
@@ -1109,8 +1186,8 @@ _INSTANCE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1820,
-  serialized_end=1998,
+  serialized_start=2042,
+  serialized_end=2220,
 )
 
 
@@ -1148,8 +1225,8 @@ _CONFIGURATION_ENVIROMENTVARIABLESENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2148,
-  serialized_end=2217,
+  serialized_start=2370,
+  serialized_end=2439,
 )
 
 _CONFIGURATION_SPECSLOTENTRY = _descriptor.Descriptor(
@@ -1186,8 +1263,8 @@ _CONFIGURATION_SPECSLOTENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2219,
-  serialized_end=2286,
+  serialized_start=2441,
+  serialized_end=2508,
 )
 
 _CONFIGURATION = _descriptor.Descriptor(
@@ -1224,8 +1301,8 @@ _CONFIGURATION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2001,
-  serialized_end=2286,
+  serialized_start=2223,
+  serialized_end=2508,
 )
 
 
@@ -1277,8 +1354,8 @@ _CONFIGURATIONFILE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2289,
-  serialized_end=2462,
+  serialized_start=2511,
+  serialized_end=2684,
 )
 
 _PRIMITIVEDEF.oneofs_by_name['_regex'].fields.append(
@@ -1305,9 +1382,13 @@ _METHODDEF.fields_by_name['input_message'].message_type = _FIELDDEF
 _METHODDEF.fields_by_name['output_message'].message_type = _FIELDDEF
 _APPLICATIONDEF.fields_by_name['method'].message_type = _METHODDEF
 _ANY.fields_by_name['field'].message_type = _FIELDDEF
+_HASHTAG_HASH.containing_type = _HASHTAG
+_HASHTAG.fields_by_name['hash'].message_type = _HASHTAG_HASH
+_PROTOCOLMESH.fields_by_name['hashtag'].message_type = _HASHTAG
 _SLOT.fields_by_name['transport_protocol'].message_type = _PROTOCOLMESH
 _API.fields_by_name['app_protocol'].message_type = _APPLICATIONDEF
 _API.fields_by_name['slot'].message_type = _SLOT
+_ARCHITECTURE.fields_by_name['hashtag'].message_type = _HASHTAG
 _FILESYSTEM_BRANCH.fields_by_name['filesystem'].message_type = _FILESYSTEM
 _FILESYSTEM_BRANCH.containing_type = _FILESYSTEM
 _FILESYSTEM_BRANCH.oneofs_by_name['item'].fields.append(
@@ -1319,6 +1400,7 @@ _FILESYSTEM_BRANCH.fields_by_name['link'].containing_oneof = _FILESYSTEM_BRANCH.
 _FILESYSTEM_BRANCH.oneofs_by_name['item'].fields.append(
   _FILESYSTEM_BRANCH.fields_by_name['filesystem'])
 _FILESYSTEM_BRANCH.fields_by_name['filesystem'].containing_oneof = _FILESYSTEM_BRANCH.oneofs_by_name['item']
+_FILESYSTEM.fields_by_name['hashtag'].message_type = _HASHTAG
 _FILESYSTEM.fields_by_name['branch'].message_type = _FILESYSTEM_BRANCH
 _CONTAINER_ENVIROMENTVARIABLESENTRY.fields_by_name['value'].message_type = _FIELDDEF
 _CONTAINER_ENVIROMENTVARIABLESENTRY.containing_type = _CONTAINER
@@ -1326,8 +1408,12 @@ _CONTAINER.fields_by_name['architecture'].message_type = _ARCHITECTURE
 _CONTAINER.fields_by_name['filesystem'].message_type = _FILESYSTEM
 _CONTAINER.fields_by_name['enviroment_variables'].message_type = _CONTAINER_ENVIROMENTVARIABLESENTRY
 _TENSOR_INDEX.fields_by_name['field'].message_type = _FIELDDEF
+_TENSOR_INDEX.fields_by_name['hashtag'].message_type = _HASHTAG
 _TENSOR_INDEX.containing_type = _TENSOR
+_TENSOR.fields_by_name['hashtag'].message_type = _HASHTAG
 _TENSOR.fields_by_name['index'].message_type = _TENSOR_INDEX
+_LEDGER.fields_by_name['hashtag'].message_type = _HASHTAG
+_SERVICE.fields_by_name['hashtag'].message_type = _HASHTAG
 _SERVICE.fields_by_name['syntax'].message_type = _MESSAGEDEF
 _SERVICE.fields_by_name['container'].message_type = _CONTAINER
 _SERVICE.fields_by_name['api'].message_type = _API
@@ -1357,6 +1443,7 @@ DESCRIPTOR.message_types_by_name['MessageDef'] = _MESSAGEDEF
 DESCRIPTOR.message_types_by_name['MethodDef'] = _METHODDEF
 DESCRIPTOR.message_types_by_name['ApplicationDef'] = _APPLICATIONDEF
 DESCRIPTOR.message_types_by_name['Any'] = _ANY
+DESCRIPTOR.message_types_by_name['HashTag'] = _HASHTAG
 DESCRIPTOR.message_types_by_name['ProtocolMesh'] = _PROTOCOLMESH
 DESCRIPTOR.message_types_by_name['Slot'] = _SLOT
 DESCRIPTOR.message_types_by_name['Api'] = _API
@@ -1441,6 +1528,21 @@ Any = _reflection.GeneratedProtocolMessageType('Any', (_message.Message,), {
   # @@protoc_insertion_point(class_scope:ipss.Any)
   })
 _sym_db.RegisterMessage(Any)
+
+HashTag = _reflection.GeneratedProtocolMessageType('HashTag', (_message.Message,), {
+
+  'Hash' : _reflection.GeneratedProtocolMessageType('Hash', (_message.Message,), {
+    'DESCRIPTOR' : _HASHTAG_HASH,
+    '__module__' : 'ipss_pb2'
+    # @@protoc_insertion_point(class_scope:ipss.HashTag.Hash)
+    })
+  ,
+  'DESCRIPTOR' : _HASHTAG,
+  '__module__' : 'ipss_pb2'
+  # @@protoc_insertion_point(class_scope:ipss.HashTag)
+  })
+_sym_db.RegisterMessage(HashTag)
+_sym_db.RegisterMessage(HashTag.Hash)
 
 ProtocolMesh = _reflection.GeneratedProtocolMessageType('ProtocolMesh', (_message.Message,), {
   'DESCRIPTOR' : _PROTOCOLMESH,

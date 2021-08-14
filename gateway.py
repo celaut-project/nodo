@@ -3,7 +3,7 @@ from ipss_pb2 import Slot
 import build, utils
 from compile import REGISTRY, HYCACHE
 import logger as l
-from verify import get_service_hash
+from verify import SHA3_256_ID, get_service_hex_hash
 import subprocess, os, threading, random
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
@@ -37,7 +37,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.ipss__pb2.Instance:
     
     slot = gateway_pb2.ipss__pb2.Slot()
     slot.port = GATEWAY_PORT
-    slot.transport_protocol.hash.extend(['http2', 'grpc'])
+    slot.transport_protocol.hashtag.tag.extend(['http2', 'grpc'])
     instance.api.slot.append(slot)
     return instance
 
@@ -262,7 +262,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, father_ip: str, confi
     # Si hace la peticion un servicio local.
     if utils.get_network_name(father_ip) == DOCKER_NETWORK:
         container = create_container(
-            id = get_service_hash(service = service, hash_type = "sha3-256"),
+            id = get_service_hex_hash(service = service),
             entrypoint = service.container.entrypoint
         )
 
@@ -304,7 +304,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, father_ip: str, confi
 
         container = create_container(
             use_other_ports = assigment_ports,
-            id = get_service_hash( service = service, hash_type = "sha3-256"),
+            id = get_service_hex_hash( service = service ),
             entrypoint = service.container.entrypoint
         )
         set_config(container_id = container.id, config = config)
@@ -346,10 +346,7 @@ def launch_service(service: gateway_pb2.ipss__pb2.Service, father_ip: str, confi
 
 def save_service(service: gateway_pb2.ipss__pb2.Service):
     # If the service is not on the registry, save it.
-    hash = get_service_hash(
-        service = service, 
-        hash_type = "sha3-256"
-    )
+    hash = get_service_hex_hash(service = service)
     if not os.path.isfile(REGISTRY+hash+'.service'):
         with open(REGISTRY + hash + '.service', 'wb') as file:
             file.write(service.SerializeToString())
@@ -420,12 +417,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if r.HasField('hash'):
                 hashes.append(r.hash)
-                if configuration and "sha3-256" == r.hash.split(':')[0] and \
-                    r.hash.split(':')[1] in [s[:-8] for s in os.listdir(REGISTRY)]:
+                if configuration and SHA3_256_ID == str(r.hash.type) and \
+                    str in [s[:-8] for s in os.listdir(REGISTRY)]:
                     try:
                         return launch_service(
                             service = get_from_registry(
-                                hash = r.hash.split(':')[1]
+                                hash = str(r.hash.value)
                             ),
                             config = configuration,
                             father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
@@ -495,10 +492,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
                 if r.HasField('hash'):
                     hashes.append(r.hash)
-                    if "sha3-256" == r.hash.split(':')[0] and \
-                        r.hash.split(':')[1] in [s[:-8] for s in os.listdir(REGISTRY)]:
+                    if SHA3_256_ID == str(r.hash.type) and \
+                        str(r.hash.value) in [s[:-8] for s in os.listdir(REGISTRY)]:
                         return get_from_registry(
-                            hash = r.hash.split(':')[1]
+                            hash = str(r.hash.value)
                         )
             except: pass
         
@@ -516,13 +513,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
         for r in request_iterator:
 
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-            if r.HasField('hash') and "sha3-256" == r.hash.split(':')[0]:
-                hash = r.hash.split(':')[1]
+            if r.HasField('hash') and SHA3_256_ID== r.hash.type:
+                hash = r.hash.value
                 break
             
             # Si me da servicio.
             if r.HasField('service'):
-                hash = get_service_hash(service=r.service, hash_type="sha3-256")
+                hash = get_service_hex_hash(service = r.service)
                 save_service(service = r.service)
                 service = r.service
                 break

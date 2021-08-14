@@ -1,17 +1,29 @@
+from grpc import ServiceRpcHandler
 from logger import LOGGER
 import hashlib
-from ipss_pb2 import Service
+from ipss_pb2 import Service, HashTag
 from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 
+# -- HASH IDs --
+SHAKE_256_ID = bytes.fromhex("46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f")
+SHA3_256_ID = bytes.fromhex("a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a")
+
 # -- HASH FUNCTIONS --
-SHAKE_256 = lambda value: "" if value is None else 'shake-256:'+hashlib.shake_256(value).hexdigest(32)
-SHA3_256 = lambda value: "" if value is None else 'sha3-256:'+hashlib.sha3_256(value).hexdigest()
+SHAKE_256 = lambda value: "" if value is None else hashlib.shake_256(value).digest(32)
+SHA3_256 = lambda value: "" if value is None else hashlib.sha3_256(value).digest()
 
 def calculate_hashes(value) -> list:
     return [
-        SHA3_256(value),
-        SHAKE_256(value)
+        HashTag.Hash(
+            type = SHA3_256_ID, 
+            value = SHA3_256(value)
+        ),
+        HashTag.Hash(
+            type = SHAKE_256_ID,
+            value = SHAKE_256(value)
+        )
     ]
+
 
 def prune_hashes_of_service(service: Service) -> Service:
     def recursive_prune(field: any) -> any:
@@ -31,26 +43,29 @@ def prune_hashes_of_service(service: Service) -> Service:
     recursive_prune(field=s)
     return s
 
-def get_service_hash(service: Service, hash_type: str) -> str:
-    for hash in service.hash:
-        if hash_type == hash.split(':')[0]:
-            return hash.split(':')[1]
-    
-    # if not is_complete_service(service=service): return ''
-    if hash_type == "sha3-256":
+def is_complete_service(service: Service) -> bool:
+    # Needs to check all fields.
+    return service.container.filesystem.HasField('branch')
+
+def get_service_hex_hash(service: Service) -> str:
+    if is_complete_service(service=service):
         return SHA3_256(
             value = prune_hashes_of_service(
                 service=service
             ).SerializeToString()
-        ).split(':')[1]
+        ).hex()
+    elif SHA3_256_ID in service.hashtag.hash:
+        return service.hashtag.hash[SHA3_256_ID].hex()
     else:
-        LOGGER(hash_type+' hash function is not implemented on this method.')
-        return ''
+        LOGGER(' sha3-256 hash function is not implemented on this method.')
+        raise Exception(' sha3-256 hash function is not implemented on this method.')
 
 def get_service_list_of_hashes(service: Service) -> list:
-    # if not is_complete_service(service=service): return []
-    return calculate_hashes(
-        value = prune_hashes_of_service(
-            service=service
-        ).SerializeToString()
-    )
+    if is_complete_service(service=service):
+        return calculate_hashes(
+            value = prune_hashes_of_service(
+                service=service
+            ).SerializeToString()
+        )
+    else:
+        raise Exception("Can't get the hashes if the service is not complete.")

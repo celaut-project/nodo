@@ -19,12 +19,17 @@ message Instance {
 }
 
 message ServiceTransport {
+    message Hash {
+        bytes type = 1;
+        bytes value = 2;
+    }
     oneof oneOf{
-        string hash = 1;
+        Hash hash = 1;
         ipss.Service service = 2;
     }
     optional ipss.Configuration config = 3;
 }
+
 
 message Chunk  {
     bytes buffer = 1;

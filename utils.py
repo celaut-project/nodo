@@ -4,7 +4,7 @@ import netifaces as ni
 
 def get_grpc_uri(instance: ipss_pb2.Instance) -> ipss_pb2.Instance.Uri:
     for slot in instance.api.slot:
-        if 'grpc' in slot.transport_protocol.hash and 'http2' in slot.transport_protocol.hash:
+        if 'grpc' in slot.transport_protocol.hashtag.tag and 'http2' in slot.transport_protocol.hashtag.tag:
             # If the protobuf lib. supported map for this message it could be O(n).
             for uri_slot in instance.uri_slot:
                 if uri_slot.internal_port == slot.port:
@@ -17,8 +17,9 @@ def service_extended(
     ) -> gateway_pb2.ServiceTransport:
     set_config = True if config else False
     transport = gateway_pb2.ServiceTransport()
-    for hash in service.hash:
-        transport.hash = hash
+    for hash in service.hashtag.hash:
+        transport.hash.type = hash.key
+        transport.hash.value = hash.value
         if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
             transport.config.CopyFrom(config)
             set_config = False
