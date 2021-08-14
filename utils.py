@@ -18,8 +18,7 @@ def service_extended(
     set_config = True if config else False
     transport = gateway_pb2.ServiceTransport()
     for hash in service.hashtag.hash:
-        transport.hash.type = hash.key
-        transport.hash.value = hash.value
+        transport.hash.CopyFrom(hash)
         if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
             transport.config.CopyFrom(config)
             set_config = False
