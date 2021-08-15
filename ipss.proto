@@ -129,7 +129,7 @@ message Tensor {
     message Index {
         string id = 1;
         FieldDef field = 2;
-        repeated HashTag hashtag = 15;
+        HashTag hashtag = 15;
     }
     HashTag hashtag = 15;
     repeated Index index = 1;
