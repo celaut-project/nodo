@@ -82,7 +82,7 @@ message HashTag {
 
 // API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
 message ProtocolMesh {
-    repeated HashTag hashtag = 15;
+    HashTag hashtag = 15;
     // Mesh specification can be applied. <- must be optional
 }
 
@@ -99,7 +99,7 @@ message Api{
 
 // Container: Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
 message Architecture {
-    repeated HashTag hashtag = 15;
+    HashTag hashtag = 15;
     // Architecture specification can be applied. <- must be optional.
 }
 
@@ -113,7 +113,7 @@ message Filesystem {
         string name = 4;
         // ¿ more params ... ?
     }
-    repeated HashTag hashtag = 15;
+    HashTag hashtag = 15;
     repeated Branch branch = 1;
 }
 
