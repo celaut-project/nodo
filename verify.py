@@ -44,18 +44,24 @@ def prune_hashes_of_service(service: Service) -> Service:
     return s
 
 def is_complete_service(service: Service) -> bool:
-    # Needs to check all fields.
+    # Needs to check all fields. But this serves at the moment.
     return service.container.filesystem.HasField('branch')
 
+# Return the service's sha3-256 hash on hexadecimal format.
 def get_service_hex_hash(service: Service) -> str:
+    # Find if it has the hash.
+    for hash in  service.hashtag.hash:
+        if hash.type == SHA3_256_ID:
+            return hash.value.hex()
+
+    # If not but the spec. is complete, calculate the hash prunning it before.
+    # If not and is incomplete, it's going to be imposible calculate any hash.
     if is_complete_service(service=service):
         return SHA3_256(
             value = prune_hashes_of_service(
                 service=service
             ).SerializeToString()
         ).hex()
-    elif SHA3_256_ID in service.hashtag.hash:
-        return service.hashtag.hash[SHA3_256_ID].hex()
     else:
         LOGGER(' sha3-256 hash function is not implemented on this method.')
         raise Exception(' sha3-256 hash function is not implemented on this method.')

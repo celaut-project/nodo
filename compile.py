@@ -147,7 +147,7 @@ class Hyper:
         )
         # Once service hashes are calculated, we prune the filesystem for save storage.
         self.service.container.filesystem.ClearField('branch')
-        id = self.service.hashtag.hash[SHA3_256_ID].hex()
+        id = get_service_hex_hash(service = self.service)
         with open( REGISTRY +id+ '.service', 'wb') as f:
             f.write( self.service.SerializeToString() )
         return id
