@@ -45,7 +45,7 @@ def prune_hashes_of_service(service: Service) -> Service:
 
 def is_complete_service(service: Service) -> bool:
     # Needs to check all fields. But this serves at the moment.
-    return service.container.filesystem.HasField('branch')
+    return len(service.container.filesystem.branch) > 0
 
 # Return the service's sha3-256 hash on hexadecimal format.
 def get_service_hex_hash(service: Service) -> str:
