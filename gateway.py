@@ -417,12 +417,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if r.HasField('hash'):
                 hashes.append(r.hash)
-                if configuration and SHA3_256_ID == str(r.hash.type) and \
-                    str in [s[:-8] for s in os.listdir(REGISTRY)]:
+                if configuration and SHA3_256_ID == r.hash.type and \
+                    r.hash.value.hex() in [s[:-8] for s in os.listdir(REGISTRY)]:
                     try:
                         return launch_service(
                             service = get_from_registry(
-                                hash = str(r.hash.value)
+                                hash = r.hash.value.hex()
                             ),
                             config = configuration,
                             father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
@@ -492,10 +492,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
                 if r.HasField('hash'):
                     hashes.append(r.hash)
-                    if SHA3_256_ID == str(r.hash.type) and \
-                        str(r.hash.value) in [s[:-8] for s in os.listdir(REGISTRY)]:
+                    if SHA3_256_ID == r.hash.type and \
+                        r.hash.value.hex() in [s[:-8] for s in os.listdir(REGISTRY)]:
                         return get_from_registry(
-                            hash = str(r.hash.value)
+                            hash = r.hash.value.hex()
                         )
             except: pass
         
@@ -514,7 +514,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if r.HasField('hash') and SHA3_256_ID== r.hash.type:
-                hash = r.hash.value
+                hash = r.hash.value.hex()
                 break
             
             # Si me da servicio.
