@@ -134,7 +134,7 @@ class Hyper:
                     variable = gateway_pb2.ipss__pb2.Tensor.Index()
                     variable.id = var
                     for tag in index[var]:
-                        variable.tag.append(tag)
+                        variable.hashtag.tag.append(tag)
                     try:
                         with open(self.path+var+".field", "rb") as var_desc:
                             variable.field.ParseFromString(var_desc.read())
