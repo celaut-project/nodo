@@ -373,7 +373,9 @@ def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.i
             ).GetServiceDef(
                 utils.service_extended(
                     service = gateway_pb2.ipss__pb2.Service(
-                        hash = hashes
+                        hashtag = gateway_pb2.ipss__pb2.HashTag(
+                            hash = hashes
+                        )
                     )
                 )
             )
