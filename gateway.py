@@ -183,8 +183,12 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
     except docker_lib.errors.APIError:
         l.LOGGER('DOCKER API ERROR ')
 
-
-execution_cost = lambda: len(DOCKER_CLIENT().containers.list())
+def execution_cost(service) -> int:
+    return sum([
+        len(DOCKER_CLIENT().containers.list()),
+        #COST_OF_BUILD * is_service_built(service = service),
+        #COST_OF_GET_CONTAINER * 
+    ]) 
 
 def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss__pb2.Instance or None:
     try:
@@ -194,7 +198,7 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
         peer_list_length = len(peer_list)
         l.LOGGER('    Peer list length of ' + str(peer_list_length))
         
-        min_cost = execution_cost()
+        min_cost = execution_cost(service = service)
         best_peer = None
         for peer in peer_list:
             del peer['_id']
@@ -222,7 +226,11 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
         return None
 
 
-def launch_service(service: gateway_pb2.ipss__pb2.Service, father_ip: str, config: gateway_pb2.ipss__pb2.Configuration = None):
+def launch_service(
+        service: gateway_pb2.ipss__pb2.Service, 
+        father_ip: str, 
+        config: gateway_pb2.ipss__pb2.Configuration = None
+        ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service.')
 
     # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
@@ -351,25 +359,41 @@ def save_service(service: gateway_pb2.ipss__pb2.Service):
         with open(REGISTRY + hash + '.service', 'wb') as file:
             file.write(service.SerializeToString())
 
-
-def search_container(ignore_network: str, service: gateway_pb2.ipss__pb2.Service) -> Generator:
-    raise Exception # Not implemented now.
-
-
-def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.ipss__pb2.Service:
-    if ignore_network: raise Exception # Not implemented now.
-
-    #  Search a service description.
-    service = None
+def peers_iterator(ignore_network: str = None) -> Generator[gateway_pb2.ipss__pb2.Instance.Uri, None, None]:
     peers = list(pymongo.MongoClient(
                 "mongodb://localhost:27017/"
             )["mongo"]["peerInstances"].find())
+
     for peer in peers:
         l.LOGGER('  Looking for a service on peer ' + str(peer))
         peer_uri = peer['uriSlot'][0]['uri'][0]
+        
+        if not utils.address_in_network(
+            ip_or_uri = peer_uri['ip'],
+            net = ignore_network
+        ): yield peer_uri
+
+def search_container(service: gateway_pb2.ipss__pb2.Service, ignore_network: str = None) -> Generator[gateway_pb2.Chunk, None, None]:
+    # Search a service tar container.
+    for peer in utils.peers_iterator(ignore_network = ignore_network):
+        try:
+            yield gateway_pb2_grpc.Gateway(
+                    grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
+                ).GetServiceTar(
+                    utils.service_extended(
+                        service = service
+                    )
+                )
+            break
+        except: pass
+
+def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.ipss__pb2.Service:
+    #  Search a service description.
+    service = None
+    for peer in utils.peers_iterator(ignore_network = ignore_network):
         try:
             service = gateway_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(peer_uri['ip'] + ':' + str( peer_uri['port']))
+                grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
             ).GetServiceDef(
                 utils.service_extended(
                     service = gateway_pb2.ipss__pb2.Service(
@@ -394,7 +418,7 @@ def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.i
         raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
 
 
-def get_from_registry(hash):
+def get_from_registry(hash: str) -> gateway_pb2.ipss__pb.Service:
     try:
         with open(REGISTRY + hash + '.service', 'rb') as file:
             service = gateway_pb2.ipss__pb2.Service()
@@ -427,7 +451,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 hash = r.hash.value.hex()
                             ),
                             config = configuration,
-                            father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
+                            father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                         )
                     except Exception as e:
                         l.LOGGER('Exception launching a service ' + str(e))
@@ -439,7 +463,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 return launch_service(
                     service = r.service,
                     config = configuration,
-                    father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
+                    father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                 )
         
         l.LOGGER('The service is not in the registry and the request does not have the definition.')
@@ -448,7 +472,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             return launch_service(
                 service = search_definition(hashes = hashes),
                 config = configuration,
-                father_ip = utils.get_only_the_ip_from_context(context_peer=context.peer())
+                father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
             ) 
         except Exception as e:
             raise Exception('Was imposible start the service. ' + str(e))
@@ -504,13 +528,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
         # Puede buscar el contenedor en otra red distinta a la del solicitante.
         try:
             return search_definition(
-                ignore_network = utils.get_network_name(ip_or_uri = context.peer()),
+                ignore_network = utils.get_network_name(
+                    ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                    ),
                 hashes = hashes
             )
         except:
             raise Exception('Was imposible get the service definition.')
 
-    def GetServiceTar(self, request_iterator, context):
+    def GetServiceTar(self, request_iterator, context) -> Generator[gateway_pb2.Chunk, None, None]:
         l.LOGGER('Request for give a service container.')
         for r in request_iterator:
 
@@ -538,19 +564,35 @@ class Gateway(gateway_pb2_grpc.Gateway):
             # Puede buscar el contenedor en otra red distinta a la del solicitante.
             try:
                 return search_container(
-                    ignore_network = utils.get_network_name(ip_or_uri = context.peer()),
+                    ignore_network = utils.get_network_name(
+                        ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                        ),
                     service = service
                 )
             except:
-                l.LOGGER('The service '+ hash + ' was not found.')
+                l.LOGGER('The service ' + hash + ' was not found.')
 
         raise Exception('Was imposible get the service container.')
 
 
     def GetServiceCost(self, request_iterator, context):
-        # It does not use the service.
+        for r in request_iterator:
 
-        cost = execution_cost()
+            if r.hasField('hash') and SHA3_256_ID == r.hash.type and \
+                r.hash.value.hex() in [s[:-8] for s in os.listdir(REGISTRY)]:
+                cost = execution_cost(
+                    service = get_from_registry(
+                        hash = r.hash.value.hex()
+                        )
+                    )
+                break
+
+            if r.hasField('service'):
+                cost = execution_cost(
+                    service = r.service
+                )
+                break
+
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
         return gateway_pb2.CostMessage(
             cost = cost

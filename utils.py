@@ -1,6 +1,11 @@
 import socket
+from typing import Generator
+from verify import SHA3_256_ID
+
+from six import Iterator
 import ipss_pb2, gateway_pb2
 import netifaces as ni
+import pymongo
 
 def get_grpc_uri(instance: ipss_pb2.Instance) -> ipss_pb2.Instance.Uri:
     for slot in instance.api.slot:
@@ -14,7 +19,7 @@ def get_grpc_uri(instance: ipss_pb2.Instance) -> ipss_pb2.Instance.Uri:
 def service_extended(
     service: gateway_pb2.ipss__pb2.Service, 
     config: gateway_pb2.ipss__pb2.Configuration = None
-    ) -> gateway_pb2.ServiceTransport:
+    ) -> Generator[gateway_pb2.ServiceTransport, None, None]:
     set_config = True if config else False
     transport = gateway_pb2.ServiceTransport()
     for hash in service.hashtag.hash:
@@ -28,12 +33,12 @@ def service_extended(
     transport.service.CopyFrom(service)
     yield transport
 
-def get_free_port():
+def get_free_port() -> int:
     with socket.socket() as s:
         s.bind(('', 0))
         return int(s.getsockname()[1])
 
-def longestSubstringFinder(string1, string2):
+def longestSubstringFinder(string1, string2) -> str:
     answer = ""
     len1, len2 = len(string1), len(string2)
     for i in range(len1):
@@ -50,7 +55,7 @@ get_only_the_ip_from_context = lambda context_peer: context_peer[5:-1*(len(conte
 
 get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
 
-def address_in_network( ip_or_uri, net):
+def address_in_network( ip_or_uri, net) -> bool:
     #  Return if the ip network portion (addr and broadcast common) is in the ip.
     return longestSubstringFinder(
         string1=ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
@@ -69,7 +74,7 @@ def get_network_name( ip_or_uri: str) -> str:
 
 CHUNK_SIZE = 1024 * 1024  # 1MB
 
-def get_file_chunks(filename):
+def get_file_chunks(filename) -> Generator[gateway_pb2.Chunk, None, None]:
     with open(filename, 'rb') as f:
         while True:
             piece = f.read(CHUNK_SIZE);
