@@ -592,7 +592,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def GetServiceCost(self, request_iterator, context):
         for r in request_iterator:
 
-            if r.hasField('hash') and SHA3_256_ID == r.hash.type and \
+            if r.HasField('hash') and SHA3_256_ID == r.hash.type and \
                 r.hash.value.hex() in [s[:-8] for s in os.listdir(REGISTRY)]:
                 cost = execution_cost(
                     service = get_from_registry(
