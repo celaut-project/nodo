@@ -14,6 +14,8 @@ from google.protobuf.json_format import Parse
 import docker as docker_lib
 import netifaces as ni
 
+COST_OF_BUILD = 10
+
 DOCKER_CLIENT = lambda: docker_lib.from_env()
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
@@ -183,11 +185,23 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
     except docker_lib.errors.APIError:
         l.LOGGER('DOCKER API ERROR ')
 
-def execution_cost(service) -> int:
+def build_cost(service: gateway_pb2.ipss__pb2.Service) -> int:
+    try:
+        # Coste de construcción si no se posee el contenedor del servicio.
+        # Debe de tener en cuenta el coste de buscar el conedor por la red.
+        return sum([
+            COST_OF_BUILD * get_service_hex_hash(service = service) \
+                in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()] is False,
+            # Coste de obtener el contenedor ... #TODO
+            ])
+    except:
+        pass
+    return 0
+
+def execution_cost(service: gateway_pb2.ipss__pb2.Service) -> int:
     return sum([
-        len(DOCKER_CLIENT().containers.list()),
-        #COST_OF_BUILD * is_service_built(service = service),
-        #COST_OF_GET_CONTAINER * 
+        len( DOCKER_CLIENT().containers.list() ),
+        build_cost(service = service),
     ]) 
 
 def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss__pb2.Instance or None:
@@ -233,7 +247,7 @@ def launch_service(
         ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service.')
 
-    # Aqui le tiene pregunta al balanceador si debería asignarle el trabajo a algun par.
+    # Aqui le pregunta al balanceador si debería asignarle el trabajo a algun par.
     node_instance = service_balancer(
         service = service
     )

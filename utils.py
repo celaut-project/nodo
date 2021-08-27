@@ -1,11 +1,9 @@
 import socket
 from typing import Generator
-from verify import SHA3_256_ID
 
 from six import Iterator
 import ipss_pb2, gateway_pb2
 import netifaces as ni
-import pymongo
 
 def get_grpc_uri(instance: ipss_pb2.Instance) -> ipss_pb2.Instance.Uri:
     for slot in instance.api.slot:
@@ -87,3 +85,4 @@ def save_chunks_to_file(chunks, filename):
     with open(filename, 'wb') as f:
         for chunk in chunks:
             f.write(chunk.buffer)
+
