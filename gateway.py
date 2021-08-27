@@ -432,7 +432,7 @@ def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.i
         raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
 
 
-def get_from_registry(hash: str) -> gateway_pb2.ipss__pb.Service:
+def get_from_registry(hash: str) -> gateway_pb2.ipss__pb2.Service:
     try:
         with open(REGISTRY + hash + '.service', 'rb') as file:
             service = gateway_pb2.ipss__pb2.Service()
