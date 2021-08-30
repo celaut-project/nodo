@@ -601,7 +601,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     )
                 break
 
-            if r.hasField('service'):
+            if r.HasField('service'):
                 cost = execution_cost(
                     service = r.service
                 )
