@@ -382,7 +382,7 @@ def peers_iterator(ignore_network: str = None) -> Generator[gateway_pb2.ipss__pb
         l.LOGGER('  Looking for a service on peer ' + str(peer))
         peer_uri = peer['uriSlot'][0]['uri'][0]
         
-        if not utils.address_in_network(
+        if ignore_network and not utils.address_in_network(
             ip_or_uri = peer_uri['ip'],
             net = ignore_network
         ): yield peer_uri
