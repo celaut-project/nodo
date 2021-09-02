@@ -389,7 +389,7 @@ def peers_iterator(ignore_network: str = None) -> Generator[gateway_pb2.ipss__pb
 
 def search_container(service: gateway_pb2.ipss__pb2.Service, ignore_network: str = None) -> Generator[gateway_pb2.Chunk, None, None]:
     # Search a service tar container.
-    for peer in utils.peers_iterator(ignore_network = ignore_network):
+    for peer in peers_iterator(ignore_network = ignore_network):
         try:
             yield gateway_pb2_grpc.Gateway(
                     grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
@@ -404,7 +404,7 @@ def search_container(service: gateway_pb2.ipss__pb2.Service, ignore_network: str
 def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.ipss__pb2.Service:
     #  Search a service description.
     service = None
-    for peer in utils.peers_iterator(ignore_network = ignore_network):
+    for peer in peers_iterator(ignore_network = ignore_network):
         try:
             service = gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))

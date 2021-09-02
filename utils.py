@@ -1,7 +1,6 @@
 import socket
 from typing import Generator
 
-from six import Iterator
 import ipss_pb2, gateway_pb2
 import netifaces as ni
 
