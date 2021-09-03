@@ -222,14 +222,17 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
                 ignore_unknown_fields = True
             )
             peer_uri = utils.get_grpc_uri(instance = peer_instance)
-            cost = gateway_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(
-                    peer_uri.ip + ':' +  str(peer_uri.port)
-                )
-            ).GetServiceCost(
-                utils.service_extended(service = service)
-            ).cost
-            if cost < min_cost: 
+            cost = None
+            try:
+                cost = gateway_pb2_grpc.GatewayStub(
+                    grpc.insecure_channel(
+                        peer_uri.ip + ':' +  str(peer_uri.port)
+                    )
+                ).GetServiceCost(
+                    utils.service_extended(service = service)
+                ).cost
+            except: pass
+            if cost and cost < min_cost: 
                 min_cost = cost
                 best_peer = peer_instance
 
