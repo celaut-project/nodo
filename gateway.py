@@ -86,15 +86,15 @@ def set_on_cache( father_ip : str, id_or_token: str, ip_or_uri: str):
 def purgue_internal(father_ip, container_id, container_ip):
     try:
         DOCKER_CLIENT().containers.get(container_id).remove(force=True)
-    except docker_lib.errors.APIError:
-        l.LOGGER('ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
+    except docker_lib.errors.APIError as e:
+        l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
 
     cache_lock.acquire()
 
     try:
         cache[father_ip].remove(container_ip + '##' + container_id)
     except ValueError as e:
-        l.LOGGER(str(e) + str(cache[father_ip]) + 'trying to remove ' + container_ip + '##' + container_id)
+        l.LOGGER(str(e) + str(cache[father_ip]) + ' trying to remove ' + container_ip + '##' + container_id)
     except KeyError as e:
         l.LOGGER(str(e) + father_ip + ' not in ' + str(cache.keys()))
 
@@ -116,6 +116,7 @@ def purgue_internal(father_ip, container_id, container_ip):
                 )
 
         try:
+            l.LOGGER('Deleting the instance ' + container_id + ' from cache with ' + str(cache[container_ip]) + ' dependencies.')
             del cache[container_ip]
         except KeyError as e:
             l.LOGGER(str(e) + container_ip + ' not in ' + str(cache.keys()))
