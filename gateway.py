@@ -383,13 +383,13 @@ def peers_iterator(ignore_network: str = None) -> Generator[gateway_pb2.ipss__pb
             )["mongo"]["peerInstances"].find())
 
     for peer in peers:
-        l.LOGGER('  Looking for a service on peer ' + str(peer))
         peer_uri = peer['uriSlot'][0]['uri'][0]
-        
         if ignore_network and not utils.address_in_network(
             ip_or_uri = peer_uri['ip'],
             net = ignore_network
-        ): yield peer_uri
+        ): 
+            l.LOGGER('  Looking for a service on peer ' + str(peer))
+            yield peer_uri
 
 def search_container(service: gateway_pb2.ipss__pb2.Service, ignore_network: str = None) -> Generator[gateway_pb2.Chunk, None, None]:
     # Search a service tar container.
