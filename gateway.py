@@ -235,11 +235,11 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
                 ).cost
                 l.LOGGER('The cost could be ' + str(cost))
             except: l.LOGGER('Error taking the cost.')
-            l.LOGGER(cost, min_cost, cost and cost < min_cost)
+            l.LOGGER(str(cost) +  str(min_cost), str(cost and cost < min_cost))
             if cost and cost < min_cost: 
                 min_cost = cost
                 best_peer = peer_instance
-                l.LOGGER('OK SO ', min_cost, best_peer)
+                l.LOGGER('OK SO ' +  str(min_cost) + str(best_peer))
         l.LOGGER('Finally the cost will be ' + str(min_cost))
         return best_peer
 
