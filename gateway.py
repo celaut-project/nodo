@@ -233,6 +233,7 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
                 ).GetServiceCost(
                     utils.service_extended(service = service)
                 ).cost
+                l.LOGGER('The cost could be ' + str(cost))
             except: l.LOGGER('Error taking the cost.')
             if cost and cost < min_cost: 
                 min_cost = cost
