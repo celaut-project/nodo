@@ -14,7 +14,7 @@ from google.protobuf.json_format import Parse
 import docker as docker_lib
 import netifaces as ni
 
-COST_OF_BUILD = 10
+COST_OF_BUILD = 0
 
 DOCKER_CLIENT = lambda: docker_lib.from_env()
 DOCKER_NETWORK = 'docker0'
@@ -214,6 +214,7 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
         l.LOGGER('    Peer list length of ' + str(peer_list_length))
         
         min_cost = execution_cost(service = service)
+        l.LOGGER('The local cost could be ' + str(min_cost))
         best_peer = None
         for peer in peer_list:
             del peer['_id']
@@ -232,11 +233,11 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
                 ).GetServiceCost(
                     utils.service_extended(service = service)
                 ).cost
-            except: pass
+            except: l.LOGGER('Error taking the cost.')
             if cost and cost < min_cost: 
                 min_cost = cost
                 best_peer = peer_instance
-
+        l.LOGGER('Finally the cost will be ' + str(min_cost))
         return best_peer
 
     except Exception as e:
