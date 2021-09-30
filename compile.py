@@ -3,7 +3,13 @@ import sys
 import json
 import os
 import gateway_pb2
-from verify import SHA3_256, SHA3_256_ID, get_service_list_of_hashes, calculate_hashes, get_service_hex_hash
+from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_hash
+
+#  -------------------------------------------------
+#  -------------------------------------------------
+#  DOCKERFILE AND JSON   to   PROTOBUF SERVICE SPEC.
+#  -------------------------------------------------
+#  -------------------------------------------------
 
 # DIRECTORIES
 HYCACHE = "/home/hy/node/__hycache__/"
@@ -45,32 +51,28 @@ class Hyper:
                     # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
                     l.LOGGER('docker opaque witeout file.')
                     continue
-                branch = gateway_pb2.celaut__pb2.Filesystem.Branch()
+                branch = gateway_pb2.celaut__pb2.ItemBranch()
                 branch.name = os.path.basename(b_name)
 
                 # It's a link.
                 if os.path.islink(directory+b_name):
                     l.LOGGER('    Adding link '+ b_name)
                     branch.link = os.path.realpath(directory+b_name)
-                    filesystem.branch.append(branch)
-                    continue
 
                 # It's a file.
-                if os.path.isfile(directory+b_name):
+                elif os.path.isfile(directory+b_name):
                     l.LOGGER('    Adding file '+ b_name)
                     with open(directory+b_name, 'rb') as file:
-                        branch.file = file.read()
-                    filesystem.branch.append(branch)
-                    continue
+                        branch.file.value = file.read()
 
                 # It's a folder.
-                if os.path.isdir(directory+b_name):
+                elif os.path.isdir(directory+b_name):
                     l.LOGGER('    Adding directory '+ b_name)
                     branch.filesystem.CopyFrom(
                         recursive_parsing(directory=directory+b_name+'/')
                         )
-                    filesystem.branch.append(branch)
-                    continue
+
+                filesystem.branch.append(branch)
 
             return filesystem
 
