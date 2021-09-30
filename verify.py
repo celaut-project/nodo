@@ -1,7 +1,7 @@
 from grpc import ServiceRpcHandler
 from logger import LOGGER
 import hashlib
-from ipss_pb2 import Service, HashTag
+from celaut_pb2 import Service, Metadata
 from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 
 # -- HASH IDs --
@@ -14,11 +14,11 @@ SHA3_256 = lambda value: "" if value is None else hashlib.sha3_256(value).digest
 
 def calculate_hashes(value) -> list:
     return [
-        HashTag.Hash(
+        Metadata.Hash(
             type = SHA3_256_ID, 
             value = SHA3_256(value)
         ),
-        HashTag.Hash(
+        Metadata.Hash(
             type = SHAKE_256_ID,
             value = SHAKE_256(value)
         )
@@ -50,7 +50,7 @@ def is_complete_service(service: Service) -> bool:
 # Return the service's sha3-256 hash on hexadecimal format.
 def get_service_hex_hash(service: Service) -> str:
     # Find if it has the hash.
-    for hash in  service.hashtag.hash:
+    for hash in  service.Metadata.hash:
         if hash.type == SHA3_256_ID:
             return hash.value.hex()
 

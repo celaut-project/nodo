@@ -2,8 +2,8 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
+import celaut_pb2 as celaut__pb2
 import gateway_pb2 as gateway__pb2
-import ipss_pb2 as ipss__pb2
 
 
 class GatewayStub(object):
@@ -27,8 +27,8 @@ class GatewayStub(object):
                 )
         self.Hynode = channel.unary_unary(
                 '/gateway.Gateway/Hynode',
-                request_serializer=ipss__pb2.Instance.SerializeToString,
-                response_deserializer=ipss__pb2.Instance.FromString,
+                request_serializer=celaut__pb2.Instance.SerializeToString,
+                response_deserializer=celaut__pb2.Instance.FromString,
                 )
         self.GetServiceTar = channel.stream_stream(
                 '/gateway.Gateway/GetServiceTar',
@@ -38,7 +38,7 @@ class GatewayStub(object):
         self.GetServiceDef = channel.stream_unary(
                 '/gateway.Gateway/GetServiceDef',
                 request_serializer=gateway__pb2.ServiceTransport.SerializeToString,
-                response_deserializer=ipss__pb2.Service.FromString,
+                response_deserializer=celaut__pb2.Service.FromString,
                 )
         self.GetServiceCost = channel.stream_unary(
                 '/gateway.Gateway/GetServiceCost',
@@ -101,8 +101,8 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'Hynode': grpc.unary_unary_rpc_method_handler(
                     servicer.Hynode,
-                    request_deserializer=ipss__pb2.Instance.FromString,
-                    response_serializer=ipss__pb2.Instance.SerializeToString,
+                    request_deserializer=celaut__pb2.Instance.FromString,
+                    response_serializer=celaut__pb2.Instance.SerializeToString,
             ),
             'GetServiceTar': grpc.stream_stream_rpc_method_handler(
                     servicer.GetServiceTar,
@@ -112,7 +112,7 @@ def add_GatewayServicer_to_server(servicer, server):
             'GetServiceDef': grpc.stream_unary_rpc_method_handler(
                     servicer.GetServiceDef,
                     request_deserializer=gateway__pb2.ServiceTransport.FromString,
-                    response_serializer=ipss__pb2.Service.SerializeToString,
+                    response_serializer=celaut__pb2.Service.SerializeToString,
             ),
             'GetServiceCost': grpc.stream_unary_rpc_method_handler(
                     servicer.GetServiceCost,
@@ -175,8 +175,8 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/gateway.Gateway/Hynode',
-            ipss__pb2.Instance.SerializeToString,
-            ipss__pb2.Instance.FromString,
+            celaut__pb2.Instance.SerializeToString,
+            celaut__pb2.Instance.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -210,7 +210,7 @@ class Gateway(object):
             metadata=None):
         return grpc.experimental.stream_unary(request_iterator, target, '/gateway.Gateway/GetServiceDef',
             gateway__pb2.ServiceTransport.SerializeToString,
-            ipss__pb2.Service.FromString,
+            celaut__pb2.Service.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

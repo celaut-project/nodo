@@ -6,7 +6,7 @@ import logger as l
 from verify import get_service_hex_hash
 from subprocess import check_output, CalledProcessError
 
-def build(service: gateway_pb2.ipss__pb2.Service):
+def build(service: gateway_pb2.celaut__pb2.Service):
     id = get_service_hex_hash(service=service)
     l.LOGGER('\nBuilding ' + id)
     
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     import sys
     id = sys.argv[1]
     with open("/home/hy/node/__registry__/"+id+".service", "rb") as file:
-        service = gateway_pb2.ipss__pb2.Service()
+        service = gateway_pb2.celaut__pb2.Service()
         service.ParseFromString(file.read())
         if get_service_hex_hash(service=service) == id:
             build(service=service)

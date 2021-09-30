@@ -89,7 +89,7 @@ message Metadata {
     }
     repeated Hash hash = 1;
     repeated string tag = 2;
-    optional FieldDef syntax = 3;
+    optional FieldDef format = 3;
 }
 
 // API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.

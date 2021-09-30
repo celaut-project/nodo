@@ -11,7 +11,7 @@ from google.protobuf import symbol_database as _symbol_database
 _sym_db = _symbol_database.Default()
 
 
-import ipss_pb2 as ipss__pb2
+import celaut_pb2 as celaut__pb2
 
 
 DESCRIPTOR = _descriptor.FileDescriptor(
@@ -20,9 +20,9 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\nipss.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"\x1b\n\x0b\x43ostMessage\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x05\";\n\x08Instance\x12 \n\x08instance\x18\x01 \x01(\x0b\x32\x0e.ipss.Instance\x12\r\n\x05token\x18\x02 \x01(\t\"\x96\x01\n\x10ServiceTransport\x12\"\n\x04hash\x18\x01 \x01(\x0b\x32\x12.ipss.HashTag.HashH\x00\x12 \n\x07service\x18\x02 \x01(\x0b\x32\r.ipss.ServiceH\x00\x12(\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x13.ipss.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"\x17\n\x05\x43hunk\x12\x0e\n\x06\x62uffer\x18\x01 \x01(\x0c\x32\xf7\x02\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12\x36\n\x0bStopService\x12\x15.gateway.TokenMessage\x1a\x0e.gateway.Empty\"\x00\x12*\n\x06Hynode\x12\x0e.ipss.Instance\x1a\x0e.ipss.Instance\"\x00\x12@\n\rGetServiceTar\x12\x19.gateway.ServiceTransport\x1a\x0e.gateway.Chunk\"\x00(\x01\x30\x01\x12=\n\rGetServiceDef\x12\x19.gateway.ServiceTransport\x1a\r.ipss.Service\"\x00(\x01\x12\x45\n\x0eGetServiceCost\x12\x19.gateway.ServiceTransport\x1a\x14.gateway.CostMessage\"\x00(\x01\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"\x1b\n\x0b\x43ostMessage\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x05\"=\n\x08Instance\x12\"\n\x08instance\x18\x01 \x01(\x0b\x32\x10.celaut.Instance\x12\r\n\x05token\x18\x02 \x01(\t\"\x9d\x01\n\x10ServiceTransport\x12%\n\x04hash\x18\x01 \x01(\x0b\x32\x15.celaut.Metadata.HashH\x00\x12\"\n\x07service\x18\x02 \x01(\x0b\x32\x0f.celaut.ServiceH\x00\x12*\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"\x17\n\x05\x43hunk\x12\x0e\n\x06\x62uffer\x18\x01 \x01(\x0c\x32\xfd\x02\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12\x36\n\x0bStopService\x12\x15.gateway.TokenMessage\x1a\x0e.gateway.Empty\"\x00\x12.\n\x06Hynode\x12\x10.celaut.Instance\x1a\x10.celaut.Instance\"\x00\x12@\n\rGetServiceTar\x12\x19.gateway.ServiceTransport\x1a\x0e.gateway.Chunk\"\x00(\x01\x30\x01\x12?\n\rGetServiceDef\x12\x19.gateway.ServiceTransport\x1a\x0f.celaut.Service\"\x00(\x01\x12\x45\n\x0eGetServiceCost\x12\x19.gateway.ServiceTransport\x1a\x14.gateway.CostMessage\"\x00(\x01\x62\x06proto3'
   ,
-  dependencies=[ipss__pb2.DESCRIPTOR,])
+  dependencies=[celaut__pb2.DESCRIPTOR,])
 
 
 
@@ -47,8 +47,8 @@ _EMPTY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=38,
-  serialized_end=45,
+  serialized_start=40,
+  serialized_end=47,
 )
 
 
@@ -79,8 +79,8 @@ _TOKENMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=47,
-  serialized_end=76,
+  serialized_start=49,
+  serialized_end=78,
 )
 
 
@@ -111,8 +111,8 @@ _COSTMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=78,
-  serialized_end=105,
+  serialized_start=80,
+  serialized_end=107,
 )
 
 
@@ -150,8 +150,8 @@ _INSTANCE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=107,
-  serialized_end=166,
+  serialized_start=109,
+  serialized_end=170,
 )
 
 
@@ -206,8 +206,8 @@ _SERVICETRANSPORT = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=169,
-  serialized_end=319,
+  serialized_start=173,
+  serialized_end=330,
 )
 
 
@@ -238,14 +238,14 @@ _CHUNK = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=321,
-  serialized_end=344,
+  serialized_start=332,
+  serialized_end=355,
 )
 
-_INSTANCE.fields_by_name['instance'].message_type = ipss__pb2._INSTANCE
-_SERVICETRANSPORT.fields_by_name['hash'].message_type = ipss__pb2._HASHTAG_HASH
-_SERVICETRANSPORT.fields_by_name['service'].message_type = ipss__pb2._SERVICE
-_SERVICETRANSPORT.fields_by_name['config'].message_type = ipss__pb2._CONFIGURATION
+_INSTANCE.fields_by_name['instance'].message_type = celaut__pb2._INSTANCE
+_SERVICETRANSPORT.fields_by_name['hash'].message_type = celaut__pb2._METADATA_HASH
+_SERVICETRANSPORT.fields_by_name['service'].message_type = celaut__pb2._SERVICE
+_SERVICETRANSPORT.fields_by_name['config'].message_type = celaut__pb2._CONFIGURATION
 _SERVICETRANSPORT.oneofs_by_name['oneOf'].fields.append(
   _SERVICETRANSPORT.fields_by_name['hash'])
 _SERVICETRANSPORT.fields_by_name['hash'].containing_oneof = _SERVICETRANSPORT.oneofs_by_name['oneOf']
@@ -314,8 +314,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=347,
-  serialized_end=722,
+  serialized_start=358,
+  serialized_end=739,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',
@@ -342,8 +342,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
     full_name='gateway.Gateway.Hynode',
     index=2,
     containing_service=None,
-    input_type=ipss__pb2._INSTANCE,
-    output_type=ipss__pb2._INSTANCE,
+    input_type=celaut__pb2._INSTANCE,
+    output_type=celaut__pb2._INSTANCE,
     serialized_options=None,
     create_key=_descriptor._internal_create_key,
   ),
@@ -363,7 +363,7 @@ _GATEWAY = _descriptor.ServiceDescriptor(
     index=4,
     containing_service=None,
     input_type=_SERVICETRANSPORT,
-    output_type=ipss__pb2._SERVICE,
+    output_type=celaut__pb2._SERVICE,
     serialized_options=None,
     create_key=_descriptor._internal_create_key,
   ),

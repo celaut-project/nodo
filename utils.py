@@ -1,12 +1,12 @@
 import socket
 from typing import Generator
 
-import ipss_pb2, gateway_pb2
+import celaut_pb2, gateway_pb2
 import netifaces as ni
 
-def get_grpc_uri(instance: ipss_pb2.Instance) -> ipss_pb2.Instance.Uri:
+def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
     for slot in instance.api.slot:
-        if 'grpc' in slot.transport_protocol.hashtag.tag and 'http2' in slot.transport_protocol.hashtag.tag:
+        if 'grpc' in slot.transport_protocol.metadata.tag and 'http2' in slot.transport_protocol.metadata.tag:
             # If the protobuf lib. supported map for this message it could be O(n).
             for uri_slot in instance.uri_slot:
                 if uri_slot.internal_port == slot.port:
@@ -14,12 +14,12 @@ def get_grpc_uri(instance: ipss_pb2.Instance) -> ipss_pb2.Instance.Uri:
     raise Exception('Grpc over Http/2 not supported on this service ' + str(instance))
 
 def service_extended(
-    service: gateway_pb2.ipss__pb2.Service, 
-    config: gateway_pb2.ipss__pb2.Configuration = None
+    service: celaut_pb2.Service, 
+    config: celaut_pb2.Configuration = None
     ) -> Generator[gateway_pb2.ServiceTransport, None, None]:
     set_config = True if config else False
     transport = gateway_pb2.ServiceTransport()
-    for hash in service.hashtag.hash:
+    for hash in service.metadata.hash:
         transport.hash.CopyFrom(hash)
         if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
             transport.config.CopyFrom(config)

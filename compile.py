@@ -12,7 +12,7 @@ REGISTRY = "/home/hy/node/__registry__/"
 class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
-        self.service =  gateway_pb2.ipss__pb2.Service()
+        self.service =  gateway_pb2.celaut__pb2.Service()
         self.path = path
         self.json = json.load(open(self.path+"service.json", "r"))
         self.aux_id = aux_id
@@ -37,15 +37,15 @@ class Hyper:
                 os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/"+layer+"/layer.tar -C "+HYCACHE+self.aux_id+"/filesystem/")
 
         # Add filesystem data to filesystem buffer object.
-        def recursive_parsing(directory: str) -> gateway_pb2.ipss__pb2.Filesystem:
-            filesystem = gateway_pb2.ipss__pb2.Filesystem()
+        def recursive_parsing(directory: str) -> gateway_pb2.celaut__pb2.Filesystem:
+            filesystem = gateway_pb2.celaut__pb2.Filesystem()
             for b_name in os.listdir(directory):
 
                 if b_name == '.wh..wh..opq': 
                     # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
                     l.LOGGER('docker opaque witeout file.')
                     continue
-                branch = gateway_pb2.ipss__pb2.Filesystem.Branch()
+                branch = gateway_pb2.celaut__pb2.Filesystem.Branch()
                 branch.name = os.path.basename(b_name)
 
                 # It's a link.
@@ -78,7 +78,7 @@ class Hyper:
 
         self.service.container.filesystem.CopyFrom( filesystem )
 
-        self.service.container.filesystem.hashtag.hash.extend(
+        self.service.container.filesystem.metadata.hash.extend(
             calculate_hashes( filesystem.SerializeToString() )
         )
 
@@ -98,7 +98,7 @@ class Hyper:
             self.service.container.entrypoint = self.json.get('entrypoint')
 
         # Arch
-        self.service.container.architecture.hashtag.tag.append( self.json.get('architecture') )
+        self.service.container.architecture.metadata.tag.append( self.json.get('architecture') )
 
         # Filesystem
         self.parseFilesys()
@@ -113,16 +113,16 @@ class Hyper:
         if self.json.get('api'):
             # iterate slots.
             for item in self.json.get('api'):
-                slot = gateway_pb2.ipss__pb2.Slot()
+                slot = gateway_pb2.celaut__pb2.Slot()
                 # port.
                 slot.port = item.get('port')
                 # transport protocol.
-                slot.transport_protocol.hashtag.tag.extend(item.get('protocol'))
+                slot.transport_protocol.metadata.tag.extend(item.get('protocol'))
                 self.service.api.slot.append(slot)
 
     def parseLedger(self):
         if self.json.get('ledger'):
-            self.service.ledger.hashtag.tag = self.json.get('ledger')
+            self.service.ledger.metadata.tag = self.json.get('ledger')
 
     def parseTensor(self):
         tensor = self.json.get('tensor') or None
@@ -131,10 +131,10 @@ class Hyper:
             index = tensor.get('index') or None
             if index:
                 for var in index:
-                    variable = gateway_pb2.ipss__pb2.Tensor.Index()
+                    variable = gateway_pb2.celaut__pb2.Tensor.Index()
                     variable.id = var
                     for tag in index[var]:
-                        variable.hashtag.tag.append(tag)
+                        variable.metadata.tag.append(tag)
                     try:
                         with open(self.path+var+".field", "rb") as var_desc:
                             variable.field.ParseFromString(var_desc.read())
@@ -142,7 +142,7 @@ class Hyper:
                     self.service.tensor.index.append(variable)
 
     def save(self):
-        self.service.hashtag.hash.extend(
+        self.service.metadata.hash.extend(
             get_service_list_of_hashes(self.service)
         )
         # Once service hashes are calculated, we prune the filesystem for save storage.

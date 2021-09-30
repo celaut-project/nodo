@@ -1,5 +1,5 @@
 from typing import Generator
-from ipss_pb2 import Slot
+from celaut_pb2 import Slot
 import build, utils
 from compile import REGISTRY, HYCACHE
 import logger as l
@@ -22,29 +22,29 @@ LOCAL_NETWORK = 'lo'
 GATEWAY_PORT = 8080
 
 
-def generate_gateway_instance(network: str) -> gateway_pb2.ipss__pb2.Instance:
-    instance = gateway_pb2.ipss__pb2.Instance()
+def generate_gateway_instance(network: str) -> gateway_pb2.celaut__pb2.Instance:
+    instance = gateway_pb2.celaut__pb2.Instance()
 
-    uri = gateway_pb2.ipss__pb2.Instance.Uri()
+    uri = gateway_pb2.celaut__pb2.Instance.Uri()
     try:
         uri.ip = ni.ifaddresses(network)[ni.AF_INET][0]['addr']
     except ValueError as e:
         l.LOGGER('You must specify a valid interface name ' + network)
         raise Exception('Error generating gateway instance --> ' + str(e))
     uri.port = GATEWAY_PORT
-    uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
+    uri_slot = gateway_pb2.celaut__pb2.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT
     uri_slot.uri.append(uri)
     instance.uri_slot.append(uri_slot)
     
-    slot = gateway_pb2.ipss__pb2.Slot()
+    slot = gateway_pb2.celaut__pb2.Slot()
     slot.port = GATEWAY_PORT
-    slot.transport_protocol.hashtag.tag.extend(['http2', 'grpc'])
+    slot.transport_protocol.metadata.tag.extend(['http2', 'grpc'])
     instance.api.slot.append(slot)
     return instance
 
 # Insert the instance if it does not exists.
-def insert_instance_on_mongo(instance: gateway_pb2.ipss__pb2.Instance):
+def insert_instance_on_mongo(instance: gateway_pb2.celaut__pb2.Instance):
     parsed_instance = json.loads(MessageToJson(instance))
     pymongo.MongoClient(
         "mongodb://localhost:27017/"
@@ -154,8 +154,8 @@ def purgue_external(father_ip, node_uri, token):
     cache_lock.release()
 
 
-def set_config(container_id: str, config: gateway_pb2.ipss__pb2.Configuration):
-    __config__ = gateway_pb2.ipss__pb2.ConfigurationFile()
+def set_config(container_id: str, config: gateway_pb2.celaut__pb2.Configuration):
+    __config__ = gateway_pb2.celaut__pb2.ConfigurationFile()
     __config__.gateway.CopyFrom(generate_gateway_instance(network=DOCKER_NETWORK))
     __config__.config.CopyFrom(config)
     os.mkdir(HYCACHE + container_id)
@@ -186,7 +186,7 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
     except docker_lib.errors.APIError:
         l.LOGGER('DOCKER API ERROR ')
 
-def build_cost(service: gateway_pb2.ipss__pb2.Service) -> int:
+def build_cost(service: gateway_pb2.celaut__pb2.Service) -> int:
     try:
         # Coste de construcción si no se posee el contenedor del servicio.
         # Debe de tener en cuenta el coste de buscar el conedor por la red.
@@ -199,13 +199,13 @@ def build_cost(service: gateway_pb2.ipss__pb2.Service) -> int:
         pass
     return 0
 
-def execution_cost(service: gateway_pb2.ipss__pb2.Service) -> int:
+def execution_cost(service: gateway_pb2.celaut__pb2.Service) -> int:
     return sum([
         len( DOCKER_CLIENT().containers.list() ),
         build_cost(service = service),
     ]) 
 
-def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss__pb2.Instance or None:
+def service_balancer(service: gateway_pb2.celaut__pb2.Service) -> gateway_pb2.celaut__pb2.Instance or None:
     try:
         peer_list = list(pymongo.MongoClient(
                         "mongodb://localhost:27017/"
@@ -220,7 +220,7 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
             del peer['_id']
             peer_instance = Parse(
                 text = json.dumps(peer),
-                message = gateway_pb2.ipss__pb2.Instance(),
+                message = gateway_pb2.celaut__pb2.Instance(),
                 ignore_unknown_fields = True
             )
             peer_uri = utils.get_grpc_uri(instance = peer_instance)
@@ -247,9 +247,9 @@ def service_balancer(service: gateway_pb2.ipss__pb2.Service) -> gateway_pb2.ipss
 
 
 def launch_service(
-        service: gateway_pb2.ipss__pb2.Service, 
+        service: gateway_pb2.celaut__pb2.Service, 
         father_ip: str, 
-        config: gateway_pb2.ipss__pb2.Configuration = None
+        config: gateway_pb2.celaut__pb2.Configuration = None
         ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service.')
 
@@ -315,11 +315,11 @@ def launch_service(
         )
 
         for slot in service.api.slot:
-            uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
+            uri_slot = gateway_pb2.celaut__pb2.Instance.Uri_Slot()
             uri_slot.internal_port = slot.port
 
             # Al ser interno sabemos que solo tendrá una dirección posible por slot.
-            uri = gateway_pb2.ipss__pb2.Instance.Uri()
+            uri = gateway_pb2.celaut__pb2.Instance.Uri()
             uri.ip = container_ip
             uri.port = slot.port
             uri_slot.uri.append(uri)
@@ -353,11 +353,11 @@ def launch_service(
         )
 
         for port in assigment_ports:
-            uri_slot = gateway_pb2.ipss__pb2.Instance.Uri_Slot()
+            uri_slot = gateway_pb2.celaut__pb2.Instance.Uri_Slot()
             uri_slot.internal_port = port
 
             # for host_ip in host_ip_list:
-            uri = gateway_pb2.ipss__pb2.Instance.Uri()
+            uri = gateway_pb2.celaut__pb2.Instance.Uri()
             uri.ip = utils.get_local_ip_from_network(
                 network = utils.get_network_name(ip_or_uri=father_ip)
             )
@@ -372,14 +372,14 @@ def launch_service(
     return instance
 
 
-def save_service(service: gateway_pb2.ipss__pb2.Service):
+def save_service(service: gateway_pb2.celaut__pb2.Service):
     # If the service is not on the registry, save it.
     hash = get_service_hex_hash(service = service)
     if not os.path.isfile(REGISTRY+hash+'.service'):
         with open(REGISTRY + hash + '.service', 'wb') as file:
             file.write(service.SerializeToString())
 
-def peers_iterator(ignore_network: str = None) -> Generator[gateway_pb2.ipss__pb2.Instance.Uri, None, None]:
+def peers_iterator(ignore_network: str = None) -> Generator[gateway_pb2.celaut__pb2.Instance.Uri, None, None]:
     peers = list(pymongo.MongoClient(
                 "mongodb://localhost:27017/"
             )["mongo"]["peerInstances"].find())
@@ -393,7 +393,7 @@ def peers_iterator(ignore_network: str = None) -> Generator[gateway_pb2.ipss__pb
             l.LOGGER('  Looking for a service on peer ' + str(peer))
             yield peer_uri
 
-def search_container(service: gateway_pb2.ipss__pb2.Service, ignore_network: str = None) -> Generator[gateway_pb2.Chunk, None, None]:
+def search_container(service: gateway_pb2.celaut__pb2.Service, ignore_network: str = None) -> Generator[gateway_pb2.Chunk, None, None]:
     # Search a service tar container.
     for peer in peers_iterator(ignore_network = ignore_network):
         try:
@@ -407,7 +407,7 @@ def search_container(service: gateway_pb2.ipss__pb2.Service, ignore_network: str
             break
         except: pass
 
-def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.ipss__pb2.Service:
+def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.celaut__pb2.Service:
     #  Search a service description.
     service = None
     for peer in peers_iterator(ignore_network = ignore_network):
@@ -416,8 +416,8 @@ def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.i
                 grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
             ).GetServiceDef(
                 utils.service_extended(
-                    service = gateway_pb2.ipss__pb2.Service(
-                        hashtag = gateway_pb2.ipss__pb2.HashTag(
+                    service = gateway_pb2.celaut__pb2.Service(
+                        metadata = gateway_pb2.celaut__pb2.metadata(
                             hash = hashes
                         )
                     )
@@ -438,10 +438,10 @@ def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.i
         raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
 
 
-def get_from_registry(hash: str) -> gateway_pb2.ipss__pb2.Service:
+def get_from_registry(hash: str) -> gateway_pb2.celaut__pb2.Service:
     try:
         with open(REGISTRY + hash + '.service', 'rb') as file:
-            service = gateway_pb2.ipss__pb2.Service()
+            service = gateway_pb2.celaut__pb2.Service()
             service.ParseFromString(file.read())
             return service
     except (IOError, FileNotFoundError):
@@ -519,7 +519,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Stopped the instance with token -> ' + request.token)
         return gateway_pb2.Empty()
     
-    def Hynode(self, request: gateway_pb2.ipss__pb2.Instance, context):
+    def Hynode(self, request: gateway_pb2.celaut__pb2.Instance, context):
         l.LOGGER('\nAdding peer ' + str(request))
         insert_instance_on_mongo(instance = request)
         return generate_gateway_instance(
