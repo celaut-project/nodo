@@ -407,7 +407,7 @@ def search_container(service: gateway_pb2.celaut__pb2.Service, ignore_network: s
             break
         except: pass
 
-def search_file(hashes: list, ignore_network: str = None) -> Generator(gateway_pb2.celaut__pb2.Any, None, None):
+def search_file(hashes: list, ignore_network: str = None) -> Generator[gateway_pb2.celaut__pb2.Any, None, None]:
     # TODO: It can search for other 'Service ledger' or 'ANY ledger' instances that could've this type of files.
     for peer in  peers_iterator(ignore_network = ignore_network):
         try:
