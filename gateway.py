@@ -3,7 +3,7 @@ from celaut_pb2 import Slot
 import build, utils
 from compile import REGISTRY, HYCACHE
 import logger as l
-from verify import SHA3_256_ID, get_service_hex_hash
+from verify import SHA3_256_ID, check_service, get_service_hex_hash
 import subprocess, os, threading, random
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
@@ -407,24 +407,39 @@ def search_container(service: gateway_pb2.celaut__pb2.Service, ignore_network: s
             break
         except: pass
 
-def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.celaut__pb2.Service:
-    #  Search a service description.
-    service = None
-    for peer in peers_iterator(ignore_network = ignore_network):
+def search_file(hashes: list, ignore_network: str = None) -> Generator(gateway_pb2.celaut__pb2.Any, None, None):
+    # TODO: It can search for other 'Service ledger' or 'ANY ledger' instances that could've this type of files.
+    for peer in  peers_iterator(ignore_network = ignore_network):
         try:
-            service = gateway_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
-            ).GetServiceDef(
-                utils.service_extended(
-                    service = gateway_pb2.celaut__pb2.Service(
-                        metadata = gateway_pb2.celaut__pb2.metadata(
-                            hash = hashes
+            yield gateway_pb2_grpc.GatewayStub(
+                    grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
+                ).GetFile(
+                    utils.service_hashes(
+                        service = gateway_pb2.celaut__pb2.Service(
+                            metadata = gateway_pb2.celaut__pb2.metadata(
+                                hash = hashes
+                            )
                         )
                     )
                 )
-            )
-            break
         except: pass
+
+def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.celaut__pb2.Service:
+    #  Search a service description.
+    service = gateway_pb2.celaut__pb2.Service()
+    for any in  search_file(
+        hashes = hashes,
+        ignore_network = ignore_network
+    ):
+        service.parseFromString(any.value)
+        if check_service(
+                service = service,
+                hashes = hashes
+            ):
+                service.metadata.CopyFrom(any.metadata) # TODO: Is not checking the metadata hashes. Needs to make an union with our hashes and check all.
+                break
+        else:
+            service = gateway_pb2.celaut__pb2.Service()
     
     if service:
         #  Save the service on the registry.
@@ -530,29 +545,27 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
         )
 
-    def GetServiceDef(self, request_iterator, context):
+    def GetFile(self, request_iterator, context):
         l.LOGGER('Request for give a service definition')
         hashes = []
-        for r in request_iterator:
+        for hash in request_iterator:
             try:
-                # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-                if r.HasField('hash'):
-                    hashes.append(r.hash)
-                    if SHA3_256_ID == r.hash.type and \
-                        r.hash.value.hex() in [s[:-8] for s in os.listdir(REGISTRY)]:
-                        return get_from_registry(
-                            hash = r.hash.value.hex()
+                # Comprueba que sea sha256 y que se encuentre en el registro.
+                hashes.append(hash)
+                if SHA3_256_ID == hash.type and \
+                    hash.value.hex() in [s[:-8] for s in os.listdir(REGISTRY)]:
+                    return get_from_registry(
+                            hash = hash.value.hex()
                         )
             except: pass
         
-        # Puede buscar el contenedor en otra red distinta a la del solicitante.
         try:
-            return search_definition(
+            return search_file(
                 ignore_network = utils.get_network_name(
                     ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
                     ),
                 hashes = hashes
-            )
+            )[0] # It's not verifying the content, because we couldn't 've the format for prune metadata in it. The final client will've to check it.
         except:
             raise Exception('Was imposible get the service definition.')
 

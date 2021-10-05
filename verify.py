@@ -1,4 +1,3 @@
-from grpc import ServiceRpcHandler
 from logger import LOGGER
 import hashlib
 from celaut_pb2 import Service, Metadata
@@ -12,6 +11,11 @@ SHA3_256_ID = bytes.fromhex("a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d
 SHAKE_256 = lambda value: "" if value is None else hashlib.shake_256(value).digest(32)
 SHA3_256 = lambda value: "" if value is None else hashlib.sha3_256(value).digest()
 
+HASH_FUNCTIONS = {
+    SHA3_256_ID: SHA3_256,
+    SHAKE_256_ID: SHAKE_256_ID
+}
+
 def calculate_hashes(value) -> list:
     return [
         Metadata.Hash(
@@ -24,6 +28,16 @@ def calculate_hashes(value) -> list:
         )
     ]
 
+def check_service(service: Service, hashes: list) -> bool:
+    for hash in hashes:
+        if hash.type in HASH_FUNCTIONS and \
+            hash.value == HASH_FUNCTIONS[hash.type](
+                            value = prune_hashes_of_service(
+                                        service = service
+                                    ).SerializeToString()
+                            ):
+                return True
+    return False
 
 def prune_hashes_of_service(service: Service) -> Service:
     def recursive_prune(field: any) -> any:
@@ -50,7 +64,7 @@ def is_complete_service(service: Service) -> bool:
 # Return the service's sha3-256 hash on hexadecimal format.
 def get_service_hex_hash(service: Service) -> str:
     # Find if it has the hash.
-    for hash in  service.Metadata.hash:
+    for hash in  service.metadata.hash:
         if hash.type == SHA3_256_ID:
             return hash.value.hex()
 

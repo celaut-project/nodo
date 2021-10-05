@@ -13,22 +13,28 @@ def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
                     return uri_slot.uri[0]
     raise Exception('Grpc over Http/2 not supported on this service ' + str(instance))
 
+def service_hashes(
+        service: celaut_pb2.Service
+    ) -> Generator[celaut_pb2.Metadata.Hash, None, None]:
+        for hash in service.metadata.hash:
+            yield hash 
+
 def service_extended(
-    service: celaut_pb2.Service, 
-    config: celaut_pb2.Configuration = None
+        service: celaut_pb2.Service, 
+        config: celaut_pb2.Configuration = None
     ) -> Generator[gateway_pb2.ServiceTransport, None, None]:
-    set_config = True if config else False
-    transport = gateway_pb2.ServiceTransport()
-    for hash in service.metadata.hash:
-        transport.hash.CopyFrom(hash)
-        if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
-            transport.config.CopyFrom(config)
-            set_config = False
+        set_config = True if config else False
+        transport = gateway_pb2.ServiceTransport()
+        for hash in service.metadata.hash:
+            transport.hash.CopyFrom(hash)
+            if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
+                transport.config.CopyFrom(config)
+                set_config = False
+            yield transport
+        transport.ClearField('hash')
+        if set_config: transport.config.CopyFrom(config)
+        transport.service.CopyFrom(service)
         yield transport
-    transport.ClearField('hash')
-    if set_config: transport.config.CopyFrom(config)
-    transport.service.CopyFrom(service)
-    yield transport
 
 def get_free_port() -> int:
     with socket.socket() as s:

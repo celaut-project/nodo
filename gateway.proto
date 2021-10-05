@@ -36,7 +36,7 @@ service Gateway {
     rpc StopService(TokenMessage) returns (Empty) {}
     rpc Hynode(celaut.Instance) returns (celaut.Instance) {}
     
+    rpc GetFile(stream celaut.Metadata.Hash) returns (celaut.Any) {}
     rpc GetServiceTar(stream ServiceTransport) returns (stream Chunk) {}
-    rpc GetServiceDef(stream ServiceTransport) returns (celaut.Service) {}
     rpc GetServiceCost(stream ServiceTransport) returns (CostMessage) {}
 }
