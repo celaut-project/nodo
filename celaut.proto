@@ -3,7 +3,6 @@
 //       CEL•AUT•WEB
 //  -----------------------
 //  -----------------------
-
 syntax = "proto3";
 package celaut;
 
@@ -11,18 +10,37 @@ package celaut;
 //  -----------------------
 //  DEFINITIONS.
 //  -----------------------
-message PrimitiveDef {
-    repeated string tag = 1; // INT32, ...
-    optional string regex = 2; // {0-10}, ...
-    // Primitive specification can be applied. <- must be optional
-}
-
-message EnumDef {
-    repeated string tag = 1;
-    map<string, int32> value = 2;
-}
 
 message FieldDef {
+    message PrimitiveDef {
+        Metadata metadata = 15;
+        optional string regex = 1;  // {0-10}, ...
+        // Primitive specification can be applied. <- must be optional
+    }
+    message EnumDef {
+        Metadata metadata = 15;
+        map<string, int32> value = 1;
+    }
+    message MessageDef {
+        Metadata metadata = 15;
+        message ParamDef {
+            Metadata metadata = 15;
+            int32 index = 1;
+            // In order to avoid loops, 
+            // in the definition of a message only
+            // the sub-messages must be fully 
+            // specified the first time they appear,
+            // if they are repeated again only the tags are added.
+            FieldDef field = 2;
+            bool repeated = 3;
+            bool optional = 4;
+        }
+        message OneofDef {
+            repeated int32 index = 1;
+        }
+        repeated ParamDef param = 1;
+        repeated OneofDef oneof = 2; // have a list of oneof's params' index.
+    }
     oneof value{
         MessageDef message = 1;
         PrimitiveDef primitive = 2;
@@ -30,41 +48,22 @@ message FieldDef {
     }
 }
 
-message ParamDef {
-    int32 index = 1;
-    repeated string tag = 2;
-    // In order to avoid loops, 
-    // in the definition of a message only
-    // the sub-messages must be fully 
-    // specified the first time they appear,
-    // if they are repeated again only the tags are added.
-    FieldDef field = 3;
-    bool repeated = 4;
-    bool optional = 5;
-}
-
-message OneofDef {
-    repeated int32 index = 1;
-}
-
-message MessageDef {
-    repeated string tag = 1;
-    repeated ParamDef param = 2;
-    repeated OneofDef oneof = 3; // have a list of oneof's params' index.
-}
-
-message MethodDef {
-    int32 index = 1;
-    repeated string tag = 2;
-    FieldDef input_message = 3;
-    bool is_input_stream = 4;
-    FieldDef output_message = 5;
-    bool is_output_stream = 6;
+message RelationDef {
+    FieldDef field = 1;
+    string relation = 2;  // {0-10}, * ...
 }
 
 message ApplicationDef {
-    repeated string tag = 1;
-    repeated MethodDef method = 2; // Exemple of method call: 8080.1()
+    Metadata metadata = 15;
+    message MethodDef {
+        Metadata metadata = 15;
+        int32 index = 1;
+        FieldDef input_message = 2;
+        bool is_input_stream = 3;
+        FieldDef output_message = 4;
+        bool is_output_stream = 5;
+    }
+    repeated MethodDef method = 1; // Exemple of method call: 8080.1()
 }
 
 message Any {
@@ -82,6 +81,7 @@ message Any {
 //  And it's used for define the field.
 //  Index 15 is the maximum that use only 1 byte.
 //  It is the only attribute that is not taken into account when calculating the hash id.
+
 message Metadata {
     message Hash {
         bytes type = 1;
@@ -92,15 +92,25 @@ message Metadata {
     optional FieldDef format = 3;
 }
 
-// API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
-message ProtocolMesh {
+message Protocol {
     Metadata metadata = 15;
-    // Mesh specification can be applied. <- must be optional
+    // Protocol specification can be applied. <- must be optional
 }
 
+message ClassDiagram {
+    Metadata metadata = 15;
+    message Class {
+        Metadata metadata = 15;
+        string id = 1;
+        optional RelationDef relation = 2;
+    }
+    repeated Class clases = 1;
+}
+
+// API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
 message Slot {
     int32 port = 1;
-    ProtocolMesh transport_protocol = 2;
+    Protocol transport_protocol = 2;
 }
 
 message Api{
@@ -115,16 +125,15 @@ message Architecture {
     // Architecture specification can be applied. <- must be optional.
 }
 
-message ItemBranch { 
-    oneof item {
-        Any file = 1;
-        string link = 2;
-        Filesystem filesystem = 3;
-    }
-    string name = 4; // id for path
-}
-
 message Filesystem {
+    message ItemBranch { 
+        oneof item {
+            Any file = 1;
+            string link = 2;
+            Filesystem filesystem = 3;
+        }
+        string name = 4; // id for path
+    }
     repeated ItemBranch branch = 1;
     Metadata metadata = 15;
 }
@@ -140,9 +149,9 @@ message Container {
 message Tensor {
     Metadata metadata = 15;
     message Index {
+        Metadata metadata = 15;
         string id = 1;
         FieldDef field = 2;
-        Metadata metadata = 15;
     }
     repeated Index index = 1;
     int32 rank = 2;
@@ -151,6 +160,8 @@ message Tensor {
 // Ledger: Defines the database that the service can provide.
 message Ledger {
     Metadata metadata = 15;
+    ClassDiagram class_diagram = 1;
+    optional Protocol consensus_protocol = 2;
     // Ledger specification can be applied. <- must be optional
     //  it would be a class diagram and a consensus algorithm.
 }
@@ -189,7 +200,7 @@ message Instance {
 // The __config__ file is mounted on each service on the filesystem's root.
 message Configuration {
     map<string, Any> enviroment_variables = 1;
-    map<int32, ProtocolMesh> spec_slot = 2; // Only some of the specified ports and a protocol-submesh subgroup of the protocol-submesh of each slot.    
+    repeated int32 spec_slot = 2;
 }
 
 message ConfigurationFile{

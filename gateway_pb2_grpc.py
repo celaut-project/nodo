@@ -30,15 +30,15 @@ class GatewayStub(object):
                 request_serializer=celaut__pb2.Instance.SerializeToString,
                 response_deserializer=celaut__pb2.Instance.FromString,
                 )
+        self.GetFile = channel.stream_unary(
+                '/gateway.Gateway/GetFile',
+                request_serializer=celaut__pb2.Metadata.Hash.SerializeToString,
+                response_deserializer=celaut__pb2.Any.FromString,
+                )
         self.GetServiceTar = channel.stream_stream(
                 '/gateway.Gateway/GetServiceTar',
                 request_serializer=gateway__pb2.ServiceTransport.SerializeToString,
                 response_deserializer=gateway__pb2.Chunk.FromString,
-                )
-        self.GetServiceDef = channel.stream_unary(
-                '/gateway.Gateway/GetServiceDef',
-                request_serializer=gateway__pb2.ServiceTransport.SerializeToString,
-                response_deserializer=celaut__pb2.Service.FromString,
                 )
         self.GetServiceCost = channel.stream_unary(
                 '/gateway.Gateway/GetServiceCost',
@@ -68,13 +68,13 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetServiceTar(self, request_iterator, context):
+    def GetFile(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetServiceDef(self, request_iterator, context):
+    def GetServiceTar(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -104,15 +104,15 @@ def add_GatewayServicer_to_server(servicer, server):
                     request_deserializer=celaut__pb2.Instance.FromString,
                     response_serializer=celaut__pb2.Instance.SerializeToString,
             ),
+            'GetFile': grpc.stream_unary_rpc_method_handler(
+                    servicer.GetFile,
+                    request_deserializer=celaut__pb2.Metadata.Hash.FromString,
+                    response_serializer=celaut__pb2.Any.SerializeToString,
+            ),
             'GetServiceTar': grpc.stream_stream_rpc_method_handler(
                     servicer.GetServiceTar,
                     request_deserializer=gateway__pb2.ServiceTransport.FromString,
                     response_serializer=gateway__pb2.Chunk.SerializeToString,
-            ),
-            'GetServiceDef': grpc.stream_unary_rpc_method_handler(
-                    servicer.GetServiceDef,
-                    request_deserializer=gateway__pb2.ServiceTransport.FromString,
-                    response_serializer=celaut__pb2.Service.SerializeToString,
             ),
             'GetServiceCost': grpc.stream_unary_rpc_method_handler(
                     servicer.GetServiceCost,
@@ -181,6 +181,23 @@ class Gateway(object):
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
+    def GetFile(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(request_iterator, target, '/gateway.Gateway/GetFile',
+            celaut__pb2.Metadata.Hash.SerializeToString,
+            celaut__pb2.Any.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
     def GetServiceTar(request_iterator,
             target,
             options=(),
@@ -194,23 +211,6 @@ class Gateway(object):
         return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GetServiceTar',
             gateway__pb2.ServiceTransport.SerializeToString,
             gateway__pb2.Chunk.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
-
-    @staticmethod
-    def GetServiceDef(request_iterator,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.stream_unary(request_iterator, target, '/gateway.Gateway/GetServiceDef',
-            gateway__pb2.ServiceTransport.SerializeToString,
-            celaut__pb2.Service.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

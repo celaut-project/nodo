@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"\x1b\n\x0b\x43ostMessage\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x05\"=\n\x08Instance\x12\"\n\x08instance\x18\x01 \x01(\x0b\x32\x10.celaut.Instance\x12\r\n\x05token\x18\x02 \x01(\t\"\x9d\x01\n\x10ServiceTransport\x12%\n\x04hash\x18\x01 \x01(\x0b\x32\x15.celaut.Metadata.HashH\x00\x12\"\n\x07service\x18\x02 \x01(\x0b\x32\x0f.celaut.ServiceH\x00\x12*\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"\x17\n\x05\x43hunk\x12\x0e\n\x06\x62uffer\x18\x01 \x01(\x0c\x32\xfd\x02\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12\x36\n\x0bStopService\x12\x15.gateway.TokenMessage\x1a\x0e.gateway.Empty\"\x00\x12.\n\x06Hynode\x12\x10.celaut.Instance\x1a\x10.celaut.Instance\"\x00\x12@\n\rGetServiceTar\x12\x19.gateway.ServiceTransport\x1a\x0e.gateway.Chunk\"\x00(\x01\x30\x01\x12?\n\rGetServiceDef\x12\x19.gateway.ServiceTransport\x1a\x0f.celaut.Service\"\x00(\x01\x12\x45\n\x0eGetServiceCost\x12\x19.gateway.ServiceTransport\x1a\x14.gateway.CostMessage\"\x00(\x01\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"\x1b\n\x0b\x43ostMessage\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x05\"=\n\x08Instance\x12\"\n\x08instance\x18\x01 \x01(\x0b\x32\x10.celaut.Instance\x12\r\n\x05token\x18\x02 \x01(\t\"\x9d\x01\n\x10ServiceTransport\x12%\n\x04hash\x18\x01 \x01(\x0b\x32\x15.celaut.Metadata.HashH\x00\x12\"\n\x07service\x18\x02 \x01(\x0b\x32\x0f.celaut.ServiceH\x00\x12*\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"\x17\n\x05\x43hunk\x12\x0e\n\x06\x62uffer\x18\x01 \x01(\x0c\x32\xef\x02\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12\x36\n\x0bStopService\x12\x15.gateway.TokenMessage\x1a\x0e.gateway.Empty\"\x00\x12.\n\x06Hynode\x12\x10.celaut.Instance\x1a\x10.celaut.Instance\"\x00\x12\x31\n\x07GetFile\x12\x15.celaut.Metadata.Hash\x1a\x0b.celaut.Any\"\x00(\x01\x12@\n\rGetServiceTar\x12\x19.gateway.ServiceTransport\x1a\x0e.gateway.Chunk\"\x00(\x01\x30\x01\x12\x45\n\x0eGetServiceCost\x12\x19.gateway.ServiceTransport\x1a\x14.gateway.CostMessage\"\x00(\x01\x62\x06proto3'
   ,
   dependencies=[celaut__pb2.DESCRIPTOR,])
 
@@ -315,7 +315,7 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
   serialized_start=358,
-  serialized_end=739,
+  serialized_end=725,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',
@@ -348,22 +348,22 @@ _GATEWAY = _descriptor.ServiceDescriptor(
     create_key=_descriptor._internal_create_key,
   ),
   _descriptor.MethodDescriptor(
-    name='GetServiceTar',
-    full_name='gateway.Gateway.GetServiceTar',
+    name='GetFile',
+    full_name='gateway.Gateway.GetFile',
     index=3,
     containing_service=None,
-    input_type=_SERVICETRANSPORT,
-    output_type=_CHUNK,
+    input_type=celaut__pb2._METADATA_HASH,
+    output_type=celaut__pb2._ANY,
     serialized_options=None,
     create_key=_descriptor._internal_create_key,
   ),
   _descriptor.MethodDescriptor(
-    name='GetServiceDef',
-    full_name='gateway.Gateway.GetServiceDef',
+    name='GetServiceTar',
+    full_name='gateway.Gateway.GetServiceTar',
     index=4,
     containing_service=None,
     input_type=_SERVICETRANSPORT,
-    output_type=celaut__pb2._SERVICE,
+    output_type=_CHUNK,
     serialized_options=None,
     create_key=_descriptor._internal_create_key,
   ),

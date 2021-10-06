@@ -51,7 +51,7 @@ class Hyper:
                     # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
                     l.LOGGER('docker opaque witeout file.')
                     continue
-                branch = gateway_pb2.celaut__pb2.ItemBranch()
+                branch = gateway_pb2.celaut__pb2.Filesystem.ItemBranch()
                 branch.name = os.path.basename(b_name)
 
                 # It's a link.

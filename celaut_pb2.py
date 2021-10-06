@@ -19,30 +19,30 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\x0c\x63\x65laut.proto\x12\x06\x63\x65laut\"9\n\x0cPrimitiveDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x12\n\x05regex\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x08\n\x06_regex\"o\n\x07\x45numDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12)\n\x05value\x18\x02 \x03(\x0b\x32\x1a.celaut.EnumDef.ValueEntry\x1a,\n\nValueEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x05:\x02\x38\x01\"\x86\x01\n\x08\x46ieldDef\x12%\n\x07message\x18\x01 \x01(\x0b\x32\x12.celaut.MessageDefH\x00\x12)\n\tprimitive\x18\x02 \x01(\x0b\x32\x14.celaut.PrimitiveDefH\x00\x12\x1f\n\x04\x65num\x18\x03 \x01(\x0b\x32\x0f.celaut.EnumDefH\x00\x42\x07\n\x05value\"k\n\x08ParamDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\x1f\n\x05\x66ield\x18\x03 \x01(\x0b\x32\x10.celaut.FieldDef\x12\x10\n\x08repeated\x18\x04 \x01(\x08\x12\x10\n\x08optional\x18\x05 \x01(\x08\"\x19\n\x08OneofDef\x12\r\n\x05index\x18\x01 \x03(\x05\"[\n\nMessageDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12\x1f\n\x05param\x18\x02 \x03(\x0b\x32\x10.celaut.ParamDef\x12\x1f\n\x05oneof\x18\x03 \x03(\x0b\x32\x10.celaut.OneofDef\"\xad\x01\n\tMethodDef\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12\'\n\rinput_message\x18\x03 \x01(\x0b\x32\x10.celaut.FieldDef\x12\x17\n\x0fis_input_stream\x18\x04 \x01(\x08\x12(\n\x0eoutput_message\x18\x05 \x01(\x0b\x32\x10.celaut.FieldDef\x12\x18\n\x10is_output_stream\x18\x06 \x01(\x08\"@\n\x0e\x41pplicationDef\x12\x0b\n\x03tag\x18\x01 \x03(\t\x12!\n\x06method\x18\x02 \x03(\x0b\x32\x11.celaut.MethodDef\"8\n\x03\x41ny\x12\r\n\x05value\x18\x01 \x01(\x0c\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\"\x93\x01\n\x08Metadata\x12#\n\x04hash\x18\x01 \x03(\x0b\x32\x15.celaut.Metadata.Hash\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12%\n\x06\x66ormat\x18\x03 \x01(\x0b\x32\x10.celaut.FieldDefH\x00\x88\x01\x01\x1a#\n\x04Hash\x12\x0c\n\x04type\x18\x01 \x01(\x0c\x12\r\n\x05value\x18\x02 \x01(\x0c\x42\t\n\x07_format\"2\n\x0cProtocolMesh\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\"F\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12\x30\n\x12transport_protocol\x18\x02 \x01(\x0b\x32\x14.celaut.ProtocolMesh\"O\n\x03\x41pi\x12,\n\x0c\x61pp_protocol\x18\x01 \x01(\x0b\x32\x16.celaut.ApplicationDef\x12\x1a\n\x04slot\x18\x02 \x03(\x0b\x32\x0c.celaut.Slot\"2\n\x0c\x41rchitecture\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\"y\n\nItemBranch\x12\x1b\n\x04\x66ile\x18\x01 \x01(\x0b\x32\x0b.celaut.AnyH\x00\x12\x0e\n\x04link\x18\x02 \x01(\tH\x00\x12(\n\nfilesystem\x18\x03 \x01(\x0b\x32\x12.celaut.FilesystemH\x00\x12\x0c\n\x04name\x18\x04 \x01(\tB\x06\n\x04item\"T\n\nFilesystem\x12\"\n\x06\x62ranch\x18\x01 \x03(\x0b\x32\x12.celaut.ItemBranch\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\"\x8b\x02\n\tContainer\x12*\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\x14.celaut.Architecture\x12&\n\nfilesystem\x18\x02 \x01(\x0b\x32\x12.celaut.Filesystem\x12H\n\x14\x65nviroment_variables\x18\x03 \x03(\x0b\x32*.celaut.Container.EnviromentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x01(\t\x1aL\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1f\n\x05value\x18\x02 \x01(\x0b\x32\x10.celaut.FieldDef:\x02\x38\x01\"\xb9\x01\n\x06Tensor\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12#\n\x05index\x18\x01 \x03(\x0b\x32\x14.celaut.Tensor.Index\x12\x0c\n\x04rank\x18\x02 \x01(\x05\x1aX\n\x05Index\x12\n\n\x02id\x18\x01 \x01(\t\x12\x1f\n\x05\x66ield\x18\x02 \x01(\x0b\x32\x10.celaut.FieldDef\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\",\n\x06Ledger\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\"\xad\x01\n\x07Service\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12$\n\tcontainer\x18\x01 \x01(\x0b\x32\x11.celaut.Container\x12\x18\n\x03\x61pi\x18\x02 \x01(\x0b\x32\x0b.celaut.Api\x12\x1e\n\x06tensor\x18\x03 \x01(\x0b\x32\x0e.celaut.Tensor\x12\x1e\n\x06ledger\x18\x04 \x01(\x0b\x32\x0e.celaut.Ledger\"\xdc\x01\n\x08Instance\x12\x18\n\x03\x61pi\x18\x01 \x01(\x0b\x32\x0b.celaut.Api\x12+\n\x08uri_slot\x18\x02 \x03(\x0b\x32\x19.celaut.Instance.Uri_Slot\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x44\n\x08Uri_Slot\x12\x15\n\rinternal_port\x18\x01 \x01(\x05\x12!\n\x03uri\x18\x02 \x03(\x0b\x32\x14.celaut.Instance.Uri\"\xa5\x02\n\rConfiguration\x12L\n\x14\x65nviroment_variables\x18\x01 \x03(\x0b\x32..celaut.Configuration.EnviromentVariablesEntry\x12\x36\n\tspec_slot\x18\x02 \x03(\x0b\x32#.celaut.Configuration.SpecSlotEntry\x1aG\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1a\n\x05value\x18\x02 \x01(\x0b\x32\x0b.celaut.Any:\x02\x38\x01\x1a\x45\n\rSpecSlotEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12#\n\x05value\x18\x02 \x01(\x0b\x32\x14.celaut.ProtocolMesh:\x02\x38\x01\"\xd9\x01\n\x11\x43onfigurationFile\x12!\n\x07gateway\x18\x01 \x01(\x0b\x32\x10.celaut.Instance\x12%\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x15.celaut.Configuration\x12*\n\x10tensor_instances\x18\x03 \x03(\x0b\x32\x10.celaut.Instance\x12*\n\x10ledger_instances\x18\x04 \x03(\x0b\x32\x10.celaut.Instance\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadatab\x06proto3'
+  serialized_pb=b'\n\x0c\x63\x65laut.proto\x12\x06\x63\x65laut\"\xc2\x05\n\x08\x46ieldDef\x12.\n\x07message\x18\x01 \x01(\x0b\x32\x1b.celaut.FieldDef.MessageDefH\x00\x12\x32\n\tprimitive\x18\x02 \x01(\x0b\x32\x1d.celaut.FieldDef.PrimitiveDefH\x00\x12(\n\x04\x65num\x18\x03 \x01(\x0b\x32\x18.celaut.FieldDef.EnumDefH\x00\x1aP\n\x0cPrimitiveDef\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12\x12\n\x05regex\x18\x01 \x01(\tH\x00\x88\x01\x01\x42\x08\n\x06_regex\x1a\x8f\x01\n\x07\x45numDef\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12\x32\n\x05value\x18\x01 \x03(\x0b\x32#.celaut.FieldDef.EnumDef.ValueEntry\x1a,\n\nValueEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x05:\x02\x38\x01\x1a\xba\x02\n\nMessageDef\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12\x33\n\x05param\x18\x01 \x03(\x0b\x32$.celaut.FieldDef.MessageDef.ParamDef\x12\x33\n\x05oneof\x18\x02 \x03(\x0b\x32$.celaut.FieldDef.MessageDef.OneofDef\x1a\x82\x01\n\x08ParamDef\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x1f\n\x05\x66ield\x18\x02 \x01(\x0b\x32\x10.celaut.FieldDef\x12\x10\n\x08repeated\x18\x03 \x01(\x08\x12\x10\n\x08optional\x18\x04 \x01(\x08\x1a\x19\n\x08OneofDef\x12\r\n\x05index\x18\x01 \x03(\x05\x42\x07\n\x05value\"@\n\x0bRelationDef\x12\x1f\n\x05\x66ield\x18\x01 \x01(\x0b\x32\x10.celaut.FieldDef\x12\x10\n\x08relation\x18\x02 \x01(\t\"\xad\x02\n\x0e\x41pplicationDef\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12\x30\n\x06method\x18\x01 \x03(\x0b\x32 .celaut.ApplicationDef.MethodDef\x1a\xc4\x01\n\tMethodDef\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12\r\n\x05index\x18\x01 \x01(\x05\x12\'\n\rinput_message\x18\x02 \x01(\x0b\x32\x10.celaut.FieldDef\x12\x17\n\x0fis_input_stream\x18\x03 \x01(\x08\x12(\n\x0eoutput_message\x18\x04 \x01(\x0b\x32\x10.celaut.FieldDef\x12\x18\n\x10is_output_stream\x18\x05 \x01(\x08\"8\n\x03\x41ny\x12\r\n\x05value\x18\x01 \x01(\x0c\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\"\x93\x01\n\x08Metadata\x12#\n\x04hash\x18\x01 \x03(\x0b\x32\x15.celaut.Metadata.Hash\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12%\n\x06\x66ormat\x18\x03 \x01(\x0b\x32\x10.celaut.FieldDefH\x00\x88\x01\x01\x1a#\n\x04Hash\x12\x0c\n\x04type\x18\x01 \x01(\x0c\x12\r\n\x05value\x18\x02 \x01(\x0c\x42\t\n\x07_format\".\n\x08Protocol\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\"\xd0\x01\n\x0c\x43lassDiagram\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12*\n\x06\x63lases\x18\x01 \x03(\x0b\x32\x1a.celaut.ClassDiagram.Class\x1ap\n\x05\x43lass\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12\n\n\x02id\x18\x01 \x01(\t\x12*\n\x08relation\x18\x02 \x01(\x0b\x32\x13.celaut.RelationDefH\x00\x88\x01\x01\x42\x0b\n\t_relation\"B\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12,\n\x12transport_protocol\x18\x02 \x01(\x0b\x32\x10.celaut.Protocol\"O\n\x03\x41pi\x12,\n\x0c\x61pp_protocol\x18\x01 \x01(\x0b\x32\x16.celaut.ApplicationDef\x12\x1a\n\x04slot\x18\x02 \x03(\x0b\x32\x0c.celaut.Slot\"2\n\x0c\x41rchitecture\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\"\xda\x01\n\nFilesystem\x12-\n\x06\x62ranch\x18\x01 \x03(\x0b\x32\x1d.celaut.Filesystem.ItemBranch\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x1ay\n\nItemBranch\x12\x1b\n\x04\x66ile\x18\x01 \x01(\x0b\x32\x0b.celaut.AnyH\x00\x12\x0e\n\x04link\x18\x02 \x01(\tH\x00\x12(\n\nfilesystem\x18\x03 \x01(\x0b\x32\x12.celaut.FilesystemH\x00\x12\x0c\n\x04name\x18\x04 \x01(\tB\x06\n\x04item\"\x8b\x02\n\tContainer\x12*\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32\x14.celaut.Architecture\x12&\n\nfilesystem\x18\x02 \x01(\x0b\x32\x12.celaut.Filesystem\x12H\n\x14\x65nviroment_variables\x18\x03 \x03(\x0b\x32*.celaut.Container.EnviromentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x01(\t\x1aL\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1f\n\x05value\x18\x02 \x01(\x0b\x32\x10.celaut.FieldDef:\x02\x38\x01\"\xb9\x01\n\x06Tensor\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12#\n\x05index\x18\x01 \x03(\x0b\x32\x14.celaut.Tensor.Index\x12\x0c\n\x04rank\x18\x02 \x01(\x05\x1aX\n\x05Index\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12\n\n\x02id\x18\x01 \x01(\t\x12\x1f\n\x05\x66ield\x18\x02 \x01(\x0b\x32\x10.celaut.FieldDef\"\xa3\x01\n\x06Ledger\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12+\n\rclass_diagram\x18\x01 \x01(\x0b\x32\x14.celaut.ClassDiagram\x12\x31\n\x12\x63onsensus_protocol\x18\x02 \x01(\x0b\x32\x10.celaut.ProtocolH\x00\x88\x01\x01\x42\x15\n\x13_consensus_protocol\"\xad\x01\n\x07Service\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x12$\n\tcontainer\x18\x01 \x01(\x0b\x32\x11.celaut.Container\x12\x18\n\x03\x61pi\x18\x02 \x01(\x0b\x32\x0b.celaut.Api\x12\x1e\n\x06tensor\x18\x03 \x01(\x0b\x32\x0e.celaut.Tensor\x12\x1e\n\x06ledger\x18\x04 \x01(\x0b\x32\x0e.celaut.Ledger\"\xdc\x01\n\x08Instance\x12\x18\n\x03\x61pi\x18\x01 \x01(\x0b\x32\x0b.celaut.Api\x12+\n\x08uri_slot\x18\x02 \x03(\x0b\x32\x19.celaut.Instance.Uri_Slot\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadata\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x44\n\x08Uri_Slot\x12\x15\n\rinternal_port\x18\x01 \x01(\x05\x12!\n\x03uri\x18\x02 \x03(\x0b\x32\x14.celaut.Instance.Uri\"\xb9\x01\n\rConfiguration\x12L\n\x14\x65nviroment_variables\x18\x01 \x03(\x0b\x32..celaut.Configuration.EnviromentVariablesEntry\x12\x11\n\tspec_slot\x18\x02 \x03(\x05\x1aG\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1a\n\x05value\x18\x02 \x01(\x0b\x32\x0b.celaut.Any:\x02\x38\x01\"\xd9\x01\n\x11\x43onfigurationFile\x12!\n\x07gateway\x18\x01 \x01(\x0b\x32\x10.celaut.Instance\x12%\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x15.celaut.Configuration\x12*\n\x10tensor_instances\x18\x03 \x03(\x0b\x32\x10.celaut.Instance\x12*\n\x10ledger_instances\x18\x04 \x03(\x0b\x32\x10.celaut.Instance\x12\"\n\x08metadata\x18\x0f \x01(\x0b\x32\x10.celaut.Metadatab\x06proto3'
 )
 
 
 
 
-_PRIMITIVEDEF = _descriptor.Descriptor(
+_FIELDDEF_PRIMITIVEDEF = _descriptor.Descriptor(
   name='PrimitiveDef',
-  full_name='celaut.PrimitiveDef',
+  full_name='celaut.FieldDef.PrimitiveDef',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='tag', full_name='celaut.PrimitiveDef.tag', index=0,
-      number=1, type=9, cpp_type=9, label=3,
-      has_default_value=False, default_value=[],
+      name='metadata', full_name='celaut.FieldDef.PrimitiveDef.metadata', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='regex', full_name='celaut.PrimitiveDef.regex', index=1,
-      number=2, type=9, cpp_type=9, label=1,
+      name='regex', full_name='celaut.FieldDef.PrimitiveDef.regex', index=1,
+      number=1, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -59,33 +59,32 @@ _PRIMITIVEDEF = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
     _descriptor.OneofDescriptor(
-      name='_regex', full_name='celaut.PrimitiveDef._regex',
+      name='_regex', full_name='celaut.FieldDef.PrimitiveDef._regex',
       index=0, containing_type=None,
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=24,
-  serialized_end=81,
+  serialized_start=179,
+  serialized_end=259,
 )
 
-
-_ENUMDEF_VALUEENTRY = _descriptor.Descriptor(
+_FIELDDEF_ENUMDEF_VALUEENTRY = _descriptor.Descriptor(
   name='ValueEntry',
-  full_name='celaut.EnumDef.ValueEntry',
+  full_name='celaut.FieldDef.EnumDef.ValueEntry',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='key', full_name='celaut.EnumDef.ValueEntry.key', index=0,
+      name='key', full_name='celaut.FieldDef.EnumDef.ValueEntry.key', index=0,
       number=1, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='value', full_name='celaut.EnumDef.ValueEntry.value', index=1,
+      name='value', full_name='celaut.FieldDef.EnumDef.ValueEntry.value', index=1,
       number=2, type=5, cpp_type=1, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
@@ -103,28 +102,28 @@ _ENUMDEF_VALUEENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=150,
-  serialized_end=194,
+  serialized_start=361,
+  serialized_end=405,
 )
 
-_ENUMDEF = _descriptor.Descriptor(
+_FIELDDEF_ENUMDEF = _descriptor.Descriptor(
   name='EnumDef',
-  full_name='celaut.EnumDef',
+  full_name='celaut.FieldDef.EnumDef',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='tag', full_name='celaut.EnumDef.tag', index=0,
-      number=1, type=9, cpp_type=9, label=3,
-      has_default_value=False, default_value=[],
+      name='metadata', full_name='celaut.FieldDef.EnumDef.metadata', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='value', full_name='celaut.EnumDef.value', index=1,
-      number=2, type=11, cpp_type=10, label=3,
+      name='value', full_name='celaut.FieldDef.EnumDef.value', index=1,
+      number=1, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -132,7 +131,7 @@ _ENUMDEF = _descriptor.Descriptor(
   ],
   extensions=[
   ],
-  nested_types=[_ENUMDEF_VALUEENTRY, ],
+  nested_types=[_FIELDDEF_ENUMDEF_VALUEENTRY, ],
   enum_types=[
   ],
   serialized_options=None,
@@ -141,10 +140,144 @@ _ENUMDEF = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=83,
-  serialized_end=194,
+  serialized_start=262,
+  serialized_end=405,
 )
 
+_FIELDDEF_MESSAGEDEF_PARAMDEF = _descriptor.Descriptor(
+  name='ParamDef',
+  full_name='celaut.FieldDef.MessageDef.ParamDef',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='metadata', full_name='celaut.FieldDef.MessageDef.ParamDef.metadata', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='index', full_name='celaut.FieldDef.MessageDef.ParamDef.index', index=1,
+      number=1, type=5, cpp_type=1, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='field', full_name='celaut.FieldDef.MessageDef.ParamDef.field', index=2,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='repeated', full_name='celaut.FieldDef.MessageDef.ParamDef.repeated', index=3,
+      number=3, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='optional', full_name='celaut.FieldDef.MessageDef.ParamDef.optional', index=4,
+      number=4, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=565,
+  serialized_end=695,
+)
+
+_FIELDDEF_MESSAGEDEF_ONEOFDEF = _descriptor.Descriptor(
+  name='OneofDef',
+  full_name='celaut.FieldDef.MessageDef.OneofDef',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='index', full_name='celaut.FieldDef.MessageDef.OneofDef.index', index=0,
+      number=1, type=5, cpp_type=1, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=697,
+  serialized_end=722,
+)
+
+_FIELDDEF_MESSAGEDEF = _descriptor.Descriptor(
+  name='MessageDef',
+  full_name='celaut.FieldDef.MessageDef',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='metadata', full_name='celaut.FieldDef.MessageDef.metadata', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='param', full_name='celaut.FieldDef.MessageDef.param', index=1,
+      number=1, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='oneof', full_name='celaut.FieldDef.MessageDef.oneof', index=2,
+      number=2, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[_FIELDDEF_MESSAGEDEF_PARAMDEF, _FIELDDEF_MESSAGEDEF_ONEOFDEF, ],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=408,
+  serialized_end=722,
+)
 
 _FIELDDEF = _descriptor.Descriptor(
   name='FieldDef',
@@ -178,7 +311,7 @@ _FIELDDEF = _descriptor.Descriptor(
   ],
   extensions=[
   ],
-  nested_types=[],
+  nested_types=[_FIELDDEF_PRIMITIVEDEF, _FIELDDEF_ENUMDEF, _FIELDDEF_MESSAGEDEF, ],
   enum_types=[
   ],
   serialized_options=None,
@@ -192,49 +325,95 @@ _FIELDDEF = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=197,
-  serialized_end=331,
+  serialized_start=25,
+  serialized_end=731,
 )
 
 
-_PARAMDEF = _descriptor.Descriptor(
-  name='ParamDef',
-  full_name='celaut.ParamDef',
+_RELATIONDEF = _descriptor.Descriptor(
+  name='RelationDef',
+  full_name='celaut.RelationDef',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='index', full_name='celaut.ParamDef.index', index=0,
+      name='field', full_name='celaut.RelationDef.field', index=0,
+      number=1, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='relation', full_name='celaut.RelationDef.relation', index=1,
+      number=2, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"".decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=733,
+  serialized_end=797,
+)
+
+
+_APPLICATIONDEF_METHODDEF = _descriptor.Descriptor(
+  name='MethodDef',
+  full_name='celaut.ApplicationDef.MethodDef',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='metadata', full_name='celaut.ApplicationDef.MethodDef.metadata', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='index', full_name='celaut.ApplicationDef.MethodDef.index', index=1,
       number=1, type=5, cpp_type=1, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='tag', full_name='celaut.ParamDef.tag', index=1,
-      number=2, type=9, cpp_type=9, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='field', full_name='celaut.ParamDef.field', index=2,
-      number=3, type=11, cpp_type=10, label=1,
+      name='input_message', full_name='celaut.ApplicationDef.MethodDef.input_message', index=2,
+      number=2, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='repeated', full_name='celaut.ParamDef.repeated', index=3,
-      number=4, type=8, cpp_type=7, label=1,
+      name='is_input_stream', full_name='celaut.ApplicationDef.MethodDef.is_input_stream', index=3,
+      number=3, type=8, cpp_type=7, label=1,
       has_default_value=False, default_value=False,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='optional', full_name='celaut.ParamDef.optional', index=4,
+      name='output_message', full_name='celaut.ApplicationDef.MethodDef.output_message', index=4,
+      number=4, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='is_output_stream', full_name='celaut.ApplicationDef.MethodDef.is_output_stream', index=5,
       number=5, type=8, cpp_type=7, label=1,
       has_default_value=False, default_value=False,
       message_type=None, enum_type=None, containing_type=None,
@@ -252,155 +431,9 @@ _PARAMDEF = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=333,
-  serialized_end=440,
+  serialized_start=905,
+  serialized_end=1101,
 )
-
-
-_ONEOFDEF = _descriptor.Descriptor(
-  name='OneofDef',
-  full_name='celaut.OneofDef',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  create_key=_descriptor._internal_create_key,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='index', full_name='celaut.OneofDef.index', index=0,
-      number=1, type=5, cpp_type=1, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  serialized_options=None,
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=442,
-  serialized_end=467,
-)
-
-
-_MESSAGEDEF = _descriptor.Descriptor(
-  name='MessageDef',
-  full_name='celaut.MessageDef',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  create_key=_descriptor._internal_create_key,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='tag', full_name='celaut.MessageDef.tag', index=0,
-      number=1, type=9, cpp_type=9, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='param', full_name='celaut.MessageDef.param', index=1,
-      number=2, type=11, cpp_type=10, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='oneof', full_name='celaut.MessageDef.oneof', index=2,
-      number=3, type=11, cpp_type=10, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  serialized_options=None,
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=469,
-  serialized_end=560,
-)
-
-
-_METHODDEF = _descriptor.Descriptor(
-  name='MethodDef',
-  full_name='celaut.MethodDef',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  create_key=_descriptor._internal_create_key,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='index', full_name='celaut.MethodDef.index', index=0,
-      number=1, type=5, cpp_type=1, label=1,
-      has_default_value=False, default_value=0,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='tag', full_name='celaut.MethodDef.tag', index=1,
-      number=2, type=9, cpp_type=9, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='input_message', full_name='celaut.MethodDef.input_message', index=2,
-      number=3, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='is_input_stream', full_name='celaut.MethodDef.is_input_stream', index=3,
-      number=4, type=8, cpp_type=7, label=1,
-      has_default_value=False, default_value=False,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='output_message', full_name='celaut.MethodDef.output_message', index=4,
-      number=5, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='is_output_stream', full_name='celaut.MethodDef.is_output_stream', index=5,
-      number=6, type=8, cpp_type=7, label=1,
-      has_default_value=False, default_value=False,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  serialized_options=None,
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=563,
-  serialized_end=736,
-)
-
 
 _APPLICATIONDEF = _descriptor.Descriptor(
   name='ApplicationDef',
@@ -411,15 +444,15 @@ _APPLICATIONDEF = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='tag', full_name='celaut.ApplicationDef.tag', index=0,
-      number=1, type=9, cpp_type=9, label=3,
-      has_default_value=False, default_value=[],
+      name='metadata', full_name='celaut.ApplicationDef.metadata', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
       name='method', full_name='celaut.ApplicationDef.method', index=1,
-      number=2, type=11, cpp_type=10, label=3,
+      number=1, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -427,7 +460,7 @@ _APPLICATIONDEF = _descriptor.Descriptor(
   ],
   extensions=[
   ],
-  nested_types=[],
+  nested_types=[_APPLICATIONDEF_METHODDEF, ],
   enum_types=[
   ],
   serialized_options=None,
@@ -436,8 +469,8 @@ _APPLICATIONDEF = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=738,
-  serialized_end=802,
+  serialized_start=800,
+  serialized_end=1101,
 )
 
 
@@ -475,8 +508,8 @@ _ANY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=804,
-  serialized_end=860,
+  serialized_start=1103,
+  serialized_end=1159,
 )
 
 
@@ -514,8 +547,8 @@ _METADATA_HASH = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=964,
-  serialized_end=999,
+  serialized_start=1263,
+  serialized_end=1298,
 )
 
 _METADATA = _descriptor.Descriptor(
@@ -564,21 +597,21 @@ _METADATA = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=863,
-  serialized_end=1010,
+  serialized_start=1162,
+  serialized_end=1309,
 )
 
 
-_PROTOCOLMESH = _descriptor.Descriptor(
-  name='ProtocolMesh',
-  full_name='celaut.ProtocolMesh',
+_PROTOCOL = _descriptor.Descriptor(
+  name='Protocol',
+  full_name='celaut.Protocol',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='metadata', full_name='celaut.ProtocolMesh.metadata', index=0,
+      name='metadata', full_name='celaut.Protocol.metadata', index=0,
       number=15, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
@@ -596,8 +629,97 @@ _PROTOCOLMESH = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1012,
-  serialized_end=1062,
+  serialized_start=1311,
+  serialized_end=1357,
+)
+
+
+_CLASSDIAGRAM_CLASS = _descriptor.Descriptor(
+  name='Class',
+  full_name='celaut.ClassDiagram.Class',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='metadata', full_name='celaut.ClassDiagram.Class.metadata', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='id', full_name='celaut.ClassDiagram.Class.id', index=1,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"".decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='relation', full_name='celaut.ClassDiagram.Class.relation', index=2,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+    _descriptor.OneofDescriptor(
+      name='_relation', full_name='celaut.ClassDiagram.Class._relation',
+      index=0, containing_type=None,
+      create_key=_descriptor._internal_create_key,
+    fields=[]),
+  ],
+  serialized_start=1456,
+  serialized_end=1568,
+)
+
+_CLASSDIAGRAM = _descriptor.Descriptor(
+  name='ClassDiagram',
+  full_name='celaut.ClassDiagram',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='metadata', full_name='celaut.ClassDiagram.metadata', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='clases', full_name='celaut.ClassDiagram.clases', index=1,
+      number=1, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[_CLASSDIAGRAM_CLASS, ],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1360,
+  serialized_end=1568,
 )
 
 
@@ -635,8 +757,8 @@ _SLOT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1064,
-  serialized_end=1134,
+  serialized_start=1570,
+  serialized_end=1636,
 )
 
 
@@ -674,8 +796,8 @@ _API = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1136,
-  serialized_end=1215,
+  serialized_start=1638,
+  serialized_end=1717,
 )
 
 
@@ -706,42 +828,42 @@ _ARCHITECTURE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1217,
-  serialized_end=1267,
+  serialized_start=1719,
+  serialized_end=1769,
 )
 
 
-_ITEMBRANCH = _descriptor.Descriptor(
+_FILESYSTEM_ITEMBRANCH = _descriptor.Descriptor(
   name='ItemBranch',
-  full_name='celaut.ItemBranch',
+  full_name='celaut.Filesystem.ItemBranch',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='file', full_name='celaut.ItemBranch.file', index=0,
+      name='file', full_name='celaut.Filesystem.ItemBranch.file', index=0,
       number=1, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='link', full_name='celaut.ItemBranch.link', index=1,
+      name='link', full_name='celaut.Filesystem.ItemBranch.link', index=1,
       number=2, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='filesystem', full_name='celaut.ItemBranch.filesystem', index=2,
+      name='filesystem', full_name='celaut.Filesystem.ItemBranch.filesystem', index=2,
       number=3, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='name', full_name='celaut.ItemBranch.name', index=3,
+      name='name', full_name='celaut.Filesystem.ItemBranch.name', index=3,
       number=4, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
@@ -759,15 +881,14 @@ _ITEMBRANCH = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
     _descriptor.OneofDescriptor(
-      name='item', full_name='celaut.ItemBranch.item',
+      name='item', full_name='celaut.Filesystem.ItemBranch.item',
       index=0, containing_type=None,
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=1269,
-  serialized_end=1390,
+  serialized_start=1869,
+  serialized_end=1990,
 )
-
 
 _FILESYSTEM = _descriptor.Descriptor(
   name='Filesystem',
@@ -794,7 +915,7 @@ _FILESYSTEM = _descriptor.Descriptor(
   ],
   extensions=[
   ],
-  nested_types=[],
+  nested_types=[_FILESYSTEM_ITEMBRANCH, ],
   enum_types=[
   ],
   serialized_options=None,
@@ -803,8 +924,8 @@ _FILESYSTEM = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1392,
-  serialized_end=1476,
+  serialized_start=1772,
+  serialized_end=1990,
 )
 
 
@@ -842,8 +963,8 @@ _CONTAINER_ENVIROMENTVARIABLESENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1670,
-  serialized_end=1746,
+  serialized_start=2184,
+  serialized_end=2260,
 )
 
 _CONTAINER = _descriptor.Descriptor(
@@ -894,8 +1015,8 @@ _CONTAINER = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1479,
-  serialized_end=1746,
+  serialized_start=1993,
+  serialized_end=2260,
 )
 
 
@@ -908,22 +1029,22 @@ _TENSOR_INDEX = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='id', full_name='celaut.Tensor.Index.id', index=0,
+      name='metadata', full_name='celaut.Tensor.Index.metadata', index=0,
+      number=15, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='id', full_name='celaut.Tensor.Index.id', index=1,
       number=1, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='field', full_name='celaut.Tensor.Index.field', index=1,
+      name='field', full_name='celaut.Tensor.Index.field', index=2,
       number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='metadata', full_name='celaut.Tensor.Index.metadata', index=2,
-      number=15, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -940,8 +1061,8 @@ _TENSOR_INDEX = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1846,
-  serialized_end=1934,
+  serialized_start=2360,
+  serialized_end=2448,
 )
 
 _TENSOR = _descriptor.Descriptor(
@@ -985,8 +1106,8 @@ _TENSOR = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1749,
-  serialized_end=1934,
+  serialized_start=2263,
+  serialized_end=2448,
 )
 
 
@@ -1005,6 +1126,20 @@ _LEDGER = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='class_diagram', full_name='celaut.Ledger.class_diagram', index=1,
+      number=1, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='consensus_protocol', full_name='celaut.Ledger.consensus_protocol', index=2,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
   ],
   extensions=[
   ],
@@ -1016,9 +1151,14 @@ _LEDGER = _descriptor.Descriptor(
   syntax='proto3',
   extension_ranges=[],
   oneofs=[
+    _descriptor.OneofDescriptor(
+      name='_consensus_protocol', full_name='celaut.Ledger._consensus_protocol',
+      index=0, containing_type=None,
+      create_key=_descriptor._internal_create_key,
+    fields=[]),
   ],
-  serialized_start=1936,
-  serialized_end=1980,
+  serialized_start=2451,
+  serialized_end=2614,
 )
 
 
@@ -1077,8 +1217,8 @@ _SERVICE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1983,
-  serialized_end=2156,
+  serialized_start=2617,
+  serialized_end=2790,
 )
 
 
@@ -1116,8 +1256,8 @@ _INSTANCE_URI = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2278,
-  serialized_end=2309,
+  serialized_start=2912,
+  serialized_end=2943,
 )
 
 _INSTANCE_URI_SLOT = _descriptor.Descriptor(
@@ -1154,8 +1294,8 @@ _INSTANCE_URI_SLOT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2311,
-  serialized_end=2379,
+  serialized_start=2945,
+  serialized_end=3013,
 )
 
 _INSTANCE = _descriptor.Descriptor(
@@ -1199,8 +1339,8 @@ _INSTANCE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2159,
-  serialized_end=2379,
+  serialized_start=2793,
+  serialized_end=3013,
 )
 
 
@@ -1238,46 +1378,8 @@ _CONFIGURATION_ENVIROMENTVARIABLESENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2533,
-  serialized_end=2604,
-)
-
-_CONFIGURATION_SPECSLOTENTRY = _descriptor.Descriptor(
-  name='SpecSlotEntry',
-  full_name='celaut.Configuration.SpecSlotEntry',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  create_key=_descriptor._internal_create_key,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='key', full_name='celaut.Configuration.SpecSlotEntry.key', index=0,
-      number=1, type=5, cpp_type=1, label=1,
-      has_default_value=False, default_value=0,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='value', full_name='celaut.Configuration.SpecSlotEntry.value', index=1,
-      number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  serialized_options=b'8\001',
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=2606,
-  serialized_end=2675,
+  serialized_start=3130,
+  serialized_end=3201,
 )
 
 _CONFIGURATION = _descriptor.Descriptor(
@@ -1297,7 +1399,7 @@ _CONFIGURATION = _descriptor.Descriptor(
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
       name='spec_slot', full_name='celaut.Configuration.spec_slot', index=1,
-      number=2, type=11, cpp_type=10, label=3,
+      number=2, type=5, cpp_type=1, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -1305,7 +1407,7 @@ _CONFIGURATION = _descriptor.Descriptor(
   ],
   extensions=[
   ],
-  nested_types=[_CONFIGURATION_ENVIROMENTVARIABLESENTRY, _CONFIGURATION_SPECSLOTENTRY, ],
+  nested_types=[_CONFIGURATION_ENVIROMENTVARIABLESENTRY, ],
   enum_types=[
   ],
   serialized_options=None,
@@ -1314,8 +1416,8 @@ _CONFIGURATION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2382,
-  serialized_end=2675,
+  serialized_start=3016,
+  serialized_end=3201,
 )
 
 
@@ -1374,18 +1476,30 @@ _CONFIGURATIONFILE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2678,
-  serialized_end=2895,
+  serialized_start=3204,
+  serialized_end=3421,
 )
 
-_PRIMITIVEDEF.oneofs_by_name['_regex'].fields.append(
-  _PRIMITIVEDEF.fields_by_name['regex'])
-_PRIMITIVEDEF.fields_by_name['regex'].containing_oneof = _PRIMITIVEDEF.oneofs_by_name['_regex']
-_ENUMDEF_VALUEENTRY.containing_type = _ENUMDEF
-_ENUMDEF.fields_by_name['value'].message_type = _ENUMDEF_VALUEENTRY
-_FIELDDEF.fields_by_name['message'].message_type = _MESSAGEDEF
-_FIELDDEF.fields_by_name['primitive'].message_type = _PRIMITIVEDEF
-_FIELDDEF.fields_by_name['enum'].message_type = _ENUMDEF
+_FIELDDEF_PRIMITIVEDEF.fields_by_name['metadata'].message_type = _METADATA
+_FIELDDEF_PRIMITIVEDEF.containing_type = _FIELDDEF
+_FIELDDEF_PRIMITIVEDEF.oneofs_by_name['_regex'].fields.append(
+  _FIELDDEF_PRIMITIVEDEF.fields_by_name['regex'])
+_FIELDDEF_PRIMITIVEDEF.fields_by_name['regex'].containing_oneof = _FIELDDEF_PRIMITIVEDEF.oneofs_by_name['_regex']
+_FIELDDEF_ENUMDEF_VALUEENTRY.containing_type = _FIELDDEF_ENUMDEF
+_FIELDDEF_ENUMDEF.fields_by_name['metadata'].message_type = _METADATA
+_FIELDDEF_ENUMDEF.fields_by_name['value'].message_type = _FIELDDEF_ENUMDEF_VALUEENTRY
+_FIELDDEF_ENUMDEF.containing_type = _FIELDDEF
+_FIELDDEF_MESSAGEDEF_PARAMDEF.fields_by_name['metadata'].message_type = _METADATA
+_FIELDDEF_MESSAGEDEF_PARAMDEF.fields_by_name['field'].message_type = _FIELDDEF
+_FIELDDEF_MESSAGEDEF_PARAMDEF.containing_type = _FIELDDEF_MESSAGEDEF
+_FIELDDEF_MESSAGEDEF_ONEOFDEF.containing_type = _FIELDDEF_MESSAGEDEF
+_FIELDDEF_MESSAGEDEF.fields_by_name['metadata'].message_type = _METADATA
+_FIELDDEF_MESSAGEDEF.fields_by_name['param'].message_type = _FIELDDEF_MESSAGEDEF_PARAMDEF
+_FIELDDEF_MESSAGEDEF.fields_by_name['oneof'].message_type = _FIELDDEF_MESSAGEDEF_ONEOFDEF
+_FIELDDEF_MESSAGEDEF.containing_type = _FIELDDEF
+_FIELDDEF.fields_by_name['message'].message_type = _FIELDDEF_MESSAGEDEF
+_FIELDDEF.fields_by_name['primitive'].message_type = _FIELDDEF_PRIMITIVEDEF
+_FIELDDEF.fields_by_name['enum'].message_type = _FIELDDEF_ENUMDEF
 _FIELDDEF.oneofs_by_name['value'].fields.append(
   _FIELDDEF.fields_by_name['message'])
 _FIELDDEF.fields_by_name['message'].containing_oneof = _FIELDDEF.oneofs_by_name['value']
@@ -1395,12 +1509,13 @@ _FIELDDEF.fields_by_name['primitive'].containing_oneof = _FIELDDEF.oneofs_by_nam
 _FIELDDEF.oneofs_by_name['value'].fields.append(
   _FIELDDEF.fields_by_name['enum'])
 _FIELDDEF.fields_by_name['enum'].containing_oneof = _FIELDDEF.oneofs_by_name['value']
-_PARAMDEF.fields_by_name['field'].message_type = _FIELDDEF
-_MESSAGEDEF.fields_by_name['param'].message_type = _PARAMDEF
-_MESSAGEDEF.fields_by_name['oneof'].message_type = _ONEOFDEF
-_METHODDEF.fields_by_name['input_message'].message_type = _FIELDDEF
-_METHODDEF.fields_by_name['output_message'].message_type = _FIELDDEF
-_APPLICATIONDEF.fields_by_name['method'].message_type = _METHODDEF
+_RELATIONDEF.fields_by_name['field'].message_type = _FIELDDEF
+_APPLICATIONDEF_METHODDEF.fields_by_name['metadata'].message_type = _METADATA
+_APPLICATIONDEF_METHODDEF.fields_by_name['input_message'].message_type = _FIELDDEF
+_APPLICATIONDEF_METHODDEF.fields_by_name['output_message'].message_type = _FIELDDEF
+_APPLICATIONDEF_METHODDEF.containing_type = _APPLICATIONDEF
+_APPLICATIONDEF.fields_by_name['metadata'].message_type = _METADATA
+_APPLICATIONDEF.fields_by_name['method'].message_type = _APPLICATIONDEF_METHODDEF
 _ANY.fields_by_name['metadata'].message_type = _METADATA
 _METADATA_HASH.containing_type = _METADATA
 _METADATA.fields_by_name['hash'].message_type = _METADATA_HASH
@@ -1408,35 +1523,49 @@ _METADATA.fields_by_name['format'].message_type = _FIELDDEF
 _METADATA.oneofs_by_name['_format'].fields.append(
   _METADATA.fields_by_name['format'])
 _METADATA.fields_by_name['format'].containing_oneof = _METADATA.oneofs_by_name['_format']
-_PROTOCOLMESH.fields_by_name['metadata'].message_type = _METADATA
-_SLOT.fields_by_name['transport_protocol'].message_type = _PROTOCOLMESH
+_PROTOCOL.fields_by_name['metadata'].message_type = _METADATA
+_CLASSDIAGRAM_CLASS.fields_by_name['metadata'].message_type = _METADATA
+_CLASSDIAGRAM_CLASS.fields_by_name['relation'].message_type = _RELATIONDEF
+_CLASSDIAGRAM_CLASS.containing_type = _CLASSDIAGRAM
+_CLASSDIAGRAM_CLASS.oneofs_by_name['_relation'].fields.append(
+  _CLASSDIAGRAM_CLASS.fields_by_name['relation'])
+_CLASSDIAGRAM_CLASS.fields_by_name['relation'].containing_oneof = _CLASSDIAGRAM_CLASS.oneofs_by_name['_relation']
+_CLASSDIAGRAM.fields_by_name['metadata'].message_type = _METADATA
+_CLASSDIAGRAM.fields_by_name['clases'].message_type = _CLASSDIAGRAM_CLASS
+_SLOT.fields_by_name['transport_protocol'].message_type = _PROTOCOL
 _API.fields_by_name['app_protocol'].message_type = _APPLICATIONDEF
 _API.fields_by_name['slot'].message_type = _SLOT
 _ARCHITECTURE.fields_by_name['metadata'].message_type = _METADATA
-_ITEMBRANCH.fields_by_name['file'].message_type = _ANY
-_ITEMBRANCH.fields_by_name['filesystem'].message_type = _FILESYSTEM
-_ITEMBRANCH.oneofs_by_name['item'].fields.append(
-  _ITEMBRANCH.fields_by_name['file'])
-_ITEMBRANCH.fields_by_name['file'].containing_oneof = _ITEMBRANCH.oneofs_by_name['item']
-_ITEMBRANCH.oneofs_by_name['item'].fields.append(
-  _ITEMBRANCH.fields_by_name['link'])
-_ITEMBRANCH.fields_by_name['link'].containing_oneof = _ITEMBRANCH.oneofs_by_name['item']
-_ITEMBRANCH.oneofs_by_name['item'].fields.append(
-  _ITEMBRANCH.fields_by_name['filesystem'])
-_ITEMBRANCH.fields_by_name['filesystem'].containing_oneof = _ITEMBRANCH.oneofs_by_name['item']
-_FILESYSTEM.fields_by_name['branch'].message_type = _ITEMBRANCH
+_FILESYSTEM_ITEMBRANCH.fields_by_name['file'].message_type = _ANY
+_FILESYSTEM_ITEMBRANCH.fields_by_name['filesystem'].message_type = _FILESYSTEM
+_FILESYSTEM_ITEMBRANCH.containing_type = _FILESYSTEM
+_FILESYSTEM_ITEMBRANCH.oneofs_by_name['item'].fields.append(
+  _FILESYSTEM_ITEMBRANCH.fields_by_name['file'])
+_FILESYSTEM_ITEMBRANCH.fields_by_name['file'].containing_oneof = _FILESYSTEM_ITEMBRANCH.oneofs_by_name['item']
+_FILESYSTEM_ITEMBRANCH.oneofs_by_name['item'].fields.append(
+  _FILESYSTEM_ITEMBRANCH.fields_by_name['link'])
+_FILESYSTEM_ITEMBRANCH.fields_by_name['link'].containing_oneof = _FILESYSTEM_ITEMBRANCH.oneofs_by_name['item']
+_FILESYSTEM_ITEMBRANCH.oneofs_by_name['item'].fields.append(
+  _FILESYSTEM_ITEMBRANCH.fields_by_name['filesystem'])
+_FILESYSTEM_ITEMBRANCH.fields_by_name['filesystem'].containing_oneof = _FILESYSTEM_ITEMBRANCH.oneofs_by_name['item']
+_FILESYSTEM.fields_by_name['branch'].message_type = _FILESYSTEM_ITEMBRANCH
 _FILESYSTEM.fields_by_name['metadata'].message_type = _METADATA
 _CONTAINER_ENVIROMENTVARIABLESENTRY.fields_by_name['value'].message_type = _FIELDDEF
 _CONTAINER_ENVIROMENTVARIABLESENTRY.containing_type = _CONTAINER
 _CONTAINER.fields_by_name['architecture'].message_type = _ARCHITECTURE
 _CONTAINER.fields_by_name['filesystem'].message_type = _FILESYSTEM
 _CONTAINER.fields_by_name['enviroment_variables'].message_type = _CONTAINER_ENVIROMENTVARIABLESENTRY
-_TENSOR_INDEX.fields_by_name['field'].message_type = _FIELDDEF
 _TENSOR_INDEX.fields_by_name['metadata'].message_type = _METADATA
+_TENSOR_INDEX.fields_by_name['field'].message_type = _FIELDDEF
 _TENSOR_INDEX.containing_type = _TENSOR
 _TENSOR.fields_by_name['metadata'].message_type = _METADATA
 _TENSOR.fields_by_name['index'].message_type = _TENSOR_INDEX
 _LEDGER.fields_by_name['metadata'].message_type = _METADATA
+_LEDGER.fields_by_name['class_diagram'].message_type = _CLASSDIAGRAM
+_LEDGER.fields_by_name['consensus_protocol'].message_type = _PROTOCOL
+_LEDGER.oneofs_by_name['_consensus_protocol'].fields.append(
+  _LEDGER.fields_by_name['consensus_protocol'])
+_LEDGER.fields_by_name['consensus_protocol'].containing_oneof = _LEDGER.oneofs_by_name['_consensus_protocol']
 _SERVICE.fields_by_name['metadata'].message_type = _METADATA
 _SERVICE.fields_by_name['container'].message_type = _CONTAINER
 _SERVICE.fields_by_name['api'].message_type = _API
@@ -1450,30 +1579,22 @@ _INSTANCE.fields_by_name['uri_slot'].message_type = _INSTANCE_URI_SLOT
 _INSTANCE.fields_by_name['metadata'].message_type = _METADATA
 _CONFIGURATION_ENVIROMENTVARIABLESENTRY.fields_by_name['value'].message_type = _ANY
 _CONFIGURATION_ENVIROMENTVARIABLESENTRY.containing_type = _CONFIGURATION
-_CONFIGURATION_SPECSLOTENTRY.fields_by_name['value'].message_type = _PROTOCOLMESH
-_CONFIGURATION_SPECSLOTENTRY.containing_type = _CONFIGURATION
 _CONFIGURATION.fields_by_name['enviroment_variables'].message_type = _CONFIGURATION_ENVIROMENTVARIABLESENTRY
-_CONFIGURATION.fields_by_name['spec_slot'].message_type = _CONFIGURATION_SPECSLOTENTRY
 _CONFIGURATIONFILE.fields_by_name['gateway'].message_type = _INSTANCE
 _CONFIGURATIONFILE.fields_by_name['config'].message_type = _CONFIGURATION
 _CONFIGURATIONFILE.fields_by_name['tensor_instances'].message_type = _INSTANCE
 _CONFIGURATIONFILE.fields_by_name['ledger_instances'].message_type = _INSTANCE
 _CONFIGURATIONFILE.fields_by_name['metadata'].message_type = _METADATA
-DESCRIPTOR.message_types_by_name['PrimitiveDef'] = _PRIMITIVEDEF
-DESCRIPTOR.message_types_by_name['EnumDef'] = _ENUMDEF
 DESCRIPTOR.message_types_by_name['FieldDef'] = _FIELDDEF
-DESCRIPTOR.message_types_by_name['ParamDef'] = _PARAMDEF
-DESCRIPTOR.message_types_by_name['OneofDef'] = _ONEOFDEF
-DESCRIPTOR.message_types_by_name['MessageDef'] = _MESSAGEDEF
-DESCRIPTOR.message_types_by_name['MethodDef'] = _METHODDEF
+DESCRIPTOR.message_types_by_name['RelationDef'] = _RELATIONDEF
 DESCRIPTOR.message_types_by_name['ApplicationDef'] = _APPLICATIONDEF
 DESCRIPTOR.message_types_by_name['Any'] = _ANY
 DESCRIPTOR.message_types_by_name['Metadata'] = _METADATA
-DESCRIPTOR.message_types_by_name['ProtocolMesh'] = _PROTOCOLMESH
+DESCRIPTOR.message_types_by_name['Protocol'] = _PROTOCOL
+DESCRIPTOR.message_types_by_name['ClassDiagram'] = _CLASSDIAGRAM
 DESCRIPTOR.message_types_by_name['Slot'] = _SLOT
 DESCRIPTOR.message_types_by_name['Api'] = _API
 DESCRIPTOR.message_types_by_name['Architecture'] = _ARCHITECTURE
-DESCRIPTOR.message_types_by_name['ItemBranch'] = _ITEMBRANCH
 DESCRIPTOR.message_types_by_name['Filesystem'] = _FILESYSTEM
 DESCRIPTOR.message_types_by_name['Container'] = _CONTAINER
 DESCRIPTOR.message_types_by_name['Tensor'] = _TENSOR
@@ -1484,69 +1605,82 @@ DESCRIPTOR.message_types_by_name['Configuration'] = _CONFIGURATION
 DESCRIPTOR.message_types_by_name['ConfigurationFile'] = _CONFIGURATIONFILE
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
-PrimitiveDef = _reflection.GeneratedProtocolMessageType('PrimitiveDef', (_message.Message,), {
-  'DESCRIPTOR' : _PRIMITIVEDEF,
-  '__module__' : 'celaut_pb2'
-  # @@protoc_insertion_point(class_scope:celaut.PrimitiveDef)
-  })
-_sym_db.RegisterMessage(PrimitiveDef)
+FieldDef = _reflection.GeneratedProtocolMessageType('FieldDef', (_message.Message,), {
 
-EnumDef = _reflection.GeneratedProtocolMessageType('EnumDef', (_message.Message,), {
-
-  'ValueEntry' : _reflection.GeneratedProtocolMessageType('ValueEntry', (_message.Message,), {
-    'DESCRIPTOR' : _ENUMDEF_VALUEENTRY,
+  'PrimitiveDef' : _reflection.GeneratedProtocolMessageType('PrimitiveDef', (_message.Message,), {
+    'DESCRIPTOR' : _FIELDDEF_PRIMITIVEDEF,
     '__module__' : 'celaut_pb2'
-    # @@protoc_insertion_point(class_scope:celaut.EnumDef.ValueEntry)
+    # @@protoc_insertion_point(class_scope:celaut.FieldDef.PrimitiveDef)
     })
   ,
-  'DESCRIPTOR' : _ENUMDEF,
-  '__module__' : 'celaut_pb2'
-  # @@protoc_insertion_point(class_scope:celaut.EnumDef)
-  })
-_sym_db.RegisterMessage(EnumDef)
-_sym_db.RegisterMessage(EnumDef.ValueEntry)
 
-FieldDef = _reflection.GeneratedProtocolMessageType('FieldDef', (_message.Message,), {
+  'EnumDef' : _reflection.GeneratedProtocolMessageType('EnumDef', (_message.Message,), {
+
+    'ValueEntry' : _reflection.GeneratedProtocolMessageType('ValueEntry', (_message.Message,), {
+      'DESCRIPTOR' : _FIELDDEF_ENUMDEF_VALUEENTRY,
+      '__module__' : 'celaut_pb2'
+      # @@protoc_insertion_point(class_scope:celaut.FieldDef.EnumDef.ValueEntry)
+      })
+    ,
+    'DESCRIPTOR' : _FIELDDEF_ENUMDEF,
+    '__module__' : 'celaut_pb2'
+    # @@protoc_insertion_point(class_scope:celaut.FieldDef.EnumDef)
+    })
+  ,
+
+  'MessageDef' : _reflection.GeneratedProtocolMessageType('MessageDef', (_message.Message,), {
+
+    'ParamDef' : _reflection.GeneratedProtocolMessageType('ParamDef', (_message.Message,), {
+      'DESCRIPTOR' : _FIELDDEF_MESSAGEDEF_PARAMDEF,
+      '__module__' : 'celaut_pb2'
+      # @@protoc_insertion_point(class_scope:celaut.FieldDef.MessageDef.ParamDef)
+      })
+    ,
+
+    'OneofDef' : _reflection.GeneratedProtocolMessageType('OneofDef', (_message.Message,), {
+      'DESCRIPTOR' : _FIELDDEF_MESSAGEDEF_ONEOFDEF,
+      '__module__' : 'celaut_pb2'
+      # @@protoc_insertion_point(class_scope:celaut.FieldDef.MessageDef.OneofDef)
+      })
+    ,
+    'DESCRIPTOR' : _FIELDDEF_MESSAGEDEF,
+    '__module__' : 'celaut_pb2'
+    # @@protoc_insertion_point(class_scope:celaut.FieldDef.MessageDef)
+    })
+  ,
   'DESCRIPTOR' : _FIELDDEF,
   '__module__' : 'celaut_pb2'
   # @@protoc_insertion_point(class_scope:celaut.FieldDef)
   })
 _sym_db.RegisterMessage(FieldDef)
+_sym_db.RegisterMessage(FieldDef.PrimitiveDef)
+_sym_db.RegisterMessage(FieldDef.EnumDef)
+_sym_db.RegisterMessage(FieldDef.EnumDef.ValueEntry)
+_sym_db.RegisterMessage(FieldDef.MessageDef)
+_sym_db.RegisterMessage(FieldDef.MessageDef.ParamDef)
+_sym_db.RegisterMessage(FieldDef.MessageDef.OneofDef)
 
-ParamDef = _reflection.GeneratedProtocolMessageType('ParamDef', (_message.Message,), {
-  'DESCRIPTOR' : _PARAMDEF,
+RelationDef = _reflection.GeneratedProtocolMessageType('RelationDef', (_message.Message,), {
+  'DESCRIPTOR' : _RELATIONDEF,
   '__module__' : 'celaut_pb2'
-  # @@protoc_insertion_point(class_scope:celaut.ParamDef)
+  # @@protoc_insertion_point(class_scope:celaut.RelationDef)
   })
-_sym_db.RegisterMessage(ParamDef)
-
-OneofDef = _reflection.GeneratedProtocolMessageType('OneofDef', (_message.Message,), {
-  'DESCRIPTOR' : _ONEOFDEF,
-  '__module__' : 'celaut_pb2'
-  # @@protoc_insertion_point(class_scope:celaut.OneofDef)
-  })
-_sym_db.RegisterMessage(OneofDef)
-
-MessageDef = _reflection.GeneratedProtocolMessageType('MessageDef', (_message.Message,), {
-  'DESCRIPTOR' : _MESSAGEDEF,
-  '__module__' : 'celaut_pb2'
-  # @@protoc_insertion_point(class_scope:celaut.MessageDef)
-  })
-_sym_db.RegisterMessage(MessageDef)
-
-MethodDef = _reflection.GeneratedProtocolMessageType('MethodDef', (_message.Message,), {
-  'DESCRIPTOR' : _METHODDEF,
-  '__module__' : 'celaut_pb2'
-  # @@protoc_insertion_point(class_scope:celaut.MethodDef)
-  })
-_sym_db.RegisterMessage(MethodDef)
+_sym_db.RegisterMessage(RelationDef)
 
 ApplicationDef = _reflection.GeneratedProtocolMessageType('ApplicationDef', (_message.Message,), {
+
+  'MethodDef' : _reflection.GeneratedProtocolMessageType('MethodDef', (_message.Message,), {
+    'DESCRIPTOR' : _APPLICATIONDEF_METHODDEF,
+    '__module__' : 'celaut_pb2'
+    # @@protoc_insertion_point(class_scope:celaut.ApplicationDef.MethodDef)
+    })
+  ,
   'DESCRIPTOR' : _APPLICATIONDEF,
   '__module__' : 'celaut_pb2'
   # @@protoc_insertion_point(class_scope:celaut.ApplicationDef)
   })
 _sym_db.RegisterMessage(ApplicationDef)
+_sym_db.RegisterMessage(ApplicationDef.MethodDef)
 
 Any = _reflection.GeneratedProtocolMessageType('Any', (_message.Message,), {
   'DESCRIPTOR' : _ANY,
@@ -1570,12 +1704,27 @@ Metadata = _reflection.GeneratedProtocolMessageType('Metadata', (_message.Messag
 _sym_db.RegisterMessage(Metadata)
 _sym_db.RegisterMessage(Metadata.Hash)
 
-ProtocolMesh = _reflection.GeneratedProtocolMessageType('ProtocolMesh', (_message.Message,), {
-  'DESCRIPTOR' : _PROTOCOLMESH,
+Protocol = _reflection.GeneratedProtocolMessageType('Protocol', (_message.Message,), {
+  'DESCRIPTOR' : _PROTOCOL,
   '__module__' : 'celaut_pb2'
-  # @@protoc_insertion_point(class_scope:celaut.ProtocolMesh)
+  # @@protoc_insertion_point(class_scope:celaut.Protocol)
   })
-_sym_db.RegisterMessage(ProtocolMesh)
+_sym_db.RegisterMessage(Protocol)
+
+ClassDiagram = _reflection.GeneratedProtocolMessageType('ClassDiagram', (_message.Message,), {
+
+  'Class' : _reflection.GeneratedProtocolMessageType('Class', (_message.Message,), {
+    'DESCRIPTOR' : _CLASSDIAGRAM_CLASS,
+    '__module__' : 'celaut_pb2'
+    # @@protoc_insertion_point(class_scope:celaut.ClassDiagram.Class)
+    })
+  ,
+  'DESCRIPTOR' : _CLASSDIAGRAM,
+  '__module__' : 'celaut_pb2'
+  # @@protoc_insertion_point(class_scope:celaut.ClassDiagram)
+  })
+_sym_db.RegisterMessage(ClassDiagram)
+_sym_db.RegisterMessage(ClassDiagram.Class)
 
 Slot = _reflection.GeneratedProtocolMessageType('Slot', (_message.Message,), {
   'DESCRIPTOR' : _SLOT,
@@ -1598,19 +1747,20 @@ Architecture = _reflection.GeneratedProtocolMessageType('Architecture', (_messag
   })
 _sym_db.RegisterMessage(Architecture)
 
-ItemBranch = _reflection.GeneratedProtocolMessageType('ItemBranch', (_message.Message,), {
-  'DESCRIPTOR' : _ITEMBRANCH,
-  '__module__' : 'celaut_pb2'
-  # @@protoc_insertion_point(class_scope:celaut.ItemBranch)
-  })
-_sym_db.RegisterMessage(ItemBranch)
-
 Filesystem = _reflection.GeneratedProtocolMessageType('Filesystem', (_message.Message,), {
+
+  'ItemBranch' : _reflection.GeneratedProtocolMessageType('ItemBranch', (_message.Message,), {
+    'DESCRIPTOR' : _FILESYSTEM_ITEMBRANCH,
+    '__module__' : 'celaut_pb2'
+    # @@protoc_insertion_point(class_scope:celaut.Filesystem.ItemBranch)
+    })
+  ,
   'DESCRIPTOR' : _FILESYSTEM,
   '__module__' : 'celaut_pb2'
   # @@protoc_insertion_point(class_scope:celaut.Filesystem)
   })
 _sym_db.RegisterMessage(Filesystem)
+_sym_db.RegisterMessage(Filesystem.ItemBranch)
 
 Container = _reflection.GeneratedProtocolMessageType('Container', (_message.Message,), {
 
@@ -1687,20 +1837,12 @@ Configuration = _reflection.GeneratedProtocolMessageType('Configuration', (_mess
     # @@protoc_insertion_point(class_scope:celaut.Configuration.EnviromentVariablesEntry)
     })
   ,
-
-  'SpecSlotEntry' : _reflection.GeneratedProtocolMessageType('SpecSlotEntry', (_message.Message,), {
-    'DESCRIPTOR' : _CONFIGURATION_SPECSLOTENTRY,
-    '__module__' : 'celaut_pb2'
-    # @@protoc_insertion_point(class_scope:celaut.Configuration.SpecSlotEntry)
-    })
-  ,
   'DESCRIPTOR' : _CONFIGURATION,
   '__module__' : 'celaut_pb2'
   # @@protoc_insertion_point(class_scope:celaut.Configuration)
   })
 _sym_db.RegisterMessage(Configuration)
 _sym_db.RegisterMessage(Configuration.EnviromentVariablesEntry)
-_sym_db.RegisterMessage(Configuration.SpecSlotEntry)
 
 ConfigurationFile = _reflection.GeneratedProtocolMessageType('ConfigurationFile', (_message.Message,), {
   'DESCRIPTOR' : _CONFIGURATIONFILE,
@@ -1710,8 +1852,7 @@ ConfigurationFile = _reflection.GeneratedProtocolMessageType('ConfigurationFile'
 _sym_db.RegisterMessage(ConfigurationFile)
 
 
-_ENUMDEF_VALUEENTRY._options = None
+_FIELDDEF_ENUMDEF_VALUEENTRY._options = None
 _CONTAINER_ENVIROMENTVARIABLESENTRY._options = None
 _CONFIGURATION_ENVIROMENTVARIABLESENTRY._options = None
-_CONFIGURATION_SPECSLOTENTRY._options = None
 # @@protoc_insertion_point(module_scope)
