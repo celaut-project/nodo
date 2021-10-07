@@ -1,5 +1,5 @@
 from typing import Generator
-from celaut_pb2 import Slot
+from celaut_pb2 import Any, Slot
 import build, utils
 from compile import REGISTRY, HYCACHE
 import logger as l
@@ -545,7 +545,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
         )
 
-    def GetFile(self, request_iterator, context):
+    def GetFile(self, request_iterator, context) -> gateway_pb2.celaut__pb2.Any:
         l.LOGGER('Request for give a service definition')
         hashes = []
         for hash in request_iterator:
@@ -554,15 +554,17 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 hashes.append(hash)
                 if SHA3_256_ID == hash.type and \
                     hash.value.hex() in [s[:-8] for s in os.listdir(REGISTRY)]:
-                    return get_from_registry(
-                            hash = hash.value.hex()
+                    return gateway_pb2.celaut__pb2.Any(
+                        value = get_from_registry(
+                                hash = hash.value.hex()
+                            ).SerializeToString()
                         )
             except: pass
         
         try:
             return search_file(
                 ignore_network = utils.get_network_name(
-                    ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                        ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
                     ),
                 hashes = hashes
             )[0] # It's not verifying the content, because we couldn't 've the format for prune metadata in it. The final client will've to check it.
