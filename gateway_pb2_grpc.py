@@ -32,7 +32,7 @@ class GatewayStub(object):
                 )
         self.GetFile = channel.stream_unary(
                 '/gateway.Gateway/GetFile',
-                request_serializer=celaut__pb2.Metadata.Hash.SerializeToString,
+                request_serializer=celaut__pb2.Any.Metadata.HashTag.Hash.SerializeToString,
                 response_deserializer=celaut__pb2.Any.FromString,
                 )
         self.GetServiceTar = channel.stream_stream(
@@ -106,7 +106,7 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'GetFile': grpc.stream_unary_rpc_method_handler(
                     servicer.GetFile,
-                    request_deserializer=celaut__pb2.Metadata.Hash.FromString,
+                    request_deserializer=celaut__pb2.Any.Metadata.HashTag.Hash.FromString,
                     response_serializer=celaut__pb2.Any.SerializeToString,
             ),
             'GetServiceTar': grpc.stream_stream_rpc_method_handler(
@@ -192,7 +192,7 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_unary(request_iterator, target, '/gateway.Gateway/GetFile',
-            celaut__pb2.Metadata.Hash.SerializeToString,
+            celaut__pb2.Any.Metadata.HashTag.Hash.SerializeToString,
             celaut__pb2.Any.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

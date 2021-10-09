@@ -13,18 +13,14 @@ package celaut;
 
 message FieldDef {
     message PrimitiveDef {
-        Metadata metadata = 15;
         optional string regex = 1;  // {0-10}, ...
         // Primitive specification can be applied. <- must be optional
     }
     message EnumDef {
-        Metadata metadata = 15;
         map<string, int32> value = 1;
     }
     message MessageDef {
-        Metadata metadata = 15;
         message ParamDef {
-            Metadata metadata = 15;
             int32 index = 1;
             // In order to avoid loops, 
             // in the definition of a message only
@@ -48,126 +44,100 @@ message FieldDef {
     }
 }
 
-message RelationDef {
-    FieldDef field = 1;
-    string relation = 2;  // {0-10}, * ...
-}
-
-message ApplicationDef {
-    Metadata metadata = 15;
-    message MethodDef {
-        Metadata metadata = 15;
-        int32 index = 1;
-        FieldDef input_message = 2;
-        bool is_input_stream = 3;
-        FieldDef output_message = 4;
-        bool is_output_stream = 5;
-    }
-    repeated MethodDef method = 1; // Exemple of method call: 8080.1()
-}
-
 message Any {
-    bytes value = 1;
-    Metadata metadata = 15;
+    message Metadata {
+        message HashTag {
+            message Hash {
+                bytes type = 1;
+                bytes value = 2;
+            }
+            message AttrHashTag {
+                int32 key = 1;  // the attribute's index. 
+                repeated HashTag value = 2;  // HashTag, if it's a repeated field, the HashTags of every one.
+            }
+            repeated Hash hash = 1;
+            repeated string tag = 2;
+            repeated AttrHashTag attr_hashtag = 3; // List of metadata fields. Ordened by indexes defined on format.
+        }
+        optional HashTag hashtag = 1;
+        optional FieldDef format = 2;
+    }
+    optional Metadata metadata = 1;
+    bytes value = 2;
 }
 
 
 //  -----------------------
 //  SERVICE SPECIFICATION.
 //  -----------------------
-
-//  It's used for give the option to prune the specification
-//  using hash identifiers or key words (tags).
-//  And it's used for define the field.
-//  Index 15 is the maximum that use only 1 byte.
-//  It is the only attribute that is not taken into account when calculating the hash id.
-
-message Metadata {
-    message Hash {
-        bytes type = 1;
-        bytes value = 2;
-    }
-    repeated Hash hash = 1;
-    repeated string tag = 2;
-    optional FieldDef format = 3;
-}
-
-message Protocol {
-    Metadata metadata = 15;
-    // Protocol specification can be applied. <- must be optional
-}
-
-message ClassDiagram {
-    Metadata metadata = 15;
-    message Class {
-        Metadata metadata = 15;
-        string id = 1;
-        optional RelationDef relation = 2;
-    }
-    repeated Class clases = 1;
-}
-
-// API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
-message Slot {
-    int32 port = 1;
-    Protocol transport_protocol = 2;
-}
-
-message Api{
-    ApplicationDef app_protocol = 1;
-    repeated Slot slot = 2;
-    // Cost function can be applied. <- must be optional (index 3).
-}
-
-// Container: Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
-message Architecture {
-    Metadata metadata = 15;
-    // Architecture specification can be applied. <- must be optional.
-}
-
-message Filesystem {
-    message ItemBranch { 
-        oneof item {
-            Any file = 1;
-            string link = 2;
-            Filesystem filesystem = 3;
-        }
-        string name = 4; // id for path
-    }
-    repeated ItemBranch branch = 1;
-    Metadata metadata = 15;
-}
-
-message Container {
-    Architecture architecture = 1;
-    Filesystem filesystem = 2;
-    map<string, FieldDef> enviroment_variables = 3;
-    string entrypoint = 4;
-}
-
-// Tensor: Defines the “intelligence” that the service can provide, I think it would be a description of a polynomial (without coefficients and describing the variables).
-message Tensor {
-    Metadata metadata = 15;
-    message Index {
-        Metadata metadata = 15;
-        string id = 1;
-        FieldDef field = 2;
-    }
-    repeated Index index = 1;
-    int32 rank = 2;
-}
-
-// Ledger: Defines the database that the service can provide.
-message Ledger {
-    Metadata metadata = 15;
-    ClassDiagram class_diagram = 1;
-    optional Protocol consensus_protocol = 2;
-    // Ledger specification can be applied. <- must be optional
-    //  it would be a class diagram and a consensus algorithm.
-}
-
 message Service {
-    Metadata metadata = 15;
+    // API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
+    message Api {
+        message ApplicationDef {
+            message MethodDef {
+                int32 index = 1;
+                FieldDef input_message = 2;
+                bool is_input_stream = 3;
+                FieldDef output_message = 4;
+                bool is_output_stream = 5;
+            }
+            repeated MethodDef method = 1; // Exemple of method call: 8080.1()
+        }
+        message Slot {
+            int32 port = 1;
+            bytes transport_protocol = 2;
+        }
+        ApplicationDef app_protocol = 1;
+        repeated Slot slot = 2;
+        // Cost function can be applied. <- must be optional (index 3).
+    }
+
+    // Container:  Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
+    message Container {
+        message Filesystem {
+            message ItemBranch {
+                oneof item {
+                    Any file = 1;
+                    string link = 2;
+                    Filesystem filesystem = 3;
+                }
+                string name = 4; // id for path
+            }
+            repeated ItemBranch branch = 1;
+        }
+        string architecture = 1; // TODO
+        Filesystem filesystem = 2;
+        map<string, FieldDef> enviroment_variables = 3;
+        string entrypoint = 4;
+    }
+
+    // Tensor:  Defines the “intelligence” that the service can provide, I think it would be a description of a polynomial (without coefficients and describing the variables).
+    message Tensor {
+        message Index {
+            string id = 1;
+            FieldDef field = 2;
+        }
+        repeated Index index = 1;
+        int32 rank = 2;
+    }
+
+    // Ledger:  Defines the database that the service can provide.
+    message Ledger {
+        message ClassDiagram {
+            message Class {
+                message RelationDef {
+                    FieldDef field = 1;
+                    string relation = 2;  // {0-10}, * ...
+                }
+                string id = 1;
+                optional RelationDef relation = 2;
+            }
+            repeated Class clases = 1;
+        }
+        ClassDiagram class_diagram = 1;
+        optional bytes consensus_protocol = 2; // Can not've consensus.
+    }
+
     Container container = 1;
     Api api = 2;
     Tensor tensor = 3;
@@ -188,9 +158,8 @@ message Instance {
         int32 internal_port = 1;
         repeated Uri uri = 2;
     }
-    Api api = 1;
-    repeated Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899, ]
-    Metadata metadata = 15;
+    Service.Api api = 1;
+    repeated Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899, 
 }
 
 
@@ -198,12 +167,13 @@ message Instance {
 //  SERVICE INITIAL CONFIGURATION.
 //  -------------------------------
 // The __config__ file is mounted on each service on the filesystem's root.
+
 message Configuration {
     map<string, Any> enviroment_variables = 1;
     repeated int32 spec_slot = 2;
 }
 
-message ConfigurationFile{
+message ConfigurationFile {
     Instance gateway = 1;
     Configuration config = 2;
     // Un servicio puede solicitar instancias de servicios con un ledger o un tensor aunque este no los ofrezca, y por tanto no aparezcan estos en su especificacion.
@@ -211,5 +181,4 @@ message ConfigurationFile{
     // por lo tanto, el nodo tiene la opcion de añadir estas instancias de manera opcional en la configuracion de arranque del servicio.
     repeated Instance tensor_instances = 3;
     repeated Instance ledger_instances = 4;
-    Metadata metadata = 15;
 }

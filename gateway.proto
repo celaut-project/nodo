@@ -20,7 +20,7 @@ message Instance {
 
 message ServiceTransport {
     oneof oneOf{
-        celaut.Metadata.Hash hash = 1;
+        celaut.Any.Metadata.HashTag.Hash hash = 1;
         celaut.Service service = 2;
     }
     optional celaut.Configuration config = 3;
@@ -36,7 +36,7 @@ service Gateway {
     rpc StopService(TokenMessage) returns (Empty) {}
     rpc Hynode(celaut.Instance) returns (celaut.Instance) {}
     
-    rpc GetFile(stream celaut.Metadata.Hash) returns (celaut.Any) {}
+    rpc GetFile(stream celaut.Any.Metadata.HashTag.Hash) returns (celaut.Any) {}
     rpc GetServiceTar(stream ServiceTransport) returns (stream Chunk) {}
     rpc GetServiceCost(stream ServiceTransport) returns (CostMessage) {}
 }

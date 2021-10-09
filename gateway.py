@@ -3,7 +3,7 @@ from celaut_pb2 import Any, Slot
 import build, utils
 from compile import REGISTRY, HYCACHE
 import logger as l
-from verify import SHA3_256_ID, check_service, get_service_hex_hash
+from verify import SHA3_256_ID, check_service, get_service_hex_main_hash
 import subprocess, os, threading, random
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
@@ -191,7 +191,7 @@ def build_cost(service: gateway_pb2.celaut__pb2.Service) -> int:
         # Coste de construcción si no se posee el contenedor del servicio.
         # Debe de tener en cuenta el coste de buscar el conedor por la red.
         return sum([
-            COST_OF_BUILD * get_service_hex_hash(service = service) \
+            COST_OF_BUILD * get_service_hex_main_hash(service = service) \
                 in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()] is False,
             # Coste de obtener el contenedor ... #TODO
             ])
@@ -290,7 +290,7 @@ def launch_service(
     # Si hace la peticion un servicio local.
     if utils.get_network_name(father_ip) == DOCKER_NETWORK:
         container = create_container(
-            id = get_service_hex_hash(service = service),
+            id = get_service_hex_main_hash(service = service),
             entrypoint = service.container.entrypoint
         )
 
@@ -332,7 +332,7 @@ def launch_service(
 
         container = create_container(
             use_other_ports = assigment_ports,
-            id = get_service_hex_hash( service = service ),
+            id = get_service_hex_main_hash( service = service ),
             entrypoint = service.container.entrypoint
         )
         set_config(container_id = container.id, config = config)
@@ -374,7 +374,7 @@ def launch_service(
 
 def save_service(service: gateway_pb2.celaut__pb2.Service):
     # If the service is not on the registry, save it.
-    hash = get_service_hex_hash(service = service)
+    hash = get_service_hex_main_hash(service = service)
     if not os.path.isfile(REGISTRY+hash+'.service'):
         with open(REGISTRY + hash + '.service', 'wb') as file:
             file.write(service.SerializeToString())
@@ -455,7 +455,7 @@ def search_definition(hashes: list, ignore_network: str = None) -> gateway_pb2.c
 
 def get_from_registry(hash: str) -> gateway_pb2.celaut__pb2.Service:
     try:
-        with open(REGISTRY + hash + '.service', 'rb') as file:
+        with open(REGISTRY + hash + '.service', 'rb') as file: # TODO: content all to Any, delete the .service sufix.
             service = gateway_pb2.celaut__pb2.Service()
             service.ParseFromString(file.read())
             return service
@@ -582,7 +582,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             
             # Si me da servicio.
             if r.HasField('service'):
-                hash = get_service_hex_hash(service = r.service)
+                hash = get_service_hex_main_hash(service = r.service)
                 save_service(service = r.service)
                 service = r.service
                 break

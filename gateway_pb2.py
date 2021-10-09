@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"\x1b\n\x0b\x43ostMessage\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x05\"=\n\x08Instance\x12\"\n\x08instance\x18\x01 \x01(\x0b\x32\x10.celaut.Instance\x12\r\n\x05token\x18\x02 \x01(\t\"\x9d\x01\n\x10ServiceTransport\x12%\n\x04hash\x18\x01 \x01(\x0b\x32\x15.celaut.Metadata.HashH\x00\x12\"\n\x07service\x18\x02 \x01(\x0b\x32\x0f.celaut.ServiceH\x00\x12*\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"\x17\n\x05\x43hunk\x12\x0e\n\x06\x62uffer\x18\x01 \x01(\x0c\x32\xef\x02\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12\x36\n\x0bStopService\x12\x15.gateway.TokenMessage\x1a\x0e.gateway.Empty\"\x00\x12.\n\x06Hynode\x12\x10.celaut.Instance\x1a\x10.celaut.Instance\"\x00\x12\x31\n\x07GetFile\x12\x15.celaut.Metadata.Hash\x1a\x0b.celaut.Any\"\x00(\x01\x12@\n\rGetServiceTar\x12\x19.gateway.ServiceTransport\x1a\x0e.gateway.Chunk\"\x00(\x01\x30\x01\x12\x45\n\x0eGetServiceCost\x12\x19.gateway.ServiceTransport\x1a\x14.gateway.CostMessage\"\x00(\x01\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"\x1b\n\x0b\x43ostMessage\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x05\"=\n\x08Instance\x12\"\n\x08instance\x18\x01 \x01(\x0b\x32\x10.celaut.Instance\x12\r\n\x05token\x18\x02 \x01(\t\"\xa9\x01\n\x10ServiceTransport\x12\x31\n\x04hash\x18\x01 \x01(\x0b\x32!.celaut.Any.Metadata.HashTag.HashH\x00\x12\"\n\x07service\x18\x02 \x01(\x0b\x32\x0f.celaut.ServiceH\x00\x12*\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.ConfigurationH\x01\x88\x01\x01\x42\x07\n\x05oneOfB\t\n\x07_config\"\x17\n\x05\x43hunk\x12\x0e\n\x06\x62uffer\x18\x01 \x01(\x0c\x32\xfb\x02\n\x07Gateway\x12@\n\x0cStartService\x12\x19.gateway.ServiceTransport\x1a\x11.gateway.Instance\"\x00(\x01\x12\x36\n\x0bStopService\x12\x15.gateway.TokenMessage\x1a\x0e.gateway.Empty\"\x00\x12.\n\x06Hynode\x12\x10.celaut.Instance\x1a\x10.celaut.Instance\"\x00\x12=\n\x07GetFile\x12!.celaut.Any.Metadata.HashTag.Hash\x1a\x0b.celaut.Any\"\x00(\x01\x12@\n\rGetServiceTar\x12\x19.gateway.ServiceTransport\x1a\x0e.gateway.Chunk\"\x00(\x01\x30\x01\x12\x45\n\x0eGetServiceCost\x12\x19.gateway.ServiceTransport\x1a\x14.gateway.CostMessage\"\x00(\x01\x62\x06proto3'
   ,
   dependencies=[celaut__pb2.DESCRIPTOR,])
 
@@ -207,7 +207,7 @@ _SERVICETRANSPORT = _descriptor.Descriptor(
     fields=[]),
   ],
   serialized_start=173,
-  serialized_end=330,
+  serialized_end=342,
 )
 
 
@@ -238,12 +238,12 @@ _CHUNK = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=332,
-  serialized_end=355,
+  serialized_start=344,
+  serialized_end=367,
 )
 
 _INSTANCE.fields_by_name['instance'].message_type = celaut__pb2._INSTANCE
-_SERVICETRANSPORT.fields_by_name['hash'].message_type = celaut__pb2._METADATA_HASH
+_SERVICETRANSPORT.fields_by_name['hash'].message_type = celaut__pb2._ANY_METADATA_HASHTAG_HASH
 _SERVICETRANSPORT.fields_by_name['service'].message_type = celaut__pb2._SERVICE
 _SERVICETRANSPORT.fields_by_name['config'].message_type = celaut__pb2._CONFIGURATION
 _SERVICETRANSPORT.oneofs_by_name['oneOf'].fields.append(
@@ -314,8 +314,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=358,
-  serialized_end=725,
+  serialized_start=370,
+  serialized_end=749,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',
@@ -352,7 +352,7 @@ _GATEWAY = _descriptor.ServiceDescriptor(
     full_name='gateway.Gateway.GetFile',
     index=3,
     containing_service=None,
-    input_type=celaut__pb2._METADATA_HASH,
+    input_type=celaut__pb2._ANY_METADATA_HASHTAG_HASH,
     output_type=celaut__pb2._ANY,
     serialized_options=None,
     create_key=_descriptor._internal_create_key,
