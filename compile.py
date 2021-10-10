@@ -268,6 +268,6 @@ if __name__ == "__main__":
         aux_id = aux_id
         )  # Hyperfile
 
-    os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.service')
+    os.system('/usr/bin/docker tag builder'+aux_id+' '+id)
     os.system('/usr/bin/docker rmi builder'+aux_id)
     os.system('rm -rf '+HYCACHE+aux_id+'/')

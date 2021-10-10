@@ -6,26 +6,27 @@ import netifaces as ni
 
 def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
     for slot in instance.api.slot:
-        if 'grpc' in slot.transport_protocol.metadata.tag and 'http2' in slot.transport_protocol.metadata.tag:
-            # If the protobuf lib. supported map for this message it could be O(n).
-            for uri_slot in instance.uri_slot:
-                if uri_slot.internal_port == slot.port:
-                    return uri_slot.uri[0]
+        #if 'grpc' in slot.transport_protocol and 'http2' in slot.transport_protocol: # TODO
+        # If the protobuf lib. supported map for this message it could be O(n).
+        for uri_slot in instance.uri_slot:
+            if uri_slot.internal_port == slot.port:
+                return uri_slot.uri[0]
     raise Exception('Grpc over Http/2 not supported on this service ' + str(instance))
 
 def service_hashes(
-        service: celaut_pb2.Service
-    ) -> Generator[celaut_pb2.Metadata.Hash, None, None]:
-        for hash in service.metadata.hash:
+        hashes: list = []
+    ) -> Generator[celaut_pb2.Metadata.HashTag.Hash, None, None]:
+        for hash in hashes:
             yield hash 
 
 def service_extended(
-        service: celaut_pb2.Service, 
+        service: celaut_pb2.Service,
+        metadata: celaut_pb2.Any.Metadata,  
         config: celaut_pb2.Configuration = None
     ) -> Generator[gateway_pb2.ServiceTransport, None, None]:
         set_config = True if config else False
         transport = gateway_pb2.ServiceTransport()
-        for hash in service.metadata.hash:
+        for hash in metadata.hash:
             transport.hash.CopyFrom(hash)
             if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
                 transport.config.CopyFrom(config)

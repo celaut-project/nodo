@@ -12,13 +12,12 @@ message CostMessage {
     int32 cost = 1;
 }
 
-
 message Instance {
-    celaut.Instance instance = 1;
-    string token = 2;
+    optional celaut.Any.Metadata instance_meta = 1;
+    celaut.Instance instance = 2;
+    optional string token = 3;
 }
 
-// Se debería de definir como protocolo.
 message ServiceTransport {
     oneof oneOf{
         celaut.Any.Metadata.HashTag.Hash hash = 1;
@@ -34,7 +33,7 @@ message Chunk  {
 service Gateway {
     rpc StartService( stream ServiceTransport) returns (Instance) {}
     rpc StopService(TokenMessage) returns (Empty) {}
-    rpc Hynode(celaut.Instance) returns (celaut.Instance) {}
+    rpc Hynode(Instance) returns (Instance) {}
     
     rpc GetFile(stream celaut.Any.Metadata.HashTag.Hash) returns (celaut.Any) {}
     rpc GetServiceTar(stream ServiceTransport) returns (stream Chunk) {}

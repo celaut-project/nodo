@@ -38,7 +38,7 @@ def check_service(service: Service, hashes: list) -> bool:
     return False
 
 def is_complete_service(service: Service) -> bool:
-    # Needs to check all fields. But this serves at the moment.
+    # TODO Needs to check all fields. But this serves at the moment.
     return len(service.container.filesystem.branch) > 0
 
 # Return the service's sha3-256 hash on hexadecimal format.

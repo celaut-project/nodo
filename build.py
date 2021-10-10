@@ -1,3 +1,4 @@
+from sys import meta_path
 import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os
 from utils import service_extended, save_chunks_to_file
 from compile import HYCACHE
@@ -6,8 +7,11 @@ import logger as l
 from verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
 
-def build(service: gateway_pb2.celaut__pb2.Service):
-    id = get_service_hex_main_hash(service = service)
+def build(
+    service: gateway_pb2.celaut__pb2.Service,
+    metadata: gateway_pb2.celaut__pb2.Any.Metadata
+    ):
+    id = get_service_hex_main_hash(service = service, metadata = metadata)
     l.LOGGER('\nBuilding ' + id)
     
     try:
@@ -34,7 +38,7 @@ def build(service: gateway_pb2.celaut__pb2.Service):
                     chunks = gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(peer_uri['ip'] + ':' + str(peer_uri['port']))
                             ).GetServiceTar(
-                                service_extended(service = service)
+                                service_extended(service = service, metadata = metadata)
                             )
                 )
                 
@@ -48,8 +52,8 @@ def build(service: gateway_pb2.celaut__pb2.Service):
         #  Load the tar file to a docker container.
         try:
             os.system('docker load < ' + HYCACHE + id + '.tar')
-            os.system('docker tag ' + id + ' ' + id + '.service')
-            check_output('/usr/bin/docker inspect ' + id + '.service', shell=True)
+            os.system('docker tag ' + id + ' ' + id)
+            check_output('/usr/bin/docker inspect ' + id, shell=True)
         except Exception as e:
             l.LOGGER('Exception during load the tar ' + id)
             raise Exception('Error building the container.')
@@ -61,10 +65,15 @@ def build(service: gateway_pb2.celaut__pb2.Service):
 if __name__ == "__main__":
     import sys
     id = sys.argv[1]
-    with open("/home/hy/node/__registry__/"+id+".service", "rb") as file:
+    with open("/home/hy/node/__registry__/"+id, "rb") as file:
+        any = gateway_pb2.celaut__pb2.Any()
+        any.ParseFromString(file.read())
         service = gateway_pb2.celaut__pb2.Service()
-        service.ParseFromString(file.read())
-        if get_service_hex_main_hash(service=service) == id:
-            build(service=service)
+        service.ParseFromString(any.value)
+        if get_service_hex_main_hash(service = service, metadata = any.metadata) == id:
+            build(
+                service = service, 
+                metadata = any.metadata
+                )
         else:
             l.LOGGER('Error: asignacion de servicio erronea en el registro.')

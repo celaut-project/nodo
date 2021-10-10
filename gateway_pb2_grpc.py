@@ -27,8 +27,8 @@ class GatewayStub(object):
                 )
         self.Hynode = channel.unary_unary(
                 '/gateway.Gateway/Hynode',
-                request_serializer=celaut__pb2.Instance.SerializeToString,
-                response_deserializer=celaut__pb2.Instance.FromString,
+                request_serializer=gateway__pb2.Instance.SerializeToString,
+                response_deserializer=gateway__pb2.Instance.FromString,
                 )
         self.GetFile = channel.stream_unary(
                 '/gateway.Gateway/GetFile',
@@ -101,8 +101,8 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'Hynode': grpc.unary_unary_rpc_method_handler(
                     servicer.Hynode,
-                    request_deserializer=celaut__pb2.Instance.FromString,
-                    response_serializer=celaut__pb2.Instance.SerializeToString,
+                    request_deserializer=gateway__pb2.Instance.FromString,
+                    response_serializer=gateway__pb2.Instance.SerializeToString,
             ),
             'GetFile': grpc.stream_unary_rpc_method_handler(
                     servicer.GetFile,
@@ -175,8 +175,8 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/gateway.Gateway/Hynode',
-            celaut__pb2.Instance.SerializeToString,
-            celaut__pb2.Instance.FromString,
+            gateway__pb2.Instance.SerializeToString,
+            gateway__pb2.Instance.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
