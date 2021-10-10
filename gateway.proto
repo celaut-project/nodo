@@ -18,6 +18,7 @@ message Instance {
     string token = 2;
 }
 
+// Se debería de definir como protocolo.
 message ServiceTransport {
     oneof oneOf{
         celaut.Any.Metadata.HashTag.Hash hash = 1;
@@ -25,7 +26,6 @@ message ServiceTransport {
     }
     optional celaut.Configuration config = 3;
 }
-
 
 message Chunk  {
     bytes buffer = 1;

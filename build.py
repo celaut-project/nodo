@@ -7,15 +7,15 @@ from verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
 
 def build(service: gateway_pb2.celaut__pb2.Service):
-    id = get_service_hex_main_hash(service=service)
+    id = get_service_hex_main_hash(service = service)
     l.LOGGER('\nBuilding ' + id)
     
     try:
         # it's locally?
-        check_output('/usr/bin/docker inspect '+id+'.service', shell=True)
+        check_output('/usr/bin/docker inspect '+id, shell=True)
         
     except CalledProcessError:
-        # search container in IPFS service. (docker-tar, docker-tar.gz, filesystem, ....)
+        # search container in a service. (docker-tar, docker-tar.gz, filesystem, ....)
 
         l.LOGGER('\nIt is not locally, ' + id + ' go to search the container in other node.')
         peers = list(pymongo.MongoClient(

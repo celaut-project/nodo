@@ -203,13 +203,10 @@ class Hyper:
             indexes = tensor.get('index') or None
             if indexes:
                 for var in indexes:
-                    index = celaut.Service.Tensor.Index()
-                    index.id = var
                     try:
                         with open(self.path+var+".field", "rb") as var_desc:
-                            index.field.ParseFromString(var_desc.read())
+                            self.service.tensor.index[var].ParseFromString(var_desc.read())
                     except FileNotFoundError: pass
-                    self.service.tensor.index.append(index)
         
                 # Add tensor metadata to the global metadata.
                 self.metadata.hashtag.attr_hashtag.append(

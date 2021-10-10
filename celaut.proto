@@ -21,20 +21,13 @@ message FieldDef {
     }
     message MessageDef {
         message ParamDef {
-            int32 index = 1;
-            // In order to avoid loops, 
-            // in the definition of a message only
-            // the sub-messages must be fully 
-            // specified the first time they appear,
-            // if they are repeated again only the tags are added.
-            FieldDef field = 2;
-            bool repeated = 3;
-            bool optional = 4;
+            FieldDef field = 1;
+            bool repeated = 2;
         }
         message OneofDef {
             repeated int32 index = 1;
         }
-        repeated ParamDef param = 1;
+        map<int32, ParamDef> param = 1;
         repeated OneofDef oneof = 2; // have a list of oneof's params' index.
     }
     oneof value{
@@ -73,21 +66,18 @@ message Any {
 message Service {
     // API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
     message Api {
-        message ApplicationDef {
+        message AppDef {
             message MethodDef {
-                int32 index = 1;
-                FieldDef input_message = 2;
-                bool is_input_stream = 3;
-                FieldDef output_message = 4;
-                bool is_output_stream = 5;
+                FieldDef input = 1;
+                FieldDef output = 2;
             }
-            repeated MethodDef method = 1; // Exemple of method call: 8080.1()
+            map<string, MethodDef> method = 1; // Exemple of method call: 8080.1()
         }
         message Slot {
             int32 port = 1;
             bytes transport_protocol = 2;
         }
-        ApplicationDef app_protocol = 1;
+        AppDef app_protocol = 1;
         repeated Slot slot = 2;
         // Cost function can be applied. <- must be optional (index 3).
     }
@@ -96,12 +86,12 @@ message Service {
     message Container {
         message Filesystem {
             message ItemBranch {
+                string name = 1; // id for path
                 oneof item {
-                    Any file = 1;
-                    string link = 2;
-                    Filesystem filesystem = 3;
+                    Any file = 2;
+                    string link = 3;
+                    Filesystem filesystem = 4;
                 }
-                string name = 4; // id for path
             }
             repeated ItemBranch branch = 1;
         }
@@ -113,26 +103,18 @@ message Service {
 
     // Tensor:  Defines the “intelligence” that the service can provide, I think it would be a description of a polynomial (without coefficients and describing the variables).
     message Tensor {
-        message Index {
-            string id = 1;
-            FieldDef field = 2;
-        }
-        repeated Index index = 1;
+        map<string, FieldDef> index = 1;
         int32 rank = 2;
     }
 
     // Ledger:  Defines the database that the service can provide.
-    message Ledger {
+    message Ledger { // TODO
         message ClassDiagram {
-            message Class {
-                message RelationDef {
-                    FieldDef field = 1;
-                    string relation = 2;  // {0-10}, * ...
-                }
-                string id = 1;
-                optional RelationDef relation = 2;
+            message RelationDef {
+                FieldDef field = 1;
+                string relation = 2;  // {0-10}, * ...
             }
-            repeated Class clases = 1;
+            map<int32, RelationDef> clases = 1;
         }
         ClassDiagram class_diagram = 1;
         optional bytes consensus_protocol = 2; // Can not've consensus.
