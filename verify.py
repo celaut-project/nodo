@@ -1,7 +1,6 @@
 from logger import LOGGER
 import hashlib
-from celaut_pb2 import Any, Service, Metadata
-from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
+from celaut_pb2 import Any, Service, Any
 
 # -- HASH IDs --
 SHAKE_256_ID = bytes.fromhex("46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f")
@@ -18,11 +17,11 @@ HASH_FUNCTIONS = {
 
 def calculate_hashes(value) -> list:
     return [
-        Metadata.Hash(
+        Any.Metadata.HashTag.Hash(
             type = SHA3_256_ID, 
             value = SHA3_256(value)
         ),
-        Metadata.Hash(
+        Any.Metadata.HashTag.Hash(
             type = SHAKE_256_ID,
             value = SHAKE_256(value)
         )
