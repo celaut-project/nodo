@@ -95,7 +95,7 @@ message Service {
             }
             repeated ItemBranch branch = 1;
         }
-        string architecture = 1; // TODO
+        bytes architecture = 1;
         Filesystem filesystem = 2;
         map<string, FieldDef> enviroment_variables = 3;
         string entrypoint = 4;
@@ -108,7 +108,7 @@ message Service {
     }
 
     // Ledger:  Defines the database that the service can provide.
-    message Ledger { // TODO
+    message Ledger {
         message ClassDiagram {
             message RelationDef {
                 FieldDef field = 1;
@@ -117,7 +117,7 @@ message Service {
             map<int32, RelationDef> clases = 1;
         }
         ClassDiagram class_diagram = 1;
-        optional bytes consensus_protocol = 2; // Can not've consensus.
+        optional bytes consensus_protocol = 2; // Can've no consensus.
     }
 
     Container container = 1;

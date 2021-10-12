@@ -21,7 +21,7 @@ DOCKER_CLIENT = lambda: docker_lib.from_env()
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 GATEWAY_PORT = 8080
-
+SELF_RATE = int(os.environ.get('COMPUTE_POWER_RATE'))
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
@@ -237,7 +237,7 @@ def execution_cost(service: celaut.Service, metadata: celaut.Any.Metadata) -> in
     return sum([
         len( DOCKER_CLIENT().containers.list() ),
         build_cost(service = service, metadata = metadata),
-    ]) 
+    ]) * SELF_RATE
 
 def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> celaut.Instance or None:
     try:

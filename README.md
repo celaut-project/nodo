@@ -25,3 +25,5 @@ https://docs.google.com/document/d/1VZ_M9mVKDe2VMsmMyHZAqedgWYrIuVEgqxc2t3-5UzM/
 https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 
 13. Optional: activate ssh, https://linuxize.com/post/how-to-enable-ssh-on-ubuntu-18-04/
+
+14. Add enviroment variable COMPUTE_POWER_RATE
