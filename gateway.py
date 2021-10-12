@@ -321,7 +321,7 @@ def launch_service(
 
     #  El nodo lanza localmente el servicio.
     l.LOGGER('El nodo lanza el servicio localmente.')
-    build.build(service = service)  # Si no esta construido el contenedor, lo construye.
+    build.build(service = service, metadata = metadata)  # Si no esta construido el contenedor, lo construye.
     instance = gateway_pb2.Instance()
 
     # Si hace la peticion un servicio local.
