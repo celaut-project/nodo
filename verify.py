@@ -12,7 +12,7 @@ SHA3_256 = lambda value: "" if value is None else hashlib.sha3_256(value).digest
 
 HASH_FUNCTIONS = {
     SHA3_256_ID: SHA3_256,
-    SHAKE_256_ID: SHAKE_256_ID
+    SHAKE_256_ID: SHAKE_256
 }
 
 def calculate_hashes(value) -> list:
@@ -36,10 +36,6 @@ def check_service(service: Service, hashes: list) -> bool:
                 return True
     return False
 
-def is_complete_service(service: Service) -> bool:
-    # TODO Needs to check all fields. But this serves at the moment.
-    return len(service.container.filesystem.branch) > 0
-
 # Return the service's sha3-256 hash on hexadecimal format.
 def get_service_hex_main_hash(service: Service, metadata: Any.Metadata = None) -> str:
     # Find if it has the hash.
@@ -50,7 +46,7 @@ def get_service_hex_main_hash(service: Service, metadata: Any.Metadata = None) -
 
     # If not but the spec. is complete, calculate the hash prunning it before.
     # If not and is incomplete, it's going to be imposible calculate any hash.
-    if is_complete_service(service = service):
+    if metadata.complete:
         return SHA3_256(
             value = service.SerializeToString()
         ).hex()
@@ -58,8 +54,8 @@ def get_service_hex_main_hash(service: Service, metadata: Any.Metadata = None) -
         LOGGER(' sha3-256 hash function is not implemented on this method.')
         raise Exception(' sha3-256 hash function is not implemented on this method.')
 
-def get_service_list_of_hashes(service: Service) -> list:
-    if is_complete_service(service = service):
+def get_service_list_of_hashes(service: Service, metadata: Any.Metadata) -> list:
+    if metadata.complete:
         return calculate_hashes(
             value = service.SerializeToString()
         )

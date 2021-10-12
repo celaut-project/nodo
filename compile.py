@@ -231,7 +231,7 @@ class Hyper:
 
     def save(self):
         self.metadata.hashtag.hash.extend(
-            get_service_list_of_hashes(self.service)
+            get_service_list_of_hashes(self.service, self.metadata)
         )
         # Once service hashes are calculated, we prune the filesystem for save storage.
         self.service.container.filesystem.ClearField('branch')
