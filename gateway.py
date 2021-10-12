@@ -475,19 +475,20 @@ def search_definition(hashes: list, ignore_network: str = None) -> celaut.Servic
         ignore_network = ignore_network
     ):
         service.parseFromString(any.value)
-        if check_service(
-                service = service,
-                hashes = hashes
-            ):
-                service.metadata.CopyFrom(any.metadata) # TODO: Is not checking the metadata hashes. Needs to make an union with our hashes and check all.
-                break
-        else:
-            service = celaut.Service()
+        if any.metadata.complete:
+            if check_service(
+                    service = service,
+                    hashes = hashes
+                ):
+                    break
+            else:
+                service = celaut.Service()
     
     if service:
         #  Save the service on the registry.
         save_service(
-            service = service
+            service = service,
+            metadata = any.metadata
         )
         return service 
 
@@ -547,7 +548,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
             
             # Si me da servicio.
             if r.HasField('service') and configuration:
-                save_service(service = r.service)
+                save_service(
+                    service = r.service,
+                    metadata = celaut.Any.Metadata(
+                        hashtag = celaut.Any.Metadata.HashTag(
+                            hash = hashes
+                        )
+                    )
+                )
                 return launch_service(
                     service = r.service,
                     metadata = celaut.Any.Metadata(
