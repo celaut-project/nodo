@@ -27,7 +27,7 @@ class Hyper:
 
 
     def parseContainer(self):
-        def parseFilesys() -> celaut.Any.MetaData.HashTag:
+        def parseFilesys() -> celaut.Any.Metadata.HashTag:
             # Directories are created on cache.
             os.system("mkdir "+HYCACHE+self.aux_id+"/building")
             os.system("mkdir "+HYCACHE+self.aux_id+"/filesystem")
@@ -83,7 +83,7 @@ class Hyper:
 
             self.service.container.filesystem.CopyFrom( filesystem )
 
-            return celaut.Any.MetaData.HashTag(
+            return celaut.Any.Metadata.HashTag(
                 hash = calculate_hashes( value = filesystem.SerializeToString() )
             )
 
@@ -114,7 +114,7 @@ class Hyper:
                             celaut.Any.Metadata.HashTag.AttrHashTag(
                                 key = 1,  # Architecture
                                 value = [ 
-                                    celaut.Any.MetaData.HashTag(
+                                    celaut.Any.Metadata.HashTag(
                                         tags = [
                                             self.json.get('architecture')
                                         ]
@@ -155,7 +155,7 @@ class Hyper:
             celaut.Any.Metadata.HashTag.AttrHashTag(
                 key = 2,  # Api attr.
                 value = [ 
-                    celaut.Any.MetaData.HashTag(
+                    celaut.Any.Metadata.HashTag(
                         attr_hashtag = [
                             celaut.Any.Metadata.HashTag.AttrHashTag(
                                 key = 2,  # Slot attr.
@@ -165,7 +165,7 @@ class Hyper:
                                             celaut.Any.Metadata.HashTag.AttrHashTag(
                                                 key = 2,  # Transport Protocol attr.
                                                 value = [
-                                                    celaut.Any.MetaData.HashTag(
+                                                    celaut.Any.Metadata.HashTag(
                                                         tags = item.get('protocol')
                                                     )
                                                 ]
