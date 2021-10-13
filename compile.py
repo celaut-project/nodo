@@ -213,12 +213,12 @@ class Hyper:
                     celaut.Any.Metadata.HashTag.AttrHashTag(
                         key = 3,  # Tensor attr.
                         value = (
-                            celaut.Any.MetaData.HashTag(
+                            celaut.Any.Metadata.HashTag(
                                 attr_hashtag = [
                                     celaut.Any.Metadata.HashTag.AttrHashTag(
                                         key = 1,  # index attr.
                                         value = [
-                                            celaut.Any.MetaData.HashTag(
+                                            celaut.Any.Metadata.HashTag(
                                                 tag = indexes[var]
                                             ) for var in indexes
                                         ]
