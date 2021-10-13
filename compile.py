@@ -249,7 +249,7 @@ class Hyper:
             f.write(
                     celaut.Any(
                         metadata = self.metadata,
-                        value = self.service.SerizaliceToString()
+                        value = self.service.SerializeToString()
                     ).SerializeToString()
                 )
         return id
