@@ -233,12 +233,18 @@ class Hyper:
 
     def save(self):
         self.metadata.hashtag.hash.extend(
-            get_service_list_of_hashes(self.service, self.metadata)
+            get_service_list_of_hashes(
+                service = self.service, 
+                metadata = self.metadata
+            )
         )
+        id = get_service_hex_main_hash(
+            service = self.service, 
+            metadata = self.metadata
+            )
         # Once service hashes are calculated, we prune the filesystem for save storage.
         self.service.container.filesystem.ClearField('branch')
         self.metadata.complete = False;
-        id = get_service_hex_main_hash(service = self.service)
         with open( REGISTRY +id, 'wb') as f:
             f.write(
                     celaut.Any(
