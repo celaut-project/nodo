@@ -1,4 +1,4 @@
-from threading import Thread
+from time import sleep
 import threading
 import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os
 from utils import service_extended, save_chunks_to_file
@@ -7,6 +7,8 @@ import logger as l
 
 from verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
+
+WAIT_FOR_CONTAINER_DOWNLOAD = 10
 
 def get_container_from_outside(
     id: str,
@@ -57,7 +59,8 @@ def get_container_from_outside(
 
 def build(
     service: gateway_pb2.celaut__pb2.Service,
-    metadata: gateway_pb2.celaut__pb2.Any.Metadata
+    metadata: gateway_pb2.celaut__pb2.Any.Metadata,
+    get_it_outside: bool = True
     ):
     id = get_service_hex_main_hash(service = service, metadata = metadata)
     l.LOGGER('\nBuilding ' + id)
@@ -68,12 +71,10 @@ def build(
         
     except CalledProcessError:
         threading.Thread(
-            get_container_from_outside(
-                id = id,
-                metadata = metadata,
-                service = service
-            )           
-        ).start()
+            target = get_container_from_outside,
+            args = (id, service, metadata)          
+            ).start() if get_it_outside else sleep(WAIT_FOR_CONTAINER_DOWNLOAD)
+        raise Exception("Getting the container, the process will've time")
 
     # verify()
 
