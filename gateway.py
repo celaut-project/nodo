@@ -1,10 +1,10 @@
-from sys import meta_path
+from posix import environ
 from typing import Generator
 import celaut_pb2 as celaut
 import build, utils
 from compile import REGISTRY, HYCACHE
 import logger as l
-from verify import SHA3_256_ID, SHAKE_256_ID, check_service, get_service_hex_main_hash
+from verify import SHA3_256_ID, check_service, get_service_hex_main_hash
 import subprocess, os, threading
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
@@ -15,13 +15,13 @@ from google.protobuf.json_format import Parse
 import docker as docker_lib
 import netifaces as ni
 
-COST_OF_BUILD = 0
-
+GET_ENV = lambda env, default: int(os.environ.get(env)) if env in os.environ.keys() else default
 DOCKER_CLIENT = lambda: docker_lib.from_env()
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
-GATEWAY_PORT = 8080
-SELF_RATE = int(os.environ.get('COMPUTE_POWER_RATE'))
+GATEWAY_PORT = GET_ENV(env = 'GATEWAY_PORT', default = 8080)
+SELF_RATE = GET_ENV(env = 'COMPUTE_POWER_RATE', default = 1)
+COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 0)
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
