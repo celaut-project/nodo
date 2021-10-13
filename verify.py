@@ -40,7 +40,7 @@ def check_service(service: Service, hashes: list) -> bool:
 def get_service_hex_main_hash(service: Service, metadata: Any.Metadata = None) -> str:
     # Find if it has the hash.
     if metadata:
-        for hash in  metadata.hash:
+        for hash in  metadata.hashtag.hash:
             if hash.type == SHA3_256_ID:
                 return hash.value.hex()
 
