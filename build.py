@@ -48,10 +48,10 @@ def get_container_from_outside(
     #  Load the tar file to a docker container.
     try:
         os.system('docker load < ' + HYCACHE + id + '.tar')
-        os.system('docker tag ' + id + ' ' + id)
+        os.system('docker tag ' + id + ' ' + id + '.docker')
         check_output('/usr/bin/docker inspect ' + id, shell=True)
     except Exception as e:
-        l.LOGGER('Exception during load the tar ' + id)
+        l.LOGGER('Exception during load the tar ' + id + '.docker')
         raise Exception('Error building the container.')
 
     l.LOGGER('Build process finished ' + id)
@@ -67,7 +67,7 @@ def build(
     
     try:
         # it's locally?
-        check_output('/usr/bin/docker inspect '+id, shell=True)
+        check_output('/usr/bin/docker inspect '+id+'.docker', shell=True)
         
     except CalledProcessError:
         threading.Thread(

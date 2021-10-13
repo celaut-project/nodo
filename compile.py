@@ -245,7 +245,8 @@ class Hyper:
         # Once service hashes are calculated, we prune the filesystem for save storage.
         self.service.container.filesystem.ClearField('branch')
         self.metadata.complete = False;
-        with open( REGISTRY +id, 'wb') as f:
+        # https://github.com/moby/moby/issues/20972#issuecomment-193381422
+        with open( REGISTRY + id, 'wb') as f:
             f.write(
                     celaut.Any(
                         metadata = self.metadata,
@@ -277,6 +278,6 @@ if __name__ == "__main__":
         aux_id = aux_id
         )  # Hyperfile
 
-    os.system('/usr/bin/docker tag builder'+aux_id+' '+id)
+    os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.docker')
     os.system('/usr/bin/docker rmi builder'+aux_id)
     os.system('rm -rf '+HYCACHE+aux_id+'/')
