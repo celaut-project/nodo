@@ -115,7 +115,7 @@ class Hyper:
                                 key = 1,  # Architecture
                                 value = [ 
                                     celaut.Any.Metadata.HashTag(
-                                        tags = [
+                                        tag = [
                                             self.json.get('architecture')
                                         ]
                                     ) 
@@ -166,7 +166,7 @@ class Hyper:
                                                 key = 2,  # Transport Protocol attr.
                                                 value = [
                                                     celaut.Any.Metadata.HashTag(
-                                                        tags = item.get('protocol')
+                                                        tag = item.get('protocol')
                                                     )
                                                 ]
                                             )
