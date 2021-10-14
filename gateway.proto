@@ -19,11 +19,15 @@ message Instance {
 }
 
 message ServiceTransport {
-    oneof oneOf{
-        celaut.Any.Metadata.HashTag.Hash hash = 1;
+    message ServiceWithMeta {
+        celaut.Any.Metadata meta = 1;
         celaut.Service service = 2;
     }
-    optional celaut.Configuration config = 3;
+    oneof oneOf{
+        celaut.Any.Metadata.HashTag.Hash hash = 1;
+        ServiceWithMeta service = 2;
+    }
+    optional celaut.Configuration config = 3;    
 }
 
 message Chunk  {

@@ -34,7 +34,8 @@ def service_extended(
             yield transport
         transport.ClearField('hash')
         if set_config: transport.config.CopyFrom(config)
-        transport.service.CopyFrom(service)
+        transport.service.service.CopyFrom(service)
+        transport.service.meta.CopyFrom(metadata)
         yield transport
 
 def get_free_port() -> int:
