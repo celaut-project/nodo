@@ -68,7 +68,7 @@ class Hyper:
                     elif os.path.isfile(directory+b_name):
                         l.LOGGER('    Adding file '+ b_name)
                         with open(directory+b_name, 'rb') as file:
-                            branch.file.value = file.read()
+                            branch.file = file.read()
 
                     # It's a folder.
                     elif os.path.isdir(directory+b_name):

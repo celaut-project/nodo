@@ -89,7 +89,7 @@ message Service {
             message ItemBranch {
                 string name = 1; // id for path
                 oneof item {
-                    Any file = 2;
+                    bytes file = 2;
                     string link = 3;
                     Filesystem filesystem = 4;
                 }
@@ -152,7 +152,7 @@ message Instance {
 // The __config__ file is mounted on each service on the filesystem's root.
 
 message Configuration {
-    map<string, Any> enviroment_variables = 1;
+    map<string, bytes> enviroment_variables = 1;
     repeated int32 spec_slot = 2;
 }
 
