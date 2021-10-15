@@ -214,7 +214,7 @@ class Hyper:
                 self.metadata.hashtag.attr_hashtag.append(
                     celaut.Any.Metadata.HashTag.AttrHashTag(
                         key = 3,  # Tensor attr.
-                        value = (
+                        value = [(
                             celaut.Any.Metadata.HashTag(
                                 attr_hashtag = [
                                     celaut.Any.Metadata.HashTag.AttrHashTag(
@@ -228,7 +228,7 @@ class Hyper:
                                 ]
                             )
                         )
-                    )
+                    )]
                 )
 
     def save(self):
