@@ -553,7 +553,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             if r.HasField('hash'):
                 hashes.append(r.hash)
                 if configuration and SHA3_256_ID == r.hash.type and \
-                    r.hash.value.hex() in [s[:-8] for s in os.listdir(REGISTRY)]:
+                    r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     try:
                         return launch_service(
                             service = get_service_from_registry(
