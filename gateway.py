@@ -526,6 +526,7 @@ def get_service_from_registry(hash: str) -> celaut.Service:
     )
 
 def get_from_registry(hash: str) -> celaut.Any:
+    l.LOGGER('Getting ' + hash + ' service from the local registry.')
     try:
         with open(REGISTRY + hash, 'rb') as file: # TODO: content all to Any, delete the .service sufix.
             any = celaut.Any()
