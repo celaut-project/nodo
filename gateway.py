@@ -263,6 +263,7 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
                         "mongodb://localhost:27017/"
                     )["mongo"]["peerInstances"].find()):
             del peer['_id']
+            l.LOGGER('Parsing instance ' + str(peer))
             peer_instance = Parse(
                 text = json.dumps(peer),
                 message = celaut.Instance(),
@@ -370,7 +371,7 @@ def launch_service(
 
                 set_on_cache(
                     father_ip = father_ip,
-                    id_or_token = container.id, 
+                    id_or_token = container.id,
                     ip_or_uri = container_ip
                 )
 
@@ -649,7 +650,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 # Comprueba que sea sha256 y que se encuentre en el registro.
                 hashes.append(hash)
                 if SHA3_256_ID == hash.type and \
-                    hash.value.hex() in [s[:-8] for s in os.listdir(REGISTRY)]:
+                    hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     return get_from_registry(
                                 hash = hash.value.hex()
                            )
@@ -694,7 +695,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 break
 
         l.LOGGER('Getting the container of service ' + hash)
-        if hash and hash in [s[:-8] for s in os.listdir(REGISTRY)]:
+        if hash and hash in [s for s in os.listdir(REGISTRY)]:
             try:
                 os.system('docker save ' + hash + '.service > ' + HYCACHE + hash + '.tar')
                 l.LOGGER('Returned the tar container buffer.')
@@ -720,7 +721,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         for r in request_iterator:
 
             if r.HasField('hash') and SHA3_256_ID == r.hash.type and \
-                r.hash.value.hex() in [s[:-8] for s in os.listdir(REGISTRY)]:
+                r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                 cost = execution_cost(
                         service = get_service_from_registry(
                                 hash = r.hash.value.hex()
