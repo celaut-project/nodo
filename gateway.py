@@ -258,6 +258,7 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
             weight = execution_cost(service = service, metadata = metadata)
         )
 
+        l.LOGGER('Local execution cost for the service is: ' + str(peers[None]))
         for peer in list(pymongo.MongoClient(
                         "mongodb://localhost:27017/"
                     )["mongo"]["peerInstances"].find()):
