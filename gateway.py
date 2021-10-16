@@ -283,7 +283,9 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
             except: l.LOGGER('Error taking the cost.')
 
         l.LOGGER('checked all peers cost.')
-        return peers.get()
+        result =  peers.get()
+        l.LOGGER('resutl  = ' + str(result))
+        return result
 
     except Exception as e:
         l.LOGGER('Error during balancer, ' + str(e))
