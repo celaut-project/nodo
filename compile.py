@@ -243,7 +243,7 @@ class Hyper:
             metadata = self.metadata
             )
         # Once service hashes are calculated, we prune the filesystem for save storage.
-        self.service.container.filesystem.ClearField('branch')
+        #self.service.container.filesystem.ClearField('branch')
         self.metadata.complete = False;
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
         with open( REGISTRY + id, 'wb') as f:
