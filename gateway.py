@@ -387,6 +387,7 @@ def launch_service(
 
             # Si hace la peticion un servicio de otro nodo.
             else:
+                print('Service ', service)
                 assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
 
                 container = create_container(
