@@ -282,10 +282,7 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
                 )
             except: l.LOGGER('Error taking the cost.')
 
-        l.LOGGER('checked all peers cost.')
-        result =  peers.get()
-        l.LOGGER('resutl  = ' + str(result))
-        return result
+        return peers.get()
 
     except Exception as e:
         l.LOGGER('Error during balancer, ' + str(e))
@@ -303,10 +300,12 @@ def launch_service(
     getting_container = False
     # Here it asks the balancer if it should assign the job to a peer.
     while True:
-        for node_instance, cost in service_balancer(
+        dict = service_balancer(
             service = service,
             metadata = metadata
-        ):
+        )
+        l.LOGGER('serivce balancer result ' + str(dict))
+        for node_instance, cost in dict:
             l.LOGGER('Balancer select peer ' + str(node_instance) + ' with cost ' + str(cost))
             
             if node_instance:
