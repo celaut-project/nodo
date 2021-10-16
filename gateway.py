@@ -558,7 +558,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                 )
         
-        l.LOGGER('The service is not in the registry and the request does not have the definition.')
+        l.LOGGER('The service is not in the registry and the request does not have the definition.' + str(hashes))
         
         try:
             return launch_service(
