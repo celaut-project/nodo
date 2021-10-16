@@ -23,7 +23,7 @@ GATEWAY_PORT = GET_ENV(env = 'GATEWAY_PORT', default = 8080)
 SELF_RATE = GET_ENV(env = 'COMPUTE_POWER_RATE', default = 1)
 COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 0)
 
-def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
+def generate_gateway_instance(network: str) -> celaut.Instance:
     instance = celaut.Instance()
 
     uri = celaut.Instance.Uri()
@@ -41,41 +41,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     slot = celaut.Service.Api.Slot()
     slot.port = GATEWAY_PORT
     instance.api.slot.append(slot)
-    return gateway_pb2.Instance(
-        instance = instance,
-        instance_meta = celaut.Any.Metadata(
-            hashtag = celaut.Any.Metadata.HashTag(
-                attr_hashtag = [
-                    celaut.Any.Metadata.HashTag.AttrHashTag(
-                        key = 1, # Api attr.
-                        value = [
-                            celaut.Any.Metadata.HashTag(
-                                attr_hashtag = [
-                                    celaut.Any.Metadata.HashTag.AttrHashTag(
-                                        key = 2, # Slot attr.
-                                        value = [
-                                            celaut.Any.Metadata.HashTag(
-                                                attr_hashtag = [
-                                                    celaut.Any.Metadata.HashTag.AttrHashTag(
-                                                        key = 2, # Transport Protocol attr.
-                                                        value = [
-                                                            celaut.Any.Metadata.HashTag(
-                                                                tag = ['http2', 'grpc']
-                                                            )
-                                                        ]
-                                                    )
-                                                ]
-                                            )
-                                        ]
-                                    )
-                                ]
-                            )
-                        ]
-                    )
-                ]
-            )
-        )
-    )
+    return instance
 
 # Insert the instance if it does not exists.
 def insert_instance_on_mongo(instance: celaut.Instance):
