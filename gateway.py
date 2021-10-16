@@ -246,7 +246,7 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
         def __init__(self) -> None:
             self.dict = {} # elem : weight
         
-        def add_elem(self, elem, weight: int) -> None:
+        def add_elem(self, weight: int, elem: celaut.Instance = None ) -> None:
             self.dict.update({elem: weight})
         
         def get(self) -> dict:
@@ -255,7 +255,6 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
     try:
         peers = PeerCostList()
         peers.add_elem(
-            elem = None,
             weight = execution_cost(service = service, metadata = metadata)
         )
 
