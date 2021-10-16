@@ -10,6 +10,10 @@ from subprocess import check_output, CalledProcessError
 
 WAIT_FOR_CONTAINER_DOWNLOAD = 10
 
+def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service):
+    # Build the container from filesystem definition.
+    pass
+
 def get_container_from_outside(
     id: str,
     service: gateway_pb2.celaut__pb2.Service,
@@ -70,11 +74,16 @@ def build(
         check_output('/usr/bin/docker inspect '+id+'.docker', shell=True)
         
     except CalledProcessError:
-        threading.Thread(
-            target = get_container_from_outside,
-            args = (id, service, metadata)          
-            ).start() if get_it_outside else sleep(WAIT_FOR_CONTAINER_DOWNLOAD)
-        raise Exception("Getting the container, the process will've time")
+        if metadata.complete:
+            build_container_from_definition(
+                service = service
+            )
+        else:
+            threading.Thread(
+                target = get_container_from_outside,
+                args = (id, service, metadata)          
+                ).start() if get_it_outside else sleep(WAIT_FOR_CONTAINER_DOWNLOAD)
+            raise Exception("Getting the container, the process will've time")
 
     # verify()
 
