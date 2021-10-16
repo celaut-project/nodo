@@ -262,7 +262,6 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
                         "mongodb://localhost:27017/"
                     )["mongo"]["peerInstances"].find()):
             del peer['_id']
-            l.LOGGER('Parsing instance ' + str(peer))
             peer_instance = Parse(
                 text = json.dumps(peer),
                 message = celaut.Instance(),
@@ -300,12 +299,10 @@ def launch_service(
     getting_container = False
     # Here it asks the balancer if it should assign the job to a peer.
     while True:
-        dict = service_balancer(
+        for node_instance, cost in service_balancer(
             service = service,
             metadata = metadata
-        )
-        l.LOGGER('serivce balancer result ' + str(dict))
-        for node_instance, cost in dict:
+        ).items():
             l.LOGGER('Balancer select peer ' + str(node_instance) + ' with cost ' + str(cost))
             
             if node_instance:
