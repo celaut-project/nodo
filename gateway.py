@@ -294,7 +294,7 @@ def launch_service(
         father_ip: str, 
         config: celaut.Configuration = None
         ) -> gateway_pb2.Instance:
-    l.LOGGER('Go to launch a service.')
+    l.LOGGER('Go to launch a service. ' + str(service) + ' with metadata ' + str(metadata) + ' and config ' + str(config))
 
     getting_container = False
     # Here it asks the balancer if it should assign the job to a peer.
@@ -387,7 +387,6 @@ def launch_service(
 
             # Si hace la peticion un servicio de otro nodo.
             else:
-                print('Service ', service)
                 assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
 
                 container = create_container(
