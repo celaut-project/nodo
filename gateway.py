@@ -38,7 +38,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     uri_slot.uri.append(uri)
     instance.uri_slot.append(uri_slot)
     
-    slot = celaut.Slot()
+    slot = celaut.Service.Api.Slot()
     slot.port = GATEWAY_PORT
     instance.api.slot.append(slot)
     return gateway_pb2.Instance(
