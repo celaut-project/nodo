@@ -295,7 +295,7 @@ def launch_service(
         config: celaut.Configuration = None
         ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ' + str(service) + ' with metadata ' + str(metadata) + ' and config ' + str(config))
-
+    if service == None: raise Exception("Service object can't be None")
     getting_container = False
     # Here it asks the balancer if it should assign the job to a peer.
     while True:
@@ -523,6 +523,7 @@ def get_service_from_registry(hash: str) -> celaut.Service:
     service.ParseFromString(
         get_from_registry(hash = hash).value
     )
+    return service
 
 def get_from_registry(hash: str) -> celaut.Any:
     l.LOGGER('Getting ' + hash + ' service from the local registry.')
