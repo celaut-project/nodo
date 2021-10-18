@@ -23,7 +23,7 @@ GATEWAY_PORT = GET_ENV(env = 'GATEWAY_PORT', default = 8080)
 SELF_RATE = GET_ENV(env = 'COMPUTE_POWER_RATE', default = 1)
 COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 0)
 
-def generate_gateway_instance(network: str) -> celaut.Instance:
+def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
 
     uri = celaut.Instance.Uri()
@@ -41,7 +41,9 @@ def generate_gateway_instance(network: str) -> celaut.Instance:
     slot = celaut.Service.Api.Slot()
     slot.port = GATEWAY_PORT
     instance.api.slot.append(slot)
-    return instance
+    return gateway_pb2.Instance(
+        instance = instance
+    )
 
 # Insert the instance if it does not exists.
 def insert_instance_on_mongo(instance: celaut.Instance):
@@ -237,13 +239,15 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
             try:
                 peers.add_elem(
                     elem = peer_instance,
-                    weight = gateway_pb2_grpc.GatewayStub(
+                    weight = utils.client_grpc(
+                        method =  gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(
                                     peer_uri.ip + ':' +  str(peer_uri.port)
                                 )
-                            ).GetServiceCost(
-                                utils.service_extended(service = service, metadata = metadata)
-                            ).cost
+                            ).GetServiceCost,
+                        output_field = gateway_pb2.CostMessage,
+                        input = utils.service_extended(service = service, metadata = metadata)
+                    )[0].cost
                 )
             except: l.LOGGER('Error taking the cost.')
 
@@ -275,17 +279,19 @@ def launch_service(
                 try:
                     node_uri = utils.get_grpc_uri(node_instance)
                     l.LOGGER('El servicio se lanza en el nodo con uri ' + str(node_uri))
-                    service_instance =  gateway_pb2_grpc.GatewayStub(
-                        grpc.insecure_channel(
-                            node_uri.ip + ':' +  str(node_uri.port)
-                        )
-                    ).StartService(
-                        utils.service_extended(
-                            service = service, 
-                            metadata = metadata,
-                            config = config
-                        )
-                    )
+                    service_instance = utils.client_grpc(
+                        method = gateway_pb2_grpc.GatewayStub(
+                                    grpc.insecure_channel(
+                                        node_uri.ip + ':' +  str(node_uri.port)
+                                    )
+                                ).StartService,
+                        output_field = gateway_pb2.Instance,
+                        input = utils.service_extended(
+                                service = service, 
+                                metadata = metadata,
+                                config = config
+                            )
+                    )[0]
                     set_on_cache(
                         father_ip = father_ip,
                         ip_or_uri =  node_uri.ip + ':' +  str(node_uri.port), # Add node_uri.
@@ -427,18 +433,19 @@ def search_container(
         service: celaut.Service, 
         metadata: celaut.Any.Metadata, 
         ignore_network: str = None
-    ) -> Generator[gateway_pb2.Chunk, None, None]:
+    ) -> Generator[gateway_pb2.Buffer, None, None]:
     # Search a service tar container.
     for peer in peers_iterator(ignore_network = ignore_network):
         try:
-            yield gateway_pb2_grpc.Gateway(
-                    grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
-                ).GetServiceTar(
-                    utils.service_extended(
-                        service = service,
-                        metadata = metadata
-                    )
-                )
+            yield utils.client_grpc(
+                method = gateway_pb2_grpc.GatewayStub(
+                            grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
+                        ).GetServiceTar,
+                input = utils.service_extended(
+                            service = service,
+                            metadata = metadata
+                        )
+            )
             break
         except: pass
 
@@ -446,13 +453,15 @@ def search_file(hashes: list, ignore_network: str = None) -> Generator[celaut.An
     # TODO: It can search for other 'Service ledger' or 'ANY ledger' instances that could've this type of files.
     for peer in  peers_iterator(ignore_network = ignore_network):
         try:
-            yield gateway_pb2_grpc.GatewayStub(
-                    grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
-                ).GetFile(
-                    utils.service_hashes(
-                        hashes = hashes
-                    )
-                )
+            yield utils.client_grpc(
+                method = gateway_pb2_grpc.GatewayStub(
+                            grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
+                        ).GetFile,
+                output_field = celaut.Any,
+                input = utils.service_hashes(
+                            hashes = hashes
+                        )
+            )
         except: pass
 
 def search_definition(hashes: list, ignore_network: str = None) -> celaut.Service:
@@ -509,7 +518,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Starting service ...')
         configuration = None
         hashes = []
-        for r in request_iterator:
+        for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport):
 
             # Captura la configuracion si puede.
             if r.HasField('config'):
@@ -521,18 +530,21 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if configuration and SHA3_256_ID == r.hash.type and \
                     r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     try:
-                        return launch_service(
-                            service = get_service_from_registry(
-                                hash = r.hash.value.hex()
-                            ),
-                            metadata = celaut.Any.Metadata(
-                                hashtag = celaut.Any.Metadata.HashTag(
-                                    hash = hashes
-                                )
-                            ), 
-                            config = configuration,
-                            father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                        return utils.serialize_to_buffer(
+                            launch_service(
+                                service = get_service_from_registry(
+                                    hash = r.hash.value.hex()
+                                ),
+                                metadata = celaut.Any.Metadata(
+                                    hashtag = celaut.Any.Metadata.HashTag(
+                                        hash = hashes
+                                    )
+                                ), 
+                                config = configuration,
+                                father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                            )                            
                         )
+
                     except Exception as e:
                         l.LOGGER('Exception launching a service ' + str(e))
                         continue
@@ -547,8 +559,27 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         )
                     )
                 )
-                return launch_service(
-                    service = r.service,
+                return utils.serialize_to_buffer(
+                    launch_service(
+                        service = r.service,
+                        metadata = celaut.Any.Metadata(
+                            hashtag = celaut.Any.Metadata.HashTag(
+                                hash = hashes
+                            )
+                        ), 
+                        config = configuration,
+                        father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                    )                    
+                )
+
+        
+        l.LOGGER('The service is not in the registry and the request does not have the definition.' \
+            + str([(hash.type.hex(), hash.value.hex()) for hash in hashes]))
+        
+        try:
+            return utils.serialize_to_buffer(
+                launch_service(
+                    service = search_definition(hashes = hashes),
                     metadata = celaut.Any.Metadata(
                         hashtag = celaut.Any.Metadata.HashTag(
                             hash = hashes
@@ -556,62 +587,61 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     ), 
                     config = configuration,
                     father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
-                )
-        
-        l.LOGGER('The service is not in the registry and the request does not have the definition.' \
-            + str([(hash.type.hex(), hash.value.hex()) for hash in hashes]))
-        
-        try:
-            return launch_service(
-                service = search_definition(hashes = hashes),
-                metadata = celaut.Any.Metadata(
-                    hashtag = celaut.Any.Metadata.HashTag(
-                        hash = hashes
-                    )
-                ), 
-                config = configuration,
-                father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
-            ) 
+                )                 
+            )
+
         except Exception as e:
             raise Exception('Was imposible start the service. ' + str(e))
 
 
-    def StopService(self, request, context):
+    def StopService(self, request_iterator, context):
+        token_message = utils.parse_from_buffer(
+            request_iterator = request_iterator,
+            message_field = gateway_pb2.TokenMessage
+        )[0]
 
-        l.LOGGER('Stopping the service with token ' + request.token)
+        l.LOGGER('Stopping the service with token ' + token_message.token)
         
-        if utils.get_network_name(ip_or_uri = request.token.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
+        if utils.get_network_name(ip_or_uri = token_message.token.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
             purgue_internal(
-                father_ip = request.token.split('##')[0],
-                container_id = request.token.split('##')[2],
-                container_ip = request.token.split('##')[1]
+                father_ip = token_message.token.split('##')[0],
+                container_id = token_message.token.split('##')[2],
+                container_ip = token_message.token.split('##')[1]
             )
         
         else:
             purgue_external(
-                father_ip = request.token.split('##')[0],
-                node_uri = request.token.split('##')[1],
-                token = request.token[len( request.token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
+                father_ip = token_message.token.split('##')[0],
+                node_uri = token_message.token.split('##')[1],
+                token = token_message.token[len( token_message.token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
             )
         
-        l.LOGGER('Stopped the instance with token -> ' + request.token)
-        return gateway_pb2.Empty()
+        l.LOGGER('Stopped the instance with token -> ' + token_message.token)
+        return utils.serialize_to_buffer(gateway_pb2.Empty())
     
-    def Hynode(self, request: gateway_pb2.Instance, context):
-        l.LOGGER('\nAdding peer ' + str(request))
-        insert_instance_on_mongo(instance = request.instance)
-        return generate_gateway_instance(
-            network = utils.get_network_name(
-                ip_or_uri = utils.get_only_the_ip_from_context(
-                    context_peer = context.peer()
+    def Hynode(self, request_iterator, context):
+        instance = utils.parse_from_buffer(
+            request_iterator = request_iterator,
+            message_field = gateway_pb2.Instance
+        )[0]
+        l.LOGGER('\nAdding peer ' + str(instance))
+        insert_instance_on_mongo(instance = instance.instance)
+
+        return utils.serialize_to_buffer(
+            generate_gateway_instance(
+                network = utils.get_network_name(
+                    ip_or_uri = utils.get_only_the_ip_from_context(
+                        context_peer = context.peer()
+                    )
                 )
-            )
+            )            
         )
 
-    def GetFile(self, request_iterator, context) -> celaut.Any:
+
+    def GetFile(self, request_iterator, context):
         l.LOGGER('Request for give a service definition')
         hashes = []
-        for hash in request_iterator:
+        for hash in utils.parse_from_buffer(request_iterator, celaut.Any.Metadata.HashTag.Hash):
             try:
                 # Comprueba que sea sha256 y que se encuentre en el registro.
                 hashes.append(hash)
@@ -623,18 +653,21 @@ class Gateway(gateway_pb2_grpc.Gateway):
             except: pass
         
         try:
-            return search_file(
-                ignore_network = utils.get_network_name(
-                        ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
-                    ),
-                hashes = hashes
-            )[0] # It's not verifying the content, because we couldn't 've the format for prune metadata in it. The final client will've to check it.
+            return utils.serialize_to_buffer(
+                search_file(
+                    ignore_network = utils.get_network_name(
+                            ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                        ),
+                    hashes = hashes
+                )[0] # It's not verifying the content, because we couldn't 've the format for prune metadata in it. The final client will've to check it.                
+            )
+
         except:
             raise Exception('Was imposible get the service definition.')
 
-    def GetServiceTar(self, request_iterator, context) -> Generator[gateway_pb2.Chunk, None, None]:
+    def GetServiceTar(self, request_iterator, context):
         l.LOGGER('Request for give a service container.')
-        for r in request_iterator:
+        for r in utils.parse_from_buffer(request_iterator=request_iterator, message_field=gateway_pb2.ServiceTransport):
 
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if r.HasField('hash') and SHA3_256_ID== r.hash.type:
@@ -684,7 +717,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     def GetServiceCost(self, request_iterator, context):
-        for r in request_iterator:
+        for r in utils.parse_from_buffer(request_iterator=request_iterator, message_field=gateway_pb2.ServiceTransport):
 
             if r.HasField('hash') and SHA3_256_ID == r.hash.type and \
                 r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
@@ -712,10 +745,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 break
 
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
-        return gateway_pb2.CostMessage(
-            cost = cost
+        return utils.serialize_to_buffer(
+            gateway_pb2.CostMessage(
+                cost = cost
+            )            
         )
-
 
 
 if __name__ == "__main__":

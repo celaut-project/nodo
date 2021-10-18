@@ -30,16 +30,22 @@ message ServiceTransport {
     optional celaut.Configuration config = 3;    
 }
 
-message Chunk  {
-    bytes buffer = 1;
+
+// GRPC.
+
+message Buffer  {
+    oneof oneof{    
+        bytes chunk = 1;
+        bytes separator = 2;
+    }
 }
 
 service Gateway {
-    rpc StartService( stream ServiceTransport) returns (Instance) {}
-    rpc StopService(TokenMessage) returns (Empty) {}
-    rpc Hynode(Instance) returns (Instance) {}
+    rpc StartService( stream Buffer) returns ( stream Buffer) {} // ServiceTransport -> Instance
+    rpc StopService(stream Buffer) returns (stream Buffer) {} // TokenMessage -> Empty
+    rpc Hynode(stream Buffer) returns (stream Buffer) {} // Instance -> Instance
     
-    rpc GetFile(stream celaut.Any.Metadata.HashTag.Hash) returns (celaut.Any) {}
-    rpc GetServiceTar(stream ServiceTransport) returns (stream Chunk) {}
-    rpc GetServiceCost(stream ServiceTransport) returns (CostMessage) {}
+    rpc GetFile(stream Buffer) returns (stream Buffer) {} // celaut.Any.Metadata.HashTag.Hash -> celaut.Any
+    rpc GetServiceTar(stream Buffer) returns (stream Buffer) {}// ServiceTransport -> Buffer (parse not needed.)
+    rpc GetServiceCost(stream Buffer) returns (stream Buffer) {} // ServiceTransport -> CostMessage
 }

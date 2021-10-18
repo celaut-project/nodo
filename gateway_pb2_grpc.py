@@ -2,7 +2,6 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-import celaut_pb2 as celaut__pb2
 import gateway_pb2 as gateway__pb2
 
 
@@ -15,35 +14,35 @@ class GatewayStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.StartService = channel.stream_unary(
+        self.StartService = channel.stream_stream(
                 '/gateway.Gateway/StartService',
-                request_serializer=gateway__pb2.ServiceTransport.SerializeToString,
-                response_deserializer=gateway__pb2.Instance.FromString,
+                request_serializer=gateway__pb2.Buffer.SerializeToString,
+                response_deserializer=gateway__pb2.Buffer.FromString,
                 )
-        self.StopService = channel.unary_unary(
+        self.StopService = channel.stream_stream(
                 '/gateway.Gateway/StopService',
-                request_serializer=gateway__pb2.TokenMessage.SerializeToString,
-                response_deserializer=gateway__pb2.Empty.FromString,
+                request_serializer=gateway__pb2.Buffer.SerializeToString,
+                response_deserializer=gateway__pb2.Buffer.FromString,
                 )
-        self.Hynode = channel.unary_unary(
+        self.Hynode = channel.stream_stream(
                 '/gateway.Gateway/Hynode',
-                request_serializer=gateway__pb2.Instance.SerializeToString,
-                response_deserializer=gateway__pb2.Instance.FromString,
+                request_serializer=gateway__pb2.Buffer.SerializeToString,
+                response_deserializer=gateway__pb2.Buffer.FromString,
                 )
-        self.GetFile = channel.stream_unary(
+        self.GetFile = channel.stream_stream(
                 '/gateway.Gateway/GetFile',
-                request_serializer=celaut__pb2.Any.Metadata.HashTag.Hash.SerializeToString,
-                response_deserializer=celaut__pb2.Any.FromString,
+                request_serializer=gateway__pb2.Buffer.SerializeToString,
+                response_deserializer=gateway__pb2.Buffer.FromString,
                 )
         self.GetServiceTar = channel.stream_stream(
                 '/gateway.Gateway/GetServiceTar',
-                request_serializer=gateway__pb2.ServiceTransport.SerializeToString,
-                response_deserializer=gateway__pb2.Chunk.FromString,
+                request_serializer=gateway__pb2.Buffer.SerializeToString,
+                response_deserializer=gateway__pb2.Buffer.FromString,
                 )
-        self.GetServiceCost = channel.stream_unary(
+        self.GetServiceCost = channel.stream_stream(
                 '/gateway.Gateway/GetServiceCost',
-                request_serializer=gateway__pb2.ServiceTransport.SerializeToString,
-                response_deserializer=gateway__pb2.CostMessage.FromString,
+                request_serializer=gateway__pb2.Buffer.SerializeToString,
+                response_deserializer=gateway__pb2.Buffer.FromString,
                 )
 
 
@@ -56,13 +55,13 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def StopService(self, request, context):
+    def StopService(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def Hynode(self, request, context):
+    def Hynode(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -89,35 +88,35 @@ class GatewayServicer(object):
 
 def add_GatewayServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'StartService': grpc.stream_unary_rpc_method_handler(
+            'StartService': grpc.stream_stream_rpc_method_handler(
                     servicer.StartService,
-                    request_deserializer=gateway__pb2.ServiceTransport.FromString,
-                    response_serializer=gateway__pb2.Instance.SerializeToString,
+                    request_deserializer=gateway__pb2.Buffer.FromString,
+                    response_serializer=gateway__pb2.Buffer.SerializeToString,
             ),
-            'StopService': grpc.unary_unary_rpc_method_handler(
+            'StopService': grpc.stream_stream_rpc_method_handler(
                     servicer.StopService,
-                    request_deserializer=gateway__pb2.TokenMessage.FromString,
-                    response_serializer=gateway__pb2.Empty.SerializeToString,
+                    request_deserializer=gateway__pb2.Buffer.FromString,
+                    response_serializer=gateway__pb2.Buffer.SerializeToString,
             ),
-            'Hynode': grpc.unary_unary_rpc_method_handler(
+            'Hynode': grpc.stream_stream_rpc_method_handler(
                     servicer.Hynode,
-                    request_deserializer=gateway__pb2.Instance.FromString,
-                    response_serializer=gateway__pb2.Instance.SerializeToString,
+                    request_deserializer=gateway__pb2.Buffer.FromString,
+                    response_serializer=gateway__pb2.Buffer.SerializeToString,
             ),
-            'GetFile': grpc.stream_unary_rpc_method_handler(
+            'GetFile': grpc.stream_stream_rpc_method_handler(
                     servicer.GetFile,
-                    request_deserializer=celaut__pb2.Any.Metadata.HashTag.Hash.FromString,
-                    response_serializer=celaut__pb2.Any.SerializeToString,
+                    request_deserializer=gateway__pb2.Buffer.FromString,
+                    response_serializer=gateway__pb2.Buffer.SerializeToString,
             ),
             'GetServiceTar': grpc.stream_stream_rpc_method_handler(
                     servicer.GetServiceTar,
-                    request_deserializer=gateway__pb2.ServiceTransport.FromString,
-                    response_serializer=gateway__pb2.Chunk.SerializeToString,
+                    request_deserializer=gateway__pb2.Buffer.FromString,
+                    response_serializer=gateway__pb2.Buffer.SerializeToString,
             ),
-            'GetServiceCost': grpc.stream_unary_rpc_method_handler(
+            'GetServiceCost': grpc.stream_stream_rpc_method_handler(
                     servicer.GetServiceCost,
-                    request_deserializer=gateway__pb2.ServiceTransport.FromString,
-                    response_serializer=gateway__pb2.CostMessage.SerializeToString,
+                    request_deserializer=gateway__pb2.Buffer.FromString,
+                    response_serializer=gateway__pb2.Buffer.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -140,14 +139,14 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_unary(request_iterator, target, '/gateway.Gateway/StartService',
-            gateway__pb2.ServiceTransport.SerializeToString,
-            gateway__pb2.Instance.FromString,
+        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/StartService',
+            gateway__pb2.Buffer.SerializeToString,
+            gateway__pb2.Buffer.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
-    def StopService(request,
+    def StopService(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -157,14 +156,14 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/gateway.Gateway/StopService',
-            gateway__pb2.TokenMessage.SerializeToString,
-            gateway__pb2.Empty.FromString,
+        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/StopService',
+            gateway__pb2.Buffer.SerializeToString,
+            gateway__pb2.Buffer.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
-    def Hynode(request,
+    def Hynode(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -174,9 +173,9 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/gateway.Gateway/Hynode',
-            gateway__pb2.Instance.SerializeToString,
-            gateway__pb2.Instance.FromString,
+        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/Hynode',
+            gateway__pb2.Buffer.SerializeToString,
+            gateway__pb2.Buffer.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -191,9 +190,9 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_unary(request_iterator, target, '/gateway.Gateway/GetFile',
-            celaut__pb2.Any.Metadata.HashTag.Hash.SerializeToString,
-            celaut__pb2.Any.FromString,
+        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GetFile',
+            gateway__pb2.Buffer.SerializeToString,
+            gateway__pb2.Buffer.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -209,8 +208,8 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GetServiceTar',
-            gateway__pb2.ServiceTransport.SerializeToString,
-            gateway__pb2.Chunk.FromString,
+            gateway__pb2.Buffer.SerializeToString,
+            gateway__pb2.Buffer.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -225,8 +224,8 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_unary(request_iterator, target, '/gateway.Gateway/GetServiceCost',
-            gateway__pb2.ServiceTransport.SerializeToString,
-            gateway__pb2.CostMessage.FromString,
+        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GetServiceCost',
+            gateway__pb2.Buffer.SerializeToString,
+            gateway__pb2.Buffer.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

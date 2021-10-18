@@ -1,7 +1,7 @@
 from time import sleep
 import threading
 import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os
-from utils import service_extended, save_chunks_to_file
+from utils import service_extended, save_chunks_to_file, serialize_to_buffer
 from compile import HYCACHE
 import logger as l
 
@@ -34,11 +34,13 @@ def get_container_from_outside(
             #  Write the buffer to a file.
             save_chunks_to_file(
                 filename = HYCACHE + id + '.tar',
-                # chunks = search_container(service = service) TODO
-                chunks = gateway_pb2_grpc.GatewayStub(
+                # chunks = search_container(service = service) TODO ??
+                chunks = gateway_pb2_grpc.GatewayStub( # Parse_from_buffer is not necesary because chunks're it.
                             grpc.insecure_channel(peer_uri['ip'] + ':' + str(peer_uri['port']))
                         ).GetServiceTar(
-                            service_extended(service = service, metadata = metadata)
+                            serialize_to_buffer(
+                                service_extended(service = service, metadata = metadata)
+                            )
                         )
             )
             
