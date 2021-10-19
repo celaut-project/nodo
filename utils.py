@@ -97,6 +97,7 @@ def parse_from_buffer(request_iterator, message_field = None):
     while True:
         all_buffer = ''
         for buffer in request_iterator:
+            print(' buffer -> ', buffer)
             if buffer.separator:
                 break
             all_buffer.append(buffer.chunk)
@@ -105,7 +106,8 @@ def parse_from_buffer(request_iterator, message_field = None):
             message = message_field()
             message.ParseFromString(
                 all_buffer
-            )            
+            )
+            print('     message -> ', message)          
             yield message
         else:
             yield all_buffer # Clean buffer index bytes.
