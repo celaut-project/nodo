@@ -44,7 +44,7 @@ def Zeroconf(network: str) -> list:
                 )
             except grpc.RpcError:
                 l.LOGGER('Node ' + peer_uri + ' not response.')
-                continue
+                continue 
         
     # Check if is a hynode with http/1.
     for peer_uri in http1__peers:
