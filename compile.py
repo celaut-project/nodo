@@ -281,3 +281,4 @@ if __name__ == "__main__":
     os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.docker')
     os.system('/usr/bin/docker rmi builder'+aux_id)
     os.system('rm -rf '+HYCACHE+aux_id+'/')
+    print(id)
