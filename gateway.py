@@ -522,7 +522,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         configuration = None
         hashes = []
         for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport):
-
+            print(r)
             # Captura la configuracion si puede.
             if r.HasField('config'):
                 configuration = r.config
@@ -590,7 +590,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     ), 
                     config = configuration,
                     father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
-                )                 
+                )
             )
 
         except Exception as e:
