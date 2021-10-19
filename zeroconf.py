@@ -39,8 +39,9 @@ def Zeroconf(network: str) -> list:
                         output_field = Instance,
                         input = generate_gateway_instance(
                                     network = network
-                                )
-                    )[0]
+                                ),
+                        first_only=True
+                    )
                 )
             except grpc.RpcError:
                 l.LOGGER('Node ' + peer_uri + ' not response.')
@@ -67,7 +68,8 @@ if __name__ == "__main__":
             output_field = Instance,
             input = generate_gateway_instance(
                         network=get_network_name(ip_or_uri=sys.argv[1])
-                    )
-        )[0].instance
+                    ),
+            first_only = True
+        ).instance
     )
     l.LOGGER('\nAdded peer ' + sys.argv[1])

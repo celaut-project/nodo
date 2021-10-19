@@ -246,8 +246,9 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
                                 )
                             ).GetServiceCost,
                         output_field = gateway_pb2.CostMessage,
-                        input = utils.service_extended(service = service, metadata = metadata)
-                    )[0].cost
+                        input = utils.service_extended(service = service, metadata = metadata),
+                        first_only=True
+                    ).cost
                 )
             except: l.LOGGER('Error taking the cost.')
 
@@ -290,8 +291,9 @@ def launch_service(
                                 service = service, 
                                 metadata = metadata,
                                 config = config
-                            )
-                    )[0]
+                            ),
+                        first_only=True
+                    )
                     set_on_cache(
                         father_ip = father_ip,
                         ip_or_uri =  node_uri.ip + ':' +  str(node_uri.port), # Add node_uri.
@@ -444,7 +446,8 @@ def search_container(
                 input = utils.service_extended(
                             service = service,
                             metadata = metadata
-                        )
+                        ),
+                first_only=True
             )
             break
         except: pass

@@ -121,8 +121,8 @@ def serialize_to_buffer(message_iterator):
             separator = ''
         )
 
-def client_grpc(method, output_field = None, input=None, timeout=None):
-    return parse_from_buffer(
+def client_grpc(method, output_field=None, input=None, timeout=None, first_only: bool=False):
+    result_iterator = parse_from_buffer(
         request_iterator = method(
                             serialize_to_buffer(
                                 input if input else ''
@@ -131,3 +131,4 @@ def client_grpc(method, output_field = None, input=None, timeout=None):
                         ),
         message_field = output_field
     )
+    return result_iterator if not first_only else list(result_iterator)[0]
