@@ -518,7 +518,7 @@ def get_from_registry(hash: str) -> celaut.Any:
 class Gateway(gateway_pb2_grpc.Gateway):
 
     def StartService(self, request_iterator, context):
-        l.LOGGER('Starting service ...')
+        l.LOGGER('Starting service ...', request_iterator)
         configuration = None
         hashes = []
         for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport):
