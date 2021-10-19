@@ -530,7 +530,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if configuration and SHA3_256_ID == r.hash.type and \
                     r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     try:
-                        return utils.serialize_to_buffer(
+                        yield utils.serialize_to_buffer(
                             launch_service(
                                 service = get_service_from_registry(
                                     hash = r.hash.value.hex()
@@ -559,7 +559,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         )
                     )
                 )
-                return utils.serialize_to_buffer(
+                yield utils.serialize_to_buffer(
                     launch_service(
                         service = r.service,
                         metadata = celaut.Any.Metadata(
@@ -577,7 +577,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             + str([(hash.type.hex(), hash.value.hex()) for hash in hashes]))
         
         try:
-            return utils.serialize_to_buffer(
+            yield utils.serialize_to_buffer(
                 launch_service(
                     service = search_definition(hashes = hashes),
                     metadata = celaut.Any.Metadata(
@@ -617,7 +617,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
         
         l.LOGGER('Stopped the instance with token -> ' + token_message.token)
-        return utils.serialize_to_buffer(gateway_pb2.Empty())
+        yield utils.serialize_to_buffer(gateway_pb2.Empty())
     
     def Hynode(self, request_iterator, context):
         instance = utils.parse_from_buffer(
@@ -627,7 +627,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('\nAdding peer ' + str(instance))
         insert_instance_on_mongo(instance = instance.instance)
 
-        return utils.serialize_to_buffer(
+        yield utils.serialize_to_buffer(
             generate_gateway_instance(
                 network = utils.get_network_name(
                     ip_or_uri = utils.get_only_the_ip_from_context(
@@ -647,13 +647,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 hashes.append(hash)
                 if SHA3_256_ID == hash.type and \
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    return get_from_registry(
+                    yield get_from_registry(
                                 hash = hash.value.hex()
                            )
             except: pass
         
         try:
-            return utils.serialize_to_buffer(
+            yield utils.serialize_to_buffer(
                 search_file(
                     ignore_network = utils.get_network_name(
                             ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
@@ -698,13 +698,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
             try:
                 os.system('docker save ' + hash + '.service > ' + HYCACHE + hash + '.tar')
                 l.LOGGER('Returned the tar container buffer.')
-                return utils.get_file_chunks(filename = HYCACHE + hash + '.tar')
+                yield utils.get_file_chunks(filename = HYCACHE + hash + '.tar')
             except:
                 l.LOGGER('Error saving the container ' + hash)
         else:
             # Puede buscar el contenedor en otra red distinta a la del solicitante.
             try:
-                return search_container(
+                yield search_container(
                     ignore_network = utils.get_network_name(
                         ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
                         ),
@@ -745,7 +745,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 break
 
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
-        return utils.serialize_to_buffer(
+        yield utils.serialize_to_buffer(
             gateway_pb2.CostMessage(
                 cost = cost
             )            
