@@ -121,7 +121,7 @@ def serialize_to_buffer(message_iterator):
             separator = ''
         )
 
-def client_grpc(method: function, output_field = None, input=None, timeout=None) -> Generator:
+def client_grpc(method, output_field = None, input=None, timeout=None) -> Generator:
     return parse_from_buffer(
         request_iterator = method(
                             serialize_to_buffer(
