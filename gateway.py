@@ -316,7 +316,8 @@ def launch_service(
                 #  the instance from another node as well.
                 getting_container = True
                 continue
-
+            
+            print('...')
             instance = gateway_pb2.Instance()
             print(instance)
             # If the request is made by a local service.
