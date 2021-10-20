@@ -97,6 +97,7 @@ def parse_from_buffer(request_iterator, message_field = None):
     while True:
         all_buffer = bytes('', encoding='utf-8')
         for buffer in request_iterator:
+            print('     buffer -> ', buffer)
             if buffer.separator:
                 break
             all_buffer += buffer.chunk
@@ -105,7 +106,8 @@ def parse_from_buffer(request_iterator, message_field = None):
             message = message_field()
             message.ParseFromString(
                 all_buffer
-            )            
+            )
+            print('     message -> ', message)
             yield message
         else:
             yield all_buffer # Clean buffer index bytes.
@@ -115,10 +117,9 @@ def serialize_to_buffer(message_iterator):
     for message in message_iterator:
         byte_list = list(message.SerializeToString())
         for chunk in [byte_list[i:i + CHUNK_SIZE] for i in range(0, len(byte_list), CHUNK_SIZE)]:
-            buffer =  gateway_pb2.Buffer(
+            yield gateway_pb2.Buffer(
                 chunk = bytes(chunk)
             )
-            yield buffer
         yield gateway_pb2.Buffer(
             separator = bytes('', encoding='utf-8')
         )
