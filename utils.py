@@ -95,19 +95,17 @@ def save_chunks_to_file(chunks: gateway_pb2.Buffer, filename):
 
 def parse_from_buffer(request_iterator, message_field = None):
     while True:
-        all_buffer = ''
+        all_buffer = bytes('', encoding='utf-8')
         for buffer in request_iterator:
-            print(' buffer -> ', buffer)
             if buffer.separator:
                 break
-            all_buffer.append(buffer.chunk)
+            all_buffer += buffer.chunk
         
         if message_field: 
             message = message_field()
             message.ParseFromString(
                 all_buffer
-            )
-            print('     message -> ', message)          
+            )            
             yield message
         else:
             yield all_buffer # Clean buffer index bytes.
@@ -117,14 +115,15 @@ def serialize_to_buffer(message_iterator):
     for message in message_iterator:
         byte_list = list(message.SerializeToString())
         for chunk in [byte_list[i:i + CHUNK_SIZE] for i in range(0, len(byte_list), CHUNK_SIZE)]:
-            yield gateway_pb2.Buffer(
-                chunk = chunk
+            buffer =  gateway_pb2.Buffer(
+                chunk = bytes(chunk)
             )
+            yield buffer
         yield gateway_pb2.Buffer(
-            separator = ''
+            separator = bytes('', encoding='utf-8')
         )
 
-def client_grpc(method, output_field=None, input=None, timeout=None, first_only: bool=False):
+def client_grpc(method, output_field = None, input=None, timeout=None, first_only: bool=False):
     result_iterator = parse_from_buffer(
         request_iterator = method(
                             serialize_to_buffer(

@@ -517,15 +517,9 @@ def get_from_registry(hash: str) -> celaut.Any:
 class Gateway(gateway_pb2_grpc.Gateway):
 
     def StartService(self, request_iterator, context):
-        try:
-            print('Starting service ...', request_iterator)
-            configuration = None
-            hashes = []
-            # TODO aqui salta error, what?? pq??
-            print('item -> ', next(request_iterator))
-        except Exception as e:
-            print('Error -> ', str(e))
-        
+        print('Starting service ...', request_iterator)
+        configuration = None
+        hashes = []
         for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport):
             print('r -> ', r)
             # Captura la configuracion si puede.
