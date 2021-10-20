@@ -100,8 +100,9 @@ def parse_from_buffer(request_iterator, message_field = None):
             buffer = next(request_iterator)
             print('     buffer -> ', buffer)
             if buffer.separator:
-                print('breack it')
+                print(' breack it')
                 break
+            print(' add to buffer')
             all_buffer += buffer.chunk
         print('m')
         if message_field: 
