@@ -359,15 +359,17 @@ def launch_service(
 
             # Si hace la peticion un servicio de otro nodo.
             else:
+                print('1')
                 assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
-
+                print(2)
                 container = create_container(
                     use_other_ports = assigment_ports,
                     id = id,
                     entrypoint = service.container.entrypoint
                 )
+                print(3)
                 set_config(container_id = container.id, config = config)
-
+                print(4)
                 try:
                     container.start()
                 except docker_lib.errors.APIError as e:
@@ -382,6 +384,7 @@ def launch_service(
                     id_or_token = container.id,
                     ip_or_uri = container.attrs['NetworkSettings']['IPAddress']
                 )
+                print(5)
 
                 for port in assigment_ports:
                     uri_slot = celaut.Instance.Uri_Slot()
