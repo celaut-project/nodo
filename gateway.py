@@ -318,7 +318,7 @@ def launch_service(
                 continue
 
             instance = gateway_pb2.Instance()
-
+            print(instance)
             # If the request is made by a local service.
             if utils.get_network_name(father_ip) == DOCKER_NETWORK:
                 container = create_container(
@@ -522,7 +522,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
         configuration = None
         hashes = []
         for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport):
-            print('r -> ', r)
             # Captura la configuracion si puede.
             if r.HasField('config'):
                 configuration = r.config
