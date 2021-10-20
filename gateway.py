@@ -317,7 +317,8 @@ def launch_service(
                 getting_container = True
                 continue
 
-            instance = celaut.Instance(
+            print('...')
+            celaut_instance = celaut.Instance(
                 api = service.api
             )
 
@@ -358,7 +359,7 @@ def launch_service(
                     uri.port = slot.port
                     uri_slot.uri.append(uri)
 
-                    instance.uri_slot.append(uri_slot)
+                    celaut_instance.uri_slot.append(uri_slot)
 
             # Si hace la peticion un servicio de otro nodo.
             else:
@@ -398,12 +399,12 @@ def launch_service(
                     uri.port = assigment_ports[port]
                     uri_slot.uri.append(uri)
 
-                    instance.uri_slot.append(uri_slot)
+                    celaut_instance.uri_slot.append(uri_slot)
 
             l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
             return gateway_pb2.Instance(
                 token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id,
-                instance = instance
+                instance = celaut_instance
             )
 
 
