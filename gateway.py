@@ -306,7 +306,7 @@ def launch_service(
             #  The node launches the service locally.
             l.LOGGER('El nodo lanza el servicio localmente.')
             try:
-                build.build(
+                id = build.build(
                         service = service, 
                         metadata = metadata,
                         get_it_outside = not getting_container
@@ -322,7 +322,7 @@ def launch_service(
             # If the request is made by a local service.
             if utils.get_network_name(father_ip) == DOCKER_NETWORK:
                 container = create_container(
-                    id = get_service_hex_main_hash(service = service, metadata = metadata),
+                    id = id,
                     entrypoint = service.container.entrypoint
                 )
 
@@ -364,7 +364,7 @@ def launch_service(
 
                 container = create_container(
                     use_other_ports = assigment_ports,
-                    id = get_service_hex_main_hash( service = service, metadata = metadata),
+                    id = id,
                     entrypoint = service.container.entrypoint
                 )
                 set_config(container_id = container.id, config = config)
@@ -401,6 +401,7 @@ def launch_service(
             instance.instance.api.CopyFrom(service.api)
             instance.token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
             l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
+            print(instance)
             return instance
 
 

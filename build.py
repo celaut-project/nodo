@@ -67,14 +67,15 @@ def build(
     service: gateway_pb2.celaut__pb2.Service,
     metadata: gateway_pb2.celaut__pb2.Any.Metadata,
     get_it_outside: bool = True
-    ):
+    ) -> str:
     id = get_service_hex_main_hash(service = service, metadata = metadata)
     l.LOGGER('\nBuilding ' + id)
     
     try:
         # it's locally?
         check_output('/usr/bin/docker inspect '+id+'.docker', shell=True)
-        
+        return id
+
     except CalledProcessError:
         if metadata.complete:
             build_container_from_definition(
