@@ -559,12 +559,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 )
                 yield utils.serialize_to_buffer(
                     launch_service(
-                        service = r.service,
-                        metadata = celaut.Any.Metadata(
-                            hashtag = celaut.Any.Metadata.HashTag(
-                                hash = hashes
-                            )
-                        ), 
+                        service = r.service.service,
+                        metadata = r.service.meta, 
                         config = configuration,
                         father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                     )                    
