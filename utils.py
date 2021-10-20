@@ -98,19 +98,14 @@ def parse_from_buffer(request_iterator, message_field = None):
         all_buffer = bytes('', encoding='utf-8')
         while True:
             buffer = next(request_iterator)
-            print('     buffer -> ', buffer)
             if buffer.HasField('separator'):
-                print(' breack it')
                 break
-            print(' add to buffer')
             all_buffer += buffer.chunk
-        print('m')
         if message_field: 
             message = message_field()
             message.ParseFromString(
                 all_buffer
             )
-            print('     message -> ', message)
             yield message
         else:
             yield all_buffer # Clean buffer index bytes.

@@ -515,11 +515,10 @@ def get_from_registry(hash: str) -> celaut.Any:
 class Gateway(gateway_pb2_grpc.Gateway):
 
     def StartService(self, request_iterator, context):
-        print('Starting service ...', request_iterator)
+        l.LOGGER('Starting service ...')
         configuration = None
         hashes = []
         for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport):
-            print('r -> ', r)
             # Captura la configuracion si puede.
             if r.HasField('config'):
                 configuration = r.config
@@ -544,6 +543,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                             )                            
                         ): yield buffer
+                        break
 
                     except Exception as e:
                         l.LOGGER('Exception launching a service ' + str(e))
@@ -563,6 +563,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                     )  
                 ): yield buffer
+                break
 
         
         l.LOGGER('The service is not in the registry and the request does not have the definition.' \
