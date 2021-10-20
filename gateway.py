@@ -554,12 +554,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
             # Si me da servicio.
             if r.HasField('service') and configuration:
                 save_service(
-                    service = r.service,
-                    metadata = celaut.Any.Metadata(
-                        hashtag = celaut.Any.Metadata.HashTag(
-                            hash = hashes
-                        )
-                    )
+                    service = r.service.service,
+                    metadata = r.service.meta
                 )
                 yield utils.serialize_to_buffer(
                     launch_service(
