@@ -265,7 +265,7 @@ def launch_service(
         father_ip: str, 
         config: celaut.Configuration = None
         ) -> gateway_pb2.Instance:
-    l.LOGGER('Go to launch a service. ' + str(service) + ' with metadata ' + str(metadata) + ' and config ' + str(config))
+    l.LOGGER('Go to launch a service. ')
     if service == None: raise Exception("Service object can't be None")
     getting_container = False
     # Here it asks the balancer if it should assign the job to a peer.
