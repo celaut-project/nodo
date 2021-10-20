@@ -317,7 +317,7 @@ def launch_service(
                 getting_container = True
                 continue
             
-            print('...')
+            print('...', gateway_pb2.Instance())
             instance = gateway_pb2.Instance()
             print(instance)
             # If the request is made by a local service.
