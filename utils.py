@@ -113,7 +113,9 @@ def parse_from_buffer(request_iterator, message_field = None):
 def serialize_to_buffer(message_iterator):
     if not hasattr(message_iterator, '__iter__'): message_iterator=[message_iterator]
     for message in message_iterator:
+        print(message)
         byte_list = list(message.SerializeToString())
+        print(byte_list)
         for chunk in [byte_list[i:i + CHUNK_SIZE] for i in range(0, len(byte_list), CHUNK_SIZE)]:
             buffer =  gateway_pb2.Buffer(
                 chunk = bytes(chunk)
