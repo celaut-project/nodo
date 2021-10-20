@@ -32,16 +32,15 @@ def Zeroconf(network: str) -> list:
             total_peers.append(peer_ip)
             try:
                 peer_instances.append (
-                    client_grpc(
+                    next(client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(peer_uri)
                             ).Hynode,
                         output_field = Instance,
                         input = generate_gateway_instance(
                                     network = network
-                                ),
-                        first_only=True
-                    )
+                                )
+                    ))
                 )
             except grpc.RpcError:
                 l.LOGGER('Node ' + peer_uri + ' not response.')
@@ -59,7 +58,7 @@ def Zeroconf(network: str) -> list:
 if __name__ == "__main__":
     import sys
     insert_instance_on_mongo(
-        instance = client_grpc(
+        instance = next(client_grpc(
             method = gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
                             sys.argv[1]
@@ -68,8 +67,7 @@ if __name__ == "__main__":
             output_field = Instance,
             input = generate_gateway_instance(
                         network=get_network_name(ip_or_uri=sys.argv[1])
-                    ),
-            first_only = True
-        ).instance
+                    )
+        )).instance
     )
     l.LOGGER('\nAdded peer ' + sys.argv[1])

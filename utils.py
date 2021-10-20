@@ -111,14 +111,9 @@ def parse_from_buffer(request_iterator, message_field = None):
             yield all_buffer # Clean buffer index bytes.
 
 def serialize_to_buffer(message_iterator):
-    print('adf')
-    print(message_iterator)
     if not hasattr(message_iterator, '__iter__'): message_iterator=[message_iterator]
-    print(message_iterator)
     for message in message_iterator:
-        print(message)
         byte_list = list(message.SerializeToString())
-        print(byte_list)
         for chunk in [byte_list[i:i + CHUNK_SIZE] for i in range(0, len(byte_list), CHUNK_SIZE)]:
             buffer =  gateway_pb2.Buffer(
                 chunk = bytes(chunk)
@@ -128,7 +123,7 @@ def serialize_to_buffer(message_iterator):
             separator = bytes('', encoding='utf-8')
         )
 
-def client_grpc(method, output_field = None, input=None, timeout=None, first_only: bool=False):
+def client_grpc(method, output_field = None, input=None, timeout=None):
     result_iterator = parse_from_buffer(
         request_iterator = method(
                             serialize_to_buffer(
@@ -138,4 +133,4 @@ def client_grpc(method, output_field = None, input=None, timeout=None, first_onl
                         ),
         message_field = output_field
     )
-    return result_iterator if not first_only else list(result_iterator)[0]
+    for buffer in result_iterator: yield buffer
