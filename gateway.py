@@ -1,4 +1,6 @@
 from typing import Generator
+
+from six import u
 import celaut_pb2 as celaut
 import build, utils
 from compile import REGISTRY, HYCACHE
@@ -317,10 +319,6 @@ def launch_service(
                 getting_container = True
                 continue
 
-            print('...')
-            celaut_instance = celaut.Instance(
-                api = service.api
-            )
 
             # If the request is made by a local service.
             if utils.get_network_name(father_ip) == DOCKER_NETWORK:
@@ -359,7 +357,10 @@ def launch_service(
                     uri.port = slot.port
                     uri_slot.uri.append(uri)
 
-                    celaut_instance.uri_slot.append(uri_slot)
+                    celaut_instance = celaut.Instance(
+                        api = service.api,
+                        uri_slot = [uri_slot]
+                    )
 
             # Si hace la peticion un servicio de otro nodo.
             else:
@@ -399,7 +400,10 @@ def launch_service(
                     uri.port = assigment_ports[port]
                     uri_slot.uri.append(uri)
 
-                    celaut_instance.uri_slot.append(uri_slot)
+                    celaut_instance = celaut.Instance(
+                        api = service.api,
+                        uri_slot = [uri_slot]
+                    )
 
             l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
             return gateway_pb2.Instance(
