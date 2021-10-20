@@ -520,6 +520,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         print('Starting service ...', request_iterator)
         configuration = None
         hashes = []
+        # TODO aqui salta error, what?? pq??
         for r in request_iterator:
             print(r)
         
