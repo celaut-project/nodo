@@ -99,7 +99,7 @@ def parse_from_buffer(request_iterator, message_field = None):
         while True:
             buffer = next(request_iterator)
             print('     buffer -> ', buffer)
-            if buffer.separator:
+            if buffer.HasField('separator'):
                 print(' breack it')
                 break
             print(' add to buffer')
