@@ -96,7 +96,8 @@ def save_chunks_to_file(chunks: gateway_pb2.Buffer, filename):
 def parse_from_buffer(request_iterator, message_field = None):
     while True:
         all_buffer = bytes('', encoding='utf-8')
-        for buffer in request_iterator:
+        while True:
+            buffer = next(request_iterator)
             print('     buffer -> ', buffer)
             if buffer.separator:
                 break
