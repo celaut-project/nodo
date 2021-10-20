@@ -522,10 +522,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
             configuration = None
             hashes = []
             # TODO aqui salta error, what?? pq??
+            print(next(request_iterator))
             for r in request_iterator:
                 print(r)
         except Exception as e:
-            print('Error -> ', e)
+            print('Error -> ', str(e))
         
         for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport):
             print('r -> ', r)
