@@ -316,10 +316,11 @@ def launch_service(
                 #  the instance from another node as well.
                 getting_container = True
                 continue
-            
-            print('...', gateway_pb2.Instance())
-            instance = gateway_pb2.Instance()
-            print(instance)
+
+            instance = celaut.Instance(
+                api = service.api
+            )
+
             # If the request is made by a local service.
             if utils.get_network_name(father_ip) == DOCKER_NETWORK:
                 container = create_container(
@@ -357,7 +358,7 @@ def launch_service(
                     uri.port = slot.port
                     uri_slot.uri.append(uri)
 
-                    instance.instance.uri_slot.append(uri_slot)
+                    instance.uri_slot.append(uri_slot)
 
             # Si hace la peticion un servicio de otro nodo.
             else:
@@ -397,13 +398,13 @@ def launch_service(
                     uri.port = assigment_ports[port]
                     uri_slot.uri.append(uri)
 
-                    instance.instance.uri_slot.append(uri_slot)
+                    instance.uri_slot.append(uri_slot)
 
-            instance.instance.api.CopyFrom(service.api)
-            instance.token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
             l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
-            print(instance)
-            return instance
+            return gateway_pb2.Instance(
+                token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id,
+                instance = instance
+            )
 
 
 def save_service(service: celaut.Service, metadata = celaut.Any.Metadata):
