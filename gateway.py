@@ -555,13 +555,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     service = r.service.service,
                     metadata = r.service.meta
                 )
-                yield utils.serialize_to_buffer(
-                    launch_service(
+                instance =                     launch_service(
                         service = r.service.service,
                         metadata = r.service.meta, 
                         config = configuration,
                         father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
-                    )                    
+                    )  
+                yield utils.serialize_to_buffer(
+                    instance
                 )
 
         
