@@ -111,7 +111,9 @@ def parse_from_buffer(request_iterator, message_field = None):
             yield all_buffer # Clean buffer index bytes.
 
 def serialize_to_buffer(message_iterator):
+    print(message_iterator)
     if not hasattr(message_iterator, '__iter__'): message_iterator=[message_iterator]
+    print(message_iterator)
     for message in message_iterator:
         print(message)
         byte_list = list(message.SerializeToString())
