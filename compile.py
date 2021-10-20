@@ -151,6 +151,10 @@ class Hyper:
             #  transport protocol.
             #  TODO: slot.transport_protocol = Protocol()
             self.service.api.slot.append(slot)
+            self.service.api.config.path = ['__config__']
+            self.service.api.config.FielDef.CopyFrom(
+                celaut.FieldDef() # celaut.ConfigFile definition.
+            )
 
         # Add api metadata to the global metadata.
         self.metadata.hashtag.attr_hashtag.append(

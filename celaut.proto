@@ -78,8 +78,13 @@ message Service {
             int32 port = 1;
             bytes transport_protocol = 2;
         }
+        message Config {
+            repeated string path = 1; // [folder_name, file_name] -> '/folder_name/file_name' (without use the / character.)
+            FieldDef format = 2;
+        }
         AppDef app_protocol = 1;
         repeated Slot slot = 2;
+        Config config = 3;
         // Cost function can be applied. <- must be optional (index 3).
     }
 

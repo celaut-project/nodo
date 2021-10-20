@@ -157,12 +157,16 @@ def purgue_external(father_ip, node_uri, token):
     cache_lock.release()
 
 
-def set_config(container_id: str, config: celaut.Configuration):
+def set_config(container_id: str, config: celaut.Configuration, api: celaut.Service.Api.Config):
     __config__ = celaut.ConfigurationFile()
     __config__.gateway.CopyFrom(generate_gateway_instance(network=DOCKER_NETWORK).instance)
     __config__.config.CopyFrom(config)
     os.mkdir(HYCACHE + container_id)
-    with open(HYCACHE + container_id + '/__config__', 'wb') as file:
+    # TODO: Check if api.format is valid or make the serializer for it.
+    path = ''
+    for e in api.path:
+        path += '/' + e
+    with open(HYCACHE + container_id + path, 'wb') as file:
         file.write(__config__.SerializeToString())
     while 1:
         try:
@@ -325,7 +329,7 @@ def launch_service(
                     entrypoint = service.container.entrypoint
                 )
 
-                set_config(container_id = container.id, config = config)
+                set_config(container_id = container.id, config = config, api = service.api.config)
 
                 # The container must be started after adding the configuration file and
                 #  before requiring its IP address, since docker assigns it at startup.
