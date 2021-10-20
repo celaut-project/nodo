@@ -523,8 +523,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
             hashes = []
             # TODO aqui salta error, what?? pq??
             print('item -> ', next(request_iterator))
-            for r in request_iterator:
-                print(r)
         except Exception as e:
             print('Error -> ', str(e))
         
