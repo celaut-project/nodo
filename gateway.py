@@ -521,7 +521,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         print('Starting service ...', request_iterator)
         configuration = None
         hashes = []
-        [print(r) for r in request_iterator]
+        for r in request_iterator: yield r
         for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport):
             print('r -> ', r)
             # Captura la configuracion si puede.
