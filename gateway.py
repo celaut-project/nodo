@@ -367,7 +367,7 @@ def launch_service(
                     id = id,
                     entrypoint = service.container.entrypoint
                 )
-                set_config(container_id = container.id, config = config)
+                set_config(container_id = container.id, config = config, api = service.api.config)
                 try:
                     container.start()
                 except docker_lib.errors.APIError as e:
