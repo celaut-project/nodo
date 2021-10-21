@@ -152,7 +152,7 @@ class Hyper:
             #  TODO: slot.transport_protocol = Protocol()
             self.service.api.slot.append(slot)
             self.service.api.config.path.append('__config__')
-            self.service.api.config.FielDef.CopyFrom(
+            self.service.api.config.format.CopyFrom(
                 celaut.FieldDef() # celaut.ConfigFile definition.
             )
 
