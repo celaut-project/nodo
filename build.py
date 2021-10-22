@@ -35,7 +35,7 @@ def get_container_from_outside(
             save_chunks_to_file(
                 filename = HYCACHE + id + '.tar',
                 # chunks = search_container(service = service) TODO ??
-                chunks = gateway_pb2_grpc.GatewayStub( # Parse_from_buffer is not necesary because chunks're it.
+                chunks = gateway_pb2_grpc.GatewayStub(  # Parse_from_buffer is not necesary because chunks're it.
                             grpc.insecure_channel(peer_uri['ip'] + ':' + str(peer_uri['port']))
                         ).GetServiceTar(
                             serialize_to_buffer(

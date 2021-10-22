@@ -592,10 +592,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     def StopService(self, request_iterator, context):
-        token_message = utils.parse_from_buffer(
+        token_message = next(utils.parse_from_buffer(
             request_iterator = request_iterator,
             message_field = gateway_pb2.TokenMessage
-        )[0]
+        ))
 
         l.LOGGER('Stopping the service with token ' + token_message.token)
         
@@ -617,10 +617,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
         for b in utils.serialize_to_buffer(gateway_pb2.Empty()): yield b
     
     def Hynode(self, request_iterator, context):
-        instance = utils.parse_from_buffer(
+        instance = next(utils.parse_from_buffer(
             request_iterator = request_iterator,
             message_field = gateway_pb2.Instance
-        )[0]
+        ))
         l.LOGGER('\nAdding peer ' + str(instance))
         insert_instance_on_mongo(instance = instance.instance)
 
@@ -651,12 +651,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
         
         try:
             for b in  utils.serialize_to_buffer(
-                search_file(
+                next(search_file(
                     ignore_network = utils.get_network_name(
                             ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
                         ),
                     hashes = hashes
-                )[0] # It's not verifying the content, because we couldn't 've the format for prune metadata in it. The final client will've to check it.                
+                )) # It's not verifying the content, because we couldn't 've the format for prune metadata in it. The final client will've to check it.                
             ): yield b
 
         except:
