@@ -546,7 +546,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 config = configuration,
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                             )                            
-                        ): yield buffer
+                        ): 
+                            print('Buffer -> ', buffer)
+                            yield buffer
                         return
 
                     except Exception as e:
