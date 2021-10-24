@@ -523,6 +523,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         configuration = None
         hashes = []
         for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport):
+            print('\n   message is -> ', r)
             # Captura la configuracion si puede.
             if r.HasField('config'):
                 configuration = r.config
