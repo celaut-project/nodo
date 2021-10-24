@@ -1,4 +1,3 @@
-from types import CellType
 import logger as l
 import sys
 import json
