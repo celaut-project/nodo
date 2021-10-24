@@ -2,7 +2,6 @@ import socket
 from typing import Generator
 
 import celaut_pb2, gateway_pb2
-from compile import HYCACHE
 import netifaces as ni
 
 def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
@@ -79,10 +78,10 @@ def get_network_name( ip_or_uri: str) -> str:
             continue
 
 CHUNK_SIZE = 1024 * 1024  # 1MB
+import os
 import gateway_pb2
 from random import randint
 from typing import Generator
-from os import remove
 
 def get_file_chunks(filename) -> Generator[gateway_pb2.Buffer, None, None]:
     with open(filename, 'rb') as f:
@@ -126,10 +125,12 @@ def serialize_to_buffer(message_iterator):
                             )
                 yield b
         except: # INEFICIENT.
-            file = HYCACHE + str(randint(1,999))
+            file =  os.path.abspath(os.curdir) + '/__hycache__/' + str(randint(1,999))
             open(file, 'wb').write(message.SerializeToString())
-            for b in get_file_chunks(file): yield b
-            remove(file)
+            try:
+                for b in get_file_chunks(file): yield b
+            finally:
+                os.remove(file)
 
         yield gateway_pb2.Buffer(
             separator = bytes('', encoding='utf-8')
