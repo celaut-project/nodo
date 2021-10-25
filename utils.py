@@ -129,7 +129,6 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
             if buffer.HasField('separator'):
                 break
             if buffer.HasField('signal'):
-                print('signal recived')
                 signal.change()
                 continue
             if buffer.HasField('chunk'):
@@ -146,7 +145,6 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
 def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_dir = None):
     if not hasattr(message_iterator, '__iter__'): message_iterator=[message_iterator]
     for message in message_iterator:
-        print('other message')
         message_bytes = message.SerializeToString()
         if len(message_bytes) < CHUNK_SIZE:
             signal.wait()
@@ -169,7 +167,6 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
             except: # INEFICIENT.    
                 try:
                     signal.wait()
-                    print('Send file inefficiently ', len(message_bytes))
                     file = cache_dir + str(len(message_bytes))
                     open(file, 'wb').write(message_bytes)
                     for b in get_file_chunks(file): 
