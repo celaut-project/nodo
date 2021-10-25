@@ -532,7 +532,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 hashes.append(r.hash)
                 if configuration and SHA3_256_ID == r.hash.type and \
                     r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    yield gateway_pb2.Buffer(signal='')
+                    yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                     try:
                         for b in utils.serialize_to_buffer(
                             launch_service(
@@ -552,7 +552,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
                     except Exception as e:
                         l.LOGGER('Exception launching a service ' + str(e))
-                        yield gateway_pb2.Buffer(signal='')
+                        yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                         continue
             
             # Si me da servicio.
@@ -646,7 +646,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 hashes.append(hash)
                 if SHA3_256_ID == hash.type and \
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    yield gateway_pb2.Buffer(signal='') # Say stop to send more hashes.
+                    yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8')) # Say stop to send more hashes.
                     for b in utils.serialize_to_buffer(
                         get_from_registry(
                             hash = hash.value.hex()
@@ -723,7 +723,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             if r.HasField('hash') and SHA3_256_ID == r.hash.type and \
                 r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                yield gateway_pb2.Buffer(signal='')
+                yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                 try:
                     cost = execution_cost(
                             service = get_service_from_registry(
@@ -737,7 +737,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         )
                     break
                 except:
-                    yield gateway_pb2.Buffer(signal='')
+                    yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                     continue
 
             if r.HasField('service'):
