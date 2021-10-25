@@ -78,7 +78,7 @@ def get_network_name( ip_or_uri: str) -> str:
             continue
 
 CHUNK_SIZE = 1024 * 1024  # 1MB
-import os
+import os, shutil
 import gateway_pb2
 from random import randint
 from typing import Generator
@@ -98,12 +98,14 @@ class Signal():
             if self.open:
                 self.open = False  # Stop the input buffer.
             else:
-                self.condition.notify_all()
+                with self.condition:
+                    self.condition.notify_all()
                 self.open = True  # Continue the input buffer.
     
     def wait(self):
         if self.exist and not self.open:
-            self.condition.wait()
+            with self.condition:
+                self.condition.wait()
 
 def get_file_chunks(filename) -> Generator[gateway_pb2.Buffer, None, None]:
     with open(filename, 'rb') as f:
@@ -127,6 +129,7 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
             if buffer.HasField('separator'):
                 break
             if buffer.HasField('signal'):
+                print('signal recived')
                 signal.change()
                 continue
             if buffer.HasField('chunk'):
@@ -140,47 +143,69 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
         else:
             yield all_buffer # Clean buffer index bytes.
 
-def serialize_to_buffer(message_iterator, signal = Signal(exist=False)):
+def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_dir = None):
     if not hasattr(message_iterator, '__iter__'): message_iterator=[message_iterator]
     for message in message_iterator:
+        print('other message')
         message_bytes = message.SerializeToString()
         if len(message_bytes) < CHUNK_SIZE:
             signal.wait()
-            yield gateway_pb2.Buffer(
-                chunk = bytes(message_bytes)
-            )
+            try:
+                yield gateway_pb2.Buffer(
+                    chunk = bytes(message_bytes)
+                )
+            finally: signal.wait()
         else:
             try:
+                signal.wait()
                 byte_list = list(message_bytes)
                 for chunk in [byte_list[i:i + CHUNK_SIZE] for i in range(0, len(byte_list), CHUNK_SIZE)]:
                     signal.wait()
-                    yield gateway_pb2.Buffer(
-                                    chunk = bytes(chunk)
-                                )
-            except: # INEFICIENT.
-                file =  os.path.abspath(os.curdir) + '/__hycache__/' + str(len(message_bytes)) + ':' + str(randint(1,999))
-                open(file, 'wb').write(message_bytes)
+                    try:
+                        yield gateway_pb2.Buffer(
+                                        chunk = bytes(chunk)
+                                    )
+                    finally: signal.wait()
+            except: # INEFICIENT.    
                 try:
+                    signal.wait()
+                    print('Send file inefficiently ', len(message_bytes))
+                    file = cache_dir + str(len(message_bytes))
+                    open(file, 'wb').write(message_bytes)
                     for b in get_file_chunks(file): 
                         signal.wait()
-                        yield b
+                        try:
+                            yield b
+                        finally: signal.wait()
                 finally:
-                    os.remove(file)
+                    try:
+                        os.remove(file)
+                    except: pass
 
-        yield gateway_pb2.Buffer(
-            separator = bytes('', encoding='utf-8')
-        )
+        try:
+            yield gateway_pb2.Buffer(
+                separator = bytes('', encoding='utf-8')
+            )
+        finally: signal.wait()
 
 def client_grpc(method, output_field = None, input=None, timeout=None):
     signal = Signal()
-    for b in parse_from_buffer(
-        request_iterator = method(
-                            serialize_to_buffer(
-                                input if input else '',
-                                signal = signal
+    cache_dir = os.path.abspath(os.curdir) + '/__hycache__/grpcbigbuffer' + str(randint(1,999)) + '/'
+    os.mkdir(cache_dir)
+    try:
+        for b in parse_from_buffer(
+            request_iterator = method(
+                                serialize_to_buffer(
+                                    input if input else '',
+                                    signal = signal,
+                                    cache_dir = cache_dir
+                                ),
+                                timeout = timeout
                             ),
-                            timeout = timeout
-                        ),
-        message_field = output_field,
-        signal = signal
-    ): yield b
+            message_field = output_field,
+            signal = signal
+        ): yield b
+    finally:
+        try:
+            shutil.rmtree(cache_dir)
+        except: pass
