@@ -532,6 +532,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 hashes.append(r.hash)
                 if configuration and SHA3_256_ID == r.hash.type and \
                     r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
+                    print('Send signal')
                     yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                     try:
                         for b in utils.serialize_to_buffer(
