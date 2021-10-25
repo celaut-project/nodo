@@ -37,6 +37,7 @@ message Buffer  {
     oneof oneof{    
         bytes chunk = 1;
         bytes separator = 2;
+        bytes signal = 3;
     }
 }
 

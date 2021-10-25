@@ -523,7 +523,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
         configuration = None
         hashes = []
         for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport):
-            print('\n   message is -> ', r)
             # Captura la configuracion si puede.
             if r.HasField('config'):
                 configuration = r.config
@@ -533,8 +532,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 hashes.append(r.hash)
                 if configuration and SHA3_256_ID == r.hash.type and \
                     r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
+                    yield gateway_pb2.Buffer(signal='')
                     try:
-                        for buffer in utils.serialize_to_buffer(
+                        for b in utils.serialize_to_buffer(
                             launch_service(
                                 service = get_service_from_registry(
                                     hash = r.hash.value.hex()
@@ -546,15 +546,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 ), 
                                 config = configuration,
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
-                            )                            
-                        ): 
-                            print('Buffer -> ', buffer)
-                            yield buffer
+                            )
+                        ): yield b
                         return
 
                     except Exception as e:
                         l.LOGGER('Exception launching a service ' + str(e))
-                        return
+                        yield gateway_pb2.Buffer(signal='')
+                        continue
             
             # Si me da servicio.
             if r.HasField('service') and configuration:
@@ -647,9 +646,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 hashes.append(hash)
                 if SHA3_256_ID == hash.type and \
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    yield get_from_registry(
-                                hash = hash.value.hex()
-                           )
+                    yield gateway_pb2.Buffer(signal='') # Say stop to send more hashes.
+                    for b in utils.serialize_to_buffer(
+                        get_from_registry(
+                            hash = hash.value.hex()
+                        )
+                    ): yield b
             except: pass
         
         try:
@@ -721,17 +723,22 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             if r.HasField('hash') and SHA3_256_ID == r.hash.type and \
                 r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                cost = execution_cost(
-                        service = get_service_from_registry(
-                                hash = r.hash.value.hex()
-                            ),
-                        metadata = celaut.Any.Metadata(
-                            hashtag = [celaut.Any.Metadata.HashTag(
-                                hash = r.hash
-                            )]
+                yield gateway_pb2.Buffer(signal='')
+                try:
+                    cost = execution_cost(
+                            service = get_service_from_registry(
+                                    hash = r.hash.value.hex()
+                                ),
+                            metadata = celaut.Any.Metadata(
+                                hashtag = [celaut.Any.Metadata.HashTag(
+                                    hash = r.hash
+                                )]
+                            )
                         )
-                    )
-                break
+                    break
+                except:
+                    yield gateway_pb2.Buffer(signal='')
+                    continue
 
             if r.HasField('service'):
                 cost = execution_cost(
