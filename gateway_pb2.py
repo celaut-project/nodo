@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"\x1b\n\x0b\x43ostMessage\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x05\"\x90\x01\n\x08Instance\x12\x30\n\rinstance_meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.MetadataH\x00\x88\x01\x01\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\x12\x12\n\x05token\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x10\n\x0e_instance_metaB\x08\n\x06_token\"\x9c\x02\n\x10ServiceTransport\x12\x31\n\x04hash\x18\x01 \x01(\x0b\x32!.celaut.Any.Metadata.HashTag.HashH\x00\x12<\n\x07service\x18\x02 \x01(\x0b\x32).gateway.ServiceTransport.ServiceWithMetaH\x00\x12*\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.ConfigurationH\x01\x88\x01\x01\x1aW\n\x0fServiceWithMeta\x12\"\n\x04meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.Metadata\x12 \n\x07service\x18\x02 \x01(\x0b\x32\x0f.celaut.ServiceB\x07\n\x05oneOfB\t\n\x07_config\"I\n\x06\x42uffer\x12\x0f\n\x05\x63hunk\x18\x01 \x01(\x0cH\x00\x12\x13\n\tseparator\x18\x02 \x01(\x0cH\x00\x12\x10\n\x06signal\x18\x03 \x01(\x0cH\x00\x42\x07\n\x05oneof2\xd0\x02\n\x07Gateway\x12\x36\n\x0cStartService\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x35\n\x0bStopService\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x30\n\x06Hynode\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x31\n\x07GetFile\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x37\n\rGetServiceTar\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x38\n\x0eGetServiceCost\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"\x1b\n\x0b\x43ostMessage\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x05\"\x90\x01\n\x08Instance\x12\x30\n\rinstance_meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.MetadataH\x00\x88\x01\x01\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\x12\x12\n\x05token\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x10\n\x0e_instance_metaB\x08\n\x06_token\"\x9c\x02\n\x10ServiceTransport\x12\x31\n\x04hash\x18\x01 \x01(\x0b\x32!.celaut.Any.Metadata.HashTag.HashH\x00\x12<\n\x07service\x18\x02 \x01(\x0b\x32).gateway.ServiceTransport.ServiceWithMetaH\x00\x12*\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.ConfigurationH\x01\x88\x01\x01\x1aW\n\x0fServiceWithMeta\x12\"\n\x04meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.Metadata\x12 \n\x07service\x18\x02 \x01(\x0b\x32\x0f.celaut.ServiceB\x07\n\x05oneOfB\t\n\x07_config\"h\n\x0eHashWithConfig\x12/\n\x04hash\x18\x01 \x01(\x0b\x32!.celaut.Any.Metadata.HashTag.Hash\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\"X\n\x11ServiceWithConfig\x12\x1c\n\x07service\x18\x02 \x01(\x0b\x32\x0b.celaut.Any\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\"I\n\x06\x42uffer\x12\x0f\n\x05\x63hunk\x18\x01 \x01(\x0cH\x00\x12\x13\n\tseparator\x18\x02 \x01(\x05H\x00\x12\x10\n\x06signal\x18\x03 \x01(\x0cH\x00\x42\x07\n\x05oneof2\xd0\x02\n\x07Gateway\x12\x36\n\x0cStartService\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x35\n\x0bStopService\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x30\n\x06Hynode\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x31\n\x07GetFile\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x37\n\rGetServiceTar\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x38\n\x0eGetServiceCost\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x62\x06proto3'
   ,
   dependencies=[celaut__pb2.DESCRIPTOR,])
 
@@ -266,6 +266,84 @@ _SERVICETRANSPORT = _descriptor.Descriptor(
 )
 
 
+_HASHWITHCONFIG = _descriptor.Descriptor(
+  name='HashWithConfig',
+  full_name='gateway.HashWithConfig',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='hash', full_name='gateway.HashWithConfig.hash', index=0,
+      number=1, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='config', full_name='gateway.HashWithConfig.config', index=1,
+      number=3, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=543,
+  serialized_end=647,
+)
+
+
+_SERVICEWITHCONFIG = _descriptor.Descriptor(
+  name='ServiceWithConfig',
+  full_name='gateway.ServiceWithConfig',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='service', full_name='gateway.ServiceWithConfig.service', index=0,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='config', full_name='gateway.ServiceWithConfig.config', index=1,
+      number=3, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=649,
+  serialized_end=737,
+)
+
+
 _BUFFER = _descriptor.Descriptor(
   name='Buffer',
   full_name='gateway.Buffer',
@@ -283,8 +361,8 @@ _BUFFER = _descriptor.Descriptor(
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
       name='separator', full_name='gateway.Buffer.separator', index=1,
-      number=2, type=12, cpp_type=9, label=1,
-      has_default_value=False, default_value=b"",
+      number=2, type=5, cpp_type=1, label=1,
+      has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
@@ -312,8 +390,8 @@ _BUFFER = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=543,
-  serialized_end=616,
+  serialized_start=739,
+  serialized_end=812,
 )
 
 _INSTANCE.fields_by_name['instance_meta'].message_type = celaut__pb2._ANY_METADATA
@@ -339,6 +417,10 @@ _SERVICETRANSPORT.fields_by_name['service'].containing_oneof = _SERVICETRANSPORT
 _SERVICETRANSPORT.oneofs_by_name['_config'].fields.append(
   _SERVICETRANSPORT.fields_by_name['config'])
 _SERVICETRANSPORT.fields_by_name['config'].containing_oneof = _SERVICETRANSPORT.oneofs_by_name['_config']
+_HASHWITHCONFIG.fields_by_name['hash'].message_type = celaut__pb2._ANY_METADATA_HASHTAG_HASH
+_HASHWITHCONFIG.fields_by_name['config'].message_type = celaut__pb2._CONFIGURATION
+_SERVICEWITHCONFIG.fields_by_name['service'].message_type = celaut__pb2._ANY
+_SERVICEWITHCONFIG.fields_by_name['config'].message_type = celaut__pb2._CONFIGURATION
 _BUFFER.oneofs_by_name['oneof'].fields.append(
   _BUFFER.fields_by_name['chunk'])
 _BUFFER.fields_by_name['chunk'].containing_oneof = _BUFFER.oneofs_by_name['oneof']
@@ -353,6 +435,8 @@ DESCRIPTOR.message_types_by_name['TokenMessage'] = _TOKENMESSAGE
 DESCRIPTOR.message_types_by_name['CostMessage'] = _COSTMESSAGE
 DESCRIPTOR.message_types_by_name['Instance'] = _INSTANCE
 DESCRIPTOR.message_types_by_name['ServiceTransport'] = _SERVICETRANSPORT
+DESCRIPTOR.message_types_by_name['HashWithConfig'] = _HASHWITHCONFIG
+DESCRIPTOR.message_types_by_name['ServiceWithConfig'] = _SERVICEWITHCONFIG
 DESCRIPTOR.message_types_by_name['Buffer'] = _BUFFER
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
@@ -399,6 +483,20 @@ ServiceTransport = _reflection.GeneratedProtocolMessageType('ServiceTransport', 
 _sym_db.RegisterMessage(ServiceTransport)
 _sym_db.RegisterMessage(ServiceTransport.ServiceWithMeta)
 
+HashWithConfig = _reflection.GeneratedProtocolMessageType('HashWithConfig', (_message.Message,), {
+  'DESCRIPTOR' : _HASHWITHCONFIG,
+  '__module__' : 'gateway_pb2'
+  # @@protoc_insertion_point(class_scope:gateway.HashWithConfig)
+  })
+_sym_db.RegisterMessage(HashWithConfig)
+
+ServiceWithConfig = _reflection.GeneratedProtocolMessageType('ServiceWithConfig', (_message.Message,), {
+  'DESCRIPTOR' : _SERVICEWITHCONFIG,
+  '__module__' : 'gateway_pb2'
+  # @@protoc_insertion_point(class_scope:gateway.ServiceWithConfig)
+  })
+_sym_db.RegisterMessage(ServiceWithConfig)
+
 Buffer = _reflection.GeneratedProtocolMessageType('Buffer', (_message.Message,), {
   'DESCRIPTOR' : _BUFFER,
   '__module__' : 'gateway_pb2'
@@ -415,8 +513,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=619,
-  serialized_end=955,
+  serialized_start=815,
+  serialized_end=1151,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',

@@ -1,5 +1,6 @@
 from time import sleep
 import threading
+from gateway_pb2_grpc_indices import GetServiceTar_indices
 import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os
 from utils import service_extended, save_chunks_to_file, serialize_to_buffer
 from compile import HYCACHE
@@ -39,7 +40,8 @@ def get_container_from_outside(
                             grpc.insecure_channel(peer_uri['ip'] + ':' + str(peer_uri['port']))
                         ).GetServiceTar(
                             serialize_to_buffer(
-                                service_extended(service = service, metadata = metadata)
+                                service_extended(service = service, metadata = metadata),
+                                indices=GetServiceTar_indices
                             )
                         )
             )

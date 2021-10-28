@@ -77,8 +77,9 @@ def get_network_name( ip_or_uri: str) -> str:
         except KeyError:
             continue
 
+
 CHUNK_SIZE = 1024 * 1024  # 1MB
-import os, shutil
+import os, shutil, gc
 import gateway_pb2
 from random import randint
 from typing import Generator
@@ -107,13 +108,17 @@ class Signal():
             with self.condition:
                 self.condition.wait()
 
-def get_file_chunks(filename) -> Generator[gateway_pb2.Buffer, None, None]:
+def get_file_chunks(filename, signal = Signal(exist=False)) -> Generator[gateway_pb2.Buffer, None, None]:
+    signal.wait()
     with open(filename, 'rb') as f:
         while True:
+            signal.wait()
             piece = f.read(CHUNK_SIZE);
             if len(piece) == 0:
                 return
-            yield gateway_pb2.Buffer(chunk=piece)
+            try:
+                yield gateway_pb2.Buffer(chunk=piece)
+            finally: signal.wait()
 
 
 def save_chunks_to_file(chunks: gateway_pb2.Buffer, filename):
@@ -121,19 +126,23 @@ def save_chunks_to_file(chunks: gateway_pb2.Buffer, filename):
         for buffer in chunks:
             f.write(buffer.chunk)
 
-def parse_from_buffer(request_iterator, message_field = None, signal = Signal(exist=False)):
+def parse_from_buffer(request_iterator, message_field = None, signal = Signal(exist=False), indices: dict = None): # indice: method
+    if len(indices) == 1: message_field = list(indices.values())[0]
     while True:
         all_buffer = bytes('', encoding='utf-8')
         while True:
             buffer = next(request_iterator)
             if buffer.HasField('separator'):
+                try:
+                    message_field = indices[buffer.separator]
+                except: pass
                 break
             if buffer.HasField('signal'):
                 signal.change()
                 continue
             if buffer.HasField('chunk'):
                 all_buffer += buffer.chunk
-        if message_field: 
+        if message_field:
             message = message_field()
             message.ParseFromString(
                 all_buffer
@@ -142,9 +151,19 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
         else:
             yield all_buffer # Clean buffer index bytes.
 
-def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_dir = None):
+def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_dir = None, indices: dict = None): # method: indice
     if not hasattr(message_iterator, '__iter__'): message_iterator=[message_iterator]
     for message in message_iterator:
+        try:
+            yield gateway_pb2.Buffer(
+                separator = indices[type(message)]
+            )
+        except:  # if not indices or the method not appear on it.
+            yield gateway_pb2.Buffer(
+                separator = bytes()
+            )
+        finally: signal.wait()
+
         message_bytes = message.SerializeToString()
         if len(message_bytes) < CHUNK_SIZE:
             signal.wait()
@@ -156,6 +175,7 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
         else:
             try:
                 signal.wait()
+                print('vamos a pasar todo a lista ', len(message_bytes))
                 byte_list = list(message_bytes)
                 for chunk in [byte_list[i:i + CHUNK_SIZE] for i in range(0, len(byte_list), CHUNK_SIZE)]:
                     signal.wait()
@@ -167,9 +187,10 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
             except: # INEFICIENT.    
                 try:
                     signal.wait()
+                    print('vamos a escribir en cache ', len(message_bytes))
                     file = cache_dir + str(len(message_bytes))
                     open(file, 'wb').write(message_bytes)
-                    for b in get_file_chunks(file): 
+                    for b in get_file_chunks(file, signal=signal): 
                         signal.wait()
                         try:
                             yield b
@@ -177,15 +198,10 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
                 finally:
                     try:
                         os.remove(file)
+                        gc.collect()
                     except: pass
 
-        try:
-            yield gateway_pb2.Buffer(
-                separator = bytes('', encoding='utf-8')
-            )
-        finally: signal.wait()
-
-def client_grpc(method, output_field = None, input=None, timeout=None):
+def client_grpc(method, output_field = None, input=None, timeout=None, indices_parser: dict = None, indices_serializer: dict = None): # indice: method
     signal = Signal()
     cache_dir = os.path.abspath(os.curdir) + '/__hycache__/grpcbigbuffer' + str(randint(1,999)) + '/'
     os.mkdir(cache_dir)
@@ -195,14 +211,24 @@ def client_grpc(method, output_field = None, input=None, timeout=None):
                                 serialize_to_buffer(
                                     input if input else '',
                                     signal = signal,
-                                    cache_dir = cache_dir
+                                    cache_dir = cache_dir,
+                                    indices = {e[1]:e[0] for e in indices_serializer.items()} if indices_serializer else None
                                 ),
                                 timeout = timeout
                             ),
-            message_field = output_field,
-            signal = signal
+            message_field = output_field,  # TODO ????
+            signal = signal,
+            indices = indices_parser
         ): yield b
     finally:
         try:
             shutil.rmtree(cache_dir)
+            gc.collect()
         except: pass
+
+
+"""
+    Serialize Object to plain bytes serialization.
+"""
+def serialize_to_plain(object: object) -> bytes:
+    pass

@@ -31,22 +31,31 @@ message ServiceTransport {
 }
 
 
-// GRPC.
+// ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S, celaut.Configuration=C; { H v S v H^C v S^C } )
+message HashWithConfig { // H^C 
+    celaut.Any.Metadata.HashTag.Hash hash = 1;
+    celaut.Configuration config = 3;  
+}
+message ServiceWithConfig { // S^C
+    celaut.Any service = 2;
+    celaut.Configuration config = 3;
+}
 
+// GRPC.
 message Buffer  {
     oneof oneof{    
         bytes chunk = 1;
-        bytes separator = 2;
+        int32 separator = 2;
         bytes signal = 3;
     }
 }
 
 service Gateway {
-    rpc StartService( stream Buffer) returns ( stream Buffer) {} // ServiceTransport -> Instance
+    rpc StartService( stream Buffer) returns ( stream Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S, celaut.Configuration=C; { H v S v H^C v S^C } ) -> Instance
     rpc StopService(stream Buffer) returns (stream Buffer) {} // TokenMessage -> Empty
     rpc Hynode(stream Buffer) returns (stream Buffer) {} // Instance -> Instance
     
     rpc GetFile(stream Buffer) returns (stream Buffer) {} // celaut.Any.Metadata.HashTag.Hash -> celaut.Any
-    rpc GetServiceTar(stream Buffer) returns (stream Buffer) {}// ServiceTransport -> Buffer (parse not needed.)
-    rpc GetServiceCost(stream Buffer) returns (stream Buffer) {} // ServiceTransport -> CostMessage
+    rpc GetServiceTar(stream Buffer) returns (stream Buffer) {}// ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> Buffer (parse not needed.)
+    rpc GetServiceCost(stream Buffer) returns (stream Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> CostMessage
 }

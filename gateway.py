@@ -15,6 +15,7 @@ from google.protobuf.json_format import MessageToJson
 from google.protobuf.json_format import Parse
 import docker as docker_lib
 import netifaces as ni
+from gateway_pb2_grpc_indices import StartService_indices, GetServiceCost_indices, GetServiceTar_indices
 
 GET_ENV = lambda env, default: int(os.environ.get(env)) if env in os.environ.keys() else default
 DOCKER_CLIENT = lambda: docker_lib.from_env()
@@ -251,6 +252,7 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
                                 )
                             ).GetServiceCost,
                         output_field = gateway_pb2.CostMessage,
+                        indices_serializer=GetServiceCost_indices,
                         input = utils.service_extended(service = service, metadata = metadata),
                     )).cost
                 )
@@ -433,7 +435,7 @@ def peers_iterator(ignore_network: str = None) -> Generator[celaut.Instance.Uri,
 
 def search_container(
         service: celaut.Service, 
-        metadata: celaut.Any.Metadata, 
+        metadata: celaut.Any.Metadata,
         ignore_network: str = None
     ) -> Generator[gateway_pb2.Buffer, None, None]:
     # Search a service tar container.
@@ -447,7 +449,8 @@ def search_container(
                     input = utils.service_extended(
                                 service = service,
                                 metadata = metadata
-                            )
+                            ),
+                    indices_serializer=GetServiceTar_indices
                 )
             )
             break
@@ -522,13 +525,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Starting service ...')
         configuration = None
         hashes = []
-        for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport):
+        for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport, indices = StartService_indices):
             # Captura la configuracion si puede.
-            if r.HasField('config'):
+            if r is celaut.Configuration:
                 configuration = r.config
             
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-            if r.HasField('hash'):
+            if r is celaut.Any.Metadata.HashTag.Hash:
                 hashes.append(r.hash)
                 if configuration and SHA3_256_ID == r.hash.type and \
                     r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
@@ -556,7 +559,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         continue
             
             # Si me da servicio.
-            if r.HasField('service') and configuration:
+            if r is celaut.Service and configuration:
                 save_service(
                     service = r.service.service,
                     metadata = r.service.meta
@@ -669,15 +672,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetServiceTar(self, request_iterator, context):
         l.LOGGER('Request for give a service container.')
-        for r in utils.parse_from_buffer(request_iterator=request_iterator, message_field=gateway_pb2.ServiceTransport):
+        for r in utils.parse_from_buffer(request_iterator=request_iterator, indices = GetServiceTar_indices):
 
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-            if r.HasField('hash') and SHA3_256_ID== r.hash.type:
+            if r is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID== r.hash.type:
                 hash = r.hash.value.hex()
                 break
             
             # Si me da servicio.
-            if r.HasField('service'):
+            if r is celaut.Service:
                 hash = get_service_hex_main_hash(service = r.service)
                 save_service(
                     service = r.service,
@@ -719,9 +722,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     def GetServiceCost(self, request_iterator, context):
-        for r in utils.parse_from_buffer(request_iterator=request_iterator, message_field=gateway_pb2.ServiceTransport):
+        for r in utils.parse_from_buffer(request_iterator=request_iterator, indices = GetServiceCost_indices):
 
-            if r.HasField('hash') and SHA3_256_ID == r.hash.type and \
+            if r is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.hash.type and \
                 r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                 yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                 try:
@@ -740,7 +743,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                     continue
 
-            if r.HasField('service'):
+            if r is celaut.Any.Metadata.HashTag.Hash:
                 cost = execution_cost(
                     service = r.service,
                     metadata = celaut.Any.Metadata(
