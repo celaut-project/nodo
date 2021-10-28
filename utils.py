@@ -127,7 +127,7 @@ def save_chunks_to_file(chunks: gateway_pb2.Buffer, filename):
             f.write(buffer.chunk)
 
 def parse_from_buffer(request_iterator, message_field = None, signal = Signal(exist=False), indices: dict = None): # indice: method
-    if len(indices) == 1: message_field = list(indices.values())[0]
+    if indices and len(indices) == 1: message_field = list(indices.values())[0]
     while True:
         all_buffer = bytes('', encoding='utf-8')
         while True:
