@@ -514,95 +514,98 @@ def get_from_registry(hash: str) -> celaut.Any:
 class Gateway(gateway_pb2_grpc.Gateway):
 
     def StartService(self, request_iterator, context):
-        l.LOGGER('Starting service ...')
-        configuration = None
-        hashes = []
-        for r in utils.parse_from_buffer(request_iterator = request_iterator, indices = StartService_indices):
-            print('message -> ', type(r))
+        try:
+            l.LOGGER('Starting service ...')
+            configuration = None
+            hashes = []
+            for r in utils.parse_from_buffer(request_iterator = request_iterator, indices = StartService_indices):
+                print('message -> ', type(r))
 
-            if r is gateway_pb2.HashWithConfig:
-                configuration = r.config
-                hash = r.hash
+                if r is gateway_pb2.HashWithConfig:
+                    configuration = r.config
+                    hash = r.hash
 
-            # Captura la configuracion si puede.
-            if r is celaut.Configuration:
-                configuration = r
-            
-            if r is celaut.Any.Metadata.HashTag.Hash:
-                hash = r
+                # Captura la configuracion si puede.
+                if r is celaut.Configuration:
+                    configuration = r
+                
+                if r is celaut.Any.Metadata.HashTag.Hash:
+                    hash = r
 
-            # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-            if hash:
-                hashes.append(hash)
-                if configuration and SHA3_256_ID == hash.type and \
-                    hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    print('signal sended.')
-                    yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
-                    try:
-                        for b in utils.serialize_to_buffer(
-                            launch_service(
-                                service_buffer = get_service_buffer_from_registry(
-                                    hash = hash.value.hex()
-                                ),
-                                metadata = celaut.Any.Metadata(
-                                    hashtag = celaut.Any.Metadata.HashTag(
-                                        hash = hashes
-                                    )
-                                ), 
-                                config = configuration,
-                                father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
-                            )
-                        ): yield b
-                        return
-
-                    except Exception as e:
-                        l.LOGGER('Exception launching a service ' + str(e))
+                # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
+                if hash:
+                    hashes.append(hash)
+                    if configuration and SHA3_256_ID == hash.type and \
+                        hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
+                        print('signal sended.')
                         yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
-                        continue
+                        try:
+                            for b in utils.serialize_to_buffer(
+                                launch_service(
+                                    service_buffer = get_service_buffer_from_registry(
+                                        hash = hash.value.hex()
+                                    ),
+                                    metadata = celaut.Any.Metadata(
+                                        hashtag = celaut.Any.Metadata.HashTag(
+                                            hash = hashes
+                                        )
+                                    ), 
+                                    config = configuration,
+                                    father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                                )
+                            ): yield b
+                            return
 
-            if r is gateway_pb2.ServiceWithConfig:
-                configuration = r.config
-                service_on_any = r.service
-            
-            if r is celaut.Any:
-                service_on_any = r
-            
-            # Si me da servicio.
-            if service_on_any and configuration:
-                save_service(
-                    service_buffer = service_on_any.value,
-                    metadata = service_on_any.metadata
-                )
-                for buffer in utils.serialize_to_buffer(
-                    launch_service(
+                        except Exception as e:
+                            l.LOGGER('Exception launching a service ' + str(e))
+                            yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
+                            continue
+
+                if r is gateway_pb2.ServiceWithConfig:
+                    configuration = r.config
+                    service_on_any = r.service
+                
+                if r is celaut.Any:
+                    service_on_any = r
+                
+                # Si me da servicio.
+                if service_on_any and configuration:
+                    save_service(
                         service_buffer = service_on_any.value,
-                        metadata = service_on_any.metadata, 
+                        metadata = service_on_any.metadata
+                    )
+                    for buffer in utils.serialize_to_buffer(
+                        launch_service(
+                            service_buffer = service_on_any.value,
+                            metadata = service_on_any.metadata, 
+                            config = configuration,
+                            father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                        )  
+                    ): yield buffer
+                    return
+
+            
+            l.LOGGER('The service is not in the registry and the request does not have the definition.' \
+                + str([(hash.type.hex(), hash.value.hex()) for hash in hashes]))
+            
+            try:
+                for b in utils.serialize_to_buffer(
+                    launch_service(
+                        service_buffer = search_definition(hashes = hashes),
+                        metadata = celaut.Any.Metadata(
+                            hashtag = celaut.Any.Metadata.HashTag(
+                                hash = hashes
+                            )
+                        ), 
                         config = configuration,
                         father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
-                    )  
-                ): yield buffer
-                return
+                    )
+                ): yield b
 
-        
-        l.LOGGER('The service is not in the registry and the request does not have the definition.' \
-            + str([(hash.type.hex(), hash.value.hex()) for hash in hashes]))
-        
-        try:
-            for b in utils.serialize_to_buffer(
-                launch_service(
-                    service_buffer = search_definition(hashes = hashes),
-                    metadata = celaut.Any.Metadata(
-                        hashtag = celaut.Any.Metadata.HashTag(
-                            hash = hashes
-                        )
-                    ), 
-                    config = configuration,
-                    father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
-                )
-            ): yield b
-
+            except Exception as e:
+                raise Exception('Was imposible start the service. ' + str(e))
         except Exception as e:
-            raise Exception('Was imposible start the service. ' + str(e))
+            print(e)
 
 
     def StopService(self, request_iterator, context):
