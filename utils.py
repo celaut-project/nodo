@@ -19,24 +19,32 @@ def service_hashes(
         for hash in hashes:
             yield hash 
 
-def service_extended( # TODO
+def service_extended(
         service_buffer: bytes,
         metadata: celaut_pb2.Any.Metadata,  
         config: celaut_pb2.Configuration = None
-    ) -> Generator[gateway_pb2.ServiceTransport, None, None]:
+    ) -> Generator[object, None, None]:
+
         set_config = True if config else False
-        transport = gateway_pb2.ServiceTransport()
         for hash in metadata.hash:
-            transport.hash.CopyFrom(hash)
             if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
-                transport.config.CopyFrom(config)
                 set_config = False
-            yield transport
-        transport.ClearField('hash')
-        if set_config: transport.config.CopyFrom(config)
-        transport.service.service.ParseFromString(service_buffer)
-        transport.service.meta.CopyFrom(metadata)
-        yield transport
+                yield gateway_pb2.HashWithConfig(
+                    hash = hash,
+                    config = celaut_pb2.Configuration()
+                )
+            yield hash
+
+        any = celaut_pb2.Any(
+                metadata = metadata,
+                value = service_buffer
+            )
+        if set_config: 
+            yield gateway_pb2.ServiceWithConfig(
+                    service = any,
+                    config = celaut_pb2.Configuration()
+                )
+        yield any
 
 def get_free_port() -> int:
     with socket.socket() as s:
@@ -216,7 +224,7 @@ def client_grpc(method, output_field = None, input=None, timeout=None, indices_p
                                 ),
                                 timeout = timeout
                             ),
-            message_field = output_field,  # TODO ????
+            message_field = output_field,
             signal = signal,
             indices = indices_parser
         ): yield b

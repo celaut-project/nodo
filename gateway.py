@@ -194,7 +194,7 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
     except docker_lib.errors.APIError:
         l.LOGGER('DOCKER API ERROR ')
 
-def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int: # TODO
+def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
     try:
         # Coste de construcción si no se posee el contenedor del servicio.
         # Debe de tener en cuenta el coste de buscar el conedor por la red.
