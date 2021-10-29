@@ -194,12 +194,12 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
     except docker_lib.errors.APIError:
         l.LOGGER('DOCKER API ERROR ')
 
-def build_cost(service: celaut.Service, metadata: celaut.Any.Metadata) -> int:
+def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int: # TODO
     try:
         # Coste de construcción si no se posee el contenedor del servicio.
         # Debe de tener en cuenta el coste de buscar el conedor por la red.
         return sum([
-            COST_OF_BUILD * get_service_hex_main_hash(service = service, metadata = metadata) \
+            COST_OF_BUILD * get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata) \
                 in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()] is False,
             # Coste de obtener el contenedor ... #TODO
             ])
@@ -207,13 +207,13 @@ def build_cost(service: celaut.Service, metadata: celaut.Any.Metadata) -> int:
         pass
     return 0
 
-def execution_cost(service: celaut.Service, metadata: celaut.Any.Metadata) -> int:
+def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
     return sum([
         len( DOCKER_CLIENT().containers.list() ),
-        build_cost(service = service, metadata = metadata),
+        build_cost(service_buffer = service_buffer, metadata = metadata),
     ]) * SELF_RATE
 
-def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> dict: # sorted by cost, dict of celaut.Instances or None (meaning local execution) and cost.
+def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> dict: # sorted by cost, dict of celaut.Instances or None (meaning local execution) and cost.
     class PeerCostList:
         # Sorts the list from the element with the smallest weight to the element with the largest weight.
         
@@ -229,7 +229,7 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
     try:
         peers = PeerCostList()
         peers.add_elem(
-            weight = execution_cost(service = service, metadata = metadata)
+            weight = execution_cost(service_buffer = service_buffer, metadata = metadata)
         )
 
         for peer in list(pymongo.MongoClient(
@@ -253,7 +253,7 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
                             ).GetServiceCost,
                         output_field = gateway_pb2.CostMessage,
                         indices_serializer=GetServiceCost_indices,
-                        input = utils.service_extended(service = service, metadata = metadata),
+                        input = utils.service_extended(service_buffer = service_buffer, metadata = metadata),
                     )).cost
                 )
             except: l.LOGGER('Error taking the cost.')
@@ -266,18 +266,18 @@ def service_balancer(service: celaut.Service, metadata: celaut.Any.Metadata) -> 
 
 
 def launch_service(
-        service: celaut.Service, 
+        service_buffer: bytes, 
         metadata: celaut.Any.Metadata, 
         father_ip: str, 
         config: celaut.Configuration = None
         ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
-    if service == None: raise Exception("Service object can't be None")
+    if service_buffer == None: raise Exception("Service object can't be None")
     getting_container = False
     # Here it asks the balancer if it should assign the job to a peer.
     while True:
         for node_instance, cost in service_balancer(
-            service = service,
+            service_buffer = service_buffer,
             metadata = metadata
         ).items():
             l.LOGGER('Balancer select peer ' + str(node_instance) + ' with cost ' + str(cost))
@@ -294,7 +294,7 @@ def launch_service(
                                 ).StartService,
                         output_field = gateway_pb2.Instance,
                         input = utils.service_extended(
-                                service = service, 
+                                service_buffer = service_buffer, 
                                 metadata = metadata,
                                 config = config
                             )
@@ -313,7 +313,7 @@ def launch_service(
             l.LOGGER('El nodo lanza el servicio localmente.')
             try:
                 id = build.build(
-                        service = service, 
+                        service_buffer = service_buffer, 
                         metadata = metadata,
                         get_it_outside = not getting_container
                     )  #  If the container is not built, build it.
@@ -323,6 +323,10 @@ def launch_service(
                 getting_container = True
                 continue
 
+            
+            # Now, serialize part of the service is needed.
+            service = celaut.Service()
+            service.ParseFromString(service_buffer)
 
             # If the request is made by a local service.
             if utils.get_network_name(father_ip) == DOCKER_NETWORK:
@@ -407,15 +411,15 @@ def launch_service(
             )
 
 
-def save_service(service: celaut.Service, metadata = celaut.Any.Metadata):
+def save_service(service_buffer: bytes, metadata: celaut.Any.Metadata):
     # If the service is not on the registry, save it.
-    hash = get_service_hex_main_hash(service = service, metadata = metadata)
+    hash = get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata)
     if not os.path.isfile(REGISTRY+hash):
         with open(REGISTRY + hash, 'wb') as file:
             file.write(
                 celaut.Any(
                     metadata = metadata,
-                    value = service.SerializeToString()
+                    value = service_buffer
                 ).SerializeToString()
             )
 
@@ -434,7 +438,7 @@ def peers_iterator(ignore_network: str = None) -> Generator[celaut.Instance.Uri,
             yield peer_uri
 
 def search_container(
-        service: celaut.Service, 
+        service_buffer: bytes, 
         metadata: celaut.Any.Metadata,
         ignore_network: str = None
     ) -> Generator[gateway_pb2.Buffer, None, None]:
@@ -447,10 +451,10 @@ def search_container(
                                 grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
                             ).GetServiceTar,
                     input = utils.service_extended(
-                                service = service,
+                                service_buffer = service_buffer,
                                 metadata = metadata
                             ),
-                    indices_serializer=GetServiceTar_indices
+                    indices_serializer = GetServiceTar_indices
                 )
             )
             break
@@ -471,46 +475,34 @@ def search_file(hashes: list, ignore_network: str = None) -> Generator[celaut.An
             ): yield buffer
         except: pass
 
-def search_definition(hashes: list, ignore_network: str = None) -> celaut.Service:
+def search_definition(hashes: list, ignore_network: str = None) -> bytes:
     #  Search a service description.
-    service = celaut.Service()
     for any in  search_file(
         hashes = hashes,
         ignore_network = ignore_network
     ):
-        service.parseFromString(any.value)
         if any.metadata.complete:
             if check_service(
-                    service = service,
+                    service_buffer = any.value,
                     hashes = hashes
                 ):
-                    break
-            else:
-                service = celaut.Service()
-    
-    if service:
-        #  Save the service on the registry.
-        save_service(
-            service = service,
-            metadata = any.metadata
-        )
-        return service 
+                #  Save the service on the registry.
+                save_service(
+                    service_buffer = any.value,
+                    metadata = any.metadata
+                )
+                return any.value
 
-    else:
-        l.LOGGER('The service '+ hashes[0].value.hex() + ' was not found.')
-        raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+    l.LOGGER('The service '+ hashes[0].value.hex() + ' was not found.')
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
 
-def get_service_from_registry(hash: str) -> celaut.Service:
-    service = celaut.Service()
-    service.ParseFromString(
-        get_from_registry(hash = hash).value
-    )
-    return service
+def get_service_buffer_from_registry(hash: str) -> bytes:
+    return get_from_registry(hash = hash).value
 
 def get_from_registry(hash: str) -> celaut.Any:
     l.LOGGER('Getting ' + hash + ' service from the local registry.')
     try:
-        with open(REGISTRY + hash, 'rb') as file: # TODO: content all to Any, delete the .service sufix.
+        with open(REGISTRY + hash, 'rb') as file:
             any = celaut.Any()
             any.ParseFromString(file.read())
             return any
@@ -525,24 +517,32 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Starting service ...')
         configuration = None
         hashes = []
-        for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport, indices = StartService_indices):
+        for r in utils.parse_from_buffer(request_iterator = request_iterator, indices = StartService_indices):
             print('message -> ', type(r))
+
+            if r is gateway_pb2.HashWithConfig:
+                configuration = r.config
+                hash = r.hash
+
             # Captura la configuracion si puede.
             if r is celaut.Configuration:
-                configuration = r.config
+                configuration = r
             
-            # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if r is celaut.Any.Metadata.HashTag.Hash:
-                hashes.append(r.hash)
-                if configuration and SHA3_256_ID == r.hash.type and \
-                    r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
+                hash = r
+
+            # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
+            if hash:
+                hashes.append(hash)
+                if configuration and SHA3_256_ID == hash.type and \
+                    hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     print('signal sended.')
                     yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                     try:
                         for b in utils.serialize_to_buffer(
                             launch_service(
-                                service = get_service_from_registry(
-                                    hash = r.hash.value.hex()
+                                service_buffer = get_service_buffer_from_registry(
+                                    hash = hash.value.hex()
                                 ),
                                 metadata = celaut.Any.Metadata(
                                     hashtag = celaut.Any.Metadata.HashTag(
@@ -559,17 +559,24 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         l.LOGGER('Exception launching a service ' + str(e))
                         yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                         continue
+
+            if r is gateway_pb2.ServiceWithConfig:
+                configuration = r.config
+                service_on_any = r.service
+            
+            if r is celaut.Any:
+                service_on_any = r
             
             # Si me da servicio.
-            if r is celaut.Service and configuration:
+            if service_on_any and configuration:
                 save_service(
-                    service = r.service.service,
-                    metadata = r.service.meta
+                    service_buffer = service_on_any.value,
+                    metadata = service_on_any.metadata
                 )
                 for buffer in utils.serialize_to_buffer(
                     launch_service(
-                        service = r.service.service,
-                        metadata = r.service.meta, 
+                        service_buffer = service_on_any.value,
+                        metadata = service_on_any.metadata, 
                         config = configuration,
                         father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                     )  
@@ -583,7 +590,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         try:
             for b in utils.serialize_to_buffer(
                 launch_service(
-                    service = search_definition(hashes = hashes),
+                    service_buffer = search_definition(hashes = hashes),
                     metadata = celaut.Any.Metadata(
                         hashtag = celaut.Any.Metadata.HashTag(
                             hash = hashes
@@ -674,30 +681,21 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetServiceTar(self, request_iterator, context):
         l.LOGGER('Request for give a service container.')
-        for r in utils.parse_from_buffer(request_iterator=request_iterator, indices = GetServiceTar_indices):
+        for r in utils.parse_from_buffer(request_iterator = request_iterator, indices = GetServiceTar_indices):
 
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-            if r is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID== r.hash.type:
-                hash = r.hash.value.hex()
+            if r is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
+                hash = r.value.hex()
                 break
             
             # Si me da servicio.
-            if r is celaut.Service:
-                hash = get_service_hex_main_hash(service = r.service)
+            if r is celaut.Any:
+                hash = get_service_hex_main_hash(service_buffer = r.value)
                 save_service(
-                    service = r.service,
-                    metadata = celaut.Any.Metadata(
-                        hashtag = [celaut.Any.Metadata.HashTag(
-                            hash = [
-                                celaut.Any.Metadata.HashTag.Hash(
-                                    type = SHA3_256_ID,
-                                    value = bytes.fromhex(hash)
-                                )
-                            ]                            
-                        )]
-                    )
+                    service_buffer = r.value,
+                    metadata = r.metadata
                 )
-                service = r.service
+                service_buffer = r.value
                 break
 
         l.LOGGER('Getting the container of service ' + hash)
@@ -715,7 +713,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     ignore_network = utils.get_network_name(
                         ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
                         ),
-                    service = service
+                    service_buffer = service_buffer
                 )
             except:
                 l.LOGGER('The service ' + hash + ' was not found.')
@@ -726,17 +724,17 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def GetServiceCost(self, request_iterator, context):
         for r in utils.parse_from_buffer(request_iterator=request_iterator, indices = GetServiceCost_indices):
 
-            if r is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.hash.type and \
-                r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
+            if r is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
+                r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                 yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                 try:
                     cost = execution_cost(
-                            service = get_service_from_registry(
-                                    hash = r.hash.value.hex()
+                            service_buffer = get_service_buffer_from_registry(
+                                    hash = r.value.hex()
                                 ),
                             metadata = celaut.Any.Metadata(
                                 hashtag = [celaut.Any.Metadata.HashTag(
-                                    hash = r.hash
+                                    hash = r
                                 )]
                             )
                         )
@@ -745,14 +743,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                     continue
 
-            if r is celaut.Any.Metadata.HashTag.Hash:
+            if r is celaut.Any:
                 cost = execution_cost(
-                    service = r.service,
-                    metadata = celaut.Any.Metadata(
-                        hashtag = [celaut.Any.Metadata.HashTag(
-                            hash = r.hash
-                        )]
-                    )
+                    service_buffer = r.value,
+                    metadata = r.metadata
                 )
                 break
 

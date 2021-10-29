@@ -237,12 +237,12 @@ class Hyper:
     def save(self):
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(
-                service = self.service, 
+                service = self.service.SerializeToString(), 
                 metadata = self.metadata
             )
         )
         id = get_service_hex_main_hash(
-            service = self.service, 
+            service_buffer = self.service.SerializeToString(), 
             metadata = self.metadata
             )
         # Once service hashes are calculated, we prune the filesystem for save storage.

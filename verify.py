@@ -27,17 +27,17 @@ def calculate_hashes(value) -> list:
         )
     ]
 
-def check_service(service: Service, hashes: list) -> bool:
+def check_service(service_buffer: bytes, hashes: list) -> bool:
     for hash in hashes:
         if hash.type in HASH_FUNCTIONS and \
             hash.value == HASH_FUNCTIONS[hash.type](
-                            value = service.SerializeToString()
+                            value = service_buffer
                             ):
                 return True
     return False
 
 # Return the service's sha3-256 hash on hexadecimal format.
-def get_service_hex_main_hash(service: Service, metadata: Any.Metadata = None) -> str:
+def get_service_hex_main_hash(service_buffer: bytes, metadata: Any.Metadata = None) -> str:
     # Find if it has the hash.
     if metadata:
         for hash in  metadata.hashtag.hash:
@@ -48,16 +48,16 @@ def get_service_hex_main_hash(service: Service, metadata: Any.Metadata = None) -
     # If not and is incomplete, it's going to be imposible calculate any hash.
     if metadata.complete:
         return SHA3_256(
-            value = service.SerializeToString()
+            value = service_buffer
         ).hex()
     else:
         LOGGER(' sha3-256 hash function is not implemented on this method.')
         raise Exception(' sha3-256 hash function is not implemented on this method.')
 
-def get_service_list_of_hashes(service: Service, metadata: Any.Metadata) -> list:
+def get_service_list_of_hashes(service_buffer: bytes, metadata: Any.Metadata) -> list:
     if metadata.complete:
         return calculate_hashes(
-            value = service.SerializeToString()
+            value = service_buffer
         )
     else:
         raise Exception("Can't get the hashes if the service is not complete.")

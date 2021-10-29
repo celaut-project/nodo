@@ -17,7 +17,7 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service):
 
 def get_container_from_outside(
     id: str,
-    service: gateway_pb2.celaut__pb2.Service,
+    service_buffer: bytes,
     metadata: gateway_pb2.celaut__pb2.Any.Metadata
 ):
     # search container in a service. (docker-tar, docker-tar.gz, filesystem, ....)
@@ -40,7 +40,7 @@ def get_container_from_outside(
                             grpc.insecure_channel(peer_uri['ip'] + ':' + str(peer_uri['port']))
                         ).GetServiceTar(
                             serialize_to_buffer(
-                                service_extended(service = service, metadata = metadata),
+                                service_extended(service = service_buffer, metadata = metadata),
                                 indices=GetServiceTar_indices
                             )
                         )
@@ -66,11 +66,11 @@ def get_container_from_outside(
     
 
 def build(
-    service: gateway_pb2.celaut__pb2.Service,
+    service_buffer: bytes,
     metadata: gateway_pb2.celaut__pb2.Any.Metadata,
     get_it_outside: bool = True
     ) -> str:
-    id = get_service_hex_main_hash(service = service, metadata = metadata)
+    id = get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata)
     l.LOGGER('\nBuilding ' + id)
     
     try:
@@ -81,12 +81,12 @@ def build(
     except CalledProcessError:
         if metadata.complete:
             build_container_from_definition(
-                service = service
+                service = service_buffer.SerializeToString()
             )
         else:
             threading.Thread(
                 target = get_container_from_outside,
-                args = (id, service, metadata)          
+                args = (id, service_buffer, metadata)          
                 ).start() if get_it_outside else sleep(WAIT_FOR_CONTAINER_DOWNLOAD)
             raise Exception("Getting the container, the process will've time")
 
@@ -98,11 +98,9 @@ if __name__ == "__main__":
     with open("/home/hy/node/__registry__/"+id, "rb") as file:
         any = gateway_pb2.celaut__pb2.Any()
         any.ParseFromString(file.read())
-        service = gateway_pb2.celaut__pb2.Service()
-        service.ParseFromString(any.value)
-        if get_service_hex_main_hash(service = service, metadata = any.metadata) == id:
+        if get_service_hex_main_hash(service_buffer = any.value, metadata = any.metadata) == id:
             build(
-                service = service, 
+                service_buffer = any.value, 
                 metadata = any.metadata
                 )
         else:

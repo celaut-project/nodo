@@ -18,19 +18,6 @@ message Instance {
     optional string token = 3;
 }
 
-message ServiceTransport {
-    message ServiceWithMeta {
-        celaut.Any.Metadata meta = 1;
-        celaut.Service service = 2;
-    }
-    oneof oneOf{
-        celaut.Any.Metadata.HashTag.Hash hash = 1;
-        ServiceWithMeta service = 2;
-    }
-    optional celaut.Configuration config = 3;    
-}
-
-
 // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S, celaut.Configuration=C; { H v S v H^C v S^C } )
 message HashWithConfig { // H^C 
     celaut.Any.Metadata.HashTag.Hash hash = 1;

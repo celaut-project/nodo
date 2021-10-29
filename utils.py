@@ -19,8 +19,8 @@ def service_hashes(
         for hash in hashes:
             yield hash 
 
-def service_extended(
-        service: celaut_pb2.Service,
+def service_extended( # TODO
+        service_buffer: bytes,
         metadata: celaut_pb2.Any.Metadata,  
         config: celaut_pb2.Configuration = None
     ) -> Generator[gateway_pb2.ServiceTransport, None, None]:
@@ -34,7 +34,7 @@ def service_extended(
             yield transport
         transport.ClearField('hash')
         if set_config: transport.config.CopyFrom(config)
-        transport.service.service.CopyFrom(service)
+        transport.service.service.ParseFromString(service_buffer)
         transport.service.meta.CopyFrom(metadata)
         yield transport
 
