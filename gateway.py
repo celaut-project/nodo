@@ -535,6 +535,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
                 if hash:
                     hashes.append(hash)
+
+                    print(configuration and SHA3_256_ID == hash.type and \
+                        hash.value.hex() in [s for s in os.listdir(REGISTRY)] )
+
                     if configuration and SHA3_256_ID == hash.type and \
                         hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                         print('signal sended.')
@@ -561,6 +565,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                             continue
 
+                service_on_any = None
                 if type(r) is gateway_pb2.ServiceWithConfig:
                     configuration = r.config
                     service_on_any = r.service
