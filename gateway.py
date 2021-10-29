@@ -526,6 +526,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         configuration = None
         hashes = []
         for r in utils.parse_from_buffer(request_iterator = request_iterator, message_field = gateway_pb2.ServiceTransport, indices = StartService_indices):
+            print('message -> ', type(r))
             # Captura la configuracion si puede.
             if r is celaut.Configuration:
                 configuration = r.config
@@ -535,6 +536,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 hashes.append(r.hash)
                 if configuration and SHA3_256_ID == r.hash.type and \
                     r.hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
+                    print('signal sended.')
                     yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                     try:
                         for b in utils.serialize_to_buffer(
