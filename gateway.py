@@ -521,15 +521,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
             for r in utils.parse_from_buffer(request_iterator = request_iterator, indices = StartService_indices):
                 print('message -> ', type(r))
 
-                if r is gateway_pb2.HashWithConfig:
+                if type(r) is gateway_pb2.HashWithConfig:
                     configuration = r.config
                     hash = r.hash
 
                 # Captura la configuracion si puede.
-                if r is celaut.Configuration:
+                if type(r) is celaut.Configuration:
                     configuration = r
                 
-                if r is celaut.Any.Metadata.HashTag.Hash:
+                if type(r) is celaut.Any.Metadata.HashTag.Hash:
                     hash = r
 
                 # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
@@ -561,11 +561,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                             continue
 
-                if r is gateway_pb2.ServiceWithConfig:
+                if type(r) is gateway_pb2.ServiceWithConfig:
                     configuration = r.config
                     service_on_any = r.service
                 
-                if r is celaut.Any:
+                if type(r) is celaut.Any:
                     service_on_any = r
                 
                 # Si me da servicio.
@@ -687,12 +687,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
         for r in utils.parse_from_buffer(request_iterator = request_iterator, indices = GetServiceTar_indices):
 
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-            if r is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
+            if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
                 hash = r.value.hex()
                 break
             
             # Si me da servicio.
-            if r is celaut.Any:
+            if type(r) is celaut.Any:
                 hash = get_service_hex_main_hash(service_buffer = r.value)
                 save_service(
                     service_buffer = r.value,
@@ -727,7 +727,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def GetServiceCost(self, request_iterator, context):
         for r in utils.parse_from_buffer(request_iterator=request_iterator, indices = GetServiceCost_indices):
 
-            if r is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
+            if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                 r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                 yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                 try:
@@ -746,7 +746,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                     continue
 
-            if r is celaut.Any:
+            if type(r) is celaut.Any:
                 cost = execution_cost(
                     service_buffer = r.value,
                     metadata = r.metadata
