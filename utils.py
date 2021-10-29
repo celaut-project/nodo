@@ -168,7 +168,7 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
             )
         except:  # if not indices or the method not appear on it.
             yield gateway_pb2.Buffer(
-                separator = bytes()
+                separator = 1
             )
         finally: signal.wait()
 
