@@ -521,6 +521,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             for r in utils.parse_from_buffer(request_iterator = request_iterator, indices = StartService_indices):
                 print('message -> ', type(r))
 
+                hash = None
                 if type(r) is gateway_pb2.HashWithConfig:
                     configuration = r.config
                     hash = r.hash
