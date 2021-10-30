@@ -142,9 +142,11 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
         while True:
             buffer = next(request_iterator)
             # The order of conditions is important.
+            print('buffer -> ', buffer.head, len(buffer.chunk), buffer.signal, buffer.separator)
             if buffer.HasField('head'):
                 try:
                     message_field = indices[buffer.separator]
+                    print('message field -> ', message_field)
                 except: pass
             if buffer.HasField('chunk'):
                 all_buffer += buffer.chunk
