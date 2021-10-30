@@ -142,7 +142,6 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
         while True:
             buffer = next(request_iterator)
             # The order of conditions is important.
-            print('buffer',buffer)
             if buffer.HasField('head'):
                 try:
                     message_field = indices[buffer.separator]
@@ -154,7 +153,6 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
                 continue
             if buffer.HasField('separator'): 
                 break
-        print('message field -> ',message_field)
         if message_field:
             message = message_field()
             message.ParseFromString(
