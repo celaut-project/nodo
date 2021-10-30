@@ -544,8 +544,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         print('signal sended.')
                         yield gateway_pb2.Buffer(signal=bytes('', encoding='utf-8'))
                         try:
-                            for b in utils.serialize_to_buffer(
-                                launch_service(
+                            instance = launch_service(
                                     service_buffer = get_service_buffer_from_registry(
                                         hash = hash.value.hex()
                                     ),
@@ -557,7 +556,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                     config = configuration,
                                     father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                                 )
-                            ): yield b
+                            print('the isntance is ', instance)
+                            for b in utils.serialize_to_buffer(
+                                instance
+                            ): 
+                                print(' send buffer ')
+                                yield b
                             return
 
                         except Exception as e:
