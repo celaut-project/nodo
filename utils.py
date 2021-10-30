@@ -141,7 +141,7 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
     while True:
         all_buffer = bytes()
         while True:
-            buffer = next(request_iterator)
+            buffer = next(request_iterator) # TODO peta aqui.
             # The order of conditions is important.
             print('buffer -> ', buffer.head, len(buffer.chunk), buffer.signal, buffer.separator)
             if buffer.HasField('head'):
@@ -157,7 +157,7 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
             if buffer.HasField('separator') and buffer.separator: 
                 print('is separator')
                 break
-        print('message field', message_field, indices.keys())
+        print('message field', message_field)
         if message_field:
             message = message_field()
             message.ParseFromString(
