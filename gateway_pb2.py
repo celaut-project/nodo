@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"\x1b\n\x0b\x43ostMessage\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x05\"\x90\x01\n\x08Instance\x12\x30\n\rinstance_meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.MetadataH\x00\x88\x01\x01\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\x12\x12\n\x05token\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x10\n\x0e_instance_metaB\x08\n\x06_token\"h\n\x0eHashWithConfig\x12/\n\x04hash\x18\x01 \x01(\x0b\x32!.celaut.Any.Metadata.HashTag.Hash\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\"X\n\x11ServiceWithConfig\x12\x1c\n\x07service\x18\x02 \x01(\x0b\x32\x0b.celaut.Any\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\"\x88\x01\n\x06\x42uffer\x12\x12\n\x05\x63hunk\x18\x01 \x01(\x0cH\x00\x88\x01\x01\x12\x16\n\tseparator\x18\x02 \x01(\x0cH\x01\x88\x01\x01\x12\x13\n\x06signal\x18\x03 \x01(\x0cH\x02\x88\x01\x01\x12\x11\n\x04head\x18\x04 \x01(\x05H\x03\x88\x01\x01\x42\x08\n\x06_chunkB\x0c\n\n_separatorB\t\n\x07_signalB\x07\n\x05_head2\xd0\x02\n\x07Gateway\x12\x36\n\x0cStartService\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x35\n\x0bStopService\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x30\n\x06Hynode\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x31\n\x07GetFile\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x37\n\rGetServiceTar\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x38\n\x0eGetServiceCost\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\"\x07\n\x05\x45mpty\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"\x1b\n\x0b\x43ostMessage\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x05\"\x90\x01\n\x08Instance\x12\x30\n\rinstance_meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.MetadataH\x00\x88\x01\x01\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\x12\x12\n\x05token\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x10\n\x0e_instance_metaB\x08\n\x06_token\"h\n\x0eHashWithConfig\x12/\n\x04hash\x18\x01 \x01(\x0b\x32!.celaut.Any.Metadata.HashTag.Hash\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\"X\n\x11ServiceWithConfig\x12\x1c\n\x07service\x18\x02 \x01(\x0b\x32\x0b.celaut.Any\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\"\x88\x01\n\x06\x42uffer\x12\x12\n\x05\x63hunk\x18\x01 \x01(\x0cH\x00\x88\x01\x01\x12\x16\n\tseparator\x18\x02 \x01(\x08H\x01\x88\x01\x01\x12\x13\n\x06signal\x18\x03 \x01(\x08H\x02\x88\x01\x01\x12\x11\n\x04head\x18\x04 \x01(\x05H\x03\x88\x01\x01\x42\x08\n\x06_chunkB\x0c\n\n_separatorB\t\n\x07_signalB\x07\n\x05_head2\xd0\x02\n\x07Gateway\x12\x36\n\x0cStartService\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x35\n\x0bStopService\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x30\n\x06Hynode\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x31\n\x07GetFile\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x37\n\rGetServiceTar\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x12\x38\n\x0eGetServiceCost\x12\x0f.gateway.Buffer\x1a\x0f.gateway.Buffer\"\x00(\x01\x30\x01\x62\x06proto3'
   ,
   dependencies=[celaut__pb2.DESCRIPTOR,])
 
@@ -267,15 +267,15 @@ _BUFFER = _descriptor.Descriptor(
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
       name='separator', full_name='gateway.Buffer.separator', index=1,
-      number=2, type=12, cpp_type=9, label=1,
-      has_default_value=False, default_value=b"",
+      number=2, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
       name='signal', full_name='gateway.Buffer.signal', index=2,
-      number=3, type=12, cpp_type=9, label=1,
-      has_default_value=False, default_value=b"",
+      number=3, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
