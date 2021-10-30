@@ -1,5 +1,6 @@
+from posix import sched_param
 import socket
-from typing import Generator
+from typing import Generator, final
 
 import celaut_pb2, gateway_pb2
 import netifaces as ni
@@ -129,27 +130,29 @@ def get_file_chunks(filename, signal = Signal(exist=False)) -> Generator[gateway
             finally: signal.wait()
 
 
-def save_chunks_to_file(chunks: gateway_pb2.Buffer, filename):
+def save_chunks_to_file(buffer_iterator, filename):
     with open(filename, 'wb') as f:
-        for buffer in chunks:
+        for buffer in buffer_iterator:
             f.write(buffer.chunk)
 
 def parse_from_buffer(request_iterator, message_field = None, signal = Signal(exist=False), indices: dict = None): # indice: method
     if indices and len(indices) == 1: message_field = list(indices.values())[0]
     while True:
-        all_buffer = bytes('', encoding='utf-8')
+        all_buffer = bytes()
         while True:
             buffer = next(request_iterator)
-            if buffer.HasField('separator'):
+            # The order of conditions is important.
+            if buffer.HasField('head'):
                 try:
                     message_field = indices[buffer.separator]
                 except: pass
-                break
+            if buffer.HasField('chunk'):
+                all_buffer += buffer.chunk
             if buffer.HasField('signal'):
                 signal.change()
                 continue
-            if buffer.HasField('chunk'):
-                all_buffer += buffer.chunk
+            if buffer.HasField('separator'): 
+                break
         if message_field:
             message = message_field()
             message.ParseFromString(
@@ -157,30 +160,34 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
             )
             yield message
         else:
-            yield all_buffer # Clean buffer index bytes.
+            yield all_buffer
 
 def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_dir = None, indices: dict = None): # method: indice
     if not hasattr(message_iterator, '__iter__'): message_iterator=[message_iterator]
     for message in message_iterator:
         try:
-            yield gateway_pb2.Buffer(
-                separator = indices[type(message)]
-            )
+                head = indices[type(message)]
         except:  # if not indices or the method not appear on it.
-            yield gateway_pb2.Buffer(
-                separator = 1
-            )
-        finally: signal.wait()
+                head = 1
 
         message_bytes = message.SerializeToString()
         if len(message_bytes) < CHUNK_SIZE:
             signal.wait()
             try:
                 yield gateway_pb2.Buffer(
-                    chunk = bytes(message_bytes)
+                    chunk = bytes(message_bytes),
+                    head = head,
+                    separator = bytes()
                 )
             finally: signal.wait()
+
         else:
+            try:
+                yield gateway_pb2.Buffer(
+                    head = head
+                )
+            finally: signal.wait()
+
             try:
                 signal.wait()
                 print('vamos a pasar todo a lista ', len(message_bytes))
@@ -192,7 +199,7 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
                                         chunk = bytes(chunk)
                                     )
                     finally: signal.wait()
-            except: # INEFICIENT.    
+            except:    
                 try:
                     signal.wait()
                     print('vamos a escribir en cache ', len(message_bytes))
@@ -208,6 +215,12 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
                         os.remove(file)
                         gc.collect()
                     except: pass
+
+            try:
+                yield gateway_pb2.Buffer(
+                    separator = bytes()
+                )
+            finally: signal.wait()
 
 def client_grpc(method, output_field = None, input=None, timeout=None, indices_parser: dict = None, indices_serializer: dict = None): # indice: method
     signal = Signal()

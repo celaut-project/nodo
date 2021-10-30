@@ -30,11 +30,10 @@ message ServiceWithConfig { // S^C
 
 // GRPC.
 message Buffer  {
-    oneof oneof{    
-        bytes chunk = 1;
-        int32 separator = 2;
-        bytes signal = 3;
-    }
+    optional bytes chunk = 1;
+    optional bytes separator = 2;
+    optional bytes signal = 3;
+    optional int32 head = 4;
 }
 
 service Gateway {
