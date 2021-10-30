@@ -146,14 +146,15 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
             if buffer.HasField('head'):
                 try:
                     message_field = indices[buffer.separator]
-                    print('message field -> ', message_field)
                 except: pass
             if buffer.HasField('chunk'):
                 all_buffer += buffer.chunk
             if buffer.HasField('signal'):
+                print('is signal')
                 signal.change()
                 continue
             if buffer.HasField('separator'): 
+                print('is separator')
                 break
         print('message field', message_field)
         if message_field:
