@@ -86,7 +86,7 @@ def get_network_name( ip_or_uri: str) -> str:
         except KeyError:
             continue
 
-
+# GrpcBigBuffer.
 CHUNK_SIZE = 1024 * 1024  # 1MB
 import os, shutil, gc
 import gateway_pb2
@@ -145,18 +145,18 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
             print('buffer -> ', buffer.head, len(buffer.chunk), buffer.signal, buffer.separator)
             if buffer.HasField('head'):
                 try:
-                    message_field = indices[buffer.separator]
+                    message_field = indices[buffer.head]
                 except: pass
             if buffer.HasField('chunk'):
                 all_buffer += buffer.chunk
-            if buffer.HasField('signal'):
+            if buffer.HasField('signal') and buffer.signal:
                 print('is signal')
                 signal.change()
                 continue
-            if buffer.HasField('separator'): 
+            if buffer.HasField('separator') and buffer.separator: 
                 print('is separator')
                 break
-        print('message field', message_field)
+        print('message field', message_field, indices.keys())
         if message_field:
             message = message_field()
             message.ParseFromString(
@@ -181,7 +181,7 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
                 yield gateway_pb2.Buffer(
                     chunk = bytes(message_bytes),
                     head = head,
-                    separator = bytes()
+                    separator = True
                 )
             finally: signal.wait()
 
@@ -222,7 +222,7 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
 
             try:
                 yield gateway_pb2.Buffer(
-                    separator = bytes()
+                    separator = True
                 )
             finally: signal.wait()
 

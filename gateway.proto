@@ -31,8 +31,8 @@ message ServiceWithConfig { // S^C
 // GRPC.
 message Buffer  {
     optional bytes chunk = 1;
-    optional bytes separator = 2;
-    optional bytes signal = 3;
+    optional bool separator = 2;
+    optional bool signal = 3;
     optional int32 head = 4;
 }
 
