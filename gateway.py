@@ -615,7 +615,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             except Exception as e:
                 raise Exception('Was imposible start the service. ' + str(e))
         except Exception as e:
-            print(e)
+            print('error on start service ',e)
 
 
     def StopService(self, request_iterator, context):

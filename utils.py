@@ -136,6 +136,7 @@ def save_chunks_to_file(buffer_iterator, filename):
             f.write(buffer.chunk)
 
 def parse_from_buffer(request_iterator, message_field = None, signal = Signal(exist=False), indices: dict = None): # indice: method
+    print('go to parse')
     if indices and len(indices) == 1: message_field = list(indices.values())[0]
     while True:
         all_buffer = bytes()
