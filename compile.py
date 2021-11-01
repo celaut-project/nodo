@@ -257,7 +257,9 @@ class Hyper:
         any =  celaut.Any(
                         metadata = self.metadata,
                         value = service_buffer
-                    ).SerializeToString()
+                    )
+        print('any to any')
+        any = any.SerializeToString()
         print('go to write.')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
         with open( REGISTRY + id, 'wb') as f:
