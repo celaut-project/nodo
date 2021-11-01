@@ -142,7 +142,6 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
         while True:
             buffer = next(request_iterator)
             # The order of conditions is important.
-            print('buffer -> ', buffer.head, len(buffer.chunk), buffer.signal, buffer.separator)
             if buffer.HasField('head'):
                 try:
                     message_field = indices[buffer.head]
@@ -150,13 +149,10 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
             if buffer.HasField('chunk'):
                 all_buffer += buffer.chunk
             if buffer.HasField('signal') and buffer.signal:
-                print('is signal')
                 signal.change()
                 continue
             if buffer.HasField('separator') and buffer.separator: 
-                print('is separator')
                 break
-        print('message field', message_field)
         if message_field:
             message = message_field()
             message.ParseFromString(
@@ -170,7 +166,6 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
     if not hasattr(message_iterator, '__iter__'): message_iterator=[message_iterator]
     for message in message_iterator:
         if type(message) is tuple:
-            print('Get buffer from file.')
             try:
                 yield gateway_pb2.Buffer(
                     head = indices[message[1]]
@@ -201,7 +196,6 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
                 finally: signal.wait()
 
             else:
-                print('send big buffer')
                 try:
                     yield gateway_pb2.Buffer(
                         head = head
@@ -211,7 +205,6 @@ def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_di
                 try:
                     signal.wait()
                     file = cache_dir + str(len(message_bytes))
-                    print('write cache file')
                     with open(file, 'wb') as f:
                         f.write(message_bytes)
                     for b in get_file_chunks(file, signal=signal):
