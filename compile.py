@@ -237,6 +237,7 @@ class Hyper:
     def save(self):
         print('saving ...')
         service_buffer = self.service.SerializeToString()
+        del self.service
         print('calculate hashes.')
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(
@@ -253,13 +254,15 @@ class Hyper:
         #self.service.container.filesystem.ClearField('branch')
         self.metadata.complete = True;
         print('do it.')
-        # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-        with open( REGISTRY + id, 'wb') as f:
-            f.write(
-                    celaut.Any(
+        any =  celaut.Any(
                         metadata = self.metadata,
                         value = service_buffer
                     ).SerializeToString()
+        print('go to write.')
+        # https://github.com/moby/moby/issues/20972#issuecomment-193381422
+        with open( REGISTRY + id, 'wb') as f:
+            f.write(
+                    any
                 )
         print('writed on file.')
         return id
