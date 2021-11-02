@@ -89,7 +89,7 @@ def get_network_name( ip_or_uri: str) -> str:
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
-            for chunk in iter(lambda: entry.read(1024 * 1024), b''):
+            for chunk in iter(lambda: entry.read(1024 * 8), b''):
                 yield chunk
     return b''.join([b for b in generator(filename)])
 
