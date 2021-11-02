@@ -272,7 +272,7 @@ def launch_service(
         father_ip: str, 
         config: celaut.Configuration = None
         ) -> gateway_pb2.Instance:
-    l.LOGGER('Go to launch a service. ', metadata.hashtag.hash[0].value.hex())
+    print('Go to launch a service. ', metadata.hashtag.hash[0].value.hex())
     import time
     time.sleep(10)
     if service_buffer == None: raise Exception("Service object can't be None")
