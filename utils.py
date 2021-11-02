@@ -91,7 +91,9 @@ def read_file(filename) -> bytes:
         with open(filename, 'rb') as entry:
             for chunk in iter(lambda: entry.read(1024 * 8), b''):
                 yield chunk
-    return b''.join([b for b in generator(filename)])
+    buff = b''.join([b for b in generator(filename)])
+    print('buff '+ filename, len(buff))
+    return buff
 
 # GrpcBigBuffer.
 CHUNK_SIZE = 1024 * 1024  # 1MB
