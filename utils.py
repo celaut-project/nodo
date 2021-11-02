@@ -105,7 +105,7 @@ def prevent_ram_kill(acumulator: int = 0) -> tuple:
             print('                 yield ', acumulator)
             return (
                 acumulator - used_ram*0.01 if acumulator > 0 else acumulator + used_ram*0.01,
-                HIGHT_RAM_MARGIN - used_ram if HIGHT_RAM_MARGIN - used_ram < LOW_RAM_MARGIN else 1024
+                int(HIGHT_RAM_MARGIN - used_ram) if HIGHT_RAM_MARGIN - used_ram < LOW_RAM_MARGIN else 1024
                 )
 
 
