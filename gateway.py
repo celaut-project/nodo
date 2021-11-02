@@ -236,6 +236,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
                         "mongodb://localhost:27017/"
                     )["mongo"]["peerInstances"].find()):
             del peer['_id']
+            print('peer')
             peer_instance = Parse(
                 text = json.dumps(peer),
                 message = celaut.Instance(),
@@ -311,6 +312,8 @@ def launch_service(
 
             #  The node launches the service locally.
             l.LOGGER('El nodo lanza el servicio localmente.')
+            import time
+            time.sleep(10)
             try:
                 id = build.build(
                         service_buffer = service_buffer, 
