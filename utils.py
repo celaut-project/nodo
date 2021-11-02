@@ -169,7 +169,7 @@ def parse_from_buffer(request_iterator, message_field = None, signal = Signal(ex
             yield all_buffer
 
 def serialize_to_buffer(message_iterator, signal = Signal(exist=False), cache_dir = None, indices: dict = None): # method: indice
-    if not hasattr(message_iterator, '__iter__'): message_iterator=[message_iterator]
+    if not hasattr(message_iterator, '__iter__') or type(message_iterator) is tuple: message_iterator=[message_iterator]
     for message in message_iterator:
         if type(message) is tuple:
             try:
