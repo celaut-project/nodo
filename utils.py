@@ -109,7 +109,7 @@ def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
             ac_prev_ram = 0
-            for chunk in iter(lambda: entry.read(1024 * 8), b''):
+            for chunk in iter(lambda: entry.read(1024 * 1024), b''):
                 ac_prev_ram = prevent_ram_kill(acumulator=ac_prev_ram)
                 yield chunk
     return b''.join([b for b in generator(filename)])
