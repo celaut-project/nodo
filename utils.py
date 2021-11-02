@@ -91,25 +91,25 @@ def get_network_name( ip_or_uri: str) -> str:
 # Big Data utils.
 HIGHT_RAM_MARGIN = 90
 LOW_RAM_MARGIN = 14
-def prevent_ram_kill():
-    acumulator = 0
+def prevent_ram_kill(acumulator: int = 0) -> int:
     prev_mem = 0
     while True:
         used_ram = psutil.virtual_memory()[2]
-        if used_ram > HIGHT_RAM_MARGIN or randint(LOW_RAM_MARGIN, 100) < used_ram and not prev_mem - used_ram > randint(1, 100):
-            print('wait for more RAM.')
-            acumulator += used_ram * 0.01
+        if used_ram > HIGHT_RAM_MARGIN or randint(LOW_RAM_MARGIN, 100) < used_ram:
+            print('wait for more RAM. ', acumulator)
+            acumulator += used_ram * 0.01 if prev_mem - used_ram < 0 else -0.01*(prev_mem - used_ram)
             prev_mem = used_ram
             sleep(acumulator)
         else:
-            print('         yield')
-            break
+            print('                 yield ', acumulator)
+            return acumulator
 
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
+            ac_prev_ram = 0
             for chunk in iter(lambda: entry.read(1024 * 1024), b''):
-                prevent_ram_kill()
+                ac_prev_ram = prevent_ram_kill(ac_prev_ram)
                 yield chunk
     return b''.join([b for b in generator(filename)])
 
