@@ -272,7 +272,9 @@ def launch_service(
         father_ip: str, 
         config: celaut.Configuration = None
         ) -> gateway_pb2.Instance:
-    l.LOGGER('Go to launch a service. ')
+    l.LOGGER('Go to launch a service. ', metadata.hashtag.hash[0].value.hex())
+    import time
+    time.sleep(10)
     if service_buffer == None: raise Exception("Service object can't be None")
     getting_container = False
     # Here it asks the balancer if it should assign the job to a peer.
@@ -312,7 +314,7 @@ def launch_service(
 
             #  The node launches the service locally.
             l.LOGGER('El nodo lanza el servicio localmente.')
-            import time
+            
             time.sleep(10)
             try:
                 id = build.build(
