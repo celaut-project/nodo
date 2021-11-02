@@ -107,7 +107,7 @@ def prevent_ram_kill(acumulator: int = LOW_RAM_MARGIN) -> int:
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
-            ac_prev_ram = None
+            ac_prev_ram = LOW_RAM_MARGIN
             for chunk in iter(lambda: entry.read(1024 * 1024), b''):
                 ac_prev_ram = prevent_ram_kill(acumulator=ac_prev_ram)
                 yield chunk
