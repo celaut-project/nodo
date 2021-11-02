@@ -73,7 +73,7 @@ def build(
     ) -> str:
     id = get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata)
     l.LOGGER('\nBuilding ' + id)
-    
+    return id
     try:
         # it's locally?
         check_output('/usr/bin/docker inspect '+id+'.docker', shell=True)
