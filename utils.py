@@ -86,6 +86,13 @@ def get_network_name( ip_or_uri: str) -> str:
         except KeyError:
             continue
 
+def read_file(filename):
+    def generator(filename):
+        with open(filename, 'rb') as entry:
+            for chunk in iter(lambda: entry.read(1024 * 1024), b''):
+                yield chunk
+    return b''.join([b for b in generator(filename)])
+
 # GrpcBigBuffer.
 CHUNK_SIZE = 1024 * 1024  # 1MB
 import os, shutil, gc
@@ -129,7 +136,6 @@ def get_file_chunks(filename, signal = Signal(exist=False)) -> Generator[gateway
                 yield gateway_pb2.Buffer(chunk=piece)
     finally: 
         gc.collect()
-
 
 def save_chunks_to_file(buffer_iterator, filename):
     with open(filename, 'wb') as f:
