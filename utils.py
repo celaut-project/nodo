@@ -97,7 +97,7 @@ def prevent_ram_kill(acumulator: int = 0) -> int:
         used_ram = psutil.virtual_memory()[2]
         if used_ram > HIGHT_RAM_MARGIN or randint(LOW_RAM_MARGIN, 100 - int(acumulator)) < used_ram:
             print('wait for more RAM. ', acumulator)
-            acumulator += used_ram*0.01 if prev_mem - used_ram < 0 else -0.01*(prev_mem - used_ram)
+            acumulator += used_ram*0.01 if prev_mem - used_ram < 0 else (used_ram - prev_mem)*0.01
             prev_mem = used_ram
             if acumulator < 0: acumulator = 0
             sleep(acumulator*0.01)
@@ -109,7 +109,7 @@ def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
             ac_prev_ram = 0
-            for chunk in iter(lambda: entry.read(1024 * 1024), b''):
+            for chunk in iter(lambda: entry.read(1024 * 8), b''):
                 ac_prev_ram = prevent_ram_kill(acumulator=ac_prev_ram)
                 yield chunk
     return b''.join([b for b in generator(filename)])
