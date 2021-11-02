@@ -91,7 +91,7 @@ def get_network_name( ip_or_uri: str) -> str:
 # Big Data utils.
 HIGHT_RAM_MARGIN = 90
 LOW_RAM_MARGIN = 10
-def prevent_ram_kill(acumulator: int = 0) -> int:
+def prevent_ram_kill(acumulator: int = 0) -> tuple:
     prev_mem = psutil.virtual_memory()[2]
     while True:
         used_ram = psutil.virtual_memory()[2]
