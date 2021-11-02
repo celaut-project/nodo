@@ -47,6 +47,7 @@ def get_service_hex_main_hash(service_buffer: bytes, metadata: Any.Metadata = No
     # If not but the spec. is complete, calculate the hash prunning it before.
     # If not and is incomplete, it's going to be imposible calculate any hash.
     if metadata.complete:
+        print('going to calculate hash of service')
         return SHA3_256(
             value = service_buffer
         ).hex()

@@ -59,7 +59,7 @@ def get_container_from_outside(
         os.system('docker load < ' + HYCACHE + id + '.tar')
         os.system('docker tag ' + id + ' ' + id + '.docker')
         check_output('/usr/bin/docker inspect ' + id, shell=True)
-    except Exception as e:
+    except:
         l.LOGGER('Exception during load the tar ' + id + '.docker')
         raise Exception('Error building the container.')
 
