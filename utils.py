@@ -3,6 +3,7 @@ from time import sleep
 from typing import Generator
 
 import celaut_pb2, gateway_pb2
+from gateway import PREVENT_RAM_MARGIN
 import netifaces as ni
 
 def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
@@ -89,10 +90,10 @@ def get_network_name( ip_or_uri: str) -> str:
 
 
 # Big Data utils.
-PREVENT_RAM_MARGIN = 90
 def prevent_ram_kill():
     while True:
         if psutil.virtual_memory()[2] > PREVENT_RAM_MARGIN:
+            print('wait for more RAM.')
             sleep(1)
         else:
             break
@@ -104,6 +105,7 @@ def read_file(filename) -> bytes:
                 prevent_ram_kill()
                 yield chunk
     return b''.join([b for b in generator(filename)])
+
 
 # GrpcBigBuffer.
 CHUNK_SIZE = 1024 * 1024  # 1MB
