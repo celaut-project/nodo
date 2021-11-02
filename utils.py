@@ -89,14 +89,16 @@ def get_network_name( ip_or_uri: str) -> str:
 
 
 # Big Data utils.
-PREVENT_RAM_MARGIN = 90
+HIGHT_RAM_MARGIN = 90
+LOW_RAM_MARGIN = 14
 def prevent_ram_kill():
     while True:
         used_ram = psutil.virtual_memory()[2]
-        if used_ram > PREVENT_RAM_MARGIN or randint(1, 100) < used_ram:
+        if used_ram > HIGHT_RAM_MARGIN or randint(LOW_RAM_MARGIN, 100) < used_ram:
             print('wait for more RAM.')
             sleep(1)
         else:
+            print('         yield')
             break
 
 def read_file(filename) -> bytes:
