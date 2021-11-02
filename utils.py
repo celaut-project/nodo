@@ -92,7 +92,8 @@ def get_network_name( ip_or_uri: str) -> str:
 PREVENT_RAM_MARGIN = 90
 def prevent_ram_kill():
     while True:
-        if psutil.virtual_memory()[2] > PREVENT_RAM_MARGIN:
+        used_ram = psutil.virtual_memory()[2]
+        if used_ram > PREVENT_RAM_MARGIN or used_ram < randint(100):
             print('wait for more RAM.')
             sleep(1)
         else:
