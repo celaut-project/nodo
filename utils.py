@@ -96,7 +96,7 @@ def prevent_ram_kill():
         used_ram = psutil.virtual_memory()[2]
         if used_ram > HIGHT_RAM_MARGIN or randint(LOW_RAM_MARGIN, 100) < used_ram:
             print('wait for more RAM.')
-            sleep(1)
+            sleep(used_ram*0.01)
         else:
             print('         yield')
             break
