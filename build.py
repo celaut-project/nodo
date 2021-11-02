@@ -5,6 +5,7 @@ import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os
 from utils import service_extended, save_chunks_to_file, serialize_to_buffer
 from compile import HYCACHE
 import logger as l
+import utils
 
 from verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
@@ -95,13 +96,12 @@ def build(
 if __name__ == "__main__":
     import sys
     id = sys.argv[1]
-    with open("/home/hy/node/__registry__/"+id, "rb") as file:
-        any = gateway_pb2.celaut__pb2.Any()
-        any.ParseFromString(file.read())
-        if get_service_hex_main_hash(service_buffer = any.value, metadata = any.metadata) == id:
-            build(
-                service_buffer = any.value, 
-                metadata = any.metadata
-                )
-        else:
-            l.LOGGER('Error: asignacion de servicio erronea en el registro.')
+    any = gateway_pb2.celaut__pb2.Any()
+    any.ParseFromString(utils.read_file("/home/hy/node/__registry__/"+id))
+    if get_service_hex_main_hash(service_buffer = any.value, metadata = any.metadata) == id:
+        build(
+            service_buffer = any.value, 
+            metadata = any.metadata
+            )
+    else:
+        l.LOGGER('Error: asignacion de servicio erronea en el registro.')

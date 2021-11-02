@@ -502,10 +502,9 @@ def get_service_buffer_from_registry(hash: str) -> bytes:
 def get_from_registry(hash: str) -> celaut.Any:
     l.LOGGER('Getting ' + hash + ' service from the local registry.')
     try:
-        with open(REGISTRY + hash, 'rb') as file:
-            any = celaut.Any()
-            any.ParseFromString(file.read())
-            return any
+        any = celaut.Any()
+        any.ParseFromString(utils.read_file(filename = REGISTRY + hash))
+        return any
     except (IOError, FileNotFoundError):
         l.LOGGER('The service was not on registry.')
         raise FileNotFoundError
