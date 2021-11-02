@@ -630,7 +630,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
         
         l.LOGGER('Stopped the instance with token -> ' + token_message.token)
-        for b in utils.serialize_to_buffer(gateway_pb2.Empty()): yield b
+        yield gateway_pb2.Buffer(
+            chunk = gateway_pb2.Empty().SerializeToString(),
+            separator = True
+        )
     
     def Hynode(self, request_iterator, context):
         instance = next(utils.parse_from_buffer(
