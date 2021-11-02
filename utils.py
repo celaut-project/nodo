@@ -92,7 +92,6 @@ def get_network_name( ip_or_uri: str) -> str:
 HIGHT_RAM_MARGIN = 90
 LOW_RAM_MARGIN = 10
 def prevent_ram_kill(acumulator: int = 0) -> int:
-    if acumulator < 0: acumulator = 0
     prev_mem = psutil.virtual_memory()[2]
     while True:
         used_ram = psutil.virtual_memory()[2]
@@ -100,6 +99,7 @@ def prevent_ram_kill(acumulator: int = 0) -> int:
             print('wait for more RAM. ', acumulator)
             acumulator += used_ram*0.01 if prev_mem - used_ram < 0 else -0.01*(prev_mem - used_ram)
             prev_mem = used_ram
+            if acumulator < 0: acumulator = 0
             sleep(acumulator*0.01)
         else:
             print('                 yield ', acumulator)
