@@ -1,6 +1,6 @@
-from posix import sched_param
-import socket
-from typing import Generator, final
+import socket, psutil
+from time import sleep
+from typing import Generator
 
 import celaut_pb2, gateway_pb2
 import netifaces as ni
@@ -86,14 +86,24 @@ def get_network_name( ip_or_uri: str) -> str:
         except KeyError:
             continue
 
+
+
+# Big Data utils.
+PREVENT_RAM_MARGIN = 90
+def prevent_ram_kill():
+    while True:
+        if psutil.virtual_memory()[2] > PREVENT_RAM_MARGIN:
+            sleep(1)
+        else:
+            break
+
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
             for chunk in iter(lambda: entry.read(1024 * 8), b''):
+                prevent_ram_kill()
                 yield chunk
-    buff = b''.join([b for b in generator(filename)])
-    print('buff '+ filename, len(buff))
-    return buff
+    return b''.join([b for b in generator(filename)])
 
 # GrpcBigBuffer.
 CHUNK_SIZE = 1024 * 1024  # 1MB
