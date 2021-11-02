@@ -92,11 +92,15 @@ def get_network_name( ip_or_uri: str) -> str:
 HIGHT_RAM_MARGIN = 90
 LOW_RAM_MARGIN = 14
 def prevent_ram_kill():
+    acumulator = 0
+    prev_mem = 0
     while True:
         used_ram = psutil.virtual_memory()[2]
-        if used_ram > HIGHT_RAM_MARGIN or randint(LOW_RAM_MARGIN, 100) < used_ram:
+        if used_ram > HIGHT_RAM_MARGIN or randint(LOW_RAM_MARGIN, 100) < used_ram and not prev_mem - used_ram > randint(1, 100):
             print('wait for more RAM.')
-            sleep(used_ram*0.01)
+            acumulator += used_ram * 0.01
+            prev_mem = used_ram
+            sleep(acumulator)
         else:
             print('         yield')
             break
@@ -108,6 +112,10 @@ def read_file(filename) -> bytes:
                 prevent_ram_kill()
                 yield chunk
     return b''.join([b for b in generator(filename)])
+
+
+
+
 
 
 # GrpcBigBuffer.
