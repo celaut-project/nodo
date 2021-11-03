@@ -94,30 +94,28 @@ import psutil
 from numpy.random import choice
 
 HIGHT_RAM_MARGIN = 90
-LOW_RAM_MARGIN = 10
-def prevent_ram_kill(acumulator: int = 0) -> tuple:
-    prev_mem = psutil.virtual_memory()[2]
+def prevent_ram_kill(generator) -> tuple:
     while True:
         used_ram = psutil.virtual_memory()[2]
-        ac_change_rate = used_ram/abs(acumulator) if abs(acumulator) >= 1 else used_ram*abs(acumulator) if acumulator != 0 else used_ram*0.01
-        print('         ', ac_change_rate)
-        if used_ram > HIGHT_RAM_MARGIN or acumulator >= 0 and randint(0, 100 - int(acumulator)) < used_ram or choice([True, False], 1, p=[0.5+used_ram*0.01, 0.5-used_ram*0.01])[0]:
-            print('wait for more RAM. ', acumulator)
-            acumulator += ac_change_rate if prev_mem - used_ram < 0 else used_ram - prev_mem
-            prev_mem = used_ram
-            sleep(used_ram*0.01)
+        if used_ram > HIGHT_RAM_MARGIN or choice([True, False], 1, p=[0.5+used_ram*0.005, 0.5-used_ram*0.005])[0]:
+            print('wait for more RAM. ')
+            sleep(used_ram)
         else:
-            print('                 yield ', acumulator)
-            return acumulator - ac_change_rate
+            print('                 yield ')
+            while( choice([False, True], 1, p=[0.5+used_ram*0.005, 0.5-used_ram*0.005])[0] ):
+                try:
+                    yield next(generator)
+                except: break
+                used_ram = psutil.virtual_memory()[2]
 
 
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
-            ac_prev_ram = 0
-            for chunk in iter(lambda: entry.read(1024 * 1024), b''):
-                ac_prev_ram = prevent_ram_kill(acumulator=ac_prev_ram)
-                yield chunk
+            for chunk in prevent_ram_kill(
+                    generator = iter(lambda: entry.read(1024 * 1024), b'')
+                ):
+                    yield chunk
     return b''.join([b for b in generator(filename)])
 
 
