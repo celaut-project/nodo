@@ -103,14 +103,16 @@ def prevent_ram_kill(generator, flush):
         else:
             while randint(0,100) > used_ram:
                 for i in range(100-int(used_ram)):
+                    used_ram = psutil.virtual_memory()[2]
+                    if used_ram > HIGHT_RAM_MARGIN: break
                     try:
                         y = next(generator)
                         print('         y', len(y))
                         yield y
                     except StopIteration:
                         return
-                    except Exception as e: print(e)
                 used_ram = psutil.virtual_memory()[2]
+                if used_ram > HIGHT_RAM_MARGIN: break
 
 
 def read_file(filename) -> bytes:
