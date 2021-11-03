@@ -88,40 +88,13 @@ def get_network_name( ip_or_uri: str) -> str:
 
 
 
-# Big Data utils.
-from random import randint
-import psutil, gc
-
-HIGHT_RAM_MARGIN = 90
-def prevent_ram_kill(generator, flush):
-    while True:
-        used_ram = psutil.virtual_memory()[2]
-        if used_ram > HIGHT_RAM_MARGIN or randint(0,100) < used_ram:
-            print('flush ')
-            if flush: flush()
-            gc.collect()
-        else:
-            while randint(0,100) > used_ram:
-                for i in range(100-int(used_ram)):
-                    used_ram = psutil.virtual_memory()[2]
-                    if used_ram > HIGHT_RAM_MARGIN: break
-                    try:
-                        y = next(generator)
-                        print('         y', len(y))
-                        yield y
-                    except StopIteration:
-                        return
-                used_ram = psutil.virtual_memory()[2]
-                if used_ram > HIGHT_RAM_MARGIN: break
-
-
+# I/O Big Data utils.
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
             for chunk in iter(lambda: entry.read(1024 * 1024), b''):
                     yield chunk
     return b''.join([b for b in generator(filename)])
-
 
 
 

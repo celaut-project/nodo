@@ -102,7 +102,7 @@ message Service {
             repeated ItemBranch branch = 1;
         }
         bytes architecture = 1;
-        Filesystem filesystem = 2;
+        bytes filesystem = 2;
         map<string, FieldDef> enviroment_variables = 3;
         string entrypoint = 4;
     }
