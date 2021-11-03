@@ -99,7 +99,6 @@ def prevent_ram_kill(generator, flush) -> tuple:
         if used_ram > HIGHT_RAM_MARGIN or randint(0,100) < used_ram:
             print('wait for more RAM. ')
             flush()
-            sleep(used_ram*0.1)
         else:
             while randint(0,100) > used_ram:
                 try:
