@@ -120,11 +120,7 @@ def read_file(filename) -> bytes:
         with open(filename, 'rb') as entry:
             for chunk in iter(lambda: entry.read(1024 * 1024), b''):
                     yield chunk
-    list = []
-    for b in generator(filename):
-        list.append(b)
-        print('             yield\n')
-    return b''.join(list)
+    return b''.join([b for b in generator(filename)])
 
 
 
