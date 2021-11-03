@@ -12,5 +12,6 @@ utils.prevent_kill(len(any.value))
 service = celaut_pb2.Service()
 service.ParseFromString(any.value)
 service.container.ClearField('filesystem')
-
+print(service)
+sleep(10)
 print('do it.')
