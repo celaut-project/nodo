@@ -103,13 +103,12 @@ def prevent_ram_kill(generator, flush):
         else:
             while randint(0,100) > used_ram:
                 for i in range(100-int(used_ram)):
-                    
                     try:
                         y = next(generator)
                         print('         y', len(y))
                         yield y
                     except StopIteration:
-                        break
+                        return
                     except Exception as e: print(e)
                 used_ram = psutil.virtual_memory()[2]
 
