@@ -106,7 +106,7 @@ def prevent_ram_kill(generator, flush):
                     
                     try:
                         y = next(generator)
-                        print('         y', y)
+                        print('         y', len(y))
                         yield y
                     except StopIteration:
                         break
