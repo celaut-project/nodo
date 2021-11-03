@@ -89,12 +89,18 @@ def get_network_name( ip_or_uri: str) -> str:
 
 
 # I/O Big Data utils.
-import psutil, os.path
+import psutil, os.path, gc
 from time import sleep
 
-def prevent_kill(len: int):
+PREVENT_RATE = 1.5
+CHUNK_SIZE = 1024 * 1024  # 1MB
+
+def prevent_kill(len: int) -> bool:
+    return psutil.virtual_memory().available > PREVENT_RATE*len
+
+def wait_to_prevent_kill(len: int) -> None:
     while True:
-        if psutil.virtual_memory().available < len:
+        if not prevent_kill(len = len):
             print('needs wait.')
             sleep(1)
         else:
@@ -103,12 +109,23 @@ def prevent_kill(len: int):
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
-            for chunk in iter(lambda: entry.read(1024 * 1024), b''):
-                prevent_kill(len = os.path.getsize(filename))
-                yield chunk
-    prevent_kill(len = os.path.getsize(filename))
+            chunk_size = 0
+            for chunk in iter(lambda: entry.read(CHUNK_SIZE), b''):
+                chunk_size += CHUNK_SIZE
+                if prevent_kill(len = os.path.getsize(filename) - chunk_size):
+                    yield chunk
+                else:
+                    entry.close()
+                    raise Exception
+
+    wait_to_prevent_kill(len = os.path.getsize(filename))
     print('go to read it.')
-    return b''.join([b for b in generator(filename)])
+    while True:
+        try:
+            return b''.join([b for b in generator(filename)])
+        except:
+            sleep(randint(1, 10))
+            gc.collect()
 
 
 
