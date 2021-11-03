@@ -101,9 +101,9 @@ def prevent_ram_kill(generator) -> tuple:
             print('wait for more RAM. ')
             sleep(used_ram)
         else:
-            print('                 yield ')
             while( choice([False, True], 1, p=[0.5+used_ram*0.005, 0.5-used_ram*0.005])[0] ):
                 try:
+                    print('                 yield ')
                     yield next(generator)
                 except: break
                 used_ram = psutil.virtual_memory()[2]
