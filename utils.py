@@ -104,7 +104,7 @@ def prevent_ram_kill(acumulator: int = 0) -> tuple:
             print('wait for more RAM. ', acumulator)
             acumulator += ac_change_rate if prev_mem - used_ram < 0 else used_ram - prev_mem
             prev_mem = used_ram
-            sleep(ac_change_rate)
+            sleep(used_ram*0.01)
         else:
             print('                 yield ', acumulator)
             return acumulator - ac_change_rate
