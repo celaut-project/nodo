@@ -106,19 +106,15 @@ def prevent_ram_kill(acumulator: int = 0) -> tuple:
             sleep(acumulator*0.01)
         else:
             print('                 yield ', acumulator)
-            return (
-                acumulator - used_ram*0.01 if acumulator > 0 else acumulator + used_ram*0.01,
-                int(HIGHT_RAM_MARGIN - used_ram) if randint(int(HIGHT_RAM_MARGIN - used_ram), HIGHT_RAM_MARGIN) < used_ram else 1024
-            )
+            return acumulator - used_ram*0.01 if acumulator > 0 else acumulator + used_ram*0.01
 
 
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
             ac_prev_ram = 0
-            chunk_size_portion = 1024
-            for chunk in iter(lambda: entry.read(1024 * chunk_size_portion), b''):
-                ac_prev_ram, chunk_size_portion = prevent_ram_kill(acumulator=ac_prev_ram)
+            for chunk in iter(lambda: entry.read(1024 * 1024), b''):
+                ac_prev_ram = prevent_ram_kill(acumulator=ac_prev_ram)
                 yield chunk
     return b''.join([b for b in generator(filename)])
 
