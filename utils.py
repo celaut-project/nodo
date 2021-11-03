@@ -103,8 +103,8 @@ def prevent_ram_kill(generator, flush) -> tuple:
         else:
             while randint(0,100) > used_ram:
                 try:
-                    print('                 yield ')
                     for i in range(100-int(used_ram)):
+                        print('                 yield ')
                         yield next(generator)
                 except: break
                 used_ram = psutil.virtual_memory()[2]
