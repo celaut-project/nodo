@@ -110,6 +110,7 @@ def prevent_ram_kill(generator, flush):
                         yield y
                     except StopIteration:
                         break
+                    except Exception as e: print(e)
                 used_ram = psutil.virtual_memory()[2]
 
 
