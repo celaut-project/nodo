@@ -104,7 +104,6 @@ def prevent_ram_kill(generator, flush):
             while randint(0,100) > used_ram:
                 try:
                     for i in range(100-int(used_ram)):
-                        print('                 yield ')
                         yield next(generator)
                 except: break
                 used_ram = psutil.virtual_memory()[2]
@@ -118,7 +117,11 @@ def read_file(filename) -> bytes:
                     flush = lambda: entry.flush
                 ):
                     yield chunk
-    return b''.join([b for b in generator(filename)])
+    list = []
+    for b in generator(filename):
+        list.append(b)
+        print('             yield')
+    return b''.join(list)
 
 
 
