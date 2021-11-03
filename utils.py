@@ -102,11 +102,9 @@ def prevent_kill(len: int):
 
 def read_file(filename) -> bytes:
     def generator(filename):
-        counter = 0
         with open(filename, 'rb') as entry:
             for chunk in iter(lambda: entry.read(1024 * 1024), b''):
-                counter += 1024 * 1024
-                prevent_kill(len = os.path.getsize(filename)-counter)
+                prevent_kill(len = os.path.getsize(filename))
                 yield chunk
     prevent_kill(len = os.path.getsize(filename))
     print('go to read it.')
