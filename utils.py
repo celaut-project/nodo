@@ -124,6 +124,7 @@ def read_file(filename) -> bytes:
         try:
             return b''.join([b for b in generator(filename)])
         except:
+            print('wait more for it.')
             sleep(randint(1, 10))
             gc.collect()
 
