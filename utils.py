@@ -118,10 +118,7 @@ def prevent_ram_kill(generator, flush):
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
-            for chunk in prevent_ram_kill(
-                    generator = iter(lambda: entry.read(1024 * 1024), b''),
-                    flush = lambda: entry.flush
-                ):
+            for chunk in iter(lambda: entry.read(1024 * 1024), b''):
                     yield chunk
     list = []
     for b in generator(filename):
