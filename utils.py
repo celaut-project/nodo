@@ -97,8 +97,8 @@ def prevent_ram_kill(generator, flush) -> tuple:
     while True:
         used_ram = psutil.virtual_memory()[2]
         if used_ram > HIGHT_RAM_MARGIN or randint(0,100) < used_ram:
-            print('wait for more RAM. ')
-            flush()
+            print('flush ')
+            if flush: flush()
         else:
             while randint(0,100) > used_ram:
                 try:
@@ -114,7 +114,7 @@ def read_file(filename) -> bytes:
         with open(filename, 'rb') as entry:
             for chunk in prevent_ram_kill(
                     generator = iter(lambda: entry.read(1024 * 1024), b''),
-                    flush = entry.flush
+                    flush = lambda: entry.flush
                 ):
                     yield chunk
     return b''.join([b for b in generator(filename)])
