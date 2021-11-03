@@ -104,7 +104,7 @@ def prevent_ram_kill(acumulator: int = 0) -> tuple:
             if acumulator > 100: acumulator = 100
         else:
             print('                 yield ', acumulator)
-            return acumulator - used_ram*0.001
+            return acumulator - used_ram*0.001 if acumulator > 0 else 0
 
 
 def read_file(filename) -> bytes:
