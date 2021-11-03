@@ -106,7 +106,7 @@ def prevent_ram_kill(acumulator: int = 0) -> tuple:
             sleep(used_ram*0.01)
         else:
             print('                 yield ', acumulator)
-            break
+            return acumulator
 
 
 def read_file(filename) -> bytes:
