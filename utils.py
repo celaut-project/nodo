@@ -99,7 +99,8 @@ def prevent_ram_kill(acumulator: int = 0) -> tuple:
             print('wait for more RAM. ', acumulator)
             acumulator += used_ram*0.01 if prev_mem - used_ram < 0 else (used_ram - prev_mem)*0.1
             prev_mem = used_ram
-            if acumulator < 0 or acumulator > 100: acumulator = randint(LOW_RAM_MARGIN, HIGHT_RAM_MARGIN)
+            if acumulator < 0: acumulator = 0
+            if acumulator > 100: acumulator = 100
             sleep(acumulator*0.01)
         else:
             print('                 yield ', acumulator)
