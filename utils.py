@@ -109,6 +109,7 @@ def read_file(filename) -> bytes:
                 prevent_kill(len = os.path.getsize(filename)-counter)
                 yield chunk
     prevent_kill(len = os.path.getsize(filename))
+    print('go to read it.')
     return b''.join([b for b in generator(filename)])
 
 
