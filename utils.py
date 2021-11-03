@@ -91,17 +91,16 @@ def get_network_name( ip_or_uri: str) -> str:
 # Big Data utils.
 from random import randint
 import psutil
-from numpy.random import choice
 
 HIGHT_RAM_MARGIN = 90
 def prevent_ram_kill(generator) -> tuple:
     while True:
         used_ram = psutil.virtual_memory()[2]
-        if used_ram > HIGHT_RAM_MARGIN or choice([True, False], 1, p=[0.5+used_ram*0.005, 0.5-used_ram*0.005])[0]:
+        if used_ram > HIGHT_RAM_MARGIN or randint(0,100) < used_ram:
             print('wait for more RAM. ')
-            sleep(used_ram)
+            sleep(used_ram*0.1)
         else:
-            while( choice([False, True], 1, p=[0.5+used_ram*0.005, 0.5-used_ram*0.005])[0] ):
+            while randint(0,100) > used_ram:
                 try:
                     print('                 yield ')
                     yield next(generator)
