@@ -93,13 +93,13 @@ from random import randint
 import psutil, gc
 
 HIGHT_RAM_MARGIN = 90
-def prevent_ram_kill(generator, flush) -> tuple:
+def prevent_ram_kill(generator, flush):
     while True:
         used_ram = psutil.virtual_memory()[2]
         if used_ram > HIGHT_RAM_MARGIN or randint(0,100) < used_ram:
             print('flush ')
             if flush: flush()
-            gc.collect()
+            #gc.collect()
         else:
             while randint(0,100) > used_ram:
                 try:
