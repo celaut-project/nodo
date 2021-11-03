@@ -100,7 +100,7 @@ def prevent_ram_kill(acumulator: int = 0) -> tuple:
     while True:
         used_ram = psutil.virtual_memory()[2]
         ac_change_rate = used_ram/abs(acumulator) if abs(acumulator) >= 1 else used_ram*abs(acumulator) if acumulator != 0 else used_ram*0.01
-        if used_ram > HIGHT_RAM_MARGIN or acumulator >= 0 and randint(0, 100 - int(acumulator)) < used_ram: # or choice([True, False], 1, p=[0.5+used_ram*0.01, 0.5-used_ram*0.01])[0]:
+        if used_ram > HIGHT_RAM_MARGIN or acumulator >= 0 and randint(0, 100 - int(acumulator)) < used_ram or choice([True, False], 1, p=[0.5+used_ram*0.01, 0.5-used_ram*0.01])[0]:
             print('wait for more RAM. ', acumulator)
             acumulator += ac_change_rate if prev_mem - used_ram < 0 else used_ram - prev_mem
             prev_mem = used_ram
