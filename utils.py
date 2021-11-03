@@ -98,8 +98,8 @@ def prevent_ram_kill(generator, flush):
         used_ram = psutil.virtual_memory()[2]
         if used_ram > HIGHT_RAM_MARGIN or randint(0,100) < used_ram:
             print('flush ')
-            #if flush: flush()
-            #gc.collect()
+            if flush: flush()
+            gc.collect()
         else:
             while randint(0,100) > used_ram:
                 for i in range(100-int(used_ram)):
