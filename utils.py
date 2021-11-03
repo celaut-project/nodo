@@ -99,11 +99,11 @@ def prevent_ram_kill(acumulator: int = 0) -> tuple:
             print('wait for more RAM. ', acumulator)
             acumulator += used_ram*0.01 if prev_mem - used_ram < 0 else (used_ram - prev_mem)*0.1
             prev_mem = used_ram
-            sleep(acumulator*0.01) if acumulator > 0 else sleep(acumulator*(-0.01))
+            sleep(acumulator*0.01) if acumulator > 0 else sleep(0.01)
             if acumulator > 100: acumulator = 100
         else:
             print('                 yield ', acumulator)
-            return acumulator - used_ram*0.01
+            return acumulator - used_ram*0.001
 
 
 def read_file(filename) -> bytes:
