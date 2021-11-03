@@ -100,6 +100,7 @@ def prevent_ram_kill(acumulator: int = 0) -> tuple:
             acumulator += used_ram*0.01 if prev_mem - used_ram < 0 else (used_ram - prev_mem)
             prev_mem = used_ram
             if acumulator > 0: sleep(acumulator*0.01)
+            else: acumulator = 0
             if acumulator > 100: acumulator = 100
         else:
             print('                 yield ', acumulator)
