@@ -94,15 +94,18 @@ import psutil, os.path
 def prevent_kill(len: int):
     while True:
         if psutil.virtual_memory().available < len:
+            print('needs wait.')
             sleep(1)
         else:
             return
 
 def read_file(filename) -> bytes:
     def generator(filename):
+        counter = 0
         with open(filename, 'rb') as entry:
             for chunk in iter(lambda: entry.read(1024 * 1024), b''):
-                prevent_kill(len = os.path.getsize(filename))
+                counter += 1024 * 1024
+                prevent_kill(len = os.path.getsize(filename)-counter)
                 yield chunk
     prevent_kill(len = os.path.getsize(filename))
     return b''.join([b for b in generator(filename)])
