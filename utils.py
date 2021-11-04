@@ -86,47 +86,68 @@ def get_network_name( ip_or_uri: str) -> str:
         except KeyError:
             continue
 
+class Singleton(type):
+    _instances = {}
 
+    def __call__(cls, ENVS):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(Singleton, cls).__call__(ENVS)
+        return cls._instances[cls]
 
 # I/O Big Data utils.
-import psutil, os.path, gc
+import psutil, os.path
 from time import sleep
+from threading import Lock
+class IOBigData(metaclass=Singleton):
 
-PREVENT_RATE = 1.5
-CHUNK_SIZE = 1024 * 1024  # 1MB
+    def __init__(self) -> None:
+        self.PREVENT_RATE = 1.5
+        self.ram_pool = psutil.virtual_memory().available
+        self.ram_locked = 0
+        self.get_ram_avaliable = lambda: self.ram_pool - self.ram_locked
+        self.amount_lock = Lock()
 
-def prevent_kill(len: int) -> bool:
-    return psutil.virtual_memory().available > PREVENT_RATE*len
 
-def wait_to_prevent_kill(len: int) -> None:
-    while True:
-        if not prevent_kill(len = len):
-            print('needs wait.')
-            sleep(1)
+    def lock_ram(self, ram_amount: int, wait: bool = True):
+        self.amount_lock.acquire()
+        if wait:
+            self.wait_to_prevent_kill(len = ram_amount)
+        elif not self.prevent_kill(len = ram_amount):
+            raise Exception
+        self.ram_locked += ram_amount
+
+        print('RAM LOCKED -> ', self.ram_locked)
+        self.amount_lock.release()
+
+    def unlock_ram(self, ram_amount: int):
+        self.amount_lock.acquire()
+        if ram_amount < self.ram_locked:
+            self.ram_locked -= ram_amount
         else:
-            return
+            self.ram_locked = 0
 
-def read_file(filename) -> bytes:
-    def generator(filename):
-        with open(filename, 'rb') as entry:
-            chunk_size = 0
-            for chunk in iter(lambda: entry.read(CHUNK_SIZE), b''):
-                chunk_size += CHUNK_SIZE
-                if prevent_kill(len = os.path.getsize(filename) - chunk_size):
-                    yield chunk
-                else:
-                    entry.close()
-                    raise Exception
+        print('RAM LOCKED -> ', self.ram_locked)
+        self.amount_lock.release()
 
-    wait_to_prevent_kill(len = os.path.getsize(filename))
-    print('go to read it.')
-    while True:
-        try:
-            return b''.join([b for b in generator(filename)])
-        except:
-            print('wait more for it.')
-            sleep(randint(1, 10))
-            gc.collect()
+    def prevent_kill(self, len: int) -> bool:
+        return self.get_ram_avaliable() > self.PREVENT_RATE*len
+
+    def wait_to_prevent_kill(self, len: int) -> None:
+        while True:
+            if not self.prevent_kill(len = len):
+                print('needs wait.')
+                sleep(1)
+            else:
+                return
+
+    def read_file(self, filename) -> bytes:
+        def generator(filename):
+            with open(filename, 'rb') as entry:
+                for chunk in iter(lambda: entry.read(1024 * 1024), b''):
+                        yield chunk
+
+        print('go to read it.')
+        return b''.join([b for b in generator(filename)])
 
 
 
