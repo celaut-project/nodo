@@ -16,6 +16,7 @@ from google.protobuf.json_format import Parse
 import docker as docker_lib
 import netifaces as ni
 from gateway_pb2_grpc_indices import StartService_indices, GetServiceCost_indices, GetServiceTar_indices
+import grpcbifbuffer as grpcbf
 
 GET_ENV = lambda env, default: int(os.environ.get(env)) if env in os.environ.keys() else default
 DOCKER_CLIENT = lambda: docker_lib.from_env()
@@ -246,7 +247,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
             try:
                 peers.add_elem(
                     elem = peer_instance,
-                    weight = next(utils.client_grpc(
+                    weight = next(grpcbf.client_grpc(
                         method =  gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(
                                     peer_uri.ip + ':' +  str(peer_uri.port)
@@ -287,7 +288,7 @@ def launch_service(
                 try:
                     node_uri = utils.get_grpc_uri(node_instance)
                     l.LOGGER('El servicio se lanza en el nodo con uri ' + str(node_uri))
-                    service_instance = next(utils.client_grpc(
+                    service_instance = next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
                                         node_uri.ip + ':' +  str(node_uri.port)
@@ -447,7 +448,7 @@ def search_container(
     for peer in peers_iterator(ignore_network = ignore_network):
         try:
             next(
-                utils.client_grpc(
+                grpcbf.client_grpc(
                     method = gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
                             ).GetServiceTar,
@@ -465,7 +466,7 @@ def search_file(hashes: list, ignore_network: str = None) -> Generator[celaut.An
     # TODO: It can search for other 'Service ledger' or 'ANY ledger' instances that could've this type of files.
     for peer in  peers_iterator(ignore_network = ignore_network):
         try:
-            for buffer in utils.client_grpc(
+            for buffer in grpcbf.client_grpc(
                 method = gateway_pb2_grpc.GatewayStub(
                             grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
                         ).GetFile,
@@ -517,7 +518,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Starting service ...')
         configuration = None
         hashes = []
-        for r in utils.parse_from_buffer(request_iterator = request_iterator, indices = StartService_indices):
+        for r in grpcbf.parse_from_buffer(request_iterator = request_iterator, indices = StartService_indices):
 
             hash = None
             if type(r) is gateway_pb2.HashWithConfig:
@@ -551,7 +552,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 config = configuration,
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                             )
-                        for b in utils.serialize_to_buffer(
+                        for b in grpcbf.serialize_to_buffer(
                             instance
                         ): 
                             yield b
@@ -576,7 +577,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         service_buffer = service_on_any.value,
                         metadata = service_on_any.metadata
                     )
-                    for buffer in utils.serialize_to_buffer(
+                    for buffer in grpcbf.serialize_to_buffer(
                         launch_service(
                             service_buffer = service_on_any.value,
                             metadata = service_on_any.metadata, 
@@ -591,7 +592,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 + str([(hash.type.hex(), hash.value.hex()) for hash in hashes]))
             
             try:
-                for b in utils.serialize_to_buffer(
+                for b in grpcbf.serialize_to_buffer(
                     launch_service(
                         service_buffer = search_definition(hashes = hashes),
                         metadata = celaut.Any.Metadata(
@@ -609,7 +610,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     def StopService(self, request_iterator, context):
-        token_message = next(utils.parse_from_buffer(
+        token_message = next(grpcbf.parse_from_buffer(
             request_iterator = request_iterator,
             message_field = gateway_pb2.TokenMessage
         ))
@@ -637,14 +638,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
         )
     
     def Hynode(self, request_iterator, context):
-        instance = next(utils.parse_from_buffer(
+        instance = next(grpcbf.parse_from_buffer(
             request_iterator = request_iterator,
             message_field = gateway_pb2.Instance
         ))
         l.LOGGER('\nAdding peer ' + str(instance))
         insert_instance_on_mongo(instance = instance.instance)
 
-        for b in utils.serialize_to_buffer(
+        for b in grpcbf.serialize_to_buffer(
             generate_gateway_instance(
                 network = utils.get_network_name(
                     ip_or_uri = utils.get_only_the_ip_from_context(
@@ -658,14 +659,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def GetFile(self, request_iterator, context):
         l.LOGGER('Request for give a service definition')
         hashes = []
-        for hash in utils.parse_from_buffer(request_iterator, celaut.Any.Metadata.HashTag.Hash):
+        for hash in grpcbf.parse_from_buffer(request_iterator, celaut.Any.Metadata.HashTag.Hash):
             try:
                 # Comprueba que sea sha256 y que se encuentre en el registro.
                 hashes.append(hash)
                 if SHA3_256_ID == hash.type and \
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.Buffer(signal = True) # Say stop to send more hashes.
-                    for b in utils.serialize_to_buffer(
+                    for b in grpcbf.serialize_to_buffer(
                         get_from_registry(
                             hash = hash.value.hex()
                         )
@@ -673,7 +674,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             except: pass
         
         try:
-            for b in  utils.serialize_to_buffer(
+            for b in  grpcbf.serialize_to_buffer(
                 next(search_file(
                     ignore_network = utils.get_network_name(
                             ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
@@ -687,7 +688,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetServiceTar(self, request_iterator, context):
         l.LOGGER('Request for give a service container.')
-        for r in utils.parse_from_buffer(request_iterator = request_iterator, indices = GetServiceTar_indices):
+        for r in grpcbf.parse_from_buffer(request_iterator = request_iterator, indices = GetServiceTar_indices):
 
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
@@ -728,7 +729,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     def GetServiceCost(self, request_iterator, context):
-        for r in utils.parse_from_buffer(request_iterator=request_iterator, indices = GetServiceCost_indices):
+        for r in grpcbf.parse_from_buffer(request_iterator=request_iterator, indices = GetServiceCost_indices):
 
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                 r.value.hex() in [s for s in os.listdir(REGISTRY)]:
@@ -757,7 +758,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 break
 
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
-        for b in utils.serialize_to_buffer(
+        for b in grpcbf.serialize_to_buffer(
             gateway_pb2.CostMessage(
                 cost = cost
             )            
