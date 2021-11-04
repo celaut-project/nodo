@@ -23,5 +23,7 @@ def test():
         del service
 
 from threading import Thread
-Thread(target=test).start()
-Thread(target=test).start()
+a = Thread(target=test).start()
+a.join()
+b = Thread(target=test).start()
+b.join()
