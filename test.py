@@ -24,4 +24,4 @@ def test():
 
 from threading import Thread
 Thread(target=test).start()
-#Thread(target=test).start()
+Thread(target=test).start()
