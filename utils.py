@@ -111,23 +111,23 @@ def read_file(filename) -> bytes:
 class IOBigData(metaclass=Singleton):
 
     def __init__(self, ENVS: dict = None) -> None:
-        self.PREVENT_RATE = 1.5
-        self.ram_pool = psutil.virtual_memory().available
+        self.ram_pool = psutil.virtual_memory().available()
         self.ram_locked = 0
         self.get_ram_avaliable = lambda: self.ram_pool - self.ram_locked
         self.amount_lock = Lock()
 
 
     def lock_ram(self, ram_amount: int, wait: bool = True):
-        self.amount_lock.acquire()
         if wait:
             self.wait_to_prevent_kill(len = ram_amount)
         elif not self.prevent_kill(len = ram_amount):
             raise Exception
+        self.amount_lock.acquire()
         self.ram_locked += ram_amount
+        self.amount_lock.release()
 
         print('RAM LOCKED -> ', self.ram_locked)
-        self.amount_lock.release()
+        print('RAM AVALIABLE -> ', self.get_ram_avaliable())
 
     def unlock_ram(self, ram_amount: int):
         self.amount_lock.acquire()
@@ -135,12 +135,17 @@ class IOBigData(metaclass=Singleton):
             self.ram_locked -= ram_amount
         else:
             self.ram_locked = 0
-
-        print('RAM LOCKED -> ', self.ram_locked)
         self.amount_lock.release()
 
+        print('RAM LOCKED -> ', self.ram_locked)
+        print('RAM AVALIABLE -> ', self.get_ram_avaliable())
+        
+
     def prevent_kill(self, len: int) -> bool:
-        return self.get_ram_avaliable() > self.PREVENT_RATE*len
+        self.amount_lock.acquire()
+        b = self.get_ram_avaliable() > len
+        self.amount_lock.release()
+        return b
 
     def wait_to_prevent_kill(self, len: int) -> None:
         while True:
