@@ -123,13 +123,15 @@ class IOBigData(metaclass=Singleton):
 
     def __init__(self) -> None:
         print('Init object')
+        self.ram_pool = psutil.virtual_memory().available
         self.ram_locked = 0
-        self.get_ram_avaliable = lambda: psutil.virtual_memory().available + self.ram_locked
+        self.get_ram_avaliable = lambda: self.ram_pool - self.ram_locked
         self.amount_lock = Lock()
 
     def stats(self):
         with self.amount_lock:
             print('----------------------')
+            print('RAM POOL -> ', self.ram_pool)
             print('RAM LOCKED -> ', self.ram_locked)
             print('RAM AVALIABLE -> ', self.get_ram_avaliable())
             print('----------------------')
