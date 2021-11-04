@@ -1,6 +1,7 @@
 import socket, psutil
 from time import sleep
 from typing import Generator
+from threading import Lock
 
 import celaut_pb2, gateway_pb2
 import netifaces as ni
@@ -91,7 +92,9 @@ class Singleton(type):
 
     def __call__(cls, ENVS = None):
         if cls not in cls._instances:
-            cls._instances[cls] = super(Singleton, cls).__call__(ENVS = None)
+            with Lock():
+                if cls not in cls._instances:
+                    cls._instances[cls] = super(Singleton, cls).__call__(ENVS = None)
         return cls._instances[cls]
 
 # I/O Big Data utils.
@@ -122,30 +125,28 @@ class IOBigData(metaclass=Singleton):
             self.wait_to_prevent_kill(len = ram_amount)
         elif not self.prevent_kill(len = ram_amount):
             raise Exception
-        self.amount_lock.acquire()
-        print('RAM LOCKET ', self.ram_locked)
-        self.ram_locked += ram_amount
-        self.amount_lock.release()
+
+        with self.amount_lock:
+            print('RAM LOCKET ', self.ram_locked)
+            self.ram_locked += ram_amount
 
         print('RAM LOCKED -> ', self.ram_locked)
         print('RAM AVALIABLE -> ', self.get_ram_avaliable())
 
     def unlock_ram(self, ram_amount: int):
-        self.amount_lock.acquire()
-        if ram_amount < self.ram_locked:
-            self.ram_locked -= ram_amount
-        else:
-            self.ram_locked = 0
-        self.amount_lock.release()
+        with self.amount_lock:
+            if ram_amount < self.ram_locked:
+                self.ram_locked -= ram_amount
+            else:
+                self.ram_locked = 0
 
         print('RAM LOCKED -> ', self.ram_locked)
         print('RAM AVALIABLE -> ', self.get_ram_avaliable())
         
 
     def prevent_kill(self, len: int) -> bool:
-        self.amount_lock.acquire()
-        b = self.get_ram_avaliable() > len
-        self.amount_lock.release()
+        with self.amount_lock:
+            b = self.get_ram_avaliable() > len
         return b
 
     def wait_to_prevent_kill(self, len: int) -> None:
