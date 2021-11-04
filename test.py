@@ -19,10 +19,7 @@ def test():
 
         service.container.ClearField('filesystem')
         print('filesystem clear')
-
-    time.sleep(10)
-    print('do it. ', io.get_ram_avaliable())
-
+        print('do it. ', io.get_ram_avaliable())
 
 from threading import Thread
 Thread(target=test).start()
