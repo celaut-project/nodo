@@ -1,5 +1,4 @@
-from threading import Lock
-import utils, time,  celaut_pb2, os.path
+import utils, celaut_pb2, os.path
 
 filename = '__registry__/16426da109eed68c89bf32bcbcab208649f01d608116f1dda15e12d55fc95456'
 

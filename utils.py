@@ -88,7 +88,7 @@ def get_network_name( ip_or_uri: str) -> str:
             continue
 
 # I/O Big Data utils.
-import psutil, os.path
+import psutil, os.path, gc
 from time import sleep
 from threading import Lock
 from singleton import Singleton
@@ -119,6 +119,7 @@ class IOBigData(metaclass=Singleton):
 
         def __exit__(self, type, value, traceback):
             self.iobd.unlock_ram(ram_amount = self.len)
+            gc.collect()
 
     def __init__(self) -> None:
         print('Init object')
@@ -140,8 +141,9 @@ class IOBigData(metaclass=Singleton):
             print('RAM LOCKET ', self.ram_locked)
             self.ram_locked += ram_amount
 
-        print('RAM LOCKED -> ', self.ram_locked)
-        print('RAM AVALIABLE -> ', self.get_ram_avaliable())
+        with self.amount_lock:
+            print('RAM LOCKED -> ', self.ram_locked)
+            print('RAM AVALIABLE -> ', self.get_ram_avaliable())
 
     def unlock_ram(self, ram_amount: int):
         with self.amount_lock:
@@ -150,8 +152,9 @@ class IOBigData(metaclass=Singleton):
             else:
                 self.ram_locked = 0
 
-        print('RAM LOCKED -> ', self.ram_locked)
-        print('RAM AVALIABLE -> ', self.get_ram_avaliable())
+        with self.amount_lock:
+            print('RAM LOCKED -> ', self.ram_locked)
+            print('RAM AVALIABLE -> ', self.get_ram_avaliable())
         
 
     def prevent_kill(self, len: int) -> bool:
