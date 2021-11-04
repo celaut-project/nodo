@@ -87,15 +87,22 @@ def get_network_name( ip_or_uri: str) -> str:
         except KeyError:
             continue
 
-class Singleton(type):
-    _instances = {}
 
-    def __call__(cls, ENVS = None):
-        if cls not in cls._instances:
-            with Lock():
-                if cls not in cls._instances:
-                    cls._instances[cls] = super(Singleton, cls).__call__(ENVS = None)
-        return cls._instances[cls]
+# Thread-sage Singleton
+import threading
+class Singleton:
+  _instance = None
+  _lock = threading.Lock()
+
+  def __new__(cls, *args, **kwargs):
+    if not cls._instance:
+      with cls._lock:
+        # another thread could have created the instance
+        # before we acquired the lock. So check that the
+        # instance is still nonexistent.
+        if not cls._instance:
+          cls._instance = super(Singleton, cls).__new__(cls)
+    return cls._instance
 
 # I/O Big Data utils.
 import psutil, os.path
