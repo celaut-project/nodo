@@ -117,7 +117,7 @@ class IOBigData(metaclass=Singleton):
             self.iobd.unlock_ram(ram_amount = amount)
             self.len -= amount
 
-        def __exit__(self):
+        def __exit__(self, type, value, traceback):
             self.iobd.unlock_ram(ram_amount = self.len)
 
     def __init__(self) -> None:
