@@ -24,9 +24,11 @@ def test():
         del service
 
 from threading import Thread
+print('RAM memory % used:', psutil.virtual_memory()[2])
 a = Thread(target=test)
 a.start()
 a.join()
+print('RAM memory % used:', psutil.virtual_memory()[2])
 sleep(10)
 b = Thread(target=test)
 b.start()
