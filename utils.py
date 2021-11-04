@@ -90,11 +90,11 @@ def get_network_name( ip_or_uri: str) -> str:
 
 # Thread-sage Singleton
 import threading
-class Singleton:
+class Singleton(type):
   _instance = None
   _lock = threading.Lock()
 
-  def __new__(cls, *args, **kwargs):
+  def __call__(cls, *args, **kwargs):
     if not cls._instance:
       with cls._lock:
         # another thread could have created the instance
@@ -120,7 +120,7 @@ def read_file(filename) -> bytes:
 
 class IOBigData(metaclass=Singleton):
 
-    def __init__(self, ENVS: dict = None) -> None:
+    def __init__(self) -> None:
         print('Init object')
         self.ram_pool = psutil.virtual_memory().available
         self.ram_locked = 0
