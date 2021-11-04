@@ -98,6 +98,16 @@ class Singleton(type):
 import psutil, os.path
 from time import sleep
 from threading import Lock
+
+def read_file(filename) -> bytes:
+    def generator(filename):
+        with open(filename, 'rb') as entry:
+            for chunk in iter(lambda: entry.read(1024 * 1024), b''):
+                    yield chunk
+
+    print('go to read it.')
+    return b''.join([b for b in generator(filename)])
+
 class IOBigData(metaclass=Singleton):
 
     def __init__(self, ENVS: dict = None) -> None:
@@ -140,14 +150,6 @@ class IOBigData(metaclass=Singleton):
             else:
                 return
 
-    def read_file(self, filename) -> bytes:
-        def generator(filename):
-            with open(filename, 'rb') as entry:
-                for chunk in iter(lambda: entry.read(1024 * 1024), b''):
-                        yield chunk
-
-        print('go to read it.')
-        return b''.join([b for b in generator(filename)])
 
 
 
