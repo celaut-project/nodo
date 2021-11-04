@@ -129,8 +129,8 @@ class IOBigData(metaclass=Singleton):
     def stats(self, message: str):
         with self.amount_lock:
             self.log('--------- '+message+' -------------')
-            self.log('RAM POOL -> '+ str(self.ram_pool()))
-            self.log('RAM LOCKED -> '+ str(self.ram_locked))
+            self.log('RAM POOL      -> '+ str(self.ram_pool()))
+            self.log('RAM LOCKED    -> '+ str(self.ram_locked))
             self.log('RAM AVALIABLE -> '+ str(self.get_ram_avaliable()))
             self.log('-----------------------------------------')
 
