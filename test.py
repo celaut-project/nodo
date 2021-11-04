@@ -5,7 +5,7 @@ filename = '__registry__/16426da109eed68c89bf32bcbcab208649f01d608116f1dda15e12d
 
 def test():
     io = utils.IOBigData()
-    with io.lock(len = 3*os.path.getsize(filename)):
+    with io.lock(len = 4*os.path.getsize(filename)):
         any = celaut_pb2.Any()
         any.ParseFromString(
             utils.read_file(filename)
