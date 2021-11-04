@@ -128,22 +128,25 @@ class IOBigData(metaclass=Singleton):
         self.get_ram_avaliable = lambda: self.ram_pool - self.ram_locked
         self.amount_lock = Lock()
 
+    def stats(self):
+        with self.amount_lock:
+            print('----------------------')
+            print('RAM LOCKED -> ', self.ram_locked)
+            print('RAM AVALIABLE -> ', self.get_ram_avaliable())
+            print('----------------------')
+
     def lock(self, len):
         return self.RamLocker(len = len, iobd = self)
 
     def lock_ram(self, ram_amount: int, wait: bool = True):
+        self.stats
         if wait:
             self.wait_to_prevent_kill(len = ram_amount)
         elif not self.prevent_kill(len = ram_amount):
             raise Exception
-
         with self.amount_lock:
-            print('RAM LOCKET ', self.ram_locked)
             self.ram_locked += ram_amount
-
-        with self.amount_lock:
-            print('RAM LOCKED -> ', self.ram_locked)
-            print('RAM AVALIABLE -> ', self.get_ram_avaliable())
+        self.stats()
 
     def unlock_ram(self, ram_amount: int):
         with self.amount_lock:
@@ -151,11 +154,7 @@ class IOBigData(metaclass=Singleton):
                 self.ram_locked -= ram_amount
             else:
                 self.ram_locked = 0
-
-        with self.amount_lock:
-            print('RAM LOCKED -> ', self.ram_locked)
-            print('RAM AVALIABLE -> ', self.get_ram_avaliable())
-        
+        self.stats()
 
     def prevent_kill(self, len: int) -> bool:
         with self.amount_lock:
