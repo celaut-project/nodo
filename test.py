@@ -13,13 +13,5 @@ def test():
         print('file readed')
 
 from threading import Thread
-import psutil
-print('RAM memory % used:', psutil.virtual_memory()[2])
-a = Thread(target=test)
-a.start()
-a.join()
-print('RAM memory % used:', psutil.virtual_memory()[2])
-sleep(10)
-b = Thread(target=test)
-b.start()
-b.join()
+a = Thread(target=test).start()
+b = Thread(target=test).start()
