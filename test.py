@@ -21,6 +21,7 @@ def test():
         print('filesystem clear')
         print('do it. ', io.get_ram_avaliable())
         print('We want ', service.api)
+        del service
 
 from threading import Thread
 Thread(target=test).start()
