@@ -104,6 +104,22 @@ def read_file(filename) -> bytes:
 
 class IOBigData(metaclass=Singleton):
 
+    class RamLocker(object):
+        def __init__(self, len, iobd):
+            self.len = len
+            self.iobd = iobd
+
+        def __enter__(self):
+            self.iobd.lock_ram(ram_amount = self.len)
+            return self
+
+        def unlock(self, amount: int):
+            self.iobd.unlock_ram(ram_amount = amount)
+            self.len -= amount
+
+        def __exit__(self):
+            self.iobd.unlock_ram(ram_amount = self.len)
+
     def __init__(self) -> None:
         print('Init object')
         self.ram_pool = psutil.virtual_memory().available
@@ -111,6 +127,8 @@ class IOBigData(metaclass=Singleton):
         self.get_ram_avaliable = lambda: self.ram_pool - self.ram_locked
         self.amount_lock = Lock()
 
+    def lock(self, len):
+        return self.RamLocker(len = len, iobd = self)
 
     def lock_ram(self, ram_amount: int, wait: bool = True):
         if wait:

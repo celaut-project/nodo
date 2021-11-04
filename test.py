@@ -5,23 +5,21 @@ filename = '__registry__/16426da109eed68c89bf32bcbcab208649f01d608116f1dda15e12d
 
 def test():
     io = utils.IOBigData()
-    io.lock_ram(2*os.path.getsize(filename))
+    with io.lock(len = 2*os.path.getsize(filename)):
+        any = celaut_pb2.Any()
+        any.ParseFromString(
+            utils.read_file(filename)
+        )
+        print('file readed')
 
-    any = celaut_pb2.Any()
-    any.ParseFromString(
-        utils.read_file(filename)
-    )
-    print('file readed')
+        service = celaut_pb2.Service()
+        service.ParseFromString(any.value)
 
-    service = celaut_pb2.Service()
-    service.ParseFromString(any.value)
+        del any
 
-    del any
+        service.container.ClearField('filesystem')
+        print('filesystem clear')
 
-    service.container.ClearField('filesystem')
-    print('filesystem clear')
-
-    io.unlock_ram(2*os.path.getsize(filename))
     time.sleep(10)
     print('do it. ', io.get_ram_avaliable())
 
