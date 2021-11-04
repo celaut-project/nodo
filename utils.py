@@ -144,7 +144,6 @@ class IOBigData(metaclass=Singleton):
     def wait_to_prevent_kill(self, len: int) -> None:
         while True:
             if not self.prevent_kill(len = len):
-                print('needs wait.')
                 sleep(1)
             else:
                 return
