@@ -120,7 +120,7 @@ class IOBigData(metaclass=Singleton):
             gc.collect()
 
     def __init__(self) -> None:
-        self.log = lambda message: print(message)
+        self.log = lambda **args: print(**args)
         self.ram_pool = psutil.virtual_memory().available
         self.ram_locked = 0
         self.get_ram_avaliable = lambda: self.ram_pool - self.ram_locked
