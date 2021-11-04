@@ -17,6 +17,7 @@ import docker as docker_lib
 import netifaces as ni
 from gateway_pb2_grpc_indices import StartService_indices, GetServiceCost_indices, GetServiceTar_indices
 import grpcbifbuffer as grpcbf
+import iobigdata as iobd
 
 GET_ENV = lambda env, default: int(os.environ.get(env)) if env in os.environ.keys() else default
 DOCKER_CLIENT = lambda: docker_lib.from_env()
@@ -417,7 +418,8 @@ def save_service(service_buffer: bytes, metadata: celaut.Any.Metadata):
     # If the service is not on the registry, save it.
     hash = get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata)
     if not os.path.isfile(REGISTRY+hash):
-        with open(REGISTRY + hash, 'wb') as file:
+        
+        with open(REGISTRY + hash, 'wb') as file, iobd.IOBigData().lock(len=len(service_buffer)):
             file.write(
                 celaut.Any(
                     metadata = metadata,
@@ -504,9 +506,10 @@ def get_service_buffer_from_registry(hash: str) -> bytes:
 def get_from_registry(hash: str) -> celaut.Any:
     l.LOGGER('Getting ' + hash + ' service from the local registry.')
     try:
-        any = celaut.Any()
-        any.ParseFromString(utils.read_file(filename = REGISTRY + hash))
-        return any
+        with iobd.IOBigData().lock(2*os.path.getsize(REGISTRY + hash)) as iolock:
+            any = celaut.Any()
+            any.ParseFromString(iobd.read_file(filename = REGISTRY + hash))
+            return any
     except (IOError, FileNotFoundError):
         l.LOGGER('The service was not on registry.')
         raise FileNotFoundError
