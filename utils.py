@@ -100,7 +100,7 @@ from time import sleep
 from threading import Lock
 class IOBigData(metaclass=Singleton):
 
-    def __init__(self) -> None:
+    def __init__(self, ENVS: dict = None) -> None:
         self.PREVENT_RATE = 1.5
         self.ram_pool = psutil.virtual_memory().available
         self.ram_locked = 0
