@@ -9,23 +9,19 @@ def test():
 
     any = celaut_pb2.Any()
     any.ParseFromString(
-    utils.read_file(filename)
+        utils.read_file(filename)
     )
     print('file readed')
-    
-    io.lock_ram(2*len(any.value))
+
     service = celaut_pb2.Service()
     service.ParseFromString(any.value)
 
     del any
-    io.unlock_ram(1.5*os.path.getsize(filename))
 
-
-    filesys_len = len(service.container.filesystem)
     service.container.ClearField('filesystem')
     print('filesystem clear')
 
-    io.unlock_ram(1.5*filesys_len)
+    io.unlock_ram(2*os.path.getsize(filename))
     time.sleep(10)
     print('do it. ', io.get_ram_avaliable())
 
