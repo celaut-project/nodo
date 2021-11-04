@@ -120,7 +120,7 @@ class IOBigData(metaclass=Singleton):
             gc.collect()
 
     def __init__(self) -> None:
-        self.log = lambda **args: print(**args)
+        self.log = lambda message: print(message)
         self.ram_pool = psutil.virtual_memory().available
         self.ram_locked = 0
         self.get_ram_avaliable = lambda: self.ram_pool - self.ram_locked
@@ -129,10 +129,10 @@ class IOBigData(metaclass=Singleton):
     def stats(self, message: str):
         with self.amount_lock:
             self.log('--------- '+message+' -------------')
-            self.log('REAL RAM -> ', psutil.virtual_memory().available)
-            self.log('RAM POOL -> ', self.ram_pool)
-            self.log('RAM LOCKED -> ', self.ram_locked)
-            self.log('RAM AVALIABLE -> ', self.get_ram_avaliable())
+            self.log('REAL RAM -> '+ str(psutil.virtual_memory().available))
+            self.log('RAM POOL -> '+ str(self.ram_pool))
+            self.log('RAM LOCKED -> '+ str(self.ram_locked))
+            self.log('RAM AVALIABLE -> '+ str(self.get_ram_avaliable()))
             self.log('-----------------------------------------')
 
     def lock(self, len):
