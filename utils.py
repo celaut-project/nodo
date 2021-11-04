@@ -98,8 +98,6 @@ def read_file(filename) -> bytes:
         with open(filename, 'rb') as entry:
             for chunk in iter(lambda: entry.read(1024 * 1024), b''):
                     yield chunk
-
-    print('go to read it.')
     return b''.join([b for b in generator(filename)])
 
 class IOBigData(metaclass=Singleton):
@@ -122,7 +120,7 @@ class IOBigData(metaclass=Singleton):
             gc.collect()
 
     def __init__(self) -> None:
-        print('Init object')
+        self.log = lambda message: print(message)
         self.ram_pool = psutil.virtual_memory().available
         self.ram_locked = 0
         self.get_ram_avaliable = lambda: self.ram_pool - self.ram_locked
@@ -130,11 +128,12 @@ class IOBigData(metaclass=Singleton):
 
     def stats(self, message: str):
         with self.amount_lock:
-            print('--------- '+message+' -------------')
-            print('RAM POOL -> ', self.ram_pool)
-            print('RAM LOCKED -> ', self.ram_locked)
-            print('RAM AVALIABLE -> ', self.get_ram_avaliable())
-            print('-----------------------------------------')
+            self.log('--------- '+message+' -------------')
+            self.log('REAL RAM -> ', psutil.virtual_memory().available)
+            self.log('RAM POOL -> ', self.ram_pool)
+            self.log('RAM LOCKED -> ', self.ram_locked)
+            self.log('RAM AVALIABLE -> ', self.get_ram_avaliable())
+            self.log('-----------------------------------------')
 
     def lock(self, len):
         return self.RamLocker(len = len, iobd = self)
