@@ -94,7 +94,7 @@ class Singleton(type):
   _instance = None
   _lock = threading.Lock()
 
-  def __call__(cls, *args, **kwargs):
+  def __new__(cls, *args, **kwargs):
     if not cls._instance:
       with cls._lock:
         # another thread could have created the instance
