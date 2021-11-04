@@ -114,6 +114,7 @@ def read_file(filename) -> bytes:
 class IOBigData(metaclass=Singleton):
 
     def __init__(self, ENVS: dict = None) -> None:
+        print('Init object')
         self.ram_pool = psutil.virtual_memory().available
         self.ram_locked = 0
         self.get_ram_avaliable = lambda: self.ram_pool - self.ram_locked
