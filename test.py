@@ -11,7 +11,8 @@ def test():
     any.ParseFromString(
     utils.read_file(filename)
     )
-
+    print('file readed')
+    
     io.lock_ram(2*len(any.value))
     service = celaut_pb2.Service()
     service.ParseFromString(any.value)
