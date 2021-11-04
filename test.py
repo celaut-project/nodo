@@ -5,14 +5,14 @@ filename = '__registry__/16426da109eed68c89bf32bcbcab208649f01d608116f1dda15e12d
 
 def test():
     io = utils.IOBigData()
-    io.lock_ram(1.5*os.path.getsize(filename))
+    io.lock_ram(2*os.path.getsize(filename))
 
     any = celaut_pb2.Any()
     any.ParseFromString(
     utils.read_file(filename)
     )
 
-    io.lock_ram(1.5*len(any.value))
+    io.lock_ram(2*len(any.value))
     service = celaut_pb2.Service()
     service.ParseFromString(any.value)
 
