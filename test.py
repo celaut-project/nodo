@@ -24,6 +24,7 @@ def test():
         del service
 
 from threading import Thread
+import psutil
 print('RAM memory % used:', psutil.virtual_memory()[2])
 a = Thread(target=test)
 a.start()
