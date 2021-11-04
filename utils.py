@@ -123,6 +123,7 @@ class IOBigData(metaclass=Singleton):
         elif not self.prevent_kill(len = ram_amount):
             raise Exception
         self.amount_lock.acquire()
+        print('RAM LOCKET ', self.ram_locked)
         self.ram_locked += ram_amount
         self.amount_lock.release()
 
