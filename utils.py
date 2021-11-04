@@ -89,9 +89,9 @@ def get_network_name( ip_or_uri: str) -> str:
 class Singleton(type):
     _instances = {}
 
-    def __call__(cls, ENVS):
+    def __call__(cls, ENVS = None):
         if cls not in cls._instances:
-            cls._instances[cls] = super(Singleton, cls).__call__(ENVS)
+            cls._instances[cls] = super(Singleton, cls).__call__(ENVS = None)
         return cls._instances[cls]
 
 # I/O Big Data utils.
