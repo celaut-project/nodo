@@ -234,14 +234,15 @@ class Hyper:
 
     def save(self):
         self.metadata.complete = True
+        service_buffer = self.service.SerializeToString()
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(
-                service_buffer = self.service.SerializeToString(), 
+                service_buffer = service_buffer, 
                 metadata = self.metadata
             )
         )
         id = get_service_hex_main_hash(
-            service_buffer = self.service.SerializeToString(), 
+            service_buffer = service_buffer, 
             metadata = self.metadata
             )
         # Once service hashes are calculated, we prune the filesystem for save storage.
@@ -251,7 +252,7 @@ class Hyper:
             f.write(
                     celaut.Any(
                         metadata = self.metadata,
-                        value = self.service.SerializeToString()
+                        value = service_buffer
                     ).SerializeToString()
                 )
         return id
