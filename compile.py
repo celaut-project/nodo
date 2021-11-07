@@ -249,8 +249,9 @@ class Hyper:
         # Once service hashes are calculated, we prune the filesystem for save storage.
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-        with iobigdata.IOBigData().lock(len = 2*len(service_buffer)):
-            del service_buffer
+        len_buffer = 2 * len(service_buffer)
+        del service_buffer
+        with iobigdata.IOBigData().lock(len = len_buffer):    
             with open(REGISTRY + id + '/p2') as f:
                 f.write(
                     celaut.Service.Container(
