@@ -252,6 +252,7 @@ class Hyper:
         len_buffer = len(service_buffer)
         del service_buffer
         with iobigdata.IOBigData().lock(len = len_buffer):
+            os.mkdir(REGISTRY + id + '/')
             with open(REGISTRY + id + '/p2') as f:
                 f.write(
                     celaut.Service.Container(
