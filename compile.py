@@ -234,34 +234,27 @@ class Hyper:
 
     def save(self):
         self.metadata.complete = True
-        print('go to save it.')
-        service_buffer = self.service.SerializeToString()
-        print(len(service_buffer))
-        del self.service
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(
-                service_buffer = service_buffer, 
+                service_buffer = self.service.SerializeToString(), 
                 metadata = self.metadata
             )
         )
         print('hashes ok')
         id = get_service_hex_main_hash(
-            service_buffer = service_buffer, 
+            service_buffer = self.service.SerializeToString(), 
             metadata = self.metadata
             )
-        print(id)
         # Once service hashes are calculated, we prune the filesystem for save storage.
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-        any_buffer = celaut.Any(
-                        metadata = self.metadata,
-                        value = service_buffer
-                    ).SerializeToString()
-        del service_buffer
         print('any_buffer -> ', len(any_buffer))
         with open( REGISTRY + id, 'wb') as f:
             f.write(
-                    any_buffer
+                    celaut.Any(
+                        metadata = self.metadata,
+                        value = self.service.SerializeToString()
+                    ).SerializeToString()
                 )
         print('do it')
         return id
