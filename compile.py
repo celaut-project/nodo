@@ -245,6 +245,7 @@ class Hyper:
             service_buffer = self.service.SerializeToString(), 
             metadata = self.metadata
             )
+        print('id -> ', id)
         # Once service hashes are calculated, we prune the filesystem for save storage.
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
