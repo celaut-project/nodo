@@ -2,6 +2,7 @@ import logger as l
 import sys
 import json
 import os
+import iobigdata
 import celaut_pb2 as celaut
 from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_main_hash
 
@@ -236,26 +237,38 @@ class Hyper:
 
     def save(self):
         self.metadata.complete = True
+        service_buffer = self.service.SerializeToString()
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(
-                service_buffer = self.service.SerializeToString(), 
+                service_buffer = service_buffer, 
                 metadata = self.metadata
             )
         )
         id = get_service_hex_main_hash(
-            service_buffer = self.service.SerializeToString(), 
+            service_buffer = service_buffer,  
             metadata = self.metadata
             )
         # Once service hashes are calculated, we prune the filesystem for save storage.
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-        with open( REGISTRY + id, 'wb') as f:
-            f.write(
-                    celaut.Any(
-                        metadata = self.metadata,
-                        value = self.service.SerializeToString()
+        with iobigdata.IOBigData().lock(len = 2*len(service_buffer)):
+            del service_buffer
+            with open(REGISTRY + id + '/p2') as f:
+                f.write(
+                    celaut.Service.Container(
+                        filesystem = self.service.container.filesystem,
+                        architecture = self.service.container.architecture
                     ).SerializeToString()
                 )
+            self.service.container.ClearField('filesystem')
+            self.service.container.ClearField('architecture')
+            with open(REGISTRY + id + '/p1') as f:
+                f.write(
+                        celaut.Any(
+                            metadata = self.metadata,
+                            value = self.service.SerializeToString()
+                        ).SerializeToString()
+                    )
         return id
 
 def ok(path, aux_id):

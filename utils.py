@@ -2,7 +2,9 @@ import socket
 from typing import Generator
 
 import celaut_pb2, gateway_pb2
+from compile import REGISTRY
 import netifaces as ni
+from verify import get_service_hex_main_hash
 
 def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
     for slot in instance.api.slot:
@@ -39,12 +41,21 @@ def service_extended(
                 metadata = metadata,
                 value = service_buffer
             )
+        hash = get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata)
         if set_config: 
-            yield gateway_pb2.ServiceWithConfig(
-                    service = any,
-                    config = celaut_pb2.Configuration()
+            yield (
+                    gateway_pb2.ServiceWithConfig,
+                    gateway_pb2.ServiceWithConfig(
+                        service = any,
+                        config = celaut_pb2.Configuration()
+                    ),
+                    REGISTRY + hash + '/p2'
                 )
-        yield any
+        yield (
+                gateway_pb2.celaut_pb2.Any,
+                any,
+                REGISTRY + hash + '/p2'
+            )
 
 def get_free_port() -> int:
     with socket.socket() as s:
