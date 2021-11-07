@@ -83,7 +83,7 @@ class Hyper:
             self.service.container.filesystem = recursive_parsing( directory = HYCACHE+self.aux_id+"/filesystem/" ).SerializeToString()
 
             return celaut.Any.Metadata.HashTag(
-                hash = calculate_hashes( value = self.service.container.filesystem.SerializeToString() )
+                hash = calculate_hashes( value = self.service.container.filesystem )
             )
 
 
