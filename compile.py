@@ -234,7 +234,9 @@ class Hyper:
 
     def save(self):
         self.metadata.complete = True
+        print('go to save it.')
         service_buffer = self.service.SerializeToString()
+        print(len(service_buffer))
         del self.service
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(
@@ -242,10 +244,12 @@ class Hyper:
                 metadata = self.metadata
             )
         )
+        print('hashes ok')
         id = get_service_hex_main_hash(
             service_buffer = service_buffer, 
             metadata = self.metadata
             )
+        print(id)
         # Once service hashes are calculated, we prune the filesystem for save storage.
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
@@ -256,6 +260,7 @@ class Hyper:
                         value = service_buffer
                     ).SerializeToString()
                 )
+        print('do it')
         return id
 
 def ok(path, aux_id):
