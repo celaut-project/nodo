@@ -249,7 +249,7 @@ class Hyper:
         # Once service hashes are calculated, we prune the filesystem for save storage.
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-        len_buffer = len(service_buffer)
+        len_buffer = 2*len(service_buffer)
         del service_buffer
         with iobigdata.IOBigData().lock(len = len_buffer):
             os.mkdir(REGISTRY + id + '/')
