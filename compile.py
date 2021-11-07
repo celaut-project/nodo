@@ -253,7 +253,7 @@ class Hyper:
         del service_buffer
         with iobigdata.IOBigData().lock(len = len_buffer):
             os.mkdir(REGISTRY + id + '/')
-            with open(REGISTRY + id + '/p2') as f:
+            with open(REGISTRY + id + '/p2', 'wb') as f:
                 f.write(
                     celaut.Service.Container(
                         filesystem = self.service.container.filesystem,
@@ -262,7 +262,7 @@ class Hyper:
                 )
             self.service.container.ClearField('filesystem')
             self.service.container.ClearField('architecture')
-            with open(REGISTRY + id + '/p1') as f:
+            with open(REGISTRY + id + '/p1', 'wb') as f:
                 f.write(
                         celaut.Any(
                             metadata = self.metadata,
