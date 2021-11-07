@@ -235,6 +235,7 @@ class Hyper:
     def save(self):
         self.metadata.complete = True
         service_buffer = self.service.SerializeToString()
+        del self.service
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(
                 service_buffer = service_buffer, 
