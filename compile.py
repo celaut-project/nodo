@@ -253,12 +253,15 @@ class Hyper:
         # Once service hashes are calculated, we prune the filesystem for save storage.
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-        with open( REGISTRY + id, 'wb') as f:
-            f.write(
-                    celaut.Any(
+        any_buffer = celaut.Any(
                         metadata = self.metadata,
                         value = service_buffer
                     ).SerializeToString()
+        del service_buffer
+        print('any_buffer -> ', len(any_buffer))
+        with open( REGISTRY + id, 'wb') as f:
+            f.write(
+                    any_buffer
                 )
         print('do it')
         return id
