@@ -234,6 +234,7 @@ class Hyper:
                 )
 
     def save(self):
+        input("Press Enter to continue...")
         self.metadata.complete = True
         service_buffer = self.service.SerializeToString()
         self.metadata.hashtag.hash.extend(
