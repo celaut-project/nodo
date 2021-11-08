@@ -1,7 +1,7 @@
 import logger as l
 import sys
 import json
-import os
+import os, subprocess
 import iobigdata
 import celaut_pb2 as celaut
 from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_main_hash
@@ -27,21 +27,21 @@ class Hyper:
         self.json = json.load(open(self.path+"service.json", "r"))
         self.aux_id = aux_id
 
+        # Directories are created on cache.
+        os.system("mkdir "+HYCACHE+self.aux_id+"/building")
+        os.system("mkdir "+HYCACHE+self.aux_id+"/filesystem")
+
+        # Build container and get compressed layers.
+        if not os.path.isfile(self.path+'Dockerfile'): raise Exception("Error: Dockerfile no encontrado.")
+        os.system('/usr/bin/docker build -t builder'+self.aux_id+' '+self.path)
+        os.system("/usr/bin/docker save builder"+self.aux_id+" > "+HYCACHE+self.aux_id+"/building/container.tar")
+        os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/container.tar -C "+HYCACHE+self.aux_id+"/building/")
+
+        self.buffer_len = int(subprocess.check_output(["/usr/bin/docker image inspect builder"+aux_id+" --format='{{.Size}}'"], shell=True))
+
 
     def parseContainer(self):
         def parseFilesys() -> celaut.Any.Metadata.HashTag:
-            # Directories are created on cache.
-            os.system("mkdir "+HYCACHE+self.aux_id+"/building")
-            os.system("mkdir "+HYCACHE+self.aux_id+"/filesystem")
-
-            # Build container and get compressed layers.
-            if os.path.isfile(self.path+'Dockerfile'):
-                os.system('/usr/bin/docker build -t builder'+self.aux_id+' '+self.path)
-                os.system("/usr/bin/docker save builder"+self.aux_id+" > "+HYCACHE+self.aux_id+"/building/container.tar")
-            else:
-                l.LOGGER("Error: Dockerfile no encontrado.")
-            os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/container.tar -C "+HYCACHE+self.aux_id+"/building/")
-
             # Save his filesystem on cache.
             for layer in os.listdir(HYCACHE+self.aux_id+"/building/"):
                 if os.path.isdir(HYCACHE+self.aux_id+"/building/"+layer):
@@ -234,7 +234,6 @@ class Hyper:
                 )
 
     def save(self):
-        input("Press Enter to continue...") # 63%
         self.metadata.complete = True
         service_buffer = self.service.SerializeToString() # 2*len
         self.metadata.hashtag.hash.extend(
@@ -250,37 +249,37 @@ class Hyper:
         # Once service hashes are calculated, we prune the filesystem for save storage.
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-        len_buffer = len(service_buffer) # 90%
-        del service_buffer
-        with iobigdata.IOBigData().lock(len = len_buffer): # 63 %
-            os.mkdir(REGISTRY + id + '/')
-            with open(REGISTRY + id + '/p2', 'wb') as f:
-                f.write(
-                    celaut.Service.Container(
-                        filesystem = self.service.container.filesystem.SerializeToString(),
-                        architecture = self.service.container.architecture
+        del service_buffer # -len
+        os.mkdir(REGISTRY + id + '/')
+        with open(REGISTRY + id + '/p2', 'wb') as f:
+            f.write(
+                celaut.Service.Container(
+                    filesystem = self.service.container.filesystem.SerializeToString(), # 2*len
+                    architecture = self.service.container.architecture
+                ).SerializeToString()
+            )
+        self.service.container.ClearField('filesystem')
+        self.service.container.ClearField('architecture')
+        with open(REGISTRY + id + '/p1', 'wb') as f:
+            f.write(
+                    celaut.Any(
+                        metadata = self.metadata,
+                        value = self.service.SerializeToString()
                     ).SerializeToString()
                 )
-            self.service.container.ClearField('filesystem')
-            self.service.container.ClearField('architecture')
-            with open(REGISTRY + id + '/p1', 'wb') as f:
-                f.write(
-                        celaut.Any(
-                            metadata = self.metadata,
-                            value = self.service.SerializeToString()
-                        ).SerializeToString()
-                    )
         return id
 
 def ok(path, aux_id):
     Hyperfile = Hyper(path = path, aux_id = aux_id)
 
-    Hyperfile.parseContainer()
-    Hyperfile.parseApi()
-    Hyperfile.parseLedger()
-    Hyperfile.parseTensor()
+    with iobigdata.IOBigData().lock(len = 2*Hyperfile.buffer_len):
+        Hyperfile.parseContainer()
+        Hyperfile.parseApi()
+        Hyperfile.parseLedger()
+        Hyperfile.parseTensor()
 
-    return Hyperfile.save()
+        id = Hyperfile.save()
+    return id
 
 if __name__ == "__main__":
     import random
@@ -292,7 +291,7 @@ if __name__ == "__main__":
     l.LOGGER(str(os.listdir(HYCACHE+aux_id+'/for_build/git/.service/')))
     id = ok(
         path = HYCACHE+aux_id+'/for_build/git/.service/',
-        aux_id = aux_id
+        aux_id = aux_id,
         )  # Hyperfile
 
     os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.docker')
