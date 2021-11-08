@@ -19,7 +19,7 @@ REGISTRY = "/home/hy/node/__registry__/"
 class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
-        self.service =  celaut.Service()
+        self.service =  celaut.ServiceForCompile()
         self.metadata = celaut.Any.Metadata(
             complete = True
         )
@@ -81,10 +81,10 @@ class Hyper:
 
                 return filesystem
 
-            self.service.container.filesystem = recursive_parsing( directory = HYCACHE+self.aux_id+"/filesystem/" ).SerializeToString()
+            self.service.container.filesystem.CopyFrom(recursive_parsing( directory = HYCACHE+self.aux_id+"/filesystem/" ))
 
             return celaut.Any.Metadata.HashTag(
-                hash = calculate_hashes( value = self.service.container.filesystem )
+                hash = calculate_hashes( value = self.service.container.filesystem.SerializeToString() )
             )
 
 
@@ -236,7 +236,7 @@ class Hyper:
     def save(self):
         input("Press Enter to continue...") # 63%
         self.metadata.complete = True
-        service_buffer = self.service.SerializeToString()
+        service_buffer = self.service.SerializeToString() # 2*len
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(
                 service_buffer = service_buffer, 
@@ -250,14 +250,14 @@ class Hyper:
         # Once service hashes are calculated, we prune the filesystem for save storage.
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-        len_buffer = 2*len(service_buffer) # 90%
+        len_buffer = len(service_buffer) # 90%
         del service_buffer
         with iobigdata.IOBigData().lock(len = len_buffer): # 63 %
             os.mkdir(REGISTRY + id + '/')
             with open(REGISTRY + id + '/p2', 'wb') as f:
                 f.write(
                     celaut.Service.Container(
-                        filesystem = self.service.container.filesystem,
+                        filesystem = self.service.container.filesystem.SerializeToString(),
                         architecture = self.service.container.architecture
                     ).SerializeToString()
                 )
