@@ -234,7 +234,7 @@ class Hyper:
                 )
 
     def save(self):
-        input("Press Enter to continue...")
+        input("Press Enter to continue...") # 63%
         self.metadata.complete = True
         service_buffer = self.service.SerializeToString()
         self.metadata.hashtag.hash.extend(
@@ -250,9 +250,9 @@ class Hyper:
         # Once service hashes are calculated, we prune the filesystem for save storage.
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-        len_buffer = 2*len(service_buffer)
+        len_buffer = 2*len(service_buffer) # 90%
         del service_buffer
-        with iobigdata.IOBigData().lock(len = len_buffer):
+        with iobigdata.IOBigData().lock(len = len_buffer): # 63 %
             os.mkdir(REGISTRY + id + '/')
             with open(REGISTRY + id + '/p2', 'wb') as f:
                 f.write(
