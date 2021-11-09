@@ -4,6 +4,8 @@ from time import sleep
 from threading import Lock
 from singleton import Singleton
 
+mem_manager = lambda len: IOBigData().lock(len=len)
+
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
