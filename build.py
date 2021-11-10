@@ -1,6 +1,6 @@
 from time import sleep
 import threading
-from gateway_pb2_grpc_indices import GetServiceTar_input_indices
+from gateway_pb2_grpcbf import GetServiceTar_input
 import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os
 from utils import service_extended, save_chunks_to_file, serialize_to_buffer
 from compile import HYCACHE, REGISTRY
@@ -42,7 +42,7 @@ def get_container_from_outside(
                         ).GetServiceTar(
                             serialize_to_buffer(
                                 service_extended(service = service_buffer, metadata = metadata),
-                                indices=GetServiceTar_input_indices
+                                indices=GetServiceTar_input
                             )
                         )
             )
@@ -81,7 +81,7 @@ def build(
     except CalledProcessError:
         if metadata.complete:
             second_partition_dir = REGISTRY + id + '/p2'
-            with iobigdata.IOBigData().lock(len = len(service_buffer) + 2*os.path.getsize(second_partition_dir)):
+            with iobigdata.mem_manager(len = len(service_buffer) + 2*os.path.getsize(second_partition_dir)):
                 service = gateway_pb2.celaut_pb2.Service()
                 service.ParseFromString(service_buffer)
                 service.container.ParseFromString(

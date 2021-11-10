@@ -272,7 +272,7 @@ class Hyper:
 def ok(path, aux_id):
     Hyperfile = Hyper(path = path, aux_id = aux_id)
 
-    with iobigdata.IOBigData().lock(len = 2*Hyperfile.buffer_len):
+    with iobigdata.mem_manager(len = 2*Hyperfile.buffer_len):
         Hyperfile.parseContainer()
         Hyperfile.parseApi()
         Hyperfile.parseLedger()

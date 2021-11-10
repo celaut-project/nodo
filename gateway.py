@@ -13,8 +13,8 @@ from google.protobuf.json_format import MessageToJson
 from google.protobuf.json_format import Parse
 import docker as docker_lib
 import netifaces as ni
-from gateway_pb2_grpc_indices import StartService_input_indices, GetServiceCost_input_indices, GetServiceTar_input_indices, StartService_input_partitions
-import grpcbifbuffer as grpcbf
+from gateway_pb2_grpcbf import StartService_input, GetServiceCost_input, GetServiceTar_input, StartService_input_partitions
+import grpcbigbuffer as grpcbf
 import iobigdata as iobd
 
 GET_ENV = lambda env, default: int(os.environ.get(env)) if env in os.environ.keys() else default
@@ -253,7 +253,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
                                 )
                             ).GetServiceCost,
                         output_field = gateway_pb2.CostMessage,
-                        indices_serializer=GetServiceCost_input_indices,
+                        indices_serializer=GetServiceCost_input,
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata),
                     )).cost
                 )
@@ -417,7 +417,7 @@ def save_service(service_buffer: bytes, metadata: celaut.Any.Metadata, hash: str
     if not hash: hash = get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata)
     if not os.path.isfile(REGISTRY+hash):
         
-        with open(REGISTRY + hash + '/p1', 'wb') as file, iobd.IOBigData().lock(len=len(service_buffer)):
+        with open(REGISTRY + hash + '/p1', 'wb') as file, iobd.mem_manager(len=len(service_buffer)):
             file.write(
                 celaut.Any(
                     metadata = metadata,
@@ -456,7 +456,7 @@ def search_container(
                                 service_buffer = service_buffer,
                                 metadata = metadata
                             ),
-                    indices_serializer = GetServiceTar_input_indices
+                    indices_serializer = GetServiceTar_input
                 )
             )
             break
@@ -505,7 +505,7 @@ def get_from_registry(hash: str) -> celaut.Any: # TODO, should've other files ??
     l.LOGGER('Getting ' + hash + ' service from the local registry.')
     first_partition_dir = REGISTRY + hash + '/p1'
     try:
-        with iobd.IOBigData().lock(2*os.path.getsize(first_partition_dir)) as iolock:
+        with iobd.mem_manager(2*os.path.getsize(first_partition_dir)) as iolock:
             any = celaut.Any()
             any.ParseFromString(iobd.read_file(filename = first_partition_dir))
             return any
@@ -523,8 +523,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
         hashes = []
         parser_generator = grpcbf.parse_from_buffer(
             request_iterator = request_iterator, 
-            indices = StartService_input_indices, 
-            partitions = StartService_input_partitions
+            indices = StartService_input, 
+            partitions_model = StartService_input_partitions,
+            partitions_message_mode = {2: [celaut.Any, ''], 4: [celaut.Any, '']},
+            mem_manager = iobd.mem_manager
         )
         while True:
             try:
@@ -575,10 +577,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
                 service_on_any = None
                 if type(r) is gateway_pb2.ServiceWithConfig:
+                    r = next(parser_generator)
                     configuration = r.config
                     service_on_any = r.service
                 
                 if type(r) is celaut.Any:
+                    r = next(parser_generator)
                     service_on_any = r
 
                 # Si me da servicio.  
@@ -589,7 +593,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     except: break
                     if type(second_partition_dir) is str:
                         if second_partition_dir[:-2] is not 'p2': raise Exception('Invalid partition for service ', second_partition_dir)
-                        hash = get_service_hex_main_hash(service_buffer = service_on_any.value, metadata = service_on_any.metadata)
+                        service_on_any.metadata.complete = False
+                        try:
+                            hash = get_service_hex_main_hash(metadata = service_on_any.metadata)
+                        except:
+                            raise Exception("Can't get the hash of that service because i don't want to take all buffer for that.") # TODO
                         shutil.move(second_partition_dir, REGISTRY+hash+'/p2')  # https://stackoverflow.com/questions/8858008/how-to-move-a-file-in-python
                     else:
                         # Does not second partition
@@ -713,7 +721,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetServiceTar(self, request_iterator, context):
         l.LOGGER('Request for give a service container.')
-        for r in grpcbf.parse_from_buffer(request_iterator = request_iterator, indices = GetServiceTar_input_indices):
+        for r in grpcbf.parse_from_buffer(request_iterator = request_iterator, indices = GetServiceTar_input):
 
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
@@ -754,7 +762,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     def GetServiceCost(self, request_iterator, context):
-        for r in grpcbf.parse_from_buffer(request_iterator=request_iterator, indices = GetServiceCost_input_indices):
+        for r in grpcbf.parse_from_buffer(request_iterator=request_iterator, indices = GetServiceCost_input):
 
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                 r.value.hex() in [s for s in os.listdir(REGISTRY)]:
