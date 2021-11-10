@@ -2,7 +2,7 @@ from gateway_pb2 import Instance
 import gateway_pb2_grpc, grpc
 import logger as l
 from gateway import generate_gateway_instance, insert_instance_on_mongo
-from utils import get_network_name, 
+from utils import get_network_name
 from grpcbigbuffer import client_grpc
 
 def Zeroconf(network: str) -> list:
