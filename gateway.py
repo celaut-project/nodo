@@ -594,7 +594,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         second_partition_dir = next(parser_generator)
                     except: break
                     if type(second_partition_dir) is str:
-                        if second_partition_dir[:-2] is not 'p2': raise Exception('Invalid partition for service ', second_partition_dir)
+                        if second_partition_dir[:-2] != 'p2': raise Exception('Invalid partition for service ', second_partition_dir)
                         service_on_any.metadata.complete = False
                         try:
                             hash = get_service_hex_main_hash(metadata = service_on_any.metadata)
