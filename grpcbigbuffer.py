@@ -61,7 +61,7 @@ def parse_from_buffer(
         mem_manager = lambda len: None,
         yield_remote_partition_dir: bool = False,
     ): 
-    if not indices and message_field: indices = {1: message_field}
+    if indices == {} and message_field: indices = {1: message_field}
 
     def parser_iterator(request_iterator, signal: Signal) -> Generator[bytes, None, None]:
         while True:
@@ -257,6 +257,7 @@ def parse_from_buffer(
                     partitions_message_mode = partitions_message_mode,
                 ): yield b
             else:
+                print('in ti', list(partitions_message_mode.values())[0][0] if len(partitions_message_mode) == 1 and len(list(partitions_message_mode.values())[0]) > 0 else list(indices.values())[0])
                 for b in iterate_partition(
                     message_field_or_route = list(partitions_message_mode.values())[0][0] if len(partitions_message_mode) == 1 and len(list(partitions_message_mode.values())[0]) > 0 else list(indices.values())[0],
                     signal = signal,
