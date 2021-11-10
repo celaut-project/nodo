@@ -2,7 +2,8 @@ from time import sleep
 import threading
 from gateway_pb2_grpcbf import GetServiceTar_input
 import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os
-from utils import service_extended, save_chunks_to_file, serialize_to_buffer
+from utils import service_extended
+from grpcbigbuffer import save_chunks_to_file, serialize_to_buffer
 from compile import HYCACHE, REGISTRY
 import logger as l
 import utils, iobigdata
