@@ -210,7 +210,7 @@ def parse_from_buffer(
                         iterator = iterate_partitions(
                             partitions = [None for i in buffer.head.partitions] if buffer.head.HasField('partitions') else [None],
                             signal = signal,
-                            request_iterator = itertools.chain(buffer, request_iterator),
+                            request_iterator = itertools.chain([buffer], request_iterator),
                             cache_dir = cache_dir + 'remote/'
                         ),
                         indices = indices,
@@ -228,7 +228,7 @@ def parse_from_buffer(
                     for b in iterate_partitions(
                         partitions = partitions_message_mode[buffer.head.index] if buffer.head.index in partitions_message_mode else [None for p in partitions_model[buffer.head.index]],
                         signal = signal,
-                        request_iterator = itertools.chain(buffer, request_iterator),
+                        request_iterator = itertools.chain([buffer], request_iterator),
                         cache_dir = cache_dir,
                     ): yield b
                 else:
@@ -236,7 +236,7 @@ def parse_from_buffer(
                         message_field_or_route = partitions_message_mode[buffer.head.index][0] \
                             if buffer.head.index in partitions_message_mode and len(partitions_message_mode[buffer.head.index]) > 0 else indices[buffer.head.index],
                         signal = signal,
-                        request_iterator = itertools.chain(buffer, request_iterator),
+                        request_iterator = itertools.chain([buffer], request_iterator),
                         filename = cache_dir + 'p1',
                     ): yield b
             except: pass
@@ -248,7 +248,7 @@ def parse_from_buffer(
                     iterator = iterate_partition(
                         message_field_or_route = '',
                         signal = signal,
-                        request_iterator = itertools.chain(buffer, request_iterator),
+                        request_iterator = itertools.chain([buffer], request_iterator),
                         filename = cache_dir + 'remote/p1',
                     ),
                     indices = indices,
@@ -265,7 +265,7 @@ def parse_from_buffer(
                 for b in iterate_partition(
                     message_field_or_route = list(partitions_message_mode.values())[0][0] if len(partitions_message_mode) == 1 and len(list(partitions_message_mode.values())[0]) > 0 else list(indices.values())[0],
                     signal = signal,
-                    request_iterator = itertools.chain(buffer, request_iterator),
+                    request_iterator = itertools.chain([buffer], request_iterator),
                     filename = cache_dir + 'p1',
                 ): yield b
         else:
