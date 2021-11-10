@@ -75,6 +75,7 @@ def parse_from_buffer(
                 break
 
     def parse_message(message_field, request_iterator, signal):
+        print('to parse')
         all_buffer = bytes()
         for b in parser_iterator(
             request_iterator=request_iterator,
