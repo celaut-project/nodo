@@ -190,6 +190,7 @@ def parse_from_buffer(
 
     while True:
         buffer = next(request_iterator)
+        print('buffer -> ', buffer)
         # The order of conditions is important.
         if buffer.HasField('head'):
             try:
