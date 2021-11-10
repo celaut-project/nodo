@@ -530,7 +530,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
         )
         while True:
             try:
-                r = next(parser_generator) if not pass_this_next else pass_this_next = False
+                if not pass_this_next:
+                    r = next(parser_generator)
+                else: pass_this_next = False
             except: break
             hash = None
             if type(r) is gateway_pb2.HashWithConfig:
