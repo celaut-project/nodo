@@ -81,10 +81,13 @@ def parse_from_buffer(
             signal=signal,
         ):
             all_buffer += b
+
+        print('all buffer ', all_buffer)
         message = message_field()
         message.ParseFromString(
             all_buffer
         )
+        print('message - ', message)
         return message
 
     def save_to_file(filename: str, request_iterator, signal) -> str:
