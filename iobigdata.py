@@ -32,12 +32,15 @@ class IOBigData(metaclass=Singleton):
             self.iobd.unlock_ram(ram_amount = self.len)
             gc.collect()
 
-    def __init__(self) -> None:
-        self.log = lambda message: print(message)
+    def __init__(self, log = lambda message: print(message)) -> None:
+        self.log = log
         self.ram_pool = lambda: psutil.virtual_memory().available
         self.ram_locked = 0
         self.get_ram_avaliable = lambda: self.ram_pool() - self.ram_locked
         self.amount_lock = Lock()
+
+    def set_log(self, log = lambda message: print(message)) -> None:
+        self.log = log
 
     def stats(self, message: str):
         with self.amount_lock:

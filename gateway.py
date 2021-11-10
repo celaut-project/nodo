@@ -534,6 +534,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     r = next(parser_generator)
                 else: pass_this_next = False
             except: break
+            l.LOGGER('r -> '+ str(r))
             hash = None
             if type(r) is gateway_pb2.HashWithConfig:
                 configuration = r.config
@@ -587,11 +588,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     r = next(parser_generator)
                     service_on_any = r
 
+                l.LOGGER('r > '+ str(r))
+
                 # Si me da servicio.  
                 if service_on_any:
                     # Iterate the second partition.
                     try:
                         second_partition_dir = next(parser_generator)
+                        l.LOGGER('partition dir -> ', str(second_partition_dir))
                     except: break
                     if type(second_partition_dir) is str:
                         if second_partition_dir[:-2] != 'p2': raise Exception('Invalid partition for service ', second_partition_dir)
@@ -802,6 +806,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 if __name__ == "__main__":
     from zeroconf import Zeroconf
+    import iobigdata
+    iobigdata.IOBigData().set_log(log=l.LOGGER)
 
     # Create __hycache__ if it does not exists.
     try:
