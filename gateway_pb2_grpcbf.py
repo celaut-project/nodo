@@ -82,11 +82,11 @@ StartService_input_partitions = {
 
 
 GetServiceCost_input = {
-    1 : buffer_pb2.celaut__pb2.Any.Metadata.HashTag.Hash,
-    2 : buffer_pb2.celaut__pb2.Any,
+    1 : gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash,
+    2 : gateway_pb2.celaut__pb2.Any,
 }
 
 GetServiceTar_input = {
-    1 : buffer_pb2.celaut__pb2.Any.Metadata.HashTag.Hash,
-    2 : buffer_pb2.celaut__pb2.Any,
+    1 : gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash,
+    2 : gateway_pb2.celaut__pb2.Any,
 }
