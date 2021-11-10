@@ -65,7 +65,6 @@ def parse_from_buffer(
 
     def parser_iterator(request_iterator, signal: Signal) -> Generator[bytes, None, None]:
         while True:
-            signal.wait()     # TODO: check
             buffer = next(request_iterator)
             if buffer.HasField('chunk'):
                 yield buffer.chunk
