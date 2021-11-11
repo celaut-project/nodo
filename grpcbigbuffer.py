@@ -264,7 +264,7 @@ def parse_from_buffer(
                     ): yield b
             else:
                 raise Exception('Failed parsing. Comunication error.')
-    except Exception as e: print('e1 ',e)
+    except Exception as e: print('e1 ', str(e))
 
 def serialize_to_buffer(
         message_iterator,
