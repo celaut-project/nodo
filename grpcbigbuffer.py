@@ -305,7 +305,7 @@ def serialize_to_buffer(
                         chunk = bytes(message_bytes),
                         separator = True
                     )
-            finally: signal.wait()
+            finally: pass#signal.wait()
 
         else:
             try:
