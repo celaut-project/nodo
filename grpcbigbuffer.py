@@ -335,57 +335,59 @@ def serialize_to_buffer(
                 )
             finally: signal.wait()
 
-    if indices: indices = {e[1]:e[0] for e in indices.items()}
-    if not hasattr(message_iterator, '__iter__') or type(message_iterator) is tuple: message_iterator=[message_iterator]
-    for message in message_iterator:
-        if type(message) is tuple:  # If is partitioned
-            try:
-                yield buffer_pb2.Buffer(
-                    head = buffer_pb2.Buffer.Head(
-                        index = indices[message[0]],
-                        partitions = partitions_model[indices[message[0]]]
+    try:
+        if indices: indices = {e[1]:e[0] for e in indices.items()}
+        if not hasattr(message_iterator, '__iter__') or type(message_iterator) is tuple: message_iterator=[message_iterator]
+        for message in message_iterator:
+            if type(message) is tuple:  # If is partitioned
+                try:
+                    yield buffer_pb2.Buffer(
+                        head = buffer_pb2.Buffer.Head(
+                            index = indices[message[0]],
+                            partitions = partitions_model[indices[message[0]]]
+                        )
                     )
-                )
-            except:
-                yield buffer_pb2.Buffer(
-                    head = buffer_pb2.Buffer.Head(
-                        index = 1,
-                        partitions = partitions_model[1]
+                except:
+                    yield buffer_pb2.Buffer(
+                        head = buffer_pb2.Buffer.Head(
+                            index = 1,
+                            partitions = partitions_model[1]
+                        )
                     )
-                )
-            
-            for partition in message[1:]:
-                if type(partition) is str:
-                    for b in send_file(
-                        filename = message[1],
-                        signal=signal
-                    ): yield b
-                else:
-                    for b in send_message(
-                        signal=signal,
-                        message=partition,
-                        mem_manager=mem_manager,
-                        cache_dir = cache_dir,
-                    ): yield b
+                
+                for partition in message[1:]:
+                    if type(partition) is str:
+                        for b in send_file(
+                            filename = message[1],
+                            signal=signal
+                        ): yield b
+                    else:
+                        for b in send_message(
+                            signal=signal,
+                            message=partition,
+                            mem_manager=mem_manager,
+                            cache_dir = cache_dir,
+                        ): yield b
 
-        else:  # If message is a protobuf object.
-            try:
-                    head = buffer_pb2.Buffer.Head(
-                        index = indices[type(message)],
-                        partitions = partitions_model[indices[type(message)]] if indices[type(message)] in partitions_model else None
-                    )
-            except:  # if not indices or the method not appear on it.
-                    head = buffer_pb2.Buffer.Head(
-                        index = 1,
-                        partitions = partitions_model[1] if 1 in partitions_model else None
-                    )
-            for b in send_message(
-                signal=signal,
-                message=message,
-                head=head,
-                mem_manager=mem_manager,
-                cache_dir = cache_dir,
-            ): yield b
+            else:  # If message is a protobuf object.
+                try:
+                        head = buffer_pb2.Buffer.Head(
+                            index = indices[type(message)],
+                            partitions = partitions_model[indices[type(message)]] if indices[type(message)] in partitions_model else None
+                        )
+                except:  # if not indices or the method not appear on it.
+                        head = buffer_pb2.Buffer.Head(
+                            index = 1,
+                            partitions = partitions_model[1] if 1 in partitions_model else None
+                        )
+                for b in send_message(
+                    signal=signal,
+                    message=message,
+                    head=head,
+                    mem_manager=mem_manager,
+                    cache_dir = cache_dir,
+                ): yield b
+    except Exception as e: print (e)
 
 def client_grpc(
         method,

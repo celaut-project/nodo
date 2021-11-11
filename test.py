@@ -11,12 +11,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
             r = next(parser)
             print(r)
             if type(r) is gateway_pb2.TokenMessage:
-                print(r.token)
                 for b in grpcbigbuffer.serialize_to_buffer(
                     message_iterator=gateway_pb2.Instance(token=r.token)
-                ): 
-                    print('b ', b)
-                    yield b
+                ): yield b
 
 
 # create a gRPC server
