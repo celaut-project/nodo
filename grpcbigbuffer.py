@@ -338,6 +338,7 @@ def serialize_to_buffer(
     if indices: indices = {e[1]:e[0] for e in indices.items()}
     if not hasattr(message_iterator, '__iter__') or type(message_iterator) is tuple: message_iterator=[message_iterator]
     for message in message_iterator:
+        print('message ', message)
         if type(message) is tuple:  # If is partitioned
             try:
                 yield buffer_pb2.Buffer(
