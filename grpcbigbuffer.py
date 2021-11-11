@@ -305,6 +305,7 @@ def serialize_to_buffer(
                         chunk = bytes(message_bytes),
                         separator = True
                     )
+                print('it')
             finally: signal.wait()
 
         else:
@@ -380,6 +381,7 @@ def serialize_to_buffer(
                         index = 1,
                         partitions = partitions_model[1] if 1 in partitions_model else None
                     )
+            print('head ', head)
             for b in send_message(
                 signal=signal,
                 message=message,
