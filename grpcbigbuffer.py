@@ -193,16 +193,16 @@ def parse_from_buffer(
         if buffer.HasField('head'):
             try:
                 # If not match
-                if buffer.head.HasField('partitions') and len(buffer.head.partitions) > 1 and \
+                if len(buffer.head.partitions)==0 and len(buffer.head.partitions) > 1 and \
                     buffer.head.index in partitions_model and partitions_model[buffer.head.index] and \
                     buffer.head.partitions != partitions_model[buffer.head.index] \
-                    or buffer.head.HasField('partitions') and len(buffer.head.partitions) > 1 and \
+                    or len(buffer.head.partitions)==0 and len(buffer.head.partitions) > 1 and \
                         not (buffer.head.index in partitions_model and partitions_model[buffer.head.index]) \
-                    or not (buffer.head.HasField('partitions') and len(buffer.head.partitions) > 1) and \
+                    or not (len(buffer.head.partitions)==0 and len(buffer.head.partitions) > 1) and \
                         buffer.head.index in partitions_model and partitions_model[buffer.head.index]:
                     for b in conversor(
                         iterator = iterate_partitions(
-                            partitions = [None for i in buffer.head.partitions] if buffer.head.HasField('partitions') else [None],
+                            partitions = [None for i in buffer.head.partitions] if len(buffer.head.partitions)==0 else [None],
                             signal = signal,
                             request_iterator = itertools.chain([buffer], request_iterator),
                             cache_dir = cache_dir + 'remote/'
@@ -297,7 +297,7 @@ def serialize_to_buffer(
         if len(message_bytes) < CHUNK_SIZE:
             signal.wait()
             try:
-                b = buffer_pb2.Buffer(
+                yield buffer_pb2.Buffer(
                     chunk = bytes(message_bytes),
                     head = head,
                     separator = True
@@ -305,12 +305,7 @@ def serialize_to_buffer(
                         chunk = bytes(message_bytes),
                         separator = True
                     )
-                print('it', b)
-                yield b
-            finally: 
-                print('fin')
-                signal.wait()
-                print('ally')
+            finally: signal.wait()
 
         else:
             try:
@@ -343,7 +338,6 @@ def serialize_to_buffer(
     if indices: indices = {e[1]:e[0] for e in indices.items()}
     if not hasattr(message_iterator, '__iter__') or type(message_iterator) is tuple: message_iterator=[message_iterator]
     for message in message_iterator:
-        print('message ', message)
         if type(message) is tuple:  # If is partitioned
             try:
                 yield buffer_pb2.Buffer(
@@ -385,16 +379,13 @@ def serialize_to_buffer(
                         index = 1,
                         partitions = partitions_model[1] if 1 in partitions_model else None
                     )
-            print('head ', head)
             for b in send_message(
                 signal=signal,
                 message=message,
                 head=head,
                 mem_manager=mem_manager,
                 cache_dir = cache_dir,
-            ): 
-                print('b  -   ', b)
-                yield b
+            ): yield b
 
 def client_grpc(
         method,
