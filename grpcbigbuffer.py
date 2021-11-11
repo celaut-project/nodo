@@ -306,6 +306,7 @@ def serialize_to_buffer(
                         separator = True
                     )
                 print('it', b)
+                yield b
             finally: 
                 print('fin')
                 signal.wait()
