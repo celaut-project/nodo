@@ -61,7 +61,7 @@ def parse_from_buffer(
         mem_manager = lambda len: None,
         yield_remote_partition_dir: bool = False,
     ): 
-    if not indices and message_field: indices = {1: message_field}
+    if indices == {} and message_field: indices = {1: message_field}
 
     def parser_iterator(request_iterator, signal: Signal) -> Generator[bytes, None, None]:
         while True:
