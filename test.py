@@ -9,7 +9,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
         try:
             parser = grpcbigbuffer.parse_from_buffer(request_iterator=request_iterator, message_field=gateway_pb2.TokenMessage)
             while True:
-                r = next(parser)
+                try:
+                    r = next(parser)
+                except StopIteration: break
                 print(r)
                 if type(r) is gateway_pb2.TokenMessage:
                     for b in grpcbigbuffer.serialize_to_buffer(
