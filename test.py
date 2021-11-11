@@ -13,7 +13,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             if type(r) is gateway_pb2.TokenMessage:
                 print(r.token)
                 for b in grpcbigbuffer.serialize_to_buffer(
-                    input=gateway_pb2.Instance(token=r.token)
+                    message_iterator=gateway_pb2.Instance(token=r.token)
                 ): yield b
 
 
