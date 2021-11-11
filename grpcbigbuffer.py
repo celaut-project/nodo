@@ -61,12 +61,11 @@ def parse_from_buffer(
         mem_manager = lambda len: None,
         yield_remote_partition_dir: bool = False,
     ): 
-    if indices == {} and message_field: indices = {1: message_field}
+    if not indices and message_field: indices = {1: message_field}
 
     def parser_iterator(request_iterator, signal: Signal) -> Generator[bytes, None, None]:
         while True:
             buffer = next(request_iterator)
-            print('buffer -> ', buffer)
             if buffer.HasField('chunk'):
                 yield buffer.chunk
             if buffer.HasField('signal') and buffer.signal:
@@ -75,20 +74,16 @@ def parse_from_buffer(
                 break
 
     def parse_message(message_field, request_iterator, signal):
-        print('to parse')
         all_buffer = bytes()
         for b in parser_iterator(
             request_iterator=request_iterator,
             signal=signal,
         ):
             all_buffer += b
-
-        print('all buffer ', all_buffer)
         message = message_field()
         message.ParseFromString(
             all_buffer
         )
-        print('message - ', message)
         return message
 
     def save_to_file(filename: str, request_iterator, signal) -> str:
@@ -194,7 +189,6 @@ def parse_from_buffer(
 
     while True:
         buffer = next(request_iterator)
-        print('buffer -> ', buffer)
         # The order of conditions is important.
         if buffer.HasField('head'):
             try:
@@ -261,7 +255,6 @@ def parse_from_buffer(
                     partitions_message_mode = partitions_message_mode,
                 ): yield b
             else:
-                print('in ti', list(partitions_message_mode.values())[0][0] if len(partitions_message_mode) == 1 and len(list(partitions_message_mode.values())[0]) > 0 else list(indices.values())[0])
                 for b in iterate_partition(
                     message_field_or_route = list(partitions_message_mode.values())[0][0] if len(partitions_message_mode) == 1 and len(list(partitions_message_mode.values())[0]) > 0 else list(indices.values())[0],
                     signal = signal,
@@ -296,7 +289,7 @@ def serialize_to_buffer(
     def send_message(
             signal: Signal, 
             message: object, 
-            head: buffer_pb2.Buffer.Head = buffer_pb2.Buffer.Head(index=1), 
+            head: buffer_pb2.Buffer.Head = None, 
             mem_manager = lambda len: None,
             cache_dir: str= None, 
         ) -> Generator[buffer_pb2.Buffer, None, None]:
@@ -384,7 +377,7 @@ def serialize_to_buffer(
             except:  # if not indices or the method not appear on it.
                     head = buffer_pb2.Buffer.Head(
                         index = 1,
-                        partitions = partitions_model[indices[type(message)]] if 1 in partitions_model else None
+                        partitions = partitions_model[1] if 1 in partitions_model else None
                     )
             for b in send_message(
                 signal=signal,
