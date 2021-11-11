@@ -296,21 +296,16 @@ def serialize_to_buffer(
         message_bytes = message.SerializeToString()
         if len(message_bytes) < CHUNK_SIZE:
             signal.wait()
-            try:
-                b = buffer_pb2.Buffer(
+            b = buffer_pb2.Buffer(
+                chunk = bytes(message_bytes),
+                head = head,
+                separator = True
+            ) if head else buffer_pb2.Buffer(
                     chunk = bytes(message_bytes),
-                    head = head,
                     separator = True
-                ) if head else buffer_pb2.Buffer(
-                        chunk = bytes(message_bytes),
-                        separator = True
-                    )
-                print('it', b)
-                yield b
-            finally: 
-                print('fin')
-                signal.wait()
-                print('ally')
+                )
+            print('it', b)
+            yield b
 
         else:
             try:
