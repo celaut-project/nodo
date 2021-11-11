@@ -388,7 +388,9 @@ def serialize_to_buffer(
                 head=head,
                 mem_manager=mem_manager,
                 cache_dir = cache_dir,
-            ): yield b
+            ): 
+                print('b  -   ', b)
+                yield b
 
 def client_grpc(
         method,
