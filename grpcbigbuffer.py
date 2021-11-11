@@ -269,7 +269,7 @@ def serialize_to_buffer(
         signal = Signal(exist=False),
         cache_dir: str = os.path.abspath(os.curdir) + '/__hycache__/grpcbigbuffer' + str(randint(1,999)) + '/', 
         indices: dict = {}, 
-        partitions_model: dict = {1: [buffer_pb2.Buffer.Head.Partition]},
+        partitions_model: dict = {},
         mem_manager = lambda len: None
     ) -> Generator[buffer_pb2.Buffer, None, None]:  # method: indice
     
