@@ -13,7 +13,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             except StopIteration: break
             print(r)
             if type(r) is gateway_pb2.TokenMessage:
-                meta = gateway_pb2.celaut__pb2.Any.Meatada(
+                meta = gateway_pb2.celaut__pb2.Any.Metada(
                     complete  = True
                 )
                 for b in grpcbigbuffer.serialize_to_buffer(
