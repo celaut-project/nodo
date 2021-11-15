@@ -8,9 +8,13 @@ from random import randint
 from typing import Generator
 from threading import Condition
 
-class MemManager:
+class MemManager(object):
+    def __init__(self, len):
+        pass
     def __enter__(self):
         return self
+    def __exit__(self, exc_type, exc_value, trace):
+        pass
 
 class Signal():
     # The parser use change() when reads a signal on the buffer.
@@ -62,16 +66,16 @@ def parse_from_buffer(
         partitions_model: dict = {},
         partitions_message_mode: dict = {},
         cache_dir: str = os.path.abspath(os.curdir) + '/__hycache__/grpcbigbuffer' + str(randint(1,999)) + '/',
-        mem_manager = lambda len: MemManager(),
+        mem_manager = lambda len: MemManager(len=len),
         yield_remote_partition_dir: bool = False,
     ): 
     if indices == {} and message_field: indices = {1: message_field}
     os.mkdir(cache_dir)
 
-    def parser_iterator(request_iterator, signal: Signal) -> Generator[bytes, None, None]:
+    def parser_iterator(request_iterator, signal: Signal) -> Generator[buffer_pb2.Buffer, None, None]:
         for buffer in request_iterator:
             if buffer.HasField('chunk'):
-                yield buffer.chunk
+                yield buffer
             if buffer.HasField('signal') and buffer.signal:
                 signal.change()
             if buffer.HasField('separator') and buffer.separator: 
@@ -83,7 +87,7 @@ def parse_from_buffer(
             request_iterator=request_iterator,
             signal=signal,
         ):
-            all_buffer += b
+            all_buffer += b.chunk
         message = message_field()
         message.ParseFromString(
             all_buffer
@@ -154,7 +158,6 @@ def parse_from_buffer(
                 dirs.append(d)
         except Exception as e: print(e)
         if not pf_object or len(remote_partitions_model)>0 and len(dirs) != len(remote_partitions_model): return None
-        
         # 3. Parse to the local partitions from the remote partitions using mem_manager.
         try:
             with mem_manager(len = 2*sum([os.path.getsize(dir) for dir in dirs])):
@@ -254,7 +257,7 @@ def parse_from_buffer(
                             mem_manager = mem_manager,
                             yield_remote_partition_dir = yield_remote_partition_dir,
                             pf_object = indices[buffer.head.index] if buffer.head.index in indices else None,
-                            partitions_message_mode =  partitions_message_mode[buffer.head.index] if buffer.head.index in partitions_message_mode else [],
+                            partitions_message_mode = partitions_message_mode[buffer.head.index] if buffer.head.index in partitions_message_mode else [],
                         ): yield b
 
                     elif buffer.head.index in partitions_model and partitions_model[buffer.head.index] and len(partitions_model[buffer.head.index]) > 1:
@@ -271,7 +274,7 @@ def parse_from_buffer(
                                 if buffer.head.index in partitions_message_mode and len(partitions_message_mode[buffer.head.index]) > 0 else indices[buffer.head.index],
                             signal = signal,
                             request_iterator = itertools.chain([buffer], request_iterator),
-                            filename = cache_dir + 'p1',  # TODO check
+                            filename = cache_dir + 'p1', # TODO check
                         ): yield b
                 except: pass
 
@@ -313,7 +316,7 @@ def serialize_to_buffer(
         cache_dir: str = os.path.abspath(os.curdir) + '/__hycache__/grpcbigbuffer' + str(randint(1,999)) + '/', 
         indices: dict = {}, 
         partitions_model: dict = {},
-        mem_manager = lambda len: MemManager()
+        mem_manager = lambda len: MemManager(len=len)
     ) -> Generator[buffer_pb2.Buffer, None, None]:  # method: indice
     
     os.mkdir(cache_dir)
@@ -337,7 +340,7 @@ def serialize_to_buffer(
             signal: Signal, 
             message: object, 
             head: buffer_pb2.Buffer.Head = None, 
-            mem_manager = lambda len: MemManager(),
+            mem_manager = lambda len: MemManager(len=len),
             cache_dir: str= None, 
         ) -> Generator[buffer_pb2.Buffer, None, None]:
         message_bytes = message.SerializeToString()
@@ -446,7 +449,7 @@ def client_grpc(
         partitions_message_mode_parser: dict = {}, 
         indices_serializer: dict = {}, 
         partitions_serializer: dict = {}, 
-        mem_manager = lambda len: MemManager(),
+        mem_manager = lambda len: MemManager(len=len),
         yield_remote_partition_dir_on_serializer: bool = False,
     ): # indice: method
     signal = Signal()
