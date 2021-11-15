@@ -52,7 +52,7 @@ def save_chunks_to_file(buffer_iterator, filename, signal):
     signal.wait()
     with open(filename, 'wb') as f:
         signal.wait()
-        f.write(''.join([buffer.chunk for buffer in buffer_iterator]))
+        f.write(b''.join([buffer.chunk for buffer in buffer_iterator]))
 
 def parse_from_buffer(
         request_iterator, 
@@ -69,8 +69,7 @@ def parse_from_buffer(
     os.mkdir(cache_dir)
 
     def parser_iterator(request_iterator, signal: Signal) -> Generator[bytes, None, None]:
-        while True:
-            buffer = next(request_iterator)
+        for buffer in request_iterator:
             if buffer.HasField('chunk'):
                 yield buffer.chunk
             if buffer.HasField('signal') and buffer.signal:
@@ -110,7 +109,7 @@ def parse_from_buffer(
                 signal=signal,
             )
 
-        elif message_field_or_route:
+        elif message_field_or_route or type(message_field_or_route) is str:
             yield save_to_file(
                 request_iterator = request_iterator,
                 filename = filename,
@@ -134,62 +133,98 @@ def parse_from_buffer(
 
     def conversor(
             iterator,
-            indices: dict,
-            signal: Signal, 
             pf_object: object = None, 
             local_partitions_model: list = [], 
             remote_partitions_model: list = [], 
-            mem_manager = lambda len: MemManager(), 
+            mem_manager = lambda len: MemManager(len=len), 
             yield_remote_partition_dir: bool = False, 
             cache_dir: str = None,
-            partitions_message_mode: dict = {},
+            partitions_message_mode: list = [],
         ):
-        dirs = []
-        # 1. Save the remote partitions on cache.
-        for d in iterator: 
-            # 2. yield remote partitions directory.
-            if yield_remote_partition_dir: yield d
-            dirs.append(d)
-
-        if not pf_object or remote_partitions_model != [] and len(dirs) != len(remote_partitions_model): return None
+        yield pf_object
+        try:
+            os.mkdir(cache_dir+'remote/')
+        except FileExistsError: pass
+        try:
+            dirs = []
+            # 1. Save the remote partitions on cache.
+            for d in iterator: 
+                # 2. yield remote partitions directory.
+                if yield_remote_partition_dir: yield d
+                dirs.append(d)
+        except Exception as e: print(e)
+        if not pf_object or len(remote_partitions_model)>0 and len(dirs) != len(remote_partitions_model): return None
+        
         # 3. Parse to the local partitions from the remote partitions using mem_manager.
-        with mem_manager(len = 2*sum([os.path.getsize(dir) for dir in dirs])):
-            main_object = pf_object()
-            for i, d in enumerate(dirs):
-                # Get the partition
-                partition = remote_partitions_model[i]
-                
-                # Get auxiliar object for partition.
-                def recursive(partition, aux_object):
-                    return recursive(
-                        aux_object = eval(aux_object.DESCRIPTOR.fields_by_number[list(partition.index.keys())[0]].message_type.full_name), 
-                        partition = list(partition.index.values())[0]
-                        ) if partition.HasField('index') and len(partition.index) == 1 else aux_object() 
-                aux_object = recursive(partition = partition, aux_object = pf_object)
+        try:
+            with mem_manager(len = 2*sum([os.path.getsize(dir) for dir in dirs])):
+                main_object = pf_object()
+                if len(remote_partitions_model)==0 and len(dirs)==1:
+                    main_object.ParseFromString(open(dirs[0], 'rb').read())
+                elif len(remote_partitions_model)!=len(dirs): 
+                    raise Exception("Error: remote partitions model are not correct with the buffer.")
+                else:
+                    for i, d in enumerate(dirs):
+                        # Get the partition
+                        partition = remote_partitions_model[i]
+                        # Get auxiliar object for partition.
+                        def recursive(partition, aux_object):
+                            return recursive(
+                                aux_object = eval(aux_object.DESCRIPTOR.fields_by_number[list(partition.index.keys())[0]].message_type.full_name), 
+                                partition = list(partition.index.values())[0]
+                                ) if len(partition.index) == 1 else aux_object() 
+                        aux_object = recursive(partition = partition, aux_object = pf_object)
+                        # Parse buffer to it.
+                        try:
+                            aux_object.ParseFromString(open(d, 'rb').read())
+                        except: raise Exception("Error: remote partitions model are not correct with the buffer, error on partition "+str(i))
 
-                # Parse buffer to it.
-                try:
-                    aux_object.ParseFromString(open(d, 'rb').read())
-                except: return None
+                        main_object.MergeFrom(aux_object)
 
-                main_object.MergeFrom(aux_object)
+                # 4. yield local partitions.
+                if local_partitions_model == []: local_partitions_model.append(buffer_pb2.Buffer.Head.Partition())
+                for i, partition in enumerate(local_partitions_model):
+                    def recursive(partition, aux_object):
+                        if len(partition.index) == 0: 
+                            return aux_object
+                        if len(partition.index) == 1:
+                            return recursive(
+                                partition = list(partition.index.values())[0],
+                                aux_object = getattr(aux_object, aux_object.DESCRIPTOR.fields[list(partition.index.keys())[0]-1].name)
+                            )
+                        for field in aux_object.DESCRIPTOR.fields:
+                            if field.index+1 in partition.index: 
+                                try:
+                                    setattr(aux_object, field.name, recursive(
+                                        partition = partition.index[field.index+1],
+                                        aux_object = getattr(aux_object, field.name)
+                                    ))
+                                except: pass
+                            else:
+                                aux_object.ClearField(field.name)
+                        return aux_object
 
-        # 4. yield local partitions.
-        for b in parse_from_buffer(
-            request_iterator = serialize_to_buffer(
-                                    signal = signal,
-                                    cache_dir = cache_dir,
-                                    partitions_model = local_partitions_model,
-                                    mem_manager = mem_manager,
-                                    indices = indices,
-                                ),
-            signal = signal,
-            indices = indices,
-            cache_dir = cache_dir,
-            mem_manager = mem_manager,
-            partitions_model = local_partitions_model,
-            partitions_message_mode = partitions_message_mode,
-        ): yield b
+                    aux_object = pf_object()
+                    aux_object.CopyFrom(main_object)
+                    aux_object = recursive(partition = partition, aux_object = aux_object)
+                    message_field_or_route = partitions_message_mode[i] if len(partitions_message_mode)>i else ''
+                    if type(message_field_or_route) is str or not message_field_or_route:
+                        try:
+                            filename = cache_dir + 'p'+str(i+1)
+                            with open(filename, 'wb') as f:
+                                f.write(
+                                    aux_object.SerializeToString() if hasattr(aux_object, 'SerializeToString') \
+                                        else bytes(aux_object) if type(aux_object) is not str else bytes(aux_object, 'utf8')
+                                )
+                            yield filename
+                        except Exception as e: print(e)
+                    elif type(aux_object) is message_field_or_route:
+                        yield aux_object
+                    else:
+                        raise Exception('Error: Partitions message mode are not correct ' + str(type(aux_object)) + ' is not ' + str(message_field_or_route))
+
+        finally:
+            shutil.rmtree(cache_dir+'remote/')
 
 
     try: 
@@ -213,19 +248,17 @@ def parse_from_buffer(
                                 request_iterator = itertools.chain([buffer], request_iterator),
                                 cache_dir = cache_dir + 'remote/'
                             ),
-                            indices = indices,
                             cache_dir = cache_dir,
-                            local_partitions_model = partitions_model[buffer.head.index] if buffer.head.index in partitions_model else [None],
+                            local_partitions_model = partitions_model[buffer.head.index] if buffer.head.index in partitions_model else [],
                             remote_partitions_model = buffer.head.partitions,
                             mem_manager = mem_manager,
                             yield_remote_partition_dir = yield_remote_partition_dir,
                             pf_object = indices[buffer.head.index] if buffer.head.index in indices else None,
-                            partitions_message_mode = partitions_message_mode,
-                            signal = signal,
+                            partitions_message_mode =  partitions_message_mode[buffer.head.index] if buffer.head.index in partitions_message_mode else [],
                         ): yield b
 
                     elif buffer.head.index in partitions_model and partitions_model[buffer.head.index] and len(partitions_model[buffer.head.index]) > 1:
-                        yield indices[buffer.head.index]()
+                        yield indices[buffer.head.index]
                         for b in iterate_partitions(
                             partitions = partitions_message_mode[buffer.head.index] if buffer.head.index in partitions_message_mode else [None for p in partitions_model[buffer.head.index]],
                             signal = signal,
@@ -238,13 +271,12 @@ def parse_from_buffer(
                                 if buffer.head.index in partitions_message_mode and len(partitions_message_mode[buffer.head.index]) > 0 else indices[buffer.head.index],
                             signal = signal,
                             request_iterator = itertools.chain([buffer], request_iterator),
-                            filename = cache_dir + 'p1',
+                            filename = cache_dir + 'p1',  # TODO check
                         ): yield b
                 except: pass
 
             elif indices and len(indices) == 1: # Does not've more than one index and more than one partition too.
                 if partitions_message_mode and 1 in partitions_message_mode and len(partitions_message_mode[1]) > 1:
-                    yield list(indices.values())[0]
                     for b in conversor(
                         iterator = iterate_partition(
                             message_field_or_route = '',
@@ -252,15 +284,13 @@ def parse_from_buffer(
                             request_iterator = itertools.chain([buffer], request_iterator),
                             filename = cache_dir + 'remote/p1',
                         ),
-                        indices = indices,
                         remote_partitions_model = [None],
-                        local_partitions_model = list(partitions_model.values())[0] if list(partitions_model.values()) > 0 else [None],
+                        local_partitions_model = list(partitions_model.values())[0] if list(partitions_model.values()) > 0 else [],
                         mem_manager = mem_manager,
                         yield_remote_partition_dir = yield_remote_partition_dir,
                         pf_object = list(indices.values())[0],
                         cache_dir = cache_dir,
-                        partitions_message_mode = partitions_message_mode,
-                        signal = signal,
+                        partitions_message_mode = list(partitions_message_mode.values())[0] if list(partitions_message_mode.values()) > 0 else [],
                     ): yield b
                 else:
                     for b in iterate_partition(
