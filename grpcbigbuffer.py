@@ -352,15 +352,13 @@ def serialize_to_buffer(
                 else:
                     partitions_model.update({i: [buffer_pb2.Buffer.Head.Partition()]})
         
-            if indices: indices = {e[1]: e[0] for e in indices.items()}
+            indices = {e[1]: e[0] for e in indices.items()}
             if not hasattr(message_iterator, '__iter__') or type(message_iterator) is tuple:
-                if type(message_iterator) is tuple and message_iterator[0] not in indices: indices.update({message_iterator[0]: 1})
-                elif message_iterator not in indices: indices.update({message_iterator: 1})
                 message_iterator = itertools.chain([message_iterator])
 
-            if 1 not in indices:
-                message_type = list(message_iterator)[0]
-                indices.update({message_type[0]: 1}) if type(message_type) is tuple else indices.update({message_type: 1})
+            if 1 not in indices.values():
+                message_type = next(message_iterator)
+                indices.update({message_type[0]: 1}) if type(message_type) is tuple else indices.update({type(message_type): 1})
                 message_iterator = itertools.chain([message_type, message_iterator])
         
         except:
