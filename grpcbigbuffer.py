@@ -77,13 +77,25 @@ def parse_from_buffer(
         if type(indices) is not dict: raise Exception
 
         if type(partitions_model) is list: partitions_model = {1: partitions_model}  # Only've one index.
-        if partitions_model.keys() != indices.keys(): raise Exception  # Check that partition model's index're correct.
+        if type(partitions_model) is not dict: raise Exception
+        for i in indices.keys():
+            if i in partitions_model:
+                if type(partitions_model[i]) is buffer_pb2.Buffer.Head.Partition: partitions_model[i] = [partitions_model[i]]
+                if type(partitions_model[i]) is not list: raise Exception
+            else:
+                partitions_model.update({i: [buffer_pb2.Buffer.Head.Partition()]})
 
         if type(partitions_message_mode) is bool: 
             partitions_message_mode = {i: [partitions_message_mode for m in l] for i, l in partitions_model.items()} # The same mode for all index and partitions.
         if type(partitions_message_mode) is list: partitions_message_mode = {1: partitions_message_mode} # Only've one index.
-
+        for i, l in partitions_message_mode.items():  # If an index in the partitions message mode have a boolean, it applies for all partitions of this index.
+            if type(l) is bool: partitions_message_mode[i] = [l for m in partitions_model[i]]
+            elif type(l) is not list: raise Exception
+        
         if partitions_message_mode.keys() != indices.keys(): raise Exception # Check that partition modes' index're correct.
+        for i in indices.keys(): # Check if partitions modes and partitions have the same lenght in all indices.
+            if len(partitions_message_mode[i]) != len(partitions_model[i]):
+                raise Exception
     except:
         raise Exception('Parse from buffer error: Partitions or Indices are not correct.' + str(partitions_model) + str(partitions_message_mode) + str(indices))
 
@@ -130,27 +142,47 @@ def parse_from_buffer(
                 signal=signal,
             )
 
-        elif message_field_or_route or type(message_field_or_route) is str:
+        else:
             yield save_to_file(
                 request_iterator = request_iterator,
                 filename = filename,
                 signal = signal
             )
-
-        else: 
-            for b in parser_iterator(
-                request_iterator = request_iterator,
-                signal = signal
-            ): yield b
     
     def iterate_partitions(signal: Signal, request_iterator, cache_dir: str, partitions: list = [None]):
         for i, partition in enumerate(partitions):
             for b in iterate_partition(
-                    message_field_or_route = partition if partition and type(partition) is not str else '', 
+                    message_field_or_route = partition, 
                     signal = signal,
                     request_iterator = request_iterator,
                     filename = cache_dir + 'p'+str(i+1),
                 ): yield b
+
+    def get_subclass(partition, object_cls):
+        return get_subclass(
+            object_cls = eval(object_cls.DESCRIPTOR.fields_by_number[list(partition.index.keys())[0]].message_type.full_name), 
+            partition = list(partition.index.values())[0]
+            ) if len(partition.index) == 1 else object_cls
+
+    def get_submessage(partition, obj):
+        if len(partition.index) == 0: 
+            return obj
+        if len(partition.index) == 1:
+            return get_submessage(
+                partition = list(partition.index.values())[0],
+                obj = getattr(obj, obj.DESCRIPTOR.fields[list(partition.index.keys())[0]-1].name)
+            )
+        for field in obj.DESCRIPTOR.fields:
+            if field.index+1 in partition.index: 
+                try:
+                    setattr(obj, field.name, get_submessage(
+                        partition = partition.index[field.index+1],
+                        obj = getattr(obj, field.name)
+                    ))
+                except: pass
+            else:
+                obj.ClearField(field.name)
+        return obj
 
     def conversor(
             iterator,
@@ -188,12 +220,7 @@ def parse_from_buffer(
                         # Get the partition
                         partition = remote_partitions_model[i]
                         # Get auxiliar object for partition.
-                        def recursive(partition, aux_object):
-                            return recursive(
-                                aux_object = eval(aux_object.DESCRIPTOR.fields_by_number[list(partition.index.keys())[0]].message_type.full_name), 
-                                partition = list(partition.index.values())[0]
-                                ) if len(partition.index) == 1 else aux_object() 
-                        aux_object = recursive(partition = partition, aux_object = pf_object)
+                        aux_object = get_subclass(partition = partition, object_cls = pf_object)()
                         # Parse buffer to it.
                         try:
                             aux_object.ParseFromString(open(d, 'rb').read())
@@ -204,31 +231,11 @@ def parse_from_buffer(
                 # 4. yield local partitions.
                 if local_partitions_model == []: local_partitions_model.append(buffer_pb2.Buffer.Head.Partition())
                 for i, partition in enumerate(local_partitions_model):
-                    def recursive(partition, aux_object):
-                        if len(partition.index) == 0: 
-                            return aux_object
-                        if len(partition.index) == 1:
-                            return recursive(
-                                partition = list(partition.index.values())[0],
-                                aux_object = getattr(aux_object, aux_object.DESCRIPTOR.fields[list(partition.index.keys())[0]-1].name)
-                            )
-                        for field in aux_object.DESCRIPTOR.fields:
-                            if field.index+1 in partition.index: 
-                                try:
-                                    setattr(aux_object, field.name, recursive(
-                                        partition = partition.index[field.index+1],
-                                        aux_object = getattr(aux_object, field.name)
-                                    ))
-                                except: pass
-                            else:
-                                aux_object.ClearField(field.name)
-                        return aux_object
-
                     aux_object = pf_object()
                     aux_object.CopyFrom(main_object)
-                    aux_object = recursive(partition = partition, aux_object = aux_object)
-                    message_field_or_route = partitions_message_mode[i] if len(partitions_message_mode)>i else ''
-                    if type(message_field_or_route) is str or not message_field_or_route:
+                    aux_object = get_submessage(partition = partition, obj = aux_object)
+                    message_mode = partitions_message_mode[i]
+                    if not message_mode:
                         try:
                             filename = cache_dir + 'p'+str(i+1)
                             with open(filename, 'wb') as f:
@@ -238,10 +245,8 @@ def parse_from_buffer(
                                 )
                             yield filename
                         except Exception as e: print(e)
-                    elif type(aux_object) is message_field_or_route:
-                        yield aux_object
                     else:
-                        raise Exception('Error: Partitions message mode are not correct ' + str(type(aux_object)) + ' is not ' + str(message_field_or_route))
+                        yield aux_object
 
         finally:
             shutil.rmtree(cache_dir+'remote/')
@@ -253,14 +258,9 @@ def parse_from_buffer(
             # The order of conditions is important.
             if buffer.HasField('head'):
                 try:
-                    # If not match
-                    if len(buffer.head.partitions)==0 and len(buffer.head.partitions) > 1 and \
-                        buffer.head.index in partitions_model and partitions_model[buffer.head.index] and \
-                        buffer.head.partitions != partitions_model[buffer.head.index] \
-                        or len(buffer.head.partitions)==0 and len(buffer.head.partitions) > 1 and \
-                            not (buffer.head.index in partitions_model and partitions_model[buffer.head.index]) \
-                        or not (len(buffer.head.partitions)==0 and len(buffer.head.partitions) > 1) and \
-                            buffer.head.index in partitions_model and partitions_model[buffer.head.index]:
+                    if buffer.head.index not in indices: raise Exception('Parse from buffer error: buffer head index is not correct ' + str(buffer.head.index) + str(indices.keys()))
+                    if not (buffer.head.partitions == [] and len(partitions_model[buffer.head.index])==1 or \
+                            buffer.head.partitions == partitions_model[buffer.head.index]):  # If not match
                         for b in conversor(
                             iterator = iterate_partitions(
                                 partitions = [None for i in buffer.head.partitions] if len(buffer.head.partitions)>0 else [None],
@@ -269,58 +269,59 @@ def parse_from_buffer(
                                 cache_dir = cache_dir + 'remote/'
                             ),
                             cache_dir = cache_dir,
-                            local_partitions_model = partitions_model[buffer.head.index] if buffer.head.index in partitions_model else [],
+                            local_partitions_model = partitions_model[buffer.head.index],
                             remote_partitions_model = buffer.head.partitions,
                             mem_manager = mem_manager,
                             yield_remote_partition_dir = yield_remote_partition_dir,
-                            pf_object = indices[buffer.head.index] if buffer.head.index in indices else None,
-                            partitions_message_mode = partitions_message_mode[buffer.head.index] if buffer.head.index in partitions_message_mode else [],
+                            pf_object = indices[buffer.head.index],
+                            partitions_message_mode = partitions_message_mode[buffer.head.index],
                         ): yield b
 
-                    elif buffer.head.index in partitions_model and partitions_model[buffer.head.index] and len(partitions_model[buffer.head.index]) > 1:
+                    elif len(partitions_model[buffer.head.index]) > 1:
                         yield indices[buffer.head.index]
                         for b in iterate_partitions(
-                            partitions = partitions_message_mode[buffer.head.index] if buffer.head.index in partitions_message_mode else [None for p in partitions_model[buffer.head.index]],
+                            partitions = [get_subclass(object_cls = indices[buffer.head.index], partition = partition) \
+                                if partitions_message_mode[buffer.head.index][part_i] else None for part_i, partition in enumerate(partitions_model[buffer.head.index])], # TODO performance
                             signal = signal,
                             request_iterator = itertools.chain([buffer], request_iterator),
                             cache_dir = cache_dir,
                         ): yield b
+
                     else:
                         for b in iterate_partition(
-                            message_field_or_route = partitions_message_mode[buffer.head.index][0] \
-                                if buffer.head.index in partitions_message_mode and len(partitions_message_mode[buffer.head.index]) > 0 else indices[buffer.head.index],
+                            message_field_or_route = indices[buffer.head.index] if partitions_message_mode[buffer.head.index][0] else None,
                             signal = signal,
                             request_iterator = itertools.chain([buffer], request_iterator),
-                            filename = cache_dir + 'p1', # TODO check
+                            filename = cache_dir + 'p1',
                         ): yield b
                 except: pass
 
-            elif indices and len(indices) == 1: # Does not've more than one index and more than one partition too.
-                if partitions_message_mode and 1 in partitions_message_mode and len(partitions_message_mode[1]) > 1:
+            elif 1 in indices: # Does not've more than one index and more than one partition too.
+                if len(partitions_model[1]) > 1:
                     for b in conversor(
                         iterator = iterate_partition(
-                            message_field_or_route = '',
+                            message_field_or_route = None,
                             signal = signal,
                             request_iterator = itertools.chain([buffer], request_iterator),
                             filename = cache_dir + 'remote/p1',
                         ),
-                        remote_partitions_model = [None],
-                        local_partitions_model = list(partitions_model.values())[0] if list(partitions_model.values()) > 0 else [],
+                        remote_partitions_model = [buffer_pb2.Buffer.Head.Partition()],
+                        local_partitions_model = partitions_model[1],
                         mem_manager = mem_manager,
                         yield_remote_partition_dir = yield_remote_partition_dir,
-                        pf_object = list(indices.values())[0],
+                        pf_object = indices[1],
                         cache_dir = cache_dir,
-                        partitions_message_mode = list(partitions_message_mode.values())[0] if list(partitions_message_mode.values()) > 0 else [],
+                        partitions_message_mode = partitions_message_mode[1],
                     ): yield b
                 else:
                     for b in iterate_partition(
-                        message_field_or_route = list(partitions_message_mode.values())[0][0] if len(partitions_message_mode) == 1 and len(list(partitions_message_mode.values())[0]) > 0 else list(indices.values())[0],
+                        message_field_or_route = indices[1] if partitions_message_mode[1][0] else None,
                         signal = signal,
                         request_iterator = itertools.chain([buffer], request_iterator),
                         filename = cache_dir + 'p1',
                     ): yield b
             else:
-                raise Exception('Failed parsing. Comunication error.')
+                raise Exception('Parse from buffer error: index are not correct ' + str(indices))
     except StopIteration:
         try:
             shutil.rmtree(cache_dir)
@@ -337,13 +338,29 @@ def serialize_to_buffer(
     ) -> Generator[buffer_pb2.Buffer, None, None]:  # method: indice
     
     try:
-        if not hasattr(message_iterator, '__iter__') or type(message_iterator) is tuple: 
-            message_iterator=[message_iterator]
+        if type(indices) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType: indices = {1: indices}
+        if type(indices) is not dict: raise Exception
     
         if type(partitions_model) is list: partitions_model = {1: partitions_model}  # Only've one index.
-        if partitions_model.keys() != indices.keys(): raise Exception  # Check that partition model's index're correct.
+        if type(partitions_model) is not dict: raise Exception
+        for i in indices.keys():
+            if i in partitions_model:
+                if type(partitions_model[i]) is buffer_pb2.Buffer.Head.Partition: partitions_model[i] = [partitions_model[i]]
+                if type(partitions_model[i]) is not list: raise Exception
+            else:
+                partitions_model.update({i: [buffer_pb2.Buffer.Head.Partition()]})
     
         if indices: indices = {e[1]: e[0] for e in indices.items()}
+        if not hasattr(message_iterator, '__iter__') or type(message_iterator) is tuple:
+            if type(message_iterator) is tuple and message_iterator[0] not in indices: indices.update({message_iterator[0]: 1})
+            elif message_iterator not in indices: indices.update({message_iterator: 1})
+            message_iterator = itertools.chain([message_iterator])
+
+        if 1 not in indices:
+            message_type = list(message_iterator)[0]
+            indices.update({message_type[0]: 1}) if type(message_type) is tuple else indices.update({message_type: 1})
+            message_iterator = itertools.chain([message_type, message_iterator])
+    
     except:
         raise Exception('Serialzie to buffer error: Indices are not correct ' + str(indices) + str(partitions_model))
 
@@ -413,20 +430,12 @@ def serialize_to_buffer(
 
     for message in message_iterator:
         if type(message) is tuple:  # If is partitioned
-            try:
-                yield buffer_pb2.Buffer(
-                    head = buffer_pb2.Buffer.Head(
-                        index = indices[message[0]],
-                        partitions = partitions_model[indices[message[0]]]
-                    )
+            yield buffer_pb2.Buffer(
+                head = buffer_pb2.Buffer.Head(
+                    index = indices[message[0]],
+                    partitions = partitions_model[indices[message[0]]]
                 )
-            except:
-                yield buffer_pb2.Buffer(
-                    head = buffer_pb2.Buffer.Head(
-                        index = 1,
-                        partitions = partitions_model[1]
-                    )
-                )
+            )
             
             for partition in message[1:]:
                 if type(partition) is str:
@@ -443,16 +452,10 @@ def serialize_to_buffer(
                     ): yield b
 
         else:  # If message is a protobuf object.
-            try:
-                    head = buffer_pb2.Buffer.Head(
-                        index = indices[type(message)],
-                        partitions = partitions_model[indices[type(message)]] if indices[type(message)] in partitions_model else None
-                    )
-            except:  # if not indices or the method not appear on it.
-                    head = buffer_pb2.Buffer.Head(
-                        index = 1,
-                        partitions = partitions_model[1] if 1 in partitions_model else None
-                    )
+            head = buffer_pb2.Buffer.Head(
+                index = indices[type(message)],
+                partitions = partitions_model[indices[type(message)]]
+            )
             for b in send_message(
                 signal=signal,
                 message=message,
