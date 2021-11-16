@@ -6,7 +6,7 @@ import gateway_pb2
 
 class Gateway(gateway_pb2_grpc.Gateway):
     def StartService(self, request_iterator, context):
-        parser = grpcbigbuffer.parse_from_buffer(request_iterator=request_iterator, message_field=gateway_pb2.TokenMessage)
+        parser = grpcbigbuffer.parse_from_buffer(request_iterator=request_iterator, indices=gateway_pb2.TokenMessage)
         while True:
             try:
                 r = next(parser)
