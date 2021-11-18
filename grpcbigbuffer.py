@@ -96,13 +96,13 @@ def parse_from_buffer(
         indices: Union[protobuf.pyext.cpp_message.GeneratedProtocolMessageType, dict] = {}, # indice: method      message_field = None,
         partitions_model: Union[list, dict] = [buffer_pb2.Buffer.Head.Partition()],
         partitions_message_mode: Union[bool, list, dict] = False,  # Write on disk by default.
-        cache_dir: str = create_cache_dir(),
+        cache_dir: str = None,
         mem_manager = lambda len: MemManager(len=len),
         yield_remote_partition_dir: bool = False,
     ): 
-    print('new parser ', cache_dir)
     try:
         try:
+            if not cache_dir: cache_dir = create_cache_dir()
             if type(indices) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType: indices = {1: indices}
             if type(indices) is not dict: raise Exception
 
@@ -360,13 +360,14 @@ def parse_from_buffer(
 def serialize_to_buffer(
         message_iterator, # Message or tuples (with head on the first item.)
         signal = Signal(exist=False),
-        cache_dir: str = create_cache_dir(), 
+        cache_dir: str = None, 
         indices: Union[protobuf.pyext.cpp_message.GeneratedProtocolMessageType, dict] = {},
         partitions_model: Union[list, dict] = [buffer_pb2.Buffer.Head.Partition()],
         mem_manager = lambda len: MemManager(len=len)
     ) -> Generator[buffer_pb2.Buffer, None, None]:  # method: indice
     try:
         try:
+            if not cache_dir: cache_dir = create_cache_dir()
             if type(indices) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType: indices = {1: indices}
             if type(indices) is not dict: raise Exception
         
@@ -504,10 +505,11 @@ def client_grpc(
         indices_serializer: Union[protobuf.pyext.cpp_message.GeneratedProtocolMessageType, dict] = {},
         partitions_serializer: Union[list, dict] = [buffer_pb2.Buffer.Head.Partition()],
         mem_manager = lambda len: MemManager(len=len),
-        cache_dir: str = create_cache_dir(), 
+        cache_dir: str = None, 
         yield_remote_partition_dir_on_serializer: bool = False,
     ): # indice: method
     try:
+        if not cache_dir: cache_dir = create_cache_dir()
         signal = Signal()
         for b in parse_from_buffer(
             request_iterator = method(
