@@ -283,6 +283,7 @@ def parse_from_buffer(
             while True:
                 buffer = next(request_iterator)
                 iteration_cache_dir = generate_random_dir(dir=cache_dir)
+                os.mkdir(iteration_cache_dir)
                 # The order of conditions is important.
                 if buffer.HasField('head'):
                     try:
