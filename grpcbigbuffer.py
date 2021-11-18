@@ -100,6 +100,7 @@ def parse_from_buffer(
         mem_manager = lambda len: MemManager(len=len),
         yield_remote_partition_dir: bool = False,
     ): 
+    print('as')
     try:
         try:
             if type(indices) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType: indices = {1: indices}
