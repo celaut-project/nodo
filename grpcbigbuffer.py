@@ -11,14 +11,30 @@ from random import randint
 from typing import Generator, Union
 from threading import Condition
 
-def create_cache_dir() -> str: 
+
+class CacheDir(type):
+    # Using singleton pattern
+    _instances = {}
     cache_dir = os.path.abspath(os.curdir) + '/__cache__/'
-    # TODO change the default for all calls.
+
+    def __call__(cls):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(CacheDir, cls).__call__()
+        return cls._instances[cls]
+
+def modify_cache_dir(cache_dir: str):
+    CacheDir.cache_dir = cache_dir
+
+def generate_random_dir(dir: str) -> str:
+    return dir + str(randint(1, MAX_DIR)) + '/'
+
+def create_cache_dir() -> str: 
+    cache_dir = CacheDir.cache_dir
     try:
         os.mkdir(cache_dir)
     except FileExistsError: pass
     while True:
-        random_dir = 'grpcbigbuffer' + str(randint(1, MAX_DIR)) + '/'
+        random_dir = generate_random_dir(dir='grpcbigbuffer')
         try:
             os.mkdir(cache_dir+random_dir)
             return cache_dir+random_dir
@@ -118,7 +134,7 @@ def parse_from_buffer(
                     yield buffer
                 if buffer.HasField('signal') and buffer.signal:
                     signal.change()
-                if buffer.HasField('separator') and buffer.separator: 
+                if buffer.HasField('separator') and buffer.separator:
                     break
 
         def parse_message(message_field, request_iterator, signal):
@@ -266,6 +282,7 @@ def parse_from_buffer(
         try: 
             while True:
                 buffer = next(request_iterator)
+                iteration_cache_dir = generate_random_dir(dir=cache_dir)
                 # The order of conditions is important.
                 if buffer.HasField('head'):
                     try:
@@ -277,9 +294,9 @@ def parse_from_buffer(
                                     partitions = [None for i in buffer.head.partitions] if len(buffer.head.partitions)>0 else [None],
                                     signal = signal,
                                     request_iterator = itertools.chain([buffer], request_iterator),
-                                    cache_dir = cache_dir + 'remote/'
+                                    cache_dir = iteration_cache_dir + 'remote/'
                                 ),
-                                cache_dir = cache_dir,
+                                cache_dir = iteration_cache_dir,
                                 local_partitions_model = partitions_model[buffer.head.index],
                                 remote_partitions_model = buffer.head.partitions,
                                 mem_manager = mem_manager,
@@ -295,7 +312,7 @@ def parse_from_buffer(
                                     if partitions_message_mode[buffer.head.index][part_i] else None for part_i, partition in enumerate(partitions_model[buffer.head.index])], # TODO performance
                                 signal = signal,
                                 request_iterator = itertools.chain([buffer], request_iterator),
-                                cache_dir = cache_dir,
+                                cache_dir = iteration_cache_dir,
                             ): yield b
 
                         else:
@@ -303,7 +320,7 @@ def parse_from_buffer(
                                 message_field_or_route = indices[buffer.head.index] if partitions_message_mode[buffer.head.index][0] else None,
                                 signal = signal,
                                 request_iterator = itertools.chain([buffer], request_iterator),
-                                filename = cache_dir + 'p1',
+                                filename = iteration_cache_dir + 'p1',
                             ): yield b
                     except: pass
 
@@ -314,14 +331,14 @@ def parse_from_buffer(
                                 message_field_or_route = None,
                                 signal = signal,
                                 request_iterator = itertools.chain([buffer], request_iterator),
-                                filename = cache_dir + 'remote/p1',
+                                filename = iteration_cache_dir + 'remote/p1',
                             ),
                             remote_partitions_model = [buffer_pb2.Buffer.Head.Partition()],
                             local_partitions_model = partitions_model[1],
                             mem_manager = mem_manager,
                             yield_remote_partition_dir = yield_remote_partition_dir,
                             pf_object = indices[1],
-                            cache_dir = cache_dir,
+                            cache_dir = iteration_cache_dir,
                             partitions_message_mode = partitions_message_mode[1],
                         ): yield b
                     else:
@@ -329,10 +346,13 @@ def parse_from_buffer(
                             message_field_or_route = indices[1] if partitions_message_mode[1][0] else None,
                             signal = signal,
                             request_iterator = itertools.chain([buffer], request_iterator),
-                            filename = cache_dir + 'p1',
+                            filename = iteration_cache_dir + 'p1',
                         ): yield b
                 else:
                     raise Exception('Parse from buffer error: index are not correct ' + str(indices))
+                try:
+                    shutil.rmtree(iteration_cache_dir)
+                except: pass
         except StopIteration:
             try:
                 shutil.rmtree(cache_dir)
