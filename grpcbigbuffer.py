@@ -12,7 +12,7 @@ from typing import Generator, Union
 from threading import Condition
 
 def create_cache_dir() -> str: 
-    cache_dir = os.path.abspath(os.curdir) + '__cache__/'
+    cache_dir = os.path.abspath(os.curdir) + '/__cache__/'
     # TODO change the default for all calls.
     try:
         os.mkdir(cache_dir)
