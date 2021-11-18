@@ -356,6 +356,7 @@ def parse_from_buffer(
                 except: pass
         except StopIteration:
             try:
+                print('as')
                 shutil.rmtree(cache_dir)
             except: pass
             return
