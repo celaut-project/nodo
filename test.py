@@ -15,7 +15,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
             try:
                 r = next(parser)
             except StopIteration: break
-            print(r)
             if type(r) is gateway_pb2.TokenMessage:
                 meta = gateway_pb2.celaut__pb2.Any.Metadata(
                     complete  = True
