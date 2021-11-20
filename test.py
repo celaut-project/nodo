@@ -29,9 +29,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         token=r.token,
                         instance_meta=meta
                         )
-                ): 
-                    print('b -> ',b)
-                    yield b
+                ): yield b
 
 
 # create a gRPC server
