@@ -1,7 +1,7 @@
 import grpc, gateway_pb2_grpc
 from concurrent import futures
 import grpcbigbuffer
-import gateway_pb2
+import gateway_pb2, buffer_pb2
 
 
 class Gateway(gateway_pb2_grpc.Gateway):
@@ -20,6 +20,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     complete  = True
                 )
                 for b in grpcbigbuffer.serialize_to_buffer(
+                    partitions_model = [
+                        buffer_pb2.Buffer.Head.Partition(index={1: buffer_pb2.Buffer.Head.Partition(), 2: buffer_pb2.Buffer.Head.Partition()}),
+                        buffer_pb2.Buffer.Head.Partition(index={3: buffer_pb2.Buffer.Head.Partition()}),
+                    ],
                     message_iterator=gateway_pb2.Instance(
                         token=r.token,
                         instance_meta=meta
