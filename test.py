@@ -21,14 +21,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     complete  = True
                 )
                 for b in grpcbigbuffer.serialize_to_buffer(
-                    partitions_model = [
-                        buffer_pb2.Buffer.Head.Partition(index={1: buffer_pb2.Buffer.Head.Partition(), 2: buffer_pb2.Buffer.Head.Partition()}),
-                        buffer_pb2.Buffer.Head.Partition(index={3: buffer_pb2.Buffer.Head.Partition()}),
-                    ],
-                    message_iterator=(gateway_pb2.Instance, 'asd', # TODO the partition obj is a str, but lib thinks that i give a file dir.
-                    gateway_pb2.Instance(
-                        instance_meta=meta
-                        ))
+                    message_iterator=gateway_pb2.Instance(
+                        instance_meta=meta,
+                        token=r.token
+                        )
                 ): yield b
 
 
