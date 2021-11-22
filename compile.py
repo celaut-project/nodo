@@ -1,6 +1,6 @@
 import logger as l
 import sys
-import json
+import json, getpass
 import os, subprocess
 import iobigdata
 import celaut_pb2 as celaut
@@ -13,8 +13,9 @@ from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex
 #  -------------------------------------------------
 
 # DIRECTORIES
-HYCACHE = "/home/hy/node/__hycache__/"
-REGISTRY = "/home/hy/node/__registry__/"
+USER_NAME = getpass.getuser()
+HYCACHE = "/home/"+USER_NAME+"/node/__hycache__/"
+REGISTRY = "/home/"+USER_NAME+"/node/__registry__/"
 
 class Hyper:
     def __init__(self, path, aux_id):

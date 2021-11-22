@@ -6,6 +6,8 @@ from compile import REGISTRY
 import netifaces as ni
 from verify import get_service_hex_main_hash
 
+GET_ENV = lambda env, default: int(os.environ.get(env)) if env in os.environ.keys() else default
+
 def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
     for slot in instance.api.slot:
         #if 'grpc' in slot.transport_protocol and 'http2' in slot.transport_protocol: # TODO
