@@ -121,6 +121,7 @@ def parse_from_buffer(
             for i, l in partitions_message_mode.items():  # If an index in the partitions message mode have a boolean, it applies for all partitions of this index.
                 if type(l) is bool: partitions_message_mode[i] = [l for m in partitions_model[i]]
                 elif type(l) is not list: raise Exception
+            partitions_message_mode.update({i: [False] for i in indices if i not in partitions_message_mode})  # Check that it've all indices.
             
             if partitions_message_mode.keys() != indices.keys(): raise Exception # Check that partition modes' index're correct.
             for i in indices.keys(): # Check if partitions modes and partitions have the same lenght in all indices.
@@ -282,6 +283,7 @@ def parse_from_buffer(
             while True:
                 buffer = next(request_iterator)
                 # The order of conditions is important.
+                # TODO buffer not have head.
                 if buffer.HasField('head'):
                     try:
                         if buffer.head.index not in indices: raise Exception('Parse from buffer error: buffer head index is not correct ' + str(buffer.head.index) + str(indices.keys()))
@@ -465,7 +467,7 @@ def serialize_to_buffer(
                 for partition in message[1:]:
                     if type(partition) is str:
                         for b in send_file(
-                            filename = message[1],
+                            filename = partition,
                             signal=signal
                         ): yield b
                     else:

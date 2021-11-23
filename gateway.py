@@ -271,144 +271,144 @@ def launch_service(
         father_ip: str, 
         config: celaut.Configuration = None
     ) -> gateway_pb2.Instance:
-    l.LOGGER('Go to launch a service. ')
-    if service_buffer == None: raise Exception("Service object can't be None")
-    getting_container = False
-    # Here it asks the balancer if it should assign the job to a peer.
-    while True:
-        for node_instance, cost in service_balancer(
-            service_buffer = service_buffer,
-            metadata = metadata
-        ).items():
-            l.LOGGER('Balancer select peer ' + str(node_instance) + ' with cost ' + str(cost))
-            
-            if node_instance:
+    try:
+        l.LOGGER('Go to launch a service. ')
+        if service_buffer == None: raise Exception("Service object can't be None")
+        getting_container = False
+        # Here it asks the balancer if it should assign the job to a peer.
+        while True:
+            for node_instance, cost in service_balancer(
+                service_buffer = service_buffer,
+                metadata = metadata
+            ).items():
+                l.LOGGER('Balancer select peer ' + str(node_instance) + ' with cost ' + str(cost))
+                
+                if node_instance:
+                    try:
+                        node_uri = utils.get_grpc_uri(node_instance)
+                        l.LOGGER('El servicio se lanza en el nodo con uri ' + str(node_uri))
+                        service_instance = next(grpcbf.client_grpc(
+                            method = gateway_pb2_grpc.GatewayStub(
+                                        grpc.insecure_channel(
+                                            node_uri.ip + ':' +  str(node_uri.port)
+                                        )
+                                    ).StartService,
+                            output_field = gateway_pb2.Instance,
+                            input = utils.service_extended(
+                                    service_buffer = service_buffer, 
+                                    metadata = metadata,
+                                    config = config
+                                )
+                        ))
+                        set_on_cache(
+                            father_ip = father_ip,
+                            ip_or_uri =  node_uri.ip + ':' +  str(node_uri.port), # Add node_uri.
+                            id_or_token = service_instance.token  # Add token.
+                        )
+                        service_instance.token = father_ip + '##' + node_uri.ip + '##' + service_instance.token
+                        return service_instance
+                    except Exception as e:
+                        l.LOGGER('Failed starting a service on peer, occurs the eror: ' + str(e))
+
+                #  The node launches the service locally.
+                l.LOGGER('El nodo lanza el servicio localmente.')
                 try:
-                    node_uri = utils.get_grpc_uri(node_instance)
-                    l.LOGGER('El servicio se lanza en el nodo con uri ' + str(node_uri))
-                    service_instance = next(grpcbf.client_grpc(
-                        method = gateway_pb2_grpc.GatewayStub(
-                                    grpc.insecure_channel(
-                                        node_uri.ip + ':' +  str(node_uri.port)
-                                    )
-                                ).StartService,
-                        output_field = gateway_pb2.Instance,
-                        input = utils.service_extended(
-                                service_buffer = service_buffer, 
-                                metadata = metadata,
-                                config = config
-                            )
-                    ))
+                    id = build.build(
+                            service_buffer = service_buffer, 
+                            metadata = metadata,
+                            get_it_outside = not getting_container
+                        )  #  If the container is not built, build it.
+                except:
+                    # If it does not have the container, it takes it from another node in the background and requests
+                    #  the instance from another node as well.
+                    getting_container = True
+                    continue
+
+                # Now, serialize part of the service is needed.
+                service = celaut.Service()
+                service.ParseFromString(service_buffer)
+                # If the request is made by a local service.
+                if utils.get_network_name(father_ip) == DOCKER_NETWORK:
+                    container = create_container(
+                        id = id,
+                        entrypoint = service.container.entrypoint
+                    )
+
+                    set_config(container_id = container.id, config = config, api = service.api.config)
+
+                    # The container must be started after adding the configuration file and
+                    #  before requiring its IP address, since docker assigns it at startup.
+
+                    try:
+                        container.start()
+                    except docker_lib.errors.APIError as e:
+                        l.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' '+str(e)) # TODO LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
+
+                    # Reload this object from the server again and update attrs with the new data.
+                    container.reload()
+                    container_ip = container.attrs['NetworkSettings']['IPAddress']
+
                     set_on_cache(
                         father_ip = father_ip,
-                        ip_or_uri =  node_uri.ip + ':' +  str(node_uri.port), # Add node_uri.
-                        id_or_token = service_instance.token  # Add token.
+                        id_or_token = container.id,
+                        ip_or_uri = container_ip
                     )
-                    service_instance.token = father_ip + '##' + node_uri.ip + '##' + service_instance.token
-                    return service_instance
-                except Exception as e:
-                    l.LOGGER('Failed starting a service on peer, occurs the eror: ' + str(e))
 
-            #  The node launches the service locally.
-            l.LOGGER('El nodo lanza el servicio localmente.')
-            try:
-                id = build.build(
-                        service_buffer = service_buffer, 
-                        metadata = metadata,
-                        get_it_outside = not getting_container
-                    )  #  If the container is not built, build it.
-            except:
-                # If it does not have the container, it takes it from another node in the background and requests
-                #  the instance from another node as well.
-                getting_container = True
-                continue
+                    for slot in service.api.slot:
+                        uri_slot = celaut.Instance.Uri_Slot()
+                        uri_slot.internal_port = slot.port
 
-            
-            # Now, serialize part of the service is needed.
-            service = celaut.Service()
-            service.ParseFromString(service_buffer)
+                        # Since it is internal, we know that it will only have one possible address per slot.
+                        uri = celaut.Instance.Uri()
+                        uri.ip = container_ip
+                        uri.port = slot.port
+                        uri_slot.uri.append(uri)
 
-            # If the request is made by a local service.
-            if utils.get_network_name(father_ip) == DOCKER_NETWORK:
-                container = create_container(
-                    id = id,
-                    entrypoint = service.container.entrypoint
-                )
-
-                set_config(container_id = container.id, config = config, api = service.api.config)
-
-                # The container must be started after adding the configuration file and
-                #  before requiring its IP address, since docker assigns it at startup.
-
-                try:
-                    container.start()
-                except docker_lib.errors.APIError as e:
-                    l.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' '+str(e)) # TODO LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
-
-                # Reload this object from the server again and update attrs with the new data.
-                container.reload()
-                container_ip = container.attrs['NetworkSettings']['IPAddress']
-
-                set_on_cache(
-                    father_ip = father_ip,
-                    id_or_token = container.id,
-                    ip_or_uri = container_ip
-                )
-
-                for slot in service.api.slot:
-                    uri_slot = celaut.Instance.Uri_Slot()
-                    uri_slot.internal_port = slot.port
-
-                    # Since it is internal, we know that it will only have one possible address per slot.
-                    uri = celaut.Instance.Uri()
-                    uri.ip = container_ip
-                    uri.port = slot.port
-                    uri_slot.uri.append(uri)
-
-            # Si hace la peticion un servicio de otro nodo.
-            else:
-                assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
-                container = create_container(
-                    use_other_ports = assigment_ports,
-                    id = id,
-                    entrypoint = service.container.entrypoint
-                )
-                set_config(container_id = container.id, config = config, api = service.api.config)
-                try:
-                    container.start()
-                except docker_lib.errors.APIError as e:
-                    # TODO LOS ERRORES DEBERÍAN LANZAR UNA EXCEPCION QUE LLEGUE HASTA EL GRPC.
-                    l.LOGGER('ERROR ON CONTAINER '+ str(container.id) + ' '+str(e)) 
-
-                # Reload this object from the server again and update attrs with the new data.
-                container.reload()
-
-                set_on_cache(
-                    father_ip = father_ip,
-                    id_or_token = container.id,
-                    ip_or_uri = container.attrs['NetworkSettings']['IPAddress']
-                )
-
-                for port in assigment_ports:
-                    uri_slot = celaut.Instance.Uri_Slot()
-                    uri_slot.internal_port = port
-
-                    # for host_ip in host_ip_list:
-                    uri = celaut.Instance.Uri()
-                    uri.ip = utils.get_local_ip_from_network(
-                        network = utils.get_network_name(ip_or_uri=father_ip)
+                # Si hace la peticion un servicio de otro nodo.
+                else:
+                    assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
+                    container = create_container(
+                        use_other_ports = assigment_ports,
+                        id = id,
+                        entrypoint = service.container.entrypoint
                     )
-                    uri.port = assigment_ports[port]
-                    uri_slot.uri.append(uri)
+                    set_config(container_id = container.id, config = config, api = service.api.config)
+                    try:
+                        container.start()
+                    except docker_lib.errors.APIError as e:
+                        # TODO LOS ERRORES DEBERÍAN LANZAR UNA EXCEPCION QUE LLEGUE HASTA EL GRPC.
+                        l.LOGGER('ERROR ON CONTAINER '+ str(container.id) + ' '+str(e)) 
 
-            l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
-            return gateway_pb2.Instance(
-                token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id,
-                instance = celaut.Instance(
-                        api = service.api,
-                        uri_slot = [uri_slot]
+                    # Reload this object from the server again and update attrs with the new data.
+                    container.reload()
+
+                    set_on_cache(
+                        father_ip = father_ip,
+                        id_or_token = container.id,
+                        ip_or_uri = container.attrs['NetworkSettings']['IPAddress']
                     )
-            )
+
+                    for port in assigment_ports:
+                        uri_slot = celaut.Instance.Uri_Slot()
+                        uri_slot.internal_port = port
+
+                        # for host_ip in host_ip_list:
+                        uri = celaut.Instance.Uri()
+                        uri.ip = utils.get_local_ip_from_network(
+                            network = utils.get_network_name(ip_or_uri=father_ip)
+                        )
+                        uri.port = assigment_ports[port]
+                        uri_slot.uri.append(uri)
+
+                l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
+                return gateway_pb2.Instance(
+                    token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id,
+                    instance = celaut.Instance(
+                            api = service.api,
+                            uri_slot = [uri_slot]
+                        )
+                )
+    except Exception as e: print('launch -< ', e)
 
 
 def save_service(service_buffer: bytes, metadata: celaut.Any.Metadata, hash: str = None):
@@ -442,7 +442,7 @@ def search_container(
         service_buffer: bytes, 
         metadata: celaut.Any.Metadata,
         ignore_network: str = None
-    ) -> Generator[gateway_pb2.Buffer, None, None]:
+    ) -> Generator[gateway_pb2.buffer__pb2.Buffer, None, None]:
     # Search a service tar container.
     for peer in peers_iterator(ignore_network = ignore_network):
         try:
@@ -522,18 +522,19 @@ class Gateway(gateway_pb2_grpc.Gateway):
         hashes = []
         parser_generator = grpcbf.parse_from_buffer(
             request_iterator = request_iterator, 
-            indices = StartService_input, 
+            indices = StartService_input,
             partitions_model = StartService_input_partitions,
-            partitions_message_mode = {2: [celaut.Any, ''], 4: [celaut.Any, '']},
+            partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False]},
             mem_manager = iobd.mem_manager
         )
         while True:
             try:
                 if not pass_this_next:
-                    r = next(parser_generator)
+                    try:
+                        r = next(parser_generator)
+                    except StopIteration: break
                 else: pass_this_next = False
             except: break
-            l.LOGGER('r -> '+ str(r))
             hash = None
             if type(r) is gateway_pb2.HashWithConfig:
                 configuration = r.config
@@ -549,11 +550,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if hash:
                 hashes.append(hash)
-
                 if configuration and SHA3_256_ID == hash.type and \
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    yield gateway_pb2.Buffer(signal = True)
+                    yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
+                        print('father ip -> ',context.peer())
                         instance = launch_service(
                                 service_buffer = get_service_buffer_from_registry(
                                     hash = hash.value.hex()
@@ -567,14 +568,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                             )
                         for b in grpcbf.serialize_to_buffer(
-                            instance
+                            message_iterator=instance
                         ): 
                             yield b
                         return
 
                     except Exception as e:
                         l.LOGGER('Exception launching a service ' + str(e))
-                        yield gateway_pb2.Buffer(signal = True)
+                        yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                         continue
 
                 service_on_any = None
@@ -586,8 +587,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if type(r) is celaut.Any:
                     r = next(parser_generator)
                     service_on_any = r
-
-                l.LOGGER('r > '+ str(r))
 
                 # Si me da servicio.  
                 if service_on_any:
@@ -616,7 +615,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             hash = hash if hash else None
                         )
                         for buffer in grpcbf.serialize_to_buffer(
-                            launch_service(
+                            message_iterator = launch_service(
                                 service_buffer = service_on_any.value,
                                 metadata = service_on_any.metadata, 
                                 config = configuration,
@@ -625,26 +624,26 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         ): yield buffer
                         return
 
-            
-            l.LOGGER('The service is not in the registry and the request does not have the definition.' \
-                + str([(hash.type.hex(), hash.value.hex()) for hash in hashes]))
-            
-            try:
-                for b in grpcbf.serialize_to_buffer(
-                    launch_service(
-                        service_buffer = search_definition(hashes = hashes),
-                        metadata = celaut.Any.Metadata(
-                            hashtag = celaut.Any.Metadata.HashTag(
-                                hash = hashes
-                            )
-                        ), 
-                        config = configuration,
-                        father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
-                    )
-                ): yield b
+                
+                l.LOGGER('The service is not in the registry and the request does not have the definition.' \
+                    + str([(hash.type.hex(), hash.value.hex()) for hash in hashes]))
+                
+                try:
+                    for b in grpcbf.serialize_to_buffer(
+                        message_iterator = launch_service(
+                            service_buffer = search_definition(hashes = hashes),
+                            metadata = celaut.Any.Metadata(
+                                hashtag = celaut.Any.Metadata.HashTag(
+                                    hash = hashes
+                                )
+                            ), 
+                            config = configuration,
+                            father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                        )
+                    ): yield b
 
-            except Exception as e:
-                raise Exception('Was imposible start the service. ' + str(e))
+                except Exception as e:
+                    raise Exception('Was imposible start the service. ' + str(e))
 
 
     def StopService(self, request_iterator, context):
@@ -670,7 +669,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
         
         l.LOGGER('Stopped the instance with token -> ' + token_message.token)
-        yield gateway_pb2.Buffer(
+        yield gateway_pb2.buffer__pb2.Buffer(
             chunk = gateway_pb2.Empty().SerializeToString(),
             separator = True
         )
@@ -703,7 +702,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 hashes.append(hash)
                 if SHA3_256_ID == hash.type and \
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    yield gateway_pb2.Buffer(signal = True) # Say stop to send more hashes.
+                    yield gateway_pb2.buffer__pb2.Buffer(signal = True) # Say stop to send more hashes.
                     for b in grpcbf.serialize_to_buffer(
                         get_from_registry(
                             hash = hash.value.hex()
@@ -771,7 +770,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                 r.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                yield gateway_pb2.Buffer(signal = True)
+                yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                 try:
                     cost = execution_cost(
                             service_buffer = get_service_buffer_from_registry(
@@ -785,7 +784,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         )
                     break
                 except:
-                    yield gateway_pb2.Buffer(signal = True)
+                    yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     continue
 
             if type(r) is celaut.Any:
@@ -807,6 +806,7 @@ if __name__ == "__main__":
     from zeroconf import Zeroconf
     import iobigdata
     iobigdata.IOBigData().set_log(log=l.LOGGER)
+    grpcbf.modify_cache_dir(HYCACHE)
 
     # Create __hycache__ if it does not exists.
     try:

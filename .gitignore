@@ -2,3 +2,6 @@
 __pycache__
 .idea
 app.log
+__hycache__/*
+__cache__/*
+__registry__/*

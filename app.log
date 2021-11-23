@@ -1,0 +1,1427 @@
+a
+2021-11-22 23:12:32,804 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-22 23:12:35,443 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-22 23:12:37,362 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-22 23:13:14,013 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-22 23:13:14,996 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-22 23:13:18,686 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-22 23:13:21,216 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-22 23:20:45,527 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 10:53:36,126 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:29:34,615 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:29:56,054 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:30:00,660 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:31:25,684 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:32:20,475 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:32:48,955 ERROR    Exception iterating responses: 'Hash' object is not iterable
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 555, in StartService
+    print( dict(hash), [s for s in os.listdir(REGISTRY)])
+TypeError: 'Hash' object is not iterable
+2021-11-23 11:32:55,976 ERROR    Exception iterating responses: 'Hash' object is not iterable
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 555, in StartService
+    print( dict(hash), [s for s in os.listdir(REGISTRY)])
+TypeError: 'Hash' object is not iterable
+2021-11-23 11:33:20,365 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:34:00,423 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:34:05,243 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:34:06,126 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:34:23,076 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:38:30,273 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 11:57:56,787 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 12:39:15,820 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 12:54:05,051 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:16:36,331 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:18:32,012 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:19:05,579 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:19:32,213 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 640, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 652, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:21:54,300 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:22:41,879 ERROR    Exception iterating responses: hash
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 553, in StartService
+    print(r.hash.type.hex())
+AttributeError: hash
+2021-11-23 13:22:46,020 ERROR    Exception iterating responses: hash
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 553, in StartService
+    print(r.hash.type.hex())
+AttributeError: hash
+2021-11-23 13:23:09,466 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 643, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 655, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:23:37,162 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:27:37,368 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    ),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    request_iterator = request_iterator,
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:44:25,419 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    ),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    request_iterator = request_iterator,
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:45:38,453 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    ),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    request_iterator = request_iterator,
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:46:09,373 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 638, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 650, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:47:40,496 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 13:48:24,136 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:00:46,028 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:02:20,573 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:05:52,026 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:06:39,294 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:06:51,683 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:21:03,170 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:21:12,837 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:21:29,898 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:21:32,137 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:21:43,449 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:28:25,934 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:29:22,452 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:33:43,632 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:40:34,283 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:40:47,734 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:42:47,258 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 14:55:03,936 ERROR    Exception iterating responses: Was imposible start the service. The service  was not found.
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 639, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 500, in search_definition
+    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+Exception: The service  was not found.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 651, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. The service  was not found.
+2021-11-23 15:07:54,687 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:07:54,687 DEBUG    No config file found
+2021-11-23 15:07:54,687 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:07:54,687 DEBUG    No config file found
+2021-11-23 15:07:54,808 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:07:54,817 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:07:54,817 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:07:54,818 DEBUG    No config file found
+2021-11-23 15:07:54,818 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:07:54,818 DEBUG    No config file found
+2021-11-23 15:07:54,826 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:07:54,841 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:07:54,845 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:07:54,849 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:07:54,851 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:07:54,854 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:07:54,856 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:20:06,096 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:20:06,096 DEBUG    No config file found
+2021-11-23 15:20:06,097 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:20:06,097 DEBUG    No config file found
+2021-11-23 15:20:06,105 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:20:06,107 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:20:06,108 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:20:06,108 DEBUG    No config file found
+2021-11-23 15:20:06,108 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:20:06,108 DEBUG    No config file found
+2021-11-23 15:20:06,116 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:20:06,118 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:20:06,121 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:20:06,123 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:20:06,125 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:20:06,128 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:20:06,130 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:21:07,369 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:21:07,369 DEBUG    No config file found
+2021-11-23 15:21:07,369 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:21:07,369 DEBUG    No config file found
+2021-11-23 15:21:07,378 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:21:07,380 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:21:07,381 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:21:07,381 DEBUG    No config file found
+2021-11-23 15:21:07,381 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:21:07,381 DEBUG    No config file found
+2021-11-23 15:21:07,388 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:21:07,391 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:21:07,392 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:21:07,394 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:21:07,396 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:21:07,398 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:21:07,400 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:21:48,210 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:21:48,210 DEBUG    No config file found
+2021-11-23 15:21:48,210 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:21:48,210 DEBUG    No config file found
+2021-11-23 15:21:48,217 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:21:48,219 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:21:48,220 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:21:48,220 DEBUG    No config file found
+2021-11-23 15:21:48,220 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:21:48,220 DEBUG    No config file found
+2021-11-23 15:21:48,227 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:21:48,229 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:21:48,232 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:21:48,234 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:21:48,236 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:21:48,238 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:21:48,239 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:31:30,047 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:31:30,047 DEBUG    No config file found
+2021-11-23 15:31:30,047 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:31:30,047 DEBUG    No config file found
+2021-11-23 15:31:30,056 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:31:30,058 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:31:30,059 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:31:30,059 DEBUG    No config file found
+2021-11-23 15:31:30,059 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:31:30,059 DEBUG    No config file found
+2021-11-23 15:31:30,066 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:31:30,068 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:31:30,070 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:31:30,072 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:31:30,074 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:31:30,077 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:31:30,078 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:32:17,152 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:32:17,152 DEBUG    No config file found
+2021-11-23 15:32:17,153 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:32:17,153 DEBUG    No config file found
+2021-11-23 15:32:17,160 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:32:17,161 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:32:17,162 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:32:17,162 DEBUG    No config file found
+2021-11-23 15:32:17,162 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:32:17,162 DEBUG    No config file found
+2021-11-23 15:32:17,170 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:32:17,172 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:32:17,174 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:32:17,176 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:32:17,178 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:32:17,179 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:32:17,181 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:36:00,234 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:36:00,234 DEBUG    No config file found
+2021-11-23 15:36:00,234 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:36:00,234 DEBUG    No config file found
+2021-11-23 15:36:00,242 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:36:00,243 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:36:00,244 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:36:00,244 DEBUG    No config file found
+2021-11-23 15:36:00,244 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:36:00,244 DEBUG    No config file found
+2021-11-23 15:36:00,251 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:36:00,254 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:36:00,256 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:36:00,258 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:36:00,261 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:36:00,262 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:36:00,265 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:36:20,113 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:36:20,113 DEBUG    No config file found
+2021-11-23 15:36:20,114 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:36:20,114 DEBUG    No config file found
+2021-11-23 15:36:20,121 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:36:20,123 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:36:20,123 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:36:20,124 DEBUG    No config file found
+2021-11-23 15:36:20,124 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:36:20,124 DEBUG    No config file found
+2021-11-23 15:36:20,131 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:36:20,133 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:36:20,135 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:36:20,137 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:36:20,139 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:36:20,142 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:36:20,143 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:38:08,536 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:38:08,536 DEBUG    No config file found
+2021-11-23 15:38:08,536 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:38:08,536 DEBUG    No config file found
+2021-11-23 15:38:08,544 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:38:08,545 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:38:08,546 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:38:08,546 DEBUG    No config file found
+2021-11-23 15:38:08,546 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:38:08,546 DEBUG    No config file found
+2021-11-23 15:38:08,555 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:38:08,558 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:38:08,561 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:38:08,563 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:38:08,564 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:38:08,566 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:38:08,568 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:39:19,001 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:39:19,001 DEBUG    No config file found
+2021-11-23 15:39:19,001 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:39:19,001 DEBUG    No config file found
+2021-11-23 15:39:19,009 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:39:19,010 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:39:19,011 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:39:19,011 DEBUG    No config file found
+2021-11-23 15:39:19,011 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:39:19,011 DEBUG    No config file found
+2021-11-23 15:39:19,019 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:39:19,022 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:39:19,024 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:39:19,026 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:39:19,028 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:39:19,029 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:39:19,031 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:39:54,809 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:39:54,809 DEBUG    No config file found
+2021-11-23 15:39:54,809 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:39:54,809 DEBUG    No config file found
+2021-11-23 15:39:54,818 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:39:54,820 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:39:54,820 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:39:54,820 DEBUG    No config file found
+2021-11-23 15:39:54,820 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:39:54,820 DEBUG    No config file found
+2021-11-23 15:39:54,828 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:39:54,831 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:39:54,833 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:39:54,835 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:39:54,836 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:39:54,838 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:39:54,840 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:40:33,338 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:40:33,338 DEBUG    No config file found
+2021-11-23 15:40:33,338 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:40:33,338 DEBUG    No config file found
+2021-11-23 15:40:33,345 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:40:33,347 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:40:33,348 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:40:33,348 DEBUG    No config file found
+2021-11-23 15:40:33,348 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:40:33,348 DEBUG    No config file found
+2021-11-23 15:40:33,355 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:40:33,357 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:40:33,359 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:40:33,361 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:40:33,362 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:40:33,364 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:40:33,366 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:41:12,496 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:41:12,496 DEBUG    No config file found
+2021-11-23 15:41:12,497 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:41:12,497 DEBUG    No config file found
+2021-11-23 15:41:12,505 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:41:12,506 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:41:12,507 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:41:12,507 DEBUG    No config file found
+2021-11-23 15:41:12,507 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:41:12,507 DEBUG    No config file found
+2021-11-23 15:41:12,514 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:41:12,516 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:41:12,521 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:41:12,523 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:41:12,525 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:41:12,527 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:41:12,528 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 15:41:41,239 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:41:41,239 DEBUG    No config file found
+2021-11-23 15:41:41,240 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:41:41,240 DEBUG    No config file found
+2021-11-23 15:41:41,247 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:41:41,249 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 15:41:41,250 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:41:41,250 DEBUG    No config file found
+2021-11-23 15:41:41,250 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 15:41:41,250 DEBUG    No config file found
+2021-11-23 15:41:41,257 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 15:41:41,260 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 15:41:41,262 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 15:41:41,266 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 15:41:41,268 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 15:41:41,270 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 15:41:41,271 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 19:16:46,048 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:16:46,048 DEBUG    No config file found
+2021-11-23 19:16:46,049 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:16:46,049 DEBUG    No config file found
+2021-11-23 19:16:46,118 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:16:46,120 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 19:16:46,120 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:16:46,121 DEBUG    No config file found
+2021-11-23 19:16:46,121 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:16:46,121 DEBUG    No config file found
+2021-11-23 19:16:46,127 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:16:46,138 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 19:16:46,141 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 19:16:46,144 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 19:16:46,146 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 19:16:46,148 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 19:16:46,149 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 19:16:46,282 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:16:46,282 DEBUG    No config file found
+2021-11-23 19:16:46,282 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:16:46,282 DEBUG    No config file found
+2021-11-23 19:16:46,289 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:16:46,403 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 19:16:46,409 DEBUG    http://localhost:None "GET /v1.41/containers/8893c2ff47d195b7600b473198bf8c1d0e263621f0c335fc8ccc19e96e5aa690/json HTTP/1.1" 200 None
+2021-11-23 19:16:47,211 DEBUG    http://localhost:None "POST /v1.41/containers/8893c2ff47d195b7600b473198bf8c1d0e263621f0c335fc8ccc19e96e5aa690/start HTTP/1.1" 204 0
+2021-11-23 19:16:47,213 DEBUG    http://localhost:None "GET /v1.41/containers/8893c2ff47d195b7600b473198bf8c1d0e263621f0c335fc8ccc19e96e5aa690/json HTTP/1.1" 200 None
+2021-11-23 19:18:16,841 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:18:16,841 DEBUG    No config file found
+2021-11-23 19:18:16,842 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:18:16,842 DEBUG    No config file found
+2021-11-23 19:18:16,849 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:18:16,851 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 19:18:16,852 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:18:16,852 DEBUG    No config file found
+2021-11-23 19:18:16,852 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:18:16,852 DEBUG    No config file found
+2021-11-23 19:18:16,860 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:18:16,862 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 19:18:16,864 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 19:18:16,866 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 19:18:16,868 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 19:18:16,870 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 19:18:16,872 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 19:18:16,906 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:18:16,907 DEBUG    No config file found
+2021-11-23 19:18:16,907 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:18:16,907 DEBUG    No config file found
+2021-11-23 19:18:16,914 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:18:17,009 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 19:18:17,010 DEBUG    http://localhost:None "GET /v1.41/containers/76c36a7362a05adefda27a29f65593dd767e499a1c62af889f65cc789ba0d2da/json HTTP/1.1" 200 None
+2021-11-23 19:18:17,503 DEBUG    http://localhost:None "POST /v1.41/containers/76c36a7362a05adefda27a29f65593dd767e499a1c62af889f65cc789ba0d2da/start HTTP/1.1" 204 0
+2021-11-23 19:18:17,506 DEBUG    http://localhost:None "GET /v1.41/containers/76c36a7362a05adefda27a29f65593dd767e499a1c62af889f65cc789ba0d2da/json HTTP/1.1" 200 None
+2021-11-23 19:19:10,192 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:19:10,192 DEBUG    No config file found
+2021-11-23 19:19:10,192 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:19:10,192 DEBUG    No config file found
+2021-11-23 19:19:10,199 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:19:10,201 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 19:19:10,202 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:19:10,202 DEBUG    No config file found
+2021-11-23 19:19:10,202 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:19:10,202 DEBUG    No config file found
+2021-11-23 19:19:10,209 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:19:10,211 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 19:19:10,213 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 19:19:10,215 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 19:19:10,218 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 19:19:10,220 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 19:19:10,221 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 19:19:10,259 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:19:10,259 DEBUG    No config file found
+2021-11-23 19:19:10,259 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:19:10,259 DEBUG    No config file found
+2021-11-23 19:19:10,266 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:19:10,329 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 19:19:10,331 DEBUG    http://localhost:None "GET /v1.41/containers/e3ebee355b8f9fbba28266ca8e6f3e5c2e1f926bf1de24d0107f7fee787b155c/json HTTP/1.1" 200 None
+2021-11-23 19:19:10,783 DEBUG    http://localhost:None "POST /v1.41/containers/e3ebee355b8f9fbba28266ca8e6f3e5c2e1f926bf1de24d0107f7fee787b155c/start HTTP/1.1" 204 0
+2021-11-23 19:19:10,785 DEBUG    http://localhost:None "GET /v1.41/containers/e3ebee355b8f9fbba28266ca8e6f3e5c2e1f926bf1de24d0107f7fee787b155c/json HTTP/1.1" 200 None
+2021-11-23 19:40:43,961 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:40:43,961 DEBUG    No config file found
+2021-11-23 19:40:43,961 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:40:43,962 DEBUG    No config file found
+2021-11-23 19:40:43,971 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:40:43,973 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 19:40:43,973 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:40:43,973 DEBUG    No config file found
+2021-11-23 19:40:43,973 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:40:43,973 DEBUG    No config file found
+2021-11-23 19:40:43,982 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:40:43,985 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 19:40:43,990 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 19:40:43,992 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 19:40:43,995 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 19:40:43,997 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 19:40:44,000 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 19:40:44,037 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:40:44,037 DEBUG    No config file found
+2021-11-23 19:40:44,038 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:40:44,038 DEBUG    No config file found
+2021-11-23 19:40:44,046 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:40:44,136 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 19:40:44,139 DEBUG    http://localhost:None "GET /v1.41/containers/62131029db82a0a96894e04fba9432cdd3e4d48533aece61400bb0ab3c4c1e25/json HTTP/1.1" 200 None
+2021-11-23 19:40:44,576 DEBUG    http://localhost:None "POST /v1.41/containers/62131029db82a0a96894e04fba9432cdd3e4d48533aece61400bb0ab3c4c1e25/start HTTP/1.1" 204 0
+2021-11-23 19:40:44,579 DEBUG    http://localhost:None "GET /v1.41/containers/62131029db82a0a96894e04fba9432cdd3e4d48533aece61400bb0ab3c4c1e25/json HTTP/1.1" 200 None
+2021-11-23 19:41:35,981 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:41:35,981 DEBUG    No config file found
+2021-11-23 19:41:35,981 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:41:35,981 DEBUG    No config file found
+2021-11-23 19:41:35,989 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:41:35,991 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 19:41:35,992 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:41:35,992 DEBUG    No config file found
+2021-11-23 19:41:35,992 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:41:35,992 DEBUG    No config file found
+2021-11-23 19:41:36,000 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:41:36,002 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 19:41:36,004 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 19:41:36,006 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 19:41:36,008 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 19:41:36,011 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 19:41:36,013 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 19:41:36,048 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:41:36,048 DEBUG    No config file found
+2021-11-23 19:41:36,048 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:41:36,048 DEBUG    No config file found
+2021-11-23 19:41:36,056 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:41:36,123 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 19:41:36,125 DEBUG    http://localhost:None "GET /v1.41/containers/dd5673f7b843c17b8b289d2a938e65ce7e3ca0e4c81582f24d30f9c3a682dc21/json HTTP/1.1" 200 None
+2021-11-23 19:41:36,582 DEBUG    http://localhost:None "POST /v1.41/containers/dd5673f7b843c17b8b289d2a938e65ce7e3ca0e4c81582f24d30f9c3a682dc21/start HTTP/1.1" 204 0
+2021-11-23 19:41:36,585 DEBUG    http://localhost:None "GET /v1.41/containers/dd5673f7b843c17b8b289d2a938e65ce7e3ca0e4c81582f24d30f9c3a682dc21/json HTTP/1.1" 200 None
+2021-11-23 19:44:25,042 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:44:25,042 DEBUG    No config file found
+2021-11-23 19:44:25,042 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:44:25,042 DEBUG    No config file found
+2021-11-23 19:44:25,051 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:44:25,053 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 19:44:25,053 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:44:25,053 DEBUG    No config file found
+2021-11-23 19:44:25,053 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:44:25,053 DEBUG    No config file found
+2021-11-23 19:44:25,063 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:44:25,066 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 19:44:25,068 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 19:44:25,070 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 19:44:25,071 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 19:44:25,073 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 19:44:25,076 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 19:44:25,111 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:44:25,111 DEBUG    No config file found
+2021-11-23 19:44:25,111 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 19:44:25,111 DEBUG    No config file found
+2021-11-23 19:44:25,120 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 19:44:25,192 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 19:44:25,195 DEBUG    http://localhost:None "GET /v1.41/containers/989eb30201574ee481d4f2498f31ecb61930ddd659e73fadae2b8604fc6782e2/json HTTP/1.1" 200 None
+2021-11-23 19:44:25,608 DEBUG    http://localhost:None "POST /v1.41/containers/989eb30201574ee481d4f2498f31ecb61930ddd659e73fadae2b8604fc6782e2/start HTTP/1.1" 204 0
+2021-11-23 19:44:25,611 DEBUG    http://localhost:None "GET /v1.41/containers/989eb30201574ee481d4f2498f31ecb61930ddd659e73fadae2b8604fc6782e2/json HTTP/1.1" 200 None
+2021-11-23 20:25:22,754 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 20:25:22,754 DEBUG    No config file found
+2021-11-23 20:25:22,754 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 20:25:22,754 DEBUG    No config file found
+2021-11-23 20:25:22,761 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 20:25:22,762 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 20:25:22,763 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 20:25:22,763 DEBUG    No config file found
+2021-11-23 20:25:22,763 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 20:25:22,763 DEBUG    No config file found
+2021-11-23 20:25:22,770 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 20:25:22,772 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 20:25:22,774 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 20:25:22,776 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 20:25:22,778 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 20:25:22,780 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 20:25:22,781 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 20:25:22,825 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 20:25:22,825 DEBUG    No config file found
+2021-11-23 20:25:22,825 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 20:25:22,825 DEBUG    No config file found
+2021-11-23 20:25:22,834 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 20:25:22,899 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 20:25:22,902 DEBUG    http://localhost:None "GET /v1.41/containers/142d3f5afe5bd1dc245172794cc48db4b18373684a8fa7b04afff2eb81212cd8/json HTTP/1.1" 200 None
+2021-11-23 20:25:23,309 DEBUG    http://localhost:None "POST /v1.41/containers/142d3f5afe5bd1dc245172794cc48db4b18373684a8fa7b04afff2eb81212cd8/start HTTP/1.1" 204 0
+2021-11-23 20:25:23,311 DEBUG    http://localhost:None "GET /v1.41/containers/142d3f5afe5bd1dc245172794cc48db4b18373684a8fa7b04afff2eb81212cd8/json HTTP/1.1" 200 None
+2021-11-23 21:48:08,656 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 21:48:08,656 DEBUG    No config file found
+2021-11-23 21:48:08,656 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 21:48:08,657 DEBUG    No config file found
+2021-11-23 21:48:08,663 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 21:48:08,665 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 21:48:08,666 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 21:48:08,666 DEBUG    No config file found
+2021-11-23 21:48:08,666 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 21:48:08,666 DEBUG    No config file found
+2021-11-23 21:48:08,673 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 21:48:08,676 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 21:48:08,678 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 21:48:08,679 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 21:48:08,681 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 21:48:08,683 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 21:48:08,685 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 21:48:08,720 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 21:48:08,720 DEBUG    No config file found
+2021-11-23 21:48:08,720 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 21:48:08,720 DEBUG    No config file found
+2021-11-23 21:48:08,727 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 21:48:08,769 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 21:48:08,771 DEBUG    http://localhost:None "GET /v1.41/containers/a1bdfd7b5783b38e05e40d0bb0d928cd6ca9d81b86fb2458d45f2265ecf74911/json HTTP/1.1" 200 None
+2021-11-23 21:48:09,235 DEBUG    http://localhost:None "POST /v1.41/containers/a1bdfd7b5783b38e05e40d0bb0d928cd6ca9d81b86fb2458d45f2265ecf74911/start HTTP/1.1" 204 0
+2021-11-23 21:48:09,237 DEBUG    http://localhost:None "GET /v1.41/containers/a1bdfd7b5783b38e05e40d0bb0d928cd6ca9d81b86fb2458d45f2265ecf74911/json HTTP/1.1" 200 None
+2021-11-23 22:17:35,779 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:17:35,779 DEBUG    No config file found
+2021-11-23 22:17:35,779 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:17:35,779 DEBUG    No config file found
+2021-11-23 22:17:35,786 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 22:17:35,788 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 22:17:35,789 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:17:35,789 DEBUG    No config file found
+2021-11-23 22:17:35,789 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:17:35,789 DEBUG    No config file found
+2021-11-23 22:17:35,796 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 22:17:35,799 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 22:17:35,801 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 22:17:35,802 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 22:17:35,804 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 22:17:35,805 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 22:17:35,807 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 22:17:35,842 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:17:35,843 DEBUG    No config file found
+2021-11-23 22:17:35,843 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:17:35,843 DEBUG    No config file found
+2021-11-23 22:17:35,850 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 22:17:35,910 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 22:17:35,912 DEBUG    http://localhost:None "GET /v1.41/containers/cd26cbe47cc8cd0747624ba8a414943d8765c1bf8ffff1da4843d80fc05359cb/json HTTP/1.1" 200 None
+2021-11-23 22:17:36,301 DEBUG    http://localhost:None "POST /v1.41/containers/cd26cbe47cc8cd0747624ba8a414943d8765c1bf8ffff1da4843d80fc05359cb/start HTTP/1.1" 204 0
+2021-11-23 22:17:36,303 DEBUG    http://localhost:None "GET /v1.41/containers/cd26cbe47cc8cd0747624ba8a414943d8765c1bf8ffff1da4843d80fc05359cb/json HTTP/1.1" 200 None
+2021-11-23 22:26:41,051 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:26:41,051 DEBUG    No config file found
+2021-11-23 22:26:41,051 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:26:41,052 DEBUG    No config file found
+2021-11-23 22:26:41,059 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 22:26:41,061 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 22:26:41,062 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:26:41,062 DEBUG    No config file found
+2021-11-23 22:26:41,062 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:26:41,063 DEBUG    No config file found
+2021-11-23 22:26:41,070 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 22:26:41,072 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 22:26:41,074 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 22:26:41,076 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 22:26:41,078 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 22:26:41,080 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 22:26:41,082 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 22:26:41,121 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:26:41,121 DEBUG    No config file found
+2021-11-23 22:26:41,121 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:26:41,121 DEBUG    No config file found
+2021-11-23 22:26:41,129 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 22:26:41,186 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 22:26:41,189 DEBUG    http://localhost:None "GET /v1.41/containers/4ebf4587134c9c8148e498ef6a39ef45c0bdd193d81e40b61a60dfa16f3ff6eb/json HTTP/1.1" 200 None
+2021-11-23 22:26:41,611 DEBUG    http://localhost:None "POST /v1.41/containers/4ebf4587134c9c8148e498ef6a39ef45c0bdd193d81e40b61a60dfa16f3ff6eb/start HTTP/1.1" 204 0
+2021-11-23 22:26:41,613 DEBUG    http://localhost:None "GET /v1.41/containers/4ebf4587134c9c8148e498ef6a39ef45c0bdd193d81e40b61a60dfa16f3ff6eb/json HTTP/1.1" 200 None
+2021-11-23 22:33:40,795 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:33:40,795 DEBUG    No config file found
+2021-11-23 22:33:40,795 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:33:40,795 DEBUG    No config file found
+2021-11-23 22:33:40,803 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 22:33:40,805 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 22:33:40,805 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:33:40,805 DEBUG    No config file found
+2021-11-23 22:33:40,805 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:33:40,805 DEBUG    No config file found
+2021-11-23 22:33:40,813 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 22:33:40,815 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 22:33:40,817 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 22:33:40,819 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 22:33:40,821 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 22:33:40,823 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 22:33:40,825 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 22:33:40,861 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:33:40,861 DEBUG    No config file found
+2021-11-23 22:33:40,861 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 22:33:40,861 DEBUG    No config file found
+2021-11-23 22:33:40,869 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 22:33:40,932 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 22:33:40,934 DEBUG    http://localhost:None "GET /v1.41/containers/5adb31b9144fbe1ec1f2e43d08e58bb7dec06d15dc989e61ae04045844fd4e6a/json HTTP/1.1" 200 None
+2021-11-23 22:33:41,325 DEBUG    http://localhost:None "POST /v1.41/containers/5adb31b9144fbe1ec1f2e43d08e58bb7dec06d15dc989e61ae04045844fd4e6a/start HTTP/1.1" 204 0
+2021-11-23 22:33:41,327 DEBUG    http://localhost:None "GET /v1.41/containers/5adb31b9144fbe1ec1f2e43d08e58bb7dec06d15dc989e61ae04045844fd4e6a/json HTTP/1.1" 200 None
+2021-11-23 23:00:28,235 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 23:00:28,235 DEBUG    No config file found
+2021-11-23 23:00:28,235 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 23:00:28,235 DEBUG    No config file found
+2021-11-23 23:00:28,243 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 23:00:28,245 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-11-23 23:00:28,245 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 23:00:28,245 DEBUG    No config file found
+2021-11-23 23:00:28,246 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 23:00:28,246 DEBUG    No config file found
+2021-11-23 23:00:28,253 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 23:00:28,255 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 1794
+2021-11-23 23:00:28,257 DEBUG    http://localhost:None "GET /v1.41/images/sha256:f9e77a71afb26d1e959ab667d10929f6d4e5fdeee2b70e07f186ff07278fa44f/json HTTP/1.1" 200 None
+2021-11-23 23:00:28,259 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-11-23 23:00:28,260 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-11-23 23:00:28,262 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-11-23 23:00:28,263 DEBUG    http://localhost:None "GET /v1.41/images/sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412/json HTTP/1.1" 200 1884
+2021-11-23 23:00:28,299 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 23:00:28,299 DEBUG    No config file found
+2021-11-23 23:00:28,299 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-11-23 23:00:28,299 DEBUG    No config file found
+2021-11-23 23:00:28,307 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-11-23 23:00:28,381 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-11-23 23:00:28,382 DEBUG    http://localhost:None "GET /v1.41/containers/74304f4fbaafa1700a7454d4ca5560616e4f0dbdae6f0fd02c154fd744ee82db/json HTTP/1.1" 200 None
+2021-11-23 23:00:28,768 DEBUG    http://localhost:None "POST /v1.41/containers/74304f4fbaafa1700a7454d4ca5560616e4f0dbdae6f0fd02c154fd744ee82db/start HTTP/1.1" 204 0
+2021-11-23 23:00:28,771 DEBUG    http://localhost:None "GET /v1.41/containers/74304f4fbaafa1700a7454d4ca5560616e4f0dbdae6f0fd02c154fd744ee82db/json HTTP/1.1" 200 None

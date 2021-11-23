@@ -1,4 +1,4 @@
-import socket
+import socket, os
 from typing import Generator
 
 import celaut_pb2, gateway_pb2
@@ -77,22 +77,37 @@ def longestSubstringFinder(string1, string2) -> str:
                 match = ""
     return answer
 
-get_only_the_ip_from_context = lambda context_peer: context_peer[5:-1*(len(context_peer.split(':')[-1])+1)] if context_peer.split(':')[0] == 'ipv4' else None  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
+get_only_the_ip_from_context = lambda context_peer: get_only_the_ip_from_context_method(context_peer)
+def get_only_the_ip_from_context_method(context_peer):
+    ipv = context_peer.split(':')[0]
+    if ipv in ('ipv4', 'ipv6'):
+        ip = context_peer[5:-1*(len(context_peer.split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
+        return ip[1:-1] if ipv == 'ipv6' else ip
 
 get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
 
 def address_in_network( ip_or_uri, net) -> bool:
     #  Return if the ip network portion (addr and broadcast common) is in the ip.
-    return longestSubstringFinder(
-        string1=ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
-        string2=ni.ifaddresses(net)[ni.AF_INET][0]['broadcast']
-    ) in ip_or_uri
+    return (
+            longestSubstringFinder(
+                string1=ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
+                string2=ni.ifaddresses(net)[ni.AF_INET][0]['broadcast']
+            ) or \
+            longestSubstringFinder(
+                string1=ni.ifaddresses(net)[ni.AF_INET6][0]['addr'],
+                string2=ni.ifaddresses(net)[ni.AF_INET6][0]['broadcast']
+            ) 
+        ) in ip_or_uri \
+        if net != 'lo' else \
+            ni.ifaddresses(net)[ni.AF_INET][0]['addr'] == ip_or_uri or \
+            ni.ifaddresses(net)[ni.AF_INET6][0]['addr'] == ip_or_uri
 
 
 def get_network_name( ip_or_uri: str) -> str:
     #  https://stackoverflow.com/questions/819355/how-can-i-check-if-an-ip-is-in-a-network-in-python
     for network in ni.interfaces():
         try:
+            print('\nnetwork ', network)
             if address_in_network(ip_or_uri = ip_or_uri, net = network):
                 return network
         except KeyError:

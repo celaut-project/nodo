@@ -211,7 +211,7 @@ class Hyper:
                     try:
                         with open(self.path+var+".field", "rb") as var_desc:
                             self.service.tensor.index[var].ParseFromString(var_desc.read())
-                    except FileNotFoundError: self.service.tensor.index[var] = celaut.FieldDef()
+                    except FileNotFoundError: pass
         
                 # Add tensor metadata to the global metadata.
                 self.metadata.hashtag.attr_hashtag.append(
