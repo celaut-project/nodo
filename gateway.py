@@ -269,6 +269,7 @@ def launch_service(
         service_buffer: bytes, 
         metadata: celaut.Any.Metadata, 
         father_ip: str, 
+        id = None,
         config: celaut.Configuration = None
     ) -> gateway_pb2.Instance:
     try:
@@ -316,6 +317,7 @@ def launch_service(
                     id = build.build(
                             service_buffer = service_buffer, 
                             metadata = metadata,
+                            id = id,
                             get_it_outside = not getting_container
                         )  #  If the container is not built, build it.
                 except:
@@ -399,7 +401,7 @@ def launch_service(
                         )
                         uri.port = assigment_ports[port]
                         uri_slot.uri.append(uri)
-
+                
                 l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
                 return gateway_pb2.Instance(
                     token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id,
@@ -530,7 +532,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
             try:
                 r = next(parser_generator)
             except StopIteration: break
-            print('type r ', type(r))
             hash = None
             service_on_any = None
             if type(r) is gateway_pb2.HashWithConfig:
@@ -597,7 +598,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if second_partition_dir[-2:] != 'p2': raise Exception('Invalid partition for service ', second_partition_dir)
                 #service_on_any.metadata.complete = False  # TODO: this should?
                 hash = get_service_hex_main_hash(
-                    service_buffer = second_partition_dir,
+                    service_buffer = (service_on_any.value, second_partition_dir) if second_partition_dir else service_on_any.value,
                     metadata = service_on_any.metadata,
                     other_hashes = hashes
                     )
@@ -615,6 +616,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             service_buffer = service_on_any.value,
                             metadata = service_on_any.metadata, 
                             config = configuration,
+                            id = hash,
                             father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                         )
                     ): yield buffer

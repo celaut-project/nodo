@@ -1,4 +1,5 @@
 from typing import Union
+from iobigdata import IOBigData
 from logger import LOGGER
 import hashlib
 from celaut_pb2 import Any, Any, Service
@@ -39,11 +40,10 @@ def check_service(service_buffer: bytes, hashes: list) -> bool:
 
 # Return the service's sha3-256 hash on hexadecimal format.
 def get_service_hex_main_hash(
-    service_buffer: Union[bytes, str, Service] = None, 
+    service_buffer: Union[bytes, str, Service, tuple] = None, 
     metadata: Any.Metadata = Any.Metadata(),
     other_hashes: list = []
     ) -> str:
-
     # Find if it has the hash.
     for hash in  list(metadata.hashtag.hash) + other_hashes:
         if hash.type == SHA3_256_ID:
@@ -51,15 +51,23 @@ def get_service_hex_main_hash(
 
     # If not but the spec. is complete, calculate the hash prunning it before.
     # If not and is incomplete, it's going to be imposible calculate any hash.
+    
     if metadata.complete and service_buffer:
-        if type(service_buffer) is str: service_buffer = open(service_buffer, 'rb').read()
-        if type(service_buffer) is Service: service_buffer = service_buffer.SerializeToString()
-        return SHA3_256(
-            value = service_buffer
-        ).hex()
-    else:
-        LOGGER(' sha3-256 hash function is not implemented on this method.')
-        raise Exception(' sha3-256 hash function is not implemented on this method.')
+        with IOBigData.mem_manager(len = 0) as io:
+            if type(service_buffer) is not tuple: service_buffer = (service_buffer)
+            value = bytes('')
+            for partition in service_buffer:
+                if type(partition) is str: 
+                    #io.add(os.len(partition)) # TODO
+                    partition = open(partition, 'rb').read()
+                if type(partition) is Service: partition = partition.SerializeToString()
+                value += partition
+            return SHA3_256(
+                value = value
+            ).hex()
+
+    LOGGER(' sha3-256 hash function is not implemented on this method.')
+    raise Exception(' sha3-256 hash function is not implemented on this method.')
 
 def get_service_list_of_hashes(service_buffer: bytes, metadata: Any.Metadata) -> list:
     if metadata.complete:

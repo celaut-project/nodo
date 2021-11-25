@@ -70,9 +70,10 @@ def get_container_from_outside(
 def build(
     service_buffer: bytes,
     metadata: gateway_pb2.celaut__pb2.Any.Metadata,
-    get_it_outside: bool = True
+    get_it_outside: bool = True,
+    id = None,
     ) -> str:
-    id = get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata)
+    if not id: id = get_service_hex_main_hash( metadata = metadata)
     l.LOGGER('\nBuilding ' + id)
     try:
         # it's locally?
