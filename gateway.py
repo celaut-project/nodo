@@ -525,8 +525,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             request_iterator = request_iterator, 
             indices = StartService_input,
             partitions_model = StartService_input_partitions,
-            partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False]},
-            mem_manager = iobd.mem_manager
+            partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False]}
         )
         while True:
             try:
@@ -808,7 +807,11 @@ if __name__ == "__main__":
     from zeroconf import Zeroconf
     import iobigdata
     iobigdata.IOBigData().set_log(log=l.LOGGER)
-    grpcbf.modify_cache_dir(HYCACHE)
+    grpcbf.modify_env(
+        cache_dir = HYCACHE,
+        mem_manager = iobigdata.mem_manager
+        )
+
 
     # Create __hycache__ if it does not exists.
     try:

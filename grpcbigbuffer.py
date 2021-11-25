@@ -12,24 +12,34 @@ from typing import Generator, Union
 from threading import Condition
 
 
-class CacheDir(type):
+class Enviroment(type):
+    class MemManager(object):
+        def __init__(self, len):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc_value, trace):
+            pass
+
     # Using singleton pattern
     _instances = {}
     cache_dir = os.path.abspath(os.curdir) + '/__cache__/'
+    mem_manager = lambda len: MemManager(len=len)
 
     def __call__(cls):
         if cls not in cls._instances:
-            cls._instances[cls] = super(CacheDir, cls).__call__()
+            cls._instances[cls] = super(Enviroment, cls).__call__()
         return cls._instances[cls]
 
-def modify_cache_dir(cache_dir: str):
-    CacheDir.cache_dir = cache_dir
+def modify_env(cache_dir: str = None, mem_manager = None):
+    if cache_dir: Enviroment.cache_dir = cache_dir
+    if mem_manager: Enviroment.mem_manager = mem_manager
 
 def generate_random_dir(dir: str) -> str:
     return dir + str(randint(1, MAX_DIR)) + '/'
 
 def create_cache_dir() -> str: 
-    cache_dir = CacheDir.cache_dir
+    cache_dir = Enviroment.cache_dir
     try:
         os.mkdir(cache_dir)
     except FileExistsError: pass
@@ -39,14 +49,6 @@ def create_cache_dir() -> str:
             os.mkdir(cache_dir+random_dir)
             return cache_dir+random_dir
         except FileExistsError: continue
-
-class MemManager(object):
-    def __init__(self, len):
-        pass
-    def __enter__(self):
-        return self
-    def __exit__(self, exc_type, exc_value, trace):
-        pass
 
 class Signal():
     # The parser use change() when reads a signal on the buffer.
@@ -97,7 +99,7 @@ def parse_from_buffer(
         partitions_model: Union[list, dict] = [buffer_pb2.Buffer.Head.Partition()],
         partitions_message_mode: Union[bool, list, dict] = False,  # Write on disk by default.
         cache_dir: str = None,
-        mem_manager = lambda len: MemManager(len=len),
+        mem_manager = Enviroment.mem_manager,
         yield_remote_partition_dir: bool = False,
     ): 
     try:
@@ -221,7 +223,7 @@ def parse_from_buffer(
                 pf_object: object = None, 
                 local_partitions_model: list = [], 
                 remote_partitions_model: list = [], 
-                mem_manager = lambda len: MemManager(len=len), 
+                mem_manager = Enviroment.mem_manager, 
                 yield_remote_partition_dir: bool = False, 
                 cache_dir: str = None,
                 partitions_message_mode: list = [],
@@ -370,7 +372,7 @@ def serialize_to_buffer(
         cache_dir: str = None, 
         indices: Union[protobuf.pyext.cpp_message.GeneratedProtocolMessageType, dict] = {},
         partitions_model: Union[list, dict] = [buffer_pb2.Buffer.Head.Partition()],
-        mem_manager = lambda len: MemManager(len=len)
+        mem_manager = Enviroment.mem_manager
     ) -> Generator[buffer_pb2.Buffer, None, None]:  # method: indice
     try:
         try:
@@ -416,7 +418,7 @@ def serialize_to_buffer(
                 signal: Signal, 
                 message: object, 
                 head: buffer_pb2.Buffer.Head = None, 
-                mem_manager = lambda len: MemManager(len=len),
+                mem_manager = Enviroment.mem_manager,
                 cache_dir: str= None, 
             ) -> Generator[buffer_pb2.Buffer, None, None]:
             message_bytes = message.SerializeToString()
@@ -511,7 +513,7 @@ def client_grpc(
         partitions_message_mode_parser: Union[bool, list, dict] = False,
         indices_serializer: Union[protobuf.pyext.cpp_message.GeneratedProtocolMessageType, dict] = {},
         partitions_serializer: Union[list, dict] = [buffer_pb2.Buffer.Head.Partition()],
-        mem_manager = lambda len: MemManager(len=len),
+        mem_manager = Enviroment.mem_manager,
         cache_dir: str = None, 
         yield_remote_partition_dir_on_serializer: bool = False,
     ): # indice: method
