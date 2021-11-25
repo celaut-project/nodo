@@ -287,7 +287,7 @@ def launch_service(
                     try:
                         node_uri = utils.get_grpc_uri(node_instance)
                         l.LOGGER('El servicio se lanza en el nodo con uri ' + str(node_uri))
-                        service_instance = next(grpcbf.client_grpc(
+                        service_instance = next(grpcbf.client_grpc( # TODO check
                             method = gateway_pb2_grpc.GatewayStub(
                                         grpc.insecure_channel(
                                             node_uri.ip + ':' +  str(node_uri.port)
@@ -551,7 +551,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
-                        instance = launch_service(
+                        for b in grpcbf.serialize_to_buffer(
+                            message_iterator = launch_service(
                                 service_buffer = get_service_buffer_from_registry(
                                     hash = hash.value.hex()
                                 ),
@@ -563,10 +564,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 config = configuration,
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                             )
-                        for b in grpcbf.serialize_to_buffer(
-                            message_iterator=instance
-                        ): 
-                            yield b
+                        ): yield b
                         return
 
                     except Exception as e:
