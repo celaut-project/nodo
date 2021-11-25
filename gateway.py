@@ -647,7 +647,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def StopService(self, request_iterator, context):
         token_message = next(grpcbf.parse_from_buffer(
             request_iterator = request_iterator,
-            message_field = gateway_pb2.TokenMessage
+            indices = gateway_pb2.TokenMessage
         ))
 
         l.LOGGER('Stopping the service with token ' + token_message.token)
@@ -694,7 +694,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def GetFile(self, request_iterator, context):
         l.LOGGER('Request for give a service definition')
         hashes = []
-        for hash in grpcbf.parse_from_buffer(request_iterator, celaut.Any.Metadata.HashTag.Hash):
+        for hash in grpcbf.parse_from_buffer(
+            request_iterator = request_iterator, 
+            indices = celaut.Any.Metadata.HashTag.Hash
+            ):
             try:
                 # Comprueba que sea sha256 y que se encuentre en el registro.
                 hashes.append(hash)
@@ -702,7 +705,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True) # Say stop to send more hashes.
                     for b in grpcbf.serialize_to_buffer(
-                        get_from_registry(
+                        message_iterator = get_from_registry(
                             hash = hash.value.hex()
                         )
                     ): yield b
@@ -710,7 +713,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         
         try:
             for b in  grpcbf.serialize_to_buffer(
-                next(search_file(
+                message_iterator = next(search_file(
                     ignore_network = utils.get_network_name(
                             ip_or_uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
                         ),
@@ -760,6 +763,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             except:
                 l.LOGGER('The service ' + hash + ' was not found.')
 
+        yield gateway_pb2.buffer__pb2.Buffer(separator=True)
         raise Exception('Was imposible get the service container.')
 
 
