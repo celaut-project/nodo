@@ -518,7 +518,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def StartService(self, request_iterator, context):
         l.LOGGER('Starting service ...')
         configuration = None
-        pass_this_next = False
         hashes = []
         parser_generator = grpcbf.parse_from_buffer(
             request_iterator = request_iterator, 
@@ -529,22 +528,20 @@ class Gateway(gateway_pb2_grpc.Gateway):
         )
         while True:
             try:
-                if not pass_this_next:
-                    try:
-                        r = next(parser_generator)
-                    except StopIteration: break
-                else: pass_this_next = False
-            except: break
+                r = next(parser_generator)
+            except StopIteration: break
+            print('type r ', type(r))
             hash = None
+            service_on_any = None
             if type(r) is gateway_pb2.HashWithConfig:
                 configuration = r.config
                 hash = r.hash
 
             # Captura la configuracion si puede.
-            if type(r) is celaut.Configuration:
+            elif type(r) is celaut.Configuration:
                 configuration = r
             
-            if type(r) is celaut.Any.Metadata.HashTag.Hash:
+            elif type(r) is celaut.Any.Metadata.HashTag.Hash:
                 hash = r
 
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
@@ -554,7 +551,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
-                        print('father ip -> ',context.peer())
                         instance = launch_service(
                                 service_buffer = get_service_buffer_from_registry(
                                     hash = hash.value.hex()
@@ -577,52 +573,54 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         l.LOGGER('Exception launching a service ' + str(e))
                         yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                         continue
-
-                service_on_any = None
-                if type(r) is gateway_pb2.ServiceWithConfig:
+            
+            elif r is gateway_pb2.ServiceWithConfig: # We now that is partitionated.
+                try:
                     r = next(parser_generator)
-                    configuration = r.config
-                    service_on_any = r.service
-                
-                if type(r) is celaut.Any:
-                    r = next(parser_generator)
-                    service_on_any = r
+                    if type(r) is not gateway_pb2.ServiceWithConfig: raise Exception
+                except Exception: raise Exception('Grpcbf error: partition corrupted')
+                configuration = r.config
+                service_on_any = r.service
+            
+            elif r is celaut.Any:
+                try:
+                    r = next(parser_generator) # Can raise StopIteration
+                    if type(r) is not celaut.Any: raise Exception
+                except Exception: raise Exception('Grpcbf error: partition corrupted')
+                service_on_any = r
 
-                # Si me da servicio.  
-                if service_on_any:
-                    # Iterate the second partition.
-                    try:
-                        second_partition_dir = next(parser_generator)
-                        l.LOGGER('partition dir -> ', str(second_partition_dir))
-                    except: break
-                    if type(second_partition_dir) is str:
-                        if second_partition_dir[:-2] != 'p2': raise Exception('Invalid partition for service ', second_partition_dir)
-                        service_on_any.metadata.complete = False
-                        try:
-                            hash = get_service_hex_main_hash(metadata = service_on_any.metadata)
-                        except:
-                            raise Exception("Can't get the hash of that service because i don't want to take all buffer for that.") # TODO
-                        shutil.move(second_partition_dir, REGISTRY+hash+'/p2')  # https://stackoverflow.com/questions/8858008/how-to-move-a-file-in-python
-                    else:
-                        # Does not second partition
-                        r = second_partition_dir
-                        pass_this_next = True
+            # Si me da servicio.  
+            if service_on_any:
+                # Iterate the second partition.
+                try:
+                    second_partition_dir = next(parser_generator)
+                    if type(second_partition_dir) is not str: raise Exception
+                except: raise Exception('Grpcbf error: partition corrupted')
+                if second_partition_dir[-2:] != 'p2': raise Exception('Invalid partition for service ', second_partition_dir)
+                #service_on_any.metadata.complete = False  # TODO: this should?
+                hash = get_service_hex_main_hash(
+                    service_buffer = second_partition_dir,
+                    metadata = service_on_any.metadata,
+                    other_hashes = hashes
+                    )
+                os.mkdir(REGISTRY+hash)
+                shutil.move(second_partition_dir, REGISTRY+hash+'/p2')  # https://stackoverflow.com/questions/8858008/how-to-move-a-file-in-python
 
-                    if configuration:
-                        save_service(
+                if configuration:
+                    save_service(
+                        service_buffer = service_on_any.value,
+                        metadata = service_on_any.metadata,
+                        hash = hash if hash else None
+                    )
+                    for buffer in grpcbf.serialize_to_buffer(
+                        message_iterator = launch_service(
                             service_buffer = service_on_any.value,
-                            metadata = service_on_any.metadata,
-                            hash = hash if hash else None
+                            metadata = service_on_any.metadata, 
+                            config = configuration,
+                            father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                         )
-                        for buffer in grpcbf.serialize_to_buffer(
-                            message_iterator = launch_service(
-                                service_buffer = service_on_any.value,
-                                metadata = service_on_any.metadata, 
-                                config = configuration,
-                                father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
-                            )  
-                        ): yield buffer
-                        return
+                    ): yield buffer
+                    return
 
                 
                 l.LOGGER('The service is not in the registry and the request does not have the definition.' \

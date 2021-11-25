@@ -1,6 +1,7 @@
+from typing import Union
 from logger import LOGGER
 import hashlib
-from celaut_pb2 import Any, Any
+from celaut_pb2 import Any, Any, Service
 
 # -- HASH IDs --
 SHAKE_256_ID = bytes.fromhex("46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f")
@@ -37,16 +38,22 @@ def check_service(service_buffer: bytes, hashes: list) -> bool:
     return False
 
 # Return the service's sha3-256 hash on hexadecimal format.
-def get_service_hex_main_hash(service_buffer: bytes, metadata: Any.Metadata = None) -> str:
+def get_service_hex_main_hash(
+    service_buffer: Union[bytes, str, Service] = None, 
+    metadata: Any.Metadata = Any.Metadata(),
+    other_hashes: list = []
+    ) -> str:
+
     # Find if it has the hash.
-    if metadata:
-        for hash in  metadata.hashtag.hash:
-            if hash.type == SHA3_256_ID:
-                return hash.value.hex()
+    for hash in  list(metadata.hashtag.hash) + other_hashes:
+        if hash.type == SHA3_256_ID:
+            return hash.value.hex()
 
     # If not but the spec. is complete, calculate the hash prunning it before.
     # If not and is incomplete, it's going to be imposible calculate any hash.
-    if metadata.complete:
+    if metadata.complete and service_buffer:
+        if type(service_buffer) is str: service_buffer = open(service_buffer, 'rb').read()
+        if type(service_buffer) is Service: service_buffer = service_buffer.SerializeToString()
         return SHA3_256(
             value = service_buffer
         ).hex()
