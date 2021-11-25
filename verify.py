@@ -1,5 +1,5 @@
 from typing import Union
-import iobigdata
+import grpcbigbuffer as grpcbf
 from logger import LOGGER
 import hashlib
 from celaut_pb2 import Any, Any, Service
@@ -53,18 +53,10 @@ def get_service_hex_main_hash(
     # If not and is incomplete, it's going to be imposible calculate any hash.
     
     if metadata.complete and service_buffer:
-        with iobigdata.mem_manager(len = 0) as io:
-            if type(service_buffer) is not tuple: service_buffer = (service_buffer)
-            value = bytes('')
-            for partition in service_buffer:
-                if type(partition) is str: 
-                    #io.add(os.len(partition)) # TODO
-                    partition = open(partition, 'rb').read()
-                if type(partition) is Service: partition = partition.SerializeToString()
-                value += partition
-            return SHA3_256(
-                value = value
-            ).hex()
+        if type(service_buffer) is not tuple: service_buffer = (service_buffer)
+        return SHA3_256(
+            value = grpcbf.partitions_to_buffer(partitions = service_buffer)
+        ).hex()
 
     LOGGER(' sha3-256 hash function is not implemented on this method.')
     raise Exception(' sha3-256 hash function is not implemented on this method.')
