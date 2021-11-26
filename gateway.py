@@ -646,7 +646,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def StopService(self, request_iterator, context):
         token_message = next(grpcbf.parse_from_buffer(
             request_iterator = request_iterator,
-            indices = gateway_pb2.TokenMessage
+            indices = gateway_pb2.TokenMessage,
+            partitions_message_mode=True
         ))
 
         l.LOGGER('Stopping the service with token ' + token_message.token)
@@ -674,7 +675,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def Hynode(self, request_iterator, context):
         instance = next(grpcbf.parse_from_buffer(
             request_iterator = request_iterator,
-            message_field = gateway_pb2.Instance
+            message_field = gateway_pb2.Instance,
+            partitions_message_mode=True
         ))
         l.LOGGER('\nAdding peer ' + str(instance))
         insert_instance_on_mongo(instance = instance.instance)
@@ -695,7 +697,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
         hashes = []
         for hash in grpcbf.parse_from_buffer(
             request_iterator = request_iterator, 
-            indices = celaut.Any.Metadata.HashTag.Hash
+            indices = celaut.Any.Metadata.HashTag.Hash,
+            partitions_message_mode=True
             ):
             try:
                 # Comprueba que sea sha256 y que se encuentre en el registro.
@@ -725,7 +728,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetServiceTar(self, request_iterator, context):
         l.LOGGER('Request for give a service container.')
-        for r in grpcbf.parse_from_buffer(request_iterator = request_iterator, indices = GetServiceTar_input):
+        for r in grpcbf.parse_from_buffer(
+            request_iterator = request_iterator, 
+            indices = GetServiceTar_input,
+            partitions_message_mode=True
+            ):
 
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
@@ -767,7 +774,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     def GetServiceCost(self, request_iterator, context):
-        for r in grpcbf.parse_from_buffer(request_iterator=request_iterator, indices = GetServiceCost_input):
+        for r in grpcbf.parse_from_buffer(
+            request_iterator=request_iterator, 
+            indices = GetServiceCost_input,
+            partitions_message_mode=True
+            ):
 
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                 r.value.hex() in [s for s in os.listdir(REGISTRY)]:
