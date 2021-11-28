@@ -532,7 +532,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 r = next(parser_generator)
             except StopIteration: break
             hash = None
-            service_on_any = None
+            service_with_meta = None
             if type(r) is gateway_pb2.HashWithConfig:
                 configuration = r.config
                 hash = r.hash
@@ -578,17 +578,17 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     if type(r) is not gateway_pb2.ServiceWithConfig: raise Exception
                 except Exception: raise Exception('Grpcbf error: partition corrupted')
                 configuration = r.config
-                service_on_any = r.service
+                service_with_meta = r.service
             
-            elif r is celaut.Any:
+            elif r is gateway_pb2.ServiceWithMeta:
                 try:
                     r = next(parser_generator) # Can raise StopIteration
-                    if type(r) is not celaut.Any: raise Exception
+                    if type(r) is not gateway_pb2.ServiceWithMeta: raise Exception
                 except Exception: raise Exception('Grpcbf error: partition corrupted')
-                service_on_any = r
+                service_with_meta = r
 
             # Si me da servicio.  
-            if service_on_any:
+            if service_with_meta:
                 # Iterate the second partition.
                 try:
                     second_partition_dir = next(parser_generator)
@@ -597,8 +597,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if second_partition_dir[-2:] != 'p2': raise Exception('Invalid partition for service ', second_partition_dir)
                 #service_on_any.metadata.complete = False  # TODO: this should?
                 hash = get_service_hex_main_hash(
-                    service_buffer = (service_on_any.value, second_partition_dir) if second_partition_dir else service_on_any.value,
-                    metadata = service_on_any.metadata,
+                    service_buffer = (service_with_meta.service, second_partition_dir) if second_partition_dir else service_with_meta.value,
+                    metadata = service_with_meta.metadata,
                     other_hashes = hashes
                     )
                 os.mkdir(REGISTRY+hash)
@@ -606,14 +606,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
                 if configuration:
                     save_service(
-                        service_buffer = service_on_any.value,
-                        metadata = service_on_any.metadata,
+                        service_buffer = service_with_meta.service.SerializeToString(),
+                        metadata = service_with_meta.metadata,
                         hash = hash if hash else None
                     )
                     for buffer in grpcbf.serialize_to_buffer(
                         message_iterator = launch_service(
-                            service_buffer = service_on_any.value,
-                            metadata = service_on_any.metadata, 
+                            service_buffer = service_with_meta.service.SerializeToString(),
+                            metadata = service_with_meta.metadata, 
                             config = configuration,
                             id = hash,
                             father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
