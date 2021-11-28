@@ -102,6 +102,15 @@ def get_subclass(partition, object_cls):
         partition = list(partition.index.values())[0]
         ) if len(partition.index) == 1 else object_cls
 
+def copy_message(obj, field_name, message):
+    if hasattr(message, 'CopyFrom'):
+        getattr(obj, field_name).CopyFrom(message)
+    elif type(message) is bytes:
+        getattr(obj, field_name).ParseFromString(message)
+    else:
+        setattr(obj, field_name, message)
+    return obj
+
 def get_submessage(partition, obj):
     if len(partition.index) == 0:
         return obj
@@ -301,23 +310,17 @@ def parse_from_buffer(
             # 3. Parse to the local partitions from the remote partitions using mem_manager.
             try:
                 with mem_manager(len = 2*sum([os.path.getsize(dir) for dir in dirs])):
-                    main_object = pf_object()
                     if len(remote_partitions_model)==0 and len(dirs)==1:
+                        main_object = pf_object()
                         main_object.ParseFromString(open(dirs[0], 'rb').read())
                     elif len(remote_partitions_model)!=len(dirs): 
                         raise Exception("Error: remote partitions model are not correct with the buffer.")
                     else:
-                        for i, d in enumerate(dirs):
-                            # Get the partition
-                            partition = remote_partitions_model[i]
-                            # Get auxiliar object for partition.
-                            aux_object = get_subclass(partition = partition, object_cls = pf_object)()
-                            # Parse buffer to it.
-                            try:
-                                with open(d, 'rb') as f: aux_object.ParseFromString(f.read())
-                            except: raise Exception("Error: remote partitions model are not correct with the buffer, error on partition "+str(i))
-
-                            main_object.MergeFrom(aux_object)  # TODO may be use combine partitions method?
+                        main_object = combine_partitions(
+                            message = pf_object,
+                            partitions_model = remote_partitions_model,
+                            partitions = dirs
+                        )
 
                     # 4. yield local partitions.
                     if local_partitions_model == []: local_partitions_model.append(buffer_pb2.Buffer.Head.Partition())
@@ -605,13 +608,6 @@ def client_grpc(
         try:
             shutil.rmtree(cache_dir)
         except: pass
-
-def copy_message(obj, field_name, message):
-    if hasattr(message, 'CopyFrom'):
-        getattr(obj, field_name).CopyFrom(message)
-    else:
-        setattr(obj, field_name, message)
-    return obj
 
 
 """
