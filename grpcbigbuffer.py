@@ -3,7 +3,7 @@ __version__ = 'dev'
 # GrpcBigBuffer.
 CHUNK_SIZE = 1024 * 1024  # 1MB
 MAX_DIR = 9999
-import os, shutil, gc, itertools
+import os, shutil, gc, itertools, sys
 
 from google import protobuf
 import buffer_pb2
@@ -91,6 +91,87 @@ def save_chunks_to_file(buffer_iterator, filename, signal):
     with open(filename, 'wb') as f:
         signal.wait()
         f.write(b''.join([buffer.chunk for buffer in buffer_iterator]))
+
+def get_subclass(partition, object_cls):
+    return get_subclass(
+        object_cls = eval(object_cls.DESCRIPTOR.fields_by_number[list(partition.index.keys())[0]].message_type.full_name), 
+        partition = list(partition.index.values())[0]
+        ) if len(partition.index) == 1 else object_cls
+
+def get_submessage(partition, obj):
+    if len(partition.index) == 0:
+        return obj
+    if len(partition.index) == 1:
+        return get_submessage(
+            partition = list(partition.index.values())[0],
+            obj = getattr(obj, obj.DESCRIPTOR.fields[list(partition.index.keys())[0]-1].name)
+        )
+    for field in obj.DESCRIPTOR.fields:
+        if field.index+1 in partition.index: 
+            try:
+                copy_message(
+                    obj=obj, field_name=field.name,
+                    message = get_submessage(
+                        partition = partition.index[field.index+1],
+                        obj = getattr(obj, field.name)
+                    )
+                )
+            except: pass
+        else:
+            obj.ClearField(field.name)
+    return obj
+
+def put_submessage(partition, message, obj):
+    if len(partition.index) == 0:
+        raise Exception('Put message error.')
+    if len(partition.index) == 1:
+        p = list(partition.index.values())[0]
+        if len(p.index) == 1:
+            field_name = obj.DESCRIPTOR.fields[list(partition.index.keys())[0]-1].name
+            return copy_message(
+                obj=obj, field_name=field_name,
+                message = put_submessage(
+                            partition = p,
+                            obj = getattr(obj, field_name),
+                            message = message,
+                        )     
+            )
+        else:
+            return copy_message(
+                obj=obj, field_name=obj.DESCRIPTOR.fields[list(partition.index.keys())[0]-1].name,
+                message=message
+            )
+
+def combine_partitions(
+    message: protobuf.pyext.cpp_message.GeneratedProtocolMessageType,
+    partitions_model: tuple,
+    partitions: tuple
+    ) -> str:
+    total_len = 0
+    for partition in partitions:
+        if type(partition) is str:
+            total_len += 2* os.path.getsize(partition)
+        elif type(partition) is object:
+            total_len += 2* sys.getsizeof(partition)
+        elif type(partition) is bytes:
+            total_len += len(partition)
+        else:
+            raise Exception('Partition to buffer error: partition type is wrong: ' + str(type(partition)))
+
+    with Enviroment.mem_manager(len = total_len):
+        obj = message()
+        for i, partition in enumerate(partitions):
+            if type(partition) is str:
+                with open(partition, 'rb') as f:
+                    partition = f.read()
+            elif not (hasattr(partition, 'SerializeToString') or type(partition) is bytes):
+                raise Exception('Partitions to buffer error.')
+            put_submessage(
+                partition = partitions_model[i],
+                message = partition,
+                obj = obj
+            )
+    return obj
 
 def parse_from_buffer(
         request_iterator, 
@@ -192,32 +273,6 @@ def parse_from_buffer(
                 if b: yield b
                 else: continue
 
-        def get_subclass(partition, object_cls):
-            return get_subclass(
-                object_cls = eval(object_cls.DESCRIPTOR.fields_by_number[list(partition.index.keys())[0]].message_type.full_name), 
-                partition = list(partition.index.values())[0]
-                ) if len(partition.index) == 1 else object_cls
-
-        def get_submessage(partition, obj):
-            if len(partition.index) == 0: 
-                return obj
-            if len(partition.index) == 1:
-                return get_submessage(
-                    partition = list(partition.index.values())[0],
-                    obj = getattr(obj, obj.DESCRIPTOR.fields[list(partition.index.keys())[0]-1].name)
-                )
-            for field in obj.DESCRIPTOR.fields:
-                if field.index+1 in partition.index: 
-                    try:
-                        setattr(obj, field.name, get_submessage(
-                            partition = partition.index[field.index+1],
-                            obj = getattr(obj, field.name)
-                        ))
-                    except: pass
-                else:
-                    obj.ClearField(field.name)
-            return obj
-
         def conversor(
                 iterator,
                 pf_object: object = None, 
@@ -255,10 +310,10 @@ def parse_from_buffer(
                             aux_object = get_subclass(partition = partition, object_cls = pf_object)()
                             # Parse buffer to it.
                             try:
-                                aux_object.ParseFromString(open(d, 'rb').read())
+                                with open(d, 'rb') as f: aux_object.ParseFromString(f.read())
                             except: raise Exception("Error: remote partitions model are not correct with the buffer, error on partition "+str(i))
 
-                            main_object.MergeFrom(aux_object)
+                            main_object.MergeFrom(aux_object)  # TODO may be use combine partitions method?
 
                     # 4. yield local partitions.
                     if local_partitions_model == []: local_partitions_model.append(buffer_pb2.Buffer.Head.Partition())
@@ -546,6 +601,28 @@ def client_grpc(
         try:
             shutil.rmtree(cache_dir)
         except: pass
+
+def copy_message(obj, field_name, message):
+    if hasattr(message, 'CopyFrom'):
+        getattr(obj, field_name).CopyFrom(message)
+    else:
+        setattr(obj, field_name, message)
+    return obj
+
+
+"""
+    Get partitions and return the protobuff buffer.
+"""
+def partitions_to_buffer(
+    message: protobuf.pyext.cpp_message.GeneratedProtocolMessageType,
+    partitions_model: tuple,
+    partitions: tuple
+    ) -> str:
+    return combine_partitions(
+        message = message,
+        partitions_model = partitions_model,
+        partitions = partitions
+    ).SerializeToString()
 
 """
     Serialize Object to plain bytes serialization.
