@@ -597,7 +597,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if second_partition_dir[-2:] != 'p2': raise Exception('Invalid partition for service ', second_partition_dir)
                 #service_on_any.metadata.complete = False  # TODO: this should?
                 hash = get_service_hex_main_hash(
-                    service_buffer = (service_with_meta.service, second_partition_dir) if second_partition_dir else service_with_meta.value,
+                    service_buffer = (service_with_meta.service, second_partition_dir) if second_partition_dir else service_with_meta.service,
                     metadata = service_with_meta.metadata,
                     other_hashes = hashes
                     )
