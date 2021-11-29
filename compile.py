@@ -1,9 +1,9 @@
 import logger as l
-import sys
+import sys, shutil
 import json, getpass
 import os, subprocess
 import iobigdata
-import celaut_pb2 as celaut
+import celaut_pb2 as celaut, grpcbigbuffer, buffer_pb2, gateway_pb2, compile_pb2
 from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_main_hash
 
 #  -------------------------------------------------
@@ -16,11 +16,12 @@ from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex
 USER_NAME = getpass.getuser()
 HYCACHE = "/home/"+USER_NAME+"/node/__hycache__/"
 REGISTRY = "/home/"+USER_NAME+"/node/__registry__/"
+SAVE_ALL = False
 
 class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
-        self.service =  celaut.ServiceForCompile()
+        self.service =  compile_pb2.Service()
         self.metadata = celaut.Any.Metadata(
             complete = True
         )
@@ -234,7 +235,7 @@ class Hyper:
                     )
                 )
 
-    def save(self):
+    def save(self, partitions_model: list) -> str:
         self.metadata.complete = True
         service_buffer = self.service.SerializeToString() # 2*len
         self.metadata.hashtag.hash.extend(
@@ -247,30 +248,33 @@ class Hyper:
             service_buffer = service_buffer,  
             metadata = self.metadata
             )
+
         # Once service hashes are calculated, we prune the filesystem for save storage.
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
         del service_buffer # -len
-        os.mkdir(REGISTRY + id + '/')
-        with open(REGISTRY + id + '/p2', 'wb') as f:
-            f.write(
-                celaut.Service.Container(
-                    filesystem = self.service.container.filesystem.SerializeToString(), # 2*len
-                    architecture = self.service.container.architecture
-                ).SerializeToString()
-            )
-        self.service.container.ClearField('filesystem')
-        self.service.container.ClearField('architecture')
-        with open(REGISTRY + id + '/p1', 'wb') as f:
-            f.write(
-                    celaut.Any(
-                        metadata = self.metadata,
-                        value = self.service.SerializeToString()
-                    ).SerializeToString()
+        os.mkdir(HYCACHE + 'compile' + id + '/')
+
+
+        print('DIR CREATED', HYCACHE + 'compile' + id + '/')
+
+        for i, partition in enumerate(partitions_model):
+            buffer = grpcbigbuffer.get_submessage(
+                        partition = partition, 
+                        obj = compile_pb2.ServiceWithMeta(
+                                    metadata = self.metadata,
+                                    service = self.service
+                                )
+                        ).SerializeToString()
+            print('buffer -> ', len(buffer))
+            with open(HYCACHE + 'compile' + id + '/p'+str(i+1), 'wb') as f:
+                f.write(
+                    buffer
                 )
         return id
 
-def ok(path, aux_id):
+
+def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
     Hyperfile = Hyper(path = path, aux_id = aux_id)
 
     with iobigdata.mem_manager(len = 2*Hyperfile.buffer_len):
@@ -279,11 +283,29 @@ def ok(path, aux_id):
         Hyperfile.parseLedger()
         Hyperfile.parseTensor()
 
-        id = Hyperfile.save()
+        id = Hyperfile.save(
+            partitions_model=partitions_model
+            )
     return id
 
+def compile(path, partitions_model: list, saveit: bool = SAVE_ALL):
+    id = ok(
+        path = path,
+        aux_id = str(random.random()),
+        partitions_model = partitions_model
+    )
+    for b in grpcbigbuffer.serialize_to_buffer(
+        message_iterator = (
+                compile_pb2.ServiceWithMeta,
+            )+(d for d in os.listdir(HYCACHE+'compile'+id)),
+        partitions_model = partitions_model,
+    ): yield b
+    shutil.rmtree(HYCACHE+'compile'+id)
+    # TODO if saveit: convert dirs to local partition model and save it into the registry.
+
+
 if __name__ == "__main__":
-    import random
+    import random, gateway_pb2_grpcbf
     aux_id = str(random.random())
     git = str(sys.argv[1])
     repo = git.split('::')[0]
@@ -293,9 +315,11 @@ if __name__ == "__main__":
     id = ok(
         path = HYCACHE+aux_id+'/for_build/git/.service/',
         aux_id = aux_id,
+        partitions_model = gateway_pb2_grpcbf.StartService_input_partitions[2] if False else [buffer_pb2.Buffer.Head.Partition()]
         )  # Hyperfile
 
     os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.docker')
     os.system('/usr/bin/docker rmi builder'+aux_id)
+    os.system('mv '+HYCACHE+'compile'+id+' '+REGISTRY+id)
     os.system('rm -rf '+HYCACHE+aux_id+'/')
     print(id)
