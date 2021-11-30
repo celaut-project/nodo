@@ -160,34 +160,22 @@ def put_submessage(partition, message, obj):
             )
 
 def combine_partitions(
-    message: protobuf.pyext.cpp_message.GeneratedProtocolMessageType,
+    obj_cls: protobuf.pyext.cpp_message.GeneratedProtocolMessageType,
     partitions_model: tuple,
     partitions: tuple
-    ) -> str:
-    total_len = 0
-    for partition in partitions:
+    ):
+    obj = obj_cls()
+    for i, partition in enumerate(partitions):
         if type(partition) is str:
-            total_len += 2* os.path.getsize(partition)
-        elif type(partition) is object:
-            total_len += 2* sys.getsizeof(partition)
-        elif type(partition) is bytes:
-            total_len += len(partition)
-        else:
-            raise Exception('Partition to buffer error: partition type is wrong: ' + str(type(partition)))
-
-    with Enviroment.mem_manager(len = 2*total_len):
-        obj = message()
-        for i, partition in enumerate(partitions):
-            if type(partition) is str:
-                with open(partition, 'rb') as f:
-                    partition = f.read()
-            elif not (hasattr(partition, 'SerializeToString') or type(partition) is bytes):
-                raise Exception('Partitions to buffer error.')
-            obj = put_submessage(
-                partition = partitions_model[i],
-                message = partition,
-                obj = obj
-            )
+            with open(partition, 'rb') as f:
+                partition = f.read()
+        elif not (hasattr(partition, 'SerializeToString') or type(partition) is bytes):
+            raise Exception('Partitions to buffer error.')
+        obj = put_submessage(
+            partition = partitions_model[i],
+            message = partition,
+            obj = obj
+        )
     return obj
 
 def parse_from_buffer(
@@ -314,14 +302,14 @@ def parse_from_buffer(
             # 3. Parse to the local partitions from the remote partitions using mem_manager.
             try:
                 with mem_manager(len = 2*sum([os.path.getsize(dir) for dir in dirs])):
-                    if len(remote_partitions_model)==0 and len(dirs)==1:
+                    if (len(remote_partitions_model)==0 or len(remote_partitions_model)==1) and len(dirs)==1:
                         main_object = pf_object()
                         main_object.ParseFromString(open(dirs[0], 'rb').read())
                     elif len(remote_partitions_model)!=len(dirs): 
                         raise Exception("Error: remote partitions model are not correct with the buffer.")
                     else:
                         main_object = combine_partitions(
-                            message = pf_object,
+                            obj_cls = pf_object,
                             partitions_model = remote_partitions_model,
                             partitions = dirs
                         )
@@ -622,11 +610,22 @@ def partitions_to_buffer(
     partitions_model: tuple,
     partitions: tuple
     ) -> str:
-    return combine_partitions(
-        message = message,
-        partitions_model = partitions_model,
-        partitions = partitions
-    ).SerializeToString()
+    total_len = 0
+    for partition in partitions:
+        if type(partition) is str:
+            total_len += 2* os.path.getsize(partition)
+        elif type(partition) is object:
+            total_len += 2* sys.getsizeof(partition)
+        elif type(partition) is bytes:
+            total_len += len(partition)
+        else:
+            raise Exception('Partition to buffer error: partition type is wrong: ' + str(type(partition)))
+    with Enviroment.mem_manager(len = total_len):
+        return combine_partitions(
+            obj_cls = message,
+            partitions_model = partitions_model,
+            partitions = partitions
+        ).SerializeToString()
 
 """
     Serialize Object to plain bytes serialization.
