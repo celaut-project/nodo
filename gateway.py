@@ -326,7 +326,7 @@ def launch_service(
                     getting_container = True
                     continue
 
-                # Now, serialize part of the service is needed.
+                # Now serialize the part of the service that is needed.
                 service = celaut.Service()
                 service.ParseFromString(service_buffer)
                 # If the request is made by a local service.
