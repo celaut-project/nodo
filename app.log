@@ -19647,3 +19647,101 @@ AttributeError: value
 2021-11-28 22:04:09,572 DEBUG    http://localhost:None "GET /v1.41/containers/f87b086b812d8f6db2458d35332fbff53f5d2222611d1cee560f7adea3fd40a8/json HTTP/1.1" 200 None
 2021-11-28 22:04:10,012 DEBUG    http://localhost:None "POST /v1.41/containers/f87b086b812d8f6db2458d35332fbff53f5d2222611d1cee560f7adea3fd40a8/start HTTP/1.1" 204 0
 2021-11-28 22:04:10,017 DEBUG    http://localhost:None "GET /v1.41/containers/f87b086b812d8f6db2458d35332fbff53f5d2222611d1cee560f7adea3fd40a8/json HTTP/1.1" 200 None
+2021-11-29 21:23:28,407 ERROR    Exception iterating responses: Grpcbf error: partition corrupted
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 585, in StartService
+    r = next(parser_generator) # Can raise StopIteration
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 587, in StartService
+    except Exception: raise Exception('Grpcbf error: partition corrupted')
+Exception: Grpcbf error: partition corrupted
+2021-11-29 23:01:14,341 ERROR    Exception iterating responses: Grpcbf error: partition corrupted
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 585, in StartService
+    r = next(parser_generator) # Can raise StopIteration
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 587, in StartService
+    except Exception: raise Exception('Grpcbf error: partition corrupted')
+Exception: Grpcbf error: partition corrupted
+2021-11-29 23:03:28,386 ERROR    Exception iterating responses: Grpcbf error: partition corrupted
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 585, in StartService
+    r = next(parser_generator) # Can raise StopIteration
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 587, in StartService
+    except Exception: raise Exception('Grpcbf error: partition corrupted')
+Exception: Grpcbf error: partition corrupted
+2021-11-30 10:26:50,578 ERROR    Exception iterating responses: Grpcbf error: partition corrupted
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 585, in StartService
+    r = next(parser_generator) # Can raise StopIteration
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 587, in StartService
+    except Exception: raise Exception('Grpcbf error: partition corrupted')
+Exception: Grpcbf error: partition corrupted
+2021-11-30 10:31:02,814 ERROR    Exception iterating responses: Grpcbf error: partition corrupted
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 585, in StartService
+    r = next(parser_generator) # Can raise StopIteration
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 587, in StartService
+    except Exception: raise Exception('Grpcbf error: partition corrupted')
+Exception: Grpcbf error: partition corrupted
+2021-11-30 10:32:46,474 ERROR    Exception iterating responses: Grpcbf error: partition corrupted
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 585, in StartService
+    r = next(parser_generator) # Can raise StopIteration
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 587, in StartService
+    except Exception: raise Exception('Grpcbf error: partition corrupted')
+Exception: Grpcbf error: partition corrupted
+2021-11-30 10:33:25,887 ERROR    Exception iterating responses: Grpcbf error: partition corrupted
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 585, in StartService
+    r = next(parser_generator) # Can raise StopIteration
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 587, in StartService
+    except Exception: raise Exception('Grpcbf error: partition corrupted')
+Exception: Grpcbf error: partition corrupted

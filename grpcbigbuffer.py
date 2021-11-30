@@ -103,12 +103,13 @@ def get_subclass(partition, object_cls):
         ) if len(partition.index) == 1 else object_cls
 
 def copy_message(obj, field_name, message):
+    e = getattr(obj, field_name) if field_name else obj
     if hasattr(message, 'CopyFrom'):
-        getattr(obj, field_name).CopyFrom(message)
+        e.CopyFrom(message)
     elif type(message) is bytes:
-        getattr(obj, field_name).ParseFromString(message)
+        e.ParseFromString(message)
     else:
-        setattr(obj, field_name, message)
+        e = message
     return obj
 
 def get_submessage(partition, obj):
@@ -136,7 +137,10 @@ def get_submessage(partition, obj):
 
 def put_submessage(partition, message, obj):
     if len(partition.index) == 0:
-        raise Exception('Put message error.')
+        return copy_message(
+            obj=obj, field_name=None,
+            message=message
+        )
     if len(partition.index) == 1:
         p = list(partition.index.values())[0]
         if len(p.index) == 1:
@@ -171,7 +175,7 @@ def combine_partitions(
         else:
             raise Exception('Partition to buffer error: partition type is wrong: ' + str(type(partition)))
 
-    with Enviroment.mem_manager(len = total_len):
+    with Enviroment.mem_manager(len = 2*total_len):
         obj = message()
         for i, partition in enumerate(partitions):
             if type(partition) is str:
@@ -179,7 +183,7 @@ def combine_partitions(
                     partition = f.read()
             elif not (hasattr(partition, 'SerializeToString') or type(partition) is bytes):
                 raise Exception('Partitions to buffer error.')
-            put_submessage(
+            obj = put_submessage(
                 partition = partitions_model[i],
                 message = partition,
                 obj = obj
