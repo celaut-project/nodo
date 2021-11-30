@@ -1,7 +1,7 @@
  .vscode
 __pycache__
 .idea
-app.log
 __hycache__
 __cache__
 __registry__
+app.log
