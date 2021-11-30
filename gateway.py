@@ -612,13 +612,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     other_hashes = hashes
                     )
 
+                save_service(
+                    service_p1 = service_with_meta.service.SerializeToString(),
+                    service_p2 = second_partition_dir,
+                    metadata = service_with_meta.metadata,
+                    hash = hash if hash else None
+                )
                 if configuration:
-                    save_service(
-                        service_p1 = service_with_meta.service.SerializeToString(),
-                        service_p2 = second_partition_dir,
-                        metadata = service_with_meta.metadata,
-                        hash = hash if hash else None
-                    )
                     for buffer in grpcbf.serialize_to_buffer(
                         message_iterator = launch_service(
                             service_buffer = service_with_meta.service.SerializeToString(),
