@@ -622,25 +622,25 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     return
 
                 
-                l.LOGGER('The service is not in the registry and the request does not have the definition.' \
-                    + str([(hash.type.hex(), hash.value.hex()) for hash in hashes]))
-                
-                try:
-                    for b in grpcbf.serialize_to_buffer(
-                        message_iterator = launch_service(
-                            service_buffer = search_definition(hashes = hashes),
-                            metadata = celaut.Any.Metadata(
-                                hashtag = celaut.Any.Metadata.HashTag(
-                                    hash = hashes
-                                )
-                            ), 
-                            config = configuration,
-                            father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
+        l.LOGGER('The service is not in the registry and the request does not have the definition.' \
+            + str([(hash.type.hex(), hash.value.hex()) for hash in hashes]))
+        
+        try:
+            for b in grpcbf.serialize_to_buffer(
+                message_iterator = launch_service(
+                    service_buffer = search_definition(hashes = hashes),
+                    metadata = celaut.Any.Metadata(
+                        hashtag = celaut.Any.Metadata.HashTag(
+                            hash = hashes
                         )
-                    ): yield b
+                    ), 
+                    config = configuration,
+                    father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                )
+            ): yield b
 
-                except Exception as e:
-                    raise Exception('Was imposible start the service. ' + str(e))
+        except Exception as e:
+            raise Exception('Was imposible start the service. ' + str(e))
 
 
     def StopService(self, request_iterator, context):
