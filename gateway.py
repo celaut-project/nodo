@@ -413,18 +413,28 @@ def launch_service(
     except Exception as e: print('launch -< ', e)
 
 
-def save_service(service_buffer: bytes, metadata: celaut.Any.Metadata, hash: str = None):
+def save_service(
+    service_p1: bytes, 
+    service_p2: str,
+    metadata: celaut.Any.Metadata, 
+    hash: str = None
+    ):
     # If the service is not on the registry, save it.
-    if not hash: hash = get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata)
-    if not os.path.isfile(REGISTRY+hash):
-        
-        with open(REGISTRY + hash + '/p1', 'wb') as file, iobd.mem_manager(len=len(service_buffer)):
+    if not hash: hash = get_service_hex_main_hash(
+        service_buffer = (service_p1, service_p2) if service_p2 else None, 
+        metadata = metadata
+        )
+    if not os.path.isdir(REGISTRY+hash):
+        os.mkdir(REGISTRY+hash)
+        with open(REGISTRY + hash + '/p1', 'wb') as file, iobd.mem_manager(len=len(service_p1)):
             file.write(
                 celaut.Any(
                     metadata = metadata,
-                    value = service_buffer
+                    value = service_p1
                 ).SerializeToString()
             )
+        if service_p2:
+            shutil.move(service_p2, REGISTRY+hash+'/p2')
 
 def peers_iterator(ignore_network: str = None) -> Generator[celaut.Instance.Uri, None, None]:
     peers = list(pymongo.MongoClient(
@@ -490,8 +500,8 @@ def search_definition(hashes: list, ignore_network: str = None) -> bytes:
                     hashes = hashes
                 ):
                 #  Save the service on the registry.
-                save_service(
-                    service_buffer = any.value,
+                save_service(  # TODO
+                    service_p1 = any.value,
                     metadata = any.metadata
                 )
                 return any.value
@@ -601,12 +611,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     metadata = service_with_meta.metadata,
                     other_hashes = hashes
                     )
-                os.mkdir(REGISTRY+hash)
-                shutil.move(second_partition_dir, REGISTRY+hash+'/p2')  # https://stackoverflow.com/questions/8858008/how-to-move-a-file-in-python
 
                 if configuration:
                     save_service(
-                        service_buffer = service_with_meta.service.SerializeToString(),
+                        service_p1 = service_with_meta.service.SerializeToString(),
+                        service_p2 = second_partition_dir,
                         metadata = service_with_meta.metadata,
                         hash = hash if hash else None
                     )
@@ -742,8 +751,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
             # Si me da servicio.
             if type(r) is celaut.Any:
                 hash = get_service_hex_main_hash(service_buffer = r.value)
-                save_service(
-                    service_buffer = r.value,
+                save_service(  # TODO
+                    service_p1 = r.value,
                     metadata = r.metadata
                 )
                 service_buffer = r.value
