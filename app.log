@@ -20746,3 +20746,22 @@ Exception: Grpcbf error: partition corrupted
 2021-11-30 22:40:19,287 DEBUG    http://localhost:None "GET /v1.41/containers/fb3c503a591c3065bb73957b1192ff4343cc7868171b0a1999587767cf75a7d6/json HTTP/1.1" 200 None
 2021-11-30 22:40:19,855 DEBUG    http://localhost:None "POST /v1.41/containers/fb3c503a591c3065bb73957b1192ff4343cc7868171b0a1999587767cf75a7d6/start HTTP/1.1" 204 0
 2021-11-30 22:40:19,861 DEBUG    http://localhost:None "GET /v1.41/containers/fb3c503a591c3065bb73957b1192ff4343cc7868171b0a1999587767cf75a7d6/json HTTP/1.1" 200 None
+2021-12-01 18:26:36,399 ERROR    Exception iterating responses: Command '["/usr/bin/docker image inspect builder0.9482696505186379 --format='{{.Size}}'"]' returned non-zero exit status 1.
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 745, in Compile
+    for b in compile(
+  File "/home/jse/node/compile.py", line 317, in compile
+    id = repo_ok(
+  File "/home/jse/node/compile.py", line 303, in repo_ok
+    id = ok(
+  File "/home/jse/node/compile.py", line 279, in ok
+    Hyperfile = Hyper(path = path, aux_id = aux_id)
+  File "/home/jse/node/compile.py", line 43, in __init__
+    self.buffer_len = int(subprocess.check_output(["/usr/bin/docker image inspect builder"+aux_id+" --format='{{.Size}}'"], shell=True))
+  File "/usr/lib/python3.9/subprocess.py", line 424, in check_output
+    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True,
+  File "/usr/lib/python3.9/subprocess.py", line 528, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '["/usr/bin/docker image inspect builder0.9482696505186379 --format='{{.Size}}'"]' returned non-zero exit status 1.
