@@ -34,6 +34,11 @@ message ServiceWithConfig { // S^C
     celaut.Configuration config = 3;
 }
 
+message CompileInput {
+    string repo = 1;
+    repeated buffer.Buffer.Head.Partition partitions_model = 2;
+}
+
 // GRPC.
 
 service Gateway {
@@ -42,6 +47,7 @@ service Gateway {
     rpc Hynode(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Instance -> Instance
     
     rpc GetFile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Any.Metadata.HashTag.Hash -> celaut.Any
+    rpc Compile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // CompileInput -> ServiceWithMeta
     rpc GetServiceTar(stream buffer.Buffer) returns (stream buffer.Buffer) {}// ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> buffer.Buffer (parse not needed.)
     rpc GetServiceCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> CostMessage
 }

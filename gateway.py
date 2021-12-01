@@ -1,7 +1,7 @@
 from typing import Generator
 import celaut_pb2 as celaut
 import build, utils
-from compile import REGISTRY, HYCACHE
+from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash
 import subprocess, os, threading, shutil
@@ -734,6 +734,18 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
         except:
             raise Exception('Was imposible get the service definition.')
+
+    def Compile(self, request_iterator, context):
+        l.LOGGER('Go to compile a proyect.')
+        input = next(grpcbf.parse_from_buffer(
+            request_iterator = request_iterator,
+            indices = gateway_pb2.CompileInput,
+            partitions_message_mode=True
+        )).token
+        for b in compile(
+            path = input.repo,
+            partitions_model = input.partitions_model
+        ): yield b
 
     def GetServiceTar(self, request_iterator, context):
         l.LOGGER('Request for give a service container.')

@@ -1,3 +1,4 @@
+from typing import Generator
 import logger as l
 import sys, shutil
 import json, getpass
@@ -288,7 +289,7 @@ def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
             )
     return id
 
-def compile(path, partitions_model: list, saveit: bool = SAVE_ALL):
+def compile(path, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
     id = ok(
         path = path,
         aux_id = str(random.random()),
