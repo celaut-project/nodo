@@ -741,9 +741,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
             request_iterator = request_iterator,
             indices = gateway_pb2.CompileInput,
             partitions_message_mode=True
-        )).token
+        ))
         for b in compile(
-            path = input.repo,
+            repo = input.repo,
             partitions_model = input.partitions_model
         ): yield b
 

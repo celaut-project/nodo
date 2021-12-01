@@ -289,11 +289,34 @@ def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
             )
     return id
 
-def compile(path, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
+def repo_ok(
+    repo: str,
+    partitions_model: list
+) -> str:
+    import random
+    aux_id = str(random.random())
+    git = str(repo)
+    git_repo = git.split('::')[0]
+    branch = git.split('::')[1]
+    os.system('git clone --branch '+branch+' '+git_repo+' '+HYCACHE+aux_id+'/for_build/git')
+    l.LOGGER(str(os.listdir(HYCACHE+aux_id+'/for_build/git/.service/')))
     id = ok(
-        path = path,
-        aux_id = str(random.random()),
-        partitions_model = partitions_model
+        path = HYCACHE+aux_id+'/for_build/git/.service/',
+        aux_id = aux_id,
+        partitions_model=partitions_model
+        )  # Hyperfile
+
+    os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.docker')
+    os.system('/usr/bin/docker rmi builder'+aux_id)
+    os.system('rm -rf '+HYCACHE+aux_id+'/')
+    return id
+
+
+
+def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
+    id = repo_ok(
+        repo = repo,
+        partitions_model=partitions_model
     )
     for b in grpcbigbuffer.serialize_to_buffer(
         message_iterator = (
@@ -306,21 +329,10 @@ def compile(path, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
 
 
 if __name__ == "__main__":
-    import random, gateway_pb2_grpcbf
-    aux_id = str(random.random())
-    git = str(sys.argv[1])
-    repo = git.split('::')[0]
-    branch = git.split('::')[1]
-    os.system('git clone --branch '+branch+' '+repo+' '+HYCACHE+aux_id+'/for_build/git')
-    l.LOGGER(str(os.listdir(HYCACHE+aux_id+'/for_build/git/.service/')))
-    id = ok(
-        path = HYCACHE+aux_id+'/for_build/git/.service/',
-        aux_id = aux_id,
-        partitions_model = gateway_pb2_grpcbf.StartService_input_partitions[2] if False else [buffer_pb2.Buffer.Head.Partition()]
-        )  # Hyperfile
-
-    os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.docker')
-    os.system('/usr/bin/docker rmi builder'+aux_id)
+    from gateway_pb2_grpcbf import StartService_input_partitions
+    id = repo_ok(
+        repo = sys.argv[1],
+        partitions_model = StartService_input_partitions[2] if False else [buffer_pb2.Buffer.Head.Partition()]
+    )
     os.system('mv '+HYCACHE+'compile'+id+' '+REGISTRY+id)
-    os.system('rm -rf '+HYCACHE+aux_id+'/')
     print(id)
