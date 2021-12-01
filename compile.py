@@ -319,7 +319,7 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
         partitions_model=partitions_model
     )
     for b in grpcbigbuffer.serialize_to_buffer(
-        message_iterator = (d for d in [compile_pb2.ServiceWithMeta] + os.listdir(HYCACHE+'compile'+id)),
+        message_iterator = tuple(d for d in [compile_pb2.ServiceWithMeta] + os.listdir(HYCACHE+'compile'+id)),
         partitions_model = partitions_model,
     ): yield b
     shutil.rmtree(HYCACHE+'compile'+id)
