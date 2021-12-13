@@ -278,6 +278,7 @@ class Hyper:
 def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
     Hyperfile = Hyper(path = path, aux_id = aux_id)
 
+    print(Hyperfile.buffer_len)
     with iobigdata.mem_manager(len = 2*Hyperfile.buffer_len):
         Hyperfile.parseContainer()
         Hyperfile.parseApi()
@@ -316,11 +317,12 @@ def repo_ok(
 def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
     id = repo_ok(
         repo = repo,
-        partitions_model=partitions_model
+        partitions_model = list(partitions_model)
     )
     for b in grpcbigbuffer.serialize_to_buffer(
-        message_iterator = tuple(d for d in [compile_pb2.ServiceWithMeta] + os.listdir(HYCACHE+'compile'+id)),
-        partitions_model = partitions_model,
+        message_iterator = tuple([gateway_pb2.CompileOutput, gateway_pb2.CompileOutput(id=id)])+tuple([HYCACHE+'compile'+id+'/'+d for d in os.listdir(HYCACHE+'compile'+id)]),
+        partitions_model = list(partitions_model),
+        indices = gateway_pb2.CompileOutput
     ): yield b
     shutil.rmtree(HYCACHE+'compile'+id)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
@@ -330,7 +332,7 @@ if __name__ == "__main__":
     from gateway_pb2_grpcbf import StartService_input_partitions
     id = repo_ok(
         repo = sys.argv[1],
-        partitions_model = StartService_input_partitions[2] if False else [buffer_pb2.Buffer.Head.Partition()]
+        partitions_model = StartService_input_partitions[2] if not sys.argv[2] else [buffer_pb2.Buffer.Head.Partition()]
     )
     os.system('mv '+HYCACHE+'compile'+id+' '+REGISTRY+id)
     print(id)

@@ -90,3 +90,36 @@ GetServiceTar_input = {
     1 : gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash,
     2 : gateway_pb2.celaut__pb2.Any,
 }
+
+Compile_output_partitions_v1 = [
+    buffer_pb2.Buffer.Head.Partition(index={1 : buffer_pb2.Buffer.Head.Partition()}),
+    buffer_pb2.Buffer.Head.Partition(index={2 : buffer_pb2.Buffer.Head.Partition()})
+]
+
+Compile_output_partitions_v2 = [
+    buffer_pb2.Buffer.Head.Partition(index={1 : buffer_pb2.Buffer.Head.Partition()}),
+    buffer_pb2.Buffer.Head.Partition(index={
+        2 : buffer_pb2.Buffer.Head.Partition(index={
+            1 : buffer_pb2.Buffer.Head.Partition(),
+            2 : buffer_pb2.Buffer.Head.Partition(index={
+                1 : buffer_pb2.Buffer.Head.Partition(index={
+                    3 : buffer_pb2.Buffer.Head.Partition(),
+                    4 : buffer_pb2.Buffer.Head.Partition(),
+                }),
+                2 : buffer_pb2.Buffer.Head.Partition(),
+                3 : buffer_pb2.Buffer.Head.Partition(),
+                4 : buffer_pb2.Buffer.Head.Partition(),
+            })
+        })
+    }),
+    buffer_pb2.Buffer.Head.Partition(index={
+        2 : buffer_pb2.Buffer.Head.Partition(index={
+            2 : buffer_pb2.Buffer.Head.Partition(index={
+                1 : buffer_pb2.Buffer.Head.Partition(index={
+                    1 : buffer_pb2.Buffer.Head.Partition(),
+                    2 : buffer_pb2.Buffer.Head.Partition()
+                }),
+            })
+        })
+    })
+]
