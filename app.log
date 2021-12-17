@@ -20765,3 +20765,26 @@ Traceback (most recent call last):
   File "/usr/lib/python3.9/subprocess.py", line 528, in run
     raise CalledProcessError(retcode, process.args,
 subprocess.CalledProcessError: Command '["/usr/bin/docker image inspect builder0.9482696505186379 --format='{{.Size}}'"]' returned non-zero exit status 1.
+2021-12-17 10:50:48,303 ERROR    Exception iterating responses: [Errno 13] Permission denied: '/home/jse/node/__hycache__/0.4216055768414675/filesystem/usr/bin/cc'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 745, in Compile
+    for b in compile(
+  File "/home/jse/node/compile.py", line 318, in compile
+    id = repo_ok(
+  File "/home/jse/node/compile.py", line 304, in repo_ok
+    id = ok(
+  File "/home/jse/node/compile.py", line 283, in ok
+    Hyperfile.parseContainer()
+  File "/home/jse/node/compile.py", line 129, in parseContainer
+    value = [ parseFilesys() ]
+  File "/home/jse/node/compile.py", line 87, in parseFilesys
+    self.service.container.filesystem.CopyFrom(recursive_parsing( directory = HYCACHE+self.aux_id+"/filesystem/" ))
+  File "/home/jse/node/compile.py", line 80, in recursive_parsing
+    recursive_parsing(directory=directory+b_name+'/')
+  File "/home/jse/node/compile.py", line 80, in recursive_parsing
+    recursive_parsing(directory=directory+b_name+'/')
+  File "/home/jse/node/compile.py", line 73, in recursive_parsing
+    with open(directory+b_name, 'rb') as file:
+PermissionError: [Errno 13] Permission denied: '/home/jse/node/__hycache__/0.4216055768414675/filesystem/usr/bin/cc'

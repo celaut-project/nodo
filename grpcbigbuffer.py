@@ -11,6 +11,13 @@ from random import randint
 from typing import Generator, Union
 from threading import Condition
 
+class EmptyBufferException(Exception):
+    pass
+
+class Dir(object):
+    def __init__(self, dir: str):
+        self.name = dir
+
 class MemManager(object):
     def __init__(self, len):
         pass
@@ -236,10 +243,16 @@ def parse_from_buffer(
             ):
                 all_buffer += b.chunk
             message = message_field()
-            message.ParseFromString(
-                all_buffer
-            )
-            return message if len(all_buffer)>0 else None
+            if message_field is str:
+                message = all_buffer.decode('utf-8')
+            elif type(message_field) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType:
+                message.ParseFromString(
+                        all_buffer
+                    )
+            else:
+                raise Exception('gRPCbb error -> Parse message error: some primitive type message not suported for contain partition '+ str(message_field))
+            if len(all_buffer)>0: return message
+            else: raise EmptyBufferException()
 
         def save_to_file(filename: str, request_iterator, signal) -> str:
             save_chunks_to_file(
@@ -269,14 +282,14 @@ def parse_from_buffer(
         
         def iterate_partitions(signal: Signal, request_iterator, cache_dir: str, partitions: list = [None]):
             for i, partition in enumerate(partitions):
-                b = iterate_partition(
-                        message_field_or_route = partition, 
-                        signal = signal,
-                        request_iterator = request_iterator,
-                        filename = cache_dir + 'p'+str(i+1),
-                    )
-                if b: yield b
-                else: continue
+                try:
+                    yield iterate_partition(
+                            message_field_or_route = partition, 
+                            signal = signal,
+                            request_iterator = request_iterator,
+                            filename = cache_dir + 'p'+str(i+1),
+                        )
+                except EmptyBufferException: continue
 
         def conversor(
                 iterator,
@@ -290,14 +303,17 @@ def parse_from_buffer(
             ):
             yield pf_object
             try:
+                print(1)
                 os.mkdir(cache_dir+'remote/')
-            except FileExistsError: pass
+            except FileExistsError: raise Exception('gRPCbb error: Conversor error, remote dir already exists')
             dirs = []
             # 1. Save the remote partitions on cache.
-            for d in iterator: 
-                # 2. yield remote partitions directory.
-                if yield_remote_partition_dir: yield d
-                dirs.append(d)
+            try:
+                for d in iterator: 
+                    # 2. yield remote partitions directory.
+                    if yield_remote_partition_dir: yield d
+                    dirs.append(d)
+            except EmptyBufferException: pass
             if not pf_object or len(remote_partitions_model)>0 and len(dirs) != len(remote_partitions_model): return None
             # 3. Parse to the local partitions from the remote partitions using mem_manager.
             try:
@@ -374,26 +390,23 @@ def parse_from_buffer(
                         ): yield b
 
                     else:
-                        b = iterate_partition(
-                            message_field_or_route = indices[buffer.head.index] if partitions_message_mode[buffer.head.index][0] else None,
-                            signal = signal,
-                            request_iterator = itertools.chain([buffer], request_iterator),
-                            filename = cache_dir + 'p1',
-                        )
-                        if b: yield b
-                        else: continue
+                        try:
+                            yield iterate_partition(
+                                message_field_or_route = indices[buffer.head.index] if partitions_message_mode[buffer.head.index][0] else None,
+                                signal = signal,
+                                request_iterator = itertools.chain([buffer], request_iterator),
+                                filename = cache_dir + 'p1',
+                            )
+                        except EmptyBufferException: continue
 
                 elif 1 in indices: # Does not've more than one index and more than one partition too.
                     if len(partitions_model[1]) > 1:
-                        input_msg = iterate_partition(
-                                message_field_or_route = None,
-                                signal = signal,
-                                request_iterator = itertools.chain([buffer], request_iterator),
-                                filename = cache_dir + 'remote/p1',
-                            )
-                        if not input_msg: continue
                         for b in conversor(
-                            iterator = [input_msg],
+                            iterator = iterate_partitions(
+                                    signal = signal,
+                                    request_iterator = itertools.chain([buffer], request_iterator),
+                                    cache_dir = cache_dir + 'remote',
+                                ),
                             remote_partitions_model = [buffer_pb2.Buffer.Head.Partition()],
                             local_partitions_model = partitions_model[1],
                             mem_manager = mem_manager,
@@ -403,14 +416,15 @@ def parse_from_buffer(
                             partitions_message_mode = partitions_message_mode[1],
                         ): yield b
                     else:
-                        b = iterate_partition(
-                            message_field_or_route = indices[1] if partitions_message_mode[1][0] else None,
-                            signal = signal,
-                            request_iterator = itertools.chain([buffer], request_iterator),
-                            filename = cache_dir + 'p1',
-                        )
-                        if b: yield b
-                        else: continue
+                        try:
+                            yield iterate_partition(
+                                message_field_or_route = indices[1] if partitions_message_mode[1][0] else None,
+                                signal = signal,
+                                request_iterator = itertools.chain([buffer], request_iterator),
+                                filename = cache_dir + 'p1',
+                            )
+                        except EmptyBufferException: continue
+
                 else:
                     raise Exception('Parse from buffer error: index are not correct ' + str(indices))
         except StopIteration:
@@ -455,9 +469,9 @@ def serialize_to_buffer(
         except:
             raise Exception('Serialzie to buffer error: Indices are not correct ' + str(indices) + str(partitions_model))
         
-        def send_file(filename: str, signal: Signal) -> Generator[buffer_pb2.Buffer, None, None]:
+        def send_file(filedir: Dir, signal: Signal) -> Generator[buffer_pb2.Buffer, None, None]:
             for b in get_file_chunks(
-                    filename=filename, 
+                    filename=filedir.name, 
                     signal=signal
                 ):
                     signal.wait()
@@ -475,7 +489,16 @@ def serialize_to_buffer(
                 mem_manager = Enviroment.mem_manager,
                 cache_dir: str= None, 
             ) -> Generator[buffer_pb2.Buffer, None, None]:
-            message_bytes = message.SerializeToString()
+
+            if type(type(message)) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType:
+                message_bytes = message.SerializeToString()
+            elif type(message) is str:
+                message_bytes = bytes(message, 'utf-8')
+            else:
+                try:
+                    message_bytes = bytes(message)
+                except TypeError: raise('gRPCbb error -> Serialize message error: some primitive type message not suported for contain partition '+ str(type(message)))
+                
             if len(message_bytes) < CHUNK_SIZE:
                 signal.wait()
                 try:
@@ -502,7 +525,7 @@ def serialize_to_buffer(
                     with open(file, 'wb') as f, mem_manager(len=os.path.getsize(file)):
                         f.write(message_bytes)
                     send_file(
-                        filename=file,
+                        filedir=file,
                         signal=signal
                     )
                 finally:
@@ -527,9 +550,10 @@ def serialize_to_buffer(
                 )
                 
                 for partition in message[1:]:
-                    if type(partition) is str:
+                    print('partition -> ', partition)
+                    if type(partition) is Dir:
                         for b in send_file(
-                            filename = partition,
+                            filedir = partition,
                             signal=signal
                         ): yield b
                     else:
