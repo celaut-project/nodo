@@ -2,6 +2,7 @@ syntax = "proto3";
 package gateway;
 import "celaut.proto";
 import "buffer.proto";
+import "compile.proto";
 
 message Empty {}
 
@@ -41,7 +42,7 @@ message CompileInput {
 
 message CompileOutput {
     string id = 1;
-    ServiceWithMeta service = 2;
+    compile.ServiceWithMeta service = 2;
 }
 
 // GRPC.

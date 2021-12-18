@@ -20788,3 +20788,29 @@ Traceback (most recent call last):
   File "/home/jse/node/compile.py", line 73, in recursive_parsing
     with open(directory+b_name, 'rb') as file:
 PermissionError: [Errno 13] Permission denied: '/home/jse/node/__hycache__/0.4216055768414675/filesystem/usr/bin/cc'
+2021-12-18 12:57:27,799 ERROR    Exception iterating responses: [Errno 2] No such file or directory: '/home/jse/node/__hycache__/0.24153866976573435/for_build/git/.service/'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 745, in Compile
+    for b in compile(
+  File "/home/jse/node/compile.py", line 319, in compile
+    id = repo_ok(
+  File "/home/jse/node/compile.py", line 304, in repo_ok
+    l.LOGGER(str(os.listdir(HYCACHE+aux_id+'/for_build/git/.service/')))
+FileNotFoundError: [Errno 2] No such file or directory: '/home/jse/node/__hycache__/0.24153866976573435/for_build/git/.service/'
+2021-12-18 12:59:08,122 ERROR    Exception iterating responses: 'str' object has no attribute 'SerializeToString'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 745, in Compile
+    for b in compile(
+  File "/home/jse/node/compile.py", line 319, in compile
+    id = repo_ok(
+  File "/home/jse/node/compile.py", line 305, in repo_ok
+    id = ok(
+  File "/home/jse/node/compile.py", line 289, in ok
+    id = Hyperfile.save(
+  File "/home/jse/node/compile.py", line 265, in save
+    grpcbigbuffer.get_submessage(
+AttributeError: 'str' object has no attribute 'SerializeToString'

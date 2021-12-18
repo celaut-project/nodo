@@ -44,6 +44,16 @@ def modify_env(cache_dir: str = None, mem_manager = None):
 def generate_random_dir(dir: str) -> str:
     return dir + str(randint(1, MAX_DIR)) + '/'
 
+def message_to_bytes(message) -> bytes:
+    if type(type(message)) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType:
+        return message.SerializeToString()
+    elif type(message) is str:
+        return bytes(message, 'utf-8')
+    else:
+        try:
+            return bytes(message)
+        except TypeError: raise('gRPCbb error -> Serialize message error: some primitive type message not suported for contain partition '+ str(type(message)))
+
 def create_cache_dir() -> str: 
     cache_dir = Enviroment.cache_dir
     try:

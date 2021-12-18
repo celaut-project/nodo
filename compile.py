@@ -262,13 +262,18 @@ class Hyper:
         for i, partition in enumerate(partitions_model):
             with open(HYCACHE + 'compile' + id + '/p'+str(i+1), 'wb') as f:
                 f.write(
-                    grpcbigbuffer.get_submessage(
-                        partition = partition, 
-                        obj = compile_pb2.ServiceWithMeta(
-                                    metadata = self.metadata,
-                                    service = self.service
-                                )
-                        ).SerializeToString()
+                    grpcbigbuffer.message_to_bytes(
+                        message = grpcbigbuffer.get_submessage(
+                            partition = partition, 
+                            obj = gateway_pb2.CompileOutput(
+                                id = id,
+                                service = compile_pb2.ServiceWithMeta(
+                                        metadata = self.metadata,
+                                        service = self.service
+                                    )
+                            )
+                        )
+                    )
                 )
         return id
 
@@ -318,7 +323,7 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
         partitions_model = list(partitions_model)
     )
     for b in grpcbigbuffer.serialize_to_buffer(
-        message_iterator = tuple([gateway_pb2.CompileOutput, id])+tuple([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d)for d in os.listdir(HYCACHE+'compile'+id)]),
+        message_iterator = tuple([gateway_pb2.CompileOutput])+tuple([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d)for d in os.listdir(HYCACHE+'compile'+id)]),
         partitions_model = list(partitions_model),
         indices = gateway_pb2.CompileOutput
     ): yield b
