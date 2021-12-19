@@ -20835,3 +20835,211 @@ Traceback (most recent call last):
   File "/home/jse/node/gateway.py", line 561, in StartService
     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
 FileNotFoundError: [Errno 2] No such file or directory: '/home/jse/node/__registry__/'
+2021-12-19 14:26:44,648 ERROR    Exception iterating responses: Was imposible start the service. list index out of range
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 640, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 509, in search_definition
+    l.LOGGER('The service '+ hashes[0].value.hex() + ' was not found.')
+IndexError: list index out of range
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 652, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. list index out of range
+2021-12-19 18:29:26,015 ERROR    Exception iterating responses: Was imposible start the service. list index out of range
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 641, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 509, in search_definition
+    l.LOGGER('The service '+ hashes[0].value.hex() + ' was not found.')
+IndexError: list index out of range
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 653, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. list index out of range
+2021-12-19 18:35:10,782 ERROR    Exception iterating responses: Was imposible start the service. list index out of range
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 641, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 509, in search_definition
+    l.LOGGER('The service '+ hashes[0].value.hex() + ' was not found.')
+IndexError: list index out of range
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 653, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. list index out of range
+2021-12-19 18:36:47,436 ERROR    Exception iterating responses: Was imposible start the service. list index out of range
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 642, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 509, in search_definition
+    l.LOGGER('The service '+ hashes[0].value.hex() + ' was not found.')
+IndexError: list index out of range
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 654, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. list index out of range
+2021-12-19 18:40:47,818 ERROR    Exception iterating responses: Was imposible start the service. list index out of range
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 641, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 509, in search_definition
+    l.LOGGER('The service '+ hashes[0].value.hex() + ' was not found.')
+IndexError: list index out of range
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 653, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. list index out of range
+2021-12-19 18:41:19,920 ERROR    Exception iterating responses: [Errno 2] No such file or directory: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 616, in StartService
+    save_service(
+  File "/home/jse/node/gateway.py", line 428, in save_service
+    os.mkdir(REGISTRY+hash)
+FileNotFoundError: [Errno 2] No such file or directory: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+2021-12-19 18:42:14,838 ERROR    Exception iterating responses: Was imposible start the service. list index out of range
+Traceback (most recent call last):
+  File "/home/jse/node/gateway.py", line 641, in StartService
+    service_buffer = search_definition(hashes = hashes),
+  File "/home/jse/node/gateway.py", line 509, in search_definition
+    l.LOGGER('The service '+ hashes[0].value.hex() + ' was not found.')
+IndexError: list index out of range
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 653, in StartService
+    raise Exception('Was imposible start the service. ' + str(e))
+Exception: Was imposible start the service. list index out of range
+2021-12-19 18:42:37,902 ERROR    Exception iterating responses: [Errno 2] No such file or directory: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 616, in StartService
+    save_service(
+  File "/home/jse/node/gateway.py", line 428, in save_service
+    os.mkdir(REGISTRY+hash)
+FileNotFoundError: [Errno 2] No such file or directory: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+2021-12-19 18:46:16,141 ERROR    Exception iterating responses: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 616, in StartService
+    save_service(
+  File "/home/jse/node/gateway.py", line 428, in save_service
+    os.mkdir(REGISTRY+hash)
+FileExistsError: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+2021-12-19 18:53:19,276 ERROR    Exception iterating responses: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 615, in StartService
+    save_service(
+  File "/home/jse/node/gateway.py", line 428, in save_service
+    os.mkdir(REGISTRY+hash)
+FileExistsError: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+2021-12-19 18:54:15,941 ERROR    Exception iterating responses: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 616, in StartService
+    save_service(
+  File "/home/jse/node/gateway.py", line 428, in save_service
+    os.mkdir(REGISTRY+hash)
+FileExistsError: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+2021-12-19 18:57:22,880 ERROR    Exception iterating responses: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 617, in StartService
+    save_service(
+  File "/home/jse/node/gateway.py", line 428, in save_service
+    os.mkdir(REGISTRY+hash)
+FileExistsError: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+2021-12-19 18:58:14,570 ERROR    Exception iterating responses: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 617, in StartService
+    save_service(
+  File "/home/jse/node/gateway.py", line 428, in save_service
+    os.mkdir(REGISTRY+hash)
+FileExistsError: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+2021-12-19 19:02:46,523 ERROR    Exception iterating responses: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 617, in StartService
+    save_service(
+  File "/home/jse/node/gateway.py", line 428, in save_service
+    os.mkdir(REGISTRY+hash)
+FileExistsError: [Errno 17] File exists: '/home/jse/node/__registry__/ce280312d1440957ef39ed9695e01b7ae0eed1690834d18170446b976fd32204'
+2021-12-19 19:14:26,559 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-12-19 19:14:26,634 DEBUG    No config file found
+2021-12-19 19:14:26,635 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-12-19 19:14:26,635 DEBUG    No config file found
+2021-12-19 19:14:27,164 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-12-19 19:14:27,182 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2021-12-19 19:14:27,183 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-12-19 19:14:27,184 DEBUG    No config file found
+2021-12-19 19:14:27,184 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-12-19 19:14:27,184 DEBUG    No config file found
+2021-12-19 19:14:27,206 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-12-19 19:14:27,310 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2021-12-19 19:14:27,320 DEBUG    http://localhost:None "GET /v1.41/images/sha256:3e0a983213ba14951b79a6489f2baae21e9dd484ef926e4855f5449add99949c/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,326 DEBUG    http://localhost:None "GET /v1.41/images/sha256:680407a58cf04299e106c6d1d06670561e5981e47af6fff53c0bdb8d4a4b165f/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,332 DEBUG    http://localhost:None "GET /v1.41/images/sha256:bbf6571db4977fe13c3f4e6289c1409fc6f98c2899eabad39bfe07cad8f64f67/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,341 DEBUG    http://localhost:None "GET /v1.41/images/sha256:c6ace788cd15db54a9df28a753255241ee972202a00bc6c56c2bbb6c1c84c636/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,346 DEBUG    http://localhost:None "GET /v1.41/images/sha256:4b578f1e6946aae68ac6b1f062b779d5d769b8143db7684608e5732f6101a912/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,352 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d109f96a6d48afa6812a2fdfc8423bdc7f2accd711d1255c346404c7acaf1032/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,356 DEBUG    http://localhost:None "GET /v1.41/images/sha256:3900abf4155226f3f62401054b872ce0c85b5c3b47275cae3d16a39c8646e36b/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,365 DEBUG    http://localhost:None "GET /v1.41/images/sha256:aa76e50e7db21ef6755d08df2770f27178830a941898849c91ccb8da5eecb843/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,369 DEBUG    http://localhost:None "GET /v1.41/images/sha256:972c9567c12fd128e25af02b2b473730b9f16a55a7da8e7bab21be615f3f6d9b/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,373 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d9d9cb7a7c66263d91e16f0f758c43212c726e381a4b079f98818605a2c5d2a6/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,382 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d2e6e9727b37928be30fb11361d1246dcc816e6b5fb55d6ef30281ff5e3884df/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,388 DEBUG    http://localhost:None "GET /v1.41/images/sha256:871019ea8dda23dace283ef6a64679cb4aa7ebfb3d66089dee9a603d1e30a1e3/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,392 DEBUG    http://localhost:None "GET /v1.41/images/sha256:29b22285caa0fce4e4b1f4323c5bd996a77d30968a973ad003829c8e63719fd2/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,400 DEBUG    http://localhost:None "GET /v1.41/images/sha256:9e9c2ec90ca7cd71703133507c824499a1a07b5c77c28f322a42b517e6c0bfe9/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,403 DEBUG    http://localhost:None "GET /v1.41/images/sha256:d5ca7a4456053674d490803005766890dd19e3f7e789a48737c0d462da531f5d/json HTTP/1.1" 200 1906
+2021-12-19 19:14:27,406 DEBUG    http://localhost:None "GET /v1.41/images/sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1/json HTTP/1.1" 200 1876
+2021-12-19 19:14:27,409 DEBUG    http://localhost:None "GET /v1.41/images/sha256:de6f83bfe0b632bd4a5018a57a9c0386564d6ece1645862388200d5a81dae9a7/json HTTP/1.1" 200 1875
+2021-12-19 19:14:27,415 DEBUG    http://localhost:None "GET /v1.41/images/sha256:2e5141bbcbfb49b123d74a5873ca669088d96cacc3097b9ff521e5392746f378/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,419 DEBUG    http://localhost:None "GET /v1.41/images/sha256:4de68494cd0dbcbc141beb755eedce4d328ab10b2d1061d74c2489e0af5f28a9/json HTTP/1.1" 200 None
+2021-12-19 19:14:27,805 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-12-19 19:14:27,805 DEBUG    No config file found
+2021-12-19 19:14:27,806 DEBUG    Trying paths: ['/home/jse/.docker/config.json', '/home/jse/.dockercfg']
+2021-12-19 19:14:27,806 DEBUG    No config file found
+2021-12-19 19:14:27,819 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 826
+2021-12-19 19:14:28,623 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 88
+2021-12-19 19:14:28,627 DEBUG    http://localhost:None "GET /v1.41/containers/e1c5d3151c24f431ab5aa3b7e531cc9af8870667d3a8a1751780cdee8f4158b3/json HTTP/1.1" 200 None
+2021-12-19 19:14:29,776 DEBUG    http://localhost:None "POST /v1.41/containers/e1c5d3151c24f431ab5aa3b7e531cc9af8870667d3a8a1751780cdee8f4158b3/start HTTP/1.1" 204 0
+2021-12-19 19:14:29,778 DEBUG    http://localhost:None "GET /v1.41/containers/e1c5d3151c24f431ab5aa3b7e531cc9af8870667d3a8a1751780cdee8f4158b3/json HTTP/1.1" 200 None

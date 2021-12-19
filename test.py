@@ -1,6 +1,6 @@
 import grpc, gateway_pb2_grpc
 from concurrent import futures
-from gateway_pb2_grpcbf import StartService_input, StartService_input_partitions
+from gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2
 import grpcbigbuffer
 import gateway_pb2, celaut_pb2
 
@@ -21,7 +21,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     message_iterator = (gateway_pb2.ServiceWithMeta,
                         '__registry__/01d030604fc89032faf57b399098db819f4ec776c0419e86cdaf64d2217014f7/p1',
                         '__registry__/01d030604fc89032faf57b399098db819f4ec776c0419e86cdaf64d2217014f7/p2'),
-                    partitions_model=StartService_input_partitions,
+                    partitions_model=StartService_input_partitions_v2,
                     indices=StartService_input
                 ): yield b
 

@@ -13,7 +13,7 @@ from google.protobuf.json_format import MessageToJson
 from google.protobuf.json_format import Parse
 import docker as docker_lib
 import netifaces as ni
-from gateway_pb2_grpcbf import StartService_input, GetServiceCost_input, GetServiceTar_input, StartService_input_partitions
+from gateway_pb2_grpcbf import StartService_input, GetServiceCost_input, GetServiceTar_input, StartService_input_partitions_v2
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
 
@@ -534,7 +534,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         parser_generator = grpcbf.parse_from_buffer(
             request_iterator = request_iterator, 
             indices = StartService_input,
-            partitions_model = StartService_input_partitions,
+            partitions_model = StartService_input_partitions_v2,
             partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False]}
         )
         while True:

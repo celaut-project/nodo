@@ -332,10 +332,10 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
 
 
 if __name__ == "__main__":
-    from gateway_pb2_grpcbf import StartService_input_partitions
+    from gateway_pb2_grpcbf import StartService_input_partitions_v2
     id = repo_ok(
         repo = sys.argv[1],
-        partitions_model = StartService_input_partitions[2] if not sys.argv[2] else [buffer_pb2.Buffer.Head.Partition()]
+        partitions_model = StartService_input_partitions_v2[2] if not sys.argv[2] else [buffer_pb2.Buffer.Head.Partition()]
     )
     os.system('mv '+HYCACHE+'compile'+id+' '+REGISTRY+id)
     print(id)
