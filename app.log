@@ -20821,3 +20821,17 @@ Traceback (most recent call last):
   File "/home/jse/node/gateway.py", line 746, in Compile
     repo = input.repo,
 AttributeError: 'NoneType' object has no attribute 'repo'
+2021-12-18 17:19:41,106 ERROR    Exception iterating responses: [Errno 2] No such file or directory: '/home/jse/node/__registry__/'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 561, in StartService
+    hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
+FileNotFoundError: [Errno 2] No such file or directory: '/home/jse/node/__registry__/'
+2021-12-19 12:33:35,662 ERROR    Exception iterating responses: [Errno 2] No such file or directory: '/home/jse/node/__registry__/'
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 561, in StartService
+    hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
+FileNotFoundError: [Errno 2] No such file or directory: '/home/jse/node/__registry__/'

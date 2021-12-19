@@ -8,7 +8,18 @@ StartService_input = {
     4 : gateway_pb2.ServiceWithConfig
 }
 
-StartService_input_partitions = {
+StartService_input_partitions_v1 = {
+    4: [
+            buffer_pb2.Buffer.Head.Partition(index={
+                3 : buffer_pb2.Buffer.Head.Partition()
+            }),
+           buffer_pb2.Buffer.Head.Partition(index={
+                2 : buffer_pb2.Buffer.Head.Partition()
+            })
+    ]
+}
+
+StartService_input_partitions_v2 = {
     2 : [
             buffer_pb2.Buffer.Head.Partition(index={
                 1 : buffer_pb2.Buffer.Head.Partition(),
