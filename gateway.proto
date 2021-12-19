@@ -41,7 +41,7 @@ message CompileInput {
 }
 
 message CompileOutput {
-    string id = 1;
+    bytes id = 1;
     compile.ServiceWithMeta service = 2;
 }
 

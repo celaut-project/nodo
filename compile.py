@@ -266,7 +266,7 @@ class Hyper:
                         message = grpcbigbuffer.get_submessage(
                             partition = partition, 
                             obj = gateway_pb2.CompileOutput(
-                                id = id,
+                                id = bytes.fromhex(id),
                                 service = compile_pb2.ServiceWithMeta(
                                         metadata = self.metadata,
                                         service = self.service
