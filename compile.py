@@ -1,4 +1,6 @@
 from typing import Generator
+
+from google.protobuf import message
 import logger as l
 import sys, shutil
 import json, getpass
@@ -260,10 +262,7 @@ class Hyper:
         print('DIR CREATED', HYCACHE + 'compile' + id + '/')
 
         for i, partition in enumerate(partitions_model):
-            with open(HYCACHE + 'compile' + id + '/p'+str(i+1), 'wb') as f:
-                f.write(
-                    grpcbigbuffer.message_to_bytes(
-                        message = grpcbigbuffer.get_submessage(
+            message = grpcbigbuffer.get_submessage(
                             partition = partition, 
                             obj = gateway_pb2.CompileOutput(
                                 id = bytes.fromhex(id),
@@ -273,6 +272,11 @@ class Hyper:
                                     )
                             )
                         )
+            print('Send message ', len(message), partition)
+            with open(HYCACHE + 'compile' + id + '/p'+str(i+1), 'wb') as f:
+                f.write(
+                    grpcbigbuffer.message_to_bytes(
+                        message = message
                     )
                 )
         return id
