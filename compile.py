@@ -272,7 +272,7 @@ class Hyper:
                                     )
                             )
                         )
-            print('Send message ', len(message), partition)
+            print('Send message ', type(message), partition)
             with open(HYCACHE + 'compile' + id + '/p'+str(i+1), 'wb') as f:
                 f.write(
                     grpcbigbuffer.message_to_bytes(
