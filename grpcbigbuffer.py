@@ -505,7 +505,7 @@ def serialize_to_buffer(
             if len(message_bytes) < CHUNK_SIZE:
                 signal.wait()
                 try:
-                    yield buffer_pb2.Buffer(
+                    b = buffer_pb2.Buffer(
                         chunk = bytes(message_bytes),
                         head = head,
                         separator = True
@@ -513,6 +513,8 @@ def serialize_to_buffer(
                             chunk = bytes(message_bytes),
                             separator = True
                         )
+                    print('This message is tinny', b)
+                    yield b
                 finally: signal.wait()
 
             else:
