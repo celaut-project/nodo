@@ -850,6 +850,12 @@ if __name__ == "__main__":
         os.system('mkdir ' + HYCACHE)
     except:
         pass
+    
+       # Create __registry__ if it does not exists.
+    try:
+        os.system('mkdir ' + REGISTRY)
+    except:
+        pass
 
     # Zeroconf for connect to the network (one per network).
     for network in ni.interfaces():
