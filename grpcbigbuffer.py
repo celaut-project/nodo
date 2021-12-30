@@ -106,7 +106,8 @@ def save_chunks_to_file(buffer_iterator, filename, signal):
     signal.wait()
     with open(filename, 'wb') as f:
         signal.wait()
-        f.write(b''.join([buffer.chunk for buffer in buffer_iterator]))
+        for buffer in buffer_iterator: f.write(buffer.chunk) # MAYBE IT'S MORE SLOW, BUT USES ONLY THE CHUNK LEN OF RAM.
+        # f.write(b''.join([buffer.chunk for buffer in buffer_iterator])) # MAYBE IT'S FASTER BUT CONSUMES A LOT OF RAM with big buffers.
 
 def get_subclass(partition, object_cls):
     return get_subclass(
@@ -252,15 +253,19 @@ def parse_from_buffer(
                 signal=signal,
             ):
                 all_buffer += b.chunk
-            message = message_field()
+            
             if message_field is str:
                 message = all_buffer.decode('utf-8')
             elif type(message_field) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType:
+                message = message_field()
                 message.ParseFromString(
                         all_buffer
                     )
             else:
-                raise Exception('gRPCbb error -> Parse message error: some primitive type message not suported for contain partition '+ str(message_field))
+                try:
+                    message = message_field(all_buffer)
+                except Exception as e:
+                    raise Exception('gRPCbb error -> Parse message error: some primitive type message not suported for contain partition '+ str(message_field) + str(e))
             if len(all_buffer)>0: return message
             else: raise EmptyBufferException()
 
@@ -505,7 +510,7 @@ def serialize_to_buffer(
             if len(message_bytes) < CHUNK_SIZE:
                 signal.wait()
                 try:
-                    b = buffer_pb2.Buffer(
+                    yield buffer_pb2.Buffer(
                         chunk = bytes(message_bytes),
                         head = head,
                         separator = True
@@ -513,8 +518,6 @@ def serialize_to_buffer(
                             chunk = bytes(message_bytes),
                             separator = True
                         )
-                    print('This message is tinny', b)
-                    yield b
                 finally: signal.wait()
 
             else:
