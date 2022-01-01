@@ -17,6 +17,7 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service):
     # Build the container from filesystem definition.
     pass
 
+# TODO DEPRECATED
 def get_container_from_outside(
     id: str,
     service_buffer: bytes,
