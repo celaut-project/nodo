@@ -318,7 +318,6 @@ def parse_from_buffer(
             ):
             yield pf_object
             try:
-                print(1)
                 os.mkdir(cache_dir+'remote/')
             except FileExistsError: raise Exception('gRPCbb error: Conversor error, remote dir already exists')
             dirs = []
@@ -332,7 +331,7 @@ def parse_from_buffer(
             if not pf_object or len(remote_partitions_model)>0 and len(dirs) != len(remote_partitions_model): return None
             # 3. Parse to the local partitions from the remote partitions using mem_manager.
             try:
-                with mem_manager(len = 2*sum([os.path.getsize(dir) for dir in dirs])):
+                with mem_manager(len = 3*sum([os.path.getsize(dir) for dir in dirs])):
                     if (len(remote_partitions_model)==0 or len(remote_partitions_model)==1) and len(dirs)==1:
                         main_object = pf_object()
                         main_object.ParseFromString(open(dirs[0], 'rb').read())
@@ -350,6 +349,7 @@ def parse_from_buffer(
                     for i, partition in enumerate(local_partitions_model):
                         aux_object = pf_object()
                         aux_object.CopyFrom(main_object)
+                        if i+1 == len(local_partitions_model): del main_object
                         aux_object = get_submessage(partition = partition, obj = aux_object)
                         message_mode = partitions_message_mode[i]
                         if not message_mode:
@@ -360,6 +360,7 @@ def parse_from_buffer(
                                         aux_object.SerializeToString() if hasattr(aux_object, 'SerializeToString') \
                                             else bytes(aux_object) if type(aux_object) is not str else bytes(aux_object, 'utf8')
                                     )
+                                del aux_object
                                 yield filename
                             except Exception as e: print(e)
                         else:
