@@ -332,7 +332,7 @@ def parse_from_buffer(
             if not pf_object or len(remote_partitions_model)>0 and len(dirs) != len(remote_partitions_model): return None
             # 3. Parse to the local partitions from the remote partitions using mem_manager.
             try:
-                with mem_manager(len = 3*sum([os.path.getsize(dir) for dir in dirs])):
+                with mem_manager(len = 3*sum([os.path.getsize(dir) for dir in dirs[:-1]]) + 2*os.path.getsize(dirs[-1])):
                     if (len(remote_partitions_model)==0 or len(remote_partitions_model)==1) and len(dirs)==1:
                         main_object = pf_object()
                         main_object.ParseFromString(open(dirs[0], 'rb').read())
