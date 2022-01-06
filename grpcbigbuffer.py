@@ -203,11 +203,12 @@ def parse_from_buffer(
         partitions_model: Union[list, dict] = [buffer_pb2.Buffer.Head.Partition()],
         partitions_message_mode: Union[bool, list, dict] = False,  # Write on disk by default.
         cache_dir: str = None,
-        mem_manager = Enviroment.mem_manager,
+        mem_manager = None,
         yield_remote_partition_dir: bool = False,
     ): 
     try:
         try:
+            if not mem_manager: mem_manager = Enviroment.mem_manager
             if not cache_dir: cache_dir = create_cache_dir()
             if type(indices) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType: indices = {1: indices}
             if type(indices) is not dict: raise Exception
@@ -456,10 +457,11 @@ def serialize_to_buffer(
         cache_dir: str = None, 
         indices: Union[protobuf.pyext.cpp_message.GeneratedProtocolMessageType, dict] = {},
         partitions_model: Union[list, dict] = [buffer_pb2.Buffer.Head.Partition()],
-        mem_manager = Enviroment.mem_manager
+        mem_manager = None
     ) -> Generator[buffer_pb2.Buffer, None, None]:  # method: indice
     try:
         try:
+            if not mem_manager: mem_manager = Enviroment.mem_manager
             if not cache_dir: cache_dir = create_cache_dir()
             if type(indices) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType: indices = {1: indices}
             if type(indices) is not dict: raise Exception
@@ -600,11 +602,12 @@ def client_grpc(
         partitions_message_mode_parser: Union[bool, list, dict] = False,
         indices_serializer: Union[protobuf.pyext.cpp_message.GeneratedProtocolMessageType, dict] = {},
         partitions_serializer: Union[list, dict] = [buffer_pb2.Buffer.Head.Partition()],
-        mem_manager = Enviroment.mem_manager,
+        mem_manager = None,
         cache_dir: str = None, 
         yield_remote_partition_dir_on_serializer: bool = False,
     ): # indice: method
     try:
+        if not mem_manager: mem_manager = Enviroment.mem_manager
         if not cache_dir: cache_dir = create_cache_dir()
         signal = Signal()
         os.mkdir(cache_dir+'serializer/')
