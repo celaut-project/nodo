@@ -130,23 +130,26 @@ def copy_message(obj, field_name, message):
         e = message
     return obj
 
-def get_submessage(partition, obj):
+def get_submessage(partition, obj, say_if_not_change = False):
     if len(partition.index) == 0:
-        return obj
+        return False if say_if_not_change else obj
     if len(partition.index) == 1:
         return get_submessage(
             partition = list(partition.index.values())[0],
             obj = getattr(obj, obj.DESCRIPTOR.fields[list(partition.index.keys())[0]-1].name)
         )
     for field in obj.DESCRIPTOR.fields:
-        if field.index+1 in partition.index: 
+        if field.index+1 in partition.index:
             try:
+                submessage = get_submessage(
+                        partition = partition.index[field.index+1],
+                        obj = getattr(obj, field.name),
+                        say_if_not_change = True
+                    )
+                if not submessage: continue  # Anything to prune.
                 copy_message(
                     obj=obj, field_name=field.name,
-                    message = get_submessage(
-                        partition = partition.index[field.index+1],
-                        obj = getattr(obj, field.name)
-                    )
+                    message = submessage
                 )
             except: pass
         else:
@@ -332,6 +335,7 @@ def parse_from_buffer(
             if not pf_object or len(remote_partitions_model)>0 and len(dirs) != len(remote_partitions_model): return None
             # 3. Parse to the local partitions from the remote partitions using mem_manager.
             try:
+                # TODO: check the limit memory formula.
                 with mem_manager(len = 3*sum([os.path.getsize(dir) for dir in dirs[:-1]]) + 2*os.path.getsize(dirs[-1])):
                     if (len(remote_partitions_model)==0 or len(remote_partitions_model)==1) and len(dirs)==1:
                         main_object = pf_object()
@@ -348,9 +352,11 @@ def parse_from_buffer(
                     # 4. yield local partitions.
                     if local_partitions_model == []: local_partitions_model.append(buffer_pb2.Buffer.Head.Partition())
                     for i, partition in enumerate(local_partitions_model):
-                        aux_object = pf_object()
-                        aux_object.CopyFrom(main_object)
-                        if i+1 == len(local_partitions_model): del main_object
+                        if i+1 == len(local_partitions_model): 
+                            aux_object = main_object
+                        else:
+                            aux_object = pf_object()
+                            aux_object.CopyFrom(main_object)
                         aux_object = get_submessage(partition = partition, obj = aux_object)
                         message_mode = partitions_message_mode[i]
                         if not message_mode:
