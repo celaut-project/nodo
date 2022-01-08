@@ -426,7 +426,7 @@ def save_service(
         )
     if not os.path.isdir(REGISTRY+hash):
         os.mkdir(REGISTRY+hash)
-        with open(REGISTRY + hash + '/p1', 'wb') as file, iobd.mem_manager(len=len(service_p1)):
+        with open(REGISTRY + hash + '/p1', 'wb') as file: # , iobd.mem_manager(len=len(service_p1)): TODO check mem-58 bug.
             file.write(
                 celaut.Any(
                     metadata = metadata,
