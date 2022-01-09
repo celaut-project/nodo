@@ -330,7 +330,7 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
     print(partitions_model)
     print([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d)for d in os.listdir(HYCACHE+'compile'+id)])
     for b in grpcbigbuffer.serialize_to_buffer(
-        message_iterator = tuple([gateway_pb2.CompileOutput])+tuple([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d)for d in os.listdir(HYCACHE+'compile'+id)]),
+        message_iterator = tuple([gateway_pb2.CompileOutput])+tuple([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d)for d in os.listdir(HYCACHE+'compile'+id).reverse()]),
         partitions_model = list(partitions_model),
         indices = gateway_pb2.CompileOutput
     ): yield b
