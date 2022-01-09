@@ -52898,3 +52898,21 @@ Exception: Grpcbf error: partition corrupted
 2022-01-06 16:05:17,972 DEBUG    http://localhost:None "GET /v1.41/images/sha256:3900abf4155226f3f62401054b872ce0c85b5c3b47275cae3d16a39c8646e36b/json HTTP/1.1" 200 None
 2022-01-06 16:05:17,984 DEBUG    http://localhost:None "GET /v1.41/images/sha256:2e5141bbcbfb49b123d74a5873ca669088d96cacc3097b9ff521e5392746f378/json HTTP/1.1" 200 None
 2022-01-06 16:05:17,989 DEBUG    http://localhost:None "GET /v1.41/images/sha256:4de68494cd0dbcbc141beb755eedce4d328ab10b2d1061d74c2489e0af5f28a9/json HTTP/1.1" 200 None
+2022-01-09 22:01:33,816 ERROR    Exception iterating responses: 'NoneType' object is not iterable
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 745, in Compile
+    for b in compile(
+  File "/home/jse/node/compile.py", line 333, in compile
+    print([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d)for d in os.listdir(HYCACHE+'compile'+id).reverse()])
+TypeError: 'NoneType' object is not iterable
+2022-01-09 22:05:50,527 ERROR    Exception iterating responses: 'NoneType' object is not iterable
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 745, in Compile
+    for b in compile(
+  File "/home/jse/node/compile.py", line 333, in compile
+    print([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d)for d in os.listdir(HYCACHE+'compile'+id).reverse()])
+TypeError: 'NoneType' object is not iterable
