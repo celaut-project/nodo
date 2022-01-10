@@ -20,7 +20,7 @@ import iobigdata as iobd
 DOCKER_CLIENT = lambda: docker_lib.from_env()
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
-GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8080)
+GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
 SELF_RATE = utils.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 1)
 COST_OF_BUILD = utils.GET_ENV(env = 'COST_OF_BUILD', default = 0)
 
