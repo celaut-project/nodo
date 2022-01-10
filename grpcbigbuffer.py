@@ -144,7 +144,7 @@ def get_submessage(partition, obj, say_if_not_change = False):
                 submessage = get_submessage(
                         partition = partition.index[field.index+1],
                         obj = getattr(obj, field.name),
-                        say_if_not_change = say_if_not_change
+                        say_if_not_change = True
                     )
                 if not submessage: continue  # Anything to prune.
                 copy_message(
