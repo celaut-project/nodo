@@ -52916,3 +52916,12 @@ Traceback (most recent call last):
   File "/home/jse/node/compile.py", line 333, in compile
     print([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d)for d in os.listdir(HYCACHE+'compile'+id).reverse()])
 TypeError: 'NoneType' object is not iterable
+2022-01-10 09:05:55,913 ERROR    Exception iterating responses: 'NoneType' object is not iterable
+Traceback (most recent call last):
+  File "/home/jse/.local/lib/python3.9/site-packages/grpc/_server.py", line 453, in _take_response_from_response_iterator
+    return next(response_iterator), True
+  File "/home/jse/node/gateway.py", line 745, in Compile
+    for b in compile(
+  File "/home/jse/node/compile.py", line 333, in compile
+    print([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d)for d in sorted(os.listdir(HYCACHE+'compile'+id).sort())])
+TypeError: 'NoneType' object is not iterable
