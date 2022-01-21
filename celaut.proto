@@ -92,10 +92,14 @@ message Service {
     message Container {
         message Filesystem {
             message ItemBranch {
+                message Link {
+                    string src = 1;
+                    string dst = 2;
+                }
                 string name = 1; // id for path
                 oneof item {
                     bytes file = 2;
-                    string link = 3;
+                    Link link = 3;
                     Filesystem filesystem = 4;
                 }
             }
