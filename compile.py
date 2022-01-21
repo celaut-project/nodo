@@ -55,8 +55,9 @@ class Hyper:
 
             # Add filesystem data to filesystem buffer object.
             def recursive_parsing(directory: str) -> celaut.Service.Container.Filesystem:
+                host_dir = HYCACHE+self.aux_id+"/filesystem/"
                 filesystem = celaut.Service.Container.Filesystem()
-                for b_name in os.listdir(directory):
+                for b_name in os.listdir(host_dir + directory):
                     if b_name == '.wh..wh..opq':
                         # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
                         l.LOGGER('docker opaque witeout file.')
@@ -65,29 +66,29 @@ class Hyper:
                     branch.name = os.path.basename(b_name)
 
                     # It's a link.
-                    if os.path.islink(directory+b_name):
+                    if os.path.islink(host_dir + directory+b_name):
                         l.LOGGER('    Adding link '+ b_name)
                         branch.link.src = directory+b_name
-                        branch.link.dst = os.path.realpath(directory+b_name)
+                        branch.link.dst = os.path.realpath(host_dir+directory+b_name)[len(host_dir):]
 
                     # It's a file.
-                    elif os.path.isfile(directory+b_name):
+                    elif os.path.isfile(host_dir + directory+b_name):
                         l.LOGGER('    Adding file '+ b_name)
-                        with open(directory+b_name, 'rb') as file:
+                        with open(host_dir + directory+b_name, 'rb') as file:
                             branch.file = file.read()
 
                     # It's a folder.
-                    elif os.path.isdir(directory+b_name):
+                    elif os.path.isdir(host_dir + directory+b_name):
                         l.LOGGER('    Adding directory '+ b_name)
                         branch.filesystem.CopyFrom(
-                            recursive_parsing(directory=directory+b_name+'/')
+                            recursive_parsing(directory = host_dir + directory+b_name+'/')
                             )
 
                     filesystem.branch.append(branch)
 
                 return filesystem
 
-            self.service.container.filesystem.CopyFrom(recursive_parsing( directory = HYCACHE+self.aux_id+"/filesystem/" ))
+            self.service.container.filesystem.CopyFrom(recursive_parsing( directory = "" ))
 
             return celaut.Any.Metadata.HashTag(
                 hash = calculate_hashes( value = self.service.container.filesystem.SerializeToString() )
