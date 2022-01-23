@@ -50,8 +50,10 @@ open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .\nENTRYPOINT /random/
 check_output('docker build -t '+id+' '+dir+'/.', shell=True)
 
 # Generate the symlinks.
-for symlink in symlinks:
-    overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+id, shell=True).decode('utf-8')[:-1]
-    run('ln -s '+symlink.src[1:]+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)
+with open('symlink-logs', 'w') as file:
+    for symlink in symlinks:
+        file.write('\n'+ str(symlink))
+        overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+id, shell=True).decode('utf-8')[:-1]
+        run('ln -s '+symlink.src[1:]+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)
 
 # Apply permissions.
