@@ -55,7 +55,7 @@ class Hyper:
 
             # Add filesystem data to filesystem buffer object.
             def recursive_parsing(directory: str) -> celaut.Service.Container.Filesystem:
-                host_dir = HYCACHE+self.aux_id+"/filesystem/"
+                host_dir = HYCACHE+self.aux_id+"/filesystem"
                 filesystem = celaut.Service.Container.Filesystem()
                 for b_name in os.listdir(host_dir + directory):
                     if b_name == '.wh..wh..opq':
@@ -81,14 +81,14 @@ class Hyper:
                     elif os.path.isdir(host_dir + directory+b_name):
                         l.LOGGER('    Adding directory '+ b_name)
                         branch.filesystem.CopyFrom(
-                            recursive_parsing(directory = host_dir + directory+b_name+'/')
+                            recursive_parsing(directory = directory+b_name+'/')
                             )
 
                     filesystem.branch.append(branch)
 
                 return filesystem
 
-            self.service.container.filesystem.CopyFrom(recursive_parsing( directory = "" ))
+            self.service.container.filesystem.CopyFrom(recursive_parsing( directory = "/" ))
 
             return celaut.Any.Metadata.HashTag(
                 hash = calculate_hashes( value = self.service.container.filesystem.SerializeToString() )

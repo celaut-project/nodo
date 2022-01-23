@@ -6,7 +6,7 @@ import celaut_pb2, gateway_pb2
 def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir: str, symlinks):
     if b.HasField('filesystem'):
         os.mkdir(dir + b.name)
-        write_fs(fs = b.filesystem, dir = dir + b.name + '/')
+        write_fs(fs = b.filesystem, dir = dir + b.name + '/', symlinks = symlinks)
 
     elif b.HasField('file'):
         open(dir + b.name, 'wb').write(

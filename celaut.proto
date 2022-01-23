@@ -99,7 +99,7 @@ message Service {
                 string name = 1; // id for path
                 oneof item {
                     bytes file = 2;
-                    Link link = 3;
+                    string link = 3;
                     Filesystem filesystem = 4;
                 }
             }
