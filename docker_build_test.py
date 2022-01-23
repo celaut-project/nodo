@@ -1,6 +1,6 @@
 import os
 from random import randint
-from subprocess import check_output
+from subprocess import check_output, run
 import celaut_pb2, gateway_pb2
 
 def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir: str, symlinks):
@@ -26,7 +26,7 @@ def write_fs(fs: celaut_pb2.Service.Container.Filesystem, dir: str, symlinks):
 
 service_with_meta = gateway_pb2.ServiceWithMeta()
 service_with_meta.ParseFromString(
-    open('__registry__/8aca55ff2e9dfb77cd09cac7251a5841bcb5492686c1b89515e1fa2d5acdb14d', 'rb').read()
+    open('__registry__/249c3e15935a2ce77fb695067224c95e95338ca7be9f4f1b2eb076c2b0c515a3', 'rb').read()
 )
 
 fs = celaut_pb2.Service.Container.Filesystem()
@@ -46,10 +46,12 @@ os.mkdir(fs_dir)
 symlinks = []
 write_fs(fs = fs, dir = fs_dir + '/', symlinks = symlinks)
 
-dockerfile = 'FROM scratch\nCOPY fs .\nENTRYPOINT /random/start.py'
-for symlink in symlinks:
-    dockerfile += '\nRUN ls -sf '+symlink.src+' '+symlink.dst
-
-open(dir+'/Dockerfile', 'w').write(dockerfile)
-print(dockerfile)
+open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .\nENTRYPOINT /random/start.py')
 check_output('docker build -t '+id+' '+dir+'/.', shell=True)
+
+# Generate the symlinks.
+for symlink in symlinks:
+    overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+id, shell=True).decode('utf-8')[:-1]
+    run('ln -s '+symlink.src[1:]+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)
+
+# Apply permissions.

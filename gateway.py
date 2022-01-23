@@ -235,7 +235,6 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
                         "mongodb://localhost:27017/"
                     )["mongo"]["peerInstances"].find()):
             del peer['_id']
-            print('peer')
             peer_instance = Parse(
                 text = json.dumps(peer),
                 message = celaut.Instance(),
