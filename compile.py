@@ -68,8 +68,8 @@ class Hyper:
                     # It's a link.
                     if os.path.islink(host_dir + directory+b_name):
                         l.LOGGER('    Adding link '+ b_name)
-                        branch.link.src = directory+b_name
-                        branch.link.dst = os.path.realpath(host_dir+directory+b_name)[len(host_dir):]
+                        branch.link.dst = directory+b_name
+                        branch.link.src = os.path.realpath(host_dir+directory+b_name)[len(host_dir):]
 
                     # It's a file.
                     elif os.path.isfile(host_dir + directory+b_name):

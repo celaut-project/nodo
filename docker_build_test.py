@@ -14,8 +14,6 @@ def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir: str, 
         )
         
     else:
-        print('src -> ', b.link.src)
-        print('dst -> ', b.link.dst)
         symlinks.append(b.link)
 
 def write_fs(fs: celaut_pb2.Service.Container.Filesystem, dir: str, symlinks):
@@ -28,7 +26,7 @@ def write_fs(fs: celaut_pb2.Service.Container.Filesystem, dir: str, symlinks):
 
 service_with_meta = gateway_pb2.ServiceWithMeta()
 service_with_meta.ParseFromString(
-    open('__registry__/bc331dfbda2807aba247bfceaad75a8751d482654a3a7ac7256c74ef5b012b01', 'rb').read()
+    open('__registry__/8aca55ff2e9dfb77cd09cac7251a5841bcb5492686c1b89515e1fa2d5acdb14d', 'rb').read()
 )
 
 fs = celaut_pb2.Service.Container.Filesystem()
@@ -48,7 +46,10 @@ os.mkdir(fs_dir)
 symlinks = []
 write_fs(fs = fs, dir = fs_dir + '/', symlinks = symlinks)
 
-open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .\nENTRYPOINT /random/start.py')
-# TODO add symlinks script
+dockerfile = 'FROM scratch\nCOPY fs .\nENTRYPOINT /random/start.py'
+for symlink in symlinks:
+    dockerfile += '\nRUN ls -sf '+symlink.src+' '+symlink.dst
 
+open(dir+'/Dockerfile', 'w').write(dockerfile)
+print(dockerfile)
 check_output('docker build -t '+id+' '+dir+'/.', shell=True)
