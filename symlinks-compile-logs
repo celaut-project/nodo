@@ -1,0 +1,2662 @@
+
+src: "/usr/lib32"
+dst: "/lib32"
+
+dst: "/etc/systemd/user/sockets.target.wants/gpg-agent.socket"
+
+dst: "/etc/systemd/user/sockets.target.wants/dirmngr.socket"
+
+dst: "/etc/systemd/user/sockets.target.wants/gpg-agent-browser.socket"
+
+dst: "/etc/systemd/user/sockets.target.wants/gpg-agent-ssh.socket"
+
+dst: "/etc/systemd/user/sockets.target.wants/gpg-agent-extra.socket"
+
+dst: "/etc/systemd/system/default.target.wants/e2scrub_reap.service"
+
+dst: "/etc/systemd/system/timers.target.wants/apt-daily.timer"
+
+dst: "/etc/systemd/system/timers.target.wants/e2scrub_all.timer"
+
+dst: "/etc/systemd/system/timers.target.wants/fstrim.timer"
+
+dst: "/etc/systemd/system/timers.target.wants/motd-news.timer"
+
+dst: "/etc/systemd/system/timers.target.wants/apt-daily-upgrade.timer"
+
+src: "/etc/init.d/procps"
+dst: "/etc/rcS.d/S01procps"
+
+dst: "/etc/rmt"
+
+src: "/etc/dpkg/origins/ubuntu"
+dst: "/etc/dpkg/origins/default"
+
+src: "t"
+dst: "/etc/ssl/certs/18856ac4.0"
+
+src: "3.crt"
+dst: "/etc/ssl/certs/68dd7389.0"
+
+src: "_-_R4.crt"
+dst: "/etc/ssl/certs/GlobalSign_ECC_Root_CA_-_R4.pem"
+
+src: "EV_Root_CA.crt"
+dst: "/etc/ssl/certs/Staat_der_Nederlanden_EV_Root_CA.pem"
+
+dst: "/etc/ssl/certs/Amazon_Root_CA_3.pem"
+
+dst: "/etc/ssl/certs/AC_RAIZ_FNMT-RCM.pem"
+
+src: ".crt"
+dst: "/etc/ssl/certs/TeliaSonera_Root_CA_v1.pem"
+
+dst: "/etc/ssl/certs/ce5e74ef.0"
+
+src: "r_Root_CA_1.crt"
+dst: "/etc/ssl/certs/IdenTrust_Public_Sector_Root_CA_1.pem"
+
+src: "n_Authority.crt"
+dst: "/etc/ssl/certs/TWCA_Root_Certification_Authority.pem"
+
+src: ".crt"
+dst: "/etc/ssl/certs/GDCA_TrustAUTH_R5_ROOT.pem"
+
+src: "oot_-_2008.crt"
+dst: "/etc/ssl/certs/Chambers_of_Commerce_Root_-_2008.pem"
+
+src: "t_Certification_Authority.crt"
+dst: "/etc/ssl/certs/VeriSign_Universal_Root_Certification_Authority.pem"
+
+src: "on_Authority.crt"
+dst: "/etc/ssl/certs/eed8c118.0"
+
+src: "rt"
+dst: "/etc/ssl/certs/Starfield_Class_2_CA.pem"
+
+src: "rt"
+dst: "/etc/ssl/certs/f387163d.0"
+
+src: "_RootCA2.crt"
+dst: "/etc/ssl/certs/cd58d51e.0"
+
+src: "1.crt"
+dst: "/etc/ssl/certs/3e45d192.0"
+
+src: "t"
+dst: "/etc/ssl/certs/TWCA_Global_Root_CA.pem"
+
+dst: "/etc/ssl/certs/SZAFIR_ROOT_CA2.pem"
+
+dst: "/etc/ssl/certs/Amazon_Root_CA_2.pem"
+
+dst: "/etc/ssl/certs/349f2832.0"
+
+src: "n_Root.crt"
+dst: "/etc/ssl/certs/0f5dc4f3.0"
+
+dst: "/etc/ssl/certs/Amazon_Root_CA_1.pem"
+
+src: "A.crt"
+dst: "/etc/ssl/certs/54657681.0"
+
+src: "ot_G3.crt"
+dst: "/etc/ssl/certs/DigiCert_Assured_ID_Root_G3.pem"
+
+src: "ate_Authority_-_G2.crt"
+dst: "/etc/ssl/certs/cbf06781.0"
+
+src: "Research_Institutions_ECC_RootCA_2015.crt"
+dst: "/etc/ssl/certs/Hellenic_Academic_and_Research_Institutions_ECC_RootCA_2015.pem"
+
+dst: "/etc/ssl/certs/QuoVadis_Root_CA.pem"
+
+src: ".crt"
+dst: "/etc/ssl/certs/0f6fa695.0"
+
+dst: "/etc/ssl/certs/ACCVRAIZ1.pem"
+
+src: "n_Authority.crt"
+dst: "/etc/ssl/certs/ePKI_Root_Certification_Authority.pem"
+
+src: "t"
+dst: "/etc/ssl/certs/406c9bb1.0"
+
+src: "oot_-_2008.crt"
+dst: "/etc/ssl/certs/c47d9980.0"
+
+src: "_RootCA2.crt"
+dst: "/etc/ssl/certs/Security_Communication_RootCA2.pem"
+
+src: "ication_Authority_RSA_R2.crt"
+dst: "/etc/ssl/certs/06dc52d5.0"
+
+src: "ation_Authority.crt"
+dst: "/etc/ssl/certs/USERTrust_ECC_Certification_Authority.pem"
+
+src: "tion_Authority_-_G4.crt"
+dst: "/etc/ssl/certs/Entrust_Root_Certification_Authority_-_G4.pem"
+
+src: "rt"
+dst: "/etc/ssl/certs/XRamp_Global_CA_Root.pem"
+
+src: "cate_Authority_-_G2.crt"
+dst: "/etc/ssl/certs/Starfield_Root_Certificate_Authority_-_G2.pem"
+
+dst: "/etc/ssl/certs/6d41d539.0"
+
+src: "Root_CA_-_G3.crt"
+dst: "/etc/ssl/certs/5a4d6896.0"
+
+dst: "/etc/ssl/certs/GTS_Root_R1.pem"
+
+src: "_Root_CA.crt"
+dst: "/etc/ssl/certs/930ac5d2.0"
+
+src: ".crt"
+dst: "/etc/ssl/certs/Sonera_Class_2_Root_CA.pem"
+
+dst: "/etc/ssl/certs/GTS_Root_R4.pem"
+
+src: "G4.crt"
+dst: "/etc/ssl/certs/75d1b2ed.0"
+
+src: "_Root_CA.crt"
+dst: "/etc/ssl/certs/f3377b1b.0"
+
+src: ".crt"
+dst: "/etc/ssl/certs/9c2e7d30.0"
+
+src: ".crt"
+dst: "/etc/ssl/certs/5d3033c5.0"
+
+src: "fication_Authority.crt"
+dst: "/etc/ssl/certs/Trustwave_Global_Certification_Authority.pem"
+
+src: "t"
+dst: "/etc/ssl/certs/2923b3f9.0"
+
+dst: "/etc/ssl/certs/2ae6433e.0"
+
+dst: "/etc/ssl/certs/c01eb047.0"
+
+src: "tion_Authority_ECC.crt"
+dst: "/etc/ssl/certs/SSL.com_Root_Certification_Authority_ECC.pem"
+
+src: "tion_Authority.crt"
+dst: "/etc/ssl/certs/6b99d060.0"
+
+dst: "/etc/ssl/certs/GlobalSign_Root_CA.pem"
+
+src: "oot_GC_CA.crt"
+dst: "/etc/ssl/certs/OISTE_WISeKey_Global_Root_GC_CA.pem"
+
+src: "_CA_2.crt"
+dst: "/etc/ssl/certs/40193066.0"
+
+dst: "/etc/ssl/certs/f39fc864.0"
+
+src: "_CA_2.crt"
+dst: "/etc/ssl/certs/Certum_Trusted_Network_CA_2.pem"
+
+src: "t"
+dst: "/etc/ssl/certs/certSIGN_Root_CA_G2.pem"
+
+src: "crt"
+dst: "/etc/ssl/certs/e-Szigno_Root_CA_2017.pem"
+
+src: "_CA.crt"
+dst: "/etc/ssl/certs/Certum_Trusted_Network_CA.pem"
+
+src: "48_Secure_Server_CA.crt"
+dst: "/etc/ssl/certs/Entrust.net_Premium_2048_Secure_Server_CA.pem"
+
+dst: "/etc/ssl/certs/626dceaf.0"
+
+src: "old=_F\305\221tan\303\272s\303\255tv\303\241ny.crt"
+dst: "/etc/ssl/certs/988a38cb.0"
+
+src: "rt"
+dst: "/etc/ssl/certs/706f604c.0"
+
+src: "t"
+dst: "/etc/ssl/certs/Go_Daddy_Class_2_CA.pem"
+
+src: "fication_Authority.crt"
+dst: "/etc/ssl/certs/f249de83.0"
+
+src: "_-_R4.crt"
+dst: "/etc/ssl/certs/b0e59380.0"
+
+src: "384_Certification_Authority.crt"
+dst: "/etc/ssl/certs/d887a5bb.0"
+
+dst: "/etc/ssl/certs/QuoVadis_Root_CA_2.pem"
+
+src: "_CA.crt"
+dst: "/etc/ssl/certs/48bec511.0"
+
+src: "crt"
+dst: "/etc/ssl/certs/QuoVadis_Root_CA_3_G3.pem"
+
+src: "crt"
+dst: "/etc/ssl/certs/e18bfb83.0"
+
+dst: "/etc/ssl/certs/Amazon_Root_CA_4.pem"
+
+src: "crt"
+dst: "/etc/ssl/certs/749e9e03.0"
+
+src: "crt"
+dst: "/etc/ssl/certs/Atos_TrustedRoot_2011.pem"
+
+src: "256_Certification_Authority.crt"
+dst: "/etc/ssl/certs/Trustwave_Global_ECC_P256_Certification_Authority.pem"
+
+dst: "/etc/ssl/certs/EC-ACC.pem"
+
+src: "oot_GB_CA.crt"
+dst: "/etc/ssl/certs/e73d606e.0"
+
+src: "k_Sertifikasi_-_Surum_1.crt"
+dst: "/etc/ssl/certs/TUBITAK_Kamu_SM_SSL_Kok_Sertifikasi_-_Surum_1.pem"
+
+src: "ot_G2.crt"
+dst: "/etc/ssl/certs/DigiCert_Assured_ID_Root_G2.pem"
+
+dst: "/etc/ssl/certs/cd8c0d63.0"
+
+dst: "/etc/ssl/certs/7aaf71c0.0"
+
+src: "cion_Firmaprofesional_CIF_A62634068.crt"
+dst: "/etc/ssl/certs/3bde41ac.0"
+
+src: "tion_Authority_-_G2.crt"
+dst: "/etc/ssl/certs/Entrust_Root_Certification_Authority_-_G2.pem"
+
+src: "_CA_2009.crt"
+dst: "/etc/ssl/certs/8160b96c.0"
+
+src: "ot_G3.crt"
+dst: "/etc/ssl/certs/7f3d5d1d.0"
+
+src: ".crt"
+dst: "/etc/ssl/certs/SwissSign_Gold_CA_-_G2.pem"
+
+src: "A_2_EV_2009.crt"
+dst: "/etc/ssl/certs/d4dae3dd.0"
+
+src: "3.crt"
+dst: "/etc/ssl/certs/emSign_ECC_Root_CA_-_C3.pem"
+
+src: "t"
+dst: "/etc/ssl/certs/emSign_Root_CA_-_G1.pem"
+
+src: "ot.crt"
+dst: "/etc/ssl/certs/Comodo_AAA_Services_root.pem"
+
+src: "Research_Institutions_ECC_RootCA_2015.crt"
+dst: "/etc/ssl/certs/7719f463.0"
+
+src: "e_EV_Root_CA.crt"
+dst: "/etc/ssl/certs/244b5494.0"
+
+src: "t"
+dst: "/etc/ssl/certs/5f15c80c.0"
+
+dst: "/etc/ssl/certs/Certigna.pem"
+
+src: "3.crt"
+dst: "/etc/ssl/certs/dd8e9d41.0"
+
+dst: "/etc/ssl/certs/UCA_Global_G2_Root.pem"
+
+src: "t"
+dst: "/etc/ssl/certs/f081611a.0"
+
+src: "k_Sertifikasi_-_Surum_1.crt"
+dst: "/etc/ssl/certs/ff34af3f.0"
+
+dst: "/etc/ssl/certs/CFCA_EV_ROOT.pem"
+
+src: "lass_2.crt"
+dst: "/etc/ssl/certs/1e09d511.0"
+
+src: "on_Authority.crt"
+dst: "/etc/ssl/certs/d6325660.0"
+
+dst: "/etc/ssl/certs/a3418fda.0"
+
+src: "A.crt"
+dst: "/etc/ssl/certs/e8de2f56.0"
+
+dst: "/etc/ssl/certs/Certigna_Root_CA.pem"
+
+src: "6.crt"
+dst: "/etc/ssl/certs/dc4d6a89.0"
+
+src: "ificate_Authority.crt"
+dst: "/etc/ssl/certs/4304c5e5.0"
+
+src: ".crt"
+dst: "/etc/ssl/certs/4f316efb.0"
+
+src: "tion_Authority_-_EC1.crt"
+dst: "/etc/ssl/certs/106f3e4d.0"
+
+src: "crt"
+dst: "/etc/ssl/certs/QuoVadis_Root_CA_1_G3.pem"
+
+src: "fication_Authority_-_G2.crt"
+dst: "/etc/ssl/certs/116bf586.0"
+
+dst: "/etc/ssl/certs/5ad8a5d6.0"
+
+src: "tion_Authority_-_G2.crt"
+dst: "/etc/ssl/certs/02265526.0"
+
+dst: "/etc/ssl/certs/de6d66f3.0"
+
+src: "tion_Authority.crt"
+dst: "/etc/ssl/certs/Entrust_Root_Certification_Authority.pem"
+
+src: "crt"
+dst: "/etc/ssl/certs/e868b802.0"
+
+src: "G2.crt"
+dst: "/etc/ssl/certs/57bcb2da.0"
+
+src: "A.crt"
+dst: "/etc/ssl/certs/3513523f.0"
+
+src: ".crt"
+dst: "/etc/ssl/certs/93bc0acc.0"
+
+src: "oot_GB_CA.crt"
+dst: "/etc/ssl/certs/OISTE_WISeKey_Global_Root_GB_CA.pem"
+
+src: "oot_CA_1.crt"
+dst: "/etc/ssl/certs/ef954a4e.0"
+
+src: "3.crt"
+dst: "/etc/ssl/certs/Hongkong_Post_Root_CA_3.pem"
+
+src: "Research_Institutions_RootCA_2011.crt"
+dst: "/etc/ssl/certs/1636090b.0"
+
+src: "G2.crt"
+dst: "/etc/ssl/certs/SwissSign_Silver_CA_-_G2.pem"
+
+dst: "/etc/ssl/certs/Izenpe.com.pem"
+
+src: ".crt"
+dst: "/etc/ssl/certs/TrustCor_RootCert_CA-1.pem"
+
+src: "ot_CA.crt"
+dst: "/etc/ssl/certs/DigiCert_Assured_ID_Root_CA.pem"
+
+src: "tificate_Authority_2017.crt"
+dst: "/etc/ssl/certs/Microsoft_ECC_Root_Certificate_Authority_2017.pem"
+
+src: "lass_3.crt"
+dst: "/etc/ssl/certs/5443e9e3.0"
+
+src: ".crt"
+dst: "/etc/ssl/certs/Cybertrust_Global_Root.pem"
+
+src: "tificate_Authority_2017.crt"
+dst: "/etc/ssl/certs/8d89cda1.0"
+
+dst: "/etc/ssl/certs/4042bcee.0"
+
+src: "t"
+dst: "/etc/ssl/certs/SecureSign_RootCA11.pem"
+
+dst: "/etc/ssl/certs/Secure_Global_CA.pem"
+
+src: "n_Authority.crt"
+dst: "/etc/ssl/certs/ca6e4ad9.0"
+
+src: "fication_Authority_-_G2.crt"
+dst: "/etc/ssl/certs/GeoTrust_Primary_Certification_Authority_-_G2.pem"
+
+src: "uthority.crt"
+dst: "/etc/ssl/certs/COMODO_Certification_Authority.pem"
+
+src: "Authority.crt"
+dst: "/etc/ssl/certs/E-Tugra_Certification_Authority.pem"
+
+dst: "/etc/ssl/certs/b66938e9.0"
+
+src: "ot_G2.crt"
+dst: "/etc/ssl/certs/9d04f354.0"
+
+dst: "/etc/ssl/certs/d7e8dc79.0"
+
+src: "3.crt"
+dst: "/etc/ssl/certs/emSign_ECC_Root_CA_-_G3.pem"
+
+src: "ate_Authority_-_G2.crt"
+dst: "/etc/ssl/certs/Go_Daddy_Root_Certificate_Authority_-_G2.pem"
+
+src: "C.crt"
+dst: "/etc/ssl/certs/AffirmTrust_Premium_ECC.pem"
+
+src: "n_Root.crt"
+dst: "/etc/ssl/certs/UCA_Extended_Validation_Root.pem"
+
+src: "oot.crt"
+dst: "/etc/ssl/certs/Baltimore_CyberTrust_Root.pem"
+
+src: "t"
+dst: "/etc/ssl/certs/d853d49e.0"
+
+src: "3.crt"
+dst: "/etc/ssl/certs/DigiCert_Global_Root_G3.pem"
+
+src: "384_Certification_Authority.crt"
+dst: "/etc/ssl/certs/Trustwave_Global_ECC_P384_Certification_Authority.pem"
+
+src: "crt"
+dst: "/etc/ssl/certs/QuoVadis_Root_CA_2_G3.pem"
+
+src: "t_Certification_Authority.crt"
+dst: "/etc/ssl/certs/c01cdfa2.0"
+
+src: "A.crt"
+dst: "/etc/ssl/certs/Buypass_Class_3_Root_CA.pem"
+
+src: "tion_Authority_RSA.crt"
+dst: "/etc/ssl/certs/SSL.com_Root_Certification_Authority_RSA.pem"
+
+dst: "/etc/ssl/certs/8d86cdd1.0"
+
+src: "t"
+dst: "/etc/ssl/certs/5f618aec.0"
+
+src: "ication_Authority_ECC.crt"
+dst: "/etc/ssl/certs/SSL.com_EV_Root_Certification_Authority_ECC.pem"
+
+src: "t_-_2008.crt"
+dst: "/etc/ssl/certs/0c4c9b6c.0"
+
+src: "oot_CA_1.crt"
+dst: "/etc/ssl/certs/IdenTrust_Commercial_Root_CA_1.pem"
+
+src: "ication_Authority_ECC.crt"
+dst: "/etc/ssl/certs/f0c70a8d.0"
+
+src: "C.crt"
+dst: "/etc/ssl/certs/9c8dfbd4.0"
+
+src: "ificate_Authority.crt"
+dst: "/etc/ssl/certs/Network_Solutions_Certificate_Authority.pem"
+
+src: ".crt"
+dst: "/etc/ssl/certs/2b349938.0"
+
+src: "on_Authority.crt"
+dst: "/etc/ssl/certs/COMODO_RSA_Certification_Authority.pem"
+
+src: "A.crt"
+dst: "/etc/ssl/certs/Buypass_Class_2_Root_CA.pem"
+
+src: "48_Secure_Server_CA.crt"
+dst: "/etc/ssl/certs/aee5f10d.0"
+
+dst: "/etc/ssl/certs/TrustCor_ECA-1.pem"
+
+src: "_CA_2009.crt"
+dst: "/etc/ssl/certs/Microsec_e-Szigno_Root_CA_2009.pem"
+
+src: "oot_GC_CA.crt"
+dst: "/etc/ssl/certs/773e07ad.0"
+
+src: "t_Certificate_Authority_-_G2.crt"
+dst: "/etc/ssl/certs/Starfield_Services_Root_Certificate_Authority_-_G2.pem"
+
+dst: "/etc/ssl/certs/0a775a30.0"
+
+src: "n_Authority.crt"
+dst: "/etc/ssl/certs/b7a5b843.0"
+
+src: "2.crt"
+dst: "/etc/ssl/certs/GlobalSign_Root_CA_-_R2.pem"
+
+src: "t_-_2008.crt"
+dst: "/etc/ssl/certs/Global_Chambersign_Root_-_2008.pem"
+
+src: "on_Authority.crt"
+dst: "/etc/ssl/certs/COMODO_ECC_Certification_Authority.pem"
+
+src: "_Root_CA.crt"
+dst: "/etc/ssl/certs/Actalis_Authentication_Root_CA.pem"
+
+src: "cion_Firmaprofesional_CIF_A62634068.crt"
+dst: "/etc/ssl/certs/Autoridad_de_Certificacion_Firmaprofesional_CIF_A62634068.pem"
+
+dst: "/etc/ssl/certs/certSIGN_ROOT_CA.pem"
+
+dst: "/etc/ssl/certs/1001acf7.0"
+
+src: "EV_Root_CA.crt"
+dst: "/etc/ssl/certs/03179a64.0"
+
+src: ".crt"
+dst: "/etc/ssl/certs/5cd81ad7.0"
+
+src: "2.crt"
+dst: "/etc/ssl/certs/607986c7.0"
+
+src: "tion_Authority_-_EC1.crt"
+dst: "/etc/ssl/certs/Entrust_Root_Certification_Authority_-_EC1.pem"
+
+src: "Research_Institutions_RootCA_2015.crt"
+dst: "/etc/ssl/certs/32888f65.0"
+
+src: "Research_Institutions_RootCA_2011.crt"
+dst: "/etc/ssl/certs/Hellenic_Academic_and_Research_Institutions_RootCA_2011.pem"
+
+src: ".crt"
+dst: "/etc/ssl/certs/3e44d2f7.0"
+
+src: "1.crt"
+dst: "/etc/ssl/certs/Hongkong_Post_Root_CA_1.pem"
+
+src: "t"
+dst: "/etc/ssl/certs/b727005e.0"
+
+src: "3.crt"
+dst: "/etc/ssl/certs/4b718d9b.0"
+
+src: "ification_Authority.crt"
+dst: "/etc/ssl/certs/NAVER_Global_Root_Certification_Authority.pem"
+
+src: "Research_Institutions_RootCA_2015.crt"
+dst: "/etc/ssl/certs/Hellenic_Academic_and_Research_Institutions_RootCA_2015.pem"
+
+src: "A_2_2009.crt"
+dst: "/etc/ssl/certs/D-TRUST_Root_Class_3_CA_2_2009.pem"
+
+src: "ation_Authority.crt"
+dst: "/etc/ssl/certs/USERTrust_RSA_Certification_Authority.pem"
+
+dst: "/etc/ssl/certs/SecureTrust_CA.pem"
+
+src: "lass_2.crt"
+dst: "/etc/ssl/certs/T-TeleSec_GlobalRoot_Class_2.pem"
+
+src: ".crt"
+dst: "/etc/ssl/certs/76cb8f92.0"
+
+src: "6.crt"
+dst: "/etc/ssl/certs/GlobalSign_Root_CA_-_R6.pem"
+
+dst: "/etc/ssl/certs/GTS_Root_R2.pem"
+
+src: ".crt"
+dst: "/etc/ssl/certs/AffirmTrust_Commercial.pem"
+
+dst: "/etc/ssl/certs/QuoVadis_Root_CA_3.pem"
+
+src: "lass_3.crt"
+dst: "/etc/ssl/certs/T-TeleSec_GlobalRoot_Class_3.pem"
+
+src: "r_Root_CA_1.crt"
+dst: "/etc/ssl/certs/1e08bfd1.0"
+
+dst: "/etc/ssl/certs/0b1b94ef.0"
+
+src: "oot.crt"
+dst: "/etc/ssl/certs/653b494a.0"
+
+dst: "/etc/ssl/certs/76faf6c0.0"
+
+src: "tion_Authority_-_G4.crt"
+dst: "/etc/ssl/certs/5e98733a.0"
+
+src: "ation_Authority.crt"
+dst: "/etc/ssl/certs/fc5a8f99.0"
+
+dst: "/etc/ssl/certs/CA_Disig_Root_R2.pem"
+
+src: "_-_R5.crt"
+dst: "/etc/ssl/certs/1d3472b9.0"
+
+dst: "/etc/ssl/certs/080911ac.0"
+
+src: "256_Certification_Authority.crt"
+dst: "/etc/ssl/certs/9b5697b0.0"
+
+src: "ication_Authority_RSA_R2.crt"
+dst: "/etc/ssl/certs/SSL.com_EV_Root_Certification_Authority_RSA_R2.pem"
+
+src: "Root_CA_-_G3.crt"
+dst: "/etc/ssl/certs/Staat_der_Nederlanden_Root_CA_-_G3.pem"
+
+src: "uthority.crt"
+dst: "/etc/ssl/certs/40547a79.0"
+
+src: "A_2_2009.crt"
+dst: "/etc/ssl/certs/c28a8a30.0"
+
+src: "ot.crt"
+dst: "/etc/ssl/certs/ee64a828.0"
+
+src: "crt"
+dst: "/etc/ssl/certs/064e0aa9.0"
+
+dst: "/etc/ssl/certs/ISRG_Root_X1.pem"
+
+src: "tion_Authority_RSA.crt"
+dst: "/etc/ssl/certs/6fa5da56.0"
+
+src: "G4.crt"
+dst: "/etc/ssl/certs/DigiCert_Trusted_Root_G4.pem"
+
+src: "t_Certificate_Authority_-_G2.crt"
+dst: "/etc/ssl/certs/09789157.0"
+
+src: "old=_F\305\221tan\303\272s\303\255tv\303\241ny.crt"
+dst: "/etc/ssl/certs/NetLock_Arany_=Class_Gold=_F\305\221tan\303\272s\303\255tv\303\241ny.pem"
+
+src: "2.crt"
+dst: "/etc/ssl/certs/DigiCert_Global_Root_G2.pem"
+
+src: "3.crt"
+dst: "/etc/ssl/certs/GlobalSign_Root_CA_-_R3.pem"
+
+src: "2.crt"
+dst: "/etc/ssl/certs/4a6481c9.0"
+
+src: "e_EV_Root_CA.crt"
+dst: "/etc/ssl/certs/DigiCert_High_Assurance_EV_Root_CA.pem"
+
+src: ".crt"
+dst: "/etc/ssl/certs/TrustCor_RootCert_CA-2.pem"
+
+src: "ot_CA.crt"
+dst: "/etc/ssl/certs/b1159c4c.0"
+
+dst: "/etc/ssl/certs/fe8a2cd8.0"
+
+dst: "/etc/ssl/certs/f51bb24c.0"
+
+src: "3.crt"
+dst: "/etc/ssl/certs/14bc7599.0"
+
+src: "ification_Authority.crt"
+dst: "/etc/ssl/certs/3fb36b73.0"
+
+src: "A_2_EV_2009.crt"
+dst: "/etc/ssl/certs/D-TRUST_Root_Class_3_CA_2_EV_2009.pem"
+
+src: "t"
+dst: "/etc/ssl/certs/Trustis_FPS_Root_CA.pem"
+
+src: ".crt"
+dst: "/etc/ssl/certs/AffirmTrust_Networking.pem"
+
+src: "_Root_CA.crt"
+dst: "/etc/ssl/certs/Security_Communication_Root_CA.pem"
+
+src: "Authority.crt"
+dst: "/etc/ssl/certs/5273a94c.0"
+
+src: "tificate_Authority_2017.crt"
+dst: "/etc/ssl/certs/Microsoft_RSA_Root_Certificate_Authority_2017.pem"
+
+src: "A.crt"
+dst: "/etc/ssl/certs/DigiCert_Global_Root_CA.pem"
+
+dst: "/etc/ssl/certs/cc450945.0"
+
+src: "_-_R5.crt"
+dst: "/etc/ssl/certs/GlobalSign_ECC_Root_CA_-_R5.pem"
+
+dst: "/etc/ssl/certs/8cb5ee0f.0"
+
+src: "ation_Authority.crt"
+dst: "/etc/ssl/certs/f30dd6ad.0"
+
+src: "tificate_Authority_2017.crt"
+dst: "/etc/ssl/certs/bf53fb88.0"
+
+src: "tion_Authority_ECC.crt"
+dst: "/etc/ssl/certs/0bf05006.0"
+
+src: "cate_Authority_-_G2.crt"
+dst: "/etc/ssl/certs/4bfab552.0"
+
+src: "3.crt"
+dst: "/etc/ssl/certs/062cdee6.0"
+
+src: "crt"
+dst: "/etc/ssl/certs/e36a6752.0"
+
+dst: "/etc/ssl/certs/a94d09e5.0"
+
+dst: "/etc/ssl/certs/GTS_Root_R3.pem"
+
+src: "t"
+dst: "/etc/ssl/certs/emSign_Root_CA_-_C1.pem"
+
+dst: "/etc/ssl/certs/e113c810.0"
+
+src: "t"
+dst: "/etc/ssl/certs/AffirmTrust_Premium.pem"
+
+src: "/usr/lib/os-release"
+dst: "/etc/os-release"
+
+dst: "/etc/alternatives/c89"
+
+dst: "/etc/alternatives/lzfgrep"
+
+dst: "/etc/alternatives/lzdiff"
+
+dst: "/etc/alternatives/rsh"
+
+dst: "/etc/alternatives/lzmore"
+
+dst: "/etc/alternatives/lzgrep"
+
+dst: "/etc/alternatives/pinentry"
+
+dst: "/etc/alternatives/lzcat"
+
+dst: "/etc/alternatives/cc"
+
+dst: "/etc/alternatives/lzless"
+
+dst: "/etc/alternatives/w"
+
+dst: "/etc/alternatives/awk"
+
+dst: "/etc/alternatives/rmt"
+
+dst: "/etc/alternatives/lzegrep"
+
+dst: "/etc/alternatives/fakeroot"
+
+dst: "/etc/alternatives/c++"
+
+dst: "/etc/alternatives/pager"
+
+dst: "/etc/alternatives/unlzma"
+
+dst: "/etc/alternatives/rlogin"
+
+dst: "/etc/alternatives/lzma"
+
+dst: "/etc/alternatives/lzcmp"
+
+dst: "/etc/alternatives/cpp"
+
+dst: "/etc/alternatives/c99"
+
+dst: "/etc/alternatives/nawk"
+
+dst: "/etc/alternatives/rcp"
+
+dst: "/var/lock"
+
+dst: "/var/run"
+
+src: "/var/mail"
+dst: "/var/spool/mail"
+
+src: "/usr/lib64"
+dst: "/lib64"
+
+src: "/usr/local/share/man"
+dst: "/usr/local/man"
+
+dst: "/usr/lib64/ld-linux-x86-64.so.2"
+
+src: "/usr/share/doc/python3"
+dst: "/usr/share/doc/python3-dev"
+
+src: "/usr/share/doc/gcc-10-base"
+dst: "/usr/share/doc/libgomp1"
+
+src: "/usr/share/doc/gcc-9-base"
+dst: "/usr/share/doc/g++-9"
+
+src: "/usr/share/doc/liblzma5/changelog.Debian.gz"
+dst: "/usr/share/doc/xz-utils/changelog.Debian.gz"
+
+src: "/usr/share/doc/liblzma5/AUTHORS"
+dst: "/usr/share/doc/xz-utils/AUTHORS"
+
+src: "/usr/share/doc/liblzma5/NEWS.gz"
+dst: "/usr/share/doc/xz-utils/NEWS.gz"
+
+src: "/usr/share/doc/liblzma5/THANKS"
+dst: "/usr/share/doc/xz-utils/THANKS"
+
+src: "/usr/share/doc/gcc-10-base"
+dst: "/usr/share/doc/liblsan0"
+
+src: "/usr/share/doc/binutils-common/changelog.Debian.gz"
+dst: "/usr/share/doc/binutils/changelog.Debian.gz"
+
+src: "/usr/share/doc/gpgconf/changelog.Debian.gz"
+dst: "/usr/share/doc/gpg/changelog.Debian.gz"
+
+src: "/usr/share/doc/gpgconf/NEWS.Debian.gz"
+dst: "/usr/share/doc/gpg/NEWS.Debian.gz"
+
+src: "/usr/share/doc/gcc-9-base"
+dst: "/usr/share/doc/libstdc++-9-dev"
+
+src: "/usr/share/doc/libpython3.8-minimal"
+dst: "/usr/share/doc/libpython3.8"
+
+src: "/usr/share/doc/libpython3.8-minimal/changelog.Debian.gz"
+dst: "/usr/share/doc/python3.8/changelog.Debian.gz"
+
+src: "/usr/share/doc/python3/python-policy.dbk.gz"
+dst: "/usr/share/doc/python3.8/python-policy.dbk.gz"
+
+src: "/usr/share/doc/python3.8/NEWS.gz"
+dst: "/usr/share/doc/python3.8/changelog.gz"
+
+src: "/usr/share/doc/python3/python-policy.html"
+dst: "/usr/share/doc/python3.8/python-policy.html"
+
+src: "/usr/share/doc/python3/python-policy.txt.gz"
+dst: "/usr/share/doc/python3.8/python-policy.txt.gz"
+
+src: "/usr/share/doc/libroken18-heimdal/changelog.Debian.gz"
+dst: "/usr/share/doc/libwind0-heimdal/changelog.Debian.gz"
+
+src: "/usr/share/doc/libpython3-stdlib/changelog.Debian.gz"
+dst: "/usr/share/doc/python3/changelog.Debian.gz"
+
+src: "/usr/share/doc/libpython3-stdlib/README.Debian"
+dst: "/usr/share/doc/python3/README.Debian"
+
+src: "/usr/share/doc/gpgconf/changelog.Debian.gz"
+dst: "/usr/share/doc/gpg-wks-server/changelog.Debian.gz"
+
+src: "/usr/share/doc/gpgconf/NEWS.Debian.gz"
+dst: "/usr/share/doc/gpg-wks-server/NEWS.Debian.gz"
+
+src: "/usr/share/doc/libssl1.1/changelog.Debian.gz"
+dst: "/usr/share/doc/openssl/changelog.Debian.gz"
+
+src: "/usr/share/doc/libssl1.1/changelog.gz"
+dst: "/usr/share/doc/openssl/changelog.gz"
+
+src: "/usr/share/doc/libssl1.1/copyright"
+dst: "/usr/share/doc/openssl/copyright"
+
+src: "/usr/share/doc/libblkid1/changelog.Debian.gz"
+dst: "/usr/share/doc/libfdisk1/changelog.Debian.gz"
+
+src: "/usr/share/doc/libtinfo6"
+dst: "/usr/share/doc/libncursesw6"
+
+src: "/usr/share/doc/python3-pkg-resources/changelog.Debian.gz"
+dst: "/usr/share/doc/python3-setuptools/changelog.Debian.gz"
+
+src: "/usr/share/doc/libpython3.8-minimal/changelog.Debian.gz"
+dst: "/usr/share/doc/python3.8-minimal/changelog.Debian.gz"
+
+src: "/usr/share/doc/gpg-agent/examples/pwpattern.list"
+dst: "/usr/share/doc/gnupg/examples/pwpattern.list"
+
+src: "/usr/share/doc/gpg-agent/examples/trustlist.txt"
+dst: "/usr/share/doc/gnupg/examples/trustlist.txt"
+
+src: "/usr/share/doc/gpgconf/changelog.Debian.gz"
+dst: "/usr/share/doc/gnupg/changelog.Debian.gz"
+
+src: "/usr/share/doc/gnupg-l10n/NEWS.Debian.gz"
+dst: "/usr/share/doc/gnupg/NEWS.Debian.gz"
+
+src: "/usr/share/doc/dirmngr/KEYSERVER"
+dst: "/usr/share/doc/gnupg/KEYSERVER"
+
+src: "/usr/share/doc/dirmngr/NEWS.gz"
+dst: "/usr/share/doc/gnupg/NEWS.gz"
+
+src: "/usr/share/doc/dirmngr/TODO"
+dst: "/usr/share/doc/gnupg/TODO"
+
+src: "/usr/share/doc/dirmngr/THANKS.gz"
+dst: "/usr/share/doc/gnupg/THANKS.gz"
+
+src: "/usr/share/doc/libblkid1/changelog.Debian.gz"
+dst: "/usr/share/doc/fdisk/changelog.Debian.gz"
+
+src: "/usr/share/doc/libprocps8/changelog.Debian.gz"
+dst: "/usr/share/doc/procps/changelog.Debian.gz"
+
+src: "/usr/share/doc/libprocps8/NEWS.Debian.gz"
+dst: "/usr/share/doc/procps/NEWS.Debian.gz"
+
+src: "/usr/share/doc/libcrypt1"
+dst: "/usr/share/doc/libcrypt-dev"
+
+src: "/usr/share/doc/binutils-common"
+dst: "/usr/share/doc/libctf0"
+
+src: "/usr/share/doc/libpam0g/changelog.Debian.gz"
+dst: "/usr/share/doc/libpam-modules/changelog.Debian.gz"
+
+src: "/usr/share/doc/libpam0g/NEWS.Debian.gz"
+dst: "/usr/share/doc/libpam-modules/NEWS.Debian.gz"
+
+src: "/usr/share/doc/cpp"
+dst: "/usr/share/doc/gcc"
+
+src: "/usr/share/doc/util-linux/examples/fstab"
+dst: "/usr/share/doc/mount/examples/fstab"
+
+src: "/usr/share/doc/libblkid1/changelog.Debian.gz"
+dst: "/usr/share/doc/mount/changelog.Debian.gz"
+
+src: "/usr/share/doc/util-linux/mount.txt"
+dst: "/usr/share/doc/mount/mount.txt"
+
+src: "/usr/share/doc/gcc-10-base"
+dst: "/usr/share/doc/libtsan0"
+
+src: "/usr/share/doc/gcc-10-base"
+dst: "/usr/share/doc/libgcc-s1"
+
+src: "/usr/share/doc/dpkg/README.feature-removal-schedule.gz"
+dst: "/usr/share/doc/libdpkg-perl/README.feature-removal-schedule.gz"
+
+src: "/usr/share/doc/dpkg/changelog.Debian.gz"
+dst: "/usr/share/doc/libdpkg-perl/changelog.Debian.gz"
+
+src: "/usr/share/doc/dpkg/AUTHORS"
+dst: "/usr/share/doc/libdpkg-perl/AUTHORS"
+
+src: "/usr/share/doc/dpkg/usertags.gz"
+dst: "/usr/share/doc/libdpkg-perl/usertags.gz"
+
+src: "/usr/share/doc/dpkg/THANKS.gz"
+dst: "/usr/share/doc/libdpkg-perl/THANKS.gz"
+
+src: "/usr/share/doc/base-files/README"
+dst: "/usr/share/doc/base-files/FAQ"
+
+src: "/usr/share/doc/gcc-10-base"
+dst: "/usr/share/doc/libstdc++6"
+
+src: "/usr/share/doc/libroken18-heimdal/changelog.Debian.gz"
+dst: "/usr/share/doc/libasn1-8-heimdal/changelog.Debian.gz"
+
+src: "/usr/share/doc/gcc-10-base"
+dst: "/usr/share/doc/libubsan1"
+
+src: "/usr/share/doc/perl-base/changelog.Debian.gz"
+dst: "/usr/share/doc/perl-modules-5.30/changelog.Debian.gz"
+
+src: "/usr/share/doc/libc6/changelog.Debian.gz"
+dst: "/usr/share/doc/libc-bin/changelog.Debian.gz"
+
+src: "/usr/share/doc/gpgconf/changelog.Debian.gz"
+dst: "/usr/share/doc/gpg-wks-client/changelog.Debian.gz"
+
+src: "/usr/share/doc/gpgconf/NEWS.Debian.gz"
+dst: "/usr/share/doc/gpg-wks-client/NEWS.Debian.gz"
+
+src: "/usr/share/doc/libexpat1/changelog.Debian.gz"
+dst: "/usr/share/doc/libexpat1-dev/changelog.Debian.gz"
+
+src: "/usr/share/doc/libexpat1-dev/expat.html/reference.html"
+dst: "/usr/share/doc/libexpat1-dev/expat.html/index.html"
+
+src: "/usr/share/doc/libpam0g/changelog.Debian.gz"
+dst: "/usr/share/doc/libpam-modules-bin/changelog.Debian.gz"
+
+src: "/usr/share/doc/libpam0g/NEWS.Debian.gz"
+dst: "/usr/share/doc/libpam-modules-bin/NEWS.Debian.gz"
+
+src: "/usr/share/doc/gcc-9-base"
+dst: "/usr/share/doc/libgcc-9-dev"
+
+src: "/usr/share/doc/gcc-10-base"
+dst: "/usr/share/doc/libcc1-0"
+
+src: "/usr/share/doc/libtinfo6/changelog.Debian.gz"
+dst: "/usr/share/doc/ncurses-bin/changelog.Debian.gz"
+
+src: "/usr/share/build-essential/list"
+dst: "/usr/share/doc/build-essential/list"
+
+src: "/usr/share/build-essential/essential-packages-list"
+dst: "/usr/share/doc/build-essential/essential-packages-list"
+
+src: "/usr/share/doc/gpgconf/changelog.Debian.gz"
+dst: "/usr/share/doc/gpg-agent/changelog.Debian.gz"
+
+src: "/usr/share/doc/manpages"
+dst: "/usr/share/doc/manpages-dev"
+
+src: "/usr/share/doc/libpam0g/changelog.Debian.gz"
+dst: "/usr/share/doc/libpam-runtime/changelog.Debian.gz"
+
+src: "/usr/share/doc/libpam0g/NEWS.Debian.gz"
+dst: "/usr/share/doc/libpam-runtime/NEWS.Debian.gz"
+
+src: "/usr/share/doc/python3.8"
+dst: "/usr/share/doc/python3.8-dev"
+
+src: "/usr/share/doc/libcom-err2/changelog.Debian.gz"
+dst: "/usr/share/doc/e2fsprogs/changelog.Debian.gz"
+
+src: "/usr/share/doc/libc6/changelog.Debian.gz"
+dst: "/usr/share/doc/libc-dev-bin/changelog.Debian.gz"
+
+src: "/usr/share/common-licenses/GPL-2"
+dst: "/usr/share/doc/git/contrib/subtree/COPYING"
+
+src: "/usr/share/git-core/contrib/hooks"
+dst: "/usr/share/doc/git/contrib/hooks"
+
+src: "/usr/share/common-licenses/Apache-2.0"
+dst: "/usr/share/doc/git/contrib/persistent-https/LICENSE"
+
+src: "/usr/share/doc/libfakeroot/DEBUG"
+dst: "/usr/share/doc/fakeroot/DEBUG"
+
+src: "/usr/share/doc/libfakeroot/changelog.Debian.gz"
+dst: "/usr/share/doc/fakeroot/changelog.Debian.gz"
+
+src: "/usr/share/doc/libfakeroot/README"
+dst: "/usr/share/doc/fakeroot/README"
+
+src: "/usr/share/doc/libfakeroot/README.saving"
+dst: "/usr/share/doc/fakeroot/README.saving"
+
+src: "/usr/share/doc/gcc-10-base"
+dst: "/usr/share/doc/libitm1"
+
+src: "/usr/share/doc/libc6/changelog.Debian.gz"
+dst: "/usr/share/doc/libc6-dev/changelog.Debian.gz"
+
+src: "/usr/share/doc/libkrb5support0/changelog.Debian.gz"
+dst: "/usr/share/doc/libk5crypto3/changelog.Debian.gz"
+
+src: "/usr/share/doc/libroken18-heimdal/changelog.Debian.gz"
+dst: "/usr/share/doc/libgssapi3-heimdal/changelog.Debian.gz"
+
+src: "/usr/share/doc/gcc-10-base"
+dst: "/usr/share/doc/libquadmath0"
+
+src: "/usr/share/doc/libroken18-heimdal/changelog.Debian.gz"
+dst: "/usr/share/doc/libheimntlm0-heimdal/changelog.Debian.gz"
+
+src: "/usr/share/doc/libmagic-mgc/changelog.Debian.gz"
+dst: "/usr/share/doc/libmagic1/changelog.Debian.gz"
+
+src: "/usr/share/doc/libblkid1/changelog.Debian.gz"
+dst: "/usr/share/doc/util-linux/changelog.Debian.gz"
+
+src: "/usr/share/doc/gcc-9-base"
+dst: "/usr/share/doc/cpp-9"
+
+src: "/usr/share/doc/gpgconf/changelog.Debian.gz"
+dst: "/usr/share/doc/gpgsm/changelog.Debian.gz"
+
+src: "/usr/share/doc/gpgconf/NEWS.Debian.gz"
+dst: "/usr/share/doc/gpgsm/NEWS.Debian.gz"
+
+src: "/usr/share/doc/libnettle7"
+dst: "/usr/share/doc/libhogweed5"
+
+src: "/usr/share/doc/libcom-err2/changelog.Debian.gz"
+dst: "/usr/share/doc/libss2/changelog.Debian.gz"
+
+src: "/usr/share/doc/binutils-common"
+dst: "/usr/share/doc/binutils-x86-64-linux-gnu"
+
+src: "/usr/share/doc/libpython3.8-minimal"
+dst: "/usr/share/doc/libpython3.8-dev"
+
+src: "/usr/share/doc/perl-base/changelog.Debian.gz"
+dst: "/usr/share/doc/perl/changelog.Debian.gz"
+
+src: "/usr/share/doc/perl/changelog.gz"
+dst: "/usr/share/doc/perl/Changes.gz"
+
+src: "/usr/share/doc/cpp"
+dst: "/usr/share/doc/g++"
+
+src: "/usr/share/doc/dpkg/README.feature-removal-schedule.gz"
+dst: "/usr/share/doc/dpkg-dev/README.feature-removal-schedule.gz"
+
+src: "/usr/share/doc/dpkg/changelog.Debian.gz"
+dst: "/usr/share/doc/dpkg-dev/changelog.Debian.gz"
+
+src: "/usr/share/doc/dpkg/AUTHORS"
+dst: "/usr/share/doc/dpkg-dev/AUTHORS"
+
+src: "/usr/share/doc/dpkg/usertags.gz"
+dst: "/usr/share/doc/dpkg-dev/usertags.gz"
+
+src: "/usr/share/doc/dpkg/THANKS.gz"
+dst: "/usr/share/doc/dpkg-dev/THANKS.gz"
+
+src: "/usr/share/doc/libdpkg-perl/README.api"
+dst: "/usr/share/doc/dpkg-dev/README.api"
+
+src: "/usr/share/doc/libroken18-heimdal/changelog.Debian.gz"
+dst: "/usr/share/doc/libkrb5-26-heimdal/changelog.Debian.gz"
+
+src: "/usr/share/doc/libgdbm6/changelog.Debian.gz"
+dst: "/usr/share/doc/libgdbm-compat4/changelog.Debian.gz"
+
+src: "/usr/share/doc/zlib1g/changelog.Debian.gz"
+dst: "/usr/share/doc/zlib1g-dev/changelog.Debian.gz"
+
+src: "/usr/share/doc/libpython3.8-minimal"
+dst: "/usr/share/doc/libpython3.8-stdlib"
+
+src: "/usr/share/doc/libblkid1/changelog.Debian.gz"
+dst: "/usr/share/doc/libmount1/changelog.Debian.gz"
+
+src: "/usr/share/doc/gcc-9-base/README.Bugs"
+dst: "/usr/share/doc/cpp/README.Bugs"
+
+src: "/usr/share/doc/libroken18-heimdal/changelog.Debian.gz"
+dst: "/usr/share/doc/libhcrypto4-heimdal/changelog.Debian.gz"
+
+src: "/usr/share/doc/gpgconf/changelog.Debian.gz"
+dst: "/usr/share/doc/dirmngr/changelog.Debian.gz"
+
+src: "/usr/share/doc/libsasl2-modules-db/changelog.Debian.gz"
+dst: "/usr/share/doc/libsasl2-2/changelog.Debian.gz"
+
+src: "/usr/share/doc/libsasl2-modules-db/NEWS.Debian.gz"
+dst: "/usr/share/doc/libsasl2-2/NEWS.Debian.gz"
+
+src: "/usr/share/doc/libkrb5support0/changelog.Debian.gz"
+dst: "/usr/share/doc/libgssapi-krb5-2/changelog.Debian.gz"
+
+src: "/usr/share/doc/libkrb5support0/changelog.Debian.gz"
+dst: "/usr/share/doc/libkrb5-3/changelog.Debian.gz"
+
+src: "/usr/share/doc/gcc-9-base"
+dst: "/usr/share/doc/libasan5"
+
+src: "/usr/share/doc/python-pip-whl/changelog.Debian.gz"
+dst: "/usr/share/doc/python3-pip/changelog.Debian.gz"
+
+src: "/usr/share/doc/libmagic-mgc/changelog.Debian.gz"
+dst: "/usr/share/doc/file/changelog.Debian.gz"
+
+src: "/usr/share/doc/gcc-10-base"
+dst: "/usr/share/doc/libatomic1"
+
+src: "/usr/share/doc/libapt-pkg6.0/changelog.gz"
+dst: "/usr/share/doc/apt/changelog.gz"
+
+src: "/usr/share/doc/libapt-pkg6.0/NEWS.Debian.gz"
+dst: "/usr/share/doc/apt/NEWS.Debian.gz"
+
+src: "/usr/share/doc/libroken18-heimdal/changelog.Debian.gz"
+dst: "/usr/share/doc/libhx509-5-heimdal/changelog.Debian.gz"
+
+src: "/usr/share/doc/libtinfo6"
+dst: "/usr/share/doc/libncurses6"
+
+src: "/usr/share/doc/gcc-9-base"
+dst: "/usr/share/doc/gcc-9"
+
+src: "/usr/share/doc/binutils-common"
+dst: "/usr/share/doc/libbinutils"
+
+src: "/usr/share/doc/libbz2-1.0/changelog.Debian.gz"
+dst: "/usr/share/doc/bzip2/changelog.Debian.gz"
+
+src: "/usr/share/doc/python3-lib2to3/changelog.Debian.gz"
+dst: "/usr/share/doc/python3-distutils/changelog.Debian.gz"
+
+src: "/usr/lib/file/magic.mgc"
+dst: "/usr/share/misc/magic.mgc"
+
+src: "/usr/share/file/magic"
+dst: "/usr/share/misc/magic"
+
+src: "/usr/share/gitweb/gitweb.cgi"
+dst: "/usr/share/gitweb/index.cgi"
+
+src: "/usr/share/common-licenses/GFDL-1.3"
+dst: "/usr/share/common-licenses/GFDL"
+
+src: "/usr/share/common-licenses/LGPL-3"
+dst: "/usr/share/common-licenses/LGPL"
+
+src: "/usr/share/common-licenses/GPL-3"
+dst: "/usr/share/common-licenses/GPL"
+
+src: "/usr/share/publicsuffix/public_suffix_list.dat"
+dst: "/usr/share/publicsuffix/effective_tld_names.dat"
+
+src: "/usr/share/pixmaps/python3.8.xpm"
+dst: "/usr/share/pixmaps/python3.xpm"
+
+src: "/usr/share/perl/5.30.0"
+dst: "/usr/share/perl/5.30"
+
+src: "/usr/lib/file/magic.mgc"
+dst: "/usr/share/file/magic.mgc"
+
+src: "/usr/share/bash-completion/completions/debconf"
+dst: "/usr/share/bash-completion/completions/debconf-show"
+
+src: "/usr/share/bash-completion/completions/git"
+dst: "/usr/share/bash-completion/completions/gitk"
+
+src: "/usr/bin/x86_64-linux-gnu-objdump"
+dst: "/usr/bin/objdump"
+
+src: "/usr/bin/pgrep"
+dst: "/usr/bin/pkill"
+
+src: "/usr/bin/x86_64-linux-gnu-addr2line"
+dst: "/usr/bin/addr2line"
+
+src: "/usr/bin/x86_64-linux-gnu-g++-9"
+dst: "/usr/bin/g++-9"
+
+src: "/usr/bin/bash"
+dst: "/usr/bin/rbash"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-ar-9"
+dst: "/usr/bin/gcc-ar"
+
+src: "/usr/bin/x86_64-linux-gnu-ranlib"
+dst: "/usr/bin/ranlib"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-ranlib-9"
+dst: "/usr/bin/x86_64-linux-gnu-gcc-ranlib"
+
+src: "/usr/lib/python3.8/pdb.py"
+dst: "/usr/bin/pdb3.8"
+
+dst: "/usr/bin/c89"
+
+src: "/usr/bin/setarch"
+dst: "/usr/bin/i386"
+
+src: "/usr/bin/md5sum"
+dst: "/usr/bin/md5sum.textutils"
+
+src: "/usr/bin/hostname"
+dst: "/usr/bin/domainname"
+
+dst: "/usr/bin/lzfgrep"
+
+src: "/usr/bin/x86_64-linux-gnu-python3.8-config"
+dst: "/usr/bin/x86_64-linux-gnu-python3-config"
+
+dst: "/usr/bin/lzdiff"
+
+src: "/usr/bin/x86_64-linux-gnu-gcov-dump-9"
+dst: "/usr/bin/x86_64-linux-gnu-gcov-dump"
+
+src: "/usr/bin/git"
+dst: "/usr/bin/git-upload-archive"
+
+src: "/usr/bin/x86_64-linux-gnu-objcopy"
+dst: "/usr/bin/objcopy"
+
+dst: "/usr/bin/rsh"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-ar-9"
+dst: "/usr/bin/gcc-ar-9"
+
+src: "/usr/bin/x86_64-linux-gnu-gprof"
+dst: "/usr/bin/gprof"
+
+src: "/usr/bin/x86_64-linux-gnu-gcov-dump-9"
+dst: "/usr/bin/gcov-dump-9"
+
+src: "/usr/bin/python3.8"
+dst: "/usr/bin/python3"
+
+dst: "/usr/bin/lzmore"
+
+src: "/usr/bin/run-mailcap"
+dst: "/usr/bin/edit"
+
+src: "/usr/bin/bzdiff"
+dst: "/usr/bin/bzcmp"
+
+dst: "/usr/bin/lzgrep"
+
+dst: "/usr/bin/pinentry"
+
+src: "/usr/bin/x86_64-linux-gnu-c++filt"
+dst: "/usr/bin/c++filt"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-nm-9"
+dst: "/usr/bin/gcc-nm"
+
+src: "/usr/bin/run-mailcap"
+dst: "/usr/bin/print"
+
+src: "/usr/bin/run-mailcap"
+dst: "/usr/bin/see"
+
+src: "/usr/bin/x86_64-linux-gnu-strip"
+dst: "/usr/bin/strip"
+
+dst: "/usr/bin/lzcat"
+
+dst: "/usr/bin/cc"
+
+src: "/usr/bin/xzdiff"
+dst: "/usr/bin/xzcmp"
+
+src: "/usr/bin/x86_64-linux-gnu-elfedit"
+dst: "/usr/bin/elfedit"
+
+src: "/usr/bin/x86_64-linux-gnu-gcov-9"
+dst: "/usr/bin/gcov-9"
+
+src: "/usr/bin/x86_64-linux-gnu-as"
+dst: "/usr/bin/as"
+
+src: "/usr/bin/bzgrep"
+dst: "/usr/bin/bzfgrep"
+
+src: "/usr/bin/hostname"
+dst: "/usr/bin/ypdomainname"
+
+src: "/usr/bin/x86_64-linux-gnu-cpp-9"
+dst: "/usr/bin/x86_64-linux-gnu-cpp"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-9"
+dst: "/usr/bin/x86_64-linux-gnu-gcc"
+
+src: "/usr/share/python3/py3versions.py"
+dst: "/usr/bin/py3versions"
+
+src: "/usr/bin/ssh"
+dst: "/usr/bin/slogin"
+
+src: "/usr/bin/lesspipe"
+dst: "/usr/bin/lessfile"
+
+src: "/usr/bin/x86_64-linux-gnu-ld.gold"
+dst: "/usr/bin/ld.gold"
+
+dst: "/usr/bin/lzless"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-9"
+dst: "/usr/bin/gcc"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-nm-9"
+dst: "/usr/bin/gcc-nm-9"
+
+src: "/usr/bin/hostname"
+dst: "/usr/bin/nisdomainname"
+
+src: "/usr/lib/python3.8/pdb.py"
+dst: "/usr/bin/pdb3"
+
+src: "/usr/bin/x86_64-linux-gnu-dwp"
+dst: "/usr/bin/dwp"
+
+src: "/usr/bin/x86_64-linux-gnu-ld.bfd"
+dst: "/usr/bin/ld.bfd"
+
+src: "/usr/bin/bzgrep"
+dst: "/usr/bin/bzegrep"
+
+src: "/usr/bin/xzgrep"
+dst: "/usr/bin/xzegrep"
+
+dst: "/usr/bin/w"
+
+src: "/usr/bin/pygettext3.8"
+dst: "/usr/bin/pygettext3"
+
+src: "/usr/bin/x86_64-linux-gnu-gcov-9"
+dst: "/usr/bin/gcov"
+
+dst: "/usr/bin/awk"
+
+src: "/usr/bin/x86_64-linux-gnu-size"
+dst: "/usr/bin/size"
+
+src: "/usr/bin/x86_64-linux-gnu-ar"
+dst: "/usr/bin/ar"
+
+src: "/usr/bin/x86_64-linux-gnu-gcov-dump-9"
+dst: "/usr/bin/gcov-dump"
+
+dst: "/usr/bin/lzegrep"
+
+src: "/usr/bin/git"
+dst: "/usr/bin/git-receive-pack"
+
+src: "/usr/bin/x86_64-linux-gnu-readelf"
+dst: "/usr/bin/readelf"
+
+src: "/usr/bin/x86_64-linux-gnu-python3.8-config"
+dst: "/usr/bin/python3-config"
+
+src: "/usr/bin/xzgrep"
+dst: "/usr/bin/xzfgrep"
+
+src: "/usr/bin/xz"
+dst: "/usr/bin/unxz"
+
+src: "/usr/bin/x86_64-linux-gnu-gcov-tool-9"
+dst: "/usr/bin/gcov-tool-9"
+
+src: "/usr/bin/x86_64-linux-gnu-ld.bfd"
+dst: "/usr/bin/x86_64-linux-gnu-ld"
+
+src: "/usr/bin/x86_64-linux-gnu-gcov-tool-9"
+dst: "/usr/bin/gcov-tool"
+
+src: "/usr/bin/pydoc3.8"
+dst: "/usr/bin/pydoc3"
+
+src: "/usr/bin/setarch"
+dst: "/usr/bin/x86_64"
+
+src: "/usr/bin/last"
+dst: "/usr/bin/lastb"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-ar-9"
+dst: "/usr/bin/x86_64-linux-gnu-gcc-ar"
+
+src: "/usr/bin/newgrp"
+dst: "/usr/bin/sg"
+
+dst: "/usr/bin/fakeroot"
+
+src: "/usr/bin/x86_64-linux-gnu-g++-9"
+dst: "/usr/bin/x86_64-linux-gnu-g++"
+
+src: "/usr/bin/x86_64-linux-gnu-ld.bfd"
+dst: "/usr/bin/ld"
+
+dst: "/usr/bin/c++"
+
+src: "/usr/bin/bzmore"
+dst: "/usr/bin/bzless"
+
+src: "/usr/bin/tic"
+dst: "/usr/bin/infotocap"
+
+dst: "/usr/bin/pager"
+
+src: "/usr/bin/tic"
+dst: "/usr/bin/captoinfo"
+
+src: "/usr/bin/git"
+dst: "/usr/bin/git-upload-pack"
+
+src: "/usr/bin/x86_64-linux-gnu-gcov-9"
+dst: "/usr/bin/x86_64-linux-gnu-gcov"
+
+src: "/usr/bin/x86_64-linux-gnu-ld.gold"
+dst: "/usr/bin/x86_64-linux-gnu-gold"
+
+src: "/usr/bin/x86_64-linux-gnu-python3.8-config"
+dst: "/usr/bin/python3.8-config"
+
+dst: "/usr/bin/unlzma"
+
+dst: "/usr/bin/rlogin"
+
+src: "/usr/bin/x86_64-linux-gnu-cpp-9"
+dst: "/usr/bin/cpp-9"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-ranlib-9"
+dst: "/usr/bin/gcc-ranlib-9"
+
+dst: "/usr/bin/lzma"
+
+dst: "/usr/bin/lzcmp"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-nm-9"
+dst: "/usr/bin/x86_64-linux-gnu-gcc-nm"
+
+src: "/usr/bin/x86_64-linux-gnu-g++-9"
+dst: "/usr/bin/g++"
+
+src: "/usr/bin/xz"
+dst: "/usr/bin/xzcat"
+
+src: "/usr/bin/x86_64-linux-gnu-gcov-tool-9"
+dst: "/usr/bin/x86_64-linux-gnu-gcov-tool"
+
+src: "/usr/bin/x86_64-linux-gnu-nm"
+dst: "/usr/bin/nm"
+
+src: "/usr/bin/x86_64-linux-gnu-cpp-9"
+dst: "/usr/bin/cpp"
+
+src: "/usr/bin/x86_64-linux-gnu-ld.gold"
+dst: "/usr/bin/gold"
+
+dst: "/usr/bin/c99"
+
+src: "/usr/bin/run-mailcap"
+dst: "/usr/bin/compose"
+
+src: "/usr/bin/tset"
+dst: "/usr/bin/reset"
+
+src: "/usr/bin/skill"
+dst: "/usr/bin/snice"
+
+src: "/usr/bin/hostname"
+dst: "/usr/bin/dnsdomainname"
+
+src: "/usr/bin/x86_64-linux-gnu-strings"
+dst: "/usr/bin/strings"
+
+src: "/usr/bin/dash"
+dst: "/usr/bin/sh"
+
+src: "/usr/bin/setarch"
+dst: "/usr/bin/linux32"
+
+dst: "/usr/bin/nawk"
+
+dst: "/usr/bin/rcp"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-9"
+dst: "/usr/bin/gcc-9"
+
+src: "/usr/bin/setarch"
+dst: "/usr/bin/linux64"
+
+dst: "/usr/bin/pidof"
+
+src: "/usr/bin/x86_64-linux-gnu-gcc-ranlib-9"
+dst: "/usr/bin/gcc-ranlib"
+
+src: "/usr/sbin/mke2fs"
+dst: "/usr/sbin/mkfs.ext3"
+
+src: "/usr/sbin/cppw"
+dst: "/usr/sbin/cpgr"
+
+src: "/usr/sbin/mke2fs"
+dst: "/usr/sbin/mkfs.ext4"
+
+src: "/usr/sbin/adduser"
+dst: "/usr/sbin/addgroup"
+
+src: "/usr/sbin/vipw"
+dst: "/usr/sbin/vigr"
+
+src: "/usr/sbin/deluser"
+dst: "/usr/sbin/delgroup"
+
+dst: "/usr/sbin/rmt"
+
+src: "/usr/sbin/agetty"
+dst: "/usr/sbin/getty"
+
+src: "/usr/sbin/e2fsck"
+dst: "/usr/sbin/fsck.ext4"
+
+src: "/usr/sbin/mke2fs"
+dst: "/usr/sbin/mkfs.ext2"
+
+src: "/usr/sbin/e2fsck"
+dst: "/usr/sbin/fsck.ext3"
+
+src: "/usr/sbin/tune2fs"
+dst: "/usr/sbin/e2label"
+
+src: "/usr/sbin/dumpe2fs"
+dst: "/usr/sbin/e2mmpstatus"
+
+src: "/usr/sbin/e2fsck"
+dst: "/usr/sbin/fsck.ext2"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-write-tree"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-pull"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-ls-files"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-mv"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-rm"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-add"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-verify-commit"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-env--helper"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-restore"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-reflog"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-diff-tree"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-blame"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-push"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-show-index"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-repack"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-commit-graph"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-difftool"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-revert"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-interpret-trailers"
+
+src: "/usr/lib/git-core/git-remote-http"
+dst: "/usr/lib/git-core/git-remote-ftp"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-mktag"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-gc"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-commit-tree"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-prune-packed"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-upload-archive"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-remote"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-stripspace"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-fmt-merge-msg"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-check-mailmap"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-column"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-notes"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-diff-files"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-reset"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-log"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-verify-tag"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-unpack-file"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-tag"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-cat-file"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-fetch"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-am"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-check-attr"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-switch"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-stage"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-clean"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-fsck-objects"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-pack-objects"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-merge-index"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-help"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-check-ref-format"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-var"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-cherry"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-merge-recursive"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-stash"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-for-each-ref"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-whatchanged"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-fsck"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-merge"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-grep"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-format-patch"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-show-ref"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-init"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-update-ref"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-count-objects"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-credential"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-worktree"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-update-index"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-mailinfo"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-submodule--helper"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-merge-subtree"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-update-server-info"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-range-diff"
+
+src: "/usr/lib/git-core/git-remote-http"
+dst: "/usr/lib/git-core/git-remote-https"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-fetch-pack"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-show"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-symbolic-ref"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-mailsplit"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-get-tar-commit-id"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-receive-pack"
+
+src: "/usr/lib/git-core/git-remote-http"
+dst: "/usr/lib/git-core/git-remote-ftps"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-bisect--helper"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-pack-refs"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-ls-tree"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-check-ignore"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-rev-list"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-rebase"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-patch-id"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-clone"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-checkout"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-hash-object"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-fast-export"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-upload-pack"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-send-pack"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-show-branch"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-pack-redundant"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-merge-ours"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-mktree"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-merge-base"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-commit"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-rerere"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-sparse-checkout"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-remote-ext"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-prune"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-index-pack"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-remote-fd"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-cherry-pick"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-describe"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-merge-tree"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-replace"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-multi-pack-index"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-archive"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-checkout-index"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-annotate"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-read-tree"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-unpack-objects"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-branch"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-init-db"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-merge-file"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-apply"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-bundle"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-verify-pack"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-diff"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-rev-parse"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-diff-index"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-shortlog"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-config"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-name-rev"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-status"
+
+src: "/usr/lib/git-core/git"
+dst: "/usr/lib/git-core/git-ls-remote"
+
+src: "/usr/lib/python3.8/_sysconfigdata__x86_64-linux-gnu.py"
+dst: "/usr/lib/python3.8/_sysconfigdata__linux_x86_64-linux-gnu.py"
+
+src: "/usr/lib/x86_64-linux-gnu/libpython3.8.so.1.0"
+dst: "/usr/lib/python3.8/config-3.8-x86_64-linux-gnu/libpython3.8.so"
+
+dst: "/usr/lib/python3.8/sitecustomize.py"
+
+src: "/usr/lib/terminfo/x/xterm"
+dst: "/usr/lib/terminfo/x/xterm-debian"
+
+src: "/usr/lib/terminfo/r/rxvt-basic"
+dst: "/usr/lib/terminfo/r/rxvt-m"
+
+src: "/usr/lib/terminfo/E/Eterm"
+dst: "/usr/lib/terminfo/E/Eterm-color"
+
+src: "/usr/lib/systemd/user/ssh-agent.service"
+dst: "/usr/lib/systemd/user/graphical-session-pre.target.wants/ssh-agent.service"
+
+src: "/usr/bin/x86_64-linux-gnu-ld.gold"
+dst: "/usr/lib/gold-ld/ld"
+
+src: "/usr/lib/x86_64-linux-gnu/libtsan.so.0.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/libtsan.so"
+
+src: "/usr/lib/gcc/x86_64-linux-gnu/9/liblto_plugin.so.0.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/liblto_plugin.so"
+
+src: "/usr/lib/gcc/x86_64-linux-gnu/9/liblto_plugin.so.0.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/liblto_plugin.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libitm.so.1.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/libitm.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libatomic.so.1.2.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/libatomic.so"
+
+src: "/usr/lib/x86_64-linux-gnu/liblsan.so.0.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/liblsan.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.28"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/libstdc++.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/libgomp.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libasan.so.5.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/libasan.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libubsan.so.1.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/libubsan.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libcc1.so.0.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/libcc1.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libquadmath.so.0.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/libquadmath.so"
+
+src: "/usr/lib/gcc/x86_64-linux-gnu/9/plugin/libcc1plugin.so.0.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/plugin/libcc1plugin.so"
+
+src: "/usr/lib/gcc/x86_64-linux-gnu/9/plugin/libcp1plugin.so.0.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/plugin/libcp1plugin.so.0"
+
+src: "/usr/lib/gcc/x86_64-linux-gnu/9/plugin/libcp1plugin.so.0.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/plugin/libcp1plugin.so"
+
+src: "/usr/lib/gcc/x86_64-linux-gnu/9/plugin/libcc1plugin.so.0.0.0"
+dst: "/usr/lib/gcc/x86_64-linux-gnu/9/plugin/libcc1plugin.so.0"
+
+src: "/usr/bin/x86_64-linux-gnu-ld.bfd"
+dst: "/usr/lib/compat-ld/ld"
+
+dst: "/usr/lib/ssl/certs"
+
+src: "/usr/lib/ssl/misc/tsget.pl"
+dst: "/usr/lib/ssl/misc/tsget"
+
+dst: "/usr/lib/ssl/private"
+
+dst: "/usr/lib/ssl/openssl.cnf"
+
+src: "/usr/lib/gcc/x86_64-linux-gnu/9/liblto_plugin.so.0.0.0"
+dst: "/usr/lib/bfd-plugins/liblto_plugin.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libquadmath.so.0.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libquadmath.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libXmuu.so.1.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libXmuu.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libsmartcols.so.1.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libsmartcols.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libffi.so.7.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libffi.so.7"
+
+src: "/usr/lib/x86_64-linux-gnu/libkrb5.so.26.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libkrb5.so.26"
+
+src: "/usr/lib/x86_64-linux-gnu/libgnutls.so.30.27.0"
+dst: "/usr/lib/x86_64-linux-gnu/libgnutls.so.30"
+
+src: "/usr/lib/x86_64-linux-gnu/libidn2.so.0.3.6"
+dst: "/usr/lib/x86_64-linux-gnu/libidn2.so.0"
+
+dst: "/usr/lib/x86_64-linux-gnu/libnsl.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libgomp.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libcap-ng.so.0.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libcap-ng.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libexpat.so.1.6.11"
+dst: "/usr/lib/x86_64-linux-gnu/libexpat.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libpam_misc.so.0.82.1"
+dst: "/usr/lib/x86_64-linux-gnu/libpam_misc.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libmpdec.so.2.4.2"
+dst: "/usr/lib/x86_64-linux-gnu/libmpdec.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libnpth.so.0.1.2"
+dst: "/usr/lib/x86_64-linux-gnu/libnpth.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libkrb5support.so.0.1"
+dst: "/usr/lib/x86_64-linux-gnu/libkrb5support.so.0"
+
+dst: "/usr/lib/x86_64-linux-gnu/libthread_db.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libkrb5.so.3.3"
+dst: "/usr/lib/x86_64-linux-gnu/libkrb5.so.3"
+
+src: "/usr/lib/x86_64-linux-gnu/libsystemd.so.0.28.0"
+dst: "/usr/lib/x86_64-linux-gnu/libsystemd.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libpamc.so.0.82.1"
+dst: "/usr/lib/x86_64-linux-gnu/libpamc.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libmvec-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libmvec.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libext2fs.so.2.4"
+dst: "/usr/lib/x86_64-linux-gnu/libext2fs.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libss.so.2.0"
+dst: "/usr/lib/x86_64-linux-gnu/libss.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libkeyutils.so.1.8"
+dst: "/usr/lib/x86_64-linux-gnu/libkeyutils.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libX11.so.6.3.0"
+dst: "/usr/lib/x86_64-linux-gnu/libX11.so.6"
+
+dst: "/usr/lib/x86_64-linux-gnu/libpthread.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libmpc.so.3.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libmpc.so.3"
+
+src: "/usr/lib/x86_64-linux-gnu/libnettle.so.7.0"
+dst: "/usr/lib/x86_64-linux-gnu/libnettle.so.7"
+
+src: "/usr/lib/x86_64-linux-gnu/ld-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libtsan.so.0.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libtsan.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libseccomp.so.2.5.1"
+dst: "/usr/lib/x86_64-linux-gnu/libseccomp.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libk5crypto.so.3.1"
+dst: "/usr/lib/x86_64-linux-gnu/libk5crypto.so.3"
+
+dst: "/usr/lib/x86_64-linux-gnu/libnss_nis.so"
+
+dst: "/usr/lib/x86_64-linux-gnu/libutil.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libroken.so.18.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libroken.so.18"
+
+src: "/usr/lib/x86_64-linux-gnu/libaudit.so.1.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libaudit.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libcbor.so.0.6.0"
+dst: "/usr/lib/x86_64-linux-gnu/libcbor.so.0.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libnss_files-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libnss_files.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libcc1.so.0.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libcc1.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libp11-kit.so.0.3.0"
+dst: "/usr/lib/x86_64-linux-gnu/libp11-kit.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.9.0"
+dst: "/usr/lib/x86_64-linux-gnu/libpcre2-8.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libmenuw.so.6.2"
+dst: "/usr/lib/x86_64-linux-gnu/libmenuw.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libpthread.so.0"
+
+dst: "/usr/lib/x86_64-linux-gnu/libnss_nisplus.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libanl-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libanl.so.1"
+
+dst: "/usr/lib/x86_64-linux-gnu/libBrokenLocale.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libnss_compat-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libnss_compat.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libpcreposix.so.3.13.3"
+dst: "/usr/lib/x86_64-linux-gnu/libpcreposix.so.3"
+
+src: "/usr/lib/x86_64-linux-gnu/libdebconfclient.so.0.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libdebconfclient.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libresolv-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libresolv.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libcrypt.so.1.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libcrypt.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libunistring.so.2.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libunistring.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libksba.so.8.11.6"
+dst: "/usr/lib/x86_64-linux-gnu/libksba.so.8"
+
+src: "/usr/lib/x86_64-linux-gnu/libexpatw.so.1.6.11"
+dst: "/usr/lib/x86_64-linux-gnu/libexpatw.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libnss_nisplus-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libnss_nisplus.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libform.so.6.2"
+dst: "/usr/lib/x86_64-linux-gnu/libform.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libhogweed.so.5.0"
+dst: "/usr/lib/x86_64-linux-gnu/libhogweed.so.5"
+
+src: "/usr/lib/x86_64-linux-gnu/libthread_db-1.0.so"
+dst: "/usr/lib/x86_64-linux-gnu/libthread_db.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libcurl-gnutls.so.4.6.0"
+dst: "/usr/lib/x86_64-linux-gnu/libcurl-gnutls.so.4"
+
+src: "/usr/lib/x86_64-linux-gnu/libreadline.so.8.0"
+dst: "/usr/lib/x86_64-linux-gnu/libreadline.so.8"
+
+src: "/usr/lib/x86_64-linux-gnu/libssh.so.4.8.4"
+dst: "/usr/lib/x86_64-linux-gnu/libssh.so.4"
+
+src: "/usr/lib/x86_64-linux-gnu/libgpg-error.so.0.28.0"
+dst: "/usr/lib/x86_64-linux-gnu/libgpg-error.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libperl.so.5.30.0"
+dst: "/usr/lib/x86_64-linux-gnu/libperl.so.5.30"
+
+src: "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6"
+dst: "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0"
+
+src: "/usr/lib/python3.8/config-3.8-x86_64-linux-gnu/libpython3.8.a"
+dst: "/usr/lib/x86_64-linux-gnu/libpython3.8.a"
+
+src: "/usr/lib/x86_64-linux-gnu/libcurl-gnutls.so.4.6.0"
+dst: "/usr/lib/x86_64-linux-gnu/libcurl-gnutls.so.3"
+
+src: "/usr/lib/x86_64-linux-gnu/pkgconfig/python-3.8.pc"
+dst: "/usr/lib/x86_64-linux-gnu/pkgconfig/python3.pc"
+
+src: "/usr/lib/x86_64-linux-gnu/pkgconfig/python-3.8-embed.pc"
+dst: "/usr/lib/x86_64-linux-gnu/pkgconfig/python3-embed.pc"
+
+src: "/usr/lib/x86_64-linux-gnu/pkgconfig/libxcrypt.pc"
+dst: "/usr/lib/x86_64-linux-gnu/pkgconfig/libcrypt.pc"
+
+src: "/usr/lib/x86_64-linux-gnu/libhx509.so.5.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libhx509.so.5"
+
+src: "/usr/lib/x86_64-linux-gnu/libncurses.so.6.2"
+dst: "/usr/lib/x86_64-linux-gnu/libncurses.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libfakeroot/libfakeroot-tcp.so"
+dst: "/usr/lib/x86_64-linux-gnu/libfakeroot/libfakeroot-0.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libgcrypt.so.20.2.5"
+dst: "/usr/lib/x86_64-linux-gnu/libgcrypt.so.20"
+
+src: "/usr/lib/x86_64-linux-gnu/libubsan.so.1.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libubsan.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libedit.so.2.0.63"
+dst: "/usr/lib/x86_64-linux-gnu/libedit.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/liblz4.so.1.9.2"
+dst: "/usr/lib/x86_64-linux-gnu/liblz4.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libwind.so.0.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libwind.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libisl.so.22.0.1"
+dst: "/usr/lib/x86_64-linux-gnu/libisl.so.22"
+
+src: "/usr/lib/x86_64-linux-gnu/libfdisk.so.1.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libfdisk.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libXdmcp.so.6.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libXdmcp.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libpcre.so.3.13.3"
+dst: "/usr/lib/x86_64-linux-gnu/libpcre.so.3"
+
+src: "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libc.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libbrotlidec.so.1.0.7"
+dst: "/usr/lib/x86_64-linux-gnu/libbrotlidec.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libzstd.so.1.4.4"
+dst: "/usr/lib/x86_64-linux-gnu/libzstd.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libacl.so.1.1.2253"
+dst: "/usr/lib/x86_64-linux-gnu/libacl.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libm-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libm.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libhistory.so.8.0"
+dst: "/usr/lib/x86_64-linux-gnu/libhistory.so.8"
+
+src: "/usr/lib/x86_64-linux-gnu/libsasl2.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/libsasl2.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libnghttp2.so.14.19.0"
+dst: "/usr/lib/x86_64-linux-gnu/libnghttp2.so.14"
+
+src: "/usr/lib/x86_64-linux-gnu/libheimbase.so.1.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libheimbase.so.1"
+
+dst: "/usr/lib/x86_64-linux-gnu/librt.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libmount.so.1.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libmount.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libnss_nis-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libnss_nis.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.28"
+dst: "/usr/lib/x86_64-linux-gnu/libstdc++.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libapt-private.so.0.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libapt-private.so.0.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libbz2.so.1.0.4"
+dst: "/usr/lib/x86_64-linux-gnu/libbz2.so.1"
+
+dst: "/usr/lib/x86_64-linux-gnu/libdl.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libncursesw.so.6.2"
+dst: "/usr/lib/x86_64-linux-gnu/libncursesw.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libexpatw.so.1.6.11"
+dst: "/usr/lib/x86_64-linux-gnu/libexpatw.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libdl-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libdl.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libasan.so.5.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libasan.so.5"
+
+src: "/usr/lib/x86_64-linux-gnu/libapt-pkg.so.6.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libapt-pkg.so.6.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libbrotlienc.so.1.0.7"
+dst: "/usr/lib/x86_64-linux-gnu/libbrotlienc.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libBrokenLocale-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libBrokenLocale.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libctf-nobfd.so.0.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libctf-nobfd.so.0"
+
+dst: "/usr/lib/x86_64-linux-gnu/libexpat.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libudev.so.1.6.17"
+dst: "/usr/lib/x86_64-linux-gnu/libudev.so.1"
+
+dst: "/usr/lib/x86_64-linux-gnu/libnss_dns.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libgdbm.so.6.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libgdbm.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libprocps.so.8.0.2"
+dst: "/usr/lib/x86_64-linux-gnu/libprocps.so.8"
+
+src: "/usr/lib/x86_64-linux-gnu/liblber-2.4.so.2.10.12"
+dst: "/usr/lib/x86_64-linux-gnu/liblber-2.4.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libutil-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libutil.so.1"
+
+dst: "/usr/lib/x86_64-linux-gnu/libz.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libmagic.so.1.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libmagic.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1.0.7"
+dst: "/usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libz.so.1.2.11"
+dst: "/usr/lib/x86_64-linux-gnu/libz.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libuuid.so.1.3.0"
+dst: "/usr/lib/x86_64-linux-gnu/libuuid.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libXau.so.6.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libXau.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libhcrypto.so.4.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libhcrypto.so.4"
+
+src: "/usr/lib/x86_64-linux-gnu/librt-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/librt.so.1"
+
+dst: "/usr/lib/x86_64-linux-gnu/libnss_compat.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libassuan.so.0.8.3"
+dst: "/usr/lib/x86_64-linux-gnu/libassuan.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libattr.so.1.1.2448"
+dst: "/usr/lib/x86_64-linux-gnu/libattr.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libpanel.so.6.2"
+dst: "/usr/lib/x86_64-linux-gnu/libpanel.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libpam.so.0.84.2"
+dst: "/usr/lib/x86_64-linux-gnu/libpam.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libatomic.so.1.2.0"
+dst: "/usr/lib/x86_64-linux-gnu/libatomic.so.1"
+
+dst: "/usr/lib/x86_64-linux-gnu/libmvec.so"
+
+dst: "/usr/lib/x86_64-linux-gnu/libresolv.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libfido2.so.1.3.1"
+dst: "/usr/lib/x86_64-linux-gnu/libfido2.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libgssapi.so.3.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libgssapi.so.3"
+
+src: "/usr/lib/x86_64-linux-gnu/libctf.so.0.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libctf.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libbz2.so.1.0.4"
+dst: "/usr/lib/x86_64-linux-gnu/libbz2.so.1.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libpython3.8.so.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libpython3.8.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libblkid.so.1.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libblkid.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libnss_dns-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libnss_dns.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/perl/5.30.0/Config.pm"
+dst: "/usr/lib/x86_64-linux-gnu/perl/cross-config-5.30.0/Config.pm"
+
+src: "/usr/lib/x86_64-linux-gnu/perl/5.30.0/Config_heavy.pl"
+dst: "/usr/lib/x86_64-linux-gnu/perl/cross-config-5.30.0/Config_heavy.pl"
+
+src: "/usr/lib/x86_64-linux-gnu/perl/5.30.0"
+dst: "/usr/lib/x86_64-linux-gnu/perl/5.30"
+
+src: "/usr/lib/x86_64-linux-gnu/libbsd.so.0.10.0"
+dst: "/usr/lib/x86_64-linux-gnu/libbsd.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libmenu.so.6.2"
+dst: "/usr/lib/x86_64-linux-gnu/libmenu.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libcom_err.so.2.1"
+dst: "/usr/lib/x86_64-linux-gnu/libcom_err.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libe2p.so.2.3"
+dst: "/usr/lib/x86_64-linux-gnu/libe2p.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libtasn1.so.6.6.0"
+dst: "/usr/lib/x86_64-linux-gnu/libtasn1.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libtic.so.6.2"
+dst: "/usr/lib/x86_64-linux-gnu/libtic.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libgmp.so.10.4.0"
+dst: "/usr/lib/x86_64-linux-gnu/libgmp.so.10"
+
+src: "/usr/lib/x86_64-linux-gnu/libmpfr.so.6.0.2"
+dst: "/usr/lib/x86_64-linux-gnu/libmpfr.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libplain.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libplain.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libsasldb.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libsasldb.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libdigestmd5.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libdigestmd5.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libanonymous.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libanonymous.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libplain.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libplain.so"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/liblogin.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/liblogin.so"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libanonymous.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libanonymous.so"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/liblogin.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/liblogin.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libdigestmd5.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libdigestmd5.so"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libntlm.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libntlm.so"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libcrammd5.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libcrammd5.so"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libntlm.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libntlm.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libsasldb.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libsasldb.so"
+
+src: "/usr/lib/x86_64-linux-gnu/sasl2/libcrammd5.so.2.0.25"
+dst: "/usr/lib/x86_64-linux-gnu/sasl2/libcrammd5.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libldap_r-2.4.so.2.10.12"
+dst: "/usr/lib/x86_64-linux-gnu/libldap_r-2.4.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libitm.so.1.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libitm.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libnsl-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libnsl.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libldap_r-2.4.so.2.10.12"
+dst: "/usr/lib/x86_64-linux-gnu/libldap-2.4.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libpython3.8.so.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libpython3.8.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libXext.so.6.4.0"
+dst: "/usr/lib/x86_64-linux-gnu/libXext.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libgssapi_krb5.so.2.2"
+dst: "/usr/lib/x86_64-linux-gnu/libgssapi_krb5.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libgdbm_compat.so.4.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libgdbm_compat.so.4"
+
+src: "/usr/lib/x86_64-linux-gnu/libasn1.so.8.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/libasn1.so.8"
+
+src: "/usr/lib/x86_64-linux-gnu/liblsan.so.0.0.0"
+dst: "/usr/lib/x86_64-linux-gnu/liblsan.so.0"
+
+dst: "/usr/lib/x86_64-linux-gnu/libnss_files.so"
+
+dst: "/usr/lib/x86_64-linux-gnu/libanl.so"
+
+src: "/usr/lib/x86_64-linux-gnu/liblzma.so.5.2.4"
+dst: "/usr/lib/x86_64-linux-gnu/liblzma.so.5"
+
+dst: "/usr/lib/x86_64-linux-gnu/libnss_hesiod.so"
+
+dst: "/usr/lib/x86_64-linux-gnu/libcrypt.so"
+
+src: "/usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libxcb.so.1"
+
+src: "/usr/lib/x86_64-linux-gnu/libtinfo.so.6.2"
+dst: "/usr/lib/x86_64-linux-gnu/libtinfo.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libpanelw.so.6.2"
+dst: "/usr/lib/x86_64-linux-gnu/libpanelw.so.6"
+
+src: "/usr/lib/x86_64-linux-gnu/libpsl.so.5.3.2"
+dst: "/usr/lib/x86_64-linux-gnu/libpsl.so.5"
+
+src: "/usr/lib/x86_64-linux-gnu/libheimntlm.so.0.1.0"
+dst: "/usr/lib/x86_64-linux-gnu/libheimntlm.so.0"
+
+src: "/usr/lib/x86_64-linux-gnu/libnss_hesiod-2.31.so"
+dst: "/usr/lib/x86_64-linux-gnu/libnss_hesiod.so.2"
+
+src: "/usr/lib/x86_64-linux-gnu/libformw.so.6.2"
+dst: "/usr/lib/x86_64-linux-gnu/libformw.so.6"
+
+dst: "/usr/lib/cpp"
+
+src: "/usr/lib/gnupg/gpg-protect-tool"
+dst: "/usr/lib/gnupg2/gpg-protect-tool"
+
+src: "/usr/lib/gnupg/gpg-preset-passphrase"
+dst: "/usr/lib/gnupg2/gpg-preset-passphrase"
+
+src: "/usr/lib/apt/solvers/dump"
+dst: "/usr/lib/apt/planners/dump"
+
+src: "/usr/lib/apt/methods/mirror"
+dst: "/usr/lib/apt/methods/mirror+file"
+
+src: "/usr/lib/apt/methods/mirror"
+dst: "/usr/lib/apt/methods/mirror+copy"
+
+src: "/usr/lib/apt/methods/mirror"
+dst: "/usr/lib/apt/methods/mirror+http"
+
+src: "/usr/lib/apt/methods/http"
+dst: "/usr/lib/apt/methods/https"
+
+src: "/usr/lib/apt/methods/mirror"
+dst: "/usr/lib/apt/methods/mirror+https"
+
+src: "/usr/lib/apt/methods/rsh"
+dst: "/usr/lib/apt/methods/ssh"
+
+src: "/usr/lib/apt/methods/mirror"
+dst: "/usr/lib/apt/methods/mirror+ftp"
+
+src: "/usr/bin"
+dst: "/bin"
+
+src: "/usr/sbin"
+dst: "/sbin"
+
+src: "/usr/libx32"
+dst: "/libx32"
+
+src: "/usr/lib"
+dst: "/lib"

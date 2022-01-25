@@ -3,3 +3,4 @@ grpcio-tools==1.34.1
 grpcio-reflection
 docker
 pymongo
+psutil

@@ -68,9 +68,9 @@ class Hyper:
                     # It's a link.
                     if os.path.islink(host_dir + directory+b_name):
                         l.LOGGER('    Adding link '+ b_name)
+
                         branch.link.dst = directory+b_name
-                        branch.link.src = os.path.realpath(host_dir+directory+b_name)[len(host_dir):]
-                        open('symlinks-logs', 'w').write('\n'+ str(branch.link))
+                        branch.link.src = os.path.realpath(host_dir+directory+b_name)[len(host_dir):] if host_dir in os.path.realpath(host_dir+directory+b_name) else os.path.realpath(host_dir+directory+b_name)
 
                     # It's a file.
                     elif os.path.isfile(host_dir + directory+b_name):
@@ -348,7 +348,7 @@ if __name__ == "__main__":
     from gateway_pb2_grpcbf import StartService_input_partitions_v2
     id = repo_ok(
         repo = sys.argv[1],
-        partitions_model = StartService_input_partitions_v2[2] if not sys.argv[2] else [buffer_pb2.Buffer.Head.Partition()]
+        partitions_model = StartService_input_partitions_v2[2] if not len(sys.argv) > 1 else [buffer_pb2.Buffer.Head.Partition()]
     )
     os.system('mv '+HYCACHE+'compile'+id+' '+REGISTRY+id)
     print(id)
