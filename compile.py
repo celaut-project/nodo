@@ -70,6 +70,7 @@ class Hyper:
                         l.LOGGER('    Adding link '+ b_name)
                         branch.link.dst = directory+b_name
                         branch.link.src = os.path.realpath(host_dir+directory+b_name)[len(host_dir):]
+                        open('symlinks-logs', 'w').write('\n'+ str(branch.link))
 
                     # It's a file.
                     elif os.path.isfile(host_dir + directory+b_name):
