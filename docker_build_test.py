@@ -26,7 +26,7 @@ def write_fs(fs: celaut_pb2.Service.Container.Filesystem, dir: str, symlinks):
 
 service_with_meta = gateway_pb2.ServiceWithMeta()
 service_with_meta.ParseFromString(
-    open('__registry__/249c3e15935a2ce77fb695067224c95e95338ca7be9f4f1b2eb076c2b0c515a3', 'rb').read()
+    open('__registry__/ba2a1ae598c805782adc94fea8d620e5c7ea1cfabc2eeca0e2d7d6adb4e82d0c', 'rb').read()
 )
 
 fs = celaut_pb2.Service.Container.Filesystem()
@@ -50,10 +50,8 @@ open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .\nENTRYPOINT /random/
 check_output('docker build -t '+id+' '+dir+'/.', shell=True)
 
 # Generate the symlinks.
-with open('symlink-logs', 'w') as file:
-    for symlink in symlinks:
-        file.write('\n'+ str(symlink))
-        overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+id, shell=True).decode('utf-8')[:-1]
-        run('ln -s '+symlink.src[1:]+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)
+overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+id, shell=True).decode('utf-8')[:-1]
+for symlink in symlinks:
+    run('ln -s '+symlink.src[1:]+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)
 
 # Apply permissions.

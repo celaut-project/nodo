@@ -2,803 +2,886 @@
 src: "/etc/dpkg/origins/ubuntu"
 dst: "/etc/dpkg/origins/default"
 
+src: "/usr/sbin/rmt-tar"
 dst: "/etc/rmt"
 
-src: "A_-_R5.crt"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_ECC_Root_CA_-_R5.crt"
 dst: "/etc/ssl/certs/GlobalSign_ECC_Root_CA_-_R5.pem"
 
-src: "Gold=_F\305\221tan\303\272s\303\255tv\303\241ny.crt"
+src: "/usr/share/ca-certificates/mozilla/NetLock_Arany_=Class_Gold=_F\305\221tan\303\272s\303\255tv\303\241ny.crt"
 dst: "/etc/ssl/certs/NetLock_Arany_=Class_Gold=_F\305\221tan\303\272s\303\255tv\303\241ny.pem"
 
-src: "ation_Authority_-_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/Entrust_Root_Certification_Authority_-_G2.crt"
 dst: "/etc/ssl/certs/Entrust_Root_Certification_Authority_-_G2.pem"
 
-src: "T.crt"
+src: "/usr/share/ca-certificates/mozilla/GDCA_TrustAUTH_R5_ROOT.crt"
 dst: "/etc/ssl/certs/0f6fa695.0"
 
-src: "ification_Authority_-_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/GeoTrust_Primary_Certification_Authority_-_G2.crt"
 dst: "/etc/ssl/certs/GeoTrust_Primary_Certification_Authority_-_G2.pem"
 
-src: "ation_Authority_RSA.crt"
+src: "/usr/share/ca-certificates/mozilla/SSL.com_Root_Certification_Authority_RSA.crt"
 dst: "/etc/ssl/certs/SSL.com_Root_Certification_Authority_RSA.pem"
 
-src: "1.crt"
+src: "/usr/share/ca-certificates/mozilla/TeliaSonera_Root_CA_v1.crt"
 dst: "/etc/ssl/certs/5cd81ad7.0"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/emSign_Root_CA_-_C1.crt"
 dst: "/etc/ssl/certs/406c9bb1.0"
 
-src: "Class_2.crt"
+src: "/usr/share/ca-certificates/mozilla/T-TeleSec_GlobalRoot_Class_2.crt"
 dst: "/etc/ssl/certs/T-TeleSec_GlobalRoot_Class_2.pem"
 
-src: "n_Root_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Actalis_Authentication_Root_CA.crt"
 dst: "/etc/ssl/certs/Actalis_Authentication_Root_CA.pem"
 
-src: "on_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/TWCA_Root_Certification_Authority.crt"
 dst: "/etc/ssl/certs/TWCA_Root_Certification_Authority.pem"
 
-src: "ation_Authority_-_EC1.crt"
+src: "/usr/share/ca-certificates/mozilla/Entrust_Root_Certification_Authority_-_EC1.crt"
 dst: "/etc/ssl/certs/Entrust_Root_Certification_Authority_-_EC1.pem"
 
-src: ".crt"
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA_1_G3.crt"
 dst: "/etc/ssl/certs/QuoVadis_Root_CA_1_G3.pem"
 
-src: "t_CA_2009.crt"
+src: "/usr/share/ca-certificates/mozilla/Microsec_e-Szigno_Root_CA_2009.crt"
 dst: "/etc/ssl/certs/8160b96c.0"
 
-src: "tification_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/NAVER_Global_Root_Certification_Authority.crt"
 dst: "/etc/ssl/certs/3fb36b73.0"
 
+src: "/usr/share/ca-certificates/mozilla/EC-ACC.crt"
 dst: "/etc/ssl/certs/349f2832.0"
 
-src: "_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/SwissSign_Silver_CA_-_G2.crt"
 dst: "/etc/ssl/certs/57bcb2da.0"
 
-src: "oot_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Assured_ID_Root_CA.crt"
 dst: "/etc/ssl/certs/DigiCert_Assured_ID_Root_CA.pem"
 
-src: "k_CA_2.crt"
+src: "/usr/share/ca-certificates/mozilla/Certum_Trusted_Network_CA_2.crt"
 dst: "/etc/ssl/certs/Certum_Trusted_Network_CA_2.pem"
 
-src: "CA_2_2009.crt"
+src: "/usr/share/ca-certificates/mozilla/D-TRUST_Root_Class_3_CA_2_2009.crt"
 dst: "/etc/ssl/certs/c28a8a30.0"
 
-src: "ation_Authority_ECC.crt"
+src: "/usr/share/ca-certificates/mozilla/SSL.com_Root_Certification_Authority_ECC.crt"
 dst: "/etc/ssl/certs/0bf05006.0"
 
-src: "on_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/TWCA_Root_Certification_Authority.crt"
 dst: "/etc/ssl/certs/b7a5b843.0"
 
-src: "icate_Authority_-_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/Starfield_Root_Certificate_Authority_-_G2.crt"
 dst: "/etc/ssl/certs/Starfield_Root_Certificate_Authority_-_G2.pem"
 
-src: "ot_-_2008.crt"
+src: "/usr/share/ca-certificates/mozilla/Global_Chambersign_Root_-_2008.crt"
 dst: "/etc/ssl/certs/0c4c9b6c.0"
 
-src: "A_-_R5.crt"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_ECC_Root_CA_-_R5.crt"
 dst: "/etc/ssl/certs/1d3472b9.0"
 
-src: "tificate_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/Network_Solutions_Certificate_Authority.crt"
 dst: "/etc/ssl/certs/Network_Solutions_Certificate_Authority.pem"
 
-src: "R2.crt"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_Root_CA_-_R2.crt"
 dst: "/etc/ssl/certs/4a6481c9.0"
 
+src: "/usr/share/ca-certificates/mozilla/AC_RAIZ_FNMT-RCM.crt"
 dst: "/etc/ssl/certs/cd8c0d63.0"
 
-src: "ot_Certification_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/VeriSign_Universal_Root_Certification_Authority.crt"
 dst: "/etc/ssl/certs/c01cdfa2.0"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/TWCA_Global_Root_CA.crt"
 dst: "/etc/ssl/certs/5f15c80c.0"
 
-src: "tificate_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/Network_Solutions_Certificate_Authority.crt"
 dst: "/etc/ssl/certs/4304c5e5.0"
 
-src: "048_Secure_Server_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Entrust.net_Premium_2048_Secure_Server_CA.crt"
 dst: "/etc/ssl/certs/Entrust.net_Premium_2048_Secure_Server_CA.pem"
 
-src: "l.crt"
+src: "/usr/share/ca-certificates/mozilla/AffirmTrust_Commercial.crt"
 dst: "/etc/ssl/certs/2b349938.0"
 
-src: "or_Root_CA_1.crt"
+src: "/usr/share/ca-certificates/mozilla/IdenTrust_Public_Sector_Root_CA_1.crt"
 dst: "/etc/ssl/certs/1e08bfd1.0"
 
-src: "A_-_R4.crt"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_ECC_Root_CA_-_R4.crt"
 dst: "/etc/ssl/certs/GlobalSign_ECC_Root_CA_-_R4.pem"
 
-src: "k_CA_2.crt"
+src: "/usr/share/ca-certificates/mozilla/Certum_Trusted_Network_CA_2.crt"
 dst: "/etc/ssl/certs/40193066.0"
 
-src: "cation_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/USERTrust_ECC_Certification_Authority.crt"
 dst: "/etc/ssl/certs/f30dd6ad.0"
 
-src: "t"
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA_3.crt"
 dst: "/etc/ssl/certs/QuoVadis_Root_CA_3.pem"
 
-src: "CA_2_2009.crt"
+src: "/usr/share/ca-certificates/mozilla/D-TRUST_Root_Class_3_CA_2_2009.crt"
 dst: "/etc/ssl/certs/D-TRUST_Root_Class_3_CA_2_2009.pem"
 
+src: "/usr/share/ca-certificates/mozilla/CFCA_EV_ROOT.crt"
 dst: "/etc/ssl/certs/0b1b94ef.0"
 
-src: "G2.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Global_Root_G2.crt"
 dst: "/etc/ssl/certs/607986c7.0"
 
-src: "CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Buypass_Class_2_Root_CA.crt"
 dst: "/etc/ssl/certs/54657681.0"
 
-src: "1.crt"
+src: "/usr/share/ca-certificates/mozilla/TrustCor_RootCert_CA-1.crt"
 dst: "/etc/ssl/certs/TrustCor_RootCert_CA-1.pem"
 
+src: "/usr/share/ca-certificates/mozilla/GTS_Root_R3.crt"
 dst: "/etc/ssl/certs/GTS_Root_R3.pem"
 
+src: "/usr/share/ca-certificates/mozilla/ACCVRAIZ1.crt"
 dst: "/etc/ssl/certs/ACCVRAIZ1.pem"
 
-src: "oot_G3.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Assured_ID_Root_G3.crt"
 dst: "/etc/ssl/certs/DigiCert_Assured_ID_Root_G3.pem"
 
+src: "/usr/share/ca-certificates/mozilla/Amazon_Root_CA_2.crt"
 dst: "/etc/ssl/certs/6d41d539.0"
 
-src: "n_RootCA2.crt"
+src: "/usr/share/ca-certificates/mozilla/Security_Communication_RootCA2.crt"
 dst: "/etc/ssl/certs/Security_Communication_RootCA2.pem"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/Trustis_FPS_Root_CA.crt"
 dst: "/etc/ssl/certs/d853d49e.0"
 
-src: "ion_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/COMODO_RSA_Certification_Authority.crt"
 dst: "/etc/ssl/certs/COMODO_RSA_Certification_Authority.pem"
 
+src: "/usr/share/ca-certificates/mozilla/Amazon_Root_CA_1.crt"
 dst: "/etc/ssl/certs/ce5e74ef.0"
 
+src: "/usr/share/ca-certificates/mozilla/GTS_Root_R2.crt"
 dst: "/etc/ssl/certs/626dceaf.0"
 
+src: "/usr/share/ca-certificates/mozilla/CFCA_EV_ROOT.crt"
 dst: "/etc/ssl/certs/CFCA_EV_ROOT.pem"
 
-src: "crt"
+src: "/usr/share/ca-certificates/mozilla/Starfield_Class_2_CA.crt"
 dst: "/etc/ssl/certs/Starfield_Class_2_CA.pem"
 
-src: "G3.crt"
+src: "/usr/share/ca-certificates/mozilla/emSign_ECC_Root_CA_-_G3.crt"
 dst: "/etc/ssl/certs/emSign_ECC_Root_CA_-_G3.pem"
 
-src: ".crt"
+src: "/usr/share/ca-certificates/mozilla/e-Szigno_Root_CA_2017.crt"
 dst: "/etc/ssl/certs/e-Szigno_Root_CA_2017.pem"
 
-src: "ation_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/Entrust_Root_Certification_Authority.crt"
 dst: "/etc/ssl/certs/Entrust_Root_Certification_Authority.pem"
 
-src: "rtificate_Authority_2017.crt"
+src: "/usr/share/ca-certificates/mozilla/Microsoft_RSA_Root_Certificate_Authority_2017.crt"
 dst: "/etc/ssl/certs/Microsoft_RSA_Root_Certificate_Authority_2017.pem"
 
-src: "A.crt"
+src: "/usr/share/ca-certificates/mozilla/Sonera_Class_2_Root_CA.crt"
 dst: "/etc/ssl/certs/9c2e7d30.0"
 
-src: "t"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_Root_CA.crt"
 dst: "/etc/ssl/certs/GlobalSign_Root_CA.pem"
 
-src: "CA_2_EV_2009.crt"
+src: "/usr/share/ca-certificates/mozilla/D-TRUST_Root_Class_3_CA_2_EV_2009.crt"
 dst: "/etc/ssl/certs/d4dae3dd.0"
 
-src: "CA_2_EV_2009.crt"
+src: "/usr/share/ca-certificates/mozilla/D-TRUST_Root_Class_3_CA_2_EV_2009.crt"
 dst: "/etc/ssl/certs/D-TRUST_Root_Class_3_CA_2_EV_2009.pem"
 
-src: "1.crt"
+src: "/usr/share/ca-certificates/mozilla/TrustCor_RootCert_CA-1.crt"
 dst: "/etc/ssl/certs/5d3033c5.0"
 
-src: "CA.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Global_Root_CA.crt"
 dst: "/etc/ssl/certs/3513523f.0"
 
+src: "/usr/share/ca-certificates/mozilla/certSIGN_ROOT_CA.crt"
 dst: "/etc/ssl/certs/certSIGN_ROOT_CA.pem"
 
-src: ".crt"
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA_3_G3.crt"
 dst: "/etc/ssl/certs/QuoVadis_Root_CA_3_G3.pem"
 
-src: "oot_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Assured_ID_Root_G2.crt"
 dst: "/etc/ssl/certs/DigiCert_Assured_ID_Root_G2.pem"
 
+src: "/usr/share/ca-certificates/mozilla/Certigna.crt"
 dst: "/etc/ssl/certs/Certigna.pem"
 
-src: "P256_Certification_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/Trustwave_Global_ECC_P256_Certification_Authority.crt"
 dst: "/etc/ssl/certs/9b5697b0.0"
 
+src: "/usr/share/ca-certificates/mozilla/GTS_Root_R4.crt"
 dst: "/etc/ssl/certs/GTS_Root_R4.pem"
 
-src: "icate_Authority_-_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/Starfield_Root_Certificate_Authority_-_G2.crt"
 dst: "/etc/ssl/certs/4bfab552.0"
 
-src: "fication_Authority_ECC.crt"
+src: "/usr/share/ca-certificates/mozilla/SSL.com_EV_Root_Certification_Authority_ECC.crt"
 dst: "/etc/ssl/certs/SSL.com_EV_Root_Certification_Authority_ECC.pem"
 
-src: "1.crt"
+src: "/usr/share/ca-certificates/mozilla/TeliaSonera_Root_CA_v1.crt"
 dst: "/etc/ssl/certs/TeliaSonera_Root_CA_v1.pem"
 
+src: "/usr/share/ca-certificates/mozilla/TrustCor_ECA-1.crt"
 dst: "/etc/ssl/certs/TrustCor_ECA-1.pem"
 
-src: "_G4.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Trusted_Root_G4.crt"
 dst: "/etc/ssl/certs/75d1b2ed.0"
 
-src: "n_Root_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Security_Communication_Root_CA.crt"
 dst: "/etc/ssl/certs/f3377b1b.0"
 
-src: "ification_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/Trustwave_Global_Certification_Authority.crt"
 dst: "/etc/ssl/certs/Trustwave_Global_Certification_Authority.pem"
 
-src: ".crt"
+src: "/usr/share/ca-certificates/mozilla/e-Szigno_Root_CA_2017.crt"
 dst: "/etc/ssl/certs/e868b802.0"
 
-src: "_3.crt"
+src: "/usr/share/ca-certificates/mozilla/Hongkong_Post_Root_CA_3.crt"
 dst: "/etc/ssl/certs/Hongkong_Post_Root_CA_3.pem"
 
-src: "Root_GB_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/OISTE_WISeKey_Global_Root_GB_CA.crt"
 dst: "/etc/ssl/certs/e73d606e.0"
 
-src: "G3.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Global_Root_G3.crt"
 dst: "/etc/ssl/certs/DigiCert_Global_Root_G3.pem"
 
-src: "Root_-_2008.crt"
+src: "/usr/share/ca-certificates/mozilla/Chambers_of_Commerce_Root_-_2008.crt"
 dst: "/etc/ssl/certs/c47d9980.0"
 
-src: "R6.crt"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_Root_CA_-_R6.crt"
 dst: "/etc/ssl/certs/dc4d6a89.0"
 
-src: "n_RootCA2.crt"
+src: "/usr/share/ca-certificates/mozilla/Security_Communication_RootCA2.crt"
 dst: "/etc/ssl/certs/cd58d51e.0"
 
-src: "Class_2.crt"
+src: "/usr/share/ca-certificates/mozilla/T-TeleSec_GlobalRoot_Class_2.crt"
 dst: "/etc/ssl/certs/1e09d511.0"
 
-src: "R6.crt"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_Root_CA_-_R6.crt"
 dst: "/etc/ssl/certs/GlobalSign_Root_CA_-_R6.pem"
 
-src: "ation_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/Entrust_Root_Certification_Authority.crt"
 dst: "/etc/ssl/certs/6b99d060.0"
 
-src: "Root.crt"
+src: "/usr/share/ca-certificates/mozilla/Baltimore_CyberTrust_Root.crt"
 dst: "/etc/ssl/certs/Baltimore_CyberTrust_Root.pem"
 
-src: "Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/COMODO_Certification_Authority.crt"
 dst: "/etc/ssl/certs/40547a79.0"
 
-src: "cate_Authority_-_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/Go_Daddy_Root_Certificate_Authority_-_G2.crt"
 dst: "/etc/ssl/certs/Go_Daddy_Root_Certificate_Authority_-_G2.pem"
 
-src: "Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/COMODO_Certification_Authority.crt"
 dst: "/etc/ssl/certs/COMODO_Certification_Authority.pem"
 
-src: "ce_EV_Root_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_High_Assurance_EV_Root_CA.crt"
 dst: "/etc/ssl/certs/DigiCert_High_Assurance_EV_Root_CA.pem"
 
-src: ".crt"
+src: "/usr/share/ca-certificates/mozilla/Atos_TrustedRoot_2011.crt"
 dst: "/etc/ssl/certs/Atos_TrustedRoot_2011.pem"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/emSign_Root_CA_-_C1.crt"
 dst: "/etc/ssl/certs/emSign_Root_CA_-_C1.pem"
 
-src: "fication_Authority_RSA_R2.crt"
+src: "/usr/share/ca-certificates/mozilla/SSL.com_EV_Root_Certification_Authority_RSA_R2.crt"
 dst: "/etc/ssl/certs/SSL.com_EV_Root_Certification_Authority_RSA_R2.pem"
 
-src: "t"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_Root_CA.crt"
 dst: "/etc/ssl/certs/5ad8a5d6.0"
 
-src: "n_Root_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Security_Communication_Root_CA.crt"
 dst: "/etc/ssl/certs/Security_Communication_Root_CA.pem"
 
-src: "l.crt"
+src: "/usr/share/ca-certificates/mozilla/AffirmTrust_Commercial.crt"
 dst: "/etc/ssl/certs/AffirmTrust_Commercial.pem"
 
+src: "/usr/share/ca-certificates/mozilla/SZAFIR_ROOT_CA2.crt"
 dst: "/etc/ssl/certs/SZAFIR_ROOT_CA2.pem"
 
-src: "g.crt"
+src: "/usr/share/ca-certificates/mozilla/AffirmTrust_Networking.crt"
 dst: "/etc/ssl/certs/AffirmTrust_Networking.pem"
 
+src: "/usr/share/ca-certificates/mozilla/GTS_Root_R4.crt"
 dst: "/etc/ssl/certs/a3418fda.0"
 
+src: "/usr/share/ca-certificates/mozilla/TrustCor_ECA-1.crt"
 dst: "/etc/ssl/certs/7aaf71c0.0"
 
-src: "_EV_Root_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Staat_der_Nederlanden_EV_Root_CA.crt"
 dst: "/etc/ssl/certs/Staat_der_Nederlanden_EV_Root_CA.pem"
 
-src: "t"
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA_2.crt"
 dst: "/etc/ssl/certs/QuoVadis_Root_CA_2.pem"
 
-src: "2.crt"
+src: "/usr/share/ca-certificates/mozilla/TrustCor_RootCert_CA-2.crt"
 dst: "/etc/ssl/certs/3e44d2f7.0"
 
-src: "n_Root_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Actalis_Authentication_Root_CA.crt"
 dst: "/etc/ssl/certs/930ac5d2.0"
 
+src: "/usr/share/ca-certificates/mozilla/Amazon_Root_CA_3.crt"
 dst: "/etc/ssl/certs/8cb5ee0f.0"
 
-src: "2.crt"
+src: "/usr/share/ca-certificates/mozilla/TrustCor_RootCert_CA-2.crt"
 dst: "/etc/ssl/certs/TrustCor_RootCert_CA-2.pem"
 
+src: "/usr/share/ca-certificates/mozilla/ISRG_Root_X1.crt"
 dst: "/etc/ssl/certs/ISRG_Root_X1.pem"
 
-src: "k_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Certum_Trusted_Network_CA.crt"
 dst: "/etc/ssl/certs/48bec511.0"
 
-src: "oot_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Assured_ID_Root_G2.crt"
 dst: "/etc/ssl/certs/9d04f354.0"
 
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA.crt"
 dst: "/etc/ssl/certs/080911ac.0"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/Trustis_FPS_Root_CA.crt"
 dst: "/etc/ssl/certs/Trustis_FPS_Root_CA.pem"
 
-src: "Root.crt"
+src: "/usr/share/ca-certificates/mozilla/Baltimore_CyberTrust_Root.crt"
 dst: "/etc/ssl/certs/653b494a.0"
 
-src: "Class_3.crt"
+src: "/usr/share/ca-certificates/mozilla/T-TeleSec_GlobalRoot_Class_3.crt"
 dst: "/etc/ssl/certs/5443e9e3.0"
 
-src: "_Research_Institutions_ECC_RootCA_2015.crt"
+src: "/usr/share/ca-certificates/mozilla/Hellenic_Academic_and_Research_Institutions_ECC_RootCA_2015.crt"
 dst: "/etc/ssl/certs/7719f463.0"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/Go_Daddy_Class_2_CA.crt"
 dst: "/etc/ssl/certs/Go_Daddy_Class_2_CA.pem"
 
-src: "acion_Firmaprofesional_CIF_A62634068.crt"
+src: "/usr/share/ca-certificates/mozilla/Autoridad_de_Certificacion_Firmaprofesional_CIF_A62634068.crt"
 dst: "/etc/ssl/certs/3bde41ac.0"
 
-src: "cation_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/USERTrust_RSA_Certification_Authority.crt"
 dst: "/etc/ssl/certs/fc5a8f99.0"
 
+src: "/usr/share/ca-certificates/mozilla/CA_Disig_Root_R2.crt"
 dst: "/etc/ssl/certs/CA_Disig_Root_R2.pem"
 
-src: "on_Root.crt"
+src: "/usr/share/ca-certificates/mozilla/UCA_Extended_Validation_Root.crt"
 dst: "/etc/ssl/certs/UCA_Extended_Validation_Root.pem"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/TWCA_Global_Root_CA.crt"
 dst: "/etc/ssl/certs/TWCA_Global_Root_CA.pem"
 
-src: "t"
+src: "/usr/share/ca-certificates/mozilla/UCA_Global_G2_Root.crt"
 dst: "/etc/ssl/certs/UCA_Global_G2_Root.pem"
 
-src: "_EV_Root_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Staat_der_Nederlanden_EV_Root_CA.crt"
 dst: "/etc/ssl/certs/03179a64.0"
 
+src: "/usr/share/ca-certificates/mozilla/Secure_Global_CA.crt"
 dst: "/etc/ssl/certs/b66938e9.0"
 
-src: "_Root_CA_-_G3.crt"
+src: "/usr/share/ca-certificates/mozilla/Staat_der_Nederlanden_Root_CA_-_G3.crt"
 dst: "/etc/ssl/certs/5a4d6896.0"
 
-src: "crt"
+src: "/usr/share/ca-certificates/mozilla/XRamp_Global_CA_Root.crt"
 dst: "/etc/ssl/certs/XRamp_Global_CA_Root.pem"
 
-src: "k_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Certum_Trusted_Network_CA.crt"
 dst: "/etc/ssl/certs/Certum_Trusted_Network_CA.pem"
 
+src: "/usr/share/ca-certificates/mozilla/Certigna_Root_CA.crt"
 dst: "/etc/ssl/certs/f51bb24c.0"
 
-src: "_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/E-Tugra_Certification_Authority.crt"
 dst: "/etc/ssl/certs/E-Tugra_Certification_Authority.pem"
 
-src: "CC.crt"
+src: "/usr/share/ca-certificates/mozilla/AffirmTrust_Premium_ECC.crt"
 dst: "/etc/ssl/certs/AffirmTrust_Premium_ECC.pem"
 
-src: ".crt"
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA_1_G3.crt"
 dst: "/etc/ssl/certs/749e9e03.0"
 
-src: "oot.crt"
+src: "/usr/share/ca-certificates/mozilla/Comodo_AAA_Services_root.crt"
 dst: "/etc/ssl/certs/Comodo_AAA_Services_root.pem"
 
+src: "/usr/share/ca-certificates/mozilla/GTS_Root_R3.crt"
 dst: "/etc/ssl/certs/0a775a30.0"
 
-src: "g.crt"
+src: "/usr/share/ca-certificates/mozilla/AffirmTrust_Networking.crt"
 dst: "/etc/ssl/certs/93bc0acc.0"
 
+src: "/usr/share/ca-certificates/mozilla/SZAFIR_ROOT_CA2.crt"
 dst: "/etc/ssl/certs/fe8a2cd8.0"
 
-src: "t.crt"
+src: "/usr/share/ca-certificates/mozilla/Cybertrust_Global_Root.crt"
 dst: "/etc/ssl/certs/Cybertrust_Global_Root.pem"
 
-src: "R2.crt"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_Root_CA_-_R2.crt"
 dst: "/etc/ssl/certs/GlobalSign_Root_CA_-_R2.pem"
 
-src: "oot_G3.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Assured_ID_Root_G3.crt"
 dst: "/etc/ssl/certs/7f3d5d1d.0"
 
-src: "oot.crt"
+src: "/usr/share/ca-certificates/mozilla/Comodo_AAA_Services_root.crt"
 dst: "/etc/ssl/certs/ee64a828.0"
 
-src: "Class_3.crt"
+src: "/usr/share/ca-certificates/mozilla/T-TeleSec_GlobalRoot_Class_3.crt"
 dst: "/etc/ssl/certs/T-TeleSec_GlobalRoot_Class_3.pem"
 
-src: "t"
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA_2.crt"
 dst: "/etc/ssl/certs/d7e8dc79.0"
 
-src: "ion_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/COMODO_ECC_Certification_Authority.crt"
 dst: "/etc/ssl/certs/COMODO_ECC_Certification_Authority.pem"
 
-src: "ation_Authority_RSA.crt"
+src: "/usr/share/ca-certificates/mozilla/SSL.com_Root_Certification_Authority_RSA.crt"
 dst: "/etc/ssl/certs/6fa5da56.0"
 
+src: "/usr/share/ca-certificates/mozilla/Izenpe.com.crt"
 dst: "/etc/ssl/certs/Izenpe.com.pem"
 
-src: "crt"
+src: "/usr/share/ca-certificates/mozilla/XRamp_Global_CA_Root.crt"
 dst: "/etc/ssl/certs/706f604c.0"
 
-src: "_Research_Institutions_RootCA_2015.crt"
+src: "/usr/share/ca-certificates/mozilla/Hellenic_Academic_and_Research_Institutions_RootCA_2015.crt"
 dst: "/etc/ssl/certs/32888f65.0"
 
+src: "/usr/share/ca-certificates/mozilla/GTS_Root_R1.crt"
 dst: "/etc/ssl/certs/GTS_Root_R1.pem"
 
-src: "A.crt"
+src: "/usr/share/ca-certificates/mozilla/Sonera_Class_2_Root_CA.crt"
 dst: "/etc/ssl/certs/Sonera_Class_2_Root_CA.pem"
 
-src: "CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Buypass_Class_3_Root_CA.crt"
 dst: "/etc/ssl/certs/e8de2f56.0"
 
-src: "C3.crt"
+src: "/usr/share/ca-certificates/mozilla/emSign_ECC_Root_CA_-_C3.crt"
 dst: "/etc/ssl/certs/emSign_ECC_Root_CA_-_C3.pem"
 
-src: "rtificate_Authority_2017.crt"
+src: "/usr/share/ca-certificates/mozilla/Microsoft_RSA_Root_Certificate_Authority_2017.crt"
 dst: "/etc/ssl/certs/bf53fb88.0"
 
-src: "t_CA_2009.crt"
+src: "/usr/share/ca-certificates/mozilla/Microsec_e-Szigno_Root_CA_2009.crt"
 dst: "/etc/ssl/certs/Microsec_e-Szigno_Root_CA_2009.pem"
 
+src: "/usr/share/ca-certificates/mozilla/certSIGN_ROOT_CA.crt"
 dst: "/etc/ssl/certs/8d86cdd1.0"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/certSIGN_Root_CA_G2.crt"
 dst: "/etc/ssl/certs/5f618aec.0"
 
-src: "Gold=_F\305\221tan\303\272s\303\255tv\303\241ny.crt"
+src: "/usr/share/ca-certificates/mozilla/NetLock_Arany_=Class_Gold=_F\305\221tan\303\272s\303\255tv\303\241ny.crt"
 dst: "/etc/ssl/certs/988a38cb.0"
 
+src: "/usr/share/ca-certificates/mozilla/ACCVRAIZ1.crt"
 dst: "/etc/ssl/certs/a94d09e5.0"
 
-src: "or_Root_CA_1.crt"
+src: "/usr/share/ca-certificates/mozilla/IdenTrust_Public_Sector_Root_CA_1.crt"
 dst: "/etc/ssl/certs/IdenTrust_Public_Sector_Root_CA_1.pem"
 
-src: "ion_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/COMODO_ECC_Certification_Authority.crt"
 dst: "/etc/ssl/certs/eed8c118.0"
 
-src: "CA.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Global_Root_CA.crt"
 dst: "/etc/ssl/certs/DigiCert_Global_Root_CA.pem"
 
-src: "_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/E-Tugra_Certification_Authority.crt"
 dst: "/etc/ssl/certs/5273a94c.0"
 
+src: "/usr/share/ca-certificates/mozilla/Amazon_Root_CA_4.crt"
 dst: "/etc/ssl/certs/Amazon_Root_CA_4.pem"
 
-src: "Root_GC_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/OISTE_WISeKey_Global_Root_GC_CA.crt"
 dst: "/etc/ssl/certs/773e07ad.0"
 
+src: "/usr/share/ca-certificates/mozilla/ISRG_Root_X1.crt"
 dst: "/etc/ssl/certs/4042bcee.0"
 
-src: "on_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/ePKI_Root_Certification_Authority.crt"
 dst: "/etc/ssl/certs/ePKI_Root_Certification_Authority.pem"
 
-src: "ce_EV_Root_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_High_Assurance_EV_Root_CA.crt"
 dst: "/etc/ssl/certs/244b5494.0"
 
-src: "R3.crt"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_Root_CA_-_R3.crt"
 dst: "/etc/ssl/certs/062cdee6.0"
 
-src: "CC.crt"
+src: "/usr/share/ca-certificates/mozilla/AffirmTrust_Premium_ECC.crt"
 dst: "/etc/ssl/certs/9c8dfbd4.0"
 
-src: ".crt"
+src: "/usr/share/ca-certificates/mozilla/Atos_TrustedRoot_2011.crt"
 dst: "/etc/ssl/certs/e36a6752.0"
 
-src: ".crt"
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA_2_G3.crt"
 dst: "/etc/ssl/certs/QuoVadis_Root_CA_2_G3.pem"
 
-src: "P384_Certification_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/Trustwave_Global_ECC_P384_Certification_Authority.crt"
 dst: "/etc/ssl/certs/d887a5bb.0"
 
-src: "acion_Firmaprofesional_CIF_A62634068.crt"
+src: "/usr/share/ca-certificates/mozilla/Autoridad_de_Certificacion_Firmaprofesional_CIF_A62634068.crt"
 dst: "/etc/ssl/certs/Autoridad_de_Certificacion_Firmaprofesional_CIF_A62634068.pem"
 
+src: "/usr/share/ca-certificates/mozilla/Amazon_Root_CA_3.crt"
 dst: "/etc/ssl/certs/Amazon_Root_CA_3.pem"
 
-src: "_1.crt"
+src: "/usr/share/ca-certificates/mozilla/Hongkong_Post_Root_CA_1.crt"
 dst: "/etc/ssl/certs/3e45d192.0"
 
+src: "/usr/share/ca-certificates/mozilla/Certigna.crt"
 dst: "/etc/ssl/certs/e113c810.0"
 
-src: "fication_Authority_ECC.crt"
+src: "/usr/share/ca-certificates/mozilla/SSL.com_EV_Root_Certification_Authority_ECC.crt"
 dst: "/etc/ssl/certs/f0c70a8d.0"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/SecureSign_RootCA11.crt"
 dst: "/etc/ssl/certs/18856ac4.0"
 
+src: "/usr/share/ca-certificates/mozilla/CA_Disig_Root_R2.crt"
 dst: "/etc/ssl/certs/2ae6433e.0"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/emSign_Root_CA_-_G1.crt"
 dst: "/etc/ssl/certs/emSign_Root_CA_-_G1.pem"
 
-src: "ation_Authority_-_G4.crt"
+src: "/usr/share/ca-certificates/mozilla/Entrust_Root_Certification_Authority_-_G4.crt"
 dst: "/etc/ssl/certs/Entrust_Root_Certification_Authority_-_G4.pem"
 
-src: "C3.crt"
+src: "/usr/share/ca-certificates/mozilla/emSign_ECC_Root_CA_-_C3.crt"
 dst: "/etc/ssl/certs/4b718d9b.0"
 
+src: "/usr/share/ca-certificates/mozilla/Amazon_Root_CA_1.crt"
 dst: "/etc/ssl/certs/Amazon_Root_CA_1.pem"
 
-src: "_3.crt"
+src: "/usr/share/ca-certificates/mozilla/Hongkong_Post_Root_CA_3.crt"
 dst: "/etc/ssl/certs/68dd7389.0"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/AffirmTrust_Premium.crt"
 dst: "/etc/ssl/certs/AffirmTrust_Premium.pem"
 
-src: "Root_GC_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/OISTE_WISeKey_Global_Root_GC_CA.crt"
 dst: "/etc/ssl/certs/OISTE_WISeKey_Global_Root_GC_CA.pem"
 
+src: "/usr/share/ca-certificates/mozilla/Secure_Global_CA.crt"
 dst: "/etc/ssl/certs/Secure_Global_CA.pem"
 
-src: "P384_Certification_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/Trustwave_Global_ECC_P384_Certification_Authority.crt"
 dst: "/etc/ssl/certs/Trustwave_Global_ECC_P384_Certification_Authority.pem"
 
+src: "/usr/share/ca-certificates/mozilla/Amazon_Root_CA_2.crt"
 dst: "/etc/ssl/certs/Amazon_Root_CA_2.pem"
 
-src: "crt"
+src: "/usr/share/ca-certificates/mozilla/Starfield_Class_2_CA.crt"
 dst: "/etc/ssl/certs/f387163d.0"
 
-src: "_Research_Institutions_RootCA_2011.crt"
+src: "/usr/share/ca-certificates/mozilla/Hellenic_Academic_and_Research_Institutions_RootCA_2011.crt"
 dst: "/etc/ssl/certs/1636090b.0"
 
-src: "_G4.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Trusted_Root_G4.crt"
 dst: "/etc/ssl/certs/DigiCert_Trusted_Root_G4.pem"
 
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA.crt"
 dst: "/etc/ssl/certs/QuoVadis_Root_CA.pem"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/SecureSign_RootCA11.crt"
 dst: "/etc/ssl/certs/SecureSign_RootCA11.pem"
 
-src: "cate_Authority_-_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/Go_Daddy_Root_Certificate_Authority_-_G2.crt"
 dst: "/etc/ssl/certs/cbf06781.0"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/certSIGN_Root_CA_G2.crt"
 dst: "/etc/ssl/certs/certSIGN_Root_CA_G2.pem"
 
-src: "2.crt"
+src: "/usr/share/ca-certificates/mozilla/SwissSign_Gold_CA_-_G2.crt"
 dst: "/etc/ssl/certs/SwissSign_Gold_CA_-_G2.pem"
 
-src: "CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Buypass_Class_3_Root_CA.crt"
 dst: "/etc/ssl/certs/Buypass_Class_3_Root_CA.pem"
 
+src: "/usr/share/ca-certificates/mozilla/EC-ACC.crt"
 dst: "/etc/ssl/certs/EC-ACC.pem"
 
-src: "ification_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/Trustwave_Global_Certification_Authority.crt"
 dst: "/etc/ssl/certs/f249de83.0"
 
-src: "R3.crt"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_Root_CA_-_R3.crt"
 dst: "/etc/ssl/certs/GlobalSign_Root_CA_-_R3.pem"
 
-src: "t"
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA_3.crt"
 dst: "/etc/ssl/certs/76faf6c0.0"
 
-src: ".crt"
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA_3_G3.crt"
 dst: "/etc/ssl/certs/e18bfb83.0"
 
+src: "/usr/share/ca-certificates/mozilla/GTS_Root_R2.crt"
 dst: "/etc/ssl/certs/GTS_Root_R2.pem"
 
-src: "_Research_Institutions_ECC_RootCA_2015.crt"
+src: "/usr/share/ca-certificates/mozilla/Hellenic_Academic_and_Research_Institutions_ECC_RootCA_2015.crt"
 dst: "/etc/ssl/certs/Hellenic_Academic_and_Research_Institutions_ECC_RootCA_2015.pem"
 
-src: "on_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/ePKI_Root_Certification_Authority.crt"
 dst: "/etc/ssl/certs/ca6e4ad9.0"
 
-src: "ot_Certificate_Authority_-_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/Starfield_Services_Root_Certificate_Authority_-_G2.crt"
 dst: "/etc/ssl/certs/09789157.0"
 
-src: "oot_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Assured_ID_Root_CA.crt"
 dst: "/etc/ssl/certs/b1159c4c.0"
 
-src: "_Root_CA_-_G3.crt"
+src: "/usr/share/ca-certificates/mozilla/Staat_der_Nederlanden_Root_CA_-_G3.crt"
 dst: "/etc/ssl/certs/Staat_der_Nederlanden_Root_CA_-_G3.pem"
 
-src: "G2.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Global_Root_G2.crt"
 dst: "/etc/ssl/certs/DigiCert_Global_Root_G2.pem"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/AffirmTrust_Premium.crt"
 dst: "/etc/ssl/certs/b727005e.0"
 
-src: "ok_Sertifikasi_-_Surum_1.crt"
+src: "/usr/share/ca-certificates/mozilla/TUBITAK_Kamu_SM_SSL_Kok_Sertifikasi_-_Surum_1.crt"
 dst: "/etc/ssl/certs/TUBITAK_Kamu_SM_SSL_Kok_Sertifikasi_-_Surum_1.pem"
 
-src: "rtificate_Authority_2017.crt"
+src: "/usr/share/ca-certificates/mozilla/Microsoft_ECC_Root_Certificate_Authority_2017.crt"
 dst: "/etc/ssl/certs/Microsoft_ECC_Root_Certificate_Authority_2017.pem"
 
-src: "ation_Authority_ECC.crt"
+src: "/usr/share/ca-certificates/mozilla/SSL.com_Root_Certification_Authority_ECC.crt"
 dst: "/etc/ssl/certs/SSL.com_Root_Certification_Authority_ECC.pem"
 
-src: "t"
+src: "/usr/share/ca-certificates/mozilla/UCA_Global_G2_Root.crt"
 dst: "/etc/ssl/certs/c01eb047.0"
 
-src: "rtificate_Authority_2017.crt"
+src: "/usr/share/ca-certificates/mozilla/Microsoft_ECC_Root_Certificate_Authority_2017.crt"
 dst: "/etc/ssl/certs/8d89cda1.0"
 
-src: ".crt"
+src: "/usr/share/ca-certificates/mozilla/QuoVadis_Root_CA_2_G3.crt"
 dst: "/etc/ssl/certs/064e0aa9.0"
 
-src: "P256_Certification_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/Trustwave_Global_ECC_P256_Certification_Authority.crt"
 dst: "/etc/ssl/certs/Trustwave_Global_ECC_P256_Certification_Authority.pem"
 
-src: "ification_Authority_-_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/GeoTrust_Primary_Certification_Authority_-_G2.crt"
 dst: "/etc/ssl/certs/116bf586.0"
 
-src: "_Research_Institutions_RootCA_2011.crt"
+src: "/usr/share/ca-certificates/mozilla/Hellenic_Academic_and_Research_Institutions_RootCA_2011.crt"
 dst: "/etc/ssl/certs/Hellenic_Academic_and_Research_Institutions_RootCA_2011.pem"
 
-src: "ot_Certification_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/VeriSign_Universal_Root_Certification_Authority.crt"
 dst: "/etc/ssl/certs/VeriSign_Universal_Root_Certification_Authority.pem"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/emSign_Root_CA_-_G1.crt"
 dst: "/etc/ssl/certs/2923b3f9.0"
 
-src: "Root_CA_1.crt"
+src: "/usr/share/ca-certificates/mozilla/IdenTrust_Commercial_Root_CA_1.crt"
 dst: "/etc/ssl/certs/IdenTrust_Commercial_Root_CA_1.pem"
 
-src: "Root_GB_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/OISTE_WISeKey_Global_Root_GB_CA.crt"
 dst: "/etc/ssl/certs/OISTE_WISeKey_Global_Root_GB_CA.pem"
 
+src: "/usr/share/ca-certificates/mozilla/Amazon_Root_CA_4.crt"
 dst: "/etc/ssl/certs/de6d66f3.0"
 
+src: "/usr/share/ca-certificates/mozilla/GTS_Root_R1.crt"
 dst: "/etc/ssl/certs/1001acf7.0"
 
-src: "t.crt"
+src: "/usr/share/ca-certificates/mozilla/Cybertrust_Global_Root.crt"
 dst: "/etc/ssl/certs/76cb8f92.0"
 
-src: "ot_-_2008.crt"
+src: "/usr/share/ca-certificates/mozilla/Global_Chambersign_Root_-_2008.crt"
 dst: "/etc/ssl/certs/Global_Chambersign_Root_-_2008.pem"
 
-src: "048_Secure_Server_CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Entrust.net_Premium_2048_Secure_Server_CA.crt"
 dst: "/etc/ssl/certs/aee5f10d.0"
 
-src: "rt"
+src: "/usr/share/ca-certificates/mozilla/Go_Daddy_Class_2_CA.crt"
 dst: "/etc/ssl/certs/f081611a.0"
 
-src: "_1.crt"
+src: "/usr/share/ca-certificates/mozilla/Hongkong_Post_Root_CA_1.crt"
 dst: "/etc/ssl/certs/Hongkong_Post_Root_CA_1.pem"
 
-src: "tification_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/NAVER_Global_Root_Certification_Authority.crt"
 dst: "/etc/ssl/certs/NAVER_Global_Root_Certification_Authority.pem"
 
-src: "cation_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/USERTrust_ECC_Certification_Authority.crt"
 dst: "/etc/ssl/certs/USERTrust_ECC_Certification_Authority.pem"
 
+src: "/usr/share/ca-certificates/mozilla/Izenpe.com.crt"
 dst: "/etc/ssl/certs/cc450945.0"
 
-src: "ation_Authority_-_G4.crt"
+src: "/usr/share/ca-certificates/mozilla/Entrust_Root_Certification_Authority_-_G4.crt"
 dst: "/etc/ssl/certs/5e98733a.0"
 
-src: "Root_CA_1.crt"
+src: "/usr/share/ca-certificates/mozilla/IdenTrust_Commercial_Root_CA_1.crt"
 dst: "/etc/ssl/certs/ef954a4e.0"
 
+src: "/usr/share/ca-certificates/mozilla/SecureTrust_CA.crt"
 dst: "/etc/ssl/certs/f39fc864.0"
 
-src: "ot_Certificate_Authority_-_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/Starfield_Services_Root_Certificate_Authority_-_G2.crt"
 dst: "/etc/ssl/certs/Starfield_Services_Root_Certificate_Authority_-_G2.pem"
 
-src: "ation_Authority_-_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/Entrust_Root_Certification_Authority_-_G2.crt"
 dst: "/etc/ssl/certs/02265526.0"
 
-src: "ation_Authority_-_EC1.crt"
+src: "/usr/share/ca-certificates/mozilla/Entrust_Root_Certification_Authority_-_EC1.crt"
 dst: "/etc/ssl/certs/106f3e4d.0"
 
-src: "_G2.crt"
+src: "/usr/share/ca-certificates/mozilla/SwissSign_Silver_CA_-_G2.crt"
 dst: "/etc/ssl/certs/SwissSign_Silver_CA_-_G2.pem"
 
-src: "_Research_Institutions_RootCA_2015.crt"
+src: "/usr/share/ca-certificates/mozilla/Hellenic_Academic_and_Research_Institutions_RootCA_2015.crt"
 dst: "/etc/ssl/certs/Hellenic_Academic_and_Research_Institutions_RootCA_2015.pem"
 
+src: "/usr/share/ca-certificates/mozilla/SecureTrust_CA.crt"
 dst: "/etc/ssl/certs/SecureTrust_CA.pem"
 
-src: "G3.crt"
+src: "/usr/share/ca-certificates/mozilla/emSign_ECC_Root_CA_-_G3.crt"
 dst: "/etc/ssl/certs/14bc7599.0"
 
-src: "fication_Authority_RSA_R2.crt"
+src: "/usr/share/ca-certificates/mozilla/SSL.com_EV_Root_Certification_Authority_RSA_R2.crt"
 dst: "/etc/ssl/certs/06dc52d5.0"
 
-src: "cation_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/USERTrust_RSA_Certification_Authority.crt"
 dst: "/etc/ssl/certs/USERTrust_RSA_Certification_Authority.pem"
 
-src: "on_Root.crt"
+src: "/usr/share/ca-certificates/mozilla/UCA_Extended_Validation_Root.crt"
 dst: "/etc/ssl/certs/0f5dc4f3.0"
 
-src: "CA.crt"
+src: "/usr/share/ca-certificates/mozilla/Buypass_Class_2_Root_CA.crt"
 dst: "/etc/ssl/certs/Buypass_Class_2_Root_CA.pem"
 
+src: "/usr/share/ca-certificates/mozilla/Certigna_Root_CA.crt"
 dst: "/etc/ssl/certs/Certigna_Root_CA.pem"
 
-src: "A_-_R4.crt"
+src: "/usr/share/ca-certificates/mozilla/GlobalSign_ECC_Root_CA_-_R4.crt"
 dst: "/etc/ssl/certs/b0e59380.0"
 
-src: "ion_Authority.crt"
+src: "/usr/share/ca-certificates/mozilla/COMODO_RSA_Certification_Authority.crt"
 dst: "/etc/ssl/certs/d6325660.0"
 
-src: "Root_-_2008.crt"
+src: "/usr/share/ca-certificates/mozilla/Chambers_of_Commerce_Root_-_2008.crt"
 dst: "/etc/ssl/certs/Chambers_of_Commerce_Root_-_2008.pem"
 
-src: "G3.crt"
+src: "/usr/share/ca-certificates/mozilla/DigiCert_Global_Root_G3.crt"
 dst: "/etc/ssl/certs/dd8e9d41.0"
 
+src: "/usr/share/ca-certificates/mozilla/AC_RAIZ_FNMT-RCM.crt"
 dst: "/etc/ssl/certs/AC_RAIZ_FNMT-RCM.pem"
 
-src: "2.crt"
+src: "/usr/share/ca-certificates/mozilla/SwissSign_Gold_CA_-_G2.crt"
 dst: "/etc/ssl/certs/4f316efb.0"
 
-src: "T.crt"
+src: "/usr/share/ca-certificates/mozilla/GDCA_TrustAUTH_R5_ROOT.crt"
 dst: "/etc/ssl/certs/GDCA_TrustAUTH_R5_ROOT.pem"
 
-src: "ok_Sertifikasi_-_Surum_1.crt"
+src: "/usr/share/ca-certificates/mozilla/TUBITAK_Kamu_SM_SSL_Kok_Sertifikasi_-_Surum_1.crt"
 dst: "/etc/ssl/certs/ff34af3f.0"
 
+src: "/usr/bin/pinentry-curses"
 dst: "/etc/alternatives/pinentry"
 
+src: "/usr/bin/ssh"
 dst: "/etc/alternatives/rlogin"
 
+src: "/usr/bin/c89-gcc"
 dst: "/etc/alternatives/c89"
 
+src: "/usr/bin/xz"
 dst: "/etc/alternatives/lzcat"
 
+src: "/usr/bin/aarch64-linux-gnu-gcc-10"
 dst: "/etc/alternatives/cc"
 
+src: "/usr/bin/c99-gcc"
 dst: "/etc/alternatives/c99"
 
+src: "/usr/bin/w.procps"
 dst: "/etc/alternatives/w"
 
+src: "/usr/bin/mawk"
 dst: "/etc/alternatives/awk"
 
+src: "/usr/bin/xzdiff"
 dst: "/etc/alternatives/lzcmp"
 
+src: "/usr/bin/scp"
 dst: "/etc/alternatives/rcp"
 
+src: "/usr/bin/xzmore"
 dst: "/etc/alternatives/lzmore"
 
+src: "/usr/bin/xzless"
 dst: "/etc/alternatives/lzless"
 
+src: "/usr/sbin/rmt-tar"
 dst: "/etc/alternatives/rmt"
 
+src: "/usr/bin/aarch64-linux-gnu-g++-10"
 dst: "/etc/alternatives/c++"
 
+src: "/usr/bin/fakeroot-sysv"
 dst: "/etc/alternatives/fakeroot"
 
+src: "/usr/bin/xzdiff"
 dst: "/etc/alternatives/lzdiff"
 
+src: "/usr/bin/ssh"
 dst: "/etc/alternatives/rsh"
 
+src: "/usr/bin/xzgrep"
 dst: "/etc/alternatives/lzegrep"
 
+src: "/usr/bin/mawk"
 dst: "/etc/alternatives/nawk"
 
+src: "/usr/bin/aarch64-linux-gnu-cpp-10"
 dst: "/etc/alternatives/cpp"
 
+src: "/usr/bin/xz"
 dst: "/etc/alternatives/unlzma"
 
+src: "/usr/bin/more"
 dst: "/etc/alternatives/pager"
 
+src: "/usr/bin/xz"
 dst: "/etc/alternatives/lzma"
 
+src: "/usr/bin/xzgrep"
 dst: "/etc/alternatives/lzfgrep"
 
+src: "/usr/bin/xzgrep"
 dst: "/etc/alternatives/lzgrep"
 
 src: "/etc/init.d/procps"
 dst: "/etc/rcS.d/S01procps"
 
+src: "/usr/lib/systemd/user/gpg-agent-ssh.socket"
 dst: "/etc/systemd/user/sockets.target.wants/gpg-agent-ssh.socket"
 
+src: "/usr/lib/systemd/user/gpg-agent-browser.socket"
 dst: "/etc/systemd/user/sockets.target.wants/gpg-agent-browser.socket"
 
+src: "/usr/lib/systemd/user/dirmngr.socket"
 dst: "/etc/systemd/user/sockets.target.wants/dirmngr.socket"
 
+src: "/usr/lib/systemd/user/gpg-agent-extra.socket"
 dst: "/etc/systemd/user/sockets.target.wants/gpg-agent-extra.socket"
 
+src: "/usr/lib/systemd/user/gpg-agent.socket"
 dst: "/etc/systemd/user/sockets.target.wants/gpg-agent.socket"
 
+src: "/usr/lib/systemd/system/e2scrub_reap.service"
 dst: "/etc/systemd/system/default.target.wants/e2scrub_reap.service"
 
+src: "/usr/lib/systemd/system/e2scrub_all.timer"
 dst: "/etc/systemd/system/timers.target.wants/e2scrub_all.timer"
 
+src: "/usr/lib/systemd/system/apt-daily-upgrade.timer"
 dst: "/etc/systemd/system/timers.target.wants/apt-daily-upgrade.timer"
 
+src: "/usr/lib/systemd/system/apt-daily.timer"
 dst: "/etc/systemd/system/timers.target.wants/apt-daily.timer"
 
+src: "/usr/lib/systemd/system/fstrim.timer"
 dst: "/etc/systemd/system/timers.target.wants/fstrim.timer"
 
+src: "/usr/lib/systemd/system/motd-news.timer"
 dst: "/etc/systemd/system/timers.target.wants/motd-news.timer"
 
 src: "/usr/lib/os-release"
@@ -807,8 +890,10 @@ dst: "/etc/os-release"
 src: "/usr/lib"
 dst: "/lib"
 
+src: "/run"
 dst: "/var/run"
 
+src: "/run/lock"
 dst: "/var/lock"
 
 src: "/var/mail"
@@ -1243,11 +1328,13 @@ dst: "/usr/lib/aarch64-linux-gnu/libtasn1.so.6"
 src: "/usr/lib/aarch64-linux-gnu/libnss_compat-2.31.so"
 dst: "/usr/lib/aarch64-linux-gnu/libnss_compat.so.2"
 
+src: "/usr/lib/aarch64-linux-gnu/libm-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libm.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libz.so.1.2.11"
 dst: "/usr/lib/aarch64-linux-gnu/libz.so.1"
 
+src: "/usr/lib/aarch64-linux-gnu/libnss_dns-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libnss_dns.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libsmartcols.so.1.1.0"
@@ -1280,6 +1367,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libXau.so.6"
 src: "/usr/lib/aarch64-linux-gnu/libuuid.so.1.3.0"
 dst: "/usr/lib/aarch64-linux-gnu/libuuid.so.1"
 
+src: "/usr/lib/aarch64-linux-gnu/libpthread-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libpthread.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libXmuu.so.1.0.0"
@@ -1291,6 +1379,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libpam_misc.so.0"
 src: "/usr/lib/aarch64-linux-gnu/libanl-2.31.so"
 dst: "/usr/lib/aarch64-linux-gnu/libanl.so.1"
 
+src: "/usr/lib/aarch64-linux-gnu/libnss_files-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libnss_files.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libmenu.so.6.2"
@@ -1314,6 +1403,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libwind.so.0"
 src: "/usr/lib/aarch64-linux-gnu/libp11-kit.so.0.3.0"
 dst: "/usr/lib/aarch64-linux-gnu/libp11-kit.so.0"
 
+src: "/usr/lib/aarch64-linux-gnu/libexpat.so.1.6.11"
 dst: "/usr/lib/aarch64-linux-gnu/libexpat.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libXdmcp.so.6.0.0"
@@ -1328,6 +1418,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libhistory.so.8"
 src: "/usr/lib/aarch64-linux-gnu/libformw.so.6.2"
 dst: "/usr/lib/aarch64-linux-gnu/libformw.so.6"
 
+src: "/usr/lib/aarch64-linux-gnu/libthread_db-1.0.so"
 dst: "/usr/lib/aarch64-linux-gnu/libthread_db.so"
 
 src: "/usr/lib/aarch64-linux-gnu/sasl2/libntlm.so.2.0.25"
@@ -1396,6 +1487,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libnsl.so.1"
 src: "/usr/lib/aarch64-linux-gnu/libbrotlienc.so.1.0.7"
 dst: "/usr/lib/aarch64-linux-gnu/libbrotlienc.so.1"
 
+src: "/usr/lib/aarch64-linux-gnu/libnss_nisplus.so.2"
 dst: "/usr/lib/aarch64-linux-gnu/libnss_nisplus.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libkrb5support.so.0.1"
@@ -1464,11 +1556,13 @@ dst: "/usr/lib/aarch64-linux-gnu/libblkid.so.1"
 src: "/usr/lib/aarch64-linux-gnu/libkrb5.so.3.3"
 dst: "/usr/lib/aarch64-linux-gnu/libkrb5.so.3"
 
+src: "/usr/lib/aarch64-linux-gnu/libdl-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libdl.so"
 
 src: "/usr/lib/aarch64-linux-gnu/ld-2.31.so"
 dst: "/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1"
 
+src: "/usr/lib/aarch64-linux-gnu/libanl-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libanl.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libcbor.so.0.6.0"
@@ -1480,6 +1574,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libmagic.so.1"
 src: "/usr/lib/aarch64-linux-gnu/libpamc.so.0.82.1"
 dst: "/usr/lib/aarch64-linux-gnu/libpamc.so.0"
 
+src: "/usr/lib/aarch64-linux-gnu/librt-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/librt.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libksba.so.8.11.6"
@@ -1530,6 +1625,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libtinfo.so.6"
 src: "/usr/lib/aarch64-linux-gnu/libstdc++.so.6.0.28"
 dst: "/usr/lib/aarch64-linux-gnu/libstdc++.so.6"
 
+src: "/usr/lib/aarch64-linux-gnu/libresolv-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libresolv.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libhogweed.so.5.0"
@@ -1559,6 +1655,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libX11.so.6"
 src: "/usr/lib/aarch64-linux-gnu/libcrypt.so.1.1.0"
 dst: "/usr/lib/aarch64-linux-gnu/libcrypt.so.1"
 
+src: "/usr/lib/aarch64-linux-gnu/libnss_compat-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libnss_compat.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libform.so.6.2"
@@ -1591,6 +1688,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libm.so.6"
 src: "/usr/lib/aarch64-linux-gnu/libisl.so.22.0.1"
 dst: "/usr/lib/aarch64-linux-gnu/libisl.so.22"
 
+src: "/usr/lib/aarch64-linux-gnu/libutil-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libutil.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libgdbm_compat.so.4.0.0"
@@ -1599,6 +1697,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libgdbm_compat.so.4"
 src: "/usr/lib/aarch64-linux-gnu/libpthread-2.31.so"
 dst: "/usr/lib/aarch64-linux-gnu/libpthread.so.0"
 
+src: "/usr/lib/aarch64-linux-gnu/libz.so.1.2.11"
 dst: "/usr/lib/aarch64-linux-gnu/libz.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libdl-2.31.so"
@@ -1655,8 +1754,10 @@ dst: "/usr/lib/aarch64-linux-gnu/libncurses.so.6"
 src: "/usr/lib/aarch64-linux-gnu/libgcrypt.so.20.2.5"
 dst: "/usr/lib/aarch64-linux-gnu/libgcrypt.so.20"
 
+src: "/usr/lib/aarch64-linux-gnu/libcrypt.so.1.1.0"
 dst: "/usr/lib/aarch64-linux-gnu/libcrypt.so"
 
+src: "/usr/lib/aarch64-linux-gnu/libnss_nis.so.2"
 dst: "/usr/lib/aarch64-linux-gnu/libnss_nis.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libsasl2.so.2.0.25"
@@ -1677,6 +1778,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libroken.so.18"
 src: "/usr/lib/aarch64-linux-gnu/libheimbase.so.1.0.0"
 dst: "/usr/lib/aarch64-linux-gnu/libheimbase.so.1"
 
+src: "/usr/lib/aarch64-linux-gnu/libBrokenLocale-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libBrokenLocale.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libffi.so.7.1.0"
@@ -1709,6 +1811,7 @@ dst: "/usr/lib/aarch64-linux-gnu/libBrokenLocale.so.1"
 src: "/usr/lib/aarch64-linux-gnu/libcurl-gnutls.so.4.6.0"
 dst: "/usr/lib/aarch64-linux-gnu/libcurl-gnutls.so.3"
 
+src: "/usr/lib/aarch64-linux-gnu/libnsl-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libnsl.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libpanelw.so.6.2"
@@ -1723,6 +1826,7 @@ dst: "/usr/lib/aarch64-linux-gnu/perl/cross-config-5.30.0/Config.pm"
 src: "/usr/lib/aarch64-linux-gnu/perl/5.30.0/Config_heavy.pl"
 dst: "/usr/lib/aarch64-linux-gnu/perl/cross-config-5.30.0/Config_heavy.pl"
 
+src: "/usr/lib/aarch64-linux-gnu/libnss_hesiod-2.33.so"
 dst: "/usr/lib/aarch64-linux-gnu/libnss_hesiod.so"
 
 src: "/usr/lib/aarch64-linux-gnu/libext2fs.so.2.4"
@@ -1764,17 +1868,22 @@ dst: "/usr/lib/gnupg2/gpg-protect-tool"
 src: "/usr/lib/ssl/misc/tsget.pl"
 dst: "/usr/lib/ssl/misc/tsget"
 
+src: "/etc/ssl/certs"
 dst: "/usr/lib/ssl/certs"
 
+src: "/etc/ssl/private"
 dst: "/usr/lib/ssl/private"
 
+src: "/etc/ssl/openssl.cnf"
 dst: "/usr/lib/ssl/openssl.cnf"
 
+src: "/usr/bin/aarch64-linux-gnu-cpp-10"
 dst: "/usr/lib/cpp"
 
 src: "/usr/bin/aarch64-linux-gnu-ld.gold"
 dst: "/usr/lib/gold-ld/ld"
 
+src: "/etc/python3.8/sitecustomize.py"
 dst: "/usr/lib/python3.8/sitecustomize.py"
 
 src: "/usr/lib/python3.8/_sysconfigdata__aarch64-linux-gnu.py"
@@ -1861,6 +1970,7 @@ dst: "/usr/sbin/cpgr"
 src: "/usr/sbin/e2fsck"
 dst: "/usr/sbin/fsck.ext2"
 
+src: "/usr/sbin/rmt-tar"
 dst: "/usr/sbin/rmt"
 
 src: "/usr/sbin/mke2fs"
@@ -2322,6 +2432,7 @@ dst: "/usr/share/file/magic.mgc"
 src: "/usr/share/perl/5.30.0"
 dst: "/usr/share/perl/5.30"
 
+src: "/usr/bin/pinentry-curses"
 dst: "/usr/bin/pinentry"
 
 src: "/usr/bin/aarch64-linux-gnu-ar"
@@ -2348,6 +2459,7 @@ dst: "/usr/bin/print"
 src: "/usr/bin/aarch64-linux-gnu-ld.gold"
 dst: "/usr/bin/ld.gold"
 
+src: "/usr/bin/ssh"
 dst: "/usr/bin/rlogin"
 
 src: "/usr/bin/aarch64-linux-gnu-gcov-tool-9"
@@ -2368,6 +2480,7 @@ dst: "/usr/bin/slogin"
 src: "/usr/bin/aarch64-linux-gnu-gcov-9"
 dst: "/usr/bin/aarch64-linux-gnu-gcov"
 
+src: "/usr/bin/c89-gcc"
 dst: "/usr/bin/c89"
 
 src: "/usr/bin/last"
@@ -2379,8 +2492,10 @@ dst: "/usr/bin/md5sum.textutils"
 src: "/usr/bin/lesspipe"
 dst: "/usr/bin/lessfile"
 
+src: "/usr/bin/xz"
 dst: "/usr/bin/lzcat"
 
+src: "/usr/bin/aarch64-linux-gnu-gcc-10"
 dst: "/usr/bin/cc"
 
 src: "/usr/bin/aarch64-linux-gnu-ld.bfd"
@@ -2392,6 +2507,7 @@ dst: "/usr/bin/aarch64-linux-gnu-cpp"
 src: "/usr/bin/aarch64-linux-gnu-gcc-ar-9"
 dst: "/usr/bin/gcc-ar-9"
 
+src: "/usr/bin/c99-gcc"
 dst: "/usr/bin/c99"
 
 src: "/usr/bin/python3.8"
@@ -2409,8 +2525,10 @@ dst: "/usr/bin/pdb3"
 src: "/usr/bin/aarch64-linux-gnu-as"
 dst: "/usr/bin/as"
 
+src: "/usr/bin/w.procps"
 dst: "/usr/bin/w"
 
+src: "/usr/bin/gawk"
 dst: "/usr/bin/awk"
 
 src: "/usr/bin/aarch64-linux-gnu-nm"
@@ -2425,11 +2543,13 @@ dst: "/usr/bin/aarch64-linux-gnu-gcc"
 src: "/usr/bin/bzdiff"
 dst: "/usr/bin/bzcmp"
 
+src: "/usr/bin/xzdiff"
 dst: "/usr/bin/lzcmp"
 
 src: "/usr/bin/aarch64-linux-gnu-gcc-ranlib-9"
 dst: "/usr/bin/gcc-ranlib"
 
+src: "/usr/bin/scp"
 dst: "/usr/bin/rcp"
 
 src: "/usr/bin/run-mailcap"
@@ -2444,13 +2564,16 @@ dst: "/usr/bin/xzcmp"
 src: "/usr/bin/aarch64-linux-gnu-gcc-ranlib-9"
 dst: "/usr/bin/aarch64-linux-gnu-gcc-ranlib"
 
+src: "/usr/bin/xzmore"
 dst: "/usr/bin/lzmore"
 
 src: "/usr/bin/git"
 dst: "/usr/bin/git-upload-pack"
 
+src: "/usr/sbin/killall5"
 dst: "/usr/bin/pidof"
 
+src: "/usr/bin/xzless"
 dst: "/usr/bin/lzless"
 
 src: "/usr/bin/pydoc3.8"
@@ -2462,6 +2585,7 @@ dst: "/usr/bin/ld"
 src: "/usr/bin/aarch64-linux-gnu-ld.gold"
 dst: "/usr/bin/aarch64-linux-gnu-gold"
 
+src: "/usr/bin/aarch64-linux-gnu-g++-10"
 dst: "/usr/bin/c++"
 
 src: "/usr/bin/hostname"
@@ -2470,6 +2594,7 @@ dst: "/usr/bin/nisdomainname"
 src: "/usr/bin/aarch64-linux-gnu-readelf"
 dst: "/usr/bin/readelf"
 
+src: "/usr/bin/fakeroot-sysv"
 dst: "/usr/bin/fakeroot"
 
 src: "/usr/lib/python3.8/pdb.py"
@@ -2502,8 +2627,10 @@ dst: "/usr/bin/aarch64-linux-gnu-g++"
 src: "/usr/bin/aarch64-linux-gnu-gcc-ar-9"
 dst: "/usr/bin/gcc-ar"
 
+src: "/usr/bin/xzdiff"
 dst: "/usr/bin/lzdiff"
 
+src: "/usr/bin/ssh"
 dst: "/usr/bin/rsh"
 
 src: "/usr/bin/aarch64-linux-gnu-gcc-9"
@@ -2539,6 +2666,7 @@ dst: "/usr/bin/objcopy"
 src: "/usr/bin/aarch64-linux-gnu-gcov-9"
 dst: "/usr/bin/gcov-9"
 
+src: "/usr/bin/xzgrep"
 dst: "/usr/bin/lzegrep"
 
 src: "/usr/bin/bzgrep"
@@ -2547,6 +2675,7 @@ dst: "/usr/bin/bzegrep"
 src: "/usr/bin/aarch64-linux-gnu-ranlib"
 dst: "/usr/bin/ranlib"
 
+src: "/usr/bin/gawk"
 dst: "/usr/bin/nawk"
 
 src: "/usr/bin/aarch64-linux-gnu-gcov-dump-9"
@@ -2597,15 +2726,19 @@ dst: "/usr/bin/gcov-dump-9"
 src: "/usr/bin/aarch64-linux-gnu-cpp-9"
 dst: "/usr/bin/cpp"
 
+src: "/usr/bin/xz"
 dst: "/usr/bin/unlzma"
 
+src: "/usr/bin/less"
 dst: "/usr/bin/pager"
 
+src: "/usr/bin/xz"
 dst: "/usr/bin/lzma"
 
 src: "/usr/bin/bzgrep"
 dst: "/usr/bin/bzfgrep"
 
+src: "/usr/bin/xzgrep"
 dst: "/usr/bin/lzfgrep"
 
 src: "/usr/bin/skill"
@@ -2641,4 +2774,5 @@ dst: "/usr/bin/edit"
 src: "/usr/bin/aarch64-linux-gnu-strip"
 dst: "/usr/bin/strip"
 
+src: "/usr/bin/xzgrep"
 dst: "/usr/bin/lzgrep"
