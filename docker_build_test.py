@@ -59,7 +59,8 @@ except Exception: pass
 
 # Generate the symlinks.
 overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+id, shell=True).decode('utf-8')[:-1]
-for symlink in symlinks:
-    run('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)
+for symlink in symlinks: run('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)
 
-# Apply permissions.
+# Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
+run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
+run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
