@@ -1,5 +1,6 @@
 import os
 from random import randint
+from shutil import rmtree
 from subprocess import check_output, run
 import celaut_pb2, gateway_pb2
 
@@ -46,12 +47,17 @@ os.mkdir(fs_dir)
 symlinks = []
 write_fs(fs = fs, dir = fs_dir + '/', symlinks = symlinks)
 
+arch = 'linux/arm64'
+
 open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .\nENTRYPOINT /random/start.py')
-check_output('docker build -t '+id+' '+dir+'/.', shell=True)
+check_output('docker buildx build --platform '+arch+' -t '+id+' '+dir+'/.', shell=True)
+try:
+    rmtree(dir)
+except Exception: pass
 
 # Generate the symlinks.
 overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+id, shell=True).decode('utf-8')[:-1]
 for symlink in symlinks:
-    run('ln -s '+symlink.src[1:]+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)
+    run('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)
 
 # Apply permissions.
