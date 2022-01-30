@@ -35,6 +35,8 @@ fs.ParseFromString(
     service_with_meta.service.container.filesystem
 )
 
+arch = 'linux/arm64' # get_arch_tag(service_with_meta=service_with_meta) # TODO: get_arch_tag, selecciona el tag de la arquitectura definida por el servicio, en base a la especificacion y metadatos, que tiene el nodo para esa arquitectura.
+
 try:
     os.mkdir('__hycache__')
 except: pass
@@ -47,7 +49,7 @@ os.mkdir(fs_dir)
 symlinks = []
 write_fs(fs = fs, dir = fs_dir + '/', symlinks = symlinks)
 
-arch = 'linux/arm64'
+
 
 open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .\nENTRYPOINT /random/start.py')
 check_output('docker buildx build --platform '+arch+' -t '+id+' '+dir+'/.', shell=True)
