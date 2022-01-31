@@ -1,24 +1,84 @@
 from time import sleep
 import threading
 from gateway_pb2_grpcbf import GetServiceTar_input
-import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os
+import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os, celaut_pb2, utils, iobigdata
 from utils import service_extended
 from grpcbigbuffer import save_chunks_to_file, serialize_to_buffer
 from compile import HYCACHE, REGISTRY
 import logger as l
-import utils, iobigdata
+
+from random import randint
+from shutil import rmtree
+from subprocess import check_output, run
 
 from verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
+from gateway import WAIT_FOR_CONTAINER
 
-WAIT_FOR_CONTAINER_DOWNLOAD = 10
-
-def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service):
+def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, metadata: gateway_pb2.celaut__pb2.Any.Metadata, id: str):
     # Build the container from filesystem definition.
-    pass
+    def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir: str, symlinks):
+        if b.HasField('filesystem'):
+            os.mkdir(dir + b.name)
+            write_fs(fs = b.filesystem, dir = dir + b.name + '/', symlinks = symlinks)
 
-# TODO DEPRECATED
-def get_container_from_outside(
+        elif b.HasField('file'):
+            open(dir + b.name, 'wb').write(
+                b.file
+            )
+            
+        else:
+            symlinks.append(b.link)
+
+    def write_fs(fs: celaut_pb2.Service.Container.Filesystem, dir: str, symlinks):
+        for branch in fs.branch:
+            write_item(
+                b = branch,
+                dir = dir,
+                symlinks = symlinks
+            )
+
+    # Take filesystem.
+    fs = celaut_pb2.Service.Container.Filesystem()
+    fs.ParseFromString(
+        service.container.filesystem
+    )
+
+    # Take architecture.
+    arch = 'linux/arm64' # get_arch_tag(service_with_meta=service_with_meta) # TODO: get_arch_tag, selecciona el tag de la arquitectura definida por el servicio, en base a la especificacion y metadatos, que tiene el nodo para esa arquitectura.
+    
+    try:
+        os.mkdir('__hycache__')
+    except: pass
+
+    # Write all on hycache.
+    id = str(randint(1,999))
+    dir = '__hycache__/builder'+id
+    os.mkdir(dir)
+    fs_dir = dir + '/fs'
+    os.mkdir(fs_dir)
+    symlinks = []
+    write_fs(fs = fs, dir = fs_dir + '/', symlinks = symlinks)
+
+    # Build it.
+    open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .\nENTRYPOINT /random/start.py')
+    check_output('docker buildx build --platform '+arch+' -t '+id+' '+dir+'/.', shell=True)
+    try:
+        rmtree(dir)
+    except Exception: pass
+
+    # Generate the symlinks.
+    overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+id, shell=True).decode('utf-8')[:-1]
+    for symlink in symlinks: run('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)
+
+    # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
+    run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
+    run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
+
+    l.LOGGER('Build process finished ' + id)
+
+
+def get_container_from_outside( # TODO could take it from a specific ledger.
     id: str,
     service_buffer: bytes,
     metadata: gateway_pb2.celaut__pb2.Any.Metadata
@@ -65,19 +125,19 @@ def get_container_from_outside(
         l.LOGGER('Exception during load the tar ' + id + '.docker')
         raise Exception('Error building the container.')
 
-    l.LOGGER('Build process finished ' + id)
+    l.LOGGER('Outside load container process finished ' + id)
     
 
 def build(
-    service_buffer: bytes,
-    metadata: gateway_pb2.celaut__pb2.Any.Metadata,
-    get_it_outside: bool = True,
-    id = None,
+        service_buffer: bytes,
+        metadata: gateway_pb2.celaut__pb2.Any.Metadata,
+        get_it: bool = True,
+        id = None,
     ) -> str:
     if not id: id = get_service_hex_main_hash( metadata = metadata)
     l.LOGGER('\nBuilding ' + id)
     try:
-        # it's locally?
+        # check if it's locally.
         check_output('/usr/bin/docker inspect '+id+'.docker', shell=True)
         return id
 
@@ -92,17 +152,23 @@ def build(
                         filename = second_partition_dir
                     )
                 )
-                build_container_from_definition(
-                    service = service
-                )
+                threading.Thread(
+                        target = build_container_from_definition,
+                        args = (
+                            service,
+                            metadata,
+                            id
+                        )
+                    ).start() if get_it else sleep( WAIT_FOR_CONTAINER )
+                raise Exception("Getting the container, the process will've time")
         else:
             threading.Thread(
-                target = get_container_from_outside,
-                args = (id, service_buffer, metadata)          
-                ).start() if get_it_outside else sleep(WAIT_FOR_CONTAINER_DOWNLOAD)
+                    target = get_container_from_outside,
+                    args = (id, service_buffer, metadata)          
+                ).start() if get_it else sleep( WAIT_FOR_CONTAINER )
             raise Exception("Getting the container, the process will've time")
 
-    # verify()
+    # verify() TODO ??
 
 if __name__ == "__main__":
     import sys

@@ -23,6 +23,7 @@ LOCAL_NETWORK = 'lo'
 GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
 SELF_RATE = utils.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 1)
 COST_OF_BUILD = utils.GET_ENV(env = 'COST_OF_BUILD', default = 0)
+WAIT_FOR_CONTAINER = utils.GET_ENV(env = 'WAIT_FOR_CONTAINER_TIME', default = 10)
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
@@ -317,7 +318,7 @@ def launch_service(
                             service_buffer = service_buffer, 
                             metadata = metadata,
                             id = id,
-                            get_it_outside = not getting_container
+                            get_it = not getting_container
                         )  #  If the container is not built, build it.
                 except:
                     # If it does not have the container, it takes it from another node in the background and requests
