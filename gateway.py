@@ -213,14 +213,14 @@ def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
         build_cost(service_buffer = service_buffer, metadata = metadata),
     ]) * SELF_RATE
 
-def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> dict: # sorted by cost, dict of celaut.Instances or None (meaning local execution) and cost.
+def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> dict: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
     class PeerCostList:
         # Sorts the list from the element with the smallest weight to the element with the largest weight.
         
         def __init__(self) -> None:
             self.dict = {} # elem : weight
         
-        def add_elem(self, weight: int, elem: celaut.Instance = None ) -> None:
+        def add_elem(self, weight: int, elem: celaut.Instance = 'local' ) -> None:
             self.dict.update({elem: weight})
         
         def get(self) -> dict:
@@ -262,7 +262,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
 
     except Exception as e:
         l.LOGGER('Error during balancer, ' + str(e))
-        return None
+        return {'local': 0}
 
 
 def launch_service(
@@ -284,7 +284,8 @@ def launch_service(
             ).items():
                 l.LOGGER('Balancer select peer ' + str(node_instance) + ' with cost ' + str(cost))
                 
-                if node_instance:
+                # Delegate the service instance execution.
+                if node_instance != 'local':
                     try:
                         node_uri = utils.get_grpc_uri(node_instance)
                         l.LOGGER('El servicio se lanza en el nodo con uri ' + str(node_uri))
