@@ -16,6 +16,7 @@ from subprocess import check_output, CalledProcessError
 from gateway import WAIT_FOR_CONTAINER
 
 def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, metadata: gateway_pb2.celaut__pb2.Any.Metadata, id: str):
+    l.LOGGER('\nIt is not locally, ' + id + ' go to build the container.')
     # Build the container from filesystem definition.
     def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir: str, symlinks):
         if b.HasField('filesystem'):
@@ -58,9 +59,11 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, me
     fs_dir = dir + '/fs'
     os.mkdir(fs_dir)
     symlinks = []
+    l.LOGGER('Build process of '+ id + ': writting filesystem.')
     write_fs(fs = fs, dir = fs_dir + '/', symlinks = symlinks)
 
     # Build it.
+    l.LOGGER('Build process of '+ id + ': docker build it.')
     open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .\nENTRYPOINT /random/start.py')
     check_output('docker buildx build --platform '+arch+' -t '+id+' '+dir+'/.', shell=True)
     try:
@@ -75,7 +78,7 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, me
     run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
     run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
 
-    l.LOGGER('Build process finished ' + id)
+    l.LOGGER('Build process of '+ id + ': finished.')
 
 
 def get_container_from_outside( # TODO could take it from a specific ledger.
@@ -135,7 +138,7 @@ def build(
         id = None,
     ) -> str:
     if not id: id = get_service_hex_main_hash( metadata = metadata)
-    l.LOGGER('\nBuilding ' + id)
+    if get_it: l.LOGGER('\nBuilding ' + id)
     try:
         # check if it's locally.
         check_output('/usr/bin/docker inspect '+id+'.docker', shell=True)
@@ -143,24 +146,26 @@ def build(
 
     except CalledProcessError:
         if metadata.complete:
-            second_partition_dir = REGISTRY + id + '/p2'
-            with iobigdata.mem_manager(len = len(service_buffer) + 2*os.path.getsize(second_partition_dir)):
-                service = gateway_pb2.celaut_pb2.Service()
-                service.ParseFromString(service_buffer)
-                service.container.ParseFromString(
-                    iobigdata.read_file(
-                        filename = second_partition_dir
-                    )
-                )
-                threading.Thread(
-                        target = build_container_from_definition,
-                        args = (
-                            service,
-                            metadata,
-                            id
+            if get_it:
+                second_partition_dir = REGISTRY + id + '/p2'
+                with iobigdata.mem_manager(len = len(service_buffer) + 2*os.path.getsize(second_partition_dir)):
+                    service = gateway_pb2.celaut_pb2.Service()
+                    service.ParseFromString(service_buffer)
+                    service.container.ParseFromString(
+                        iobigdata.read_file(
+                            filename = second_partition_dir
                         )
-                    ).start() if get_it else sleep( WAIT_FOR_CONTAINER )
-                raise Exception("Getting the container, the process will've time")
+                    )
+                    threading.Thread(
+                            target = build_container_from_definition,
+                            args = (
+                                service,
+                                metadata,
+                                id
+                            )
+                        ).start()
+            else: sleep( WAIT_FOR_CONTAINER )
+            raise Exception("Getting the container, the process will've time")
         else:
             threading.Thread(
                     target = get_container_from_outside,
