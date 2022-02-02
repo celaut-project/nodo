@@ -149,6 +149,7 @@ def build(
             if get_it:
                 second_partition_dir = REGISTRY + id + '/p2'
                 with iobigdata.mem_manager(len = len(service_buffer) + 2*os.path.getsize(second_partition_dir)):
+                    l.LOGGER('Build process of '+ id + ': go to load all the buffer.')
                     service = gateway_pb2.celaut_pb2.Service()
                     service.ParseFromString(service_buffer)
                     service.container.ParseFromString(
@@ -156,6 +157,7 @@ def build(
                             filename = second_partition_dir
                         )
                     )
+                    l.LOGGER('Build process of '+ id + ': filesystem load in memmory.')
                     threading.Thread(
                             target = build_container_from_definition,
                             args = (

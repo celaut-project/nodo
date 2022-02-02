@@ -313,7 +313,7 @@ def launch_service(
                         l.LOGGER('Failed starting a service on peer, occurs the eror: ' + str(e))
 
                 #  The node launches the service locally.
-                l.LOGGER('El nodo lanza el servicio localmente.')
+                if getting_container: l.LOGGER('El nodo lanza el servicio localmente.')
                 try:
                     id = build.build(
                             service_buffer = service_buffer, 
