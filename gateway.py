@@ -570,7 +570,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 metadata = celaut.Any.Metadata(
                                     hashtag = celaut.Any.Metadata.HashTag(
                                         hash = hashes
-                                    )
+                                    ),
+                                    complete = True # TODO check
                                 ), 
                                 config = configuration,
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
