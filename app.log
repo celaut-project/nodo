@@ -53774,3 +53774,490 @@ TypeError: 'NoneType' object is not iterable
 2022-02-02 22:42:30,945 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
 2022-02-02 22:42:30,952 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
 2022-02-02 22:42:30,957 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-02 23:46:58,312 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:46:58,334 DEBUG    No config file found
+2022-02-02 23:46:58,334 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:46:58,334 DEBUG    No config file found
+2022-02-02 23:46:58,537 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:46:58,541 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2022-02-02 23:46:58,543 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:46:58,543 DEBUG    No config file found
+2022-02-02 23:46:58,543 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:46:58,543 DEBUG    No config file found
+2022-02-02 23:46:58,564 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:46:58,573 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 2012
+2022-02-02 23:46:58,577 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-02 23:46:58,580 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-02 23:46:58,583 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-02 23:46:58,585 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-02 23:47:03,616 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:47:03,617 DEBUG    No config file found
+2022-02-02 23:47:03,617 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:47:03,617 DEBUG    No config file found
+2022-02-02 23:47:03,726 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:47:03,728 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2022-02-02 23:47:03,728 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:47:03,728 DEBUG    No config file found
+2022-02-02 23:47:03,729 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:47:03,729 DEBUG    No config file found
+2022-02-02 23:47:03,736 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:47:03,744 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 2012
+2022-02-02 23:47:03,746 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-02 23:47:03,748 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-02 23:47:03,750 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-02 23:47:03,752 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-02 23:48:06,094 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:48:06,095 DEBUG    No config file found
+2022-02-02 23:48:06,095 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:48:06,095 DEBUG    No config file found
+2022-02-02 23:48:06,175 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:48:06,178 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2022-02-02 23:48:06,179 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:48:06,179 DEBUG    No config file found
+2022-02-02 23:48:06,179 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:48:06,179 DEBUG    No config file found
+2022-02-02 23:48:06,187 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:48:06,229 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-02 23:48:06,232 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1408
+2022-02-02 23:48:06,237 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-02 23:48:06,243 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-02 23:48:06,247 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-02 23:48:06,248 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-02 23:49:06,474 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:49:06,475 DEBUG    No config file found
+2022-02-02 23:49:06,475 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:49:06,475 DEBUG    No config file found
+2022-02-02 23:49:06,483 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:49:06,485 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2022-02-02 23:49:06,486 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:49:06,486 DEBUG    No config file found
+2022-02-02 23:49:06,486 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:49:06,486 DEBUG    No config file found
+2022-02-02 23:49:06,494 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:49:06,499 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-02 23:49:06,502 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1408
+2022-02-02 23:49:06,504 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-02 23:49:06,538 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-02 23:49:06,542 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-02 23:49:06,544 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-02 23:50:06,784 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:50:06,784 DEBUG    No config file found
+2022-02-02 23:50:06,784 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:50:06,784 DEBUG    No config file found
+2022-02-02 23:50:06,803 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:50:06,805 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2022-02-02 23:50:06,806 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:50:06,806 DEBUG    No config file found
+2022-02-02 23:50:06,806 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:50:06,806 DEBUG    No config file found
+2022-02-02 23:50:06,813 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:50:06,818 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-02 23:50:06,820 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1408
+2022-02-02 23:50:06,821 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-02 23:50:06,824 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-02 23:50:06,826 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-02 23:50:06,828 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-02 23:51:07,015 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:51:07,015 DEBUG    No config file found
+2022-02-02 23:51:07,015 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:51:07,016 DEBUG    No config file found
+2022-02-02 23:51:07,031 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:51:07,032 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2022-02-02 23:51:07,033 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:51:07,033 DEBUG    No config file found
+2022-02-02 23:51:07,033 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:51:07,033 DEBUG    No config file found
+2022-02-02 23:51:07,040 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:51:07,044 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-02 23:51:07,046 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1408
+2022-02-02 23:51:07,047 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-02 23:51:07,049 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-02 23:51:07,050 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-02 23:51:07,051 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-02 23:55:59,692 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:55:59,692 DEBUG    No config file found
+2022-02-02 23:55:59,692 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:55:59,692 DEBUG    No config file found
+2022-02-02 23:55:59,701 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:55:59,705 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2022-02-02 23:55:59,706 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:55:59,706 DEBUG    No config file found
+2022-02-02 23:55:59,706 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:55:59,706 DEBUG    No config file found
+2022-02-02 23:55:59,719 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:55:59,725 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 2012
+2022-02-02 23:55:59,728 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-02 23:55:59,731 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-02 23:55:59,734 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-02 23:55:59,736 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-02 23:56:04,959 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:56:04,959 DEBUG    No config file found
+2022-02-02 23:56:04,959 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:56:04,959 DEBUG    No config file found
+2022-02-02 23:56:04,975 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:56:04,976 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2022-02-02 23:56:04,977 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:56:04,977 DEBUG    No config file found
+2022-02-02 23:56:04,977 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:56:04,978 DEBUG    No config file found
+2022-02-02 23:56:04,985 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:56:04,990 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 2012
+2022-02-02 23:56:04,992 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-02 23:56:04,993 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-02 23:56:04,995 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-02 23:56:04,996 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-02 23:57:14,329 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:57:14,330 DEBUG    No config file found
+2022-02-02 23:57:14,330 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:57:14,330 DEBUG    No config file found
+2022-02-02 23:57:14,343 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:57:14,345 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 3
+2022-02-02 23:57:14,345 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:57:14,346 DEBUG    No config file found
+2022-02-02 23:57:14,346 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:57:14,346 DEBUG    No config file found
+2022-02-02 23:57:14,354 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:57:14,360 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-02 23:57:14,362 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-02 23:57:14,364 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-02 23:57:14,366 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-02 23:57:14,368 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-02 23:57:14,370 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-02 23:57:14,412 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:57:14,412 DEBUG    No config file found
+2022-02-02 23:57:14,412 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:57:14,412 DEBUG    No config file found
+2022-02-02 23:57:14,420 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:57:14,508 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 229
+2022-02-02 23:57:14,512 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-02 23:57:15,417 DEBUG    http://localhost:None "POST /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/start HTTP/1.1" 204 0
+2022-02-02 23:57:15,419 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-02 23:59:27,935 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:59:27,973 DEBUG    No config file found
+2022-02-02 23:59:27,973 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:59:27,973 DEBUG    No config file found
+2022-02-02 23:59:27,982 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:59:28,074 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 1008
+2022-02-02 23:59:28,079 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-02 23:59:28,081 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:59:28,081 DEBUG    No config file found
+2022-02-02 23:59:28,081 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:59:28,082 DEBUG    No config file found
+2022-02-02 23:59:28,105 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:59:28,120 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-02 23:59:28,125 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-02 23:59:28,131 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-02 23:59:28,180 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-02 23:59:28,186 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-02 23:59:28,191 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-02 23:59:30,665 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:59:30,666 DEBUG    No config file found
+2022-02-02 23:59:30,666 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:59:30,666 DEBUG    No config file found
+2022-02-02 23:59:30,677 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:59:30,679 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 1008
+2022-02-02 23:59:30,680 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-02 23:59:30,681 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:59:30,681 DEBUG    No config file found
+2022-02-02 23:59:30,681 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-02 23:59:30,681 DEBUG    No config file found
+2022-02-02 23:59:30,688 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-02 23:59:30,693 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-02 23:59:30,695 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-02 23:59:30,697 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-02 23:59:30,698 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-02 23:59:30,700 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-02 23:59:30,702 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:02:06,983 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:06,983 DEBUG    No config file found
+2022-02-03 00:02:06,984 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:06,984 DEBUG    No config file found
+2022-02-03 00:02:06,997 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:02:06,999 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 1008
+2022-02-03 00:02:07,000 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-03 00:02:07,001 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:07,001 DEBUG    No config file found
+2022-02-03 00:02:07,001 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:07,001 DEBUG    No config file found
+2022-02-03 00:02:07,009 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:02:07,015 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-03 00:02:07,017 DEBUG    http://localhost:None "GET /v1.41/images/sha256:2bb18cd0518e0ad8148132aae91cbaee405f12ee23a366e99dbdf1dba5af9756/json HTTP/1.1" 200 1474
+2022-02-03 00:02:07,019 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-03 00:02:07,020 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-03 00:02:07,023 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-03 00:02:07,026 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-03 00:02:07,027 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:02:07,064 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:07,064 DEBUG    No config file found
+2022-02-03 00:02:07,064 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:07,064 DEBUG    No config file found
+2022-02-03 00:02:07,072 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:02:07,152 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 229
+2022-02-03 00:02:07,154 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:02:07,708 DEBUG    http://localhost:None "POST /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/start HTTP/1.1" 204 0
+2022-02-03 00:02:07,710 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:02:42,025 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:42,025 DEBUG    No config file found
+2022-02-03 00:02:42,025 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:42,025 DEBUG    No config file found
+2022-02-03 00:02:42,034 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:02:42,037 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 2016
+2022-02-03 00:02:42,039 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:02:42,040 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-03 00:02:42,041 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:42,041 DEBUG    No config file found
+2022-02-03 00:02:42,041 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:42,041 DEBUG    No config file found
+2022-02-03 00:02:42,047 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:02:42,052 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-03 00:02:42,053 DEBUG    http://localhost:None "GET /v1.41/images/sha256:2bb18cd0518e0ad8148132aae91cbaee405f12ee23a366e99dbdf1dba5af9756/json HTTP/1.1" 200 1474
+2022-02-03 00:02:42,055 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-03 00:02:42,056 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-03 00:02:42,076 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-03 00:02:42,078 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-03 00:02:42,080 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:02:42,155 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:42,155 DEBUG    No config file found
+2022-02-03 00:02:42,155 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:42,155 DEBUG    No config file found
+2022-02-03 00:02:42,164 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:02:44,476 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 229
+2022-02-03 00:02:44,478 DEBUG    http://localhost:None "GET /v1.41/containers/7fc0b4588a94498795940d51007775dbbcb9d048b834727834dd32518dbebbce/json HTTP/1.1" 200 None
+2022-02-03 00:02:45,202 DEBUG    http://localhost:None "POST /v1.41/containers/7fc0b4588a94498795940d51007775dbbcb9d048b834727834dd32518dbebbce/start HTTP/1.1" 400 163
+2022-02-03 00:02:45,205 DEBUG    http://localhost:None "GET /v1.41/containers/7fc0b4588a94498795940d51007775dbbcb9d048b834727834dd32518dbebbce/json HTTP/1.1" 200 None
+2022-02-03 00:02:45,289 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:45,289 DEBUG    No config file found
+2022-02-03 00:02:45,289 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:45,289 DEBUG    No config file found
+2022-02-03 00:02:45,300 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:02:45,302 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 2016
+2022-02-03 00:02:45,303 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:02:45,305 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-03 00:02:45,306 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:45,306 DEBUG    No config file found
+2022-02-03 00:02:45,306 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:45,306 DEBUG    No config file found
+2022-02-03 00:02:45,319 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:02:45,328 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-03 00:02:45,330 DEBUG    http://localhost:None "GET /v1.41/images/sha256:2bb18cd0518e0ad8148132aae91cbaee405f12ee23a366e99dbdf1dba5af9756/json HTTP/1.1" 200 1474
+2022-02-03 00:02:45,332 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-03 00:02:45,335 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-03 00:02:45,338 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-03 00:02:45,341 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-03 00:02:45,344 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:02:45,400 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:45,400 DEBUG    No config file found
+2022-02-03 00:02:45,400 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:02:45,400 DEBUG    No config file found
+2022-02-03 00:02:45,417 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:02:45,476 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 229
+2022-02-03 00:02:45,478 DEBUG    http://localhost:None "GET /v1.41/containers/1b47f6b423458175090a9bd259208477f93cb255fa1d292da0864273880b0ec1/json HTTP/1.1" 200 None
+2022-02-03 00:02:46,142 DEBUG    http://localhost:None "POST /v1.41/containers/1b47f6b423458175090a9bd259208477f93cb255fa1d292da0864273880b0ec1/start HTTP/1.1" 400 163
+2022-02-03 00:02:46,147 DEBUG    http://localhost:None "GET /v1.41/containers/1b47f6b423458175090a9bd259208477f93cb255fa1d292da0864273880b0ec1/json HTTP/1.1" 200 None
+2022-02-03 00:04:16,803 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:04:16,804 DEBUG    No config file found
+2022-02-03 00:04:16,804 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:04:16,804 DEBUG    No config file found
+2022-02-03 00:04:16,820 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:04:16,823 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 2015
+2022-02-03 00:04:16,827 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:04:16,831 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-03 00:04:16,833 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:04:16,833 DEBUG    No config file found
+2022-02-03 00:04:16,833 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:04:16,833 DEBUG    No config file found
+2022-02-03 00:04:16,843 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:04:16,850 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-03 00:04:16,853 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1396
+2022-02-03 00:04:16,856 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-03 00:04:16,858 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-03 00:04:16,861 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-03 00:04:16,862 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:04:22,043 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:04:22,043 DEBUG    No config file found
+2022-02-03 00:04:22,043 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:04:22,043 DEBUG    No config file found
+2022-02-03 00:04:22,055 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:04:22,058 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 2015
+2022-02-03 00:04:22,060 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:04:22,062 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-03 00:04:22,063 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:04:22,063 DEBUG    No config file found
+2022-02-03 00:04:22,063 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:04:22,063 DEBUG    No config file found
+2022-02-03 00:04:22,073 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:04:22,082 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-03 00:04:22,084 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1396
+2022-02-03 00:04:22,086 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-03 00:04:22,088 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-03 00:04:22,090 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-03 00:04:22,094 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:05:22,274 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:05:22,275 DEBUG    No config file found
+2022-02-03 00:05:22,275 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:05:22,275 DEBUG    No config file found
+2022-02-03 00:05:22,345 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:05:22,349 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 2015
+2022-02-03 00:05:22,353 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:05:22,355 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-03 00:05:22,356 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:05:22,356 DEBUG    No config file found
+2022-02-03 00:05:22,356 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:05:22,356 DEBUG    No config file found
+2022-02-03 00:05:22,364 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:05:22,377 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-03 00:05:22,379 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-03 00:05:22,383 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-03 00:05:22,389 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-03 00:05:22,421 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-03 00:05:22,425 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:05:22,546 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:05:22,546 DEBUG    No config file found
+2022-02-03 00:05:22,546 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:05:22,546 DEBUG    No config file found
+2022-02-03 00:05:22,555 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:05:22,619 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 229
+2022-02-03 00:05:22,622 DEBUG    http://localhost:None "GET /v1.41/containers/c8420a941ef97edb7de8b94579f481121d3930813ed342a89bbe03d17791d21d/json HTTP/1.1" 200 None
+2022-02-03 00:05:23,418 DEBUG    http://localhost:None "POST /v1.41/containers/c8420a941ef97edb7de8b94579f481121d3930813ed342a89bbe03d17791d21d/start HTTP/1.1" 204 0
+2022-02-03 00:05:23,422 DEBUG    http://localhost:None "GET /v1.41/containers/c8420a941ef97edb7de8b94579f481121d3930813ed342a89bbe03d17791d21d/json HTTP/1.1" 200 None
+2022-02-03 00:07:52,772 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:07:52,772 DEBUG    No config file found
+2022-02-03 00:07:52,773 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:07:52,773 DEBUG    No config file found
+2022-02-03 00:07:52,785 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:07:52,787 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 None
+2022-02-03 00:07:52,790 DEBUG    http://localhost:None "GET /v1.41/containers/c8420a941ef97edb7de8b94579f481121d3930813ed342a89bbe03d17791d21d/json HTTP/1.1" 200 None
+2022-02-03 00:07:52,791 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:07:52,793 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-03 00:07:52,793 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:07:52,794 DEBUG    No config file found
+2022-02-03 00:07:52,794 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:07:52,794 DEBUG    No config file found
+2022-02-03 00:07:52,801 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:07:52,806 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-03 00:07:52,807 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-03 00:07:52,808 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-03 00:07:52,811 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-03 00:07:52,812 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-03 00:07:52,814 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:07:52,851 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:07:52,851 DEBUG    No config file found
+2022-02-03 00:07:52,851 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:07:52,851 DEBUG    No config file found
+2022-02-03 00:07:52,858 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:07:52,917 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 229
+2022-02-03 00:07:52,919 DEBUG    http://localhost:None "GET /v1.41/containers/78d4447e244be8efc12184594b339a7bd86dc4c6bd3dfc1fef15c10360f676e0/json HTTP/1.1" 200 None
+2022-02-03 00:07:53,397 DEBUG    http://localhost:None "POST /v1.41/containers/78d4447e244be8efc12184594b339a7bd86dc4c6bd3dfc1fef15c10360f676e0/start HTTP/1.1" 204 0
+2022-02-03 00:07:53,399 DEBUG    http://localhost:None "GET /v1.41/containers/78d4447e244be8efc12184594b339a7bd86dc4c6bd3dfc1fef15c10360f676e0/json HTTP/1.1" 200 None
+2022-02-03 00:08:17,403 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:08:17,404 DEBUG    No config file found
+2022-02-03 00:08:17,404 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:08:17,404 DEBUG    No config file found
+2022-02-03 00:08:17,439 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:08:17,440 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 None
+2022-02-03 00:08:17,442 DEBUG    http://localhost:None "GET /v1.41/containers/78d4447e244be8efc12184594b339a7bd86dc4c6bd3dfc1fef15c10360f676e0/json HTTP/1.1" 200 None
+2022-02-03 00:08:17,443 DEBUG    http://localhost:None "GET /v1.41/containers/c8420a941ef97edb7de8b94579f481121d3930813ed342a89bbe03d17791d21d/json HTTP/1.1" 200 None
+2022-02-03 00:08:17,444 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:08:17,446 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-03 00:08:17,446 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:08:17,446 DEBUG    No config file found
+2022-02-03 00:08:17,446 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:08:17,446 DEBUG    No config file found
+2022-02-03 00:08:17,453 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:08:17,574 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-03 00:08:17,579 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-03 00:08:17,601 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-03 00:08:17,632 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-03 00:08:17,659 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-03 00:08:17,703 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:08:20,703 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:08:20,704 DEBUG    No config file found
+2022-02-03 00:08:20,704 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:08:20,704 DEBUG    No config file found
+2022-02-03 00:08:20,712 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:08:20,714 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 None
+2022-02-03 00:08:20,717 DEBUG    http://localhost:None "GET /v1.41/containers/78d4447e244be8efc12184594b339a7bd86dc4c6bd3dfc1fef15c10360f676e0/json HTTP/1.1" 200 None
+2022-02-03 00:08:20,718 DEBUG    http://localhost:None "GET /v1.41/containers/c8420a941ef97edb7de8b94579f481121d3930813ed342a89bbe03d17791d21d/json HTTP/1.1" 200 None
+2022-02-03 00:08:20,721 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:08:20,726 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-03 00:08:20,728 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:08:20,728 DEBUG    No config file found
+2022-02-03 00:08:20,728 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:08:20,728 DEBUG    No config file found
+2022-02-03 00:08:20,735 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:08:20,752 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-03 00:08:20,754 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-03 00:08:20,755 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-03 00:08:20,758 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-03 00:08:20,759 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-03 00:08:20,761 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:09:20,922 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:20,923 DEBUG    No config file found
+2022-02-03 00:09:20,924 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:20,924 DEBUG    No config file found
+2022-02-03 00:09:20,942 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:09:20,947 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 None
+2022-02-03 00:09:20,951 DEBUG    http://localhost:None "GET /v1.41/containers/78d4447e244be8efc12184594b339a7bd86dc4c6bd3dfc1fef15c10360f676e0/json HTTP/1.1" 200 None
+2022-02-03 00:09:20,955 DEBUG    http://localhost:None "GET /v1.41/containers/c8420a941ef97edb7de8b94579f481121d3930813ed342a89bbe03d17791d21d/json HTTP/1.1" 200 None
+2022-02-03 00:09:20,958 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:09:20,960 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-03 00:09:20,962 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:20,962 DEBUG    No config file found
+2022-02-03 00:09:20,962 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:20,962 DEBUG    No config file found
+2022-02-03 00:09:20,971 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:09:20,976 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-03 00:09:20,978 DEBUG    http://localhost:None "GET /v1.41/images/sha256:2bb18cd0518e0ad8148132aae91cbaee405f12ee23a366e99dbdf1dba5af9756/json HTTP/1.1" 200 1474
+2022-02-03 00:09:20,980 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-03 00:09:20,982 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-03 00:09:20,984 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-03 00:09:20,986 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-03 00:09:20,987 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:09:21,066 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:21,066 DEBUG    No config file found
+2022-02-03 00:09:21,066 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:21,066 DEBUG    No config file found
+2022-02-03 00:09:21,074 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:09:21,167 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 229
+2022-02-03 00:09:21,169 DEBUG    http://localhost:None "GET /v1.41/containers/fcbbe02bfb37240029c17b271c34da9af2d8a3cda9ea313bda2d4eac1167f1f9/json HTTP/1.1" 200 None
+2022-02-03 00:09:21,711 DEBUG    http://localhost:None "POST /v1.41/containers/fcbbe02bfb37240029c17b271c34da9af2d8a3cda9ea313bda2d4eac1167f1f9/start HTTP/1.1" 204 0
+2022-02-03 00:09:21,713 DEBUG    http://localhost:None "GET /v1.41/containers/fcbbe02bfb37240029c17b271c34da9af2d8a3cda9ea313bda2d4eac1167f1f9/json HTTP/1.1" 200 None
+2022-02-03 00:09:21,781 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:21,781 DEBUG    No config file found
+2022-02-03 00:09:21,781 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:21,781 DEBUG    No config file found
+2022-02-03 00:09:21,791 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:09:21,793 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 None
+2022-02-03 00:09:21,795 DEBUG    http://localhost:None "GET /v1.41/containers/fcbbe02bfb37240029c17b271c34da9af2d8a3cda9ea313bda2d4eac1167f1f9/json HTTP/1.1" 200 None
+2022-02-03 00:09:21,797 DEBUG    http://localhost:None "GET /v1.41/containers/78d4447e244be8efc12184594b339a7bd86dc4c6bd3dfc1fef15c10360f676e0/json HTTP/1.1" 200 None
+2022-02-03 00:09:21,799 DEBUG    http://localhost:None "GET /v1.41/containers/c8420a941ef97edb7de8b94579f481121d3930813ed342a89bbe03d17791d21d/json HTTP/1.1" 200 None
+2022-02-03 00:09:21,801 DEBUG    http://localhost:None "GET /v1.41/containers/defb4fc036034d51017d36d9bb27afda3896fbd86d418dd78531bc45a2926404/json HTTP/1.1" 200 None
+2022-02-03 00:09:21,804 DEBUG    http://localhost:None "GET /v1.41/containers/ee867fd9947527055fe6aae787374b303eadd3f51b829ca5531b6215444490ec/json HTTP/1.1" 200 None
+2022-02-03 00:09:21,805 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:21,805 DEBUG    No config file found
+2022-02-03 00:09:21,805 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:21,805 DEBUG    No config file found
+2022-02-03 00:09:21,814 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:09:21,822 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-03 00:09:21,825 DEBUG    http://localhost:None "GET /v1.41/images/sha256:2bb18cd0518e0ad8148132aae91cbaee405f12ee23a366e99dbdf1dba5af9756/json HTTP/1.1" 200 1474
+2022-02-03 00:09:21,827 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-03 00:09:21,830 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-03 00:09:21,832 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-03 00:09:21,835 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-03 00:09:21,837 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-03 00:09:21,936 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:21,937 DEBUG    No config file found
+2022-02-03 00:09:21,937 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:21,937 DEBUG    No config file found
+2022-02-03 00:09:21,946 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:09:22,066 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 229
+2022-02-03 00:09:22,068 DEBUG    http://localhost:None "GET /v1.41/containers/77b98b79dc98701ae8751631e2ea05800290c0e9255572ea1fa0a02391dc054c/json HTTP/1.1" 200 None
+2022-02-03 00:09:22,555 DEBUG    http://localhost:None "POST /v1.41/containers/77b98b79dc98701ae8751631e2ea05800290c0e9255572ea1fa0a02391dc054c/start HTTP/1.1" 204 0
+2022-02-03 00:09:22,557 DEBUG    http://localhost:None "GET /v1.41/containers/77b98b79dc98701ae8751631e2ea05800290c0e9255572ea1fa0a02391dc054c/json HTTP/1.1" 200 None
+2022-02-03 00:09:27,582 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:27,582 DEBUG    No config file found
+2022-02-03 00:09:27,582 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-03 00:09:27,582 DEBUG    No config file found
+2022-02-03 00:09:27,593 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-03 00:09:27,594 DEBUG    http://localhost:None "GET /v1.41/containers/77b98b79dc98701ae8751631e2ea05800290c0e9255572ea1fa0a02391dc054c/json HTTP/1.1" 200 None
+2022-02-03 00:09:27,960 DEBUG    http://localhost:None "DELETE /v1.41/containers/77b98b79dc98701ae8751631e2ea05800290c0e9255572ea1fa0a02391dc054c?v=False&link=False&force=True HTTP/1.1" 204 0

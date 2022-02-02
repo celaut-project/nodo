@@ -53,7 +53,6 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, me
     except: pass
 
     # Write all on hycache.
-    id = str(randint(1,999))
     dir = '__hycache__/builder'+id
     os.mkdir(dir)
     fs_dir = dir + '/fs'
@@ -63,16 +62,18 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, me
     write_fs(fs = fs, dir = fs_dir + '/', symlinks = symlinks)
 
     # Build it.
-    l.LOGGER('Build process of '+ id + ': docker build it.')
+    l.LOGGER('Build process of '+ id + ': docker building it ...')
     open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .\nENTRYPOINT /random/start.py')
-    check_output('docker buildx build --platform '+arch+' -t '+id+' '+dir+'/.', shell=True)
+    check_output('docker buildx build --platform '+arch+' -t '+id+'.docker '+dir+'/.', shell=True)
+    l.LOGGER('Build process of '+ id + ': docker build it.')
     try:
         rmtree(dir)
     except Exception: pass
 
     # Generate the symlinks.
-    overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+id, shell=True).decode('utf-8')[:-1]
-    for symlink in symlinks: run('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)
+    overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+id+'.docker', shell=True).decode('utf-8')[:-1]
+    for symlink in symlinks: 
+        if check_output('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)[:2] == 'ln': break
 
     # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
     run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
