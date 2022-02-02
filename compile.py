@@ -16,9 +16,8 @@ from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex
 #  -------------------------------------------------
 
 # DIRECTORIES
-USER_NAME = getpass.getuser()
-HYCACHE = "/home/"+USER_NAME+"/node/__hycache__/"
-REGISTRY = "/home/"+USER_NAME+"/node/__registry__/"
+HYCACHE = "/node/__hycache__/"
+REGISTRY = "/node/__registry__/"
 SAVE_ALL = False
 
 class Hyper:
