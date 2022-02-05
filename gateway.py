@@ -1,4 +1,6 @@
 from typing import Generator
+
+from numpy import indices
 import celaut_pb2 as celaut
 import build, utils
 from compile import REGISTRY, HYCACHE, compile
@@ -685,8 +687,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def Hynode(self, request_iterator, context):
         instance = next(grpcbf.parse_from_buffer(
             request_iterator = request_iterator,
-            message_field = gateway_pb2.Instance,
-            partitions_message_mode=True
+            indices = gateway_pb2.Instance,
+            partitions_message_mode = True
         ))
         l.LOGGER('\nAdding peer ' + str(instance))
         insert_instance_on_mongo(instance = instance.instance)
