@@ -256,7 +256,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata),
                     )).cost
                 )
-            except: l.LOGGER('Error taking the cost.')
+            except Exception as e: l.LOGGER('Error taking the cost: '+str(e))
 
         return peers.get()
 
