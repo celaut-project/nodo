@@ -37,7 +37,7 @@ def Zeroconf(network: str) -> list:
                         method = gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(peer_uri)
                             ).Hynode,
-                        output_field = Instance,
+                        indices_parser = Instance,
                         input = generate_gateway_instance(
                                     network = network
                                 )
@@ -65,7 +65,7 @@ if __name__ == "__main__":
                             sys.argv[1]
                         )
                     ).Hynode,
-            output_field = Instance,
+            indices_parser = Instance,
             input = generate_gateway_instance(
                         network=get_network_name(ip_or_uri=sys.argv[1])
                     )
