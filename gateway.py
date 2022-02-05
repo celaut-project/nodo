@@ -252,10 +252,11 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
                                 )
                             ).GetServiceCost,
                         indices_parser = gateway_pb2.CostMessage,
+                        partitions_message_mode_parser = True,
                         indices_serializer=GetServiceCost_input,
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata),
-                    ))
-                ).cost
+                    )).cost
+                )
             except Exception as e: l.LOGGER('Error taking the cost: '+str(e))
 
         return peers.get()
