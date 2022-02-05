@@ -13,7 +13,7 @@ from subprocess import check_output, run
 
 from verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
-from gateway import WAIT_FOR_CONTAINER
+WAIT_FOR_CONTAINER = utils.GET_ENV(env = 'WAIT_FOR_CONTAINER_TIME', default = 60)
 
 def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, metadata: gateway_pb2.celaut__pb2.Any.Metadata, id: str):
     l.LOGGER('\nIt is not locally, ' + id + ' go to build the container.')

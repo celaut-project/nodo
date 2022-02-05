@@ -23,7 +23,6 @@ LOCAL_NETWORK = 'lo'
 GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
 SELF_RATE = utils.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 1)
 COST_OF_BUILD = utils.GET_ENV(env = 'COST_OF_BUILD', default = 0)
-WAIT_FOR_CONTAINER = utils.GET_ENV(env = 'WAIT_FOR_CONTAINER_TIME', default = 60)
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
