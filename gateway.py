@@ -1,6 +1,5 @@
 from typing import Generator
 
-from numpy import indices
 import celaut_pb2 as celaut
 import build, utils
 from compile import REGISTRY, HYCACHE, compile
