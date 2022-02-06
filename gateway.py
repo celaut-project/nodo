@@ -253,7 +253,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
                             ).GetServiceCost,
                         indices_parser = gateway_pb2.CostMessage,
                         partitions_message_mode_parser = True,
-                        indices_serializer=GetServiceCost_input,
+                        indices_serializer = GetServiceCost_input,
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata),
                     )).cost
                 )
@@ -802,10 +802,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
             request_iterator=request_iterator, 
             indices = GetServiceCost_input,
             partitions_message_mode=True
-            ):
+        ):
 
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                 r.value.hex() in [s for s in os.listdir(REGISTRY)]:
+                print('VAMOS A OBTENER EL COSTE DEL REGISTRO.')
                 yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                 try:
                     cost = execution_cost(
@@ -824,6 +825,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     continue
 
             if type(r) is celaut.Any:
+                print('VAMOS A OBTENER EL COSTE DEL ANY.')
                 cost = execution_cost(
                     service_buffer = r.value,
                     metadata = r.metadata
