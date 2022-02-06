@@ -798,12 +798,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     def GetServiceCost(self, request_iterator, context):
+        print('GO TO TAKE THE SERVICE COST')
         for r in grpcbf.parse_from_buffer(
             request_iterator=request_iterator, 
             indices = GetServiceCost_input,
             partitions_message_mode=True
         ):
-
+            print('R IS ', r)
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                 r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                 print('VAMOS A OBTENER EL COSTE DEL REGISTRO.')
