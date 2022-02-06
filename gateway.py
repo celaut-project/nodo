@@ -799,47 +799,48 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetServiceCost(self, request_iterator, context):
         print('GO TO TAKE THE SERVICE COST')
-        for r in grpcbf.parse_from_buffer(
-            request_iterator=request_iterator, 
-            indices = GetServiceCost_input,
-            partitions_message_mode=True
-        ):
-            print('R IS ', r)
-            if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
-                r.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                print('VAMOS A OBTENER EL COSTE DEL REGISTRO.')
-                yield gateway_pb2.buffer__pb2.Buffer(signal = True)
-                try:
-                    cost = execution_cost(
-                            service_buffer = get_service_buffer_from_registry(
-                                    hash = r.value.hex()
-                                ),
-                            metadata = celaut.Any.Metadata(
-                                hashtag = [celaut.Any.Metadata.HashTag(
-                                    hash = r
-                                )]
-                            )
-                        )
-                    break
-                except:
+        try:
+            for r in grpcbf.parse_from_buffer(
+                request_iterator=request_iterator, 
+                indices = GetServiceCost_input,
+                partitions_message_mode=True
+            ):
+                print('R IS ', r)
+                if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
+                    r.value.hex() in [s for s in os.listdir(REGISTRY)]:
+                    print('VAMOS A OBTENER EL COSTE DEL REGISTRO.')
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
-                    continue
+                    try:
+                        cost = execution_cost(
+                                service_buffer = get_service_buffer_from_registry(
+                                        hash = r.value.hex()
+                                    ),
+                                metadata = celaut.Any.Metadata(
+                                    hashtag = [celaut.Any.Metadata.HashTag(
+                                        hash = r
+                                    )]
+                                )
+                            )
+                        break
+                    except:
+                        yield gateway_pb2.buffer__pb2.Buffer(signal = True)
+                        continue
 
-            if type(r) is celaut.Any:
-                print('VAMOS A OBTENER EL COSTE DEL ANY.')
-                cost = execution_cost(
-                    service_buffer = r.value,
-                    metadata = r.metadata
-                )
-                break
+                if type(r) is celaut.Any:
+                    print('VAMOS A OBTENER EL COSTE DEL ANY.')
+                    cost = execution_cost(
+                        service_buffer = r.value,
+                        metadata = r.metadata
+                    )
+                    break
 
-        l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
-        for b in grpcbf.serialize_to_buffer(
-            gateway_pb2.CostMessage(
-                cost = cost
-            )            
-        ): yield b
-
+            l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
+            for b in grpcbf.serialize_to_buffer(
+                gateway_pb2.CostMessage(
+                    cost = cost
+                )            
+            ): yield b
+        except Exception as e: print('GetSErviceCost exception ', str(e))
 
 if __name__ == "__main__":
     from zeroconf import Zeroconf
