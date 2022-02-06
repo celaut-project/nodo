@@ -805,6 +805,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 indices = GetServiceCost_input,
                 partitions_message_mode=True
             ):
+                cost = None
                 print('R IS ')
                 print(r)
                 if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
