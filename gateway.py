@@ -238,21 +238,19 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
             peer_uri_d = peer['uriSlot'][0]['uri'][0]
             peer_uri = peer_uri_d['ip']+':'+str(peer_uri_d['port'])
             try:
-                cost = next(grpcbf.client_grpc(
+                peers.add_elem(
+                    elem = peer_uri,
+                    weight = next(grpcbf.client_grpc(
                         method =  gateway_pb2_grpc.GatewayStub(
-                                grpc.insecure_channel(
-                                    peer_uri
-                                )
-                            ).GetServiceCost,
+                                    grpc.insecure_channel(
+                                        peer_uri
+                                    )
+                                ).GetServiceCost,
                         indices_parser = gateway_pb2.CostMessage,
                         partitions_message_mode_parser = True,
                         indices_serializer = GetServiceCost_input,
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata),
                     )).cost
-                print('cost ', cost)
-                peers.add_elem(
-                    elem = peer_uri,
-                    weight = cost
                 )
             except Exception as e: l.LOGGER('Error taking the cost: '+str(e))
 

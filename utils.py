@@ -28,7 +28,6 @@ def service_extended(
         metadata: celaut_pb2.Any.Metadata,  
         config: celaut_pb2.Configuration = None
     ) -> Generator[object, None, None]:
-
         set_config = True if config else False
         for hash in metadata.hashtag.hash:
             if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
