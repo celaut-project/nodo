@@ -831,7 +831,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     cost = cost
                 )            
             ): yield b
-        except Exception as e: print('GetSErviceCost exception ', str(e))
+        except Exception as e: print('GetSErviceCost exception ', str(e)) # TODO delete this ex. catch.
 
 if __name__ == "__main__":
     from zeroconf import Zeroconf
