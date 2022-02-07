@@ -220,7 +220,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
         def __init__(self) -> None:
             self.dict = {} # elem : weight
         
-        def add_elem(self, weight: int, elem: celaut.Instance = 'local' ) -> None:
+        def add_elem(self, weight: int, elem: str = 'local' ) -> None:
             self.dict.update({elem: weight})
         
         def get(self) -> dict:
@@ -235,20 +235,14 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
         for peer in list(pymongo.MongoClient(
                         "mongodb://localhost:27017/"
                     )["mongo"]["peerInstances"].find()):
-            del peer['_id']
-            peer_instance = Parse(
-                text = json.dumps(peer),
-                message = celaut.Instance,
-                ignore_unknown_fields = True
-            )
-            peer_uri = utils.get_grpc_uri(instance = peer_instance)
+            peer_uri = peer['uriSlot'][0]['uri'][0]
             try:
                 peers.add_elem(
-                    elem = peer_instance,
+                    elem = peer_uri,
                     weight = next(grpcbf.client_grpc(
                         method =  gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(
-                                    peer_uri.ip + ':' +  str(peer_uri.port)
+                                    peer_uri
                                 )
                             ).GetServiceCost,
                         indices_parser = gateway_pb2.CostMessage,
@@ -279,21 +273,20 @@ def launch_service(
         getting_container = False
         # Here it asks the balancer if it should assign the job to a peer.
         while True:
-            for node_instance, cost in service_balancer(
+            for peer_instance_uri, cost in service_balancer(
                 service_buffer = service_buffer,
                 metadata = metadata
             ).items():
-                l.LOGGER('Balancer select peer ' + str(node_instance) + ' with cost ' + str(cost))
+                l.LOGGER('Balancer select peer ' + str(peer_instance_uri) + ' with cost ' + str(cost))
                 
                 # Delegate the service instance execution.
-                if node_instance != 'local':
+                if peer_instance_uri != 'local':
                     try:
-                        node_uri = utils.get_grpc_uri(node_instance)
-                        l.LOGGER('El servicio se lanza en el nodo con uri ' + str(node_uri))
+                        l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer_instance_uri))
                         service_instance = next(grpcbf.client_grpc( # TODO check
                             method = gateway_pb2_grpc.GatewayStub(
                                         grpc.insecure_channel(
-                                            node_uri.ip + ':' +  str(node_uri.port)
+                                            peer_instance_uri
                                         )
                                     ).StartService,
                             output_field = gateway_pb2.Instance,
@@ -305,10 +298,10 @@ def launch_service(
                         ))
                         set_on_cache(
                             father_ip = father_ip,
-                            ip_or_uri =  node_uri.ip + ':' +  str(node_uri.port), # Add node_uri.
+                            ip_or_uri =  peer_instance_uri, # Add node_uri.
                             id_or_token = service_instance.token  # Add token.
                         )
-                        service_instance.token = father_ip + '##' + node_uri.ip + '##' + service_instance.token
+                        service_instance.token = father_ip + '##' + peer_instance_uri.split(':')[0] + '##' + service_instance.token  # TODO adapt for ipv6 too.
                         return service_instance
                     except Exception as e:
                         l.LOGGER('Failed starting a service on peer, occurs the eror: ' + str(e))
