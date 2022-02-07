@@ -30,7 +30,7 @@ def service_extended(
     ) -> Generator[object, None, None]:
 
         set_config = True if config else False
-        for hash in metadata.hash:
+        for hash in metadata.hastag.hash:
             if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
                 set_config = False
                 yield gateway_pb2.HashWithConfig(
