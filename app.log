@@ -57313,3 +57313,134 @@ RuntimeError: generator raised StopIteration
 2022-02-07 19:10:02,599 DEBUG    http://localhost:None "GET /v1.41/containers/233f0c5b3a0038b795de2d69f747092952ab68aadd03d16b6b33c2272ddd5484/json HTTP/1.1" 200 None
 2022-02-07 19:10:03,160 DEBUG    http://localhost:None "POST /v1.41/containers/233f0c5b3a0038b795de2d69f747092952ab68aadd03d16b6b33c2272ddd5484/start HTTP/1.1" 204 0
 2022-02-07 19:10:03,162 DEBUG    http://localhost:None "GET /v1.41/containers/233f0c5b3a0038b795de2d69f747092952ab68aadd03d16b6b33c2272ddd5484/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,950 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:05,950 DEBUG    No config file found
+2022-02-07 19:13:05,950 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:05,950 DEBUG    No config file found
+2022-02-07 19:13:05,959 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-07 19:13:05,968 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 None
+2022-02-07 19:13:05,970 DEBUG    http://localhost:None "GET /v1.41/containers/233f0c5b3a0038b795de2d69f747092952ab68aadd03d16b6b33c2272ddd5484/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,971 DEBUG    http://localhost:None "GET /v1.41/containers/b76f34a9247ba5c2dc69a9464bbcaf641c71e43fac86c9c78bb5feabee33fe77/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,973 DEBUG    http://localhost:None "GET /v1.41/containers/371ad1847344c61ad704fe8bf6feacfdf4fba76e8e14210e4fc6b45ede5d810f/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,976 DEBUG    http://localhost:None "GET /v1.41/containers/aebbfc1a13910ffc337164cd4d30331504c94db664d4f49704df0d8770c9bdd0/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,978 DEBUG    http://localhost:None "GET /v1.41/containers/01f4d9f90ee89e620f80d3ef837cb64caa9ae94e098ac52fa9e34840a573eb71/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,980 DEBUG    http://localhost:None "GET /v1.41/containers/4898bb9294519eb244bc2fcec78548c04929ce45dee9d81b6ec1c1a91a1b5725/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,982 DEBUG    http://localhost:None "GET /v1.41/containers/0fea365bad65fc2a1dc38d0da83e1fb1413c430fb4409d16bbede5b28e9dae10/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,984 DEBUG    http://localhost:None "GET /v1.41/containers/c267cb2fa570b17b609f41f4c320b1c41816657c23bf263b5adef9fb3457cb49/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,986 DEBUG    http://localhost:None "GET /v1.41/containers/0e17ab22c586ac476d3a1e451f8397a4690bd84459f4d2ec3da42183b8c41f0d/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,987 DEBUG    http://localhost:None "GET /v1.41/containers/6b58c1375d6401211d1917ac7a55a19a2be3bfb0323776e94d5274906a2fa7b6/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,988 DEBUG    http://localhost:None "GET /v1.41/containers/44b14bc97f9d8f3d5fd85e72d8fe503577156385389cb99bd42cbb58fb441946/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,990 DEBUG    http://localhost:None "GET /v1.41/containers/f64e39352b24966f68d0706f2e9678dca33193802abd51bf1b8b4b2465743993/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,992 DEBUG    http://localhost:None "GET /v1.41/containers/668a16597ff03dc064529778b5c326f9d5652d45d47605c1e0b1af31a0e414a1/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,994 DEBUG    http://localhost:None "GET /v1.41/containers/1f188b9f8611a10c3e536300772c18f9783cf5b8763acb86726f40cfc8e7dbc9/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,996 DEBUG    http://localhost:None "GET /v1.41/containers/571d60505d0c7d4282aa530c8ac061c79ee8b58486c34e75daefe5ccf246810f/json HTTP/1.1" 200 None
+2022-02-07 19:13:05,998 DEBUG    http://localhost:None "GET /v1.41/containers/62fb7f502ce6395c2df379bb4f4b17589eea0a17760718e6ced6f0800a1ca475/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,000 DEBUG    http://localhost:None "GET /v1.41/containers/0751148797eba787a97bc0146fdfccaf837dc9faae2f6835af3c8a7fd87e27f0/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,002 DEBUG    http://localhost:None "GET /v1.41/containers/085edcfc5108984b0e43416e193fd23464b3c73d0157bcd832f14af7e4574ce5/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,004 DEBUG    http://localhost:None "GET /v1.41/containers/efa24ac12f32a2f1ddaabdf9dd2db47d91850586b028080ed92d031a6c31deb3/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,006 DEBUG    http://localhost:None "GET /v1.41/containers/ddf5e93b38dcfe9f6458f5fb43aaad00939d6f7977180f7a45bd3766cfeb2295/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,008 DEBUG    http://localhost:None "GET /v1.41/containers/0b0b5b0af6fb3a78558535a84e0533fc80e06c80100d36f6faddb147421b2f30/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,010 DEBUG    http://localhost:None "GET /v1.41/containers/23327783efffbd6b3ebaad51d964e7fe41f491f35af91e1620385aed56fc5491/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,013 DEBUG    http://localhost:None "GET /v1.41/containers/f660880e091c09ca80330ef2b29fb5fead07182900a68754a1851d6cd17b7f54/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,015 DEBUG    http://localhost:None "GET /v1.41/containers/794854752f6804d611b7f8995ab1ff916a2519473a828a75e7af568aa6e4ac38/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,016 DEBUG    http://localhost:None "GET /v1.41/containers/542b59465b1a8f89ef88f1fbfd6a0fc521ba46bd97b28cdd9c9ed0280e74122e/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,018 DEBUG    http://localhost:None "GET /v1.41/containers/9611c8bf3f5963ebf4c8d6191d7217fd19f9b1f42880fad78fdc97efb91a74b7/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,019 DEBUG    http://localhost:None "GET /v1.41/containers/94fbaed7d74205e9506182343f90eb8abaf7755abc49cb05e86b2fbaa31a8ccc/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,020 DEBUG    http://localhost:None "GET /v1.41/containers/3229dedb5f3374b2f5b3fc071330a4374ab284c4c3a73cdc20d41dc7ed8e177e/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,022 DEBUG    http://localhost:None "GET /v1.41/containers/3f1b39d7df64575c31ed71e44623e446e1a417b7565a7526210ff308e4c04f14/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,024 DEBUG    http://localhost:None "GET /v1.41/containers/d9f9dd6259d9659fe3aaad43ecef6f73d7e4d381c066002319db20c311e4ebb0/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,026 DEBUG    http://localhost:None "GET /v1.41/containers/a096a56b60cdf37ced1aa700305ebba4ce611d6b1e4b08082065cdf526d2590a/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,028 DEBUG    http://localhost:None "GET /v1.41/containers/bb53cdfa7d7aa2a4422a9a6789d2999eaea60a946bdde7d41c5e7a6657485e20/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,030 DEBUG    http://localhost:None "GET /v1.41/containers/45a74e937bcc28313fe1835745dce14d5cb886f36a0fed362cac4983eb6e4e9a/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,032 DEBUG    http://localhost:None "GET /v1.41/containers/25252f5202ab9cd8d3baa3a6133c75a0f20bf6ac5869cd34ce16a14153756c82/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,033 DEBUG    http://localhost:None "GET /v1.41/containers/f192b2e3e572b5fdd7e6c4cfc70701844cd13b0081b94b326b274eb796864836/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,034 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:06,035 DEBUG    No config file found
+2022-02-07 19:13:06,035 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:06,035 DEBUG    No config file found
+2022-02-07 19:13:06,047 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-07 19:13:06,052 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-07 19:13:06,053 DEBUG    http://localhost:None "GET /v1.41/images/sha256:efef732e00fd5d171693bf9cbc8614d1db6d7ceabfa4c1a597ac89b121e988e9/json HTTP/1.1" 200 1474
+2022-02-07 19:13:06,055 DEBUG    http://localhost:None "GET /v1.41/images/sha256:7f2e49c0de173b83f54ded7b49726e91cbfe96735e0bf230778d9d5b56e98653/json HTTP/1.1" 200 1474
+2022-02-07 19:13:06,056 DEBUG    http://localhost:None "GET /v1.41/images/sha256:4b9e29aeefd926c0d81c0b6492fffed531f8cbf74d90d0b09727cebac7dfd252/json HTTP/1.1" 200 1474
+2022-02-07 19:13:06,058 DEBUG    http://localhost:None "GET /v1.41/images/sha256:2bb18cd0518e0ad8148132aae91cbaee405f12ee23a366e99dbdf1dba5af9756/json HTTP/1.1" 200 1474
+2022-02-07 19:13:06,060 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-07 19:13:06,062 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,065 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,067 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,069 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-07 19:13:06,133 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:06,133 DEBUG    No config file found
+2022-02-07 19:13:06,133 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:06,133 DEBUG    No config file found
+2022-02-07 19:13:06,144 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-07 19:13:06,211 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 229
+2022-02-07 19:13:06,213 DEBUG    http://localhost:None "GET /v1.41/containers/abc401ccf237e9215f0cac5cbb6385c4dcfcdf12b7c01c6176f69e8d5507b1a6/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,666 DEBUG    http://localhost:None "POST /v1.41/containers/abc401ccf237e9215f0cac5cbb6385c4dcfcdf12b7c01c6176f69e8d5507b1a6/start HTTP/1.1" 204 0
+2022-02-07 19:13:06,668 DEBUG    http://localhost:None "GET /v1.41/containers/abc401ccf237e9215f0cac5cbb6385c4dcfcdf12b7c01c6176f69e8d5507b1a6/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,711 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:06,711 DEBUG    No config file found
+2022-02-07 19:13:06,711 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:06,711 DEBUG    No config file found
+2022-02-07 19:13:06,720 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-07 19:13:06,729 DEBUG    http://localhost:None "GET /v1.41/containers/json?limit=-1&all=0&size=0&trunc_cmd=0 HTTP/1.1" 200 None
+2022-02-07 19:13:06,733 DEBUG    http://localhost:None "GET /v1.41/containers/abc401ccf237e9215f0cac5cbb6385c4dcfcdf12b7c01c6176f69e8d5507b1a6/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,736 DEBUG    http://localhost:None "GET /v1.41/containers/233f0c5b3a0038b795de2d69f747092952ab68aadd03d16b6b33c2272ddd5484/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,738 DEBUG    http://localhost:None "GET /v1.41/containers/b76f34a9247ba5c2dc69a9464bbcaf641c71e43fac86c9c78bb5feabee33fe77/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,743 DEBUG    http://localhost:None "GET /v1.41/containers/371ad1847344c61ad704fe8bf6feacfdf4fba76e8e14210e4fc6b45ede5d810f/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,746 DEBUG    http://localhost:None "GET /v1.41/containers/aebbfc1a13910ffc337164cd4d30331504c94db664d4f49704df0d8770c9bdd0/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,748 DEBUG    http://localhost:None "GET /v1.41/containers/01f4d9f90ee89e620f80d3ef837cb64caa9ae94e098ac52fa9e34840a573eb71/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,751 DEBUG    http://localhost:None "GET /v1.41/containers/4898bb9294519eb244bc2fcec78548c04929ce45dee9d81b6ec1c1a91a1b5725/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,754 DEBUG    http://localhost:None "GET /v1.41/containers/0fea365bad65fc2a1dc38d0da83e1fb1413c430fb4409d16bbede5b28e9dae10/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,757 DEBUG    http://localhost:None "GET /v1.41/containers/c267cb2fa570b17b609f41f4c320b1c41816657c23bf263b5adef9fb3457cb49/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,760 DEBUG    http://localhost:None "GET /v1.41/containers/0e17ab22c586ac476d3a1e451f8397a4690bd84459f4d2ec3da42183b8c41f0d/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,763 DEBUG    http://localhost:None "GET /v1.41/containers/6b58c1375d6401211d1917ac7a55a19a2be3bfb0323776e94d5274906a2fa7b6/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,765 DEBUG    http://localhost:None "GET /v1.41/containers/44b14bc97f9d8f3d5fd85e72d8fe503577156385389cb99bd42cbb58fb441946/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,768 DEBUG    http://localhost:None "GET /v1.41/containers/f64e39352b24966f68d0706f2e9678dca33193802abd51bf1b8b4b2465743993/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,769 DEBUG    http://localhost:None "GET /v1.41/containers/668a16597ff03dc064529778b5c326f9d5652d45d47605c1e0b1af31a0e414a1/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,771 DEBUG    http://localhost:None "GET /v1.41/containers/1f188b9f8611a10c3e536300772c18f9783cf5b8763acb86726f40cfc8e7dbc9/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,773 DEBUG    http://localhost:None "GET /v1.41/containers/571d60505d0c7d4282aa530c8ac061c79ee8b58486c34e75daefe5ccf246810f/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,776 DEBUG    http://localhost:None "GET /v1.41/containers/62fb7f502ce6395c2df379bb4f4b17589eea0a17760718e6ced6f0800a1ca475/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,778 DEBUG    http://localhost:None "GET /v1.41/containers/0751148797eba787a97bc0146fdfccaf837dc9faae2f6835af3c8a7fd87e27f0/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,780 DEBUG    http://localhost:None "GET /v1.41/containers/085edcfc5108984b0e43416e193fd23464b3c73d0157bcd832f14af7e4574ce5/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,783 DEBUG    http://localhost:None "GET /v1.41/containers/efa24ac12f32a2f1ddaabdf9dd2db47d91850586b028080ed92d031a6c31deb3/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,785 DEBUG    http://localhost:None "GET /v1.41/containers/ddf5e93b38dcfe9f6458f5fb43aaad00939d6f7977180f7a45bd3766cfeb2295/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,790 DEBUG    http://localhost:None "GET /v1.41/containers/0b0b5b0af6fb3a78558535a84e0533fc80e06c80100d36f6faddb147421b2f30/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,793 DEBUG    http://localhost:None "GET /v1.41/containers/23327783efffbd6b3ebaad51d964e7fe41f491f35af91e1620385aed56fc5491/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,795 DEBUG    http://localhost:None "GET /v1.41/containers/f660880e091c09ca80330ef2b29fb5fead07182900a68754a1851d6cd17b7f54/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,800 DEBUG    http://localhost:None "GET /v1.41/containers/794854752f6804d611b7f8995ab1ff916a2519473a828a75e7af568aa6e4ac38/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,802 DEBUG    http://localhost:None "GET /v1.41/containers/542b59465b1a8f89ef88f1fbfd6a0fc521ba46bd97b28cdd9c9ed0280e74122e/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,806 DEBUG    http://localhost:None "GET /v1.41/containers/9611c8bf3f5963ebf4c8d6191d7217fd19f9b1f42880fad78fdc97efb91a74b7/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,811 DEBUG    http://localhost:None "GET /v1.41/containers/94fbaed7d74205e9506182343f90eb8abaf7755abc49cb05e86b2fbaa31a8ccc/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,813 DEBUG    http://localhost:None "GET /v1.41/containers/3229dedb5f3374b2f5b3fc071330a4374ab284c4c3a73cdc20d41dc7ed8e177e/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,815 DEBUG    http://localhost:None "GET /v1.41/containers/3f1b39d7df64575c31ed71e44623e446e1a417b7565a7526210ff308e4c04f14/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,818 DEBUG    http://localhost:None "GET /v1.41/containers/d9f9dd6259d9659fe3aaad43ecef6f73d7e4d381c066002319db20c311e4ebb0/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,821 DEBUG    http://localhost:None "GET /v1.41/containers/a096a56b60cdf37ced1aa700305ebba4ce611d6b1e4b08082065cdf526d2590a/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,824 DEBUG    http://localhost:None "GET /v1.41/containers/bb53cdfa7d7aa2a4422a9a6789d2999eaea60a946bdde7d41c5e7a6657485e20/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,826 DEBUG    http://localhost:None "GET /v1.41/containers/45a74e937bcc28313fe1835745dce14d5cb886f36a0fed362cac4983eb6e4e9a/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,830 DEBUG    http://localhost:None "GET /v1.41/containers/25252f5202ab9cd8d3baa3a6133c75a0f20bf6ac5869cd34ce16a14153756c82/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,833 DEBUG    http://localhost:None "GET /v1.41/containers/f192b2e3e572b5fdd7e6c4cfc70701844cd13b0081b94b326b274eb796864836/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,836 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:06,836 DEBUG    No config file found
+2022-02-07 19:13:06,836 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:06,836 DEBUG    No config file found
+2022-02-07 19:13:06,848 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-07 19:13:06,856 DEBUG    http://localhost:None "GET /v1.41/images/json?only_ids=0&all=0 HTTP/1.1" 200 None
+2022-02-07 19:13:06,860 DEBUG    http://localhost:None "GET /v1.41/images/sha256:efef732e00fd5d171693bf9cbc8614d1db6d7ceabfa4c1a597ac89b121e988e9/json HTTP/1.1" 200 1474
+2022-02-07 19:13:06,863 DEBUG    http://localhost:None "GET /v1.41/images/sha256:7f2e49c0de173b83f54ded7b49726e91cbfe96735e0bf230778d9d5b56e98653/json HTTP/1.1" 200 1474
+2022-02-07 19:13:06,867 DEBUG    http://localhost:None "GET /v1.41/images/sha256:4b9e29aeefd926c0d81c0b6492fffed531f8cbf74d90d0b09727cebac7dfd252/json HTTP/1.1" 200 1474
+2022-02-07 19:13:06,870 DEBUG    http://localhost:None "GET /v1.41/images/sha256:2bb18cd0518e0ad8148132aae91cbaee405f12ee23a366e99dbdf1dba5af9756/json HTTP/1.1" 200 1474
+2022-02-07 19:13:06,873 DEBUG    http://localhost:None "GET /v1.41/images/sha256:525400ca45b96a6f958137db917c34a0c89bd81f7b53c0fd82571b77e189f445/json HTTP/1.1" 200 1476
+2022-02-07 19:13:06,876 DEBUG    http://localhost:None "GET /v1.41/images/sha256:8ca20aa755126211a9d4dc696202217dbfb28928a0a79e313efa1bb27058a93d/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,880 DEBUG    http://localhost:None "GET /v1.41/images/sha256:59a7d846a0a9c505b983fd51ff8238694b413e0df75bc981fdcf9a33e616f0fe/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,883 DEBUG    http://localhost:None "GET /v1.41/images/sha256:434c35b82b0870b1d5e177141161fd895aee015352f9c8f9da96236231caaeff/json HTTP/1.1" 200 None
+2022-02-07 19:13:06,887 DEBUG    http://localhost:None "GET /v1.41/images/sha256:64cdc469caaa7cee68b06410692f436ff4a1d8b314577a83f4e6400cc2dfc1ff/json HTTP/1.1" 200 1875
+2022-02-07 19:13:06,978 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:06,978 DEBUG    No config file found
+2022-02-07 19:13:06,978 DEBUG    Trying paths: ['/root/.docker/config.json', '/root/.dockercfg']
+2022-02-07 19:13:06,978 DEBUG    No config file found
+2022-02-07 19:13:06,991 DEBUG    http://localhost:None "GET /version HTTP/1.1" 200 828
+2022-02-07 19:13:07,047 DEBUG    http://localhost:None "POST /v1.41/containers/create HTTP/1.1" 201 229
+2022-02-07 19:13:07,049 DEBUG    http://localhost:None "GET /v1.41/containers/d5759993c71be3e53c4c47a4256b0cbf97f426a5a09368ecca00a9543da5fc78/json HTTP/1.1" 200 None
+2022-02-07 19:13:07,644 DEBUG    http://localhost:None "POST /v1.41/containers/d5759993c71be3e53c4c47a4256b0cbf97f426a5a09368ecca00a9543da5fc78/start HTTP/1.1" 204 0
+2022-02-07 19:13:07,646 DEBUG    http://localhost:None "GET /v1.41/containers/d5759993c71be3e53c4c47a4256b0cbf97f426a5a09368ecca00a9543da5fc78/json HTTP/1.1" 200 None
