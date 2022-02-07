@@ -238,7 +238,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
             del peer['_id']
             peer_instance = Parse(
                 text = json.dumps(peer),
-                message = celaut.Instance(),
+                message = celaut.Instance,
                 ignore_unknown_fields = True
             )
             peer_uri = utils.get_grpc_uri(instance = peer_instance)
