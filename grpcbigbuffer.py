@@ -379,9 +379,7 @@ def parse_from_buffer(
 
         try: 
             while True:
-                print('bufferrrr')
                 buffer = next(request_iterator)
-                print('buffer -> ', buffer)
                 # The order of conditions is important.
                 if buffer.HasField('head'):
                     if buffer.head.index not in indices: raise Exception('Parse from buffer error: buffer head index is not correct ' + str(buffer.head.index) + str(indices.keys()))
@@ -559,9 +557,7 @@ def serialize_to_buffer(
                     )
                 finally: signal.wait()
 
-        print('messageeesssss')
         for message in message_iterator:
-            print('message -> ', message)
             if type(message) is tuple:  # If is partitioned
                 yield buffer_pb2.Buffer(
                     head = buffer_pb2.Buffer.Head(
@@ -571,7 +567,6 @@ def serialize_to_buffer(
                 )
                 
                 for partition in message[1:]:
-                    print('partition -> ', partition)
                     if type(partition) is Dir:
                         for b in send_file(
                             filedir = partition,

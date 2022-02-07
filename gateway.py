@@ -235,9 +235,9 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
         for peer in list(pymongo.MongoClient(
                         "mongodb://localhost:27017/"
                     )["mongo"]["peerInstances"].find()):
-            peer_uri = peer['uriSlot'][0]['uri'][0]
+            peer_uri_d = peer['uriSlot'][0]['uri'][0]
+            peer_uri = peer_uri_d['ip']+':'+str(peer_uri_d['port'])
             try:
-                print('gogogo cost')
                 cost = next(grpcbf.client_grpc(
                         method =  gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(
@@ -249,7 +249,6 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
                         indices_serializer = GetServiceCost_input,
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata),
                     )).cost
-                print('cost ', cost)
                 peers.add_elem(
                     elem = peer_uri,
                     weight = cost
@@ -794,7 +793,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     def GetServiceCost(self, request_iterator, context):
-        print('GO TO TAKE THE SERVICE COST')
         try:
             for r in grpcbf.parse_from_buffer(
                 request_iterator=request_iterator, 
@@ -802,11 +800,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 partitions_message_mode=True
             ):
                 cost = None
-                print('R IS ')
-                print(r)
                 if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                     r.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    print('VAMOS A OBTENER EL COSTE DEL REGISTRO.')
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
                         cost = execution_cost(
@@ -825,7 +820,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         continue
 
                 if type(r) is celaut.Any:
-                    print('VAMOS A OBTENER EL COSTE DEL ANY.')
                     cost = execution_cost(
                         service_buffer = r.value,
                         metadata = r.metadata
