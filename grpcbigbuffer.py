@@ -380,7 +380,9 @@ def parse_from_buffer(
         try: 
             while True:
                 print('buffer ....')
-                buffer = next(request_iterator)
+                try:
+                    buffer = next(request_iterator)
+                except Exception as e: print('exception receibin the next buffer ', str(e))
                 print('buffer -> ', buffer)
                 # The order of conditions is important.
                 if buffer.HasField('head'):

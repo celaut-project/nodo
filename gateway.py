@@ -250,6 +250,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
                         indices_serializer = GetServiceCost_input,
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata),
                     )).cost
+                cost = next(cost)
                 print('cost -> ', cost)
                 peers.add_elem(
                     elem = peer_uri,
