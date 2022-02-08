@@ -484,6 +484,7 @@ def serialize_to_buffer(
                     partitions_model.update({i: [buffer_pb2.Buffer.Head.Partition()]})
         
             if not hasattr(message_iterator, '__iter__') or type(message_iterator) is tuple:
+                print('Antes de meterlo al iterador .-> ', message_iterator.cost == 0)
                 message_iterator = itertools.chain([message_iterator])
 
             if 1 not in indices:
