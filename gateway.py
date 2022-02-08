@@ -832,9 +832,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
             for b in grpcbf.serialize_to_buffer(
-                gateway_pb2.CostMessage(
-                    cost = cost
-                )            
+                message_iterator = gateway_pb2.CostMessage(
+                                    cost = cost
+                                )            
             ): 
                 print('ok b-> ',b)
                 yield b

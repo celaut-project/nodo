@@ -561,7 +561,7 @@ def serialize_to_buffer(
 
         print('message ....')
         for message in message_iterator:
-            print('message -> ', message, type(message))
+            print('message -> ', message, message.cost == 0, type(message))
             if type(message) is tuple:  # If is partitioned
                 yield buffer_pb2.Buffer(
                     head = buffer_pb2.Buffer.Head(
