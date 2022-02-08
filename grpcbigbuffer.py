@@ -380,10 +380,8 @@ def parse_from_buffer(
         try: 
             while True:
                 print('buffer ....')
-                try:
-                    buffer = next(request_iterator)
-                except Exception as e: print('exception receibin the next buffer ', str(e))
-                print('buffer -> ', buffer)
+                buffer = next(request_iterator)
+                print('buffer -> ', buffer)  # TODO check, no esta tomando el siguiente buffer (CostMessage), pero el otro lado si que lo manda.
                 # The order of conditions is important.
                 if buffer.HasField('head'):
                     if buffer.head.index not in indices: raise Exception('Parse from buffer error: buffer head index is not correct ' + str(buffer.head.index) + str(indices.keys()))

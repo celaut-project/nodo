@@ -835,7 +835,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 gateway_pb2.CostMessage(
                     cost = cost
                 )            
-            ): yield b
+            ): 
+                print('ok b-> ',b)
+                yield b
+            print('OK, thats all.')
         except Exception as e: print('GetSErviceCost exception ', str(e)) # TODO delete this ex. catch.
 
 if __name__ == "__main__":
