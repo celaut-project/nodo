@@ -801,7 +801,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 cost = None
                 if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                     r.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    yield gateway_pb2.buffer__pb2.Buffer(signal = True)
+                    yield gateway_pb2.buffer__pb2.Buffer(signal = True) # TODO check, why is sending signal.?
                     try:
                         cost = execution_cost(
                                 service_buffer = get_service_buffer_from_registry(
@@ -813,8 +813,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                     )]
                                 )
                             )
+                        print('cost with hash -> ', cost)
                         break
                     except:
+                        print('yield on except.')
                         yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                         continue
 
@@ -823,6 +825,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         service_buffer = r.value,
                         metadata = r.metadata
                     )
+                    print('cost  with any -> ', cost)
                     break
 
             l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
