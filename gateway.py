@@ -803,15 +803,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
+                        metadata = celaut.Any.Metadata()
+                        metadata.hashtag.hash.append(r)
                         cost = execution_cost(
                                 service_buffer = get_service_buffer_from_registry(
                                         hash = r.value.hex()
                                     ),
-                                metadata = celaut.Any.Metadata(
-                                    hashtag = [celaut.Any.Metadata.HashTag(
-                                        hash = r
-                                    )]
-                                )
+                                metadata = metadata
                             )
                         print('cost with hash -> ', cost)
                         break
