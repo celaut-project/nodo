@@ -467,6 +467,7 @@ def serialize_to_buffer(
         partitions_model: Union[list, dict] = [buffer_pb2.Buffer.Head.Partition()],
         mem_manager = None
     ) -> Generator[buffer_pb2.Buffer, None, None]:  # method: indice
+    print('d.f.daf,.ad,fa.,.a')
     try:
         try:
             if not mem_manager: mem_manager = Enviroment.mem_manager
