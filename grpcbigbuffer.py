@@ -379,9 +379,7 @@ def parse_from_buffer(
 
         try: 
             while True:
-                print('buffer ....')
                 buffer = next(request_iterator)
-                print('buffer -> ', buffer)  # TODO check, no esta tomando el siguiente buffer (CostMessage), pero el otro lado si que lo manda.
                 # The order of conditions is important.
                 if buffer.HasField('head'):
                     if buffer.head.index not in indices: raise Exception('Parse from buffer error: buffer head index is not correct ' + str(buffer.head.index) + str(indices.keys()))
@@ -467,7 +465,6 @@ def serialize_to_buffer(
         partitions_model: Union[list, dict] = [buffer_pb2.Buffer.Head.Partition()],
         mem_manager = None
     ) -> Generator[buffer_pb2.Buffer, None, None]:  # method: indice
-    print('d.f.daf,.ad,fa.,.a')
     try:
         try:
             if not mem_manager: mem_manager = Enviroment.mem_manager
@@ -485,7 +482,6 @@ def serialize_to_buffer(
                     partitions_model.update({i: [buffer_pb2.Buffer.Head.Partition()]})
         
             if not hasattr(message_iterator, '__iter__') or type(message_iterator) is tuple:
-                print('Antes de meterlo al iterador .-> ', message_iterator.cost == 0)
                 message_iterator = itertools.chain([message_iterator])
 
             if 1 not in indices:
@@ -560,10 +556,8 @@ def serialize_to_buffer(
                         separator = True
                     )
                 finally: signal.wait()
-
-        print('message ....')
+                
         for message in message_iterator:
-            print('message -> ', message, message.cost == 0, type(message))
             if type(message) is tuple:  # If is partitioned
                 yield buffer_pb2.Buffer(
                     head = buffer_pb2.Buffer.Head(
