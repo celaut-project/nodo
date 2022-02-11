@@ -537,6 +537,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
             except StopIteration: break
             hash = None
             service_with_meta = None
+
+            print('r -> ', r, type(r))
             if type(r) is gateway_pb2.HashWithConfig:
                 configuration = r.config
                 hash = r.hash
