@@ -82,7 +82,7 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, me
     run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
     run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
     
-    check_output('docker image tag '+cache_id+' '+id, shell=True)
+    check_output('docker image tag '+cache_id+' '+id+'.docker', shell=True)
     check_output('docker rmi '+cache_id, shell=True)
     l.LOGGER('Build process of '+ id + ': finished.')
 
