@@ -72,7 +72,7 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, me
     except Exception: pass
 
     # Generate the symlinks.
-    overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+id+'.docker', shell=True).decode('utf-8')[:-1]
+    overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+cache_id, shell=True).decode('utf-8')[:-1]
     l.LOGGER('Build process of '+ id + ': overlay dir '+str(overlay_dir))
     for symlink in symlinks: 
         l.LOGGER('  symlink -> '+ str(symlink.src)+' '+ str(symlink.dst))
