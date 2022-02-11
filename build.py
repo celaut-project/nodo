@@ -1,4 +1,4 @@
-from time import sleep
+from time import sleep, time
 import threading
 from gateway_pb2_grpcbf import GetServiceTar_input
 import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os, celaut_pb2, utils, iobigdata
@@ -64,7 +64,8 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, me
     # Build it.
     l.LOGGER('Build process of '+ id + ': docker building it ...')
     open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .')
-    check_output('docker buildx build --platform '+arch+' -t '+id+'.docker '+dir+'/.', shell=True)
+    cache_id = id+time()+'.cache'
+    check_output('docker buildx build --platform '+arch+' -t '+cache_id+' '+dir+'/.', shell=True)
     l.LOGGER('Build process of '+ id + ': docker build it.')
     try:
         rmtree(dir)
@@ -81,7 +82,9 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, me
     # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
     run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
     run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
-
+    
+    check_output('docker image tag '+cache_id+' '+id, shell=True)
+    check_output('docker rmi '+cache_id, shell=True)
     l.LOGGER('Build process of '+ id + ': finished.')
 
 
