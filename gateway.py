@@ -289,6 +289,8 @@ def launch_service(
                                         peer_instance_uri
                                     )
                                 ).StartService,
+                        partitions_message_mode_parser = True,
+                        indices_serializer = StartService_input,
                         indices_parser = gateway_pb2.Instance,
                         input = utils.service_extended(
                                 service_buffer = service_buffer, 
@@ -557,17 +559,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
+                        metadata = celaut.Any.Metadata()
+                        metadata.hashtag.hash.append(hash)
+                        metadata.complete = True # TODO check
                         for b in grpcbf.serialize_to_buffer(
                             message_iterator = launch_service(
                                 service_buffer = get_service_buffer_from_registry(
                                     hash = hash.value.hex()
                                 ),
-                                metadata = celaut.Any.Metadata(
-                                    hashtag = celaut.Any.Metadata.HashTag(
-                                        hash = hash
-                                    ),
-                                    complete = True # TODO check
-                                ), 
+                                metadata = metadata, 
                                 config = configuration,
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                             )
