@@ -469,7 +469,6 @@ def serialize_to_buffer(
         try:
             if not mem_manager: mem_manager = Enviroment.mem_manager
             if not cache_dir: cache_dir = create_cache_dir()
-            print('Default indices re -> ', indices)
             if type(indices) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType: indices = {1: indices}
             if type(indices) is not dict: raise Exception
         
@@ -559,7 +558,6 @@ def serialize_to_buffer(
                 finally: signal.wait()
                 
         for message in message_iterator:
-            print('     want to send the message -> ', message, type(message), indices)
             if type(message) is tuple:  # If is partitioned
                 yield buffer_pb2.Buffer(
                     head = buffer_pb2.Buffer.Head(
@@ -587,7 +585,6 @@ def serialize_to_buffer(
                     index = indices[type(message)],
                     partitions = partitions_model[indices[type(message)]]
                 )
-                print('     buffer head is -> ', head)
                 for b in send_message(
                     signal=signal,
                     message=message,
@@ -599,7 +596,7 @@ def serialize_to_buffer(
             shutil.rmtree(cache_dir)
         except: pass
         return
-    except Exception as e: print('Serialize buffer error -> ', e)
+    except Exception as e: print(e)
 
 def client_grpc(
         method,
