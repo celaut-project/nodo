@@ -64,7 +64,7 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, me
     # Build it.
     l.LOGGER('Build process of '+ id + ': docker building it ...')
     open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .')
-    cache_id = id+time()+'.cache'
+    cache_id = id+str(time())+'.cache'
     check_output('docker buildx build --platform '+arch+' -t '+cache_id+' '+dir+'/.', shell=True)
     l.LOGGER('Build process of '+ id + ': docker build it.')
     try:
