@@ -182,7 +182,8 @@ if __name__ == "__main__":
     import sys
     id = sys.argv[1]
     any = gateway_pb2.celaut__pb2.Any()
-    any.ParseFromString(iobigdata.read_file(filename="/node/__registry__/"+id))
+    any.ParseFromString(iobigdata.read_file(filename="/node/__registry__/"+id+'/p1'))
+    any.service.container.ParseFromString(iobigdata.read_file(filename="/node/__registry__/"+id+'/p2'))
     if get_service_hex_main_hash(service_buffer = any.value, metadata = any.metadata) == id:
         id = build(
             service_buffer = any.value, 
