@@ -298,11 +298,13 @@ def launch_service(
                                 config = config
                             )
                     ))
+                    print('Service instance ', service_instance, type(service_instance))
                     set_on_cache(
                         father_ip = father_ip,
                         ip_or_uri =  peer_instance_uri, # Add node_uri.
                         id_or_token = service_instance.token  # Add token.
                     )
+                    print('set on cache ok')
                     service_instance.token = father_ip + '##' + peer_instance_uri.split(':')[0] + '##' + service_instance.token  # TODO adapt for ipv6 too.
                     return service_instance
                 except Exception as e:
@@ -540,7 +542,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
             hash = None
             service_with_meta = None
 
-            print('r -> ', r, type(r))
             if type(r) is gateway_pb2.HashWithConfig:
                 configuration = r.config
                 hash = r.hash
