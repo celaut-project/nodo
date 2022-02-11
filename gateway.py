@@ -14,7 +14,7 @@ from google.protobuf.json_format import MessageToJson
 from google.protobuf.json_format import Parse
 import docker as docker_lib
 import netifaces as ni
-from gateway_pb2_grpcbf import StartService_input, GetServiceCost_input, GetServiceTar_input, StartService_input_partitions_v2
+from gateway_pb2_grpcbf import StartService_input, GetServiceCost_input, GetServiceTar_input, StartService_input_partitions_v1, StartService_input_partitions_v2
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
 
