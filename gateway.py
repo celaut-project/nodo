@@ -289,7 +289,7 @@ def launch_service(
                                         peer_instance_uri
                                     )
                                 ).StartService,
-                        output_field = gateway_pb2.Instance,
+                        indices_parser = gateway_pb2.Instance,
                         input = utils.service_extended(
                                 service_buffer = service_buffer, 
                                 metadata = metadata,
