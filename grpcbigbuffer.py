@@ -558,7 +558,7 @@ def serialize_to_buffer(
                 finally: signal.wait()
                 
         for message in message_iterator:
-            print('     want to send the message -> ', message, type(message))
+            print('     want to send the message -> ', message, type(message), indices)
             if type(message) is tuple:  # If is partitioned
                 yield buffer_pb2.Buffer(
                     head = buffer_pb2.Buffer.Head(
