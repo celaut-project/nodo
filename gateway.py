@@ -283,6 +283,7 @@ def launch_service(
             if peer_instance_uri != 'local':
                 try:
                     l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer_instance_uri))
+                    # TODO se debe hacer que al pedir un servicio exista un timeout.
                     service_instance = next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
@@ -793,6 +794,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     def GetServiceCost(self, request_iterator, context):
+        # TODO podría comparar costes de otros pares, (menos del que le pregunta.)
         for r in grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
             indices = GetServiceCost_input,
