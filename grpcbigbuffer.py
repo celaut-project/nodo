@@ -596,7 +596,7 @@ def serialize_to_buffer(
             shutil.rmtree(cache_dir)
         except: pass
         return
-    except Exception as e: print(e)
+    except Exception as e: print('Serialize buffer error -> ', e)
 
 def client_grpc(
         method,
