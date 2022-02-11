@@ -469,6 +469,7 @@ def serialize_to_buffer(
         try:
             if not mem_manager: mem_manager = Enviroment.mem_manager
             if not cache_dir: cache_dir = create_cache_dir()
+            print('Default indices re -> ', indices)
             if type(indices) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType: indices = {1: indices}
             if type(indices) is not dict: raise Exception
         
