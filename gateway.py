@@ -563,6 +563,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         metadata.hashtag.hash.append(hash)
                         metadata.complete = True # TODO check
                         for b in grpcbf.serialize_to_buffer(
+                            indices={},
                             message_iterator = launch_service(
                                 service_buffer = get_service_buffer_from_registry(
                                     hash = hash.value.hex()
@@ -617,6 +618,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 )
                 if configuration:
                     for buffer in grpcbf.serialize_to_buffer(
+                        indices={},
                         message_iterator = launch_service(
                             service_buffer = service_with_meta.service.SerializeToString(),
                             metadata = service_with_meta.metadata, 
@@ -634,6 +636,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         try:
             for b in grpcbf.serialize_to_buffer(
                 message_iterator = launch_service(
+                    indices={},
                     service_buffer = search_definition(hashes = hashes),
                     metadata = celaut.Any.Metadata(
                         hashtag = celaut.Any.Metadata.HashTag(
