@@ -293,7 +293,6 @@ def launch_service(
                         partitions_message_mode_parser = True,
                         indices_serializer = StartService_input,
                         indices_parser = gateway_pb2.Instance,
-                        partitions_serializer = StartService_input_partitions_v1,
                         input = utils.service_extended(
                                 service_buffer = service_buffer, 
                                 metadata = metadata,
