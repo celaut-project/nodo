@@ -562,7 +562,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 ),
                                 metadata = celaut.Any.Metadata(
                                     hashtag = celaut.Any.Metadata.HashTag(
-                                        hash = hashes
+                                        hash = hash
                                     ),
                                     complete = True # TODO check
                                 ), 
