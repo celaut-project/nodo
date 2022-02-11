@@ -283,7 +283,7 @@ def launch_service(
             if peer_instance_uri != 'local':
                 try:
                     l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer_instance_uri))
-                    service_instance = next(grpcbf.client_grpc( # TODO check
+                    service_instance = next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
                                         peer_instance_uri
