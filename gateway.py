@@ -594,7 +594,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     if type(r) is not gateway_pb2.ServiceWithMeta: raise Exception
                 except Exception: raise Exception('Grpcbf error: partition corrupted')
                 service_with_meta = r
-
+ 
             # Si me da servicio.  
             if service_with_meta:
                 # Iterate the second partition.
