@@ -271,7 +271,7 @@ def launch_service(
     if service_buffer == None: raise Exception("Service object can't be None")
     getting_container = False
     # Here it asks the balancer if it should assign the job to a peer.
-    while True: # TODO NOW no introducir en el balancer el nodo que realizo la peticion.
+    while True:
         for peer_instance_uri, cost in service_balancer(
             service_buffer = service_buffer,
             metadata = metadata,
