@@ -22,8 +22,9 @@ DOCKER_CLIENT = lambda: docker_lib.from_env()
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
-SELF_RATE = utils.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 1)
-COST_OF_BUILD = utils.GET_ENV(env = 'COST_OF_BUILD', default = 0)
+COMPUTE_POWER_RATE = utils.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
+COST_OF_BUILD = utils.GET_ENV(env = 'COST_OF_BUILD', default = 5)
+EXECUTION_BENEFIT = utils.GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
@@ -209,11 +210,11 @@ def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
 
 def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
     return sum([
-        len( DOCKER_CLIENT().containers.list() ),
+        len( DOCKER_CLIENT().containers.list() )* COMPUTE_POWER_RATE,
         build_cost(service_buffer = service_buffer, metadata = metadata),
-    ]) * SELF_RATE
+    ]) 
 
-def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> dict: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
+def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignore_network: str = None) -> dict: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
     class PeerCostList:
         # Sorts the list from the element with the smallest weight to the element with the largest weight.
         
@@ -232,9 +233,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata) -> di
             weight = execution_cost(service_buffer = service_buffer, metadata = metadata)
         )
 
-        for peer in list(pymongo.MongoClient(
-                        "mongodb://localhost:27017/"
-                    )["mongo"]["peerInstances"].find()):
+        for peer in peers_iterator(ignore_network = ignore_network):
             peer_uri_d = peer['uriSlot'][0]['uri'][0]
             peer_uri = peer_uri_d['ip']+':'+str(peer_uri_d['port'])
             try:
@@ -272,10 +271,13 @@ def launch_service(
     if service_buffer == None: raise Exception("Service object can't be None")
     getting_container = False
     # Here it asks the balancer if it should assign the job to a peer.
-    while True:
+    while True: # TODO NOW no introducir en el balancer el nodo que realizo la peticion.
         for peer_instance_uri, cost in service_balancer(
             service_buffer = service_buffer,
-            metadata = metadata
+            metadata = metadata,
+            ignore_network = utils.get_network_name(
+                ip_or_uri = father_ip
+            )
         ).items():
             l.LOGGER('Balancer select peer ' + str(peer_instance_uri) + ' with cost ' + str(cost))
             
@@ -443,9 +445,7 @@ def peers_iterator(ignore_network: str = None) -> Generator[celaut.Instance.Uri,
         if ignore_network and not utils.address_in_network(
             ip_or_uri = peer_uri['ip'],
             net = ignore_network
-        ): 
-            l.LOGGER('  Looking for a service on peer ' + str(peer))
-            yield peer_uri
+        ): yield peer_uri
 
 def search_container(
         service_buffer: bytes, 
@@ -829,7 +829,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.CostMessage(
-                                cost = cost+1
+                                cost = cost + EXECUTION_BENEFIT
                             )            
         ): yield b
 
