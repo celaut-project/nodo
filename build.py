@@ -15,8 +15,8 @@ from verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
 WAIT_FOR_CONTAINER = utils.GET_ENV(env = 'WAIT_FOR_CONTAINER_TIME', default = 60)
 
-def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, metadata: gateway_pb2.celaut__pb2.Any.Metadata, id: str):
-    l.LOGGER('\nIt is not locally, ' + id + ' go to build the container.')
+def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2.celaut__pb2.Any.Metadata, id: str):
+    
     # Build the container from filesystem definition.
     def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir: str, symlinks):
         if b.HasField('filesystem'):
@@ -39,52 +39,64 @@ def build_container_from_definition(service: gateway_pb2.celaut__pb2.Service, me
                 symlinks = symlinks
             )
 
-    # Take filesystem.
-    fs = celaut_pb2.Service.Container.Filesystem()
-    fs.ParseFromString(
-        service.container.filesystem
-    )
+    second_partition_dir = REGISTRY + id + '/p2'
+    with iobigdata.mem_manager(len = len(service_buffer) + 2*os.path.getsize(second_partition_dir)):
+        l.LOGGER('Build process of '+ id + ': go to load all the buffer.')
+        service = gateway_pb2.celaut__pb2.Service()
+        service.ParseFromString(service_buffer)
+        service.container.ParseFromString(
+            iobigdata.read_file(
+                filename = second_partition_dir
+            )
+        )
+        l.LOGGER('Build process of '+ id + ': filesystem load in memmory.')
 
-    # Take architecture.
-    arch = 'linux/arm64' # get_arch_tag(service_with_meta=service_with_meta) # TODO: get_arch_tag, selecciona el tag de la arquitectura definida por el servicio, en base a la especificacion y metadatos, que tiene el nodo para esa arquitectura.
-    
-    try:
-        os.mkdir('__hycache__')
-    except: pass
+        # Take filesystem.
+        fs = celaut_pb2.Service.Container.Filesystem()
+        fs.ParseFromString(
+            service.container.filesystem
+        )
 
-    # Write all on hycache.
-    dir = '__hycache__/builder'+id
-    os.mkdir(dir)
-    fs_dir = dir + '/fs'
-    os.mkdir(fs_dir)
-    symlinks = []
-    l.LOGGER('Build process of '+ id + ': writting filesystem.')
-    write_fs(fs = fs, dir = fs_dir + '/', symlinks = symlinks)
+        # Take architecture.
+        arch = 'linux/arm64' # get_arch_tag(service_with_meta=service_with_meta) # TODO: get_arch_tag, selecciona el tag de la arquitectura definida por el servicio, en base a la especificacion y metadatos, que tiene el nodo para esa arquitectura.
+        
+        try:
+            os.mkdir('__hycache__')
+        except: pass
 
-    # Build it.
-    l.LOGGER('Build process of '+ id + ': docker building it ...')
-    open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .')
-    cache_id = id+str(time())+'.cache'
-    check_output('docker buildx build --platform '+arch+' -t '+cache_id+' '+dir+'/.', shell=True)
-    l.LOGGER('Build process of '+ id + ': docker build it.')
-    try:
-        rmtree(dir)
-    except Exception: pass
+        # Write all on hycache.
+        dir = '__hycache__/builder'+id
+        os.mkdir(dir)
+        fs_dir = dir + '/fs'
+        os.mkdir(fs_dir)
+        symlinks = []
+        l.LOGGER('Build process of '+ id + ': writting filesystem.')
+        write_fs(fs = fs, dir = fs_dir + '/', symlinks = symlinks)
 
-    # Generate the symlinks.
-    overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+cache_id, shell=True).decode('utf-8')[:-1]
-    l.LOGGER('Build process of '+ id + ': overlay dir '+str(overlay_dir))
-    for symlink in symlinks: 
-        if check_output('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)[:2] == 'ln': break
+        # Build it.
+        l.LOGGER('Build process of '+ id + ': docker building it ...')
+        open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .')
+        cache_id = id+str(time())+'.cache'
+        check_output('docker buildx build --platform '+arch+' -t '+cache_id+' '+dir+'/.', shell=True)
+        l.LOGGER('Build process of '+ id + ': docker build it.')
+        try:
+            rmtree(dir)
+        except Exception: pass
 
-    l.LOGGER('Build process of '+ id + ': apply permissions.')
-    # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
-    run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
-    run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
-    
-    check_output('docker image tag '+cache_id+' '+id+'.docker', shell=True)
-    check_output('docker rmi '+cache_id, shell=True)
-    l.LOGGER('Build process of '+ id + ': finished.')
+        # Generate the symlinks.
+        overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+cache_id, shell=True).decode('utf-8')[:-1]
+        l.LOGGER('Build process of '+ id + ': overlay dir '+str(overlay_dir))
+        for symlink in symlinks: 
+            if check_output('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)[:2] == 'ln': break
+
+        l.LOGGER('Build process of '+ id + ': apply permissions.')
+        # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
+        run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
+        run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
+        
+        check_output('docker image tag '+cache_id+' '+id+'.docker', shell=True)
+        check_output('docker rmi '+cache_id, shell=True)
+        l.LOGGER('Build process of '+ id + ': finished.')
 
 
 def get_container_from_outside( # TODO could take it from a specific ledger.
@@ -153,25 +165,14 @@ def build(
     except CalledProcessError:
         if metadata.complete:
             if get_it:
-                second_partition_dir = REGISTRY + id + '/p2'
-                with iobigdata.mem_manager(len = len(service_buffer) + 2*os.path.getsize(second_partition_dir)):
-                    l.LOGGER('Build process of '+ id + ': go to load all the buffer.')
-                    service = gateway_pb2.celaut__pb2.Service()
-                    service.ParseFromString(service_buffer)
-                    service.container.ParseFromString(
-                        iobigdata.read_file(
-                            filename = second_partition_dir
+                threading.Thread(
+                        target = build_container_from_definition,
+                        args = (
+                            service_buffer,
+                            metadata,
+                            id
                         )
-                    )
-                    l.LOGGER('Build process of '+ id + ': filesystem load in memmory.')
-                    threading.Thread(
-                            target = build_container_from_definition,
-                            args = (
-                                service,
-                                metadata,
-                                id
-                            )
-                        ).start()
+                    ).start()
             else: sleep( WAIT_FOR_CONTAINER )
             raise Exception("Getting the container, the process will've time")
         else:
