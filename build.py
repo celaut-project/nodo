@@ -86,8 +86,10 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         # Generate the symlinks.
         overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+cache_id, shell=True).decode('utf-8')[:-1]
         l.LOGGER('Build process of '+ id + ': overlay dir '+str(overlay_dir))
-        for symlink in symlinks: 
-            if check_output('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)[:2] == 'ln': break
+        for symlink in symlinks:
+            try:
+                if check_output('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)[:2] == 'ln': break
+            except CalledProcessError: pass
 
         l.LOGGER('Build process of '+ id + ': apply permissions.')
         # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
