@@ -2,7 +2,7 @@ from time import sleep, time
 import threading
 from gateway_pb2_grpcbf import GetServiceTar_input
 import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os, celaut_pb2, utils, iobigdata
-from utils import service_extended
+from utils import peers_iterator, service_extended
 from grpcbigbuffer import save_chunks_to_file, serialize_to_buffer
 from compile import HYCACHE, REGISTRY
 import logger as l
@@ -13,7 +13,11 @@ from subprocess import check_output, run
 
 from verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
+
 WAIT_FOR_CONTAINER = utils.GET_ENV(env = 'WAIT_FOR_CONTAINER_TIME', default = 60)
+
+actual_building_processes_lock = threading.Lock()
+actual_building_processes = []  # list of hexadecimal string sha256 value hashes.
 
 def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2.celaut__pb2.Any.Metadata, id: str):
     
@@ -100,6 +104,10 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         check_output('docker rmi '+cache_id, shell=True)
         l.LOGGER('Build process of '+ id + ': finished.')
 
+        actual_building_processes_lock.acquire()
+        actual_building_processes.remove(id)
+        actual_building_processes_lock.release()
+
 
 def get_container_from_outside( # TODO could take it from a specific ledger.
     id: str,
@@ -109,11 +117,7 @@ def get_container_from_outside( # TODO could take it from a specific ledger.
     # search container in a service. (docker-tar, docker-tar.gz, filesystem, ....)
 
     l.LOGGER('\nIt is not locally, ' + id + ' go to search the container in other node.')
-    peers = list(pymongo.MongoClient(
-                "mongodb://localhost:27017/"
-            )["mongo"]["peerInstances"].find())
-
-    for peer in peers:
+    for peer in peers_iterator():
         try:
             peer_uri = peer['uriSlot'][0]['uri'][0]
             l.LOGGER('\nUsing the peer ' + str(peer_uri) + ' for get the container of '+ id)
@@ -149,6 +153,10 @@ def get_container_from_outside( # TODO could take it from a specific ledger.
         raise Exception('Error building the container.')
 
     l.LOGGER('Outside load container process finished ' + id)
+
+    actual_building_processes_lock.acquire()
+    actual_building_processes.remove(id)
+    actual_building_processes_lock.release()
     
 
 def build(
@@ -166,7 +174,11 @@ def build(
 
     except CalledProcessError:
         if metadata.complete:
-            if get_it:
+            if get_it and id not in actual_building_processes:
+                actual_building_processes_lock.acquire()
+                actual_building_processes.append(id)
+                actual_building_processes_lock.release()
+
                 threading.Thread(
                         target = build_container_from_definition,
                         args = (
@@ -178,11 +190,15 @@ def build(
             else: sleep( WAIT_FOR_CONTAINER )
             raise Exception("Getting the container, the process will've time")
         else:
-            threading.Thread(
-                    target = get_container_from_outside,
-                    args = (id, service_buffer, metadata)          
-                ).start() if get_it else sleep( WAIT_FOR_CONTAINER )
-            raise Exception("Getting the container, the process will've time")
+            if id not in actual_building_processes:
+                actual_building_processes_lock.acquire()
+                actual_building_processes.append(id)
+                actual_building_processes_lock.release()
+                threading.Thread(
+                        target = get_container_from_outside,
+                        args = (id, service_buffer, metadata)          
+                    ).start() if get_it else sleep( WAIT_FOR_CONTAINER )
+                raise Exception("Getting the container, the process will've time")
 
     # verify() TODO ??
 

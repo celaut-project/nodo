@@ -233,7 +233,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
             weight = execution_cost(service_buffer = service_buffer, metadata = metadata)
         )
 
-        for peer in peers_iterator(ignore_network = ignore_network):
+        for peer in utils.peers_iterator(ignore_network = ignore_network):
             peer_uri = peer['ip']+':'+str(peer['port'])
             try:
                 peers.add_elem(
@@ -434,25 +434,13 @@ def save_service(
         if service_p2:
             shutil.move(service_p2, REGISTRY+hash+'/p2')
 
-def peers_iterator(ignore_network: str = None) -> Generator[celaut.Instance.Uri, None, None]:
-    peers = list(pymongo.MongoClient(
-                "mongodb://localhost:27017/"
-            )["mongo"]["peerInstances"].find())
-
-    for peer in peers:
-        peer_uri = peer['uriSlot'][0]['uri'][0]
-        if ignore_network and not utils.address_in_network(
-            ip_or_uri = peer_uri['ip'],
-            net = ignore_network
-        ): yield peer_uri
-
 def search_container(
         service_buffer: bytes, 
         metadata: celaut.Any.Metadata,
         ignore_network: str = None
     ) -> Generator[gateway_pb2.buffer__pb2.Buffer, None, None]:
     # Search a service tar container.
-    for peer in peers_iterator(ignore_network = ignore_network):
+    for peer in utils.peers_iterator(ignore_network = ignore_network):
         try:
             next(
                 grpcbf.client_grpc(
@@ -471,7 +459,7 @@ def search_container(
 
 def search_file(hashes: list, ignore_network: str = None) -> Generator[celaut.Any, None, None]:
     # TODO: It can search for other 'Service ledger' or 'ANY ledger' instances that could've this type of files.
-    for peer in  peers_iterator(ignore_network = ignore_network):
+    for peer in  utils.peers_iterator(ignore_network = ignore_network):
         try:
             for buffer in grpcbf.client_grpc(
                 method = gateway_pb2_grpc.GatewayStub(
