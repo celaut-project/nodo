@@ -234,8 +234,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
         )
 
         for peer in peers_iterator(ignore_network = ignore_network):
-            peer_uri_d = peer['uriSlot'][0]['uri'][0]
-            peer_uri = peer_uri_d['ip']+':'+str(peer_uri_d['port'])
+            peer_uri = peer['ip']+':'+str(peer['port'])
             try:
                 peers.add_elem(
                     elem = peer_uri,
