@@ -47,14 +47,14 @@ class IOBigData(metaclass=Singleton):
             self.iobd.unlock_ram(ram_amount = self.len)
             gc.collect()
 
-    def __init__(self, log = lambda message: print(message)) -> None:
+    def __init__(self, log = None) -> None:
         self.log = log
         self.ram_pool = lambda: psutil.virtual_memory().available
         self.ram_locked = 0
         self.get_ram_avaliable = lambda: self.ram_pool() - self.ram_locked
         self.amount_lock = Lock()
 
-    def set_log(self, log = lambda message: print(message)) -> None:
+    def set_log(self, log = None) -> None:
         self.log = log
 
     @staticmethod
@@ -69,12 +69,13 @@ class IOBigData(metaclass=Singleton):
         return "%s %s" % (s, size_name[i])
 
     def stats(self, message: str):
-        with self.amount_lock:
-            self.log('\n--------- '+message+' -------------')
-            self.log('RAM POOL      -> '+ IOBigData.convert_size(self.ram_pool()))
-            self.log('RAM LOCKED    -> '+ IOBigData.convert_size(self.ram_locked))
-            self.log('RAM AVALIABLE -> '+ IOBigData.convert_size(self.get_ram_avaliable()))
-            self.log('-----------------------------------------\n')
+        if self.log:
+            with self.amount_lock:
+                self.log('\n--------- '+message+' -------------')
+                self.log('RAM POOL      -> '+ IOBigData.convert_size(self.ram_pool()))
+                self.log('RAM LOCKED    -> '+ IOBigData.convert_size(self.ram_locked))
+                self.log('RAM AVALIABLE -> '+ IOBigData.convert_size(self.get_ram_avaliable()))
+                self.log('-----------------------------------------\n')
 
     def lock(self, len):
         return self.RamLocker(len = len, iobd = self)

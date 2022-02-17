@@ -25,6 +25,7 @@ GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
 COMPUTE_POWER_RATE = utils.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
 COST_OF_BUILD = utils.GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = utils.GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
+MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
@@ -823,7 +824,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
 if __name__ == "__main__":
     from zeroconf import Zeroconf
     import iobigdata
-    iobigdata.IOBigData().set_log(log=l.LOGGER)
+    iobigdata.IOBigData().set_log(
+        log = l.LOGGER if MEMORY_LOGS else None
+        )
     grpcbf.modify_env(
         cache_dir = HYCACHE,
         mem_manager = iobigdata.mem_manager
