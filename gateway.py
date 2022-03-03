@@ -147,13 +147,17 @@ def purgue_external(father_ip, node_uri, token):
 
     # Le manda al otro nodo que elimine esa instancia.
     try:
-        gateway_pb2_grpc.Gateway(
-            grpc.insecure_channel(node_uri)
-        ).StopService(
-             gateway_pb2.TokenMessage(
+        next(grpcbf.client_grpc(
+            method = gateway_pb2_grpc.GatewayStub(
+                        grpc.insecure_channel(
+                            node_uri
+                        )
+                    ).StopService,
+            input = gateway_pb2.TokenMessage(
                 token = token
-            )
-        )
+            ),
+            indices_parser = gateway_pb2.Empty,
+        ))
     except grpc.RpcError as e:
         l.LOGGER('Error during remove a container on ' + node_uri + ' ' + str(e))
 
