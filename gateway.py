@@ -502,7 +502,7 @@ def search_definition(hashes: list, ignore_network: str = None) -> bytes:
 def get_service_buffer_from_registry(hash: str) -> bytes:
     return get_from_registry(hash = hash).value
 
-def get_from_registry(hash: str) -> celaut.Any: # TODO, should've other files ?? 
+def get_from_registry(hash: str) -> celaut.Any:
     l.LOGGER('Getting ' + hash + ' service from the local registry.')
     first_partition_dir = REGISTRY + hash + '/p1'
     try:

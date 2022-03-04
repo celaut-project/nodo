@@ -58,6 +58,22 @@ def instances_list():
     os.system('sudo docker ps')
 
 if __name__ == "__main__":
+    """
     import os
     os.chdir( os.getcwd() )
-    os.system('python3')
+    os.system('python3')    
+    """
+
+    import sys
+    id = sys.argv[1]
+    from gateway import get_from_registry
+    from build import build
+    print('Go to build ', id)
+    service_with_meta = get_from_registry(id)
+    print(
+        build(
+            service_buffer = service_with_meta.value,
+            metadata = service_with_meta.metadata,
+            id = id
+        )
+    ) 

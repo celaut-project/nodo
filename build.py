@@ -201,20 +201,3 @@ def build(
                 raise Exception("Getting the container, the process will've time")
 
     # verify() TODO ??
-
-if __name__ == "__main__":
-    import sys
-    l.LOGGER('DEPRECATED. Use gateway.')
-    id = sys.argv[1]
-    any = gateway_pb2.celaut__pb2.Any()
-    any.ParseFromString(iobigdata.read_file(filename="/node/__registry__/"+id+'/p1'))
-    service = celaut_pb2.Service()
-    service.container.ParseFromString(iobigdata.read_file(filename="/node/__registry__/"+id+'/p2'))
-    if get_service_hex_main_hash(service_buffer = any.value, metadata = any.metadata) == id:
-        id = build(
-            service_buffer = any.value, 
-            metadata = any.metadata
-            )
-        print(id)
-    else:
-        l.LOGGER('Error: asignacion de servicio erronea en el registro.')
