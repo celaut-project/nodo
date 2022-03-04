@@ -708,10 +708,19 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if SHA3_256_ID == hash.type and \
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True) # Say stop to send more hashes.
-                    for b in grpcbf.serialize_to_buffer(
-                        message_iterator = get_from_registry(
-                            hash = hash.value.hex()
-                        )
+                    any = celaut.Any()
+                    any.ParseFromString(
+                        get_from_registry(
+                                hash = hash.value.hex()
+                            )
+                    )
+                    for b in grpcbf.serialize_to_buffer( # TODO check.
+                        message_iterator = (
+                            celaut.Any,
+                            any,
+                            grpcbf.Dir(REGISTRY+'/'+hash.value.hex()+'/p2')
+                        ),
+                        partitions_model = StartService_input_partitions_v2[2]
                     ): yield b
             except: pass
         
