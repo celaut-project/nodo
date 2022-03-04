@@ -44,6 +44,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
             )
 
     second_partition_dir = REGISTRY + id + '/p2'
+    l.LOGGER('Build process of '+ id + ': wait for unlock the memory.')
     with iobigdata.mem_manager(len = len(service_buffer) + 3*os.path.getsize(second_partition_dir)):
         l.LOGGER('Build process of '+ id + ': go to load all the buffer.')
         service = gateway_pb2.celaut__pb2.Service()
