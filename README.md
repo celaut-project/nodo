@@ -34,3 +34,4 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 - MEMORY_LOGS
 - BUILD_CONTAINER_MEMORY_SIZE_FACTOR
 - WAIT_FOR_CONTAINER_TIME
+- USE_PRINT
