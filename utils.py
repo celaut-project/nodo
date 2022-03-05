@@ -7,7 +7,7 @@ import pymongo
 import netifaces as ni
 from verify import get_service_hex_main_hash
 
-GET_ENV = lambda env, default: int(os.environ.get(env)) if env in os.environ.keys() else default
+GET_ENV = lambda env, default: type(default)(os.environ.get(env)) if env in os.environ.keys() else default
 
 def peers_iterator(ignore_network: str = None) -> Generator[celaut_pb2.Instance.Uri, None, None]:
     peers = list(pymongo.MongoClient(
