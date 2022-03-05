@@ -836,17 +836,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ): yield b
 
 if __name__ == "__main__":
-    from zeroconf import Zeroconf
-    import iobigdata
-    iobigdata.IOBigData().set_log(
-        log = l.LOGGER if MEMORY_LOGS else None
-        )
-    grpcbf.modify_env(
-        cache_dir = HYCACHE,
-        mem_manager = iobigdata.mem_manager
-        )
-
-
     # Create __hycache__ if it does not exists.
     try:
         os.system('mkdir ' + HYCACHE)
@@ -858,6 +847,18 @@ if __name__ == "__main__":
         os.system('mkdir ' + REGISTRY)
     except:
         pass
+
+    from zeroconf import Zeroconf
+    import iobigdata
+    
+    iobigdata.IOBigData().set_log(
+        log = l.LOGGER if MEMORY_LOGS else None
+        )
+
+    grpcbf.modify_env(
+        cache_dir = HYCACHE,
+        mem_manager = iobigdata.mem_manager
+        )
 
     # Zeroconf for connect to the network (one per network).
     for network in ni.interfaces():
