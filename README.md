@@ -26,4 +26,11 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 
 14.Optional: activate ssh, https://linuxize.com/post/how-to-enable-ssh-on-ubuntu-18-04/
 
-15. Add enviroment variable COMPUTE_POWER_RATE
+15. Add enviroment variableS: 
+- COMPUTE_POWER_RATE
+- GATEWAY_PORT
+- COST_OF_BUILD
+- EXECUTION_BENEFIT
+- MEMORY_LOGS
+- BUILD_CONTAINER_MEMORY_SIZE_FACTOR
+- WAIT_FOR_CONTAINER_TIME
