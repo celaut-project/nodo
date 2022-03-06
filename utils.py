@@ -9,14 +9,14 @@ from verify import get_service_hex_main_hash
 
 GET_ENV = lambda env, default: type(default)(os.environ.get(env)) if env in os.environ.keys() else default
 
-def peers_iterator(ignore_network: str = None) -> Generator[celaut_pb2.Instance.Uri, None, None]:
+def peers_iterator(ignore_network: str = '') -> Generator[celaut_pb2.Instance.Uri, None, None]:
     peers = list(pymongo.MongoClient(
                 "mongodb://localhost:27017/"
             )["mongo"]["peerInstances"].find())
 
     for peer in peers:
         peer_uri = peer['uriSlot'][0]['uri'][0]
-        if ignore_network and not address_in_network(
+        if not ignore_network in address_in_network(
             ip_or_uri = peer_uri['ip'],
             net = ignore_network
         ): yield peer_uri
