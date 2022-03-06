@@ -35,4 +35,3 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 - BUILD_CONTAINER_MEMORY_SIZE_FACTOR
 - WAIT_FOR_CONTAINER_TIME
 - USE_PRINT
-- IGNORE_NETWORK_ON_SERVICE_BALANCER
