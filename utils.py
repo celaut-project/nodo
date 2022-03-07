@@ -16,7 +16,7 @@ def peers_iterator(ignore_network: str = None) -> Generator[celaut_pb2.Instance.
 
     for peer in peers:
         peer_uri = peer['uriSlot'][0]['uri'][0]
-        if ignore_network and not address_in_network(
+        if not ignore_network or ignore_network and not address_in_network(
             ip_or_uri = peer_uri['ip'],
             net = ignore_network
         ): yield peer_uri

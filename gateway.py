@@ -26,6 +26,7 @@ COMPUTE_POWER_RATE = utils.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
 COST_OF_BUILD = utils.GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = utils.GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
 MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
+IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = False)
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
@@ -282,7 +283,7 @@ def launch_service(
             metadata = metadata,
             ignore_network = utils.get_network_name(
                 ip_or_uri = father_ip
-            )
+            ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None
         ).items():
             l.LOGGER('Balancer select peer ' + str(peer_instance_uri) + ' with cost ' + str(cost))
             
