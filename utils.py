@@ -66,7 +66,7 @@ def service_extended(
                     REGISTRY + hash + '/p2'
                 )
         yield (
-                gateway_pb2.celaut__pb2.Any,
+                gateway_pb2.ServiceWithMeta,
                 any,
                 REGISTRY + hash + '/p2'
             )
