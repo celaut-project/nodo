@@ -39,7 +39,7 @@ def service_hashes(
 def service_extended(
         service_buffer: bytes,
         metadata: celaut_pb2.Any.Metadata,  
-        config: celaut_pb2.Configuration
+        config: celaut_pb2.Configuration = None
     ) -> Generator[object, None, None]:
         set_config = True if config else False
         for hash in metadata.hashtag.hash:
