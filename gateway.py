@@ -799,14 +799,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetServiceCost(self, request_iterator, context):
         # TODO podría comparar costes de otros pares, (menos del que le pregunta.)
-        print('get cost')
         for r in grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
             indices = GetServiceCost_input,
             partitions_message_mode=True
         ):
             cost = None
-            print('\ntype of r ->', type(r), type(r) is celaut.Any.Metadata.HashTag.Hash)
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                 r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                 yield gateway_pb2.buffer__pb2.Buffer(signal = True)
@@ -824,17 +822,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     continue
 
-            print('\ntype of r ->', type(r), type(r) is celaut.Any)
-            try:
-                print(1)
-                if type(r) is celaut.Any:
-                    cost = execution_cost(
-                        service_buffer = r.value,
-                        metadata = r.metadata
-                    )
-                    break
-                print(2)
-            except Exception as e: print('e -> ',e)
+            if type(r) is celaut.Any:
+                cost = execution_cost(
+                    service_buffer = r.value,
+                    metadata = r.metadata
+                )
+                break
 
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
         for b in grpcbf.serialize_to_buffer(

@@ -388,7 +388,6 @@ def parse_from_buffer(
     try: 
         while True:
             buffer = next(request_iterator)
-            print('buffer -> ', buffer)
             # The order of conditions is important.
             if buffer.HasField('head'):
                 if buffer.head.index not in indices: raise Exception('Parse from buffer error: buffer head index is not correct ' + str(buffer.head.index) + str(indices.keys()))
