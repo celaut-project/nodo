@@ -838,7 +838,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.CostMessage(
                                 cost = cost + EXECUTION_BENEFIT
-                            )            
+                            ),
+            indices = gateway_pb2.CostMessage      
         ): yield b
 
 if __name__ == "__main__":
