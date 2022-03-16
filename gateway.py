@@ -806,7 +806,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_message_mode=True
         ):
             cost = None
-            print('type of r ->', type(r), type(r) is celaut.Any.Metadata.HashTag.Hash)
+            print('\ntype of r ->', type(r), type(r) is celaut.Any.Metadata.HashTag.Hash)
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                 r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                 yield gateway_pb2.buffer__pb2.Buffer(signal = True)
@@ -824,12 +824,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     continue
 
-            if type(r) is celaut.Any:
-                cost = execution_cost(
-                    service_buffer = r.value,
-                    metadata = r.metadata
-                )
-                break
+            print('\ntype of r ->', type(r), type(r) is celaut.Any)
+            try:
+                if type(r) is celaut.Any:
+                    cost = execution_cost(
+                        service_buffer = r.value,
+                        metadata = r.metadata
+                    )
+                    break
+            except Exception as e: print('e -> ',e)
 
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
         for b in grpcbf.serialize_to_buffer(
