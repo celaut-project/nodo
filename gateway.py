@@ -826,12 +826,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             print('\ntype of r ->', type(r), type(r) is celaut.Any)
             try:
+                print(1)
                 if type(r) is celaut.Any:
                     cost = execution_cost(
                         service_buffer = r.value,
                         metadata = r.metadata
                     )
                     break
+                print(2)
             except Exception as e: print('e -> ',e)
 
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
