@@ -39,7 +39,7 @@ def service_hashes(
 def service_extended(
         service_buffer: bytes,
         metadata: celaut_pb2.Any.Metadata,  
-        config: celaut_pb2.Configuration = None
+        config: celaut_pb2.Configuration
     ) -> Generator[object, None, None]:
         set_config = True if config else False
         for hash in metadata.hashtag.hash:
@@ -47,8 +47,9 @@ def service_extended(
                 set_config = False
                 yield gateway_pb2.HashWithConfig(
                     hash = hash,
-                    config = celaut_pb2.Configuration()
+                    config = config
                 )
+                continue
             yield hash
 
         any = celaut_pb2.Any(
@@ -61,15 +62,16 @@ def service_extended(
                     gateway_pb2.ServiceWithConfig,
                     gateway_pb2.ServiceWithConfig(
                         service = any,
-                        config = celaut_pb2.Configuration()
+                        config = config
                     ),
                     REGISTRY + hash + '/p2'
                 )
-        yield (
-                gateway_pb2.ServiceWithMeta,
-                any,
-                REGISTRY + hash + '/p2'
-            )
+        else:
+            yield (
+                    gateway_pb2.ServiceWithMeta,
+                    any,
+                    REGISTRY + hash + '/p2'
+                )
 
 def get_free_port() -> int:
     with socket.socket() as s:
