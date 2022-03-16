@@ -40,7 +40,8 @@ def service_hashes(
 def service_extended(
         service_buffer: bytes,
         metadata: celaut_pb2.Any.Metadata,  
-        config: celaut_pb2.Configuration = None
+        config: celaut_pb2.Configuration = None,
+        send_only_hashes: bool = False,
     ) -> Generator[object, None, None]:
         set_config = True if config else False
         for hash in metadata.hashtag.hash:
@@ -52,27 +53,28 @@ def service_extended(
                 )
                 continue
             yield hash
-
-        any = celaut_pb2.Any(
-                metadata = metadata,
-                value = service_buffer
-            )
-        hash = get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata)
-        if set_config: 
-            yield (
-                    gateway_pb2.ServiceWithConfig,
-                    gateway_pb2.ServiceWithConfig(
-                        service = any,
-                        config = config
-                    ),
-                    Dir(REGISTRY + hash + '/p2')
+        
+        if not send_only_hashes:
+            any = celaut_pb2.Any(
+                    metadata = metadata,
+                    value = service_buffer
                 )
-        else:
-            yield (
-                    gateway_pb2.ServiceWithMeta,
-                    any,
-                    Dir(REGISTRY + hash + '/p2')
-                )
+            hash = get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata)
+            if set_config: 
+                yield (
+                        gateway_pb2.ServiceWithConfig,
+                        gateway_pb2.ServiceWithConfig(
+                            service = any,
+                            config = config
+                        ),
+                        Dir(REGISTRY + hash + '/p2')
+                    )
+            else:
+                yield (
+                        gateway_pb2.ServiceWithMeta,
+                        any,
+                        Dir(REGISTRY + hash + '/p2')
+                    )
 
 def get_free_port() -> int:
     with socket.socket() as s:

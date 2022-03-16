@@ -27,6 +27,7 @@ COST_OF_BUILD = utils.GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = utils.GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
 MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
 IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = False)
+SEND_ONLY_HASHES_ASKING_COST = utils.GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default=True)
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
@@ -254,7 +255,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
                         indices_parser = gateway_pb2.CostMessage,
                         partitions_message_mode_parser = True,
                         indices_serializer = GetServiceCost_input,
-                        input = utils.service_extended(service_buffer = service_buffer, metadata = metadata),
+                        input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),
                     )).cost
                 )
             except Exception as e: l.LOGGER('Error taking the cost: '+str(e))
