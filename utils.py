@@ -3,6 +3,7 @@ from typing import Generator
 
 import celaut_pb2, gateway_pb2
 from compile import REGISTRY
+from grpcbigbuffer import Dir
 import pymongo
 import netifaces as ni
 from verify import get_service_hex_main_hash
@@ -64,13 +65,13 @@ def service_extended(
                         service = any,
                         config = config
                     ),
-                    REGISTRY + hash + '/p2'
+                    Dir(REGISTRY + hash + '/p2')
                 )
         else:
             yield (
                     gateway_pb2.ServiceWithMeta,
                     any,
-                    REGISTRY + hash + '/p2'
+                    Dir(REGISTRY + hash + '/p2')
                 )
 
 def get_free_port() -> int:
