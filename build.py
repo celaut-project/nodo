@@ -21,7 +21,6 @@ actual_building_processes_lock = threading.Lock()
 actual_building_processes = []  # list of hexadecimal string sha256 value hashes.
 
 def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2.celaut__pb2.Any.Metadata, id: str):
-    print(5)
     # Build the container from filesystem definition.
     def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir: str, symlinks):
         if b.HasField('filesystem'):
@@ -175,16 +174,13 @@ def build(
         return id
 
     except CalledProcessError:
-        print(1)
         if metadata.complete:
-            print(2)
+            sleep(1)  # TODO -> TMB(typical multithread bug).
             if get_it and id not in actual_building_processes:
-                print(3)
                 actual_building_processes_lock.acquire()
                 actual_building_processes.append(id)
                 actual_building_processes_lock.release()
 
-                print(4)
                 threading.Thread(
                         target = build_container_from_definition,
                         args = (
