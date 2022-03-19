@@ -256,6 +256,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
                         indices_parser = gateway_pb2.CostMessage,
                         partitions_message_mode_parser = True,
                         indices_serializer = GetServiceCost_input,
+                        partitions = {2: StartService_input_partitions_v2[2]},
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),
                     )).cost
                 )
@@ -302,6 +303,7 @@ def launch_service(
                                 ).StartService,
                         partitions_message_mode_parser = True,
                         indices_serializer = StartService_input,
+                        partitions_serializer = StartService_input_partitions_v2,
                         indices_parser = gateway_pb2.Instance,
                         input = utils.service_extended(
                                 service_buffer = service_buffer, 
@@ -860,7 +862,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             message_iterator = gateway_pb2.CostMessage(
                                 cost = cost + EXECUTION_BENEFIT
                             ),
-            indices = gateway_pb2.CostMessage      
+            indices = gateway_pb2.CostMessage
         ): yield b
 
 if __name__ == "__main__":
