@@ -854,6 +854,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 break
                 
         if not cost: 
+            import time
+            time.sleep(2)
             print("I dont've the service. 123")
             raise Exception("I dont've the service. 123")
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
