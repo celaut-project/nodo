@@ -343,9 +343,12 @@ def parse_from_buffer(
         try:
             for d in iterator: 
                 # 2. yield remote partitions directory.
-                if yield_remote_partition_dir: yield d
+                if yield_remote_partition_dir: 
+                    print('yield remote partiton -< ', d)
+                    yield d
                 dirs.append(d)
         except EmptyBufferException: pass
+        print("All dirs all ready.", len(dirs))
         if not pf_object or len(remote_partitions_model)>0 and len(dirs) != len(remote_partitions_model): return None
         # 3. Parse to the local partitions from the remote partitions using mem_manager.
         try:
@@ -381,8 +384,10 @@ def parse_from_buffer(
                                     else bytes(aux_object) if type(aux_object) is not str else bytes(aux_object, 'utf8')
                             )
                         del aux_object
+                        print('yield partition -> ', filename)
                         yield filename
                     else:
+                        print('Yield object -< ', aux_object)
                         yield aux_object
 
         finally:
