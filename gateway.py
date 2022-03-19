@@ -28,6 +28,7 @@ EXECUTION_BENEFIT = utils.GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
 MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
 IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = False)
 SEND_ONLY_HASHES_ASKING_COST = utils.GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default=False)
+DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = utils.GET_ENV(env = 'DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH', default=False)
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
@@ -831,7 +832,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     except Exception as e:
                         yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                         continue
-                else: raise Exception("I dont've the service.")
+                elif(DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH): raise Exception("I dont've the service.")
 
             if r is gateway_pb2.ServiceWithMeta:
                 service_with_meta = next(r)
