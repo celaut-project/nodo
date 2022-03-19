@@ -509,7 +509,6 @@ def serialize_to_buffer(
             ):
                 signal.wait()
                 try:
-                    print('     send b ')
                     yield b
                 finally: signal.wait()
         yield buffer_pb2.Buffer(

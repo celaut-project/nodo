@@ -818,7 +818,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
             cost = None
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
                 if r.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    print('Na i already had it ')
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
                         metadata = celaut.Any.Metadata()
@@ -853,11 +852,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     )
                 break
                 
-        if not cost: 
-            import time
-            time.sleep(2)
-            print("I dont've the service. 123")
-            raise Exception("I dont've the service. 123")
+        if not cost: raise Exception("I dont've the service. 123")
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.CostMessage(
