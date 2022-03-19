@@ -424,7 +424,7 @@ def save_service(
     service_p2: str,
     metadata: celaut.Any.Metadata, 
     hash: str = None
-    ):
+    ) -> str:
     # If the service is not on the registry, save it.
     if not hash: hash = get_service_hex_main_hash(
         service_buffer = (service_p1, service_p2) if service_p2 else None, 
@@ -441,6 +441,7 @@ def save_service(
             )
         if service_p2:
             shutil.move(service_p2, REGISTRY+hash+'/p2')
+    return hash
 
 def search_container(
         service_buffer: bytes, 
@@ -752,6 +753,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ): yield b
 
     def GetServiceTar(self, request_iterator, context):
+        # TODO se debe de hacer que gestione mejor tomar todo el servicio, como hace GetServiceCost.
+        
         l.LOGGER('Request for give a service container.')
         for r in grpcbf.parse_from_buffer(
             request_iterator = request_iterator, 
@@ -800,11 +803,17 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetServiceCost(self, request_iterator, context):
         # TODO podría comparar costes de otros pares, (menos del que le pregunta.)
-        for r in grpcbf.parse_from_buffer(
+        
+        parse_iterator = grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
             indices = GetServiceCost_input,
-            partitions_message_mode=True
-        ):
+            partitions_model={2: StartService_input_partitions_v2[2]},
+            partitions_message_mode={1: True, 2: [True, False]}
+        )
+        while True:
+            try:
+                r = next(parse_iterator)
+            except StopIteration: break
             cost = None
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type and \
                 r.value.hex() in [s for s in os.listdir(REGISTRY)]:
@@ -823,11 +832,21 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     continue
 
-            if type(r) is celaut.Any:
+            if r is gateway_pb2.ServiceWithMeta:
+                service_with_meta = next(r)
+                second_partition_dir = next(r)
+                if type(second_partition_dir) is not str: raise Exception('Fail sending service.')
                 cost = execution_cost(
-                    service_buffer = r.value,
-                    metadata = r.metadata
-                )
+                        service_buffer = get_service_buffer_from_registry(
+                            hash = save_service(
+                                service_p1 = service_with_meta.service.SerializeToString(),
+                                service_p2 = second_partition_dir,
+                                metadata = service_with_meta.metadata,
+                                hash = None
+                            )
+                        ),
+                        metadata = service_with_meta.metadata
+                    )
                 break
                 
         if not cost: raise Exception("I dont've the service.")
