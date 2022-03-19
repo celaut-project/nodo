@@ -833,7 +833,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     except Exception as e:
                         yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                         continue
-                elif(DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH): raise Exception("I dont've the service..")
+                elif(DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH): raise Exception("I dont've the service.")
 
             if r is gateway_pb2.ServiceWithMeta:
                 service_with_meta = next(parse_iterator)
@@ -853,7 +853,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     )
                 break
                 
-        if not cost: raise Exception("I dont've the service.")
+        if not cost: 
+            print("I dont've the service. 123")
+            raise Exception("I dont've the service. 123")
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.CostMessage(
