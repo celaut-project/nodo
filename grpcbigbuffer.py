@@ -247,6 +247,7 @@ def parse_from_buffer(
 
     def parser_iterator(request_iterator, signal: Signal = None) -> Generator[buffer_pb2.Buffer, None, None]:
         if not signal: signal = Signal(exist=False)
+        print('Comienza a iterar un buffer.')
         for buffer in request_iterator:
             print('\n     get buffer -> ', buffer)
             if buffer.HasField('signal') and buffer.signal:
@@ -281,6 +282,7 @@ def parse_from_buffer(
         else: raise EmptyBufferException()
 
     def save_to_file(filename: str, request_iterator, signal) -> str:
+        print('Go to save to file.')
         save_chunks_to_file(
             filename = filename,
             buffer_iterator = parser_iterator(
@@ -289,6 +291,7 @@ def parse_from_buffer(
             ),
             signal = signal,
         )
+        print('Retorna -< -> ', filename)
         return filename
     
     def iterate_partition(message_field_or_route, signal: Signal, request_iterator, filename: str):

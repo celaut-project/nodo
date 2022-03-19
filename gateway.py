@@ -809,7 +809,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             request_iterator=request_iterator,
             indices = GetServiceCost_input,
             partitions_model={2: StartService_input_partitions_v2[2]},
-            partitions_message_mode={1: True, 2: [True, True]}
+            partitions_message_mode={1: True, 2: [True, False]}
         )
         while True:
             try:
