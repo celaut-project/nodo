@@ -248,6 +248,7 @@ def parse_from_buffer(
     def parser_iterator(request_iterator, signal: Signal = None) -> Generator[buffer_pb2.Buffer, None, None]:
         if not signal: signal = Signal(exist=False)
         for buffer in request_iterator:
+            print('\n     get buffer -> ', buffer)
             if buffer.HasField('signal') and buffer.signal:
                 signal.change()
             if buffer.HasField('chunk'):
@@ -509,6 +510,7 @@ def serialize_to_buffer(
             ):
                 signal.wait()
                 try:
+                    print('     send b')
                     yield b
                 finally: signal.wait()
         yield buffer_pb2.Buffer(
