@@ -809,7 +809,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             request_iterator=request_iterator,
             indices = GetServiceCost_input,
             partitions_model={2: StartService_input_partitions_v2[2]},
-            partitions_message_mode={1: True, 2: [True, False]}
+            partitions_message_mode={1: True, 2: [True, True]}
         )
         while True:
             try:
@@ -853,7 +853,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     )
                 break
                 
-        if not cost: raise Exception("I dont've the service. 123")
+        if not cost: 
+            from time import sleep
+            sleep(3)
+            raise Exception("I dont've the service. 123")
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.CostMessage(
