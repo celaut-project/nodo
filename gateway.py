@@ -818,6 +818,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             cost = None
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
                 if r.value.hex() in [s for s in os.listdir(REGISTRY)]:
+                    print('Na i already had it ')
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
                         metadata = celaut.Any.Metadata()
@@ -832,7 +833,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     except Exception as e:
                         yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                         continue
-                elif(DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH): raise Exception("I dont've the service.")
+                elif(DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH): raise Exception("I dont've the service..")
 
             if r is gateway_pb2.ServiceWithMeta:
                 service_with_meta = next(parse_iterator)
