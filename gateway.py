@@ -836,9 +836,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             if r is gateway_pb2.ServiceWithMeta:
                 service_with_meta = next(parse_iterator)
-                print("I've the first partition message -> ", service_with_meta)
                 second_partition_dir = next(parse_iterator)
-                print("I've the second partition dir -> ", second_partition_dir)
                 if type(second_partition_dir) is not str: raise Exception('Fail sending service.')
                 cost = execution_cost(
                         service_buffer = get_service_buffer_from_registry(

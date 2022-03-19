@@ -247,9 +247,7 @@ def parse_from_buffer(
 
     def parser_iterator(request_iterator, signal: Signal = None) -> Generator[buffer_pb2.Buffer, None, None]:
         if not signal: signal = Signal(exist=False)
-        print('Comienza a iterar un buffer.')
         for buffer in request_iterator:
-            print('\n     get buffer -> ', buffer)
             if buffer.HasField('signal') and buffer.signal:
                 signal.change()
             if buffer.HasField('chunk'):
@@ -282,7 +280,6 @@ def parse_from_buffer(
         else: raise EmptyBufferException()
 
     def save_to_file(filename: str, request_iterator, signal) -> str:
-        print('Go to save to file.')
         save_chunks_to_file(
             filename = filename,
             buffer_iterator = parser_iterator(
@@ -291,7 +288,6 @@ def parse_from_buffer(
             ),
             signal = signal,
         )
-        print('Retorna -< -> ', filename)
         return filename
     
     def iterate_partition(message_field_or_route, signal: Signal, request_iterator, filename: str):
@@ -343,12 +339,9 @@ def parse_from_buffer(
         try:
             for d in iterator: 
                 # 2. yield remote partitions directory.
-                if yield_remote_partition_dir: 
-                    print('yield remote partiton -< ', d)
-                    yield d
+                if yield_remote_partition_dir: yield d
                 dirs.append(d)
         except EmptyBufferException: pass
-        print("All dirs all ready.", len(dirs))
         if not pf_object or len(remote_partitions_model)>0 and len(dirs) != len(remote_partitions_model): return None
         # 3. Parse to the local partitions from the remote partitions using mem_manager.
         try:
@@ -384,10 +377,8 @@ def parse_from_buffer(
                                     else bytes(aux_object) if type(aux_object) is not str else bytes(aux_object, 'utf8')
                             )
                         del aux_object
-                        print('yield partition -> ', filename)
                         yield filename
                     else:
-                        print('Yield object -< ', aux_object)
                         yield aux_object
 
         finally:
@@ -517,9 +508,7 @@ def serialize_to_buffer(
                 signal=signal
             ):
                 signal.wait()
-                try:
-                    print('     send b')
-                    yield b
+                try: yield b
                 finally: signal.wait()
         yield buffer_pb2.Buffer(
             separator = True
