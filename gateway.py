@@ -208,9 +208,9 @@ def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
         # Coste de construcción si no se posee el contenedor del servicio.
         # Debe de tener en cuenta el coste de buscar el conedor por la red.
         return sum([
-            COST_OF_BUILD * get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata) \
-                in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()] is False,
-            # Coste de obtener el contenedor ... #TODO
+                COST_OF_BUILD * ((get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata) \
+                    in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()]) is False),
+                # Coste de obtener el contenedor ... #TODO
             ])
     except:
         pass
