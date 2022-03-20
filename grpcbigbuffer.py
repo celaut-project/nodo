@@ -3,11 +3,9 @@ __version__ = 'dev'
 # GrpcBigBuffer.
 CHUNK_SIZE = 1024 * 1024  # 1MB
 MAX_DIR = 999999999
-from functools import cache
-import os, shutil, gc, itertools, sys
+import os, gc, itertools, sys
 
 from google import protobuf
-from numpy import indices
 import buffer_pb2
 from random import randint
 from typing import Generator, Union
