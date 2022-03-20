@@ -602,7 +602,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     second_partition_dir = next(parser_generator)
                     if type(second_partition_dir) is not str: raise Exception
                 except: raise Exception('Grpcbf error: partition corrupted')
-                if second_partition_dir[-2:] != 'p2': raise Exception('Invalid partition for service ', second_partition_dir)
                 #service_on_any.metadata.complete = False  # TODO: this should?
                 hash = get_service_hex_main_hash(
                     service_buffer = (service_with_meta.service, second_partition_dir) if second_partition_dir else service_with_meta.service,
