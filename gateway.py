@@ -807,6 +807,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def GetServiceCost(self, request_iterator, context):
         # TODO podría comparar costes de otros pares, (menos del que le pregunta.)
         
+        l.LOGGER('Request for the cost of a service.')
         parse_iterator = grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
             indices = GetServiceCost_input,
