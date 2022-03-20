@@ -214,7 +214,7 @@ def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
             ])
     except:
         pass
-    return 0
+    return COST_OF_BUILD
 
 def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
     return sum([
