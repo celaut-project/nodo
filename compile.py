@@ -288,7 +288,6 @@ class Hyper:
 def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
     Hyperfile = Hyper(path = path, aux_id = aux_id)
 
-    print(Hyperfile.buffer_len)
     with iobigdata.mem_manager(len = 2*Hyperfile.buffer_len):
         Hyperfile.parseContainer()
         Hyperfile.parseApi()
@@ -298,6 +297,10 @@ def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
         id = Hyperfile.save(
             partitions_model=partitions_model
             )
+
+    os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.docker')
+    os.system('/usr/bin/docker rmi builder'+aux_id)
+    os.system('rm -rf '+HYCACHE+aux_id+'/')            
     return id
 
 def repo_ok(
@@ -310,30 +313,33 @@ def repo_ok(
     git_repo = git.split('::')[0]
     branch = git.split('::')[1]
     os.system('git clone --branch '+branch+' '+git_repo+' '+HYCACHE+aux_id+'/for_build/git')
-    l.LOGGER(str(os.listdir(HYCACHE+aux_id+'/for_build/git/.service/')))
-    id = ok(
+    return ok(
         path = HYCACHE+aux_id+'/for_build/git/.service/',
         aux_id = aux_id,
         partitions_model=partitions_model
         )  # Hyperfile
 
-    os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.docker')
-    os.system('/usr/bin/docker rmi builder'+aux_id)
-    os.system('rm -rf '+HYCACHE+aux_id+'/')
-    return id
 
-
+def zipfile_ok(
+    repo: str,
+    partitions_model: list
+) -> str:
+    import random
+    aux_id = str(random.random())
+    os.system('unzip '+repo+' -d '+HYCACHE+aux_id+'/for_build/git')
+    os.system('rm '+repo)
+    return ok(
+        path = HYCACHE+aux_id+'/for_build/git/.service/',
+        aux_id = aux_id,
+        partitions_model=partitions_model
+        )  # Hyperfile
 
 def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
-    id = repo_ok(
+    id = zipfile_ok(
         repo = repo,
         partitions_model = list(partitions_model)
     )
-    print('id .> ', id)
-    print(partitions_model)
-    print('....')
     dirs = sorted([d for d in os.listdir(HYCACHE+'compile'+id)])
-    print('dirs -> ', dirs)
     for b in grpcbigbuffer.serialize_to_buffer(
         message_iterator = tuple([gateway_pb2.CompileOutput])+tuple([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d) for d in dirs]),
         partitions_model = list(partitions_model),

@@ -1,4 +1,5 @@
 from typing import Generator
+from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
@@ -745,14 +746,16 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def Compile(self, request_iterator, context):
         l.LOGGER('Go to compile a proyect.')
-        input = next(grpcbf.parse_from_buffer(
+        input = grpcbf.parse_from_buffer(
             request_iterator = request_iterator,
             indices = gateway_pb2.CompileInput,
-            partitions_message_mode=True
-        ))
+            partitions_model=[Buffer.Head.Partition(index={1: Buffer.Head.Partition()}), Buffer.Head.Partition(index={2: Buffer.Head.Partition()})],
+            partitions_message_mode=[False, True]
+        )
+        if next(input) != gateway_pb2.CompileInput: raise Exception('Compile Input wrong.')
         for b in compile(
-            repo = input.repo,
-            partitions_model = input.partitions_model
+            repo = next(input),
+            partitions_model = next(input)
         ): yield b
 
     def GetServiceTar(self, request_iterator, context):
