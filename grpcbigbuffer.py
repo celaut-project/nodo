@@ -346,6 +346,7 @@ def parse_from_buffer(
             if (len(remote_partitions_model)==0 or len(remote_partitions_model)==1) and len(dirs)==1:
                 main_object = pf_object()
                 main_object.ParseFromString(open(dirs[0], 'rb').read())
+                remove_file(file=dirs[0])
             elif len(remote_partitions_model)!=len(dirs): 
                 raise Exception("Error: remote partitions model are not correct with the buffer.")
             else:
