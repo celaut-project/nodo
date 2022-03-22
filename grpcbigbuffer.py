@@ -526,10 +526,10 @@ def serialize_to_buffer(
             file = generate_random_dir()
             with open(file, 'wb') as f, mem_manager(len=len(message_bytes)):
                 f.write(message_bytes)
-            send_file(
-                filedir=Dir(dir=file),
+            for b in get_file_chunks(
+                filename=file,
                 signal=signal
-            )
+            ): yield b
             remove_file(file)
 
             try:
