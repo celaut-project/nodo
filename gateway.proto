@@ -4,8 +4,6 @@ import "celaut.proto";
 import "buffer.proto";
 import "compile.proto";
 
-message Empty {}
-
 message TokenMessage {
     string token = 1;
 }

@@ -19,10 +19,35 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\x0c\x62uffer.proto\x12\x06\x62uffer\"\xfc\x02\n\x06\x42uffer\x12\x12\n\x05\x63hunk\x18\x01 \x01(\x0cH\x00\x88\x01\x01\x12\x16\n\tseparator\x18\x02 \x01(\x08H\x01\x88\x01\x01\x12\x13\n\x06signal\x18\x03 \x01(\x08H\x02\x88\x01\x01\x12&\n\x04head\x18\x04 \x01(\x0b\x32\x13.buffer.Buffer.HeadH\x03\x88\x01\x01\x1a\xdc\x01\n\x04Head\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x31\n\npartitions\x18\x02 \x03(\x0b\x32\x1d.buffer.Buffer.Head.Partition\x1a\x91\x01\n\tPartition\x12\x37\n\x05index\x18\x01 \x03(\x0b\x32(.buffer.Buffer.Head.Partition.IndexEntry\x1aK\n\nIndexEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12,\n\x05value\x18\x02 \x01(\x0b\x32\x1d.buffer.Buffer.Head.Partition:\x02\x38\x01\x42\x08\n\x06_chunkB\x0c\n\n_separatorB\t\n\x07_signalB\x07\n\x05_headb\x06proto3'
+  serialized_pb=b'\n\x0c\x62uffer.proto\x12\x06\x62uffer\"\x07\n\x05\x45mpty\"\xfc\x02\n\x06\x42uffer\x12\x12\n\x05\x63hunk\x18\x01 \x01(\x0cH\x00\x88\x01\x01\x12\x16\n\tseparator\x18\x02 \x01(\x08H\x01\x88\x01\x01\x12\x13\n\x06signal\x18\x03 \x01(\x08H\x02\x88\x01\x01\x12&\n\x04head\x18\x04 \x01(\x0b\x32\x13.buffer.Buffer.HeadH\x03\x88\x01\x01\x1a\xdc\x01\n\x04Head\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x31\n\npartitions\x18\x02 \x03(\x0b\x32\x1d.buffer.Buffer.Head.Partition\x1a\x91\x01\n\tPartition\x12\x37\n\x05index\x18\x01 \x03(\x0b\x32(.buffer.Buffer.Head.Partition.IndexEntry\x1aK\n\nIndexEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12,\n\x05value\x18\x02 \x01(\x0b\x32\x1d.buffer.Buffer.Head.Partition:\x02\x38\x01\x42\x08\n\x06_chunkB\x0c\n\n_separatorB\t\n\x07_signalB\x07\n\x05_headb\x06proto3'
 )
 
 
+
+
+_EMPTY = _descriptor.Descriptor(
+  name='Empty',
+  full_name='buffer.Empty',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  create_key=_descriptor._internal_create_key,
+  fields=[
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=24,
+  serialized_end=31,
+)
 
 
 _BUFFER_HEAD_PARTITION_INDEXENTRY = _descriptor.Descriptor(
@@ -59,8 +84,8 @@ _BUFFER_HEAD_PARTITION_INDEXENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=286,
-  serialized_end=361,
+  serialized_start=295,
+  serialized_end=370,
 )
 
 _BUFFER_HEAD_PARTITION = _descriptor.Descriptor(
@@ -90,8 +115,8 @@ _BUFFER_HEAD_PARTITION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=216,
-  serialized_end=361,
+  serialized_start=225,
+  serialized_end=370,
 )
 
 _BUFFER_HEAD = _descriptor.Descriptor(
@@ -128,8 +153,8 @@ _BUFFER_HEAD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=141,
-  serialized_end=361,
+  serialized_start=150,
+  serialized_end=370,
 )
 
 _BUFFER = _descriptor.Descriptor(
@@ -200,8 +225,8 @@ _BUFFER = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=25,
-  serialized_end=405,
+  serialized_start=34,
+  serialized_end=414,
 )
 
 _BUFFER_HEAD_PARTITION_INDEXENTRY.fields_by_name['value'].message_type = _BUFFER_HEAD_PARTITION
@@ -223,8 +248,16 @@ _BUFFER.fields_by_name['signal'].containing_oneof = _BUFFER.oneofs_by_name['_sig
 _BUFFER.oneofs_by_name['_head'].fields.append(
   _BUFFER.fields_by_name['head'])
 _BUFFER.fields_by_name['head'].containing_oneof = _BUFFER.oneofs_by_name['_head']
+DESCRIPTOR.message_types_by_name['Empty'] = _EMPTY
 DESCRIPTOR.message_types_by_name['Buffer'] = _BUFFER
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
+
+Empty = _reflection.GeneratedProtocolMessageType('Empty', (_message.Message,), {
+  'DESCRIPTOR' : _EMPTY,
+  '__module__' : 'buffer_pb2'
+  # @@protoc_insertion_point(class_scope:buffer.Empty)
+  })
+_sym_db.RegisterMessage(Empty)
 
 Buffer = _reflection.GeneratedProtocolMessageType('Buffer', (_message.Message,), {
 

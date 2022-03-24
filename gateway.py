@@ -159,8 +159,7 @@ def purgue_external(father_ip, node_uri, token):
                     ).StopService,
             input = gateway_pb2.TokenMessage(
                 token = token
-            ),
-            indices_parser = gateway_pb2.Empty,
+            )
         ))
     except grpc.RpcError as e:
         l.LOGGER('Error during remove a container on ' + node_uri + ' ' + str(e))
@@ -455,18 +454,16 @@ def search_container(
     # Search a service tar container.
     for peer in utils.peers_iterator(ignore_network = ignore_network):
         try:
-            next(
-                grpcbf.client_grpc(
-                    method = gateway_pb2_grpc.GatewayStub(
-                                grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
-                            ).GetServiceTar,
-                    input = utils.service_extended(
-                                service_buffer = service_buffer,
-                                metadata = metadata
-                            ),
-                    indices_serializer = GetServiceTar_input
-                )
-            )
+            next(grpcbf.client_grpc(
+                method = gateway_pb2_grpc.GatewayStub(
+                            grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
+                        ).GetServiceTar,
+                input = utils.service_extended(
+                            service_buffer = service_buffer,
+                            metadata = metadata
+                        ),
+                indices_serializer = GetServiceTar_input
+            ))
             break
         except: pass
 
@@ -676,7 +673,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         
         l.LOGGER('Stopped the instance with token -> ' + token_message.token)
         yield gateway_pb2.buffer__pb2.Buffer(
-            chunk = gateway_pb2.Empty().SerializeToString(),
+            chunk = bytes(''.encode('utf-8')),
             separator = True
         )
     

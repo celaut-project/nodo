@@ -8,7 +8,7 @@ import os, gc, itertools, sys
 from google import protobuf
 import buffer_pb2
 from random import randint
-from typing import Generator, Union
+from typing import Generator, Union, final
 from threading import Condition
 
 class EmptyBufferException(Exception):
@@ -208,7 +208,7 @@ def parse_from_buffer(
         yield_remote_partition_dir: bool = False,
     ): 
     try:
-        if not indices: indices = {}
+        if not indices: indices = buffer_pb2.Empty()
         if not partitions_model: partitions_model = [buffer_pb2.Buffer.Head.Partition()]
         if not signal: signal = Signal(exist=False)
         if not mem_manager: mem_manager = Enviroment.mem_manager
@@ -255,27 +255,28 @@ def parse_from_buffer(
                 break
 
     def parse_message(message_field, request_iterator, signal):
-        all_buffer = bytes()
+        all_buffer = None
         for b in parser_iterator(
             request_iterator=request_iterator,
             signal=signal,
         ):
-            all_buffer += b.chunk
+            if not all_buffer: all_buffer = b.chunk
+            else: all_buffer += b.chunk
         
+        if all_buffer == None: raise EmptyBufferException()
         if message_field is str:
-            message = all_buffer.decode('utf-8')
+            return all_buffer.decode('utf-8')
         elif type(message_field) is protobuf.pyext.cpp_message.GeneratedProtocolMessageType:
             message = message_field()
             message.ParseFromString(
                     all_buffer
                 )
+            return message
         else:
             try:
-                message = message_field(all_buffer)
+                return message_field(all_buffer)
             except Exception as e:
                 raise Exception('gRPCbb error -> Parse message error: some primitive type message not suported for contain partition '+ str(message_field) + str(e))
-        if len(all_buffer)>0: return message
-        else: raise EmptyBufferException()
 
     def save_to_file(request_iterator, signal) -> str:
         filename = generate_random_dir()
@@ -446,13 +447,14 @@ def parse_from_buffer(
             raise Exception('Parse from buffer error: index are not correct ' + str(indices))
 
 def serialize_to_buffer(
-        message_iterator, # Message or tuples (with head on the first item.)
+        message_iterator = None, # Message or tuples (with head on the first item.)
         signal = None,
         indices: Union[protobuf.pyext.cpp_message.GeneratedProtocolMessageType, dict] = None,
         partitions_model: Union[list, dict] = None,
         mem_manager = None
     ) -> Generator[buffer_pb2.Buffer, None, None]:  # method: indice
     try:
+        if not message_iterator: message_iterator = buffer_pb2.Empty()
         if not indices: indices = {}
         if not partitions_model: partitions_model = [buffer_pb2.Buffer.Head.Partition()]
         if not signal: signal = Signal(exist=False)
@@ -526,11 +528,13 @@ def serialize_to_buffer(
             file = generate_random_dir()
             with open(file, 'wb') as f, mem_manager(len=len(message_bytes)):
                 f.write(message_bytes)
-            for b in get_file_chunks(
-                filename=file,
-                signal=signal
-            ): yield b
-            remove_file(file)
+            try:
+                for b in get_file_chunks(
+                    filename=file,
+                    signal=signal
+                ): yield b
+            finally:
+                remove_file(file)
 
             try:
                 yield buffer_pb2.Buffer(
@@ -578,13 +582,16 @@ def client_grpc(
         timeout = None, 
         indices_parser: Union[protobuf.pyext.cpp_message.GeneratedProtocolMessageType, dict] = None,
         partitions_parser: Union[list, dict] = None,
-        partitions_message_mode_parser: Union[bool, list, dict] = False,
+        partitions_message_mode_parser: Union[bool, list, dict] = None,
         indices_serializer: Union[protobuf.pyext.cpp_message.GeneratedProtocolMessageType, dict] = None,
         partitions_serializer: Union[list, dict] = None,
         mem_manager = None,
         yield_remote_partition_dir_on_serializer: bool = False,
     ): # indice: method
-    if not indices_parser: indices_parser = {}
+    if not indices_parser: 
+        indices_parser = buffer_pb2.Empty
+        partitions_message_mode_parser = True
+    if not partitions_message_mode_parser: partitions_message_mode_parser = False
     if not partitions_parser: partitions_parser = [buffer_pb2.Buffer.Head.Partition()]
     if not indices_serializer: indices_serializer = {}
     if not partitions_serializer: partitions_serializer = [buffer_pb2.Buffer.Head.Partition()]
@@ -593,7 +600,7 @@ def client_grpc(
     for b in parse_from_buffer(
         request_iterator = method(
                             serialize_to_buffer(
-                                message_iterator = input if input else '',
+                                message_iterator = input if input else buffer_pb2.Empty(),
                                 signal = signal,
                                 indices = indices_serializer,
                                 partitions_model = partitions_serializer,
