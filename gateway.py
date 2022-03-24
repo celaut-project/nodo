@@ -242,7 +242,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
         )
 
         for peer in utils.peers_iterator(ignore_network = ignore_network):
-            # TODO could use async or concurrency.
+            # TODO could use async or concurrency. And use timeout.
             peer_uri = peer['ip']+':'+str(peer['port'])
             try:
                 peers.add_elem(
