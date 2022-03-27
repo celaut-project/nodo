@@ -95,6 +95,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
             try:
                 if check_output('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)[:2] == 'ln': break
             except CalledProcessError: break
+            except AttributeError: print('symlink -> ', symlink)
 
         l.LOGGER('Build process of '+ id + ': apply permissions.')
         # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
