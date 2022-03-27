@@ -28,4 +28,5 @@ apt-get -y install qemu binfmt-support qemu-user-static
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
 export COMPUTE_POWER_RATE=1
+export WAIT_FOR_CONTAINER=30
 export BUILD_CONTAINER_MEMORY_SIZE_FACTOR=1
