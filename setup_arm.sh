@@ -24,7 +24,4 @@ systemctl start mongod.service
 systemctl status mongod
 systemctl enable mongod
 
-apt-get -y install qemu binfmt-support qemu-user-static
-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
 export COMPUTE_POWER_RATE=1
