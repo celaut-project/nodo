@@ -85,7 +85,7 @@ message Service {
         AppDef app_protocol = 1;
         repeated Slot slot = 2;
         Config config = 3;
-        // Cost function can be applied. <- must be optional (index 3).
+        // Cost function can be applied. <- must be optional (index 4).
     }
 
     // Container:  Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
