@@ -24,5 +24,4 @@ systemctl start mongod.service
 systemctl status mongod
 systemctl enable mongod
 
-export COMPUTE_POWER_RATE=1
-export WAIT_FOR_CONTAINER=30
+sh ./init_arm.sh
