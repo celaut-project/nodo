@@ -361,7 +361,6 @@ def parse_from_buffer(
 
             # 4. yield local partitions.
             if local_partitions_model == []: local_partitions_model.append(buffer_pb2.Buffer.Head.Partition())
-            print(len(local_partitions_model))
             for i, partition in enumerate(local_partitions_model):
                 if i+1 == len(local_partitions_model): 
                     aux_object = main_object
@@ -378,12 +377,18 @@ def parse_from_buffer(
                             aux_object.SerializeToString() if hasattr(aux_object, 'SerializeToString') \
                                 else bytes(aux_object) if type(aux_object) is not str else bytes(aux_object, 'utf8')
                         )
-                    del aux_object  # TODO se esta dejando algo.
-                    yield filename
-                    print('No llegó aqui?')
+                    del aux_object
+                    if i+1 == len(local_partitions_model): 
+                        last = filename
+                    else:
+                        yield filename
                 else:
-                    yield aux_object
-                    print('No llegó aqui?')
+                    if i+1 == len(local_partitions_model): 
+                        last = aux_object
+                        del aux_object
+                    else:
+                        yield aux_object
+        yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
         print('Ahora libero la memoria jajajja.')
 
 
