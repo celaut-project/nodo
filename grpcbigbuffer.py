@@ -381,6 +381,7 @@ def parse_from_buffer(
                     yield filename
                 else:
                     yield aux_object
+        print('Ahora libero la memoria jajajja.')
 
 
     for buffer in request_iterator:
