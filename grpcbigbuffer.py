@@ -381,19 +381,14 @@ def parse_from_buffer(
                     if i+1 == len(local_partitions_model): 
                         last = filename
                     else:
-                        print('yield filename')
                         yield filename
                 else:
                     if i+1 == len(local_partitions_model): 
                         last = aux_object
                         del aux_object
                     else:
-                        print('yield aux object')
                         yield aux_object
-            print('sale del for.')
-        print('yield last')
         yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
-        print('Ahora libero la memoria jajajja.')
 
 
     for buffer in request_iterator:
