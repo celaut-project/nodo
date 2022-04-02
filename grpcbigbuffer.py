@@ -361,6 +361,7 @@ def parse_from_buffer(
 
             # 4. yield local partitions.
             if local_partitions_model == []: local_partitions_model.append(buffer_pb2.Buffer.Head.Partition())
+            print(len(local_partitions_model))
             for i, partition in enumerate(local_partitions_model):
                 if i+1 == len(local_partitions_model): 
                     aux_object = main_object
