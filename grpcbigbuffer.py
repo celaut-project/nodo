@@ -4,6 +4,7 @@ __version__ = 'dev'
 CHUNK_SIZE = 1024 * 1024  # 1MB
 MAX_DIR = 999999999
 import os, gc, itertools, sys
+from re import sub
 
 from google import protobuf
 import buffer_pb2
@@ -366,8 +367,10 @@ def parse_from_buffer(
                 else:
                     aux_object = pf_object()
                     aux_object.CopyFrom(main_object)
+                print('\n Created aux object')
                 aux_object = get_submessage(partition = partition, obj = aux_object)
                 message_mode = partitions_message_mode[i]
+                print('message -> ', message_mode)
                 if not message_mode:
                     filename = generate_random_dir()
                     with open(filename, 'wb') as f:
@@ -375,9 +378,11 @@ def parse_from_buffer(
                             aux_object.SerializeToString() if hasattr(aux_object, 'SerializeToString') \
                                 else bytes(aux_object) if type(aux_object) is not str else bytes(aux_object, 'utf8')
                         )
-                    del aux_object
+                    print('del aux_object')
+                    del aux_object  # TODO se esta dejando algo.
                     yield filename
                 else:
+                    print('yield aux_object')
                     yield aux_object
 
 
