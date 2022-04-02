@@ -380,8 +380,10 @@ def parse_from_buffer(
                         )
                     del aux_object  # TODO se esta dejando algo.
                     yield filename
+                    print('No llegó aqui?')
                 else:
                     yield aux_object
+                    print('No llegó aqui?')
         print('Ahora libero la memoria jajajja.')
 
 
