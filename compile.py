@@ -326,6 +326,9 @@ def zipfile_ok(
 ) -> str:
     import random
     aux_id = str(random.random())
+    os.system('mkdir '+HYCACHE+aux_id)
+    os.system('mkdir '+HYCACHE+aux_id+'/for_build')
+    os.system('mkdir '+HYCACHE+aux_id+'/for_build/git')
     os.system('unzip '+repo+' -d '+HYCACHE+aux_id+'/for_build/git')
     os.system('rm '+repo)
     return ok(
@@ -335,7 +338,7 @@ def zipfile_ok(
         )  # Hyperfile
 
 def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
-    l.LOGGER('Compiling zip ...')
+    l.LOGGER('Compiling zip ' + str(repo))
     id = zipfile_ok(
         repo = repo,
         partitions_model = list(partitions_model)
