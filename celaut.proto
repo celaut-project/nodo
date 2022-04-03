@@ -168,9 +168,15 @@ message Configuration {
 message ConfigurationFile {
     Instance gateway = 1;
     Configuration config = 2;
-    // Un servicio puede solicitar instancias de servicios con un ledger o un tensor aunque este no los ofrezca, y por tanto no aparezcan estos en su especificacion.
-    // Pero para los tensores y ledgers que si se especifican en la descripcion del servicio se puede concluir que van a ser requeridas instancias de los mismos al nodo,
-    // por lo tanto, el nodo tiene la opcion de añadir estas instancias de manera opcional en la configuracion de arranque del servicio.
-    repeated Instance tensor_instances = 3;
-    repeated Instance ledger_instances = 4;
+}
+
+//  ------------------------
+//  System requirements.
+//  ------------------------
+message Sysinfo {
+    optional int32 ram_space = 1;
+    optional int32 ram_frecuency = 2;
+    optional int32 disk_space = 3;
+    optional int32 disk_frecuency = 4;
+    optional int32 cpu_frecuency = 5;
 }

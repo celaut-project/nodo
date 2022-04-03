@@ -11,7 +11,8 @@ StartService_input = {
 StartService_input_partitions_v1 = {
     4: [
             buffer_pb2.Buffer.Head.Partition(index={
-                3 : buffer_pb2.Buffer.Head.Partition()
+                3 : buffer_pb2.Buffer.Head.Partition(),
+                4 : buffer_pb2.Buffer.Head.Partition()
             }),
            buffer_pb2.Buffer.Head.Partition(index={
                 2 : buffer_pb2.Buffer.Head.Partition()
@@ -56,7 +57,8 @@ StartService_input_partitions_v2 = {
                         4 : buffer_pb2.Buffer.Head.Partition(),
                     })
                 }),
-                3 : buffer_pb2.Buffer.Head.Partition()
+                3 : buffer_pb2.Buffer.Head.Partition(),
+                4 : buffer_pb2.Buffer.Head.Partition()
             }),
             buffer_pb2.Buffer.Head.Partition(index={
                 2 : buffer_pb2.Buffer.Head.Partition(index={
