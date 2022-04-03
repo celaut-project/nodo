@@ -328,8 +328,7 @@ def zipfile_ok(
     aux_id = str(random.random())
     os.system('mkdir '+HYCACHE+aux_id)
     os.system('mkdir '+HYCACHE+aux_id+'/for_build')
-    os.system('mkdir '+HYCACHE+aux_id+'/for_build/git')
-    os.system('unzip -j '+repo+' -d '+HYCACHE+aux_id+'/for_build/git')
+    os.system('unzip '+repo+' -d '+HYCACHE+aux_id+'/for_build')
     os.system('rm '+repo)
     return ok(
         path = HYCACHE+aux_id+'/for_build/git/.service/',
