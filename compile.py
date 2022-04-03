@@ -335,6 +335,7 @@ def zipfile_ok(
         )  # Hyperfile
 
 def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
+    l.LOGGER('Compiling zip ...')
     id = zipfile_ok(
         repo = repo,
         partitions_model = list(partitions_model)
