@@ -752,9 +752,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         for b in compile(
             repo = next(input),
             partitions_model = next(input)
-        ): 
-            print('b -> ', b)
-            yield b
+        ): yield b
 
     def GetServiceTar(self, request_iterator, context):
         # TODO se debe de hacer que gestione mejor tomar todo el servicio, como hace GetServiceCost.
