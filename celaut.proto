@@ -173,10 +173,15 @@ message ConfigurationFile {
 //  ------------------------
 //  System requirements.
 //  ------------------------
-message Sysinfo {
-    optional int32 ram_space = 1;
-    optional int32 ram_frecuency = 2;
-    optional int32 disk_space = 3;
-    optional int32 disk_frecuency = 4;
-    optional int32 cpu_frecuency = 5;
+message Sysparams {                           //  https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
+    optional int32 blkio_weight = 1;
+    optional int32 cpu_period = 2;
+    optional int32 cpu_quota = 3;
+    optional int32 cpu_shares = 4;
+    repeated string cpuset_cpus = 5;
+    repeated string cpuset_mems = 6;
+    optional int32 mem_limit = 7;
+    optional int32 memswap_limit = 8;
+    optional int32 kernel_memory = 9;
+    optional int32 disk_space = 10;
 }

@@ -41,6 +41,8 @@ def service_extended(
         service_buffer: bytes,
         metadata: celaut_pb2.Any.Metadata,  
         config: celaut_pb2.Configuration = None,
+        min_sysreq: celaut_pb2.Sysparams = None,
+        max_sysreq: celaut_pb2.Sysparams = None,
         send_only_hashes: bool = False,
     ) -> Generator[object, None, None]:
         set_config = True if config else False
@@ -49,7 +51,9 @@ def service_extended(
                 set_config = False
                 yield gateway_pb2.HashWithConfig(
                     hash = hash,
-                    config = config
+                    config = config,
+                    min_sysreq = min_sysreq,
+                    max_sysreq = max_sysreq,
                 )
                 continue
             yield hash
@@ -65,7 +69,9 @@ def service_extended(
                         gateway_pb2.ServiceWithConfig,
                         gateway_pb2.ServiceWithConfig(
                             service = any,
-                            config = config
+                            config = config,
+                            min_sysreq = min_sysreq,
+                            max_sysreq = max_sysreq
                         ),
                         Dir(REGISTRY + hash + '/p2')
                     )

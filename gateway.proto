@@ -27,12 +27,14 @@ message ServiceWithMeta {
 message HashWithConfig { // H^C 
     celaut.Any.Metadata.HashTag.Hash hash = 1;
     celaut.Configuration config = 3;
-    celaut.Sysinfo sysreq = 4;
+    celaut.Sysparams min_sysreq = 4;  // init system specs.
+    celaut.Sysparams max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
 }
 message ServiceWithConfig { // S^C
     ServiceWithMeta service = 2;
     celaut.Configuration config = 3;
-    celaut.Sysinfo sysreq = 4;
+    celaut.Sysparams min_sysreq = 4;  // init system specs.
+    celaut.Sysparams max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
 }
 
 message CompileInput {
@@ -48,7 +50,7 @@ message CompileOutput {
 // GRPC.
 
 service Gateway {
-    rpc StartService( stream buffer.Buffer) returns ( stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S, celaut.Configuration & celaut.Sysinfo=C; { H v S v H^C v S^C } ) -> Instance
+    rpc StartService( stream buffer.Buffer) returns ( stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S, celaut.Configuration & celaut.Sysparams=C; { H v S v H^C v S^C } ) -> Instance
     rpc StopService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Empty
     rpc Hynode(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Instance -> Instance
     

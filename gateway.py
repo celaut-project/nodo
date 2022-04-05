@@ -3,6 +3,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
+from manager import could_ve_this_sysreq
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash
@@ -274,6 +275,8 @@ def launch_service(
         metadata: celaut.Any.Metadata, 
         father_ip: str, 
         id = None,
+        system_requeriments = None,
+        max_sysreq = None,
         config: celaut.Configuration = None
     ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
@@ -306,9 +309,11 @@ def launch_service(
                         partitions_serializer = StartService_input_partitions_v2,
                         indices_parser = gateway_pb2.Instance,
                         input = utils.service_extended(
-                                service_buffer = service_buffer, 
+                                service_buffer = service_buffer,
                                 metadata = metadata,
-                                config = config
+                                config = config,
+                                min_sysreq = system_requeriments,
+                                max_sysreq = max_sysreq
                             )
                     ))
                     set_on_cache(
@@ -412,6 +417,11 @@ def launch_service(
                     uri.port = assigment_ports[port]
                     uri_slot.uri.append(uri)
             
+            container_modify_system_params(
+                container = container,
+                system_requeriments = system_requeriments
+            )
+
             l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
             return gateway_pb2.Instance(
                 token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id,
@@ -421,6 +431,16 @@ def launch_service(
                     )
             )
 
+
+def container_modify_system_params(
+        container: docker_lib.client.containers, 
+        system_requeriments: celaut.Sysparams
+    ):
+    # Set system requeriments parameters.
+    if system_requeriments and system_requeriments.HasField('mem_limit'):   # TODO all.
+        container.update(
+            mem_limit = system_requeriments.mem_limit
+        )    
 
 def save_service(
     service_p1: bytes, 
@@ -524,6 +544,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def StartService(self, request_iterator, context):
         l.LOGGER('Starting service ...')
         configuration = None
+        system_requeriments = None
+        max_sysreq = None
         hashes = []
         parser_generator = grpcbf.parse_from_buffer(
             request_iterator = request_iterator, 
@@ -541,6 +563,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
             if type(r) is gateway_pb2.HashWithConfig:
                 configuration = r.config
                 hash = r.hash
+                
+                if r.HasField('max_symreq') and not could_ve_this_sysreq(sysreq = r.max_sysreq): 
+                    raise Exception("The node can't execute the service with this requeriments.")
+                else: max_sysreq = r.max_sysreq
+                
+                if r.HasField('min_sysreq'):
+                    system_requeriments = r.min_sysreq
+
 
             # Captura la configuracion si puede.
             elif type(r) is celaut.Configuration:
@@ -567,6 +597,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 ),
                                 metadata = metadata, 
                                 config = configuration,
+                                system_requeriments = system_requeriments,
+                                max_sysreq = max_sysreq,
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                             )
                         ): yield b
@@ -577,6 +609,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                         continue
             
+
             elif r is gateway_pb2.ServiceWithConfig: # We now that is partitionated.
                 try:
                     r = next(parser_generator)
@@ -584,7 +617,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 except Exception: raise Exception('Grpcbf error: partition corrupted')
                 configuration = r.config
                 service_with_meta = r.service
-            
+
+                if r.HasField('max_symreq') and not could_ve_this_sysreq(sysreq = r.max_sysreq): 
+                    raise Exception("The node can't execute the service with this requeriments.")
+                else: max_sysreq = r.max_sysreq
+                
+                if r.HasField('min_sysreq'):
+                    system_requeriments = r.min_sysreq
+
+
             elif r is gateway_pb2.ServiceWithMeta:
                 try:
                     r = next(parser_generator) # Can raise StopIteration
@@ -619,6 +660,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             service_buffer = service_with_meta.service.SerializeToString(),
                             metadata = service_with_meta.metadata, 
                             config = configuration,
+                            system_requeriments = system_requeriments,
+                            max_sysreq = max_sysreq,
                             id = hash,
                             father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                         )
@@ -640,6 +683,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         )
                     ), 
                     config = configuration,
+                    system_requeriments = system_requeriments,
+                    max_sysreq = max_sysreq,
                     father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                 )
             ): yield b
@@ -695,6 +740,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 )
             )            
         ): yield b
+
+
+    def ModifyServiceSystemParams(self, request_iterator, context):
+        container_modify_system_params(
+            container = None,
+            system_requeriments = None
+        )
 
 
     def GetFile(self, request_iterator, context):

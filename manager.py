@@ -8,15 +8,16 @@ db = pymongo.MongoClient(
         )["mongo"]["serviceInstances"]
 
 
-def could_ve_this_sysreq(sysreq: celaut_pb2.Configuration.Sysinfo) -> bool:
+# I've it's not possible local, but other pair can, returns True.
+def could_ve_this_sysreq(sysreq: celaut_pb2.Configuration.Sysparams) -> bool:
     return True
 
-def get_sysinfo(token: str) -> celaut_pb2.Configuration.Sysinfo:
-    info = celaut_pb2.Configuration.Sysinfo()
+def get_sysparams(token: str) -> celaut_pb2.Configuration.Sysparams:
+    info = celaut_pb2.Configuration.Sysparams()
     info = toProto( db.find(token) )
     return info
 
-def modify_sysreq(token: str, sys_req: celaut_pb2.Configuration.Sysinfo):
+def modify_sysreq(token: str, sys_req: celaut_pb2.Configuration.Sysparams):
     if (sys_req.hasField('ram_space')):
         with mem_manager(len = sys_req.ram_space):
             db.find(token)['ram_space'] = sys_req.ram_space
