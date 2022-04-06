@@ -3,7 +3,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import could_ve_this_sysreq
+from manager import container_modify_system_params, could_ve_this_sysreq
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash
@@ -416,31 +416,22 @@ def launch_service(
                     )
                     uri.port = assigment_ports[port]
                     uri_slot.uri.append(uri)
-            
+
+            token = token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
             container_modify_system_params(
-                container = container,
+                token = token,
                 system_requeriments = system_requeriments
             )
 
             l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
             return gateway_pb2.Instance(
-                token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id,
+                token = token,
                 instance = celaut.Instance(
                         api = service.api,
                         uri_slot = [uri_slot]
                     )
             )
-
-
-def container_modify_system_params(
-        container: docker_lib.client.containers, 
-        system_requeriments: celaut.Sysparams
-    ):
-    # Set system requeriments parameters.
-    if system_requeriments and system_requeriments.HasField('mem_limit'):   # TODO all.
-        container.update(
-            mem_limit = system_requeriments.mem_limit
-        )    
+            
 
 def save_service(
     service_p1: bytes, 
@@ -744,7 +735,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def ModifyServiceSystemParams(self, request_iterator, context):
         container_modify_system_params(
-            container = None,
+            token = None,
             system_requeriments = None
         )
 

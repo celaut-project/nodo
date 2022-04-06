@@ -168,6 +168,7 @@ message Configuration {
 message ConfigurationFile {
     Instance gateway = 1;
     Configuration config = 2;
+    Sysparams initial_sysparams = 3;
 }
 
 //  ------------------------
