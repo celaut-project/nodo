@@ -11,8 +11,7 @@ db = pymongo.MongoClient(
 
 # TODO get from enviroment variables.
 DEFAULT_SYSTEM_PARAMETERS = celaut_pb2.Sysparams(
-
-    mem_limit = 50,
+    mem_limit = 50*pow(10, 6),
 )
 
 system_cache = {} # token : { mem_limit : 0 }
@@ -40,10 +39,10 @@ def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysparams) -> bool:
         varriation = system_cache[token]['mem_limit'] - sys_req.mem_limit
 
         if varriation < 0:
-            IOBigData().lock_ram(ram_amount = (-1)* sys_req.mem_limit)
+            pass#IOBigData().lock_ram(ram_amount = (-1)* sys_req.mem_limit)
 
         elif varriation > 0:
-            IOBigData().unlock_ram(ram_amount = sys_req.mem_limit)
+            pass#IOBigData().unlock_ram(ram_amount = sys_req.mem_limit)
 
         system_cache[token]['mem_limit'] = sys_req.mem_limit
 
