@@ -555,7 +555,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 configuration = r.config
                 hash = r.hash
                 
-                if r.HasField('max_symreq') and not could_ve_this_sysreq(sysreq = r.max_sysreq): 
+                if r.HasField('max_sysreq') and not could_ve_this_sysreq(sysreq = r.max_sysreq): 
                     raise Exception("The node can't execute the service with this requeriments.")
                 else: max_sysreq = r.max_sysreq
                 
@@ -609,7 +609,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 configuration = r.config
                 service_with_meta = r.service
 
-                if r.HasField('max_symreq') and not could_ve_this_sysreq(sysreq = r.max_sysreq): 
+                if r.HasField('max_sysreq') and not could_ve_this_sysreq(sysreq = r.max_sysreq): 
                     raise Exception("The node can't execute the service with this requeriments.")
                 else: max_sysreq = r.max_sysreq
                 
