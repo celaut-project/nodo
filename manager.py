@@ -23,7 +23,7 @@ def __pop_token(token: str):
     del system_cache[token]
     __modify_sysreq(
         token = token,
-        sym_req = celaut_pb2.Configuration.Sysparams(
+        sym_req = celaut_pb2.Sysparams(
             mem_limit = 0
         )
     )
@@ -33,7 +33,7 @@ def manager_prevent():    # TODO Para comprobar que todas las cuentas sean corre
         if False: # If was killed.
             __pop_token(token = token)
 
-def __modify_sysreq(token: str, sys_req: celaut_pb2.Configuration.Sysparams) -> bool:
+def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysparams) -> bool:
     if token not in system_cache.keys(): __push_token(token = token)
     if sys_req.HasField('mem_limit'):
         varriation = system_cache[token]['mem_limit'] - sys_req.mem_limit
@@ -79,11 +79,11 @@ def __get_cointainer_by_token(token: str) -> docker_lib.containers:
     )
 
 
-def could_ve_this_sysreq(sysreq: celaut_pb2.Configuration.Sysparams) -> bool:
+def could_ve_this_sysreq(sysreq: celaut_pb2.Sysparams) -> bool:
     return IOBigData().prevent_kill(len = sysreq.mem_limit)
     # It's not possible local, but other pair can, returns True.
 
-def get_sysparams(token: str) -> celaut_pb2.Configuration.Sysparams:
-    return celaut_pb2.Configuration.Sysparams(
+def get_sysparams(token: str) -> celaut_pb2.Sysparams:
+    return celaut_pb2.Sysparams(
         mem_limit = system_cache[token]["mem_limit"]
     )
