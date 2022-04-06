@@ -275,7 +275,7 @@ def launch_service(
         metadata: celaut.Any.Metadata, 
         father_ip: str, 
         id = None,
-        system_requeriments = None,
+        system_requeriments: celaut.Sysparams = None,
         max_sysreq = None,
         config: celaut.Configuration = None
     ) -> gateway_pb2.Instance:

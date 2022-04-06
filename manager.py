@@ -10,9 +10,10 @@ db = pymongo.MongoClient(
         )["mongo"]["serviceInstances"]
 
 # TODO get from enviroment variables.
-DEFAULT_SYSTEM_PARAMETERS = {
-    "mem_limit": 50*10^6
-}
+DEFAULT_SYSTEM_PARAMETERS = celaut_pb2.Sysparams(
+    
+    mem_limit = 50*10^6,
+)
 
 system_cache = {} # token : { mem_limit : 0 }
 
