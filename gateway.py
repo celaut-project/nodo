@@ -3,7 +3,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import container_modify_system_params, could_ve_this_sysreq
+from manager import DEFAULT_SYSTEM_PARAMETERS, container_modify_system_params, could_ve_this_sysreq
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash
@@ -418,6 +418,7 @@ def launch_service(
                     uri_slot.uri.append(uri)
 
             token = token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
+            if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_PARAMETERS
             container_modify_system_params(
                 token = token,
                 system_requeriments = system_requeriments

@@ -1,4 +1,5 @@
 from lib2to3.pgen2 import token
+from statistics import variance
 from wsgiref.simple_server import sys_version
 import celaut_pb2
 from iobigdata import IOBigData
@@ -36,15 +37,15 @@ def manager_prevent():    # TODO Para comprobar que todas las cuentas sean corre
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysparams) -> bool:
     if token not in system_cache.keys(): __push_token(token = token)
     if sys_req.HasField('mem_limit'):
-        varriation = system_cache[token]['mem_limit'] - sys_req.mem_limit
+        variation = system_cache[token]['mem_limit'] - sys_req.mem_limit
 
-        if varriation < 0:
-            pass#IOBigData().lock_ram(ram_amount = (-1)* sys_req.mem_limit)
+        if variation < 0:
+            IOBigData().lock_ram(ram_amount = abs(variation))
 
-        elif varriation > 0:
-            pass#IOBigData().unlock_ram(ram_amount = sys_req.mem_limit)
+        elif variation > 0:
+            IOBigData().unlock_ram(ram_amount = variation)
 
-        system_cache[token]['mem_limit'] = sys_req.mem_limit
+        if variation != 0: system_cache[token]['mem_limit'] = sys_req.mem_limit
 
     return True
 
@@ -56,7 +57,7 @@ def container_modify_system_params(
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
 
-    if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_PARAMETERS
+    if not system_requeriments: return False
 
     if __modify_sysreq(
                 token = token,
