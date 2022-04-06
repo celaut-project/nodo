@@ -73,8 +73,8 @@ def container_modify_system_params(
 
     return False 
 
-def __get_cointainer_by_token(token: str) -> docker_lib.containers:
-    return docker_lib.containers.get(
+def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Container:
+    return docker_lib.from_env().containers.get(
         container_id = token.split('##')[-1]
     )
 
