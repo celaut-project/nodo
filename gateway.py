@@ -732,13 +732,16 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )            
         ): yield b
 
-
+    """
     def ModifyServiceSystemParams(self, request_iterator, context):
         container_modify_system_params(
             token = None,
             system_requeriments = None
         )
 
+    def GetSystemParams(self, request_iterator, context):
+        pass    
+    """
 
     def GetFile(self, request_iterator, context):
         l.LOGGER('Request for give a service definition')
