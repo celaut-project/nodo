@@ -27,14 +27,14 @@ message ServiceWithMeta {
 message HashWithConfig { // H^C 
     celaut.Any.Metadata.HashTag.Hash hash = 1;
     celaut.Configuration config = 3;
-    celaut.Sysparams min_sysreq = 4;  // init system specs.
-    celaut.Sysparams max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
+    optional celaut.Sysparams min_sysreq = 4;  // init system specs.
+    optional celaut.Sysparams max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
 }
 message ServiceWithConfig { // S^C
     ServiceWithMeta service = 2;
     celaut.Configuration config = 3;
-    celaut.Sysparams min_sysreq = 4;  // init system specs.
-    celaut.Sysparams max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
+    optional celaut.Sysparams min_sysreq = 4;  // init system specs.
+    optional celaut.Sysparams max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
 }
 
 message CompileInput {
