@@ -5,7 +5,7 @@ import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
 import docker as docker_lib
-from logger import l
+import logger as l
 
 db = pymongo.MongoClient(
             "mongodb://localhost:27017/"
