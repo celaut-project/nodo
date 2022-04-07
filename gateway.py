@@ -3,7 +3,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import DEFAULT_SYSTEM_PARAMETERS, container_modify_system_params, could_ve_this_sysreq
+from manager import DEFAULT_SYSTEM_PARAMETERS, container_modify_system_params, container_stop, could_ve_this_sysreq
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash
@@ -700,6 +700,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 container_id = token_message.token.split('##')[2],
                 container_ip = token_message.token.split('##')[1]
             )
+            if not container_stop(
+                token = token_message.token
+            ): raise Exception('The service could not be stopped.')
         
         else:
             purgue_external(
