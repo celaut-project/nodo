@@ -12,9 +12,12 @@ db = pymongo.MongoClient(
         )["mongo"]["serviceInstances"]
 
 # TODO get from enviroment variables.
+
 DEFAULT_SYSTEM_PARAMETERS = celaut_pb2.Sysparams(
     mem_limit = 50*pow(10, 6),
 )
+
+MEMSWAP_FACTOR = 0 # 0 - 1
 
 system_cache = {} # token : { mem_limit : 0 }
 
@@ -68,16 +71,21 @@ def container_modify_system_params(
 
     if can:
         try:
+            # Memory limit should be smaller than already set memoryswap limit, update the memoryswap at the same time
             __get_cointainer_by_token(
                 token = token
             ).update(
-                    mem_limit = system_requeriments.mem_limit
+                    mem_limit = system_requeriments.mem_limit if MEMSWAP_FACTOR == 0 \
+                        else system_requeriments.mem_limit - MEMSWAP_FACTOR* system_requeriments.mem_limit,
+                    memswap_limit = system_requeriments.mem_limit if MEMSWAP_FACTOR > 0 else -1
                 )
+
             l.LOGGER('Limit container resources -> '+ str(system_requeriments))
             print('Docker stats -> ',
-            __get_cointainer_by_token(
-                token = token
-            ).stats(stream=False))
+                __get_cointainer_by_token(
+                    token = token
+                ).stats(stream=False)
+            )
         except Exception as e: 
             print('e -> ', e)
             return False

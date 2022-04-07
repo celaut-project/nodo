@@ -177,11 +177,7 @@ message ConfigurationFile {
 message Sysparams {                           //  https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     optional int32 blkio_weight = 1;
     optional int32 cpu_period = 2;
-    optional int32 cpu_quota = 3;
-    optional int32 cpu_shares = 4;
-    repeated string cpuset_cpus = 5;
-    repeated string cpuset_mems = 6;
-    optional int32 mem_limit = 7;
-    optional int32 memswap_limit = 8;
-    optional int32 disk_space = 9;
+    optional int32 cpu_quota = 3;  // https://wbhegedus.me/understanding-kubernetes-cpu-limits/
+    optional int32 mem_limit = 4;
+    optional int32 disk_space = 5;
 }
