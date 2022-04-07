@@ -5,6 +5,7 @@ import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
 import docker as docker_lib
+from logger import l
 
 db = pymongo.MongoClient(
             "mongodb://localhost:27017/"
@@ -69,6 +70,11 @@ def container_modify_system_params(
             ).update(
                     mem_limit = system_requeriments.mem_limit
                 )
+            l.LOGGER('Limit container resources -> '+ str(system_requeriments))
+            print('Docker stats -> ',
+            __get_cointainer_by_token(
+                token = token
+            ).stats(stream=False))
         except: return False
         return True
 
