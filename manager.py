@@ -34,6 +34,7 @@ def manager_prevent():    # TODO Para comprobar que todas las cuentas sean corre
     for token, sysreq in system_cache:
         if False: # If was killed.
             __pop_token(token = token)
+        continue
 
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysparams) -> bool:
     if token not in system_cache.keys(): __push_token(token = token)
@@ -59,11 +60,13 @@ def container_modify_system_params(
     # Set system requeriments parameters.
 
     if not system_requeriments: return False
-
-    if __modify_sysreq(
+    can = __modify_sysreq(
                 token = token,
                 sys_req = system_requeriments
-            ):
+            )
+    print('can modify ', can)
+
+    if can:
         try:
             __get_cointainer_by_token(
                 token = token
@@ -75,7 +78,9 @@ def container_modify_system_params(
             __get_cointainer_by_token(
                 token = token
             ).stats(stream=False))
-        except: return False
+        except Exception as e: 
+            print('e -> ', e)
+            return False
         return True
 
     return False 
