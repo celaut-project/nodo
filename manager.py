@@ -55,21 +55,19 @@ def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysparams) -> bool:
     return True
 
 def container_modify_system_params(
-            token: str, 
-            system_requeriments: celaut_pb2.Sysparams = None
-        ) -> bool:
+        token: str, 
+        system_requeriments: celaut_pb2.Sysparams = None
+    ) -> bool:
 
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
 
     if not system_requeriments: return False
-    can = __modify_sysreq(
+
+    if __modify_sysreq(
                 token = token,
                 sys_req = system_requeriments
-            )
-    print('can modify ', can)
-
-    if can:
+            ):
         try:
             # Memory limit should be smaller than already set memoryswap limit, update the memoryswap at the same time
             __get_cointainer_by_token(
@@ -79,16 +77,7 @@ def container_modify_system_params(
                         else system_requeriments.mem_limit - MEMSWAP_FACTOR* system_requeriments.mem_limit,
                     memswap_limit = system_requeriments.mem_limit if MEMSWAP_FACTOR > 0 else -1
                 )
-
-            l.LOGGER('Limit container resources -> '+ str(system_requeriments))
-            print('Docker stats -> ',
-                __get_cointainer_by_token(
-                    token = token
-                ).stats(stream=False)
-            )
-        except Exception as e: 
-            print('e -> ', e)
-            return False
+        except: return False
         return True
 
     return False 
@@ -100,7 +89,7 @@ def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Contai
 
 
 def could_ve_this_sysreq(sysreq: celaut_pb2.Sysparams) -> bool:
-    return IOBigData().prevent_kill(len = sysreq.mem_limit)
+    return IOBigData().prevent_kill(len = sysreq.mem_limit) # Prevent kill dice de lo que dispone actualmente libre.
     # It's not possible local, but other pair can, returns True.
 
 def get_sysparams(token: str) -> celaut_pb2.Sysparams:
