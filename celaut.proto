@@ -183,6 +183,5 @@ message Sysparams {                           //  https://docker-py.readthedocs.
     repeated string cpuset_mems = 6;
     optional int32 mem_limit = 7;
     optional int32 memswap_limit = 8;
-    optional int32 kernel_memory = 9;
-    optional int32 disk_space = 10;
+    optional int32 disk_space = 9;
 }
