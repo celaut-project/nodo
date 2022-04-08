@@ -3,7 +3,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import DEFAULT_SYSTEM_PARAMETERS, container_modify_system_params, container_stop, could_ve_this_sysreq
+from manager import DEFAULT_SYSTEM_PARAMETERS, container_modify_system_params, container_stop, could_ve_this_sysreq, get_sysparams
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash
@@ -66,7 +66,9 @@ def insert_instance_on_mongo(instance: celaut.Instance):
     )
 
 cache_lock = threading.Lock()
-cache = {}  # ip:[dependencies]
+cache = {}  # ip_father:[dependencies]
+
+cache_service_perspective = {} # service_ip:token
 
 # internal token -> str( peer_ip##container_ip##container_id )   peer_ip se refiere a la direccion del servicio padre (que puede ser interno o no).
 # external token -> str( peer_ip##node_ip:node_port##his_token )
@@ -78,7 +80,6 @@ cache = {}  # ip:[dependencies]
 
 
 def set_on_cache( father_ip : str, id_or_token: str, ip_or_uri: str):
-    
 
     # En caso de ser un nodo externo:
     if not father_ip in cache:
@@ -91,8 +92,16 @@ def set_on_cache( father_ip : str, id_or_token: str, ip_or_uri: str):
 
     # Añade el nuevo servicio como dependencia.
     cache[father_ip].append(ip_or_uri + '##' + id_or_token)
+    cache_service_perspective[ip_or_uri] = id_or_token
     l.LOGGER('Set on cache ' + ip_or_uri + '##' + id_or_token + ' as dependency of ' + father_ip )
 
+
+def get_token_by_uri(uri: str) -> str:
+    try:
+        return cache_service_perspective[uri]
+    except Exception as e:
+        print('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e))  # TODO. Study the imposibility of that.
+        raise e
 
 def purgue_internal(father_ip, container_id, container_ip):
     try:
@@ -108,6 +117,12 @@ def purgue_internal(father_ip, container_id, container_ip):
         l.LOGGER(str(e) + str(cache[father_ip]) + ' trying to remove ' + container_ip + '##' + container_id)
     except KeyError as e:
         l.LOGGER(str(e) + father_ip + ' not in ' + str(cache.keys()))
+
+    try:
+        del cache_service_perspective[container_ip]
+    except Exception as e:
+        print('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e))  # TODO. Study the imposibility of that.
+        raise e
 
     if container_ip in cache:
         for dependency in cache[container_ip]:
@@ -736,19 +751,32 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )            
         ): yield b
 
-    """
     def ModifyServiceSystemParams(self, request_iterator, context):
+        l.LOGGER('Request for modify service system params.')
         container_modify_system_params(
-            token = None,
-            system_requeriments = None
+            token = get_token_by_uri(
+                uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
+            ),
+            system_requeriments = grpcbf.parse_from_buffer(
+                request_iterator = request_iterator,
+                indices = celaut.Sysparams,
+                partitions_message_mode = True
+            )
         )
+        for b in grpcbf.serialize_to_buffer(): yield b
 
     def GetSystemParams(self, request_iterator, context):
-        pass    
-    """
+        l.LOGGER('Request for get service system params.')
+        for b in grpcbf.serialize_to_buffer(
+            message_iterator = get_sysparams(
+                token = get_token_by_uri(
+                    uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                )
+            )
+        ): yield b
 
     def GetFile(self, request_iterator, context):
-        l.LOGGER('Request for give a service definition')
+        l.LOGGER('Request for give a service definition.')
         hashes = []
         for hash in grpcbf.parse_from_buffer(
             request_iterator = request_iterator, 

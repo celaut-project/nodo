@@ -54,6 +54,9 @@ service Gateway {
     rpc StopService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Empty
     rpc Hynode(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Instance -> Instance
     
+    rpc ModifyServiceSystemParams(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Sysparams -> Empty
+    rpc GetSystemParams(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Empty -> celaut.Sysparams
+
     rpc GetFile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Any.Metadata.HashTag.Hash -> celaut.Any
     rpc Compile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // CompileInput -> CompileOutput
     rpc GetServiceTar(stream buffer.Buffer) returns (stream buffer.Buffer) {}// ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> buffer.Buffer (parse not needed.)

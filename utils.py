@@ -101,7 +101,7 @@ def longestSubstringFinder(string1, string2) -> str:
     return answer
 
 get_only_the_ip_from_context = lambda context_peer: get_only_the_ip_from_context_method(context_peer)
-def get_only_the_ip_from_context_method(context_peer):
+def get_only_the_ip_from_context_method(context_peer: str) -> str:
     ipv = context_peer.split(':')[0]
     if ipv in ('ipv4', 'ipv6'):
         ip = context_peer[5:-1*(len(context_peer.split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
