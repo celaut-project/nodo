@@ -331,7 +331,7 @@ def zipfile_ok(
     os.system('unzip '+repo+' -d '+HYCACHE+aux_id+'/for_build')
     os.system('rm '+repo)
     return ok(
-        path = HYCACHE+aux_id+'/for_build/git/.service/',
+        path = HYCACHE+aux_id+'/for_build/.service/',
         aux_id = aux_id,
         partitions_model=partitions_model
         )  # Hyperfile
