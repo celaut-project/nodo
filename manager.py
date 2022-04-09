@@ -13,7 +13,7 @@ db = pymongo.MongoClient(
 
 # TODO get from enviroment variables.
 
-DEFAULT_SYSTEM_PARAMETERS = celaut_pb2.Sysparams(
+DEFAULT_SYSTEM_RESOURCES = celaut_pb2.Sysresources(
     mem_limit = 50*pow(10, 6),
 )
 
@@ -31,12 +31,12 @@ def __pop_token(token: str):
     del system_cache[token]
     __modify_sysreq(
         token = token,
-        sym_req = celaut_pb2.Sysparams(
+        sym_req = celaut_pb2.Sysresources(
             mem_limit = 0
         )
     )
 
-def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysparams) -> bool:
+def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
     if token not in system_cache.keys(): __push_token(token = token)
     if sys_req.HasField('mem_limit'):
         variation = system_cache[token]['mem_limit'] - sys_req.mem_limit
@@ -58,7 +58,7 @@ def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Contai
 
 def container_modify_system_params(
         token: str, 
-        system_requeriments: celaut_pb2.Sysparams = None
+        system_requeriments: celaut_pb2.Sysresources = None
     ) -> bool:
 
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
@@ -87,19 +87,19 @@ def container_modify_system_params(
 def container_stop(token: str) -> bool:
     if __modify_sysreq(
         token = token,
-        sys_req = celaut_pb2.Sysparams(
+        sys_req = celaut_pb2.Sysresources(
             mem_limit = 0
         )
     ):
         del system_cache[token]
         return True
 
-def could_ve_this_sysreq(sysreq: celaut_pb2.Sysparams) -> bool:
+def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
     return IOBigData().prevent_kill(len = sysreq.mem_limit) # Prevent kill dice de lo que dispone actualmente libre.
     # It's not possible local, but other pair can, returns True.
 
-def get_sysparams(token: str) -> celaut_pb2.Sysparams:
-    return celaut_pb2.Sysparams(
+def get_sysresources(token: str) -> celaut_pb2.Sysresources:
+    return celaut_pb2.Sysresources(
         mem_limit = system_cache[token]["mem_limit"]
     )
 

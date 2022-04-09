@@ -31,13 +31,13 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
-        self.ModifyServiceSystemParams = channel.stream_stream(
-                '/gateway.Gateway/ModifyServiceSystemParams',
+        self.ModifyServiceSystemResources = channel.stream_stream(
+                '/gateway.Gateway/ModifyServiceSystemResources',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
-        self.GetSystemParams = channel.stream_stream(
-                '/gateway.Gateway/GetSystemParams',
+        self.GetSystemResources = channel.stream_stream(
+                '/gateway.Gateway/GetSystemResources',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
@@ -86,13 +86,13 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ModifyServiceSystemParams(self, request_iterator, context):
+    def ModifyServiceSystemResources(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetSystemParams(self, request_iterator, context):
+    def GetSystemResources(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -140,13 +140,13 @@ def add_GatewayServicer_to_server(servicer, server):
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
-            'ModifyServiceSystemParams': grpc.stream_stream_rpc_method_handler(
-                    servicer.ModifyServiceSystemParams,
+            'ModifyServiceSystemResources': grpc.stream_stream_rpc_method_handler(
+                    servicer.ModifyServiceSystemResources,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
-            'GetSystemParams': grpc.stream_stream_rpc_method_handler(
-                    servicer.GetSystemParams,
+            'GetSystemResources': grpc.stream_stream_rpc_method_handler(
+                    servicer.GetSystemResources,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
@@ -234,7 +234,7 @@ class Gateway(object):
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
-    def ModifyServiceSystemParams(request_iterator,
+    def ModifyServiceSystemResources(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -244,14 +244,14 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/ModifyServiceSystemParams',
+        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/ModifyServiceSystemResources',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
-    def GetSystemParams(request_iterator,
+    def GetSystemResources(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -261,7 +261,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GetSystemParams',
+        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GetSystemResources',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

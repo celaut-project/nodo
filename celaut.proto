@@ -168,13 +168,13 @@ message Configuration {
 message ConfigurationFile {
     Instance gateway = 1;
     Configuration config = 2;
-    Sysparams initial_sysparams = 3;
+    Sysresources initial_sysresources = 3;
 }
 
 //  ------------------------
-//  System requirements.
+//  System resources.
 //  ------------------------
-message Sysparams {                           //  https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
+message Sysresources {                           //  https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     optional int32 blkio_weight = 1;
     optional int32 cpu_period = 2;
     optional int32 cpu_quota = 3;  // https://wbhegedus.me/understanding-kubernetes-cpu-limits/

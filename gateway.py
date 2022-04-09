@@ -3,7 +3,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import DEFAULT_SYSTEM_PARAMETERS, container_modify_system_params, container_stop, could_ve_this_sysreq, get_sysparams
+from manager import DEFAULT_SYSTEM_RESOURCES, container_modify_system_params, container_stop, could_ve_this_sysreq, get_sysresources
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash
@@ -13,10 +13,9 @@ from concurrent import futures
 from grpc_reflection.v1alpha import reflection
 import pymongo, json
 from google.protobuf.json_format import MessageToJson
-from google.protobuf.json_format import Parse
 import docker as docker_lib
 import netifaces as ni
-from gateway_pb2_grpcbf import StartService_input, GetServiceCost_input, GetServiceTar_input, StartService_input_partitions_v1, StartService_input_partitions_v2
+from gateway_pb2_grpcbf import StartService_input, GetServiceCost_input, GetServiceTar_input, StartService_input_partitions_v2
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
 
@@ -183,10 +182,12 @@ def purgue_external(father_ip, node_uri, token):
     cache_lock.release()
 
 
-def set_config(container_id: str, config: celaut.Configuration, api: celaut.Service.Api.Config):
+def set_config(container_id: str, config: celaut.Configuration, resources: celaut.Sysresources, api: celaut.Service.Api.Config):
     __config__ = celaut.ConfigurationFile()
     __config__.gateway.CopyFrom(generate_gateway_instance(network=DOCKER_NETWORK).instance)
-    __config__.config.CopyFrom(config)
+    if config: __config__.config.CopyFrom(config)
+    if resources: __config__.initial_sysresources.CopyFrom(resources)
+
     os.mkdir(HYCACHE + container_id)
     # TODO: Check if api.format is valid or make the serializer for it.
     path = ''
@@ -290,7 +291,7 @@ def launch_service(
         metadata: celaut.Any.Metadata, 
         father_ip: str, 
         id = None,
-        system_requeriments: celaut.Sysparams = None,
+        system_requeriments: celaut.Sysresources = None,
         max_sysreq = None,
         config: celaut.Configuration = None
     ) -> gateway_pb2.Instance:
@@ -366,7 +367,7 @@ def launch_service(
                     entrypoint = service.container.entrypoint
                 )
 
-                set_config(container_id = container.id, config = config, api = service.api.config)
+                set_config(container_id = container.id, config = config, resources = system_requeriments, api = service.api.config)
 
                 # The container must be started after adding the configuration file and
                 #  before requiring its IP address, since docker assigns it at startup.
@@ -404,7 +405,7 @@ def launch_service(
                     id = id,
                     entrypoint = service.container.entrypoint
                 )
-                set_config(container_id = container.id, config = config, api = service.api.config)
+                set_config(container_id = container.id, config = config, resources = system_requeriments, api = service.api.config)
                 try:
                     container.start()
                 except docker_lib.errors.APIError as e:
@@ -433,7 +434,7 @@ def launch_service(
                     uri_slot.uri.append(uri)
 
             token = token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
-            if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_PARAMETERS
+            if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_RESOURCES
             container_modify_system_params(
                 token = token,
                 system_requeriments = system_requeriments
@@ -751,24 +752,24 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )            
         ): yield b
 
-    def ModifyServiceSystemParams(self, request_iterator, context):
-        l.LOGGER('Request for modify service system params.')
+    def ModifyServiceSystemResources(self, request_iterator, context):
+        l.LOGGER('Request for modify service system resources.')
         container_modify_system_params(
             token = get_token_by_uri(
                 uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
             ),
             system_requeriments = grpcbf.parse_from_buffer(
                 request_iterator = request_iterator,
-                indices = celaut.Sysparams,
+                indices = celaut.Sysresources,
                 partitions_message_mode = True
             )
         )
         for b in grpcbf.serialize_to_buffer(): yield b
 
-    def GetSystemParams(self, request_iterator, context):
-        l.LOGGER('Request for get service system params.')
+    def GetSystemResources(self, request_iterator, context):
+        l.LOGGER('Request for get service system resources.')
         for b in grpcbf.serialize_to_buffer(
-            message_iterator = get_sysparams(
+            message_iterator = get_sysresources(
                 token = get_token_by_uri(
                     uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
                 )

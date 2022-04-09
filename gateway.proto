@@ -27,14 +27,14 @@ message ServiceWithMeta {
 message HashWithConfig { // H^C 
     celaut.Any.Metadata.HashTag.Hash hash = 1;
     celaut.Configuration config = 3;
-    optional celaut.Sysparams min_sysreq = 4;  // init system specs.
-    optional celaut.Sysparams max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
+    optional celaut.Sysresources min_sysreq = 4;  // init system specs.
+    optional celaut.Sysresources max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
 }
 message ServiceWithConfig { // S^C
     ServiceWithMeta service = 2;
     celaut.Configuration config = 3;
-    optional celaut.Sysparams min_sysreq = 4;  // init system specs.
-    optional celaut.Sysparams max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
+    optional celaut.Sysresources min_sysreq = 4;  // init system specs.
+    optional celaut.Sysresources max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
 }
 
 message CompileInput {
@@ -50,12 +50,12 @@ message CompileOutput {
 // GRPC.
 
 service Gateway {
-    rpc StartService( stream buffer.Buffer) returns ( stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S, celaut.Configuration & celaut.Sysparams=C; { H v S v H^C v S^C } ) -> Instance
+    rpc StartService( stream buffer.Buffer) returns ( stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S, celaut.Configuration & celaut.Sysresources=C; { H v S v H^C v S^C } ) -> Instance
     rpc StopService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Empty
     rpc Hynode(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Instance -> Instance
     
-    rpc ModifyServiceSystemParams(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Sysparams -> Empty
-    rpc GetSystemParams(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Empty -> celaut.Sysparams
+    rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Sysresources -> Empty
+    rpc GetSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Empty -> celaut.Sysresources
 
     rpc GetFile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Any.Metadata.HashTag.Hash -> celaut.Any
     rpc Compile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // CompileInput -> CompileOutput
