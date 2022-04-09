@@ -955,10 +955,13 @@ if __name__ == "__main__":
 
     from zeroconf import Zeroconf
     import iobigdata
+    from psutil import virtual_memory
     
-    iobigdata.IOBigData().set_log(
+    iobigdata.IOBigData(
+        ram_pool_method = lambda: virtual_memory().available
+    ).set_log(
         log = l.LOGGER if MEMORY_LOGS else None
-        )
+    )
 
     grpcbf.modify_env(
         cache_dir = HYCACHE,
