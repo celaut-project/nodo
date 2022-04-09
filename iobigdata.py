@@ -49,7 +49,7 @@ class IOBigData(metaclass=Singleton):
 
     def __init__(self, log = None) -> None:
         self.log = log
-        self.ram_pool = lambda: psutil.virtual_memory().available
+        self.ram_pool = lambda: psutil.virtual_memory().total
         self.ram_locked = 0
         self.get_ram_avaliable = lambda: self.ram_pool() - self.ram_locked
         self.amount_lock = Lock()
