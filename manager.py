@@ -65,7 +65,7 @@ def container_modify_system_params(
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
 
-    system_requeriments = system_requeriments_range.min_sysreq
+    system_requeriments = system_requeriments_range.min_sysreq  # TODO implement the use of max_sysreq.
     if not system_requeriments: return False
 
     if __modify_sysreq(
