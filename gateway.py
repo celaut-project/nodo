@@ -437,7 +437,7 @@ def launch_service(
             if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_RESOURCES
             container_modify_system_params(
                 token = token,
-                system_requeriments = system_requeriments
+                system_requeriments_range = gateway_pb2.ModifyServiceSystemResourcesInput(min_sysreq = system_requeriments, max_sysreq = system_requeriments)
             )
 
             l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
@@ -754,25 +754,20 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def ModifyServiceSystemResources(self, request_iterator, context):
         l.LOGGER('Request for modify service system resources.')
-        container_modify_system_params(
-            token = get_token_by_uri(
+        token = get_token_by_uri(
                 uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
-            ),
-            system_requeriments = grpcbf.parse_from_buffer(
+            )
+        if not container_modify_system_params(
+            token = token,
+            system_requeriments_range = grpcbf.parse_from_buffer(
                 request_iterator = request_iterator,
-                indices = celaut.Sysresources,
+                indices = gateway_pb2.ModifyServiceSystemResourcesInput,
                 partitions_message_mode = True
             )
-        )
-        for b in grpcbf.serialize_to_buffer(): yield b
-
-    def GetSystemResources(self, request_iterator, context):
-        l.LOGGER('Request for get service system resources.')
+        ): raise Exception('Exception on service modify method.')
         for b in grpcbf.serialize_to_buffer(
             message_iterator = get_sysresources(
-                token = get_token_by_uri(
-                    uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
-                )
+                token = token
             )
         ): yield b
 

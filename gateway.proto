@@ -47,6 +47,11 @@ message CompileOutput {
     compile.ServiceWithMeta service = 2;
 }
 
+message ModifyServiceSystemResourcesInput {
+    celaut.Sysresources min_sysreq = 1;
+    celaut.Sysresources max_sysreq = 2;
+}
+
 // GRPC.
 
 service Gateway {
@@ -54,8 +59,7 @@ service Gateway {
     rpc StopService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Empty
     rpc Hynode(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Instance -> Instance
     
-    rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Sysresources -> Empty
-    rpc GetSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Empty -> celaut.Sysresources
+    rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Sysresources -> celaut.Sysresources
 
     rpc GetFile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Any.Metadata.HashTag.Hash -> celaut.Any
     rpc Compile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // CompileInput -> CompileOutput

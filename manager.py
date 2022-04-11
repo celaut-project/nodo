@@ -6,6 +6,7 @@ from iobigdata import IOBigData
 import pymongo
 import docker as docker_lib
 import logger as l
+import gateway_pb2
 
 db = pymongo.MongoClient(
             "mongodb://localhost:27017/"
@@ -58,12 +59,13 @@ def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Contai
 
 def container_modify_system_params(
         token: str, 
-        system_requeriments: celaut_pb2.Sysresources = None
+        system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
     ) -> bool:
 
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
 
+    system_requeriments = system_requeriments_range.min_sysreq
     if not system_requeriments: return False
 
     if __modify_sysreq(
