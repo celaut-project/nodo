@@ -954,7 +954,7 @@ if __name__ == "__main__":
     from psutil import virtual_memory
     
     iobigdata.IOBigData(
-        # ram_pool_method = lambda: virtual_memory().total  TODO add this line when the lib. is used.
+        ram_pool_method = lambda: virtual_memory().total
     ).set_log(
         log = l.LOGGER if MEMORY_LOGS else None
     )
