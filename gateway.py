@@ -344,6 +344,7 @@ def launch_service(
 
             #  The node launches the service locally.
             if getting_container: l.LOGGER('El nodo lanza el servicio localmente.')
+            if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_RESOURCES
             try:
                 id = build.build(
                         service_buffer = service_buffer, 
@@ -434,7 +435,6 @@ def launch_service(
                     uri_slot.uri.append(uri)
 
             token = token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
-            if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_RESOURCES
             container_modify_system_params(
                 token = token,
                 system_requeriments_range = gateway_pb2.ModifyServiceSystemResourcesInput(min_sysreq = system_requeriments, max_sysreq = system_requeriments)
