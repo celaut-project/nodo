@@ -59,7 +59,7 @@ service Gateway {
     rpc StopService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Empty
     rpc Hynode(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Instance -> Instance
     
-    rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Sysresources -> celaut.Sysresources
+    rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput -> celaut.Sysresources
 
     rpc GetFile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Any.Metadata.HashTag.Hash -> celaut.Any
     rpc Compile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // CompileInput -> CompileOutput
