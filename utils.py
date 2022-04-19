@@ -10,6 +10,13 @@ from verify import get_service_hex_main_hash
 
 GET_ENV = lambda env, default: type(default)(os.environ.get(env)) if env in os.environ.keys() else default
 
+def read_file(filename) -> bytes:
+    def generator(filename):
+        with open(filename, 'rb') as entry:
+            for chunk in iter(lambda: entry.read(1024 * 1024), b''):
+                yield chunk
+    return b''.join([b for b in generator(filename)])
+
 def peers_iterator(ignore_network: str = None) -> Generator[celaut_pb2.Instance.Uri, None, None]:
     peers = list(pymongo.MongoClient(
                 "mongodb://localhost:27017/"

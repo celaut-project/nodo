@@ -540,7 +540,7 @@ def get_from_registry(hash: str) -> celaut.Any:
     try:
         with iobd.mem_manager(2*os.path.getsize(first_partition_dir)) as iolock:
             any = celaut.Any()
-            any.ParseFromString(iobd.read_file(filename = first_partition_dir))
+            any.ParseFromString(utils.read_file(filename = first_partition_dir))
             return any
     except (IOError, FileNotFoundError):
         l.LOGGER('The service was not on registry.')
