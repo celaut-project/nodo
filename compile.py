@@ -288,7 +288,7 @@ class Hyper:
 def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
     Hyperfile = Hyper(path = path, aux_id = aux_id)
 
-    with iobigdata.mem_manager(len = 2*Hyperfile.buffer_len):
+    with iobigdata.mem_manager(len = 1.5*Hyperfile.buffer_len):
         Hyperfile.parseContainer()
         Hyperfile.parseApi()
         Hyperfile.parseLedger()
