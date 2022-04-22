@@ -104,21 +104,10 @@ def get_only_the_ip_from_context_method(context_peer: str) -> str:
 
 get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
 
-longestSublistFinder = lambda string1, string2, split: split.join([a for a in string1 for b in string2 if a == b])+split
+longestSublistFinder = lambda string1, string2, split: split.join([a for a in string1.split(split) for b in string2.split(split) if a == b])+split
 
 def address_in_network( ip_or_uri, net) -> bool:
     #  Return if the ip network portion (addr and broadcast common) is in the ip.
-    print(longestSublistFinder(
-                string1 = ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
-                string2 = ni.ifaddresses(net)[ni.AF_INET][0]['broadcast'],
-                split = '.'
-            ))
-    print(ip_or_uri)
-    print(longestSublistFinder(
-                string1 = ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
-                string2 = ni.ifaddresses(net)[ni.AF_INET][0]['broadcast'],
-                split = '.'
-            ) in ip_or_uri)
     return (
             longestSublistFinder(
                 string1 = ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
