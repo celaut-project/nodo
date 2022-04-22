@@ -94,20 +94,8 @@ def get_free_port() -> int:
         s.bind(('', 0))
         return int(s.getsockname()[1])
 
-def longestSubstringFinder(string1, string2) -> str:
-    answer = ""
-    len1, len2 = len(string1), len(string2)
-    for i in range(len1):
-        match = ""
-        for j in range(len2):
-            if (i + j < len1 and string1[i + j] == string2[j]):
-                match += string2[j]
-            else:
-                if (len(match) > len(answer)): answer = match
-                match = ""
-    return answer
-
 get_only_the_ip_from_context = lambda context_peer: get_only_the_ip_from_context_method(context_peer)
+
 def get_only_the_ip_from_context_method(context_peer: str) -> str:
     ipv = context_peer.split(':')[0]
     if ipv in ('ipv4', 'ipv6'):
@@ -116,16 +104,20 @@ def get_only_the_ip_from_context_method(context_peer: str) -> str:
 
 get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
 
+longestSublistFinder = lambda string1, string2, split: split.join([a for a in string1 for b in string2 if a == b])+split
+
 def address_in_network( ip_or_uri, net) -> bool:
     #  Return if the ip network portion (addr and broadcast common) is in the ip.
     return (
-            longestSubstringFinder(
-                string1=ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
-                string2=ni.ifaddresses(net)[ni.AF_INET][0]['broadcast']
+            longestSublistFinder(
+                string1 = ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
+                string2 = ni.ifaddresses(net)[ni.AF_INET][0]['broadcast'],
+                split = '.'
             ) or \
-            longestSubstringFinder(
-                string1=ni.ifaddresses(net)[ni.AF_INET6][0]['addr'],
-                string2=ni.ifaddresses(net)[ni.AF_INET6][0]['broadcast']
+            longestSublistFinder(
+                string1 = ni.ifaddresses(net)[ni.AF_INET6][0]['addr'],
+                string2 = ni.ifaddresses(net)[ni.AF_INET6][0]['broadcast'],
+                split = '::'
             ) 
         ) in ip_or_uri \
         if net != 'lo' else \
