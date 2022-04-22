@@ -108,6 +108,17 @@ longestSublistFinder = lambda string1, string2, split: split.join([a for a in st
 
 def address_in_network( ip_or_uri, net) -> bool:
     #  Return if the ip network portion (addr and broadcast common) is in the ip.
+    print(longestSublistFinder(
+                string1 = ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
+                string2 = ni.ifaddresses(net)[ni.AF_INET][0]['broadcast'],
+                split = '.'
+            ))
+    print(ip_or_uri)
+    print(longestSublistFinder(
+                string1 = ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
+                string2 = ni.ifaddresses(net)[ni.AF_INET][0]['broadcast'],
+                split = '.'
+            ) in ip_or_uri)
     return (
             longestSublistFinder(
                 string1 = ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
