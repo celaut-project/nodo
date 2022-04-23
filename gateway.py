@@ -822,12 +822,16 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_model=[Buffer.Head.Partition(index={1: Buffer.Head.Partition()}), Buffer.Head.Partition(index={2: Buffer.Head.Partition()})],
             partitions_message_mode=[False, True]
         )
-        print("yeahhh we've the input.")
-        if next(input) != gateway_pb2.CompileInput: 
+        print("yeahhh we've the input.", input)
+        ti = next(input)
+        print('ti -> ', ti)
+        if ti != gateway_pb2.CompileInput: 
             print('Compile Input wrong.')
             raise Exception('Compile Input wrong.')
+        ipt = next(input)
+        print('ipt .> ', ipt)
         for b in compile(
-            repo = next(input),
+            repo = ipt,
             partitions_model = next(input)
         ): yield b
 
