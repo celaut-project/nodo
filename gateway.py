@@ -823,7 +823,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_message_mode=[False, True]
         )
         print("yeahhh we've the input.")
-        if next(input) != gateway_pb2.CompileInput: raise Exception('Compile Input wrong.')
+        if next(input) != gateway_pb2.CompileInput: 
+            print('Compile Input wrong.')
+            raise Exception('Compile Input wrong.')
         for b in compile(
             repo = next(input),
             partitions_model = next(input)
