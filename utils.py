@@ -131,7 +131,6 @@ def get_network_name( ip_or_uri: str) -> str:
         print(network)
         try:
             if address_in_network(ip_or_uri = ip_or_uri, net = network):
-                print('return this ', network)
                 return network
         except KeyError:
             continue
