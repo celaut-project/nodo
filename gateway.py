@@ -55,6 +55,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
 
 # Insert the instance if it does not exists.
 def insert_instance_on_mongo(instance: celaut.Instance):
+    print(1)
     parsed_instance = json.loads(MessageToJson(instance))
     pymongo.MongoClient(
         "mongodb://localhost:27017/"
@@ -63,6 +64,7 @@ def insert_instance_on_mongo(instance: celaut.Instance):
         update={'$setOnInsert': parsed_instance},
         upsert = True
     )
+    print(2)
 
 cache_lock = threading.Lock()
 cache = {}  # ip_father:[dependencies]
