@@ -742,6 +742,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('\nAdding peer ' + str(instance))
         insert_instance_on_mongo(instance = instance.instance)
 
+        print('return mine.')
         for b in grpcbf.serialize_to_buffer(
             generate_gateway_instance(
                 network = utils.get_network_name(
@@ -750,7 +751,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     )
                 )
             )            
-        ): yield b
+        ): 
+            print('b -> ',b)
+            yield b
 
     def ModifyServiceSystemResources(self, request_iterator, context):
         l.LOGGER('Request for modify service system resources.')
