@@ -128,8 +128,10 @@ def address_in_network( ip_or_uri, net) -> bool:
 def get_network_name( ip_or_uri: str) -> str:
     #  https://stackoverflow.com/questions/819355/how-can-i-check-if-an-ip-is-in-a-network-in-python
     for network in ni.interfaces():
+        print(network)
         try:
             if address_in_network(ip_or_uri = ip_or_uri, net = network):
+                print('return this ', network)
                 return network
         except KeyError:
             continue
