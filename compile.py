@@ -20,9 +20,6 @@ HYCACHE = "/node/__hycache__/"
 REGISTRY = "/node/__registry__/"
 SAVE_ALL = False
 
-GET_ENV = lambda env, default: type(default)(os.environ.get(env)) if env in os.environ.keys() else default
-COMPILE_MEMORY_FACTOR = GET_ENV(env = 'COMPILE_MEMORY_FACTOR', default = 1.5)
-
 class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
@@ -291,7 +288,7 @@ class Hyper:
 def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
     Hyperfile = Hyper(path = path, aux_id = aux_id)
 
-    with iobigdata.mem_manager(len = COMPILE_MEMORY_FACTOR*Hyperfile.buffer_len):
+    with iobigdata.mem_manager(len = 1.5*Hyperfile.buffer_len):
         Hyperfile.parseContainer()
         Hyperfile.parseApi()
         Hyperfile.parseLedger()
