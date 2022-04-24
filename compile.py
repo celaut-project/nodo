@@ -51,7 +51,7 @@ class Hyper:
         if not os.path.isfile(self.path+'Dockerfile'): raise Exception("Error: Dockerfile no encontrado.")
         with iobigdata.mem_manager(len = get_folder_size(start_path=self.path)):
             os.system('/usr/bin/docker build --no-cache -t builder'+self.aux_id+' '+self.path)
-            os.system('docker builder prune -all --force')
+            os.system('docker builder prune --all --force')
         os.system("/usr/bin/docker save builder"+self.aux_id+" > "+HYCACHE+self.aux_id+"/building/container.tar")
         os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/container.tar -C "+HYCACHE+self.aux_id+"/building/")
 
