@@ -59,27 +59,22 @@ class Hyper:
                 for b_name in os.listdir(host_dir + directory):
                     if b_name == '.wh..wh..opq':
                         # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
-                        l.LOGGER('docker opaque witeout file.')
                         continue
                     branch = celaut.Service.Container.Filesystem.ItemBranch()
                     branch.name = os.path.basename(b_name)
 
                     # It's a link.
                     if os.path.islink(host_dir + directory+b_name):
-                        l.LOGGER('    Adding link '+ b_name)
-
                         branch.link.dst = directory+b_name
                         branch.link.src = os.path.realpath(host_dir+directory+b_name)[len(host_dir):] if host_dir in os.path.realpath(host_dir+directory+b_name) else os.path.realpath(host_dir+directory+b_name)
 
                     # It's a file.
                     elif os.path.isfile(host_dir + directory+b_name):
-                        l.LOGGER('    Adding file '+ b_name)
                         with open(host_dir + directory+b_name, 'rb') as file:
                             branch.file = file.read()
 
                     # It's a folder.
                     elif os.path.isdir(host_dir + directory+b_name):
-                        l.LOGGER('    Adding directory '+ b_name)
                         branch.filesystem.CopyFrom(
                             recursive_parsing(directory = directory+b_name+'/')
                             )
@@ -261,7 +256,7 @@ class Hyper:
         os.mkdir(HYCACHE + 'compile' + id + '/')
 
 
-        print('DIR CREATED', HYCACHE + 'compile' + id + '/')
+        l.LOGGER('Compiler: DIR CREATED', HYCACHE + 'compile' + id + '/')
 
         for i, partition in enumerate(partitions_model):
             message = grpcbigbuffer.get_submessage(
@@ -277,7 +272,7 @@ class Hyper:
             message_buffer = grpcbigbuffer.message_to_bytes(
                         message = message
                     )
-            print('Send message ', type(message), partition, len(message_buffer))
+            l.LOGGER('Compiler: send message ', type(message), partition, len(message_buffer))
             with open(HYCACHE + 'compile' + id + '/p'+str(i+1), 'wb') as f:
                 f.write(
                     message_buffer
