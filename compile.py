@@ -7,7 +7,6 @@ import json, getpass
 import os, subprocess
 import iobigdata
 import celaut_pb2 as celaut, grpcbigbuffer, buffer_pb2, gateway_pb2, compile_pb2
-from utils import GET_ENV
 from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_main_hash
 
 #  -------------------------------------------------
@@ -20,6 +19,8 @@ from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex
 HYCACHE = "/node/__hycache__/"
 REGISTRY = "/node/__registry__/"
 SAVE_ALL = False
+
+GET_ENV = lambda env, default: type(default)(os.environ.get(env)) if env in os.environ.keys() else default
 COMPILE_MEMORY_FACTOR = GET_ENV(env = 'COMPILE_MEMORY_FACTOR', default = 1.5)
 
 class Hyper:
