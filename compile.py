@@ -20,6 +20,18 @@ HYCACHE = "/node/__hycache__/"
 REGISTRY = "/node/__registry__/"
 SAVE_ALL = False
 
+
+def get_folder_size(start_path = '.'):
+    total_size = 0
+    for dirpath, dirnames, filenames in os.walk(start_path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            # skip if it is symbolic link
+            if not os.path.islink(fp):
+                total_size += os.path.getsize(fp)
+
+    return total_size
+
 class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
@@ -37,7 +49,9 @@ class Hyper:
 
         # Build container and get compressed layers.
         if not os.path.isfile(self.path+'Dockerfile'): raise Exception("Error: Dockerfile no encontrado.")
-        os.system('/usr/bin/docker build --no-cache -t builder'+self.aux_id+' '+self.path)
+        with iobigdata.mem_manager(len = get_folder_size(start_path=self.path)):
+            os.system('/usr/bin/docker build --no-cache -t builder'+self.aux_id+' '+self.path)
+            os.system('docker builder prune -all --force')
         os.system("/usr/bin/docker save builder"+self.aux_id+" > "+HYCACHE+self.aux_id+"/building/container.tar")
         os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/container.tar -C "+HYCACHE+self.aux_id+"/building/")
 
