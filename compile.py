@@ -7,6 +7,7 @@ import json, getpass
 import os, subprocess
 import iobigdata
 import celaut_pb2 as celaut, grpcbigbuffer, buffer_pb2, gateway_pb2, compile_pb2
+from utils import GET_ENV
 from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_main_hash
 
 #  -------------------------------------------------
@@ -19,6 +20,7 @@ from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex
 HYCACHE = "/node/__hycache__/"
 REGISTRY = "/node/__registry__/"
 SAVE_ALL = False
+COMPILE_MEMORY_FACTOR = GET_ENV(env = 'COMPILE_MEMORY_FACTOR', default = 1.5)
 
 class Hyper:
     def __init__(self, path, aux_id):
@@ -288,7 +290,7 @@ class Hyper:
 def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
     Hyperfile = Hyper(path = path, aux_id = aux_id)
 
-    with iobigdata.mem_manager(len = 1.5*Hyperfile.buffer_len):
+    with iobigdata.mem_manager(len = COMPILE_MEMORY_FACTOR*Hyperfile.buffer_len):
         Hyperfile.parseContainer()
         Hyperfile.parseApi()
         Hyperfile.parseLedger()
