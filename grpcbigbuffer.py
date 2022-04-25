@@ -395,6 +395,7 @@ def parse_from_buffer(
                         from sys import getsizeof
                         print('yield aux_object', i, type(aux_object), getsizeof(aux_object))
                         yield aux_object
+        gc.collect()
         yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
 
 
