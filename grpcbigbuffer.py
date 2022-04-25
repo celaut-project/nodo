@@ -390,16 +390,18 @@ def parse_from_buffer(
                     else:
                         yield aux_object
 
-        filename = generate_random_dir()
-        with open(filename, 'wb') as f:
-            f.write(
-                last.SerializeToString() if hasattr(last, 'SerializeToString') \
-                    else bytes(last) if type(last) is not str else bytes(last, 'utf8')
-            )
-        with open(filename, 'rb') as f:
-            last.ParseFromString(f.read())
-        remove_file(filename)    
-        yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
+        try:
+            filename = generate_random_dir()
+            with open(filename, 'wb') as f:
+                f.write(
+                    last.SerializeToString() if hasattr(last, 'SerializeToString') \
+                        else bytes(last) if type(last) is not str else bytes(last, 'utf8')
+                )
+            with open(filename, 'rb') as f:
+                last.ParseFromString(f.read())
+            remove_file(filename)    
+            yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
+        except Exception as e: print('e -< ', e)
 
 
     for buffer in request_iterator:
