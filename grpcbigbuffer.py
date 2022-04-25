@@ -345,7 +345,7 @@ def parse_from_buffer(
         # 3. Parse to the local partitions from the remote partitions using mem_manager.
         # TODO: check the limit memory formula.
         print('Using conversor.')
-        with mem_manager(len = 3*sum([os.path.getsize(dir) for dir in dirs[:-1]]) + 3*os.path.getsize(dirs[-1])):
+        with mem_manager(len = 3*sum([os.path.getsize(dir) for dir in dirs[:-1]]) + 2*os.path.getsize(dirs[-1])):
             if (len(remote_partitions_model)==0 or len(remote_partitions_model)==1) and len(dirs)==1:
                 main_object = pf_object()
                 main_object.ParseFromString(open(dirs[0], 'rb').read())
@@ -363,9 +363,12 @@ def parse_from_buffer(
             # 4. yield local partitions.
             if local_partitions_model == []: local_partitions_model.append(buffer_pb2.Buffer.Head.Partition())
             for i, partition in enumerate(local_partitions_model):
-                aux_object = pf_object()
-                aux_object.CopyFrom(main_object)
-                if i+1 == len(local_partitions_model): del main_object
+                if i+1 == len(local_partitions_model): 
+                    aux_object = main_object
+                    del main_object
+                else:
+                    aux_object = pf_object()
+                    aux_object.CopyFrom(main_object)
                 aux_object = get_submessage(partition = partition, obj = aux_object)
                 message_mode = partitions_message_mode[i]
                 if not message_mode:
