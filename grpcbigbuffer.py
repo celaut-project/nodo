@@ -394,6 +394,7 @@ def parse_from_buffer(
                                 aux = type(p)()
                                 aux.CopyFrom(p)
                                 last.append(p)
+                        last = []
                         del aux_object
                     else:
                         yield aux_object
