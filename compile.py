@@ -323,7 +323,9 @@ def zipfile_ok(
     aux_id = str(random.random())
     os.system('mkdir '+HYCACHE+aux_id)
     os.system('mkdir '+HYCACHE+aux_id+'/for_build')
+    print(1)
     os.system('unzip '+repo+' -d '+HYCACHE+aux_id+'/for_build')
+    print(2)
     os.system('rm '+repo)
     return ok(
         path = HYCACHE+aux_id+'/for_build/',
