@@ -385,8 +385,11 @@ def parse_from_buffer(
                         yield filename
                 else:
                     if i+1 == len(local_partitions_model):
-                        last = type(aux_object)()
-                        last.CopyFrom(aux_object)
+                        if type(aux_object) != protobuf.pyext._message.RepeatedCompositeContainer:
+                            last = type(aux_object)() 
+                            last.CopyFrom(aux_object)
+                        else:
+                            last = list(aux_object)
                         del aux_object
                     else:
                         yield aux_object
