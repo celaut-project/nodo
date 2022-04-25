@@ -390,11 +390,11 @@ def parse_from_buffer(
                             last.CopyFrom(aux_object)
                         else:
                             last = []
+                            continue
                             for p in aux_object:
                                 aux = type(p)()
                                 aux.CopyFrom(p)
                                 last.append(p)
-                        last = []
                         del aux_object
                     else:
                         yield aux_object
