@@ -385,7 +385,7 @@ def parse_from_buffer(
                         yield filename
                 else:
                     if i+1 == len(local_partitions_model):
-                        last = pf_object()
+                        last = type(aux_object)()
                         last.CopyFrom(aux_object)
                         del aux_object
                     else:
