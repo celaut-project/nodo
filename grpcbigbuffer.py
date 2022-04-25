@@ -389,7 +389,7 @@ def parse_from_buffer(
                             last = type(aux_object)()
                             last.CopyFrom(aux_object)
                         else:
-                            last = []
+                            last = []  # TODO porque mantiene todo el peso del main_object?
                             for p in aux_object:
                                 aux = type(p)()
                                 aux.CopyFrom(p)
