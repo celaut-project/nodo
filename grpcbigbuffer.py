@@ -392,6 +392,7 @@ def parse_from_buffer(
                         else:
                             print(2)
                             last = []
+                            del aux_object
                             continue
                             for p in aux_object:
                                 aux = type(p)()
