@@ -395,7 +395,7 @@ def parse_from_buffer(
                         print('yield aux_object', i)
                         try:
                             print(type(aux_object), getsizeof(aux_object))
-                        except: print('na')
+                        except Exception as e: print(e)
                         yield aux_object
         yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
 
