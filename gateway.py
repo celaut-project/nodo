@@ -816,34 +816,21 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def Compile(self, request_iterator, context):
         l.LOGGER('Go to compile a proyect.')
-        correct_type = False
-        repo = None
-        partitions_model = None
-        for b in grpcbf.parse_from_buffer(
+        input = grpcbf.parse_from_buffer(
             request_iterator = request_iterator,
             indices = gateway_pb2.CompileInput,
             partitions_model=[Buffer.Head.Partition(index={1: Buffer.Head.Partition()}), Buffer.Head.Partition(index={2: Buffer.Head.Partition()})],
             partitions_message_mode=[False, True]
-        ):
-            if not correct_type:
-                print('Correct type ', b != gateway_pb2.CompileInput)
-                correct_type = True
-                continue
-
-            if not repo:
-                print('repo -> ' ,b)
-                repo = b
-                continue
-
-            if not partitions_model:
-                print('artitiosn model -< ', b)
-                partitions_model = b
-                continue                
-
-        #if next(input) != gateway_pb2.CompileInput: raise Exception('Compile Input wrong.')
+        )
+        if next(input) != gateway_pb2.CompileInput: raise Exception('Compile Input wrong.')
+        repo = next(input)
+        pm = next(input)
+        try:
+            next(input)
+        except StopIteration: pass
         for b in compile(
-            repo = repo, # next(input),
-            partitions_model = partitions_model # next(input)
+            repo = repo,
+            partitions_model = pm
         ): yield b
 
     def GetServiceTar(self, request_iterator, context):
