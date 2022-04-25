@@ -323,10 +323,9 @@ def zipfile_ok(
     aux_id = str(random.random())
     os.system('mkdir '+HYCACHE+aux_id)
     os.system('mkdir '+HYCACHE+aux_id+'/for_build')
-    print(1)
-    os.system('unzip '+repo+' -d '+HYCACHE+aux_id+'/for_build')
-    print(2)
-    os.system('rm '+repo)
+    with iobigdata.mem_manager(len = 2*os.file_size(repo)):
+        os.system('unzip '+repo+' -d '+HYCACHE+aux_id+'/for_build')
+    exit()#os.system('rm '+repo)
     return ok(
         path = HYCACHE+aux_id+'/for_build/',
         aux_id = aux_id,
