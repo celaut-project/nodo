@@ -386,14 +386,10 @@ def parse_from_buffer(
                 else:
                     if i+1 == len(local_partitions_model):
                         if type(aux_object) != protobuf.pyext._message.RepeatedCompositeContainer:
-                            print(1)
-                            last = type(aux_object)() 
+                            last = type(aux_object)()
                             last.CopyFrom(aux_object)
                         else:
-                            print(2)
                             last = []
-                            del aux_object
-                            continue
                             for p in aux_object:
                                 aux = type(p)()
                                 aux.CopyFrom(p)
