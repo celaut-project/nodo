@@ -344,6 +344,7 @@ def parse_from_buffer(
         if not pf_object or len(remote_partitions_model)>0 and len(dirs) != len(remote_partitions_model): return None
         # 3. Parse to the local partitions from the remote partitions using mem_manager.
         # TODO: check the limit memory formula.
+        print('Using conversor.')
         with mem_manager(len = 3*sum([os.path.getsize(dir) for dir in dirs[:-1]]) + 2*os.path.getsize(dirs[-1])):
             if (len(remote_partitions_model)==0 or len(remote_partitions_model)==1) and len(dirs)==1:
                 main_object = pf_object()
@@ -364,6 +365,7 @@ def parse_from_buffer(
             for i, partition in enumerate(local_partitions_model):
                 if i+1 == len(local_partitions_model): 
                     aux_object = main_object
+                    print('del main object')
                     del main_object
                 else:
                     aux_object = pf_object()
@@ -377,6 +379,7 @@ def parse_from_buffer(
                             aux_object.SerializeToString() if hasattr(aux_object, 'SerializeToString') \
                                 else bytes(aux_object) if type(aux_object) is not str else bytes(aux_object, 'utf8')
                         )
+                    print('(mm) del aux_object', i)
                     del aux_object
                     if i+1 == len(local_partitions_model): 
                         last = filename
@@ -385,6 +388,7 @@ def parse_from_buffer(
                 else:
                     if i+1 == len(local_partitions_model): 
                         last = aux_object
+                        print('del aux_object', i)
                         del aux_object
                     else:
                         yield aux_object
