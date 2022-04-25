@@ -2,7 +2,7 @@ from time import sleep, time
 import threading
 from gateway_pb2_grpcbf import GetServiceTar_input
 import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os, celaut_pb2, utils, iobigdata
-from utils import peers_iterator, service_extended
+from utils import peers_iterator, service_extended, read_file
 from grpcbigbuffer import save_chunks_to_file, serialize_to_buffer
 from compile import HYCACHE, REGISTRY
 import logger as l
@@ -50,7 +50,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         service = gateway_pb2.celaut__pb2.Service()
         service.ParseFromString(service_buffer)
         service.container.ParseFromString(
-            iobigdata.read_file(
+            read_file(
                 filename = second_partition_dir
             )
         )
