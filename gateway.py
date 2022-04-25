@@ -823,14 +823,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_message_mode=[False, True]
         )
         if next(input) != gateway_pb2.CompileInput: raise Exception('Compile Input wrong.')
-        repo = next(input)
-        pm = next(input)
-        try:
-            next(input)
-        except StopIteration: pass
         for b in compile(
-            repo = repo,
-            partitions_model = pm
+            repo = next(input),
+            partitions_model = next(input)
         ): yield b
 
     def GetServiceTar(self, request_iterator, context):
