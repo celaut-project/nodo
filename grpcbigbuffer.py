@@ -386,10 +386,11 @@ def parse_from_buffer(
                     else:
                         yield filename
                 else:
-                    if i+1 == len(local_partitions_model): 
+                    if i+1 == len(local_partitions_model):
+                        from sys import getsizeof
                         last = aux_object
-                        print('del aux_object', i)
                         del aux_object
+                        print('del aux_object', i, type(last), getsizeof(last))
                     else:
                         yield aux_object
         yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
