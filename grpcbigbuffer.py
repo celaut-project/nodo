@@ -385,27 +385,12 @@ def parse_from_buffer(
                         yield filename
                 else:
                     if i+1 == len(local_partitions_model):
-                        last = aux_object
+                        last = pf_object()
+                        last.CopyFrom(aux_object)
                         del aux_object
                     else:
                         yield aux_object
-
-        try:
-            filename = generate_random_dir()
-            print('write')
-            with open(filename, 'wb') as f:
-                f.write(
-                    last.SerializeToString() if hasattr(last, 'SerializeToString') \
-                        else bytes(last) if type(last) is not str else bytes(last, 'utf8')
-                )
-            print('read')
-            with open(filename, 'rb') as f:
-                last.ParseFromString(f.read())
-            print('remove')
-            remove_file(filename)    
-            print('last')
-            yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
-        except Exception as e: print('e -< ', e)
+        yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
 
 
     for buffer in request_iterator:
