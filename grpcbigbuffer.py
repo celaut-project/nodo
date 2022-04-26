@@ -140,18 +140,16 @@ def get_submessage(partition, obj, say_if_not_change = False):
         )
     for field in obj.DESCRIPTOR.fields:
         if field.index+1 in partition.index:
-            try:
-                submessage = get_submessage(
-                        partition = partition.index[field.index+1],
-                        obj = getattr(obj, field.name),
-                        say_if_not_change = True
-                    )
-                if not submessage: continue  # Anything to prune.
-                copy_message(
-                    obj=obj, field_name=field.name,
-                    message = submessage
+            submessage = get_submessage(
+                    partition = partition.index[field.index+1],
+                    obj = getattr(obj, field.name),
+                    say_if_not_change = True
                 )
-            except: pass
+            if not submessage: continue  # Anything to prune.
+            copy_message(
+                obj=obj, field_name=field.name,
+                message = submessage
+            )
         else:
             obj.ClearField(field.name)
     return obj
@@ -406,11 +404,7 @@ def parse_from_buffer(
                                 aux = type(p)()
                                 aux.CopyFrom(p)
                                 last.append(p)
-                        print('\nGo to del aux obj.')
-                        print('last pre -> ', sum([l.ByteSize() for l in last]))
-                        print('aux obj -< ', sum([l.ByteSize() for l in aux_object]))
                         del aux_object
-                        print('last post -> ', sum([l.ByteSize() for l in last]))
                     else:
                         yield aux_object
         yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
