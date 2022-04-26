@@ -154,6 +154,7 @@ def get_submessage(partition, obj, say_if_not_change = False):
             )
         else:
             obj.ClearField(field.name)
+    print('return obj -> ', type(obj))
     return obj
 
 def put_submessage(partition, message, obj):
