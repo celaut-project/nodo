@@ -368,7 +368,7 @@ def parse_from_buffer(
                     print('go to del main object.')
                     print('main_object -> ', main_object.ByteSize())
                     print('aux_object pre -> ', aux_object.ByteSize())
-                    del main_object
+                    del main_object  # TODO Aqui baja de 48 a 27.
                     from time import sleep
                     sleep(10)
                     print('aux_object post -> ', aux_object.ByteSize())
@@ -380,7 +380,7 @@ def parse_from_buffer(
                 from time import sleep
                 sleep(10)
                 aux_object = get_submessage(partition = partition, obj = aux_object)
-                print('aux_object post -> ', aux_object.ByteSize() if hasattr(aux_object, 'SerializeToString') else len(aux_object))
+                print('aux_object post -> ', type(aux_object), aux_object.ByteSize() if hasattr(aux_object, 'SerializeToString') else len(aux_object))
                 sleep(10)
                 message_mode = partitions_message_mode[i]
                 if not message_mode:
