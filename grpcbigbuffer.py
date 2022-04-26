@@ -154,7 +154,6 @@ def get_submessage(partition, obj, say_if_not_change = False):
             )
         else:
             obj.ClearField(field.name)
-    print('return obj -> ', type(obj))
     return obj
 
 def put_submessage(partition, message, obj):
@@ -381,7 +380,7 @@ def parse_from_buffer(
                 from time import sleep
                 sleep(10)
                 aux_object = get_submessage(partition = partition, obj = aux_object)
-                print('aux_object post -> ', type(aux_object), aux_object.ByteSize() if hasattr(aux_object, 'SerializeToString') else len(aux_object))
+                print('aux_object post -> ', type(aux_object), sys.getsizeof(aux_object), aux_object.ByteSize() if hasattr(aux_object, 'SerializeToString') else len(aux_object))
                 sleep(10)
                 message_mode = partitions_message_mode[i]
                 if not message_mode:
