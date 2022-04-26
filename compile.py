@@ -283,7 +283,7 @@ class Hyper:
 def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
     Hyperfile = Hyper(path = path, aux_id = aux_id)
 
-    with iobigdata.mem_manager(len = 1.5*Hyperfile.buffer_len):
+    with iobigdata.mem_manager(len = 1.75*Hyperfile.buffer_len):
         Hyperfile.parseContainer()
         Hyperfile.parseApi()
         Hyperfile.parseLedger()
@@ -295,7 +295,7 @@ def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
 
     os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.docker')
     os.system('/usr/bin/docker rmi builder'+aux_id)
-    os.system('rm -rf '+HYCACHE+aux_id+'/')            
+    os.system('rm -rf '+HYCACHE+aux_id+'/')
     return id
 
 def repo_ok(
