@@ -139,6 +139,7 @@ def get_submessage(partition, obj, say_if_not_change = False):
             obj = getattr(obj, obj.DESCRIPTOR.fields[list(partition.index.keys())[0]-1].name)
         )
     for field in obj.DESCRIPTOR.fields:
+        print('obj fields -> ', obj.DESCRIPTOR.fiels)
         if field.index+1 in partition.index:
             submessage = get_submessage(
                     partition = partition.index[field.index+1],
