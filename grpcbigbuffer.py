@@ -361,16 +361,15 @@ def parse_from_buffer(
                 for dir in dirs: remove_file(dir)
 
             # 4. yield local partitions.
-            from sys import getsizeof
             if local_partitions_model == []: local_partitions_model.append(buffer_pb2.Buffer.Head.Partition())
             for i, partition in enumerate(local_partitions_model):
                 if i+1 == len(local_partitions_model): 
                     aux_object = main_object
                     print('go to del main object.')
-                    print('main_object -> ', getsizeof(main_object))
-                    print('aux_object pre -> ', getsizeof(aux_object))
+                    print('main_object -> ', main_object.ByteSize())
+                    print('aux_object pre -> ', aux_object.ByteSize())
                     del main_object
-                    print('aux_object post -> ', getsizeof(aux_object))
+                    print('aux_object post -> ', aux_object.ByteSize())
                 else:
                     aux_object = pf_object()
                     aux_object.CopyFrom(main_object)
@@ -400,10 +399,10 @@ def parse_from_buffer(
                                 aux.CopyFrom(p)
                                 last.append(p)
                         print('Go to del aux obj.')
-                        print('last pre -> ', getsizeof(last))
-                        print('aux obj -< ', getsizeof(aux_object))
+                        print('last pre -> ', last.ByteSize())
+                        print('aux obj -< ', aux_object.ByteSize())
                         del aux_object
-                        print('last post -> ', getsizeof(last))
+                        print('last post -> ', last.ByteSize())
                     else:
                         yield aux_object
         yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
