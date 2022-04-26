@@ -379,7 +379,8 @@ def parse_from_buffer(
                 print('aux_object pre -> ', aux_object.ByteSize())
                 from time import sleep
                 sleep(10)
-                aux_object = get_submessage(partition = partition, obj = aux_object)
+                del aux_object
+                aux_object = get_submessage(partition = partition, obj = pf_object()) # get_submessage(partition = partition, obj = aux_object)
                 print('aux_object post -> ', type(aux_object), sys.getsizeof(aux_object), aux_object.ByteSize() if hasattr(aux_object, 'SerializeToString') else len(aux_object))
                 sleep(10)
                 message_mode = partitions_message_mode[i]
