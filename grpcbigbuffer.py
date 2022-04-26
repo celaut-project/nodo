@@ -134,7 +134,7 @@ def get_submessage(partition, obj, say_if_not_change = False):
         return False if say_if_not_change else obj
     if len(partition.index) == 1:
         for field in obj.DESCRIPTOR.fields:
-            if field.index+1 != partition.index:
+            if field.index+1 not in partition.index:
                 obj.ClearField(field.name)
         return get_submessage(
             partition = list(partition.index.values())[0],
