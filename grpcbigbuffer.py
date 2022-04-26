@@ -373,7 +373,10 @@ def parse_from_buffer(
                 else:
                     aux_object = pf_object()
                     aux_object.CopyFrom(main_object)
+                print('\n Go to get the submessage.')
+                print('aux_object pre -> ', aux_object.ByteSize())
                 aux_object = get_submessage(partition = partition, obj = aux_object)
+                print('aux_object post -> ', aux_object.ByteSize())
                 message_mode = partitions_message_mode[i]
                 if not message_mode:
                     filename = generate_random_dir()
@@ -398,7 +401,7 @@ def parse_from_buffer(
                                 aux = type(p)()
                                 aux.CopyFrom(p)
                                 last.append(p)
-                        print('Go to del aux obj.')
+                        print('\nGo to del aux obj.')
                         print('last pre -> ', sum([l.ByteSize() for l in last]))
                         print('aux obj -< ', sum([l.ByteSize() for l in aux_object]))
                         del aux_object
