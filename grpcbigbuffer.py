@@ -369,6 +369,8 @@ def parse_from_buffer(
                     print('main_object -> ', main_object.ByteSize())
                     print('aux_object pre -> ', aux_object.ByteSize())
                     del main_object
+                    from time import sleep
+                    sleep(10)
                     print('aux_object post -> ', aux_object.ByteSize())
                 else:
                     aux_object = pf_object()
