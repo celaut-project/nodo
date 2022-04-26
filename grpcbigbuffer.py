@@ -375,8 +375,11 @@ def parse_from_buffer(
                     aux_object.CopyFrom(main_object)
                 print('\n Go to get the submessage.')
                 print('aux_object pre -> ', aux_object.ByteSize())
+                from time import sleep
+                sleep(10)
                 aux_object = get_submessage(partition = partition, obj = aux_object)
                 print('aux_object post -> ', aux_object.ByteSize() if hasattr(aux_object, 'SerializeToString') else len(aux_object))
+                sleep(10)
                 message_mode = partitions_message_mode[i]
                 if not message_mode:
                     filename = generate_random_dir()
