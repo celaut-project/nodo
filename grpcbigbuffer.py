@@ -4,10 +4,9 @@ __version__ = 'dev'
 CHUNK_SIZE = 1024 * 1024  # 1MB
 MAX_DIR = 999999999
 import os, gc, itertools, sys
-from re import sub
 
 from google import protobuf
-import buffer_pb2
+import src.buffer_pb2 as buffer_pb2
 from random import randint
 from typing import Generator, Union, final
 from threading import Condition
@@ -120,7 +119,7 @@ def get_subclass(partition, object_cls):
         partition = list(partition.index.values())[0]
         ) if len(partition.index) == 1 else object_cls
 
-def copy_message(obj, field_name, message):
+def copy_message(obj, field_name, message):  # TODO for list too.
     e = getattr(obj, field_name) if field_name else obj
     if hasattr(message, 'CopyFrom'):
         e.CopyFrom(message)
@@ -131,33 +130,27 @@ def copy_message(obj, field_name, message):
     return obj
 
 def get_submessage(partition, obj, say_if_not_change = False):
-    print('obj fields -> ', type(obj), partition)
     if len(partition.index) == 0:
         return False if say_if_not_change else obj
-
     if len(partition.index) == 1:
-        for field in obj.DESCRIPTOR.fields:
-            if field.index != partition.index:
-                obj.ClearField(field.name)
-
         return get_submessage(
             partition = list(partition.index.values())[0],
             obj = getattr(obj, obj.DESCRIPTOR.fields[list(partition.index.keys())[0]-1].name)
         )
-
     for field in obj.DESCRIPTOR.fields:
-        
         if field.index+1 in partition.index:
-            submessage = get_submessage(
-                    partition = partition.index[field.index+1],
-                    obj = getattr(obj, field.name),
-                    say_if_not_change = True
+            try:
+                submessage = get_submessage(
+                        partition = partition.index[field.index+1],
+                        obj = getattr(obj, field.name),
+                        say_if_not_change = True
+                    )
+                if not submessage: continue  # Anything to prune.
+                copy_message(
+                    obj=obj, field_name=field.name,
+                    message = submessage
                 )
-            if not submessage: continue  # Anything to prune.
-            copy_message(
-                obj=obj, field_name=field.name,
-                message = submessage
-            )
+            except: pass
         else:
             obj.ClearField(field.name)
     return obj
@@ -350,7 +343,6 @@ def parse_from_buffer(
         if not pf_object or len(remote_partitions_model)>0 and len(dirs) != len(remote_partitions_model): return None
         # 3. Parse to the local partitions from the remote partitions using mem_manager.
         # TODO: check the limit memory formula.
-        print('Using conversor.')
         with mem_manager(len = 3*sum([os.path.getsize(dir) for dir in dirs[:-1]]) + 2*os.path.getsize(dirs[-1])):
             if (len(remote_partitions_model)==0 or len(remote_partitions_model)==1) and len(dirs)==1:
                 main_object = pf_object()
@@ -371,23 +363,11 @@ def parse_from_buffer(
             for i, partition in enumerate(local_partitions_model):
                 if i+1 == len(local_partitions_model): 
                     aux_object = main_object
-                    print('go to del main object.')
-                    print('main_object -> ', main_object.ByteSize())
-                    print('aux_object pre -> ', aux_object.ByteSize())
-                    del main_object  # TODO Aqui baja de 48 a 27.
-                    from time import sleep
-                    sleep(10)
-                    print('aux_object post -> ', aux_object.ByteSize())
+                    del main_object
                 else:
                     aux_object = pf_object()
                     aux_object.CopyFrom(main_object)
-                print('\n Go to get the submessage.')
-                print('aux_object pre -> ', aux_object.ByteSize())
-                from time import sleep
-                sleep(10)
                 aux_object = get_submessage(partition = partition, obj = aux_object)
-                print('aux_object post -> ', type(aux_object), sys.getsizeof(aux_object), aux_object.ByteSize() if hasattr(aux_object, 'SerializeToString') else len(aux_object))
-                sleep(10)
                 message_mode = partitions_message_mode[i]
                 if not message_mode:
                     filename = generate_random_dir()
@@ -402,16 +382,8 @@ def parse_from_buffer(
                     else:
                         yield filename
                 else:
-                    if i+1 == len(local_partitions_model):
-                        if type(aux_object) != protobuf.pyext._message.RepeatedCompositeContainer:
-                            last = type(aux_object)()
-                            last.CopyFrom(aux_object)
-                        else:
-                            last = []  # TODO porque mantiene todo el peso del main_object?
-                            for p in aux_object:
-                                aux = type(p)()
-                                aux.CopyFrom(p)
-                                last.append(p)
+                    if i+1 == len(local_partitions_model): 
+                        last = aux_object
                         del aux_object
                     else:
                         yield aux_object
