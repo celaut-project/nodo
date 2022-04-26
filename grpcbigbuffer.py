@@ -146,6 +146,7 @@ def get_submessage(partition, obj, say_if_not_change = False):
                     say_if_not_change = True
                 )
             if not submessage: continue  # Anything to prune.
+            print('Go to copy -> ',type(submessage))
             copy_message(
                 obj=obj, field_name=field.name,
                 message = submessage
