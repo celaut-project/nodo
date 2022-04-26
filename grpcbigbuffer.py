@@ -400,7 +400,7 @@ def parse_from_buffer(
                                 last.append(p)
                         print('Go to del aux obj.')
                         print('last pre -> ', sum([l.ByteSize() for l in last]))
-                        print('aux obj -< ', aux_object.ByteSize())
+                        print('aux obj -< ', sum([l.ByteSize() for l in aux_object]))
                         del aux_object
                         print('last post -> ', sum([l.ByteSize() for l in last]))
                     else:
