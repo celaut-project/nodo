@@ -399,10 +399,10 @@ def parse_from_buffer(
                                 aux.CopyFrom(p)
                                 last.append(p)
                         print('Go to del aux obj.')
-                        print('last pre -> ', last.ByteSize())
+                        print('last pre -> ', sum([l.ByteSize() for l in last]))
                         print('aux obj -< ', aux_object.ByteSize())
                         del aux_object
-                        print('last post -> ', last.ByteSize())
+                        print('last post -> ', sum([l.ByteSize() for l in last]))
                     else:
                         yield aux_object
         yield last  # Necesario para evitar realizar una última iteración del conversor para salir del mem_manager, y en su uso no es necesario esa última iteración porque se conoce local_partitions.
