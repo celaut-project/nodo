@@ -1,11 +1,11 @@
 from typing import Generator
 
-from google.protobuf import message
 import logger as l
 import sys, shutil
-import json, getpass
+import json
 import os, subprocess
-import iobigdata, utils
+import iobigdata
+from utils import GET_ENV
 import celaut_pb2 as celaut, grpcbigbuffer, buffer_pb2, gateway_pb2, compile_pb2
 from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_main_hash
 
@@ -20,7 +20,7 @@ HYCACHE = "/node/__hycache__/"
 REGISTRY = "/node/__registry__/"
 
 SAVE_ALL = False
-COMPILER_MEMORY_SIZE_FACTOR = utils.GET_ENV(env = 'COMPILER_MEMORY_SIZE_FACTOR', default = 2)
+COMPILER_MEMORY_SIZE_FACTOR = GET_ENV(env = 'COMPILER_MEMORY_SIZE_FACTOR', default = 2)
 
 class Hyper:
     def __init__(self, path, aux_id):
