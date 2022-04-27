@@ -5,7 +5,6 @@ import sys, shutil
 import json
 import os, subprocess
 import iobigdata
-from utils import GET_ENV
 import celaut_pb2 as celaut, grpcbigbuffer, buffer_pb2, gateway_pb2, compile_pb2
 from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_main_hash
 
@@ -14,6 +13,8 @@ from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex
 #  DOCKERFILE AND JSON   to   PROTOBUF SERVICE SPEC.
 #  -------------------------------------------------
 #  -------------------------------------------------
+
+GET_ENV = lambda env, default: type(default)(os.environ.get(env)) if env in os.environ.keys() else default
 
 # DIRECTORIES
 HYCACHE = "/node/__hycache__/"
