@@ -254,9 +254,11 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
 
     try:
         peers = PeerCostList()
-        peers.add_elem(
-            weight = execution_cost(service_buffer = service_buffer, metadata = metadata)
-        )
+        # TODO Need to check the architecture on the buffer and write it on metadata, if there is noting on meta.
+        if any(a in build.SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag):
+            peers.add_elem(
+                weight = execution_cost(service_buffer = service_buffer, metadata = metadata)
+            )
 
         for peer in utils.peers_iterator(ignore_network = ignore_network):
             # TODO could use async or concurrency. And use timeout.
@@ -448,7 +450,7 @@ def launch_service(
                         uri_slot = [uri_slot]
                     )
             )
-            
+
 
 def save_service(
     service_p1: bytes, 
