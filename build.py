@@ -50,7 +50,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
             )
 
     second_partition_dir = REGISTRY + id + '/p2'
-    if not any(a in SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag): raise Exception('Unsuported architecture.')
+    if not any(a in SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag): raise Exception('Unsupported architecture.')
     l.LOGGER('Build process of '+ id + ': wait for unlock the memory.')
     with iobigdata.mem_manager(len = len(service_buffer) + BUILD_CONTAINER_MEMORY_SIZE_FACTOR*os.path.getsize(second_partition_dir)):  # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
         l.LOGGER('Build process of '+ id + ': go to load all the buffer.')
