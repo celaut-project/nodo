@@ -5,7 +5,7 @@ import logger as l
 import sys, shutil
 import json, getpass
 import os, subprocess
-import iobigdata
+import iobigdata, utils
 import celaut_pb2 as celaut, grpcbigbuffer, buffer_pb2, gateway_pb2, compile_pb2
 from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_main_hash
 
@@ -18,7 +18,9 @@ from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex
 # DIRECTORIES
 HYCACHE = "/node/__hycache__/"
 REGISTRY = "/node/__registry__/"
+
 SAVE_ALL = False
+COMPILER_MEMORY_SIZE_FACTOR = utils.GET_ENV(env = 'COMPILER_MEMORY_SIZE_FACTOR', default = 2)
 
 class Hyper:
     def __init__(self, path, aux_id):
@@ -284,7 +286,7 @@ def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
     Hyperfile = Hyper(path = path, aux_id = aux_id)
 
     print('buffer len -> ', Hyperfile.buffer_len)
-    with iobigdata.mem_manager(len = 1.5*Hyperfile.buffer_len):
+    with iobigdata.mem_manager(len = COMPILER_MEMORY_SIZE_FACTOR*Hyperfile.buffer_len):
         Hyperfile.parseContainer()
         Hyperfile.parseApi()
         Hyperfile.parseLedger()
