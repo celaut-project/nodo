@@ -20,7 +20,7 @@ BUILD_CONTAINER_MEMORY_SIZE_FACTOR = utils.GET_ENV(env = 'BUILD_CONTAINER_MEMORY
 
 SUPPORTED_ARCHITECTURES = list(itertools.chain.from_iterable([
     ['arm64', 'arm_64', 'aarch64'] if utils.GET_ENV(env = 'ARM_SUPPORT', default=True) else [],
-    ['x86_64'] if utils.GET_ENV(env = 'X86_SUPPORT', default=False) else []
+    ['x86_64', 'amd64'] if utils.GET_ENV(env = 'X86_SUPPORT', default=False) else []
 ]))
 
 actual_building_processes_lock = threading.Lock()
