@@ -317,7 +317,7 @@ def launch_service(
                 ip_or_uri = father_ip
             ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None
         ).items():
-            abort_it = False
+            if abort_it: abort_it = False
             l.LOGGER('Balancer select peer ' + str(peer_instance_uri) + ' with cost ' + str(cost))
             
             # Delegate the service instance execution.
