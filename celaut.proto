@@ -175,9 +175,9 @@ message ConfigurationFile {
 //  System resources.
 //  ------------------------
 message Sysresources {                           //  https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
-    optional int32 blkio_weight = 1;
-    optional int32 cpu_period = 2;
-    optional int32 cpu_quota = 3;  // https://wbhegedus.me/understanding-kubernetes-cpu-limits/
-    optional int32 mem_limit = 4;
-    optional int32 disk_space = 5;
+    optional uint64 blkio_weight = 1;
+    optional uint64 cpu_period = 2;
+    optional uint64 cpu_quota = 3;  // https://wbhegedus.me/understanding-kubernetes-cpu-limits/
+    optional uint64 mem_limit = 4;
+    optional uint64 disk_space = 5;
 }
