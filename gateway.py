@@ -224,9 +224,7 @@ def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
     is_built = (get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata) \
                     in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()])
     if not is_built and \
-        not build.check_supported_architecture(metadata=metadata):
-        print('build not supported for this architecture.')
-        raise build.UnsupportedArquitectureException
+        not build.check_supported_architecture(metadata=metadata): raise build.UnsupportedArquitectureException
     try:
         # Coste de construcción si no se posee el contenedor del servicio.
         # Debe de tener en cuenta el coste de buscar el conedor por la red.
@@ -244,9 +242,7 @@ def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
             len( DOCKER_CLIENT().containers.list() )* COMPUTE_POWER_RATE,
             build_cost(service_buffer = service_buffer, metadata = metadata),
         ]) 
-    except build.UnsupportedArquitectureException as e: 
-        print('raise on execution cost '+ str(e))
-        raise e
+    except build.UnsupportedArquitectureException as e: raise e
 
 def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignore_network: str = None) -> dict: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
     class PeerCostList:
@@ -366,9 +362,7 @@ def launch_service(
                         id = id,
                         get_it = not getting_container
                     )  #  If the container is not built, build it.
-            except build.UnsupportedArquitectureException as e: 
-                print('build unsiported on launch service encima de wait build ', str(e))
-                raise e
+            except build.UnsupportedArquitectureException as e: raise e
             except build.WaitBuildException:
                 # If it does not have the container, it takes it from another node in the background and requests
                 #  the instance from another node as well.

@@ -27,9 +27,7 @@ SUPPORTED_ARCHITECTURES = list(itertools.chain.from_iterable([
 def check_supported_architecture(metadata: celaut_pb2.Any.Metadata) -> bool:
     try:
         return any(a in SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag)
-    except Exception as e:
-        print(e, 'METADATA NO POSEE ARQUITECTURA.', metadata)
-        return False
+    except: return False
 
 class WaitBuildException(Exception):
     
@@ -127,7 +125,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
             try:
                 if check_output('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)[:2] == 'ln': break
             except CalledProcessError: break
-            except AttributeError: print('symlink -> ', symlink)
+            except AttributeError: l.LOGGER('Build process of '+ id + ': symlink error '+str(symlink.src)+str(symlink.dst))
 
         l.LOGGER('Build process of '+ id + ': apply permissions.')
         # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
