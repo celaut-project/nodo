@@ -99,7 +99,7 @@ def get_token_by_uri(uri: str) -> str:
     try:
         return cache_service_perspective[uri]
     except Exception as e:
-        print('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e))  # TODO. Study the imposibility of that.
+        print('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e), cache_service_perspective, uri)  # TODO. Study the imposibility of that.
         raise e
 
 def purgue_internal(father_ip, container_id, container_ip):
@@ -120,7 +120,7 @@ def purgue_internal(father_ip, container_id, container_ip):
     try:
         del cache_service_perspective[container_ip]
     except Exception as e:
-        print('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e))  # TODO. Study the imposibility of that.
+        print('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e), cache_service_perspective, container_id)  # TODO. Study the imposibility of that.
         raise e
 
     if container_ip in cache:
