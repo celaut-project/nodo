@@ -1,3 +1,4 @@
+from curses import meta
 from time import sleep, time
 import threading
 from gateway_pb2_grpcbf import GetServiceTar_input
@@ -22,6 +23,9 @@ SUPPORTED_ARCHITECTURES = list(itertools.chain.from_iterable([
     ['arm64', 'arm_64', 'aarch64'] if utils.GET_ENV(env = 'ARM_SUPPORT', default=True) else [],
     ['x86_64', 'amd64'] if utils.GET_ENV(env = 'X86_SUPPORT', default=False) else []
 ]))
+
+def check_supported_architecture(metadata: celaut_pb2.Any.Metadata) -> bool:
+    return any(a in SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag)
 
 class WaitBuildException(Exception):
     
@@ -65,7 +69,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
             )
 
     second_partition_dir = REGISTRY + id + '/p2'
-    if not any(a in SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag): 
+    if not check_supported_architecture(metadata=metadata): 
         l.LOGGER('Build process of '+ id + ': unsupported architecture.')
         raise UnsupportedArquitectureException
     l.LOGGER('Build process of '+ id + ': wait for unlock the memory.')

@@ -224,7 +224,7 @@ def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
     is_built = (get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata) \
                     in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()])
     if not is_built and \
-        not any(a in build.SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag):
+        not build.check_supported_architecture(metadata=metadata):
         print('build not supported for this architecture.')
         raise build.UnsupportedArquitectureException
     try:
