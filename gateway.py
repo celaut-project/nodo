@@ -776,11 +776,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
         if not container_modify_system_params(
             token = token,
-            system_requeriments_range = grpcbf.parse_from_buffer(
+            system_requeriments_range = next(grpcbf.parse_from_buffer(
                 request_iterator = request_iterator,
                 indices = gateway_pb2.ModifyServiceSystemResourcesInput,
                 partitions_message_mode = True
-            )
+            ))
         ): raise Exception('Exception on service modify method.')
         for b in grpcbf.serialize_to_buffer(
             message_iterator = get_sysresources(
