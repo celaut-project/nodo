@@ -619,9 +619,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         p1 = get_from_registry(
                                     hash = hash.value.hex()
                                 )
+                        print('get the any.')
                         if hash not in p1.metadata.hashtag.hash:
                             p1.metadata.hashtag.hash.append(hash)
+                        print('hash ...')
                         p1.metadata.complete = True # TODO check
+                        print('complete...')
                         for b in grpcbf.serialize_to_buffer(
                             indices={},
                             message_iterator = launch_service(
