@@ -1,3 +1,4 @@
+from tkinter import E
 from typing import Generator
 from buffer_pb2 import Buffer
 
@@ -363,11 +364,15 @@ def launch_service(
                         id = id,
                         get_it = not getting_container
                     )  #  If the container is not built, build it.
-            except:
+            except build.UnsupportedArquitectureException as e: raise e
+            except build.WaitBuildException:
                 # If it does not have the container, it takes it from another node in the background and requests
                 #  the instance from another node as well.
                 getting_container = True
                 continue
+            except Exception as e:
+                l.LOGGER(str(e))
+                raise e
 
             # Now serialize the part of the service that is needed.
             service = celaut.Service()

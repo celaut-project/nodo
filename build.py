@@ -23,6 +23,9 @@ SUPPORTED_ARCHITECTURES = list(itertools.chain.from_iterable([
     ['x86_64', 'amd64'] if utils.GET_ENV(env = 'X86_SUPPORT', default=False) else []
 ]))
 
+class WaitBuildException(Exception):
+    def __str__(self):
+        return "Getting the container, the process will've time"
 class UnsupportedArquitectureException(Exception):
     def __str__(self):
         return 'Unsupported architecture.'
@@ -54,7 +57,9 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
             )
 
     second_partition_dir = REGISTRY + id + '/p2'
-    if not any(a in SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag): raise UnsupportedArquitectureException
+    if not any(a in SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag): 
+        l.LOGGER('Build process of '+ id + ': unsupported architecture.')
+        raise UnsupportedArquitectureException
     l.LOGGER('Build process of '+ id + ': wait for unlock the memory.')
     with iobigdata.mem_manager(len = len(service_buffer) + BUILD_CONTAINER_MEMORY_SIZE_FACTOR*os.path.getsize(second_partition_dir)):  # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
         l.LOGGER('Build process of '+ id + ': go to load all the buffer.')
@@ -202,7 +207,7 @@ def build(
                         )
                     ).start()
             else: sleep( WAIT_FOR_CONTAINER )
-            raise Exception("Getting the container, the process will've time")
+            raise WaitBuildException
         else:
             if id not in actual_building_processes:
                 actual_building_processes_lock.acquire()
@@ -212,6 +217,6 @@ def build(
                         target = get_container_from_outside,
                         args = (id, service_buffer, metadata)          
                     ).start() if get_it else sleep( WAIT_FOR_CONTAINER )
-                raise Exception("Getting the container, the process will've time")
+                raise WaitBuildException
 
     # verify() TODO ??
