@@ -299,7 +299,7 @@ def launch_service(
         service_buffer: bytes, 
         metadata: celaut.Any.Metadata, 
         father_ip: str, 
-        id = None,
+        id: str = None,
         system_requeriments: celaut.Sysresources = None,
         max_sysreq = None,
         config: celaut.Configuration = None
@@ -309,6 +309,7 @@ def launch_service(
     getting_container = False
     # Here it asks the balancer if it should assign the job to a peer.
     while True:
+        abort_it = True
         for peer_instance_uri, cost in service_balancer(
             service_buffer = service_buffer,
             metadata = metadata,
@@ -316,6 +317,7 @@ def launch_service(
                 ip_or_uri = father_ip
             ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None
         ).items():
+            abort_it = False
             l.LOGGER('Balancer select peer ' + str(peer_instance_uri) + ' with cost ' + str(cost))
             
             # Delegate the service instance execution.
@@ -457,7 +459,9 @@ def launch_service(
                         uri_slot = [uri_slot]
                     )
             )
-
+        if abort_it: 
+            l.LOGGER("Can't launch this service "+id)
+            raise Exception("Can't launch this service "+id)
 
 def save_service(
     service_p1: bytes, 
