@@ -225,6 +225,7 @@ def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
                     in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()])
     if not is_built and \
         not any(a in build.SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag):
+        print('build not supported for this architecture.')
         raise build.UnsupportedArquitectureException
     try:
         # Coste de construcción si no se posee el contenedor del servicio.
@@ -243,7 +244,9 @@ def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
             len( DOCKER_CLIENT().containers.list() )* COMPUTE_POWER_RATE,
             build_cost(service_buffer = service_buffer, metadata = metadata),
         ]) 
-    except build.UnsupportedArquitectureException as e: raise e
+    except build.UnsupportedArquitectureException as e: 
+        print('raise on execution cost '+ str(e))
+        raise e
 
 def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignore_network: str = None) -> dict: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
     class PeerCostList:
@@ -363,7 +366,9 @@ def launch_service(
                         id = id,
                         get_it = not getting_container
                     )  #  If the container is not built, build it.
-            except build.UnsupportedArquitectureException as e: raise e
+            except build.UnsupportedArquitectureException as e: 
+                print('build unsiported on launch service encima de wait build ', str(e))
+                raise e
             except build.WaitBuildException:
                 # If it does not have the container, it takes it from another node in the background and requests
                 #  the instance from another node as well.
@@ -896,9 +901,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetServiceCost(self, request_iterator, context):
         # TODO podría comparar costes de otros pares, (menos del que le pregunta.)
-        
-
-# TODO DONDE Y COMO CONTROLA LA EXCEPCION Unsupported architecture.
 
         l.LOGGER('Request for the cost of a service.')
         parse_iterator = grpcbf.parse_from_buffer(
