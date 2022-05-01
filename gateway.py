@@ -221,12 +221,16 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
         l.LOGGER('DOCKER API ERROR ')
 
 def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
+    is_built = (get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata) \
+                    in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()])
+    if not is_built and \
+        not any(a in build.SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag):
+        raise build.UnsupportedArquitectureException
     try:
         # Coste de construcción si no se posee el contenedor del servicio.
         # Debe de tener en cuenta el coste de buscar el conedor por la red.
         return sum([
-                COST_OF_BUILD * ((get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata) \
-                    in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()]) is False),
+                COST_OF_BUILD * (is_built is False),
                 # Coste de obtener el contenedor ... #TODO
             ])
     except:
@@ -234,10 +238,12 @@ def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
     return COST_OF_BUILD
 
 def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
-    return sum([
-        len( DOCKER_CLIENT().containers.list() )* COMPUTE_POWER_RATE,
-        build_cost(service_buffer = service_buffer, metadata = metadata),
-    ]) 
+    try:
+        return sum([
+            len( DOCKER_CLIENT().containers.list() )* COMPUTE_POWER_RATE,
+            build_cost(service_buffer = service_buffer, metadata = metadata),
+        ]) 
+    except build.UnsupportedArquitectureException as e: raise e
 
 def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignore_network: str = None) -> dict: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
     class PeerCostList:
@@ -255,10 +261,11 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
     try:
         peers = PeerCostList()
         # TODO Need to check the architecture on the buffer and write it on metadata, if there is noting on meta.
-        if any(a in build.SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag):
+        try:
             peers.add_elem(
                 weight = execution_cost(service_buffer = service_buffer, metadata = metadata)
             )
+        except build.UnsupportedArquitectureException: pass
 
         for peer in utils.peers_iterator(ignore_network = ignore_network):
             # TODO could use async or concurrency. And use timeout.
@@ -882,6 +889,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def GetServiceCost(self, request_iterator, context):
         # TODO podría comparar costes de otros pares, (menos del que le pregunta.)
         
+
+# TODO DONDE Y COMO CONTROLA LA EXCEPCION Unsupported architecture.
+
         l.LOGGER('Request for the cost of a service.')
         parse_iterator = grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
@@ -907,6 +917,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 metadata = metadata
                             )
                         break
+                    except build.UnsupportedArquitectureException as e:
+                        raise e
                     except Exception as e:
                         yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                         continue
@@ -915,18 +927,20 @@ class Gateway(gateway_pb2_grpc.Gateway):
             if r is gateway_pb2.ServiceWithMeta:
                 service_with_meta = next(parse_iterator)
                 second_partition_dir = next(parse_iterator)
-                if type(second_partition_dir) is not str: raise Exception('Fail sending service.')
-                cost = execution_cost(
-                        service_buffer = get_service_buffer_from_registry(
-                            hash = save_service(
-                                service_p1 = service_with_meta.service.SerializeToString(),
-                                service_p2 = second_partition_dir,
-                                metadata = service_with_meta.metadata,
-                                hash = None
-                            )
-                        ),
-                        metadata = service_with_meta.metadata
-                    )
+                if type(second_partition_dir) is not str: raise Exception('Error: fail sending service.')
+                try:
+                    cost = execution_cost(
+                            service_buffer = get_service_buffer_from_registry(
+                                hash = save_service(
+                                    service_p1 = service_with_meta.service.SerializeToString(),
+                                    service_p2 = second_partition_dir,
+                                    metadata = service_with_meta.metadata,
+                                    hash = None
+                                )
+                            ),
+                            metadata = service_with_meta.metadata
+                        )
+                except build.build.UnsupportedArquitectureException as e: raise e
                 break
                 
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
