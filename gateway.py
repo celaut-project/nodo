@@ -258,41 +258,41 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
         def get(self) -> dict:
             return {k : v for k, v in sorted(self.dict.items(), key=lambda item: item[1])}
 
+    
+    peers = PeerCostList()
+    # TODO Need to check the architecture on the buffer and write it on metadata, if there is noting on meta.
     try:
-        peers = PeerCostList()
-        # TODO Need to check the architecture on the buffer and write it on metadata, if there is noting on meta.
+        peers.add_elem(
+            weight = execution_cost(service_buffer = service_buffer, metadata = metadata)
+        )
+    except build.UnsupportedArquitectureException: pass
+
+    for peer in utils.peers_iterator(ignore_network = ignore_network):
+        # TODO could use async or concurrency. And use timeout.
+        peer_uri = peer['ip']+':'+str(peer['port'])
         try:
             peers.add_elem(
-                weight = execution_cost(service_buffer = service_buffer, metadata = metadata)
+                elem = peer_uri,
+                weight = next(grpcbf.client_grpc(
+                    method =  gateway_pb2_grpc.GatewayStub(
+                                grpc.insecure_channel(
+                                    peer_uri
+                                )
+                            ).GetServiceCost,
+                    indices_parser = gateway_pb2.CostMessage,
+                    partitions_message_mode_parser = True,
+                    indices_serializer = GetServiceCost_input,
+                    partitions_serializer = {2: StartService_input_partitions_v2[2]},
+                    input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),
+                )).cost
             )
-        except build.UnsupportedArquitectureException: pass
+        except Exception as e: l.LOGGER('Error taking the cost: '+str(e))
 
-        for peer in utils.peers_iterator(ignore_network = ignore_network):
-            # TODO could use async or concurrency. And use timeout.
-            peer_uri = peer['ip']+':'+str(peer['port'])
-            try:
-                peers.add_elem(
-                    elem = peer_uri,
-                    weight = next(grpcbf.client_grpc(
-                        method =  gateway_pb2_grpc.GatewayStub(
-                                    grpc.insecure_channel(
-                                        peer_uri
-                                    )
-                                ).GetServiceCost,
-                        indices_parser = gateway_pb2.CostMessage,
-                        partitions_message_mode_parser = True,
-                        indices_serializer = GetServiceCost_input,
-                        partitions_serializer = {2: StartService_input_partitions_v2[2]},
-                        input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),
-                    )).cost
-                )
-            except Exception as e: l.LOGGER('Error taking the cost: '+str(e))
-
+    try:
         return peers.get()
-
     except Exception as e:
         l.LOGGER('Error during balancer, ' + str(e))
-        return {'local': 0}
+        return {}
 
 
 def launch_service(
