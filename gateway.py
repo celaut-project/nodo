@@ -916,14 +916,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
             except StopIteration: break
             cost = None
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
-                print('get service cost r is hash.', r.value.hex(), [s for s in os.listdir(REGISTRY)], r.value.hex() in [s for s in os.listdir(REGISTRY)])
                 if r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
                         p1 = get_from_registry(
-                                    hash = hash.value.hex()
+                                    hash = r.value.hex()
                                 )
-                        print('p1 -> ', type(p1))
                         cost = execution_cost(
                                 service_buffer = p1.value,
                                 metadata = p1.metadata
@@ -931,14 +929,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         break
                     except build.UnsupportedArquitectureException as e: raise e
                     except Exception as e:
-                        print('exception on get cost -> ', str(e))
                         yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                         continue
                 elif DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
 
             if r is gateway_pb2.ServiceWithMeta:
                 if DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
-                print('get service cost r is service with meta.')
                 service_with_meta = next(parse_iterator)
                 second_partition_dir = next(parse_iterator)
                 if type(second_partition_dir) is not str: raise Exception('Error: fail sending service.')
