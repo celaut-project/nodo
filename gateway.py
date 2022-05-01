@@ -1,4 +1,3 @@
-from tkinter import E
 from typing import Generator
 from buffer_pb2 import Buffer
 
