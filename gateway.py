@@ -930,6 +930,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         break
                     except build.UnsupportedArquitectureException as e: raise e
                     except Exception as e:
+                        print('exception on get cost -> ', str(e))
                         yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                         continue
                 elif DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
