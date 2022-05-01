@@ -25,7 +25,10 @@ SUPPORTED_ARCHITECTURES = list(itertools.chain.from_iterable([
 ]))
 
 def check_supported_architecture(metadata: celaut_pb2.Any.Metadata) -> bool:
-    return any(a in SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag)
+    try:
+        return any(a in SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag)
+    except Exception as e:
+        print(e, 'METADATA NO POSEE ARQUITECTURA.')
 
 class WaitBuildException(Exception):
     
