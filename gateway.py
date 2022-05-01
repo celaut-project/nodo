@@ -923,6 +923,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         p1 = get_from_registry(
                                     hash = hash.value.hex()
                                 )
+                        print('p1 -> ', type(p1))
                         cost = execution_cost(
                                 service_buffer = p1.value,
                                 metadata = p1.metadata
