@@ -955,7 +955,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
         if not cost: 
-            print('I dontve the service ')
+            print('I dontve the service ', str(cost), not cost)
             raise Exception("I dont've the service.")
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.CostMessage(
