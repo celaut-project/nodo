@@ -616,16 +616,17 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
-                        metadata = celaut.Any.Metadata()
-                        metadata.hashtag.hash.append(hash)
-                        metadata.complete = True # TODO check
+                        p1 = get_from_registry(
+                                    hash = hash.value.hex()
+                                )
+                        if hash not in p1.metadata.hashtag.hash:
+                            p1.metadata.hashtag.hash.append(hash)
+                        p1.metadata.complete = True # TODO check
                         for b in grpcbf.serialize_to_buffer(
                             indices={},
                             message_iterator = launch_service(
-                                service_buffer = get_service_buffer_from_registry(
-                                    hash = hash.value.hex()
-                                ),
-                                metadata = metadata, 
+                                service_buffer = p1.value,
+                                metadata = p1.metadata, 
                                 config = configuration,
                                 system_requeriments = system_requeriments,
                                 max_sysreq = max_sysreq,
@@ -918,13 +919,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
-                        metadata = celaut.Any.Metadata()
-                        metadata.hashtag.hash.append(r)
+                        p1 = get_from_registry(
+                                    hash = hash.value.hex()
+                                )
+                        if hash not in p1.metadata.hashtag.hash:
+                            p1.metadata.hashtag.hash.append(hash)
                         cost = execution_cost(
-                                service_buffer = get_service_buffer_from_registry(
-                                        hash = r.value.hex()
-                                    ),
-                                metadata = metadata
+                                service_buffer = p1.value,
+                                metadata = p1.metadata
                             )
                         break
                     except build.UnsupportedArquitectureException as e: raise e
