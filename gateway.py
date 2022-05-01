@@ -560,9 +560,13 @@ def get_from_registry(hash: str) -> celaut.Any:
     l.LOGGER('Getting ' + hash + ' service from the local registry.')
     first_partition_dir = REGISTRY + hash + '/p1'
     try:
+        print(1)
         with iobd.mem_manager(2*os.path.getsize(first_partition_dir)) as iolock:
+            print(2)
             any = celaut.Any()
+            print(3)
             any.ParseFromString(utils.read_file(filename = first_partition_dir))
+            print(4)
             return any
     except (IOError, FileNotFoundError):
         l.LOGGER('The service was not on registry.')
@@ -619,12 +623,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         p1 = get_from_registry(
                                     hash = hash.value.hex()
                                 )
-                        print('get the any.')
                         if hash not in p1.metadata.hashtag.hash:
                             p1.metadata.hashtag.hash.append(hash)
-                        print('hash ...')
                         p1.metadata.complete = True # TODO check
-                        print('complete...')
                         for b in grpcbf.serialize_to_buffer(
                             indices={},
                             message_iterator = launch_service(
