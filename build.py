@@ -24,12 +24,14 @@ SUPPORTED_ARCHITECTURES = list(itertools.chain.from_iterable([
 ]))
 
 class WaitBuildException(Exception):
+    
     def __init__(self, *args):
         self.message = None
 
     def __str__(self):
         return "Getting the container, the process will've time"
 class UnsupportedArquitectureException(Exception):
+    
     def __init__(self, *args):
         self.message = None
         
