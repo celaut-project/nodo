@@ -916,7 +916,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             except StopIteration: break
             cost = None
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
-                print('get service cost r is hash.')
+                print('get service cost r is hash.', r.value.hex(), [s for s in os.listdir(REGISTRY)], r.value.hex() in [s for s in os.listdir(REGISTRY)])
                 if r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
                     try:
