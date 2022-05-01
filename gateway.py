@@ -926,6 +926,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             )
                         break
                     except build.UnsupportedArquitectureException as e:
+                        print(1+e)
                         raise e
                     except Exception as e:
                         yield gateway_pb2.buffer__pb2.Buffer(signal = True)
@@ -948,7 +949,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             ),
                             metadata = service_with_meta.metadata
                         )
-                except build.build.UnsupportedArquitectureException as e: raise e
+                except build.build.UnsupportedArquitectureException as e: 
+                    print(2+e)
+                    raise e
                 break
                 
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
