@@ -774,21 +774,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
         token = get_token_by_uri(
                 uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
             )
-        try:
-            srr_it = grpcbf.parse_from_buffer(
-                    request_iterator = request_iterator,
-                    indices = gateway_pb2.ModifyServiceSystemResourcesInput,
-                    partitions_message_mode = True
-                )
-        except Exception as e: print('e it -< ', str(e))
-        try:
-            srr = next(srr_it)
-        except Exception as e: print('e srr -< ', str(e))
-        print('srr -< ', srr)
-        print('\n\n\n')
         if not container_modify_system_params(
             token = token,
-            system_requeriments_range = srr
+            system_requeriments_range = next(grpcbf.parse_from_buffer(
+                request_iterator = request_iterator,
+                indices = gateway_pb2.ModifyServiceSystemResourcesInput,
+                partitions_message_mode = True
+            ))
         ): raise Exception('Exception on service modify method.')
         for b in grpcbf.serialize_to_buffer(
             message_iterator = get_sysresources(
