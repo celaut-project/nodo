@@ -21,7 +21,7 @@ HYCACHE = "/node/__hycache__/"
 REGISTRY = "/node/__registry__/"
 
 SAVE_ALL = False
-COMPILER_MEMORY_SIZE_FACTOR = GET_ENV(env = 'COMPILER_MEMORY_SIZE_FACTOR', default = 2)
+COMPILER_MEMORY_SIZE_FACTOR = GET_ENV(env = 'COMPILER_MEMORY_SIZE_FACTOR', default = 2.0)
 
 class Hyper:
     def __init__(self, path, aux_id):
