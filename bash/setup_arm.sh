@@ -1,4 +1,3 @@
-git clone https://github.com/josemibnf/HyperNode.git node
 apt-get update
 apt-get -y install python3 python3-pip
 cd node
