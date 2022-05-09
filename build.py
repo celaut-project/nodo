@@ -17,7 +17,7 @@ from verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
 
 WAIT_FOR_CONTAINER = utils.GET_ENV(env = 'WAIT_FOR_CONTAINER_TIME', default = 60)
-BUILD_CONTAINER_MEMORY_SIZE_FACTOR = utils.GET_ENV(env = 'BUILD_CONTAINER_MEMORY_SIZE_FACTOR', default = 3)
+BUILD_CONTAINER_MEMORY_SIZE_FACTOR = utils.GET_ENV(env = 'BUILD_CONTAINER_MEMORY_SIZE_FACTOR', default = 3.1)
 
 SUPPORTED_ARCHITECTURES = list(itertools.chain.from_iterable([
     ['arm64', 'arm_64', 'aarch64'] if utils.GET_ENV(env = 'ARM_SUPPORT', default=True) else [],
