@@ -996,7 +996,6 @@ if __name__ == "__main__":
 
     SERVICE_NAMES = (
         gateway_pb2.DESCRIPTOR.services_by_name['Gateway'].full_name,
-        reflection.SERVICE_NAME,
     )
 
     server.add_insecure_port('[::]:' + str(GATEWAY_PORT))
