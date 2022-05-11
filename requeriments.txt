@@ -5,4 +5,3 @@ docker
 pymongo
 psutil
 netifaces
-grpcio-reflection
