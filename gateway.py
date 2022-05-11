@@ -10,7 +10,6 @@ from verify import SHA3_256_ID, check_service, get_service_hex_main_hash
 import subprocess, os, threading, shutil
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
-from grpc_reflection.v1alpha import reflection
 import pymongo, json
 from google.protobuf.json_format import MessageToJson
 import docker as docker_lib
@@ -999,7 +998,6 @@ if __name__ == "__main__":
         gateway_pb2.DESCRIPTOR.services_by_name['Gateway'].full_name,
         reflection.SERVICE_NAME,
     )
-    reflection.enable_server_reflection(SERVICE_NAMES, server)
 
     server.add_insecure_port('[::]:' + str(GATEWAY_PORT))
     l.LOGGER('Starting gateway at port'+ str(GATEWAY_PORT))
