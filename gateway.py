@@ -265,7 +265,9 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
         )
     except build.UnsupportedArquitectureException: pass
 
+    print('prev peers iterator')
     for peer in utils.peers_iterator(ignore_network = ignore_network):
+        print('peer -> ', str(peer))
         # TODO could use async or concurrency. And use timeout.
         peer_uri = peer['ip']+':'+str(peer['port'])
         try:
@@ -286,6 +288,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
             )
         except Exception as e: l.LOGGER('Error taking the cost: '+str(e))
 
+    print('post peer iterator')
     try:
         return peers.get()
     except Exception as e:
@@ -308,6 +311,7 @@ def launch_service(
     # Here it asks the balancer if it should assign the job to a peer.
     while True:
         abort_it = True
+        print('prev service balancer')
         for peer_instance_uri, cost in service_balancer(
             service_buffer = service_buffer,
             metadata = metadata,
@@ -315,6 +319,7 @@ def launch_service(
                 ip_or_uri = father_ip
             ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None
         ).items():
+            print('post service balancer')
             if abort_it: abort_it = False
             l.LOGGER('Balancer select peer ' + str(peer_instance_uri) + ' with cost ' + str(cost))
             
