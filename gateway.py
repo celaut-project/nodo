@@ -258,7 +258,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
 
     
     peers = PeerCostList()
-    # TODO Need to check the architecture on the buffer and write it on metadata, if there is noting on meta.
+    # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
     try:
         peers.add_elem(
             weight = execution_cost(service_buffer = service_buffer, metadata = metadata)
@@ -266,27 +266,29 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
     except build.UnsupportedArquitectureException: pass
 
     print('prev peers iterator')
-    for peer in utils.peers_iterator(ignore_network = ignore_network):
-        print('peer -> ', str(peer))
-        # TODO could use async or concurrency. And use timeout.
-        peer_uri = peer['ip']+':'+str(peer['port'])
-        try:
-            peers.add_elem(
-                elem = peer_uri,
-                weight = next(grpcbf.client_grpc(
-                    method =  gateway_pb2_grpc.GatewayStub(
-                                grpc.insecure_channel(
-                                    peer_uri
-                                )
-                            ).GetServiceCost,
-                    indices_parser = gateway_pb2.CostMessage,
-                    partitions_message_mode_parser = True,
-                    indices_serializer = GetServiceCost_input,
-                    partitions_serializer = {2: StartService_input_partitions_v2[2]},
-                    input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),
-                )).cost
-            )
-        except Exception as e: l.LOGGER('Error taking the cost: '+str(e))
+    try:
+        for peer in utils.peers_iterator(ignore_network = ignore_network):
+            print('peer -> ', str(peer))
+            # TODO could use async or concurrency. And use timeout.
+            peer_uri = peer['ip']+':'+str(peer['port'])
+            try:
+                peers.add_elem(
+                    elem = peer_uri,
+                    weight = next(grpcbf.client_grpc(
+                        method =  gateway_pb2_grpc.GatewayStub(
+                                    grpc.insecure_channel(
+                                        peer_uri
+                                    )
+                                ).GetServiceCost,
+                        indices_parser = gateway_pb2.CostMessage,
+                        partitions_message_mode_parser = True,
+                        indices_serializer = GetServiceCost_input,
+                        partitions_serializer = {2: StartService_input_partitions_v2[2]},
+                        input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),
+                    )).cost
+                )
+            except Exception as e: l.LOGGER('Error taking the cost: '+str(e))
+    except Exception as e: print('e ->>', str(e))
 
     print('post peer iterator')
     try:
