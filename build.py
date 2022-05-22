@@ -1,14 +1,12 @@
-from curses import meta
 from time import sleep, time
 import threading
 from gateway_pb2_grpcbf import GetServiceTar_input
-import pymongo, gateway_pb2, gateway_pb2_grpc, grpc, os, celaut_pb2, utils, iobigdata
+import gateway_pb2, gateway_pb2_grpc, grpc, os, celaut_pb2, utils, iobigdata
 from utils import peers_iterator, service_extended, read_file
 from grpcbigbuffer import save_chunks_to_file, serialize_to_buffer
 from compile import HYCACHE, REGISTRY
 import logger as l
 
-from random import randint
 from shutil import rmtree
 from subprocess import check_output, run
 import itertools
@@ -19,14 +17,19 @@ from subprocess import check_output, CalledProcessError
 WAIT_FOR_CONTAINER = utils.GET_ENV(env = 'WAIT_FOR_CONTAINER_TIME', default = 60)
 BUILD_CONTAINER_MEMORY_SIZE_FACTOR = utils.GET_ENV(env = 'BUILD_CONTAINER_MEMORY_SIZE_FACTOR', default = 3.1)
 
-SUPPORTED_ARCHITECTURES = list(itertools.chain.from_iterable([
-    ['arm64', 'arm_64', 'aarch64'] if utils.GET_ENV(env = 'ARM_SUPPORT', default=True) else [],
-    ['x86_64', 'amd64'] if utils.GET_ENV(env = 'X86_SUPPORT', default=False) else []
-]))
+SUPPORTED_ARCHITECTURES = [       # The first element of each list is the Docker buildx tag.
+    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if utils.GET_ENV(env = 'ARM_SUPPORT', default=True) else [],
+    ['linux/amd64', 'x86_64', 'amd64'] if utils.GET_ENV(env = 'X86_SUPPORT', default=False) else []
+]
+
+def get_arch_tag(metadata: celaut_pb2.Any.Metadata) -> str:
+    for l in SUPPORTED_ARCHITECTURES:
+        if any(a in l for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag):
+            return l[0]
 
 def check_supported_architecture(metadata: celaut_pb2.Any.Metadata) -> bool:
     try:
-        return any(a in SUPPORTED_ARCHITECTURES for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag)
+        return any( a in list(itertools.chain.from_iterable(SUPPORTED_ARCHITECTURES)) for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag )
     except: return False
 
 class WaitBuildException(Exception):
@@ -74,6 +77,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
     if not check_supported_architecture(metadata=metadata): 
         l.LOGGER('Build process of '+ id + ': unsupported architecture.')
         raise UnsupportedArquitectureException
+
     l.LOGGER('Build process of '+ id + ': wait for unlock the memory.')
     with iobigdata.mem_manager(len = len(service_buffer) + BUILD_CONTAINER_MEMORY_SIZE_FACTOR*os.path.getsize(second_partition_dir)):  # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
         l.LOGGER('Build process of '+ id + ': go to load all the buffer.')
@@ -93,7 +97,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         )
 
         # Take architecture.
-        arch = 'linux/arm64' # get_arch_tag(service_with_meta=service_with_meta) # TODO: get_arch_tag, selecciona el tag de la arquitectura definida por el servicio, en base a la especificacion y metadatos, que tiene el nodo para esa arquitectura.
+        arch = get_arch_tag(metadata = metadata) # get_arch_tag, selecciona el tag de la arquitectura definida por el servicio, en base a la especificacion y metadatos, que tiene el nodo para esa arquitectura.
         
         try:
             os.mkdir('__hycache__')
