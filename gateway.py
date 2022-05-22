@@ -310,7 +310,6 @@ def launch_service(
     # Here it asks the balancer if it should assign the job to a peer.
     while True:
         abort_it = True
-        print('prev service balancer')
         for peer_instance_uri, cost in service_balancer(
             service_buffer = service_buffer,
             metadata = metadata,
@@ -318,7 +317,6 @@ def launch_service(
                 ip_or_uri = father_ip
             ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None
         ).items():
-            print('post service balancer')
             if abort_it: abort_it = False
             l.LOGGER('Balancer select peer ' + str(peer_instance_uri) + ' with cost ' + str(cost))
             
