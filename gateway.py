@@ -1001,8 +1001,7 @@ if __name__ == "__main__":
     )
 
     server.add_insecure_port('[::]:' + str(GATEWAY_PORT))
-    l.LOGGER('Starting gateway at port'+ str(GATEWAY_PORT))
-
+   
     l.LOGGER('COMPUTE POWER RATE -> '+ str(COMPUTE_POWER_RATE))
     l.LOGGER('COST OF BUILD -> '+ str(COST_OF_BUILD))
     l.LOGGER('EXECUTION BENEFIT -> '+ str(EXECUTION_BENEFIT))
@@ -1010,7 +1009,7 @@ if __name__ == "__main__":
     l.LOGGER('SEND ONLY HASHES ASKING COST -> '+ str(SEND_ONLY_HASHES_ASKING_COST))
     l.LOGGER('DENEGATE COST REQUEST IF DONT VE THE HASH -> '+ str(DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH))
 
-    
+    l.LOGGER('Starting gateway at port'+ str(GATEWAY_PORT))    
 
     server.start()
     server.wait_for_termination()
