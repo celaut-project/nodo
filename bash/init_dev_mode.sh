@@ -1,4 +1,3 @@
 export WAIT_FOR_CONTAINER=120
-export SEND_ONLY_HASHES_ASKING_COST=True
 export USE_PRINT=True
 export MEMORY_LOGS=True
