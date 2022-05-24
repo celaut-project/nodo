@@ -98,7 +98,8 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
 
         # Take architecture.
         arch = get_arch_tag(metadata = metadata) # get_arch_tag, selecciona el tag de la arquitectura definida por el servicio, en base a la especificacion y metadatos, que tiene el nodo para esa arquitectura.
-        
+        l.LOGGER('Build process of '+ id + ': select the architecture '+str(arch))
+
         try:
             os.mkdir('__hycache__')
         except: pass
