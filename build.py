@@ -134,10 +134,11 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
                 break
             except AttributeError: l.LOGGER('Build process of '+ id + ': symlink error (AttributeError) '+str(symlink.src)+str(symlink.dst))
 
-        l.LOGGER('Build process of '+ id + ': apply permissions.')
-        # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
-        run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
-        run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
+        if arch == 'linux/arm64':
+            l.LOGGER('Build process of '+ id + ': apply permissions.')
+            # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
+            run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
+            run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
         
         check_output('docker image tag '+cache_id+' '+id+'.docker', shell=True)
         check_output('docker rmi '+cache_id, shell=True)
