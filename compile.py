@@ -23,6 +23,11 @@ REGISTRY = "/node/__registry__/"
 SAVE_ALL = False
 COMPILER_MEMORY_SIZE_FACTOR = GET_ENV(env = 'COMPILER_MEMORY_SIZE_FACTOR', default = 2.0)
 
+SUPPORTED_ARCHITECTURES = [       # The first element of each list is the Docker buildx tag.
+    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if GET_ENV(env = 'ARM_COMPILER_SUPPORT', default=True) else [],
+    ['linux/amd64', 'x86_64', 'amd64'] if GET_ENV(env = 'X86_COMPILER_SUPPORT', default=False) else []
+]
+
 class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
@@ -34,13 +39,19 @@ class Hyper:
         self.json = json.load(open(self.path+"service.json", "r"))
         self.aux_id = aux_id
 
+        arch = None
+        for a in SUPPORTED_ARCHITECTURES:
+            if self.json.get('architecture') in a: arch = a[0]
+
+        if not arch: raise Exception("Can't compile this service, not supported architecture.")
+
         # Directories are created on cache.
         os.system("mkdir "+HYCACHE+self.aux_id+"/building")
         os.system("mkdir "+HYCACHE+self.aux_id+"/filesystem")
 
         # Build container and get compressed layers.
         if not os.path.isfile(self.path+'Dockerfile'): raise Exception("Error: Dockerfile no encontrado.")
-        os.system('/usr/bin/docker build --no-cache -t builder'+self.aux_id+' '+self.path)
+        os.system('/usr/bin/docker buildx build --platform '+ arch +' --no-cache -t builder'+self.aux_id+' '+self.path)
         os.system("/usr/bin/docker save builder"+self.aux_id+" > "+HYCACHE+self.aux_id+"/building/container.tar")
         os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/container.tar -C "+HYCACHE+self.aux_id+"/building/")
 
