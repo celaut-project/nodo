@@ -948,7 +948,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 except build.UnsupportedArquitectureException as e: raise e
                 break
                 
-        l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost))
+        l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost) + ' with benefit ' + str(cost + EXECUTION_BENEFIT))
         if cost is None: raise Exception("I dont've the service.")
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.CostMessage(
