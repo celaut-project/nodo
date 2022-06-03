@@ -55,7 +55,7 @@ def get_service_hex_main_hash(
     # If not but the spec. is complete, calculate the hash prunning it before.
     # If not and is incomplete, it's going to be imposible calculate any hash.
     
-    if metadata.complete and service_buffer:
+    if service_buffer:
         if type(service_buffer) is not tuple:
             try:
                 return SHA3_256(
@@ -77,10 +77,16 @@ def get_service_hex_main_hash(
     LOGGER(' sha3-256 hash function is not implemented on this method.')
     raise Exception(' sha3-256 hash function is not implemented on this method.')
 
-def get_service_list_of_hashes(service_buffer: bytes, metadata: Any.Metadata) -> list:
-    if metadata.complete:
+def get_service_list_of_hashes(service_buffer: bytes, metadata: Any.Metadata, complete = True) -> list:
+    if complete:
         return calculate_hashes(
             value = service_buffer
         )
     else:
         raise Exception("Can't get the hashes if the service is not complete.")
+
+def completeness(
+        service_buffer: bytes, 
+        metadata: Any.Metadata,
+        id: str,
+    ) -> bool:  return True  # TODO develop when celaut.proto finish.

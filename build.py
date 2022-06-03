@@ -203,6 +203,7 @@ def build(
         metadata: gateway_pb2.celaut__pb2.Any.Metadata,
         get_it: bool = True,
         id = None,
+        complete = False
     ) -> str:
     if not id: id = get_service_hex_main_hash( metadata = metadata)
     if get_it: l.LOGGER('\nBuilding ' + id)
@@ -212,7 +213,7 @@ def build(
         return id
 
     except CalledProcessError:
-        if metadata.complete:
+        if complete:
             sleep(1)  # TODO -> TMB(typical multithread bug).
             if get_it and id not in actual_building_processes:
                 actual_building_processes_lock.acquire()

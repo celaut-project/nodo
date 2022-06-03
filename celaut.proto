@@ -54,7 +54,6 @@ message Any {
         }
         optional HashTag hashtag = 1;
         optional FieldDef format = 2;
-        optional bool complete = 3;
     }
     optional Metadata metadata = 1;
     bytes value = 2;

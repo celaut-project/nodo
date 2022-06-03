@@ -250,7 +250,6 @@ class Hyper:
                 )
 
     def save(self, partitions_model: list) -> str:
-        self.metadata.complete = True
         service_buffer = self.service.SerializeToString() # 2*len
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(

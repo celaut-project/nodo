@@ -6,7 +6,7 @@ import build, utils
 from manager import DEFAULT_SYSTEM_RESOURCES, container_modify_system_params, container_stop, could_ve_this_sysreq, get_sysresources
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
-from verify import SHA3_256_ID, check_service, get_service_hex_main_hash
+from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
 import subprocess, os, threading, shutil
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
@@ -306,8 +306,12 @@ def launch_service(
     ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
     if service_buffer == None: raise Exception("Service object can't be None")
-    getting_container = False
-    # Here it asks the balancer if it should assign the job to a peer.
+    getting_container = False  # Here it asks the balancer if it should assign the job to a peer.
+    is_complete = completeness(
+                            service_buffer = service_buffer,
+                            metadata = metadata,
+                            id = id,
+                        )
     while True:
         abort_it = True
         for peer_instance_uri, cost in service_balancer(
@@ -361,7 +365,8 @@ def launch_service(
                         service_buffer = service_buffer, 
                         metadata = metadata,
                         id = id,
-                        get_it = not getting_container
+                        get_it = not getting_container,
+                        complete = is_complete
                     )  #  If the container is not built, build it.
             except build.UnsupportedArquitectureException as e: raise e
             except build.WaitBuildException:
@@ -533,17 +538,16 @@ def search_definition(hashes: list, ignore_network: str = None) -> bytes:
         hashes = hashes,
         ignore_network = ignore_network
     ):
-        if any.metadata.complete:
-            if check_service(
-                    service_buffer = any.value,
-                    hashes = hashes
-                ):
-                #  Save the service on the registry.
-                save_service(  # TODO
-                    service_p1 = any.value,
-                    metadata = any.metadata
-                )
-                return any.value
+        if check_service(
+                service_buffer = any.value,
+                hashes = hashes
+            ):
+            #  Save the service on the registry.
+            save_service(  # TODO
+                service_p1 = any.value,
+                metadata = any.metadata
+            )
+            return any.value
 
     l.LOGGER('The service '+ hashes[0].value.hex() + ' was not found.')
     raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
@@ -616,7 +620,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 )
                         if hash not in p1.metadata.hashtag.hash:
                             p1.metadata.hashtag.hash.append(hash)
-                        p1.metadata.complete = True # TODO check
                         for b in grpcbf.serialize_to_buffer(
                             indices={},
                             message_iterator = launch_service(
@@ -666,7 +669,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     second_partition_dir = next(parser_generator)
                     if type(second_partition_dir) is not str: raise Exception
                 except: raise Exception('Grpcbf error: partition corrupted')
-                #service_on_any.metadata.complete = False  # TODO: this should?
                 hash = get_service_hex_main_hash(
                     service_buffer = (service_with_meta.service, second_partition_dir) if second_partition_dir else service_with_meta.service,
                     metadata = service_with_meta.metadata,
