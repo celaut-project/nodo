@@ -115,10 +115,19 @@ class Hyper:
 
         # Entrypoint
         if self.json.get('entrypoint'):
-            self.service.container.entrypoint = self.json.get('entrypoint')
+            self.service.container.entrypoint.append(self.json.get('entrypoint'))
 
         # Arch
         
+        
+        # Config file spec.
+        self.service.container.config.path.append('__config__')
+        self.service.container.config.format.CopyFrom(
+            celaut.FieldDef() # celaut.ConfigFile definition.
+        )
+
+        # Expected Gateway.
+
         
         # Add container metadata to the global metadata.
         self.metadata.hashtag.attr_hashtag.append(
@@ -165,10 +174,6 @@ class Hyper:
             #  transport protocol.
             #  TODO: slot.transport_protocol = Protocol()
             self.service.api.slot.append(slot)
-            self.service.api.config.path.append('__config__')
-            self.service.api.config.format.CopyFrom(
-                celaut.FieldDef() # celaut.ConfigFile definition.
-            )
 
         # Add api metadata to the global metadata.
         self.metadata.hashtag.attr_hashtag.append(

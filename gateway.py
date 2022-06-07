@@ -181,7 +181,7 @@ def purgue_external(father_ip, node_uri, token):
     cache_lock.release()
 
 
-def set_config(container_id: str, config: celaut.Configuration, resources: celaut.Sysresources, api: celaut.Service.Api.Config):
+def set_config(container_id: str, config: celaut.Configuration, resources: celaut.Sysresources, api: celaut.Service.Container.Config):
     __config__ = celaut.ConfigurationFile()
     __config__.gateway.CopyFrom(generate_gateway_instance(network=DOCKER_NETWORK).instance)
     if config: __config__.config.CopyFrom(config)
@@ -388,7 +388,7 @@ def launch_service(
                     entrypoint = service.container.entrypoint
                 )
 
-                set_config(container_id = container.id, config = config, resources = system_requeriments, api = service.api.config)
+                set_config(container_id = container.id, config = config, resources = system_requeriments, api = service.container.config)
 
                 # The container must be started after adding the configuration file and
                 #  before requiring its IP address, since docker assigns it at startup.
@@ -426,7 +426,7 @@ def launch_service(
                     id = id,
                     entrypoint = service.container.entrypoint
                 )
-                set_config(container_id = container.id, config = config, resources = system_requeriments, api = service.api.config)
+                set_config(container_id = container.id, config = config, resources = system_requeriments, api = service.container.config)
                 try:
                     container.start()
                 except docker_lib.errors.APIError as e:

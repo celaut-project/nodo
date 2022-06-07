@@ -77,14 +77,9 @@ message Service {
             int32 port = 1;
             bytes transport_protocol = 2;
         }
-        message Config {
-            repeated string path = 1; // [folder_name, file_name] -> '/folder_name/file_name' (without use the / character.)
-            FieldDef format = 2;
-        }
         AppDef app_protocol = 1;
         repeated Slot slot = 2;
-        Config config = 3;
-        // Cost function can be applied. <- must be optional (index 4).
+        // Cost function can be applied. <- must be optional.
     }
 
     // Container:  Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
@@ -104,10 +99,20 @@ message Service {
             }
             repeated ItemBranch branch = 1;
         }
+        message Config {
+            repeated string path = 1;
+            FieldDef format = 2;
+        }
+        message ExpectedGateway {
+            Api.AppDef gateway_app_protocol = 1;
+            repeated bytes gateway_transport_protocol = 2;
+        }
         bytes architecture = 1;
         bytes filesystem = 2;
         map<string, FieldDef> enviroment_variables = 3;
-        string entrypoint = 4;
+        repeated string entrypoint = 4;
+        Config config = 5;
+        ExpectedGateway expected_gateway = 6;
     }
 
     // Tensor:  Defines the “intelligence” that the service can provide, I think it would be a description of a polynomial (without coefficients and describing the variables).
@@ -150,7 +155,7 @@ message Instance {
         repeated Uri uri = 2;
     }
     Service.Api api = 1;
-    repeated Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899, 
+    repeated Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899], 
 }
 
 
