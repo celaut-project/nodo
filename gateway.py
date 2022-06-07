@@ -207,11 +207,11 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
     os.rmdir(HYCACHE + container_id)
 
 
-def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_lib.models.containers.Container:
+def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
     try:
         return DOCKER_CLIENT().containers.create(
             image = id + '.docker', # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-            entrypoint = entrypoint,
+            entrypoint = ' '.join(entrypoint),
             ports = use_other_ports
         )
     except docker_lib.errors.ImageNotFound:
