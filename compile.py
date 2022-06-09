@@ -32,9 +32,7 @@ class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
         self.service =  compile_pb2.Service()
-        self.metadata = celaut.Any.Metadata(
-            complete = True
-        )
+        self.metadata = celaut.Any.Metadata()
         self.path = path
         self.json = json.load(open(self.path+"service.json", "r"))
         self.aux_id = aux_id
