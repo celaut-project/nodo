@@ -19,6 +19,8 @@ message Service {
         celaut.Service.Container.Filesystem filesystem = 2;
         map<string, celaut.FieldDef> enviroment_variables = 3;
         repeated string entrypoint = 4;
+        celaut.Service.Container.Config config = 5;
+        celaut.Service.Container.ExpectedGateway expected_gateway = 6;
     }
     Container container = 1;
     celaut.Service.Api api = 2;

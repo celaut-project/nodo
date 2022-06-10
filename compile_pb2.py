@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rcompile.proto\x12\x07\x63ompile\x1a\x0c\x63\x65laut.proto\"\x8e\x05\n\x07Service\x12-\n\tcontainer\x18\x01 \x01(\x0b\x32\x1a.compile.Service.Container\x12 \n\x03\x61pi\x18\x02 \x01(\x0b\x32\x13.celaut.Service.Api\x12&\n\x06tensor\x18\x03 \x01(\x0b\x32\x16.celaut.Service.Tensor\x12&\n\x06ledger\x18\x04 \x01(\x0b\x32\x16.celaut.Service.Ledger\x1a\xe1\x03\n\tContainer\x12\x14\n\x0c\x61rchitecture\x18\x01 \x01(\x0c\x12\x38\n\nfilesystem\x18\x02 \x01(\x0b\x32$.celaut.Service.Container.Filesystem\x12Q\n\x14\x65nviroment_variables\x18\x03 \x03(\x0b\x32\x33.compile.Service.Container.EnviromentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x03(\t\x1a\xce\x01\n\nFilesystem\x12@\n\x06\x62ranch\x18\x01 \x03(\x0b\x32\x30.compile.Service.Container.Filesystem.ItemBranch\x1a~\n\nItemBranch\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0e\n\x04\x66ile\x18\x02 \x01(\x0cH\x00\x12\x0e\n\x04link\x18\x03 \x01(\tH\x00\x12:\n\nfilesystem\x18\x04 \x01(\x0b\x32$.celaut.Service.Container.FilesystemH\x00\x42\x06\n\x04item\x1aL\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1f\n\x05value\x18\x02 \x01(\x0b\x32\x10.celaut.FieldDef:\x02\x38\x01\"\\\n\x0fServiceWithMeta\x12&\n\x08metadata\x18\x01 \x01(\x0b\x32\x14.celaut.Any.Metadata\x12!\n\x07service\x18\x02 \x01(\x0b\x32\x10.compile.Serviceb\x06proto3'
+  serialized_pb=b'\n\rcompile.proto\x12\x07\x63ompile\x1a\x0c\x63\x65laut.proto\"\x85\x06\n\x07Service\x12-\n\tcontainer\x18\x01 \x01(\x0b\x32\x1a.compile.Service.Container\x12 \n\x03\x61pi\x18\x02 \x01(\x0b\x32\x13.celaut.Service.Api\x12&\n\x06tensor\x18\x03 \x01(\x0b\x32\x16.celaut.Service.Tensor\x12&\n\x06ledger\x18\x04 \x01(\x0b\x32\x16.celaut.Service.Ledger\x1a\xd8\x04\n\tContainer\x12\x14\n\x0c\x61rchitecture\x18\x01 \x01(\x0c\x12\x38\n\nfilesystem\x18\x02 \x01(\x0b\x32$.celaut.Service.Container.Filesystem\x12Q\n\x14\x65nviroment_variables\x18\x03 \x03(\x0b\x32\x33.compile.Service.Container.EnviromentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x03(\t\x12\x30\n\x06\x63onfig\x18\x05 \x01(\x0b\x32 .celaut.Service.Container.Config\x12\x43\n\x10\x65xpected_gateway\x18\x06 \x01(\x0b\x32).celaut.Service.Container.ExpectedGateway\x1a\xce\x01\n\nFilesystem\x12@\n\x06\x62ranch\x18\x01 \x03(\x0b\x32\x30.compile.Service.Container.Filesystem.ItemBranch\x1a~\n\nItemBranch\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0e\n\x04\x66ile\x18\x02 \x01(\x0cH\x00\x12\x0e\n\x04link\x18\x03 \x01(\tH\x00\x12:\n\nfilesystem\x18\x04 \x01(\x0b\x32$.celaut.Service.Container.FilesystemH\x00\x42\x06\n\x04item\x1aL\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1f\n\x05value\x18\x02 \x01(\x0b\x32\x10.celaut.FieldDef:\x02\x38\x01\"\\\n\x0fServiceWithMeta\x12&\n\x08metadata\x18\x01 \x01(\x0b\x32\x14.celaut.Any.Metadata\x12!\n\x07service\x18\x02 \x01(\x0b\x32\x10.compile.Serviceb\x06proto3'
   ,
   dependencies=[celaut__pb2.DESCRIPTOR,])
 
@@ -80,8 +80,8 @@ _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=491,
-  serialized_end=617,
+  serialized_start=610,
+  serialized_end=736,
 )
 
 _SERVICE_CONTAINER_FILESYSTEM = _descriptor.Descriptor(
@@ -111,8 +111,8 @@ _SERVICE_CONTAINER_FILESYSTEM = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=411,
-  serialized_end=617,
+  serialized_start=530,
+  serialized_end=736,
 )
 
 _SERVICE_CONTAINER_ENVIROMENTVARIABLESENTRY = _descriptor.Descriptor(
@@ -149,8 +149,8 @@ _SERVICE_CONTAINER_ENVIROMENTVARIABLESENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=619,
-  serialized_end=695,
+  serialized_start=738,
+  serialized_end=814,
 )
 
 _SERVICE_CONTAINER = _descriptor.Descriptor(
@@ -189,6 +189,20 @@ _SERVICE_CONTAINER = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='config', full_name='compile.Service.Container.config', index=4,
+      number=5, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
+    _descriptor.FieldDescriptor(
+      name='expected_gateway', full_name='compile.Service.Container.expected_gateway', index=5,
+      number=6, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
   ],
   extensions=[
   ],
@@ -202,7 +216,7 @@ _SERVICE_CONTAINER = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=214,
-  serialized_end=695,
+  serialized_end=814,
 )
 
 _SERVICE = _descriptor.Descriptor(
@@ -254,7 +268,7 @@ _SERVICE = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=41,
-  serialized_end=695,
+  serialized_end=814,
 )
 
 
@@ -292,8 +306,8 @@ _SERVICEWITHMETA = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=697,
-  serialized_end=789,
+  serialized_start=816,
+  serialized_end=908,
 )
 
 _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH.fields_by_name['filesystem'].message_type = celaut__pb2._SERVICE_CONTAINER_FILESYSTEM
@@ -313,6 +327,8 @@ _SERVICE_CONTAINER_ENVIROMENTVARIABLESENTRY.fields_by_name['value'].message_type
 _SERVICE_CONTAINER_ENVIROMENTVARIABLESENTRY.containing_type = _SERVICE_CONTAINER
 _SERVICE_CONTAINER.fields_by_name['filesystem'].message_type = celaut__pb2._SERVICE_CONTAINER_FILESYSTEM
 _SERVICE_CONTAINER.fields_by_name['enviroment_variables'].message_type = _SERVICE_CONTAINER_ENVIROMENTVARIABLESENTRY
+_SERVICE_CONTAINER.fields_by_name['config'].message_type = celaut__pb2._SERVICE_CONTAINER_CONFIG
+_SERVICE_CONTAINER.fields_by_name['expected_gateway'].message_type = celaut__pb2._SERVICE_CONTAINER_EXPECTEDGATEWAY
 _SERVICE_CONTAINER.containing_type = _SERVICE
 _SERVICE.fields_by_name['container'].message_type = _SERVICE_CONTAINER
 _SERVICE.fields_by_name['api'].message_type = celaut__pb2._SERVICE_API
