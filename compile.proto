@@ -18,7 +18,7 @@ message Service {
         bytes architecture = 1;
         celaut.Service.Container.Filesystem filesystem = 2;
         map<string, celaut.FieldDef> enviroment_variables = 3;
-        string entrypoint = 4;
+        repeated string entrypoint = 4;
     }
     Container container = 1;
     celaut.Service.Api api = 2;
