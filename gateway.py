@@ -189,15 +189,14 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
 
     os.mkdir(HYCACHE + container_id)
     # TODO: Check if api.format is valid or make the serializer for it.
-    path = ''
-    for e in api.path:
-        path += '/' + e
-    with open(HYCACHE + container_id + path, 'wb') as file:
+
+    l.LOGGER('/usr/bin/docker cp ' + HYCACHE + container_id + '/__config__ ' + container_id + ':/'+'/'.join(api.path))
+    with open(HYCACHE + container_id + '/__config__', 'wb') as file:
         file.write(__config__.SerializeToString())
     while 1:
         try:
             subprocess.run(
-                '/usr/bin/docker cp ' + HYCACHE + container_id + '/__config__ ' + container_id + ':/__config__',
+                '/usr/bin/docker cp ' + HYCACHE + container_id + '/__config__ ' + container_id + ':/'+'/'.join(api.path),
                 shell=True
             )
             break
