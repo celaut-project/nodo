@@ -355,11 +355,14 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
         partitions_model = list(partitions_model)
     )
     dirs = sorted([d for d in os.listdir(HYCACHE+'compile'+id)])
+    l.LOGGER('Dirs ->  '+str(dirs))
     for b in grpcbigbuffer.serialize_to_buffer(
         message_iterator = tuple([gateway_pb2.CompileOutput])+tuple([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d) for d in dirs]),
         partitions_model = list(partitions_model),
         indices = gateway_pb2.CompileOutput
-    ): yield b
+    ): 
+        l.LOGGER('B -> '+str(b))
+        yield b
     shutil.rmtree(HYCACHE+'compile'+id)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
 
