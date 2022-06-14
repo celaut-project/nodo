@@ -845,7 +845,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             repo = next(input),
             partitions_model = next(input)
         ): 
-            print('b\n')
+            print('b\n', b)
             yield b
 
     def GetServiceTar(self, request_iterator, context):
