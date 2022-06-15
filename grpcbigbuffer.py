@@ -570,6 +570,8 @@ def serialize_to_buffer(
                     partitions = partitions_model[indices[message[0]]]
                 )
             )
+
+            print('go to iterate the rest of the message.')
             
             for partition in message[1:]:
 
