@@ -496,12 +496,14 @@ def serialize_to_buffer(
         raise Exception('Serialzie to buffer error: Indices are not correct ' + str(indices) + str(partitions_model))
     
     def send_file(filedir: Dir, signal: Signal) -> Generator[buffer_pb2.Buffer, None, None]:
+        print('     Go to send the file -> ', filedir)
         for b in get_file_chunks(
                 filename=filedir.name, 
                 signal=signal
             ):
                 signal.wait()
                 try:
+                    print('         bf -> ', len(str(b)))
                     yield b
                 finally: signal.wait()
         yield buffer_pb2.Buffer(
@@ -555,8 +557,13 @@ def serialize_to_buffer(
             finally: signal.wait()
 
     for message in message_iterator:
+        
         print('message -> ', message)
+        
         if type(message) is tuple:  # If is partitioned
+            
+            print('message head -> ', message[0], indices[message[0]], partitions_model[indices[message[0]]])
+            
             yield buffer_pb2.Buffer(
                 head = buffer_pb2.Buffer.Head(
                     index = indices[message[0]],
@@ -565,6 +572,9 @@ def serialize_to_buffer(
             )
             
             for partition in message[1:]:
+
+                print('partition -> ', partition, type(partition))
+
                 if type(partition) is Dir:
                     for b in send_file(
                         filedir = partition,
