@@ -291,7 +291,7 @@ class Hyper:
             l.LOGGER('Compiler: send message '+ str(type(message)) + ' ' + str(partition) + ' ' + str(len(message_buffer)))
             with open(HYCACHE + 'compile' + id + '/p'+str(i+1), 'wb') as f:
                 f.write(
-                    message_buffer
+                    bytes('HOLA.', 'utf-8')     # message_buffer
                 )
         return id
 
