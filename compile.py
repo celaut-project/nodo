@@ -361,7 +361,7 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
         partitions_model = list(partitions_model),
         indices = gateway_pb2.CompileOutput
     ): 
-        l.LOGGER('B -> '+len(str(b)))
+        print('B -> ',len(str(b)))
         yield b
     print('finish, now clean the tree.')
     shutil.rmtree(HYCACHE+'compile'+id)
