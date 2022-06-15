@@ -503,7 +503,7 @@ def serialize_to_buffer(
             ):
                 signal.wait()
                 try:
-                    print('         bf -> ', len(str(b)))
+                    print('         bf')
                     yield b
                 finally: signal.wait()
         yield buffer_pb2.Buffer(
