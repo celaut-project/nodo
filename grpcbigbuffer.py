@@ -95,7 +95,10 @@ def get_file_chunks(filename, signal = None) -> Generator[buffer_pb2.Buffer, Non
                 f.flush()
                 signal.wait()
                 piece = f.read(CHUNK_SIZE)
-                if len(piece) == 0: return
+                if len(piece) == 0: 
+                    print('end of file.')
+                    return
+                print('             send chunk.')
                 yield buffer_pb2.Buffer(chunk=piece)
     finally: 
         gc.collect()
