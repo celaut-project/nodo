@@ -461,6 +461,23 @@ def parse_from_buffer(
         else:
             raise Exception('Parse from buffer error: index are not correct ' + str(indices))
 
+def send_file(filedir: Dir, signal: Signal) -> Generator[buffer_pb2.Buffer, None, None]:
+    print('     Go to send the file -> ', filedir)
+    for b in get_file_chunks(
+            filename=filedir.name, 
+            signal=signal
+        ):
+            signal.wait()
+            try:
+                print('         bf -> ', len(str(b)))
+                yield b
+            finally: signal.wait()
+    s = buffer_pb2.Buffer(
+        separator = True
+    )
+    print('            separator -> ', s)
+    yield s
+
 def serialize_to_buffer(
         message_iterator = None, # Message or tuples (with head on the first item.)
         signal = None,
