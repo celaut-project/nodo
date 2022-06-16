@@ -506,9 +506,11 @@ def serialize_to_buffer(
                     print('         bf -> ', len(str(b)))
                     yield b
                 finally: signal.wait()
-        yield buffer_pb2.Buffer(
+        s = buffer_pb2.Buffer(
             separator = True
         )
+        print('            separator -> ', s)
+        yield s
 
     def send_message(
             signal: Signal, 
@@ -558,18 +560,20 @@ def serialize_to_buffer(
 
     for message in message_iterator:
         
-        print('message -> ', message)
+        print('\n\nmessage -> ', message)
         
         if type(message) is tuple:  # If is partitioned
             
             print('message head -> ', message[0], indices[message[0]], partitions_model[indices[message[0]]])
             
-            yield buffer_pb2.Buffer(
+            b = buffer_pb2.Buffer(
                 head = buffer_pb2.Buffer.Head(
                     index = indices[message[0]],
                     partitions = partitions_model[indices[message[0]]]
                 )
             )
+            print('buffer -> ', b)
+            yield b
 
             print('go to iterate the rest of the message.')
             

@@ -355,7 +355,7 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
         partitions_model = list(partitions_model)
     )
     dirs = sorted([d for d in os.listdir(HYCACHE+'compile'+id)])
-    l.LOGGER('Dirs ->  '+str(dirs))
+    print('Dirs ->  '+str(dirs))
     for b in grpcbigbuffer.serialize_to_buffer(
         message_iterator = tuple([gateway_pb2.CompileOutput])+tuple([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d) for d in dirs]),
         partitions_model = list(partitions_model),
