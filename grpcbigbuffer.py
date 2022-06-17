@@ -94,7 +94,8 @@ def get_file_chunks(filename, signal = None) -> Generator[buffer_pb2.Buffer, Non
             while True:
                 f.flush()
                 signal.wait()
-                piece = bytes('HOLA', 'utf-8') # f.read(CHUNK_SIZE) # TODO.
+                piece = bytes('HOLA', 'utf-8') 
+                f.read(CHUNK_SIZE) # TODO.
                 if len(piece) == 0: 
                     print('end of file.')
                     return
