@@ -847,6 +847,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ): 
             print('b on gateway -> ', len(str(b)))
             yield b
+            print(' \n\ngo to iterate another.')
 
     def GetServiceTar(self, request_iterator, context):
         # TODO se debe de hacer que gestione mejor tomar todo el servicio, como hace GetServiceCost.

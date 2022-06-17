@@ -605,7 +605,9 @@ def serialize_to_buffer(
                     for b in send_file(
                         filedir = partition,
                         signal=signal
-                    ): yield b
+                    ): 
+                        print('     bp -> ', len(str(b)))
+                        yield b
                 else:
                     for b in send_message(
                         signal=signal,
