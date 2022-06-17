@@ -525,6 +525,7 @@ def serialize_to_buffer(
                 try:
                     print('         bf -> ', len(str(b)))
                     yield b
+                    print('     bf.')
                 finally: signal.wait()
         s = buffer_pb2.Buffer(
             separator = True
@@ -608,6 +609,7 @@ def serialize_to_buffer(
                     ): 
                         print('     bp -> ', len(str(b)))
                         yield b
+                        print('     bp.')
                 else:
                     for b in send_message(
                         signal=signal,

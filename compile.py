@@ -363,6 +363,7 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
     ): 
         print('B -> ',len(str(b)))
         yield b
+        print(' B.')
     print('finish, now clean the tree.')
     shutil.rmtree(HYCACHE+'compile'+id)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
