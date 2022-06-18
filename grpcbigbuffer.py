@@ -6,9 +6,9 @@ MAX_DIR = 999999999
 import os, gc, itertools, sys
 
 from google import protobuf
-import src.buffer_pb2 as buffer_pb2
+import buffer_pb2
 from random import randint
-from typing import Generator, Union, final
+from typing import Generator, Union
 from threading import Condition
 
 class EmptyBufferException(Exception):
