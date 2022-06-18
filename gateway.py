@@ -98,7 +98,7 @@ def get_token_by_uri(uri: str) -> str:
     try:
         return cache_service_perspective[uri]
     except Exception as e:
-        print('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e), cache_service_perspective, uri)  # TODO. Study the imposibility of that.
+        l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e)+ ' '+str(cache_service_perspective)+ ' '+str(uri))  # TODO. Study the imposibility of that.
         raise e
 
 def purgue_internal(father_ip, container_id, container_ip):
@@ -119,7 +119,7 @@ def purgue_internal(father_ip, container_id, container_ip):
     try:
         del cache_service_perspective[container_ip]
     except Exception as e:
-        print('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e), cache_service_perspective, container_id)  # TODO. Study the imposibility of that.
+        l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e)+ ' ' + str(cache_service_perspective)+ ' ' + str(container_id))  # TODO. Study the imposibility of that.
         raise e
 
     if container_ip in cache:
@@ -284,7 +284,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
                     )).cost
                 )
             except Exception as e: l.LOGGER('Error taking the cost on '+ peer_uri +' : '+str(e))
-    except Exception as e: print('e ->>', str(e))
+    except Exception as e: l.LOGGER('Error iterating peers on service balancer ->>'+ str(e))
 
     try:
         return peers.get()
@@ -844,10 +844,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         for b in compile(
             repo = next(input),
             partitions_model = next(input)
-        ): 
-            print('b on gateway -> ', len(str(b)))
-            yield b
-            print(' \n\ngo to iterate another.')
+        ): yield b
 
     def GetServiceTar(self, request_iterator, context):
         # TODO se debe de hacer que gestione mejor tomar todo el servicio, como hace GetServiceCost.

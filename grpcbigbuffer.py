@@ -6,7 +6,7 @@ MAX_DIR = 999999999
 import os, gc, itertools, sys
 
 from google import protobuf
-import buffer_pb2 as buffer_pb2
+import src.buffer_pb2 as buffer_pb2
 from random import randint
 from typing import Generator, Union, final
 from threading import Condition
@@ -95,10 +95,7 @@ def get_file_chunks(filename, signal = None) -> Generator[buffer_pb2.Buffer, Non
                 f.flush()
                 signal.wait()
                 piece = f.read(CHUNK_SIZE)
-                if len(piece) == 0: 
-                    print('end of file.')
-                    return
-                print('             send chunk.')
+                if len(piece) == 0: return
                 yield buffer_pb2.Buffer(chunk=piece)
     finally: 
         gc.collect()
@@ -461,23 +458,6 @@ def parse_from_buffer(
         else:
             raise Exception('Parse from buffer error: index are not correct ' + str(indices))
 
-def send_file(filedir: Dir, signal: Signal) -> Generator[buffer_pb2.Buffer, None, None]:
-    print('     Go to send the file -> ', filedir)
-    for b in get_file_chunks(
-            filename=filedir.name, 
-            signal=signal
-        ):
-            signal.wait()
-            try:
-                print('         bf -> ', len(str(b)))
-                yield b
-            finally: signal.wait()
-    s = buffer_pb2.Buffer(
-        separator = True
-    )
-    print('            separator -> ', s)
-    yield s
-
 def serialize_to_buffer(
         message_iterator = None, # Message or tuples (with head on the first item.)
         signal = None,
@@ -516,22 +496,17 @@ def serialize_to_buffer(
         raise Exception('Serialzie to buffer error: Indices are not correct ' + str(indices) + str(partitions_model))
     
     def send_file(filedir: Dir, signal: Signal) -> Generator[buffer_pb2.Buffer, None, None]:
-        print('     Go to send the file -> ', filedir)
         for b in get_file_chunks(
                 filename=filedir.name, 
                 signal=signal
             ):
                 signal.wait()
                 try:
-                    print('         bf -> ', len(str(b)))
                     yield b
-                    print('     bf.')
                 finally: signal.wait()
-        s = buffer_pb2.Buffer(
+        yield buffer_pb2.Buffer(
             separator = True
         )
-        print('            separator -> ', s)
-        yield s
 
     def send_message(
             signal: Signal, 
@@ -580,36 +555,20 @@ def serialize_to_buffer(
             finally: signal.wait()
 
     for message in message_iterator:
-        
-        print('\n\nmessage -> ', message)
-        
         if type(message) is tuple:  # If is partitioned
-            
-            print('message head -> ', message[0], indices[message[0]], partitions_model[indices[message[0]]])
-            
-            b = buffer_pb2.Buffer(
+            yield buffer_pb2.Buffer(
                 head = buffer_pb2.Buffer.Head(
                     index = indices[message[0]],
                     partitions = partitions_model[indices[message[0]]]
                 )
             )
-            print('buffer -> ', b)
-            yield b
-
-            print('go to iterate the rest of the message.')
             
             for partition in message[1:]:
-
-                print('partition -> ', partition, type(partition))
-
                 if type(partition) is Dir:
                     for b in send_file(
                         filedir = partition,
                         signal=signal
-                    ): 
-                        print('     bp -> ', len(str(b)))
-                        yield b
-                        print('     bp.')
+                    ): yield b
                 else:
                     for b in send_message(
                         signal=signal,

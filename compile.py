@@ -299,7 +299,6 @@ class Hyper:
 def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
     Hyperfile = Hyper(path = path, aux_id = aux_id)
 
-    print('buffer len -> ', Hyperfile.buffer_len)
     with iobigdata.mem_manager(len = COMPILER_MEMORY_SIZE_FACTOR*Hyperfile.buffer_len):
         Hyperfile.parseContainer()
         Hyperfile.parseApi()
@@ -355,16 +354,11 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
         partitions_model = list(partitions_model)
     )
     dirs = sorted([d for d in os.listdir(HYCACHE+'compile'+id)])
-    print('Dirs ->  '+str(dirs))
     for b in grpcbigbuffer.serialize_to_buffer(
         message_iterator = tuple([gateway_pb2.CompileOutput])+tuple([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d) for d in dirs]),
         partitions_model = list(partitions_model),
         indices = gateway_pb2.CompileOutput
-    ): 
-        print('B -> ',len(str(b)))
-        yield b
-        print(' B.')
-    print('finish, now clean the tree.')
+    ): yield b
     shutil.rmtree(HYCACHE+'compile'+id)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
 
