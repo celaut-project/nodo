@@ -1,6 +1,6 @@
 from asyncio import FastChildWatcher
 from time import sleep
-from build import build
+import build
 import docker as docker_lib
 from utils import GET_ENV
 import celaut_pb2
