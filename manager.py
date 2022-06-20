@@ -66,7 +66,7 @@ def spend_gas(
     id: str,
     gas_to_spend: int
 ) -> bool:
-    l.LOGGER('Spend '+gas_to_spend+' gas by ' + id)
+    l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + id)
 
     if id in peer_instances and peer_instances[id] >= gas_to_spend:
         l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]))
