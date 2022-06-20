@@ -61,21 +61,39 @@ def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Contai
         container_id = token.split('##')[-1]
     )
 
+def __refound_gas(
+    gas: int,
+    cache: dict,
+    id: int
+) -> None: 
+    cache[id] += gas
+
+# Only can be executed once.
+def __refound_gas_function_factory(
+    gas: int,
+    cache: dict,
+    id: int,
+    container: list
+) -> lambda: None: 
+    def use(l = [lambda: __refound_gas(gas, cache, id)]): l.pop()()
+    if container: container.append( lambda: use() )
 
 def spend_gas(
     id: str,
-    gas_to_spend: int
+    gas_to_spend: int,
+    refund_gas_function_container: list = None
 ) -> bool:
     l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + id)
-
     try:
         if id in peer_instances and peer_instances[id] >= gas_to_spend:
             l.LOGGER( str(gas_to_spend)+' of '+str(peer_instances[id]))
             peer_instances[id] -= gas_to_spend
+            __refound_gas_function_factory(gas = gas_to_spend, cache = peer_instances, id = id, container = refund_gas_function_container)
             return True
         elif id in system_cache and system_cache[id]['gas'] >= gas_to_spend:
             l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]['gas']))
             system_cache[id] -= gas_to_spend
+            __refound_gas_function_factory(gas = gas_to_spend, cache = peer_instances, id = id, container = refund_gas_function_container)
             return True
     except Exception as e: l.LOGGER('Manager error '+str(e))
     

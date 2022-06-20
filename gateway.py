@@ -302,13 +302,19 @@ def launch_service(
             if peer_instance_uri != 'local':
                 try:
                     l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer_instance_uri))
-                    # TODO se debe hacer que al pedir un servicio exista un timeout.
+                    gas_to_spend = cost  # TODO cuando la estimacion del coste posea un nivel de varianza se escogera: cost * varianza * AVG_COST_MAX_PROXIMITY_FACTOR
+                    refound_gas = []
+                    if not spend_gas(
+                        id = father_ip,
+                        gas_to_spend = gas_to_spend,
+                        refund_gas_function_container = refound_gas
+                    ): raise Exception('Launch service error spending gas for '+father_ip)
                     service_instance = next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
                                         peer_instance_uri
                                     )
-                                ).StartService,
+                                ).StartService, # TODO se debe hacer que al pedir un servicio exista un timeout.
                         partitions_message_mode_parser = True,
                         indices_serializer = StartService_input,
                         partitions_serializer = StartService_input_partitions_v2,
@@ -330,6 +336,7 @@ def launch_service(
                     return service_instance
                 except Exception as e:
                     l.LOGGER('Failed starting a service on peer, occurs the eror: ' + str(e))
+                    refound_gas.pop()()
 
             #  The node launches the service locally.
             if getting_container: l.LOGGER('El nodo lanza el servicio localmente.')
