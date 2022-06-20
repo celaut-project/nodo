@@ -152,7 +152,7 @@ def get_sysresources(token: str) -> celaut_pb2.Sysresources:
 def maintain_cost(sysreq: dict) -> int:
     return 0    # TODO
 
-def manager_prevent():    # TODO Para comprobar que todas las cuentas sean correctas, se puede iterar en un hilo secundario.
+def manager_thread():    # TODO Para comprobar que todas las cuentas sean correctas, se puede iterar en un hilo secundario.
     for token, sysreq in system_cache:
         if False: # If was killed.
             if not container_stop(token = token):
@@ -164,7 +164,7 @@ def manager_prevent():    # TODO Para comprobar que todas las cuentas sean corre
         ) and not container_stop(
                     token = token
                 ): raise Exception('Manager error: the service '+ token+' could not be stopped.')
-                
+
     sleep(MANAGER_ITERATION_TIME)
 
 

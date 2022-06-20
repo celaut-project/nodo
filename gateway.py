@@ -4,7 +4,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_INITIAL_GAS_AMOUNT, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, add_container, add_peer, container_modify_system_params, container_stop, could_ve_this_sysreq, execution_cost, get_sysresources, spend_gas, start_service_cost
+from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_INITIAL_GAS_AMOUNT, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, add_container, add_peer, container_modify_system_params, container_stop, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, spend_gas, start_service_cost
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
@@ -988,6 +988,12 @@ if __name__ == "__main__":
         if network != DOCKER_NETWORK and network != LOCAL_NETWORK:
             Zeroconf(network=network)
 
+    # Run manager.
+    threading.Thread(
+        target = manager_thread,
+        daemon = True
+    ).start()
+
     # create a gRPC server
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=30))
     gateway_pb2_grpc.add_GatewayServicer_to_server(
@@ -1006,6 +1012,7 @@ if __name__ == "__main__":
     l.LOGGER('IGNORE FATHER NETWORK ON SERVICE BALANCER -> '+ str(IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER))
     l.LOGGER('SEND ONLY HASHES ASKING COST -> '+ str(SEND_ONLY_HASHES_ASKING_COST))
     l.LOGGER('DENEGATE COST REQUEST IF DONT VE THE HASH -> '+ str(DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH))
+    l.LOGGER('MANAGER ITERATION TIME-> '+ str(MANAGER_ITERATION_TIME))
 
     l.LOGGER('Starting gateway at port'+ str(GATEWAY_PORT))    
 
