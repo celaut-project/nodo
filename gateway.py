@@ -336,7 +336,9 @@ def launch_service(
                     return service_instance
                 except Exception as e:
                     l.LOGGER('Failed starting a service on peer, occurs the eror: ' + str(e))
-                    refound_gas.pop()()
+                    try:
+                        refound_gas.pop()()
+                    except IndexError: pass
 
             #  The node launches the service locally.
             if getting_container: l.LOGGER('El nodo lanza el servicio localmente.')
