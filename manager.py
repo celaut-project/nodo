@@ -65,6 +65,8 @@ def spend_gas(
     id: str,
     gas_to_spend: int
 ) -> bool:
+    l.LOGGER('Spend gas by ' + id)
+
     if id in peer_instances and peer_instances[id] >= gas_to_spend:
         peer_instances[id] -= gas_to_spend
         return True
@@ -77,6 +79,8 @@ def spend_gas(
 def add_peer(
     peer_id: str
 ) -> bool:
+    l.LOGGER('Add peer '+ peer_id)
+
     if peer_id not in peer_instances:
         peer_instances[peer_id] = 0
         return True
@@ -89,6 +93,7 @@ def add_container(
     initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT,
     system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> str:
+    l.LOGGER('Add container for '+ father_ip)
     token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
     if token in system_cache.keys(): raise Exception('Manager error: '+token+' exists.')
 
@@ -104,6 +109,8 @@ def container_modify_system_params(
         token: str, 
         system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
     ) -> bool:
+
+    l.LOGGER('Modify params of '+ token)
 
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
@@ -154,7 +161,6 @@ def maintain_cost(sysreq: dict) -> int:
 
 def manager_thread():    # TODO Para comprobar que todas las cuentas sean correctas, se puede iterar en un hilo secundario.
     while True:
-        l.LOGGER('Iterate manager thread')
         for token, sysreq in system_cache:
             if False: # If was killed.
                 if not container_stop(token = token):
