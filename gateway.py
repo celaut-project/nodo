@@ -594,7 +594,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             elif type(r) is celaut.Any.Metadata.HashTag.Hash:
                 hash = r
 
-            # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
+            # Si me da hash, comprueba que sea sha3-256 y que se encuentre en el registro.
             if hash:
                 hashes.append(hash)
                 if configuration and SHA3_256_ID == hash.type and \
