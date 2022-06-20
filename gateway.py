@@ -892,6 +892,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         raise Exception('Was imposible get the service container.')
 
 
+    # Estimacion de coste de ejecución de un servicio con la cantidad de gas por defecto.
     def GetServiceCost(self, request_iterator, context):
         # TODO podría comparar costes de otros pares, (menos del que le pregunta.)
 
@@ -949,7 +950,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         if cost is None: raise Exception("I dont've the service.")
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.CostMessage(
-                                cost = cost
+                                cost = cost + DEFAULT_INITIAL_GAS_AMOUNT
                             ),
             indices = gateway_pb2.CostMessage
         ): yield b
