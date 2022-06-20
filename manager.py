@@ -1,4 +1,5 @@
 from asyncio import FastChildWatcher
+from os import system
 from time import sleep
 import build
 import docker as docker_lib
@@ -68,9 +69,11 @@ def spend_gas(
     l.LOGGER('Spend gas by ' + id)
 
     if id in peer_instances and peer_instances[id] >= gas_to_spend:
+        l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]))
         peer_instances[id] -= gas_to_spend
         return True
     elif id in system_cache and system_cache[id]['gas'] >= gas_to_spend:
+        l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]['gas']))
         system_cache[id] -= gas_to_spend
         return True
     return False
