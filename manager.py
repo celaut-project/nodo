@@ -1,10 +1,14 @@
+from build import build
 import docker as docker_lib
+from utils import GET_ENV
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
 import docker as docker_lib
 import logger as l
 import gateway_pb2
+from verify import get_service_hex_main_hash
+import celaut_pb2 as celaut
 
 db = pymongo.MongoClient(
             "mongodb://localhost:27017/"
@@ -12,11 +16,15 @@ db = pymongo.MongoClient(
 
 # TODO get from enviroment variables.
 
+DOCKER_CLIENT = lambda: docker_lib.from_env()
 DEFAULT_SYSTEM_RESOURCES = celaut_pb2.Sysresources(
     mem_limit = 50*pow(10, 6),
 )
 
-DEFAULT_INITIAL_GAS_AMOUNT = 5
+DEFAULT_INITIAL_GAS_AMOUNT = GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT', default = 5)
+COMPUTE_POWER_RATE = GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
+COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 5)
+EXECUTION_BENEFIT = GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
 
 MEMSWAP_FACTOR = 0 # 0 - 1
 
@@ -24,6 +32,7 @@ MEMSWAP_FACTOR = 0 # 0 - 1
 # TODO system_cache_lock = Lock()
 
 system_cache = {} # token : { mem_limit: 0, gas: 0 }
+peer_instances = {} # id: amount_of_gas
 
 def __push_token(token: str): 
     system_cache[token] = { "mem_limit": 0 }
@@ -56,6 +65,29 @@ def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Contai
     return docker_lib.from_env().containers.get(
         container_id = token.split('##')[-1]
     )
+
+
+def spend_gas(
+    id: str,
+    gas_to_spend: int
+) -> bool:
+    if id in peer_instances and peer_instances[id] >= gas_to_spend:
+        peer_instances[id] -= gas_to_spend
+        return True
+    elif id in system_cache and system_cache[id]['gas'] >= gas_to_spend:
+        system_cache[id] -= gas_to_spend
+        return True
+    return False
+
+
+def add_peer(
+    peer_id: str
+) -> bool:
+    if peer_id not in peer_instances:
+        peer_instances[peer_id] = 0
+        return True
+    return False
+
 
 def add_container(
     father_ip: str,
@@ -127,3 +159,40 @@ def manager_prevent():    # TODO Para comprobar que todas las cuentas sean corre
         if False: # If was killed.
             __pop_token(token = token)
         continue
+
+
+
+def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
+    is_built = (get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata) \
+                    in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()])
+    if not is_built and \
+        not build.check_supported_architecture(metadata=metadata): raise build.UnsupportedArquitectureException
+    try:
+        # Coste de construcción si no se posee el contenedor del servicio.
+        # Debe de tener en cuenta el coste de buscar el conedor por la red.
+        return sum([
+                COST_OF_BUILD * (is_built is False),
+                # Coste de obtener el contenedor ... #TODO
+            ])
+    except:
+        pass
+    return COST_OF_BUILD
+
+def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
+    try:
+        return sum([
+            len( DOCKER_CLIENT().containers.list() )* COMPUTE_POWER_RATE,
+            build_cost(service_buffer = service_buffer, metadata = metadata),
+            EXECUTION_BENEFIT
+        ]) 
+    except build.UnsupportedArquitectureException as e: raise e
+
+def start_service_cost(
+    metadata,
+    service_buffer,
+    initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT
+) -> int:
+    return execution_cost(
+        service_buffer = service_buffer,
+        metadata = metadata
+    ) + initial_gas_amount

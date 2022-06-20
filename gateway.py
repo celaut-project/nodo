@@ -1,9 +1,10 @@
+from mimetypes import init
 from typing import Generator
 from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import DEFAULT_SYSTEM_RESOURCES, add_container, container_modify_system_params, container_stop, could_ve_this_sysreq, get_sysresources
+from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_INITIAL_GAS_AMOUNT, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, add_container, add_peer, container_modify_system_params, container_stop, could_ve_this_sysreq, execution_cost, get_sysresources, spend_gas, start_service_cost
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
@@ -22,9 +23,6 @@ DOCKER_CLIENT = lambda: docker_lib.from_env()
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
-COMPUTE_POWER_RATE = utils.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
-COST_OF_BUILD = utils.GET_ENV(env = 'COST_OF_BUILD', default = 5)
-EXECUTION_BENEFIT = utils.GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
 MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
 IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = True)
 SEND_ONLY_HASHES_ASKING_COST = utils.GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default=False)
@@ -217,29 +215,6 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
     except docker_lib.errors.APIError:
         l.LOGGER('DOCKER API ERROR ')
 
-def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
-    is_built = (get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata) \
-                    in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()])
-    if not is_built and \
-        not build.check_supported_architecture(metadata=metadata): raise build.UnsupportedArquitectureException
-    try:
-        # Coste de construcción si no se posee el contenedor del servicio.
-        # Debe de tener en cuenta el coste de buscar el conedor por la red.
-        return sum([
-                COST_OF_BUILD * (is_built is False),
-                # Coste de obtener el contenedor ... #TODO
-            ])
-    except:
-        pass
-    return COST_OF_BUILD
-
-def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
-    try:
-        return sum([
-            len( DOCKER_CLIENT().containers.list() )* COMPUTE_POWER_RATE,
-            build_cost(service_buffer = service_buffer, metadata = metadata),
-        ]) 
-    except build.UnsupportedArquitectureException as e: raise e
 
 def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignore_network: str = None) -> dict: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
     class PeerCostList:
@@ -359,6 +334,14 @@ def launch_service(
             #  The node launches the service locally.
             if getting_container: l.LOGGER('El nodo lanza el servicio localmente.')
             if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_RESOURCES
+            if not spend_gas(
+                id = father_ip,
+                gas_to_spend = start_service_cost(
+                    initial_gas_amount = initial_gas_amount if initial_gas_amount else DEFAULT_INITIAL_GAS_AMOUNT,
+                    service_buffer = service_buffer,
+                    metadata = metadata
+                )
+            ): raise Exception('Launch service error spending gas for '+father_ip)
             try:
                 id = build.build(
                         service_buffer = service_buffer, 
@@ -770,6 +753,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ))
         l.LOGGER('\nAdding peer ' + str(instance))
         insert_instance_on_mongo(instance = instance.instance)
+        add_peer(
+            peer_id = instance.instance.uri_slot[0].uri[0].ip  # TODO use generic id for peers.
+        )
 
         for b in grpcbf.serialize_to_buffer(
             generate_gateway_instance(
@@ -959,11 +945,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 except build.UnsupportedArquitectureException as e: raise e
                 break
                 
-        l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost) + ' with benefit ' + str(cost + EXECUTION_BENEFIT))
+        l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost) + ' with benefit ' + str(cost))
         if cost is None: raise Exception("I dont've the service.")
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.CostMessage(
-                                cost = cost + EXECUTION_BENEFIT
+                                cost = cost
                             ),
             indices = gateway_pb2.CostMessage
         ): yield b
