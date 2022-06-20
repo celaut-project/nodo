@@ -79,10 +79,6 @@ def spend_gas(
             return True
     except Exception as e: l.LOGGER('Manager error '+str(e))
     
-    print(peer_instances, system_cache)
-    print( id in peer_instances)
-    print( peer_instances[id])
-    
     l.LOGGER(id+" can't spend "+str(gas_to_spend)+" gas.")
     return False
 
