@@ -29,12 +29,14 @@ message HashWithConfig { // H^C
     celaut.Configuration config = 3;
     optional celaut.Sysresources min_sysreq = 4;  // init system specs.
     optional celaut.Sysresources max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
+    optional int32 initial_gas_amount = 6;
 }
 message ServiceWithConfig { // S^C
     ServiceWithMeta service = 2;
     celaut.Configuration config = 3;
     optional celaut.Sysresources min_sysreq = 4;  // init system specs.
     optional celaut.Sysresources max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
+    optional int32 initial_gas_amount = 6;
 }
 
 message CompileInput {

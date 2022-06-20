@@ -3,7 +3,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import DEFAULT_SYSTEM_RESOURCES, container_modify_system_params, container_stop, could_ve_this_sysreq, get_sysresources
+from manager import DEFAULT_SYSTEM_RESOURCES, add_container, container_modify_system_params, container_stop, could_ve_this_sysreq, get_sysresources
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
@@ -300,7 +300,8 @@ def launch_service(
         id: str = None,
         system_requeriments: celaut.Sysresources = None,
         max_sysreq = None,
-        config: celaut.Configuration = None
+        config: celaut.Configuration = None,
+        initial_gas_amount: int = None,
     ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
     if service_buffer == None: raise Exception("Service object can't be None")
@@ -452,20 +453,20 @@ def launch_service(
                     uri.port = assigment_ports[port]
                     uri_slot.uri.append(uri)
 
-            token = token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
-            container_modify_system_params(
-                token = token,
-                system_requeriments_range = gateway_pb2.ModifyServiceSystemResourcesInput(min_sysreq = system_requeriments, max_sysreq = system_requeriments)
-            )
-
             l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
             return gateway_pb2.Instance(
-                token = token,
+                token = add_container(
+                            father_ip = father_ip,
+                            container = container,
+                            initial_gas_amount = initial_gas_amount,
+                            system_requeriments_range = gateway_pb2.ModifyServiceSystemResourcesInput(min_sysreq = system_requeriments, max_sysreq = system_requeriments)
+                        ),
                 instance = celaut.Instance(
                         api = service.api,
                         uri_slot = [uri_slot]
                     )
             )
+
         if abort_it: 
             l.LOGGER("Can't launch this service "+id)
             raise Exception("Can't launch this service "+id)
@@ -572,6 +573,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Starting service ...')
         configuration = None
         system_requeriments = None
+        initial_gas_amount = None
         max_sysreq = None
         hashes = []
         parser_generator = grpcbf.parse_from_buffer(
@@ -597,6 +599,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 
                 if r.HasField('min_sysreq'):
                     system_requeriments = r.min_sysreq
+
+                if r.HasField('initial_gas_amount'):
+                    initial_gas_amount = r.initial_gas_amount
 
 
             # Captura la configuracion si puede.
@@ -626,6 +631,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 config = configuration,
                                 system_requeriments = system_requeriments,
                                 max_sysreq = max_sysreq,
+                                initial_gas_amount = initial_gas_amount,
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                             )
                         ): yield b
@@ -651,6 +657,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 
                 if r.HasField('min_sysreq'):
                     system_requeriments = r.min_sysreq
+
+                if r.HasField('initial_gas_amount'):
+                    initial_gas_amount = r.initial_gas_amount
 
 
             elif r is gateway_pb2.ServiceWithMeta:
@@ -688,6 +697,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             config = configuration,
                             system_requeriments = system_requeriments,
                             max_sysreq = max_sysreq,
+                            initial_gas_amount = initial_gas_amount,
                             id = hash,
                             father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                         )
@@ -711,6 +721,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     config = configuration,
                     system_requeriments = system_requeriments,
                     max_sysreq = max_sysreq,
+                    initial_gas_amount = initial_gas_amount,
                     father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                 )
             ): yield b

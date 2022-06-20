@@ -1,6 +1,4 @@
-from lib2to3.pgen2 import token
-from statistics import variance
-from wsgiref.simple_server import sys_version
+import docker as docker_lib
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -18,12 +16,14 @@ DEFAULT_SYSTEM_RESOURCES = celaut_pb2.Sysresources(
     mem_limit = 50*pow(10, 6),
 )
 
+DEFAULT_INITIAL_GAS_AMOUNT = 5
+
 MEMSWAP_FACTOR = 0 # 0 - 1
 
 
 # TODO system_cache_lock = Lock()
 
-system_cache = {} # token : { mem_limit : 0 }
+system_cache = {} # token : { mem_limit: 0, gas: 0 }
 
 def __push_token(token: str): 
     system_cache[token] = { "mem_limit": 0 }
@@ -38,7 +38,7 @@ def __pop_token(token: str):
     )
 
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
-    if token not in system_cache.keys(): __push_token(token = token)
+    if token not in system_cache.keys(): raise Exception('Manager error: token '+token+' does not exists.')
     if sys_req.HasField('mem_limit'):
         variation = system_cache[token]['mem_limit'] - sys_req.mem_limit
 
@@ -56,6 +56,23 @@ def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Contai
     return docker_lib.from_env().containers.get(
         container_id = token.split('##')[-1]
     )
+
+def add_container(
+    father_ip: str,
+    container: docker_lib.models.containers.Container,
+    initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT,
+    system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
+) -> str:
+    token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
+    if token in system_cache.keys(): raise Exception('Manager error: '+token+' exists.')
+
+    __push_token(token = token)
+    system_cache[token]['gas'] = initial_gas_amount
+    if not container_modify_system_params(
+        token = token,
+        system_requeriments_range = system_requeriments_range
+    ): raise Exception('Manager error adding '+token+'.')
+    return token
 
 def container_modify_system_params(
         token: str, 

@@ -1,6 +1,5 @@
 import buffer_pb2, gateway_pb2
 
-# This is part of the transport protocol (slot) data.
 StartService_input = {
     1 : gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash,
     2 : gateway_pb2.ServiceWithMeta,
@@ -12,7 +11,9 @@ StartService_input_partitions_v1 = {
     4: [
             buffer_pb2.Buffer.Head.Partition(index={
                 3 : buffer_pb2.Buffer.Head.Partition(),
-                4 : buffer_pb2.Buffer.Head.Partition()
+                4 : buffer_pb2.Buffer.Head.Partition(),
+                5 : buffer_pb2.Buffer.Head.Partition(),
+                6 : buffer_pb2.Buffer.Head.Partition(),
             }),
            buffer_pb2.Buffer.Head.Partition(index={
                 2 : buffer_pb2.Buffer.Head.Partition()
@@ -58,7 +59,9 @@ StartService_input_partitions_v2 = {
                     })
                 }),
                 3 : buffer_pb2.Buffer.Head.Partition(),
-                4 : buffer_pb2.Buffer.Head.Partition()
+                4 : buffer_pb2.Buffer.Head.Partition(),
+                5 : buffer_pb2.Buffer.Head.Partition(),
+                6 : buffer_pb2.Buffer.Head.Partition(),
             }),
             buffer_pb2.Buffer.Head.Partition(index={
                 2 : buffer_pb2.Buffer.Head.Partition(index={
