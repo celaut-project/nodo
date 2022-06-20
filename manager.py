@@ -68,14 +68,17 @@ def spend_gas(
 ) -> bool:
     l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + id)
 
-    if id in peer_instances and peer_instances[id] >= gas_to_spend:
-        l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]))
-        peer_instances[id] -= gas_to_spend
-        return True
-    elif id in system_cache and system_cache[id]['gas'] >= gas_to_spend:
-        l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]['gas']))
-        system_cache[id] -= gas_to_spend
-        return True
+    try:
+        if id in peer_instances and peer_instances[id] >= gas_to_spend:
+            l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]))
+            peer_instances[id] -= gas_to_spend
+            return True
+        elif id in system_cache and system_cache[id]['gas'] >= gas_to_spend:
+            l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]['gas']))
+            system_cache[id] -= gas_to_spend
+            return True
+    except Exception as e:
+        l.LOGGER('Manager error '+str(e))
     
     l.LOGGER(id+" can't spend "+str(gas_to_spend)+" gas.")
     return False
