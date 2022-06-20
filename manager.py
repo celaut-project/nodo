@@ -76,6 +76,8 @@ def spend_gas(
         l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]['gas']))
         system_cache[id] -= gas_to_spend
         return True
+    
+    l.LOGGER(id+" can't spend "+str(gas_to_spend)+" gas.")
     return False
 
 
