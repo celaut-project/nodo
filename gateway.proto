@@ -8,8 +8,9 @@ message TokenMessage {
     string token = 1;
 }
 
-message CostMessage {
+message EstimatedCost {
     int32 cost = 1;
+    float variance = 2;
 }
 
 message Instance {
@@ -66,5 +67,5 @@ service Gateway {
     rpc GetFile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Any.Metadata.HashTag.Hash -> celaut.Any
     rpc Compile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // CompileInput -> CompileOutput
     rpc GetServiceTar(stream buffer.Buffer) returns (stream buffer.Buffer) {}// ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> buffer.Buffer (parse not needed.)
-    rpc GetServiceCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> CostMessage
+    rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> EstimatedCost
 }

@@ -15,7 +15,7 @@ import pymongo, json
 from google.protobuf.json_format import MessageToJson
 import docker as docker_lib
 import netifaces as ni
-from gateway_pb2_grpcbf import StartService_input, GetServiceCost_input, GetServiceTar_input, StartService_input_partitions_v2
+from gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input, GetServiceTar_input, StartService_input_partitions_v2
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
 
@@ -27,6 +27,7 @@ MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
 IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = True)
 SEND_ONLY_HASHES_ASKING_COST = utils.GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default=False)
 DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = utils.GET_ENV(env = 'DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH', default=False)
+AVG_COST_MAX_PROXIMITY_FACTOR = utils.GET_ENV(env = 'AVG_COST_MAX_PROXIMITY_FACTOR', default=1)
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
@@ -227,20 +228,20 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
             self.dict.update({elem: weight})
         
         def get(self) -> dict:
-            return {k : v for k, v in sorted(self.dict.items(), key=lambda item: item[1])}
+            return {k : v for k, v in sorted(self.dict.items(), key=lambda item: item[1].cost)}  # TODO ordenar en function de la varianza tambien.
 
     
     peers = PeerCostList()
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
     try:
         peers.add_elem(
-            weight = execution_cost(service_buffer = service_buffer, metadata = metadata)
+            weight = gateway_pb2.EstimatedCost(cost = execution_cost(service_buffer = service_buffer, metadata = metadata), variance = 0)
         )
     except build.UnsupportedArquitectureException: pass
 
     try:
         for peer in utils.peers_iterator(ignore_network = ignore_network):
-            # TODO could use async or concurrency. And use timeout.
+            # TODO could use async or concurrency ¿numba?. And use timeout.
             peer_uri = peer['ip']+':'+str(peer['port'])
             try:
                 peers.add_elem(
@@ -250,13 +251,13 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
                                     grpc.insecure_channel(
                                         peer_uri
                                     )
-                                ).GetServiceCost,
-                        indices_parser = gateway_pb2.CostMessage,
+                                ).GetServiceEstimatedCost,
+                        indices_parser = gateway_pb2.EstimatedCost,
                         partitions_message_mode_parser = True,
-                        indices_serializer = GetServiceCost_input,
+                        indices_serializer = GetServiceEstimatedCost_input,
                         partitions_serializer = {2: StartService_input_partitions_v2[2]},
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),
-                    )).cost
+                    ))
                 )
             except Exception as e: l.LOGGER('Error taking the cost on '+ peer_uri +' : '+str(e))
     except Exception as e: l.LOGGER('Error iterating peers on service balancer ->>'+ str(e))
@@ -302,7 +303,7 @@ def launch_service(
             if peer_instance_uri != 'local':
                 try:
                     l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer_instance_uri))
-                    gas_to_spend = cost  # TODO cuando la estimacion del coste posea un nivel de varianza se escogera: cost * varianza * AVG_COST_MAX_PROXIMITY_FACTOR
+                    gas_to_spend = cost.cost * cost.variance * AVG_COST_MAX_PROXIMITY_FACTOR
                     refound_gas = []
                     if not spend_gas(
                         id = father_ip,
@@ -853,7 +854,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ): yield b
 
     def GetServiceTar(self, request_iterator, context):
-        # TODO se debe de hacer que gestione mejor tomar todo el servicio, como hace GetServiceCost.
+        # TODO se debe de hacer que gestione mejor tomar todo el servicio, como hace GetServiceEstimatedCost.
         
         l.LOGGER('Request for give a service container.')
         for r in grpcbf.parse_from_buffer(
@@ -902,13 +903,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     # Estimacion de coste de ejecución de un servicio con la cantidad de gas por defecto.
-    def GetServiceCost(self, request_iterator, context):
+    def GetServiceEstimatedCost(self, request_iterator, context):
         # TODO podría comparar costes de otros pares, (menos del que le pregunta.)
 
         l.LOGGER('Request for the cost of a service.')
         parse_iterator = grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
-            indices = GetServiceCost_input,
+            indices = GetServiceEstimatedCost_input,
             partitions_model={2: StartService_input_partitions_v2[2]},
             partitions_message_mode={1: True, 2: [True, False]}
         )
@@ -958,10 +959,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost) + ' with benefit ' + str(cost))
         if cost is None: raise Exception("I dont've the service.")
         for b in grpcbf.serialize_to_buffer(
-            message_iterator = gateway_pb2.CostMessage(
-                                cost = cost + DEFAULT_INITIAL_GAS_AMOUNT
+            message_iterator = gateway_pb2.EstimatedCost(
+                                cost = cost + DEFAULT_INITIAL_GAS_AMOUNT,
+                                variance = 0.01  # TODO dynamic variance.
                             ),
-            indices = gateway_pb2.CostMessage
+            indices = gateway_pb2.EstimatedCost
         ): yield b
 
 if __name__ == "__main__":
@@ -1022,6 +1024,7 @@ if __name__ == "__main__":
     l.LOGGER('SEND ONLY HASHES ASKING COST -> '+ str(SEND_ONLY_HASHES_ASKING_COST))
     l.LOGGER('DENEGATE COST REQUEST IF DONT VE THE HASH -> '+ str(DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH))
     l.LOGGER('MANAGER ITERATION TIME-> '+ str(MANAGER_ITERATION_TIME))
+    l.LOGGER('AVG COST MAX PROXIMITY FACTOR-> '+ str(AVG_COST_MAX_PROXIMITY_FACTOR))
 
     l.LOGGER('Starting gateway at port'+ str(GATEWAY_PORT))    
 

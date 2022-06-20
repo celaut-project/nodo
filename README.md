@@ -43,3 +43,4 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 - X86_SUPPORT
 - DEFAULT_INITIAL_GAS_AMOUNT
 - MANAGER_ITERATION_TIME
+- AVG_COST_MAX_PROXIMITY_FACTOR
