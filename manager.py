@@ -36,7 +36,7 @@ MEMSWAP_FACTOR = 0 # 0 - 1
 # TODO system_cache_lock = Lock()
 
 system_cache = {} # token : { mem_limit: 0, gas: 0 }
-peer_instances = {} # id: amount_of_gas
+peer_instances = {'192.168.1.21': 999999} # id: amount_of_gas
 
 def __push_token(token: str): 
     system_cache[token] = { "mem_limit": 0 }
