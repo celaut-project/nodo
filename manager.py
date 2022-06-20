@@ -153,6 +153,7 @@ def maintain_cost(sysreq: dict) -> int:
     return 0    # TODO
 
 def manager_thread():    # TODO Para comprobar que todas las cuentas sean correctas, se puede iterar en un hilo secundario.
+    l.LOGGER('Iterate manager thread')
     for token, sysreq in system_cache:
         if False: # If was killed.
             if not container_stop(token = token):
