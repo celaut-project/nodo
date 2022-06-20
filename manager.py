@@ -70,7 +70,7 @@ def spend_gas(
 
     try:
         if id in peer_instances and peer_instances[id] >= gas_to_spend:
-            l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]))
+            l.LOGGER( str(gas_to_spend)+' of '+str(peer_instances[id]))
             peer_instances[id] -= gas_to_spend
             return True
         elif id in system_cache and system_cache[id]['gas'] >= gas_to_spend:
