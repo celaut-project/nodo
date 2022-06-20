@@ -42,3 +42,4 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 - ARM_SUPPORT
 - X86_SUPPORT
 - DEFAULT_INITIAL_GAS_AMOUNT
+- MANAGER_ITERATION_TIME

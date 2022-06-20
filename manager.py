@@ -1,3 +1,5 @@
+from asyncio import FastChildWatcher
+from time import sleep
 from build import build
 import docker as docker_lib
 from utils import GET_ENV
@@ -25,6 +27,7 @@ DEFAULT_INITIAL_GAS_AMOUNT = GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT', default
 COMPUTE_POWER_RATE = GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
 COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
+MANAGER_ITERATION_TIME = GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 3)
 
 MEMSWAP_FACTOR = 0 # 0 - 1
 
@@ -36,15 +39,6 @@ peer_instances = {} # id: amount_of_gas
 
 def __push_token(token: str): 
     system_cache[token] = { "mem_limit": 0 }
-
-def __pop_token(token: str): 
-    del system_cache[token]
-    __modify_sysreq(
-        token = token,
-        sym_req = celaut_pb2.Sysresources(
-            mem_limit = 0
-        )
-    )
 
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
     if token not in system_cache.keys(): raise Exception('Manager error: token '+token+' does not exists.')
@@ -144,6 +138,7 @@ def container_stop(token: str) -> bool:
     ):
         del system_cache[token]
         return True
+    return False
 
 def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
     return IOBigData().prevent_kill(len = sysreq.mem_limit) # Prevent kill dice de lo que dispone actualmente libre.
@@ -154,11 +149,23 @@ def get_sysresources(token: str) -> celaut_pb2.Sysresources:
         mem_limit = system_cache[token]["mem_limit"]
     )
 
+def maintain_cost(sysreq: dict) -> int:
+    return 0    # TODO
+
 def manager_prevent():    # TODO Para comprobar que todas las cuentas sean correctas, se puede iterar en un hilo secundario.
     for token, sysreq in system_cache:
         if False: # If was killed.
-            __pop_token(token = token)
-        continue
+            if not container_stop(token = token):
+                raise Exception('Manager error: the service '+ token+' could not be stopped.')
+        
+        if not spend_gas(
+            id = token,
+            gas_to_spend = maintain_cost(sysreq)
+        ) and not container_stop(
+                    token = token
+                ): raise Exception('Manager error: the service '+ token+' could not be stopped.')
+                
+    sleep(MANAGER_ITERATION_TIME)
 
 
 
