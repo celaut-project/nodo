@@ -3,6 +3,7 @@ from os import system
 from time import sleep
 import build
 import docker as docker_lib
+from gateway import GAS_COST_FACTOR
 from utils import GET_ENV
 import celaut_pb2
 from iobigdata import IOBigData
@@ -30,6 +31,8 @@ COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
 MANAGER_ITERATION_TIME = GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 3)
 MEMORY_LIMIT_COST_FACTOR = GET_ENV(env = 'MEMORY_LIMIT_COST_FACTOR', default = 0)
+MIN_PEER_DEPOSIT = GET_ENV(env = 'MIN_PEER_DEPOSIT', default = 10)
+INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', default = 2)
 
 MEMSWAP_FACTOR = 0 # 0 - 1
 
@@ -38,6 +41,7 @@ MEMSWAP_FACTOR = 0 # 0 - 1
 
 system_cache = {} # token : { mem_limit: 0, gas: 0 }
 peer_instances = {'192.168.1.13': 999999} # id: amount_of_gas
+peer_deposits = {}  # the deposits in other peers.
 
 def __push_token(token: str): 
     system_cache[token] = { "mem_limit": 0 }
@@ -79,6 +83,12 @@ def __refound_gas_function_factory(
     def use(l = [lambda: __refound_gas(gas, cache, id)]): l.pop()()
     if container: container.append( lambda: use() )
 
+def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
+    l.LOGGER('Increase deposit on peer '+peer_id+' by '+str(amount))
+    peer_deposits[peer_id] += amount if peer_id in peer_deposits else amount
+    # TODO  VYPER NODE PAYMENT PROCESS.
+    return True
+
 def spend_gas(
     id: str,
     gas_to_spend: int,
@@ -109,7 +119,7 @@ def add_peer(
 
     if peer_id not in peer_instances:
         peer_instances[peer_id] = 0
-        return True
+        return increase_deposit_on_peer(peer_id, INITIAL_PEER_DEPOSIT_FACTOR * MIN_PEER_DEPOSIT)
     return False
 
 
@@ -224,23 +234,33 @@ def start_service_cost(
     ) + initial_gas_amount
 
 
-# Threads
+# Thread
+
+def maintain():
+    for token, sysreq in system_cache:
+        try:
+            if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
+                if not pop_container_on_cache(token = token):
+                    l.LOGGER('Manager error: the service '+ token+' could not be stopped.')
+        except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
+            l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO GET THE CONTAINER ' + token)
+        
+        if not spend_gas(
+            id = token,
+            gas_to_spend = maintain_cost(sysreq)
+        ) and not pop_container_on_cache(
+                    token = token
+                ): raise Exception('Manager error: the service '+ token+' could not be stopped.')
+
+def pair_deposits():
+    for peer, deposit in peer_deposits.items():
+        if deposit < MIN_PEER_DEPOSIT:
+            l.LOGGER('Manager error: the peer '+ peer+' has not enough deposit.')
+            if not pop_peer(peer = peer):
+                l.LOGGER('Manager error: the peer '+ peer+' could not be stopped.')
 
 def manager_thread():
     while True:
-        for token, sysreq in system_cache:
-            try:
-                if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
-                    if not pop_container_on_cache(token = token):
-                        l.LOGGER('Manager error: the service '+ token+' could not be stopped.')
-            except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-                l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO GET THE CONTAINER ' + token)
-            
-            if not spend_gas(
-                id = token,
-                gas_to_spend = maintain_cost(sysreq)
-            ) and not pop_container_on_cache(
-                        token = token
-                    ): raise Exception('Manager error: the service '+ token+' could not be stopped.')
-
-        sleep(MANAGER_ITERATION_TIME)
+        maintain()
+        
+        sleep(MANAGER_ITERATION_TIME) 
