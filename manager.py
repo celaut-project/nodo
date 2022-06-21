@@ -40,8 +40,8 @@ MEMSWAP_FACTOR = 0 # 0 - 1
 # TODO system_cache_lock = Lock()
 
 system_cache = {} # token : { mem_limit: 0, gas: 0 }
-peer_instances = {'192.168.1.13': 999999} # id: amount_of_gas
-peer_deposits = {}  # the deposits in other peers.
+peer_instances = {'192.168.1.13': 999999} # id: amount_of_gas -> other peers' deposits on this node.
+peer_deposits = {}  # id: amount of gas -> the deposits in other peers.
 
 def __push_token(token: str): 
     system_cache[token] = { "mem_limit": 0 }
@@ -107,7 +107,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase deposit on peer '+peer_id+' by '+str(amount))
     if __peer_payment_process(peer_id, amount):  # process the payment on the peer.
-        peer_deposits[peer_id] += amount if peer_id in peer_deposits else amount
+        peer_deposits[peer_id] = peer_deposits[peer_id] + amount if peer_id in peer_deposits else amount
         return True
     return False
 
@@ -121,12 +121,22 @@ def spend_gas(
         if id in peer_instances and peer_instances[id] >= gas_to_spend:
             l.LOGGER( str(gas_to_spend)+' of '+str(peer_instances[id]))
             peer_instances[id] -= gas_to_spend
-            __refound_gas_function_factory(gas = gas_to_spend, cache = peer_instances, id = id, container = refund_gas_function_container)
+            __refound_gas_function_factory(
+                gas = gas_to_spend, 
+                cache = peer_instances, 
+                id = id, 
+                container = refund_gas_function_container
+            )
             return True
         elif id in system_cache and system_cache[id]['gas'] >= gas_to_spend:
             l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]['gas']))
             system_cache[id] -= gas_to_spend
-            __refound_gas_function_factory(gas = gas_to_spend, cache = peer_instances, id = id, container = refund_gas_function_container)
+            __refound_gas_function_factory(
+                gas = gas_to_spend, 
+                cache = peer_instances, 
+                id = id, 
+                container = refund_gas_function_container
+            )
             return True
     except Exception as e: l.LOGGER('Manager error '+str(e))
     
@@ -284,7 +294,8 @@ def pair_deposits():
 
 def check_deposits():
     for event in __new_payment_events():
-        peer_instances[event['peer']] += event['amount']
+        peer_instances[event['peer']] = peer_instances[event['peer']] + event['amount'] \
+            if event['peer'] in peer_instances else event['amount']
 
 def manager_thread():
     while True:
