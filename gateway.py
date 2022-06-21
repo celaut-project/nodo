@@ -27,7 +27,9 @@ MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
 IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = True)
 SEND_ONLY_HASHES_ASKING_COST = utils.GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default=False)
 DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = utils.GET_ENV(env = 'DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH', default=False)
-AVG_COST_MAX_PROXIMITY_FACTOR = utils.GET_ENV(env = 'AVG_COST_MAX_PROXIMITY_FACTOR', default=1)
+COST_AVERAGE_VARIATION = utils.GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
+GAS_COST_FACTOR = utils.GET_ENV(env = 'GAS_COST_FACTOR', default = 1)
+MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR = utils.GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
@@ -235,7 +237,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
     try:
         peers.add_elem(
-            weight = gateway_pb2.EstimatedCost(cost = execution_cost(service_buffer = service_buffer, metadata = metadata), variance = 0)
+            weight = gateway_pb2.EstimatedCost(cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * GAS_COST_FACTOR, variance = 0)
         )
     except build.UnsupportedArquitectureException: pass
 
@@ -303,11 +305,10 @@ def launch_service(
             if peer_instance_uri != 'local':
                 try:
                     l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer_instance_uri))
-                    gas_to_spend = cost.cost * cost.variance * AVG_COST_MAX_PROXIMITY_FACTOR
                     refound_gas = []
                     if not spend_gas(
                         id = father_ip,
-                        gas_to_spend = gas_to_spend,
+                        gas_to_spend =  cost.cost * GAS_COST_FACTOR * cost.variance * COST_AVERAGE_VARIATION,
                         refund_gas_function_container = refound_gas
                     ): raise Exception('Launch service error spending gas for '+father_ip)
                     service_instance = next(grpcbf.client_grpc(
@@ -344,13 +345,14 @@ def launch_service(
             #  The node launches the service locally.
             if getting_container: l.LOGGER('El nodo lanza el servicio localmente.')
             if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_RESOURCES
+            refound_gas = []
             if not spend_gas(
                 id = father_ip,
                 gas_to_spend = start_service_cost(
                     initial_gas_amount = initial_gas_amount if initial_gas_amount else DEFAULT_INITIAL_GAS_AMOUNT,
                     service_buffer = service_buffer,
                     metadata = metadata
-                )
+                ) * GAS_COST_FACTOR,
             ): raise Exception('Launch service error spending gas for '+father_ip)
             try:
                 id = build.build(
@@ -360,13 +362,23 @@ def launch_service(
                         get_it = not getting_container,
                         complete = is_complete
                     )  #  If the container is not built, build it.
-            except build.UnsupportedArquitectureException as e: raise e
+            except build.UnsupportedArquitectureException as e: 
+                try:
+                    refound_gas.pop()()
+                except IndexError: pass
+                raise e
             except build.WaitBuildException:
                 # If it does not have the container, it takes it from another node in the background and requests
                 #  the instance from another node as well.
+                try:
+                    refound_gas.pop()() # Refund the gas.
+                except IndexError: pass
                 getting_container = True
                 continue
             except Exception as e:
+                try:
+                    refound_gas.pop()() # Refund the gas.
+                except IndexError: pass
                 l.LOGGER(str(e))
                 raise e
 
@@ -782,6 +794,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
         token = get_token_by_uri(
                 uri = utils.get_only_the_ip_from_context(context_peer = context.peer())
             )
+        refound_gas = []
+        if not spend_gas(
+            id = token, 
+            gas_to_spend = MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR * GAS_COST_FACTOR,
+            refund_gas_function_container = refound_gas
+        ): raise Exception('Launch service error spending gas for '+context.peer())
         if not container_modify_system_params(
             token = token,
             system_requeriments_range = next(grpcbf.parse_from_buffer(
@@ -789,7 +807,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 indices = gateway_pb2.ModifyServiceSystemResourcesInput,
                 partitions_message_mode = True
             ))
-        ): raise Exception('Exception on service modify method.')
+        ): 
+            try:
+                refound_gas.pop()()
+            except IndexError: pass
+            raise Exception('Exception on service modify method.')
+
         for b in grpcbf.serialize_to_buffer(
             message_iterator = get_sysresources(
                 token = token
@@ -928,7 +951,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         cost = execution_cost(
                                 service_buffer = p1.value,
                                 metadata = p1.metadata
-                            )
+                            ) * GAS_COST_FACTOR
                         break
                     except build.UnsupportedArquitectureException as e: raise e
                     except Exception as e:
@@ -952,7 +975,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 )
                             ),
                             metadata = service_with_meta.metadata
-                        )
+                        ) * GAS_COST_FACTOR
                 except build.UnsupportedArquitectureException as e: raise e
                 break
                 
@@ -1024,7 +1047,9 @@ if __name__ == "__main__":
     l.LOGGER('SEND ONLY HASHES ASKING COST -> '+ str(SEND_ONLY_HASHES_ASKING_COST))
     l.LOGGER('DENEGATE COST REQUEST IF DONT VE THE HASH -> '+ str(DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH))
     l.LOGGER('MANAGER ITERATION TIME-> '+ str(MANAGER_ITERATION_TIME))
-    l.LOGGER('AVG COST MAX PROXIMITY FACTOR-> '+ str(AVG_COST_MAX_PROXIMITY_FACTOR))
+    l.LOGGER('AVG COST MAX PROXIMITY FACTOR-> '+ str(COST_AVERAGE_VARIATION))
+    l.LOGGER('GAS_COST_FACTOR-> '+ str(GAS_COST_FACTOR))
+    l.LOGGER('MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR-> '+ str(MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR))
 
     l.LOGGER('Starting gateway at port'+ str(GATEWAY_PORT))    
 
