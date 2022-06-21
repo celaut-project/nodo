@@ -4,7 +4,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_INITIAL_GAS_AMOUNT, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, add_container, add_peer, container_modify_system_params, container_stop, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, spend_gas, start_service_cost
+from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_INITIAL_GAS_AMOUNT, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, add_container, add_peer, container_modify_system_params, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, spend_gas, start_service_cost
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
@@ -103,7 +103,7 @@ def get_token_by_uri(uri: str) -> str:
 def purgue_internal(father_ip, container_id, container_ip):
     try:
         DOCKER_CLIENT().containers.get(container_id).remove(force=True)
-    except docker_lib.errors.APIError as e:
+    except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
         l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
 
     cache_lock.acquire()
@@ -738,7 +738,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 container_id = token_message.token.split('##')[2],
                 container_ip = token_message.token.split('##')[1]
             )
-            if not container_stop(
+            if not pop_container_on_cache(
                 token = token_message.token
             ): raise Exception('The service could not be stopped.')
         

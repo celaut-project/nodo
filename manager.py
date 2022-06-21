@@ -162,7 +162,7 @@ def container_modify_system_params(
 
     return False 
 
-def container_stop(token: str) -> bool:
+def pop_container_on_cache(token: str) -> bool:
     if __modify_sysreq(
         token = token,
         sys_req = celaut_pb2.Sysresources(
@@ -229,14 +229,17 @@ def start_service_cost(
 def manager_thread():
     while True:
         for token, sysreq in system_cache:
-            if False: # TODO If was killed.
-                if not container_stop(token = token):
-                    raise Exception('Manager error: the service '+ token+' could not be stopped.')
+            try:
+                if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
+                    if not pop_container_on_cache(token = token):
+                        l.LOGGER('Manager error: the service '+ token+' could not be stopped.')
+            except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
+                l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO GET THE CONTAINER ' + token)
             
             if not spend_gas(
                 id = token,
                 gas_to_spend = maintain_cost(sysreq)
-            ) and not container_stop(
+            ) and not pop_container_on_cache(
                         token = token
                     ): raise Exception('Manager error: the service '+ token+' could not be stopped.')
 
