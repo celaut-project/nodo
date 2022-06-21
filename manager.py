@@ -83,11 +83,27 @@ def __refound_gas_function_factory(
     def use(l = [lambda: __refound_gas(gas, cache, id)]): l.pop()()
     if container: container.append( lambda: use() )
 
+
+# Payment process for the manager.
+
+def __peer_avaliable_payment_process(peer_id: str) -> list: # This is a simualtion of the payment process.
+    return [
+        lambda amount: amount > 0,      # TODO  VYPER NODE PAYMENT PROCESS. (debe de retornar una lista de funciones de procesos que permita ese par en concreto)
+    ]
+
+def __peer_payment_process(peer_id: str, amount: int) -> bool:
+    l.LOGGER('Peer payment process to '+peer_id+' by '+str(amount))
+    for avaliable_payment_process in __peer_avaliable_payment_process(peer_id = peer_id):
+        if avaliable_payment_process(amount = amount):
+            return True
+    return False
+
 def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase deposit on peer '+peer_id+' by '+str(amount))
-    peer_deposits[peer_id] += amount if peer_id in peer_deposits else amount
-    # TODO  VYPER NODE PAYMENT PROCESS.
-    return True
+    if __peer_payment_process(peer_id, amount):  # process the payment on the peer.
+        peer_deposits[peer_id] += amount if peer_id in peer_deposits else amount
+        return True
+    return False
 
 def spend_gas(
     id: str,
@@ -255,9 +271,10 @@ def maintain():
 def pair_deposits():
     for peer, deposit in peer_deposits.items():
         if deposit < MIN_PEER_DEPOSIT:
-            l.LOGGER('Manager error: the peer '+ peer+' has not enough deposit.')
-            if not pop_peer(peer = peer):
-                l.LOGGER('Manager error: the peer '+ peer+' could not be stopped.')
+            l.LOGGER('Manager error: the peer '+ str(peer)+' has not enough deposit.')
+            if not increase_deposit_on_peer(peer = peer):
+                l.LOGGER('Manager error: the peer '+ str(peer)+' could not be increased.')
+                del peer_deposits[peer]
 
 def manager_thread():
     while True:
