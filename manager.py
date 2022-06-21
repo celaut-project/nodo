@@ -84,6 +84,12 @@ def __refound_gas_function_factory(
     if container: container.append( lambda: use() )
 
 
+# Payment events for the manager.
+
+def __new_payment_events() -> list:
+    return []
+
+
 # Payment process for the manager.
 
 def __peer_avaliable_payment_process(peer_id: str) -> list: # This is a simualtion of the payment process.
@@ -275,6 +281,10 @@ def pair_deposits():
             if not increase_deposit_on_peer(peer = peer):
                 l.LOGGER('Manager error: the peer '+ str(peer)+' could not be increased.')
                 del peer_deposits[peer]
+
+def check_deposits():
+    for event in __new_payment_events():
+        peer_instances[event['peer']] += event['amount']
 
 def manager_thread():
     while True:
