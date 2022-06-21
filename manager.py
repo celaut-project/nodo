@@ -29,6 +29,7 @@ COMPUTE_POWER_RATE = GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
 COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
 MANAGER_ITERATION_TIME = GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 3)
+MEMORY_LIMIT_COST_FACTOR = GET_ENV(env = 'MEMORY_LIMIT_COST_FACTOR', default = 0)
 
 MEMSWAP_FACTOR = 0 # 0 - 1
 
@@ -181,26 +182,11 @@ def get_sysresources(token: str) -> celaut_pb2.Sysresources:
         mem_limit = system_cache[token]["mem_limit"]
     )
 
+
+# Cost functions
+
 def maintain_cost(sysreq: dict) -> int:
-    return 0    # TODO
-
-def manager_thread():
-    while True:
-        for token, sysreq in system_cache:
-            if False: # TODO If was killed.
-                if not container_stop(token = token):
-                    raise Exception('Manager error: the service '+ token+' could not be stopped.')
-            
-            if not spend_gas(
-                id = token,
-                gas_to_spend = maintain_cost(sysreq)
-            ) and not container_stop(
-                        token = token
-                    ): raise Exception('Manager error: the service '+ token+' could not be stopped.')
-
-        sleep(MANAGER_ITERATION_TIME)
-
-
+    return MEMORY_LIMIT_COST_FACTOR * sysreq['mem_limit']
 
 def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
     is_built = (get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata) \
@@ -236,3 +222,22 @@ def start_service_cost(
         service_buffer = service_buffer,
         metadata = metadata
     ) + initial_gas_amount
+
+
+# Threads
+
+def manager_thread():
+    while True:
+        for token, sysreq in system_cache:
+            if False: # TODO If was killed.
+                if not container_stop(token = token):
+                    raise Exception('Manager error: the service '+ token+' could not be stopped.')
+            
+            if not spend_gas(
+                id = token,
+                gas_to_spend = maintain_cost(sysreq)
+            ) and not container_stop(
+                        token = token
+                    ): raise Exception('Manager error: the service '+ token+' could not be stopped.')
+
+        sleep(MANAGER_ITERATION_TIME)

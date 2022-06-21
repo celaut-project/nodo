@@ -44,3 +44,4 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 - DEFAULT_INITIAL_GAS_AMOUNT
 - MANAGER_ITERATION_TIME
 - AVG_COST_MAX_PROXIMITY_FACTOR
+- MEMORY_LIMIT_COST_FACTOR
