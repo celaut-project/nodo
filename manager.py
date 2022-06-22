@@ -1,3 +1,4 @@
+from threading import Lock
 from time import sleep
 import build
 import docker as docker_lib
@@ -41,14 +42,17 @@ AVALIABLE_PAYMENT_PROCESS = {'VYPER': vyper_gdc.process_payment}   #ledger_id:  
 MEMSWAP_FACTOR = 0 # 0 - 1
 
 
-# TODO system_cache_lock = Lock()
-
+system_cache_lock = Lock()
 system_cache = {} # token : { mem_limit: 0, gas: 0 }
+
+peer_instances_lock = Lock()
 peer_instances = {'192.168.1.13': 999999} # id: amount_of_gas -> other peers' deposits on this node.
+
+deposits_on_other_peers_lock = Lock()
 deposits_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
 
 def __push_token(token: str): 
-    system_cache[token] = { "mem_limit": 0 }
+    with system_cache_lock: system_cache[token] = { "mem_limit": 0 }
 
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
     if token not in system_cache.keys(): raise Exception('Manager error: token '+token+' does not exists.')
@@ -61,7 +65,8 @@ def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
         elif variation > 0:
             IOBigData().unlock_ram(ram_amount = variation)
 
-        if variation != 0: system_cache[token]['mem_limit'] = sys_req.mem_limit
+        if variation != 0: 
+            with system_cache_lock: system_cache[token]['mem_limit'] = sys_req.mem_limit
 
     return True
 
@@ -159,7 +164,7 @@ def spend_gas(
             return True
         elif id in system_cache and system_cache[id]['gas'] >= gas_to_spend:
             l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]['gas']))
-            system_cache[id]['gas'] -= gas_to_spend
+            with system_cache_lock: system_cache[id]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
                 cache = peer_instances, 
@@ -195,7 +200,7 @@ def add_container(
     if token in system_cache.keys(): raise Exception('Manager error: '+token+' exists.')
 
     __push_token(token = token)
-    system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else DEFAULT_INITIAL_GAS_AMOUNT
+    with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else DEFAULT_INITIAL_GAS_AMOUNT
     if not container_modify_system_params(
         token = token,
         system_requeriments_range = system_requeriments_range
@@ -240,7 +245,7 @@ def pop_container_on_cache(token: str) -> bool:
             mem_limit = 0
         )
     ):
-        del system_cache[token]
+        with system_cache_lock: del system_cache[token]
         return True
     return False
 
@@ -299,7 +304,7 @@ def start_service_cost(
 
 def maintain():
     l.LOGGER('Maintain '+str(system_cache))
-    for token, sysreq in system_cache.items():
+    for token, sysreq in dict(system_cache).items():  # Parse the system cache to other dict to avoid concurrent access.
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
                 if not pop_container_on_cache(token = token):
