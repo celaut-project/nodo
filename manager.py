@@ -31,7 +31,9 @@ MANAGER_ITERATION_TIME = GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 3)
 MEMORY_LIMIT_COST_FACTOR = GET_ENV(env = 'MEMORY_LIMIT_COST_FACTOR', default = 0)
 MIN_PEER_DEPOSIT = GET_ENV(env = 'MIN_PEER_DEPOSIT', default = 10)
 INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', default = 2)
-PAYMENT_PROCESS_VALIDATORS = {'VYPER': vyper_gdc.payment_process_validator}     # ledger_id: lambda peer_id, tx_id, amount: bool,
+
+PAYMENT_PROCESS_VALIDATORS = {'VYPER': vyper_gdc.payment_process_validator}     # ledger_id:  lambda peer_id, tx_id, amount -> bool,
+AVALIABLE_PAYMENT_PROCESS = {'VYPER': vyper_gdc.process_payment}   #ledger_id:   lambda amount, peer_id -> tx_id,
 
 MEMSWAP_FACTOR = 0 # 0 - 1
 
@@ -90,27 +92,21 @@ def __refound_gas_function_factory(
 
 # Payment process for the manager.
 
-def __peer_avaliable_payment_process(peer_id: str) -> list: # This is a simualtion of the payment process.
-    return [
-        lambda amount: amount > 0,      # TODO  VYPER NODE PAYMENT PROCESS. (debe de retornar una lista de funciones de procesos que permita ese par en concreto)
-    ]
-
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
     l.LOGGER('Peer payment process to '+peer_id+' by '+str(amount))
-    for avaliable_payment_process in __peer_avaliable_payment_process(peer_id = peer_id):
-        if avaliable_payment_process(amount = amount):
-            try:
-                gateway_pb2_grpc.GatewayStub(peer_id).Payment(  # TODO
-                    payment = gateway_pb2.Payment(
-                        amount = amount,
-                        tx_id = '',
-                        ledger = '',
-                    )
+    for payment_ledger, avaliable_payment_process in AVALIABLE_PAYMENT_PROCESS.items(): # check if the payment process is compatible with this peer.
+        try:
+            gateway_pb2_grpc.GatewayStub(peer_id).Payment(  # TODO
+                payment = gateway_pb2.Payment(
+                    amount = amount,
+                    tx_id = avaliable_payment_process(amount = amount, peer_id = peer_id),
+                    ledger = payment_ledger,
                 )
-            except Exception as e:
-                l.LOGGER('Peer payment process error: '+str(e))
-                return False
-            return True
+            )
+        except Exception as e:
+            l.LOGGER('Peer payment process error: '+str(e))
+            return False
+        return True
     return False
 
 def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
