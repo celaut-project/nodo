@@ -159,7 +159,7 @@ def spend_gas(
             return True
         elif id in system_cache and system_cache[id]['gas'] >= gas_to_spend:
             l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]['gas']))
-            system_cache[id] -= gas_to_spend
+            system_cache[id]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
                 cache = peer_instances, 
