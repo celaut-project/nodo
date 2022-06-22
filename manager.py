@@ -7,9 +7,9 @@ from iobigdata import IOBigData
 import pymongo
 import docker as docker_lib
 import logger as l
-import gateway_pb2
 from verify import get_service_hex_main_hash
 import celaut_pb2 as celaut
+import gateway_pb2_grpc,gateway_pb2, grpc, grpcbigbuffer as grpcbf
 import contracts.vyper_gas_deposit_contract as vyper_gdc
 
 db = pymongo.MongoClient(
@@ -95,14 +95,21 @@ def __refound_gas_function_factory(
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
     l.LOGGER('Peer payment process to '+peer_id+' by '+str(amount))
     for payment_ledger, avaliable_payment_process in AVALIABLE_PAYMENT_PROCESS.items(): # check if the payment process is compatible with this peer.
-        try:
-            gateway_pb2_grpc.GatewayStub(peer_id).Payment(  # TODO
-                payment = gateway_pb2.Payment(
-                    amount = amount,
-                    tx_id = avaliable_payment_process(amount = amount, peer_id = peer_id),
-                    ledger = payment_ledger,
+        try:            
+            next(grpcbf.client_grpc(
+                        method = gateway_pb2_grpc.GatewayStub(
+                                    grpc.insecure_channel(
+                                        peer_id+':8090', # TODO with port. Tiene que buscar en mongo, cuando se guarden por identificador.
+                                    )
+                                ).Payment,
+                        partitions_message_mode_parser = True,
+                        input = gateway_pb2.Payment(
+                            amount = amount,
+                            tx_id = avaliable_payment_process(amount = amount, peer_id = peer_id),
+                            ledger = payment_ledger,                            
+                        )
+                    )
                 )
-            )
         except Exception as e:
             l.LOGGER('Peer payment process error: '+str(e))
             return False
