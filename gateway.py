@@ -4,7 +4,9 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_INITIAL_GAS_AMOUNT, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, add_container, add_peer, container_modify_system_params, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, spend_gas, start_service_cost, validate_payment_process
+from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_INITIAL_GAS_AMOUNT, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
+    add_container, add_peer, container_modify_system_params, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, \
+    spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
@@ -27,9 +29,6 @@ MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
 IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = True)
 SEND_ONLY_HASHES_ASKING_COST = utils.GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default=False)
 DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = utils.GET_ENV(env = 'DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH', default=False)
-COST_AVERAGE_VARIATION = utils.GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
-GAS_COST_FACTOR = utils.GET_ENV(env = 'GAS_COST_FACTOR', default = 1)
-MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR = utils.GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()

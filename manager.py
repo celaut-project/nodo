@@ -23,7 +23,7 @@ DEFAULT_SYSTEM_RESOURCES = celaut_pb2.Sysresources(
     mem_limit = 50*pow(10, 6),
 )
 
-DEFAULT_INITIAL_GAS_AMOUNT = GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT', default = 5)
+DEFAULT_INITIAL_GAS_AMOUNT = GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT', default = 500)
 COMPUTE_POWER_RATE = GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
 COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
@@ -31,6 +31,9 @@ MANAGER_ITERATION_TIME = GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 3)
 MEMORY_LIMIT_COST_FACTOR = GET_ENV(env = 'MEMORY_LIMIT_COST_FACTOR', default = 0)
 MIN_PEER_DEPOSIT = GET_ENV(env = 'MIN_PEER_DEPOSIT', default = 10)
 INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', default = 2)
+COST_AVERAGE_VARIATION = GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
+GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1)
+MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
 
 PAYMENT_PROCESS_VALIDATORS = {'VYPER': vyper_gdc.payment_process_validator}     # ledger_id:  lambda peer_id, tx_id, amount -> bool,
 AVALIABLE_PAYMENT_PROCESS = {'VYPER': vyper_gdc.process_payment}   #ledger_id:   lambda amount, peer_id -> tx_id,
@@ -296,7 +299,7 @@ def start_service_cost(
 
 def maintain():
     l.LOGGER('Maintain '+str(system_cache))
-    for token, sysreq in system_cache:
+    for token, sysreq in system_cache.items():
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
                 if not pop_container_on_cache(token = token):
