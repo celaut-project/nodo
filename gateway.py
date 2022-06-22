@@ -990,7 +990,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ): yield b
 
 
-    def Payment(self, request_iterator, context):
+    def Payment(self, request_iterator, context):  # TODO
         l.LOGGER('Request for payment.')
         payment = next(grpcbf.parse_from_buffer(
             request_iterator = request_iterator
