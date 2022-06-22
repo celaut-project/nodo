@@ -1,9 +1,6 @@
-from asyncio import FastChildWatcher
-from os import system
 from time import sleep
 import build
 import docker as docker_lib
-from gateway import GAS_COST_FACTOR
 from utils import GET_ENV
 import celaut_pb2
 from iobigdata import IOBigData
@@ -13,6 +10,7 @@ import logger as l
 import gateway_pb2
 from verify import get_service_hex_main_hash
 import celaut_pb2 as celaut
+import contracts.vyper_gas_deposit_contract as vyper_gdc
 
 db = pymongo.MongoClient(
             "mongodb://localhost:27017/"
@@ -33,6 +31,7 @@ MANAGER_ITERATION_TIME = GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 3)
 MEMORY_LIMIT_COST_FACTOR = GET_ENV(env = 'MEMORY_LIMIT_COST_FACTOR', default = 0)
 MIN_PEER_DEPOSIT = GET_ENV(env = 'MIN_PEER_DEPOSIT', default = 10)
 INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', default = 2)
+PAYMENT_PROCESS_VALIDATORS = {'VYPER': vyper_gdc.payment_process_validator}     # ledger_id: lambda peer_id, tx_id, amount: bool,
 
 MEMSWAP_FACTOR = 0 # 0 - 1
 
@@ -41,7 +40,7 @@ MEMSWAP_FACTOR = 0 # 0 - 1
 
 system_cache = {} # token : { mem_limit: 0, gas: 0 }
 peer_instances = {'192.168.1.13': 999999} # id: amount_of_gas -> other peers' deposits on this node.
-peer_deposits = {}  # id: amount of gas -> the deposits in other peers.
+deposits_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
 
 def __push_token(token: str): 
     system_cache[token] = { "mem_limit": 0 }
@@ -70,24 +69,23 @@ def __refound_gas(
     gas: int,
     cache: dict,
     id: int
-) -> None: 
-    cache[id] += gas
+) -> bool: 
+    try:
+        cache[id] += gas
+    except Exception as e:
+        l.LOGGER('Manager error: '+str(e))
+        return False
+    return True
 
 # Only can be executed once.
 def __refound_gas_function_factory(
     gas: int,
     cache: dict,
     id: int,
-    container: list
+    container: list = None
 ) -> lambda: None: 
     def use(l = [lambda: __refound_gas(gas, cache, id)]): l.pop()()
     if container: container.append( lambda: use() )
-
-
-# Payment events for the manager.
-
-def __new_payment_events() -> list:
-    return []
 
 
 # Payment process for the manager.
@@ -101,15 +99,40 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
     l.LOGGER('Peer payment process to '+peer_id+' by '+str(amount))
     for avaliable_payment_process in __peer_avaliable_payment_process(peer_id = peer_id):
         if avaliable_payment_process(amount = amount):
+            try:
+                gateway_pb2_grpc.GatewayStub(peer_id).Payment(  # TODO
+                    payment = gateway_pb2.Payment(
+                        amount = amount,
+                        tx_id = '',
+                        ledger = '',
+                    )
+                )
+            except Exception as e:
+                l.LOGGER('Peer payment process error: '+str(e))
+                return False
             return True
     return False
 
-def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
+def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase deposit on peer '+peer_id+' by '+str(amount))
-    if __peer_payment_process(peer_id, amount):  # process the payment on the peer.
-        peer_deposits[peer_id] = peer_deposits[peer_id] + amount if peer_id in peer_deposits else amount
+    if __peer_payment_process(peer_id = peer_id, amount = amount):  # process the payment on the peer.
+        deposits_on_other_peers[peer_id] = deposits_on_other_peers[peer_id] + amount if peer_id in deposits_on_other_peers else amount
         return True
     return False
+
+def __check_payment_process(peer_id: str, amount: int, tx_id: str, ledger: str) -> bool:
+    l.LOGGER('Check payment process to '+peer_id+' by '+str(amount))
+    return PAYMENT_PROCESS_VALIDATORS[ledger](peer_id, amount, tx_id)
+
+def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
+    l.LOGGER('Increase local gas for peer '+peer_id+' by '+str(amount))
+    if not __refound_gas(gas = amount, cache = peer_instances, id = peer_id):
+        raise Exception('Manager error: cannot increase local gas for peer '+peer_id+' by '+str(amount))
+    return True
+
+def validate_payment_process(peer: str, amount: int, tx_id: str, ledger: str) -> bool:
+    return __check_payment_process(peer = peer, amount = amount, tx_id = tx_id, ledger = ledger) \
+         and __increase_local_gas_for_peer(peer_id = peer, amount = amount)
 
 def spend_gas(
     id: str,
@@ -151,7 +174,7 @@ def add_peer(
 
     if peer_id not in peer_instances:
         peer_instances[peer_id] = 0
-        return increase_deposit_on_peer(peer_id, INITIAL_PEER_DEPOSIT_FACTOR * MIN_PEER_DEPOSIT)
+        return __increase_local_gas_for_peer(peer_id, INITIAL_PEER_DEPOSIT_FACTOR * MIN_PEER_DEPOSIT)
     return False
 
 
@@ -285,20 +308,16 @@ def maintain():
                 ): raise Exception('Manager error: the service '+ token+' could not be stopped.')
 
 def pair_deposits():
-    for peer, deposit in peer_deposits.items():
+    for peer, deposit in deposits_on_other_peers.items():
         if deposit < MIN_PEER_DEPOSIT:
             l.LOGGER('Manager error: the peer '+ str(peer)+' has not enough deposit.')
-            if not increase_deposit_on_peer(peer = peer):
+            if not __increase_deposit_on_peer(peer = peer):
                 l.LOGGER('Manager error: the peer '+ str(peer)+' could not be increased.')
-                del peer_deposits[peer]
+                del deposits_on_other_peers[peer]
 
-def check_deposits():
-    for event in __new_payment_events():
-        peer_instances[event['peer']] = peer_instances[event['peer']] + event['amount'] \
-            if event['peer'] in peer_instances else event['amount']
 
 def manager_thread():
     while True:
         maintain()
-        
+        pair_deposits()
         sleep(MANAGER_ITERATION_TIME) 

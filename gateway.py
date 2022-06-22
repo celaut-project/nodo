@@ -4,7 +4,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_INITIAL_GAS_AMOUNT, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, add_container, add_peer, container_modify_system_params, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, spend_gas, start_service_cost
+from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_INITIAL_GAS_AMOUNT, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, add_container, add_peer, container_modify_system_params, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, spend_gas, start_service_cost, validate_payment_process
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
@@ -988,6 +988,21 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             ),
             indices = gateway_pb2.EstimatedCost
         ): yield b
+
+
+    def Payment(self, request_iterator, context):
+        l.LOGGER('Request for payment.')
+        payment = next(grpcbf.parse_from_buffer(
+            request_iterator = request_iterator
+        ))
+        if not validate_payment_process(
+            peer = context.peer(),
+            amount = payment.amount,
+            tx_id  = payment.tx_id,
+            ledger = payment.ledger,
+        ): raise Exception('Error: payment not valid.')
+        l.LOGGER('Payment is valid.')
+        yield gateway_pb2.buffer__pb2.Buffer(separator = True)
 
 if __name__ == "__main__":
     # Create __hycache__ if it does not exists.
