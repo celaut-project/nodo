@@ -235,7 +235,10 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
     try:
         peers.add_elem(
-            weight = gateway_pb2.EstimatedCost(cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * GAS_COST_FACTOR, variance = 0)
+            weight = gateway_pb2.EstimatedCost(
+                cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * GAS_COST_FACTOR + DEFAULT_INITIAL_GAS_AMOUNT, 
+                variance = 0
+            )
         )
     except build.UnsupportedArquitectureException: pass
 
@@ -1001,6 +1004,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ): raise Exception('Error: payment not valid.')
         l.LOGGER('Payment is valid.')
         yield gateway_pb2.buffer__pb2.Buffer(separator = True)
+
 
 if __name__ == "__main__":
     # Create __hycache__ if it does not exists.
