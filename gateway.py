@@ -279,7 +279,7 @@ def launch_service(
         system_requeriments: celaut.Sysresources = None,
         max_sysreq = None,
         config: celaut.Configuration = None,
-        initial_gas_amount: int = None,
+        initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT,
     ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
     if service_buffer == None: raise Exception("Service object can't be None")
