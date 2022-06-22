@@ -578,7 +578,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Starting service ...')
         configuration = None
         system_requeriments = None
-        initial_gas_amount = None
+        initial_gas_amount = DEFAULT_INITIAL_GAS_AMOUNT
         max_sysreq = None
         hashes = []
         parser_generator = grpcbf.parse_from_buffer(

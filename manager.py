@@ -192,7 +192,7 @@ def add_container(
     if token in system_cache.keys(): raise Exception('Manager error: '+token+' exists.')
 
     __push_token(token = token)
-    system_cache[token]['gas'] = initial_gas_amount
+    system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else DEFAULT_INITIAL_GAS_AMOUNT
     if not container_modify_system_params(
         token = token,
         system_requeriments_range = system_requeriments_range
