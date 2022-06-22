@@ -295,6 +295,7 @@ def start_service_cost(
 # Thread
 
 def maintain():
+    l.LOGGER('Maintain '+str(system_cache))
     for token, sysreq in system_cache:
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
