@@ -49,3 +49,4 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 - MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR
 - MIN_PEER_DEPOSIT
 - INITIAL_PEER_DEPOSIT_FACTOR
+- ALLOW_GAS_DEBT

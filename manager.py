@@ -35,6 +35,7 @@ INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', defau
 COST_AVERAGE_VARIATION = GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
 GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1)
 MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
+ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = False)  # Could be used with the reputation system.
 
 PAYMENT_PROCESS_VALIDATORS = {'VYPER': vyper_gdc.payment_process_validator}     # ledger_id:  lambda peer_id, tx_id, amount -> bool,
 AVALIABLE_PAYMENT_PROCESS = {'VYPER': vyper_gdc.process_payment}   #ledger_id:   lambda amount, peer_id -> tx_id,
@@ -152,7 +153,7 @@ def spend_gas(
 ) -> bool:
     l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + id)
     try:
-        if id in peer_instances and peer_instances[id] >= gas_to_spend:
+        if id in peer_instances and (peer_instances[id] >= gas_to_spend or ALLOW_GAS_DEBT):
             l.LOGGER( str(gas_to_spend)+' of '+str(peer_instances[id]))
             peer_instances[id] -= gas_to_spend
             __refound_gas_function_factory(
@@ -162,7 +163,7 @@ def spend_gas(
                 container = refund_gas_function_container
             )
             return True
-        elif id in system_cache and system_cache[id]['gas'] >= gas_to_spend:
+        elif id in system_cache and (system_cache[id]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
             l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[id]['gas']))
             with system_cache_lock: system_cache[id]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
