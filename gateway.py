@@ -149,7 +149,6 @@ def purgue_internal(father_ip, container_id, container_ip):
 
 
 def purgue_external(father_ip, node_uri, token):
-    # EN NODE_URI LLEGA UNA IP ¿?
     if len(node_uri.split(':')) < 2:
         l.LOGGER('Should be an uri not an ip. Something was wrong. The node uri is ' + node_uri)
         return None
