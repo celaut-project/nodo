@@ -4,7 +4,8 @@ import threading
 from time import sleep
 import build
 import docker as docker_lib
-from utils import GET_ENV
+from gateway import DOCKER_NETWORK
+from utils import GET_ENV, get_network_name
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -115,7 +116,7 @@ def purgue_internal(father_ip, container_id, container_ip):
     if container_ip in container_cache:
         for dependency in container_cache[container_ip]:
             # Si la dependencia esta en local.
-            if utils.get_network_name(ip_or_uri = dependency.split('##')[0]) == DOCKER_NETWORK:
+            if get_network_name(ip_or_uri = dependency.split('##')[0]) == DOCKER_NETWORK:
                 purgue_internal(
                     father_ip = container_ip,
                     container_id = dependency.split('##')[1],
@@ -391,6 +392,40 @@ def get_sysresources(token: str) -> celaut_pb2.Sysresources:
     )
 
 
+# PRUNE CONTAINER METHOD
+
+def prune_container(token: str) -> bool:
+    if get_network_name(ip_or_uri = token.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
+        try:
+            purgue_internal(
+                father_ip = token.split('##')[0],
+                container_id = token.split('##')[2],
+                container_ip = token.split('##')[1]
+            )
+        except Exception as e:
+            l.LOGGER('Error purging '+token+' '+str(e))
+            return False
+        if not pop_container_on_cache(
+            token = token
+        ):
+            l.LOGGER('Error purging '+token)
+            return False
+        
+    else:
+        try:
+            purgue_external(
+                father_ip = token.split('##')[0],
+                node_uri = token.split('##')[1],
+                token = token[len( token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
+            )
+        except Exception as e:
+            l.LOGGER('Error purging '+token+' '+str(e))
+            return False
+    
+    return True
+
+
+
 # COST FUNCTIONS
 
 def maintain_cost(sysreq: dict) -> int:
@@ -447,7 +482,7 @@ def maintain():
         if not spend_gas(
             id = token,
             gas_to_spend = maintain_cost(sysreq)
-        ) and not pop_container_on_cache(
+        ) and not prune_container(
                     token = token
                 ): raise Exception('Manager error: the service '+ token+' could not be stopped.')
 

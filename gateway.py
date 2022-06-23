@@ -5,7 +5,7 @@ from buffer_pb2 import Buffer
 import celaut_pb2 as celaut
 import build, utils
 from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_INITIAL_GAS_AMOUNT, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
-    add_container, add_peer, container_modify_system_params, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, \
+    add_container, add_peer, container_modify_system_params, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, prune_container, \
     spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
@@ -626,24 +626,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_message_mode=True
         ))
 
-        l.LOGGER('Stopping the service with token ' + token_message.token)
-        
-        if utils.get_network_name(ip_or_uri = token_message.token.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
-            purgue_internal(
-                father_ip = token_message.token.split('##')[0],
-                container_id = token_message.token.split('##')[2],
-                container_ip = token_message.token.split('##')[1]
-            )
-            if not pop_container_on_cache(
-                token = token_message.token
-            ): raise Exception('The service could not be stopped.')
-        
-        else:
-            purgue_external(
-                father_ip = token_message.token.split('##')[0],
-                node_uri = token_message.token.split('##')[1],
-                token = token_message.token[len( token_message.token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
-            )
+        if not prune_container(token = token_message.token):
+            raise Exception('Was imposible stop the service'+ str(token_message))
         
         l.LOGGER('Stopped the instance with token -> ' + token_message.token)
         yield gateway_pb2.buffer__pb2.Buffer(
