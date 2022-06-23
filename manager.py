@@ -241,6 +241,7 @@ def container_modify_system_params(
     return False 
 
 def pop_container_on_cache(token: str) -> bool:
+    l.LOGGER('Pop container on cache '+ token)
     if __modify_sysreq(
         token = token,
         sys_req = celaut_pb2.Sysresources(
