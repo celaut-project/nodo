@@ -980,12 +980,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         ) * GAS_COST_FACTOR
                 except build.UnsupportedArquitectureException as e: raise e
                 break
-                
+        
+        cost = cost + DEFAULT_INITIAL_GAS_AMOUNT
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost) + ' with benefit ' + str(cost))
         if cost is None: raise Exception("I dont've the service.")
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.EstimatedCost(
-                                cost = cost + DEFAULT_INITIAL_GAS_AMOUNT,
+                                cost = cost,
                                 variance = 0.01  # TODO dynamic variance.
                             ),
             indices = gateway_pb2.EstimatedCost
