@@ -151,6 +151,7 @@ def spend_gas(
     gas_to_spend: int,
     refund_gas_function_container: list = None
 ) -> bool:
+    gas_to_spend = int(gas_to_spend)
     l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + id)
     try:
         if id in peer_instances and (peer_instances[id] >= gas_to_spend or ALLOW_GAS_DEBT):
