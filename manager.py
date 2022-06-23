@@ -1,4 +1,6 @@
+import json
 from threading import Lock
+import threading
 from time import sleep
 import build
 import docker as docker_lib
@@ -12,6 +14,7 @@ from verify import get_service_hex_main_hash
 import celaut_pb2 as celaut
 import gateway_pb2_grpc,gateway_pb2, grpc, grpcbigbuffer as grpcbf
 import contracts.vyper_gas_deposit_contract as vyper_gdc
+from google.protobuf.json_format import MessageToJson
 
 db = pymongo.MongoClient(
             "mongodb://localhost:27017/"
@@ -42,6 +45,132 @@ AVALIABLE_PAYMENT_PROCESS = {'VYPER': vyper_gdc.process_payment}   #ledger_id:  
 
 MEMSWAP_FACTOR = 0 # 0 - 1
 
+
+# CONTAINER CACHE
+
+# Insert the instance if it does not exists.
+def insert_instance_on_mongo(instance: celaut.Instance):
+    parsed_instance = json.loads(MessageToJson(instance))
+    pymongo.MongoClient(
+        "mongodb://localhost:27017/"
+    )["mongo"]["peerInstances"].update_one(
+        filter = parsed_instance,
+        update={'$setOnInsert': parsed_instance},
+        upsert = True
+    )
+
+container_cache_lock = threading.Lock()
+container_cache = {}  # ip_father:[dependencies]
+
+cache_service_perspective = {} # service_ip:token
+
+# internal token -> str( peer_ip##container_ip##container_id )   peer_ip se refiere a la direccion del servicio padre (que puede ser interno o no).
+# external token -> str( peer_ip##node_ip:node_port##his_token )
+
+# En caso de mandarle la tarea a otro nodo:
+#   En cache se añadirá el servicio como dependencia del nodo elegido,
+#   en vez de usar la ip del servicio se pone el token que nos dió ese servicio,
+#   nosotros a nuestro servicio solicitante le daremos un token con el formato node_ip##his_token.
+
+
+def set_on_cache( father_ip : str, id_or_token: str, ip_or_uri: str):
+
+    # En caso de ser un nodo externo:
+    if not father_ip in container_cache:
+        container_cache_lock.acquire()
+        container_cache.update({father_ip: []})
+        container_cache_lock.release()
+        # Si peer_ip es un servicio del nodo ya
+        # debería estar en el registro.
+
+
+    # Añade el nuevo servicio como dependencia.
+    container_cache[father_ip].append(ip_or_uri + '##' + id_or_token)
+    cache_service_perspective[ip_or_uri] = id_or_token
+    l.LOGGER('Set on cache ' + ip_or_uri + '##' + id_or_token + ' as dependency of ' + father_ip )
+
+
+
+def purgue_internal(father_ip, container_id, container_ip):
+    try:
+        DOCKER_CLIENT().containers.get(container_id).remove(force=True)
+    except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
+        l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
+
+    container_cache_lock.acquire()
+
+    try:
+        container_cache[father_ip].remove(container_ip + '##' + container_id)
+    except ValueError as e:
+        l.LOGGER(str(e) + str(container_cache[father_ip]) + ' trying to remove ' + container_ip + '##' + container_id)
+    except KeyError as e:
+        l.LOGGER(str(e) + father_ip + ' not in ' + str(container_cache.keys()))
+
+    try:
+        del cache_service_perspective[container_ip]
+    except Exception as e:
+        l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e)+ ' ' + str(cache_service_perspective)+ ' ' + str(container_id))  # TODO. Study the imposibility of that.
+        raise e
+
+    if container_ip in container_cache:
+        for dependency in container_cache[container_ip]:
+            # Si la dependencia esta en local.
+            if utils.get_network_name(ip_or_uri = dependency.split('##')[0]) == DOCKER_NETWORK:
+                purgue_internal(
+                    father_ip = container_ip,
+                    container_id = dependency.split('##')[1],
+                    container_ip = dependency.split('##')[0]
+                )
+            # Si la dependencia se encuentra en otro nodo.
+            else:
+                purgue_external(
+                    father_ip = father_ip,
+                    node_uri = dependency.split('##')[0],
+                    token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
+                )
+
+        try:
+            l.LOGGER('Deleting the instance ' + container_id + ' from cache with ' + str(container_cache[container_ip]) + ' dependencies.')
+            del container_cache[container_ip]
+        except KeyError as e:
+            l.LOGGER(str(e) + container_ip + ' not in ' + str(container_cache.keys()))
+
+    container_cache_lock.release()
+
+
+def purgue_external(father_ip, node_uri, token):
+    if len(node_uri.split(':')) < 2:
+        l.LOGGER('Should be an uri not an ip. Something was wrong. The node uri is ' + node_uri)
+        return None
+    
+    container_cache_lock.acquire()
+    
+    try:
+        container_cache[father_ip].remove(node_uri + '##' + token)
+    except ValueError as e:
+        l.LOGGER(str(e) + str(container_cache[father_ip]) + ' trying to remove ' + node_uri + '##' + token)
+    except KeyError as e:
+        l.LOGGER(str(e) + father_ip + ' not in ' + str(container_cache.keys()))
+
+    # Le manda al otro nodo que elimine esa instancia.
+    try:
+        next(grpcbf.client_grpc(
+            method = gateway_pb2_grpc.GatewayStub(
+                        grpc.insecure_channel(
+                            node_uri
+                        )
+                    ).StopService,
+            input = gateway_pb2.TokenMessage(
+                token = token
+            )
+        ))
+    except grpc.RpcError as e:
+        l.LOGGER('Error during remove a container on ' + node_uri + ' ' + str(e))
+
+    container_cache_lock.release()
+
+
+# SYSTEM CACHE
 
 system_cache_lock = Lock()
 system_cache = {} # token : { mem_limit: 0, gas: 0 }
@@ -262,7 +391,7 @@ def get_sysresources(token: str) -> celaut_pb2.Sysresources:
     )
 
 
-# Cost functions
+# COST FUNCTIONS
 
 def maintain_cost(sysreq: dict) -> int:
     return MEMORY_LIMIT_COST_FACTOR * sysreq['mem_limit']
@@ -303,7 +432,7 @@ def start_service_cost(
     ) + initial_gas_amount
 
 
-# Thread
+# THREAD
 
 def maintain():
     l.LOGGER('Maintain '+str(system_cache))
