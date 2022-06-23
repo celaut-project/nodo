@@ -244,7 +244,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
 
     try:
         for peer in utils.peers_iterator(ignore_network = ignore_network):
-            l.LOGGER('Peer ' + peer.ip + ' ' + str(peer.port))
+            l.LOGGER('Peer ' + peer['ip'] + ' ' + str(peer['port']))
             # TODO could use async or concurrency ¿numba?. And use timeout.
             peer_uri = peer['ip']+':'+str(peer['port'])
             try:
