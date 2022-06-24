@@ -40,7 +40,7 @@ INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', defau
 COST_AVERAGE_VARIATION = GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
 GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only outside the manager. (not in maintain_cost)
 MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
-ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = False)  # Could be used with the reputation system.
+ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = True)  # Could be used with the reputation system.
 
 PAYMENT_PROCESS_VALIDATORS = {'VYPER': vyper_gdc.payment_process_validator}     # ledger_id:  lambda peer_id, tx_id, amount -> bool,
 AVALIABLE_PAYMENT_PROCESS = {'VYPER': vyper_gdc.process_payment}   #ledger_id:   lambda amount, peer_id -> tx_id,
