@@ -275,14 +275,16 @@ def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
         raise Exception('Manager error: cannot increase local gas for peer '+peer_id+' by '+str(amount))
     return True
 
-def __get_gas_amount(id: str) -> int:
-    l.LOGGER('Get gas amount for '+id)
-    if id in peer_instances:
-        return peer_instances[id]
-    elif id in system_cache:
-        return system_cache[id]['gas']
+def __get_gas_amount_by_father_ip(father_ip: str) -> int:
+    l.LOGGER('Get gas amount for '+father_ip)
+    if father_ip in peer_instances:
+        return peer_instances[father_ip]
+    elif father_ip in cache_service_perspective:
+        return system_cache[
+            cache_service_perspective[father_ip]
+        ]['gas']
     else:
-        raise Exception('Manager error: cannot get gas amount for '+id)
+        raise Exception('Manager error: cannot get gas amount for '+father_ip)
 
 
 def validate_payment_process(peer: str, amount: int, tx_id: str, ledger: str) -> bool:
@@ -338,7 +340,7 @@ def add_peer(
 def default_cost(
     father_ip: str = None
 ) -> int:
-    return ( __get_gas_amount( id = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR ) if father_ip else DEFAULT_INTIAL_GAS_AMOUNT
+    return ( __get_gas_amount_by_father_ip( father_ip = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR ) if father_ip else DEFAULT_INTIAL_GAS_AMOUNT
 
 def add_container(
     father_ip: str,
