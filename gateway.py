@@ -20,11 +20,9 @@ import netifaces as ni
 from gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input, GetServiceTar_input, StartService_input_partitions_v2
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
-from manager import insert_instance_on_mongo, purgue_external, purgue_internal, cache_service_perspective, set_on_cache
+from manager import insert_instance_on_mongo, purgue_external, purgue_internal, cache_service_perspective, set_on_cache, DOCKER_NETWORK, LOCAL_NETWORK
 
 DOCKER_CLIENT = lambda: docker_lib.from_env()
-DOCKER_NETWORK = 'docker0'
-LOCAL_NETWORK = 'lo'
 GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
 MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
 IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = True)
