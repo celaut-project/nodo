@@ -4,7 +4,6 @@ import threading
 from time import sleep
 import build
 import docker as docker_lib
-from gateway import DOCKER_NETWORK
 from utils import GET_ENV, get_network_name
 import celaut_pb2
 from iobigdata import IOBigData
