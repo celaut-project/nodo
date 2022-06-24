@@ -20,7 +20,7 @@ import netifaces as ni
 from gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input, GetServiceTar_input, StartService_input_partitions_v2
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
-from manager import insert_instance_on_mongo, purgue_external, purgue_internal, cache_service_perspective, set_on_cache, DOCKER_NETWORK, LOCAL_NETWORK
+from manager import insert_instance_on_mongo, cache_service_perspective, set_on_cache, DOCKER_NETWORK, LOCAL_NETWORK
 
 DOCKER_CLIENT = lambda: docker_lib.from_env()
 GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
