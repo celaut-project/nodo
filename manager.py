@@ -284,7 +284,7 @@ def __get_gas_amount_by_father_ip(father_ip: str) -> int:
             cache_service_perspective[father_ip]
         ]['gas']
     else:
-        raise Exception('Manager error: cannot get gas amount for '+father_ip+'. Cache -> '+str(cache_service_perspective) + str(system_cache) + str(peer_instances))
+        raise Exception('Manager error: cannot get gas amount for '+father_ip+' Caches -> '+str(cache_service_perspective) + str(system_cache) + str(peer_instances))
 
 
 def validate_payment_process(peer: str, amount: int, tx_id: str, ledger: str) -> bool:
