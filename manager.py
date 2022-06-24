@@ -4,7 +4,7 @@ import threading
 from time import sleep
 import build
 import docker as docker_lib
-from utils import GET_ENV, get_network_name
+from utils import GET_ENV, get_network_name, get_only_the_ip_from_context_method
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -287,7 +287,7 @@ def __get_gas_amount(id: str) -> int:
 
 def validate_payment_process(peer: str, amount: int, tx_id: str, ledger: str) -> bool:
     return __check_payment_process(peer = peer, amount = amount, tx_id = tx_id, ledger = ledger) \
-         and __increase_local_gas_for_peer(peer_id = peer, amount = amount)
+         and __increase_local_gas_for_peer(peer_id = get_only_the_ip_from_context_method(context_peer = peer), amount = amount)
 
 
 def spend_gas(

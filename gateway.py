@@ -518,7 +518,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 config = configuration,
                                 system_requeriments = system_requeriments,
                                 max_sysreq = max_sysreq,
-                                initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(father_ip = context.peer()),  # TODO : modificar context.peer() por el id que se use.
+                                initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())),  # TODO : modificar context.peer() por el id que se use.
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                             )
                         ): yield b
@@ -584,7 +584,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             config = configuration,
                             system_requeriments = system_requeriments,
                             max_sysreq = max_sysreq,
-                            initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(father_ip = context.peer()),  # TODO : modificar context.peer() por el id que se use.
+                            initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())),  # TODO : modificar context.peer() por el id que se use.
                             id = hash,
                             father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                         )
@@ -608,7 +608,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     config = configuration,
                     system_requeriments = system_requeriments,
                     max_sysreq = max_sysreq,
-                    initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(father_ip = context.peer()),  # TODO : modificar context.peer() por el id que se use.
+                    initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())),  # TODO : modificar context.peer() por el id que se use.
                     father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                 )
             ): yield b
