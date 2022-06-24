@@ -4,8 +4,8 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_INITIAL_GAS_AMOUNT, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
-    add_container, add_peer, container_modify_system_params, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, prune_container, \
+from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
+    add_container, add_peer, container_modify_system_params, default_cost, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, prune_container, \
     spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
@@ -118,7 +118,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
     try:
         peers.add_elem(
             weight = gateway_pb2.EstimatedCost(
-                cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * GAS_COST_FACTOR + DEFAULT_INITIAL_GAS_AMOUNT, 
+                cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * GAS_COST_FACTOR + default_cost(), 
                 variance = 0
             )
         )
@@ -163,7 +163,7 @@ def launch_service(
         system_requeriments: celaut.Sysresources = None,
         max_sysreq = None,
         config: celaut.Configuration = None,
-        initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT,
+        initial_gas_amount: int = None,
     ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
     if service_buffer == None: raise Exception("Service object can't be None")
@@ -233,7 +233,7 @@ def launch_service(
             if not spend_gas(
                 id = father_ip,
                 gas_to_spend = start_service_cost(
-                    initial_gas_amount = initial_gas_amount if initial_gas_amount else DEFAULT_INITIAL_GAS_AMOUNT,
+                    initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(),
                     service_buffer = service_buffer,
                     metadata = metadata
                 ) * GAS_COST_FACTOR,
@@ -347,7 +347,7 @@ def launch_service(
                 token = add_container(
                             father_ip = father_ip,
                             container = container,
-                            initial_gas_amount = initial_gas_amount,
+                            initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(father_ip = father_ip),
                             system_requeriments_range = gateway_pb2.ModifyServiceSystemResourcesInput(min_sysreq = system_requeriments, max_sysreq = system_requeriments)
                         ),
                 instance = celaut.Instance(
@@ -462,7 +462,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Starting service ...')
         configuration = None
         system_requeriments = None
-        initial_gas_amount = DEFAULT_INITIAL_GAS_AMOUNT
+        initial_gas_amount = None
         max_sysreq = None
         hashes = []
         parser_generator = grpcbf.parse_from_buffer(
@@ -520,7 +520,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 config = configuration,
                                 system_requeriments = system_requeriments,
                                 max_sysreq = max_sysreq,
-                                initial_gas_amount = initial_gas_amount,
+                                initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(father_ip = context.peer()),  # TODO : modificar context.peer() por el id que se use.
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                             )
                         ): yield b
@@ -586,7 +586,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             config = configuration,
                             system_requeriments = system_requeriments,
                             max_sysreq = max_sysreq,
-                            initial_gas_amount = initial_gas_amount,
+                            initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(father_ip = context.peer()),  # TODO : modificar context.peer() por el id que se use.
                             id = hash,
                             father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                         )
@@ -610,7 +610,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     config = configuration,
                     system_requeriments = system_requeriments,
                     max_sysreq = max_sysreq,
-                    initial_gas_amount = initial_gas_amount,
+                    initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(father_ip = context.peer()),  # TODO : modificar context.peer() por el id que se use.
                     father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
                 )
             ): yield b
@@ -847,7 +847,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 except build.UnsupportedArquitectureException as e: raise e
                 break
         
-        cost = cost + DEFAULT_INITIAL_GAS_AMOUNT
+        cost = cost + default_cost()
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost) + ' with benefit ' + str(cost))
         if cost is None: raise Exception("I dont've the service.")
         for b in grpcbf.serialize_to_buffer(

@@ -28,7 +28,8 @@ DEFAULT_SYSTEM_RESOURCES = celaut_pb2.Sysresources(
     mem_limit = 50*pow(10, 6),
 )
 
-DEFAULT_INITIAL_GAS_AMOUNT = GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT', default = 5000)
+DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT_FACTOR', default = 0.001)  # Perdentage of the parent's gas amount.
+DEFAULT_INTIAL_GAS_AMOUNT = GET_ENV(env = 'DEFAULT_INTIAL_GAS_AMOUNT', default = 100000) # Only for services launched by the node.
 COMPUTE_POWER_RATE = GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
 COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
@@ -37,7 +38,7 @@ MEMORY_LIMIT_COST_FACTOR = GET_ENV(env = 'MEMORY_LIMIT_COST_FACTOR', default = 0
 MIN_PEER_DEPOSIT = GET_ENV(env = 'MIN_PEER_DEPOSIT', default = 10)
 INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', default = 20)
 COST_AVERAGE_VARIATION = GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
-GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1)
+GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only outside the manager. (not in maintain_cost)
 MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
 ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = False)  # Could be used with the reputation system.
 
@@ -272,9 +273,20 @@ def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
         raise Exception('Manager error: cannot increase local gas for peer '+peer_id+' by '+str(amount))
     return True
 
+def __get_gas_amount(id: str) -> int:
+    l.LOGGER('Get gas amount for '+id)
+    if id in peer_instances:
+        return peer_instances[id]
+    elif id in system_cache:
+        return system_cache[id]['gas']
+    else:
+        raise Exception('Manager error: cannot get gas amount for '+id)
+
+
 def validate_payment_process(peer: str, amount: int, tx_id: str, ledger: str) -> bool:
     return __check_payment_process(peer = peer, amount = amount, tx_id = tx_id, ledger = ledger) \
          and __increase_local_gas_for_peer(peer_id = peer, amount = amount)
+
 
 def spend_gas(
     id: str,
@@ -321,10 +333,15 @@ def add_peer(
     return False
 
 
+def default_cost(
+    father_ip: str = None
+) -> int:
+    return ( __get_gas_amount( id = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR ) if father_ip else DEFAULT_INTIAL_GAS_AMOUNT
+
 def add_container(
     father_ip: str,
     container: docker_lib.models.containers.Container,
-    initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT,
+    initial_gas_amount: int,
     system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> str:
     l.LOGGER('Add container for '+ father_ip)
@@ -332,7 +349,7 @@ def add_container(
     if token in system_cache.keys(): raise Exception('Manager error: '+token+' exists.')
 
     __push_token(token = token)
-    with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else DEFAULT_INITIAL_GAS_AMOUNT
+    with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_cost(father_ip = father_ip)
     if not container_modify_system_params(
         token = token,
         system_requeriments_range = system_requeriments_range
@@ -459,7 +476,7 @@ def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
 def start_service_cost(
     metadata,
     service_buffer,
-    initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT
+    initial_gas_amount: int
 ) -> int:
     return execution_cost(
         service_buffer = service_buffer,
