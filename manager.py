@@ -30,8 +30,8 @@ DEFAULT_SYSTEM_RESOURCES = celaut_pb2.Sysresources(
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
-DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT_FACTOR', default = 0.001)  # Perdentage of the parent's gas amount.
-DEFAULT_INTIAL_GAS_AMOUNT = GET_ENV(env = 'DEFAULT_INTIAL_GAS_AMOUNT', default = 100000) # Only for services launched by the node.
+DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT_FACTOR', default = 1/pow(10,6))  # Perdentage of the parent's gas amount.
+DEFAULT_INTIAL_GAS_AMOUNT = GET_ENV(env = 'DEFAULT_INTIAL_GAS_AMOUNT', default = pow(10, 9)) # Only for services launched by the node.
 COMPUTE_POWER_RATE = GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
 COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
@@ -41,7 +41,7 @@ MIN_PEER_DEPOSIT = GET_ENV(env = 'MIN_PEER_DEPOSIT', default = 10)
 INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', default = 20)
 COST_AVERAGE_VARIATION = GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
 GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only outside the manager. (not in maintain_cost)
-MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
+MODIFY_SERVICE_SYSTEM_RESOURCES_COST = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
 ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = True)  # Could be used with the reputation system.
 
 PAYMENT_PROCESS_VALIDATORS = {'VYPER': vyper_gdc.payment_process_validator}     # ledger_id:  lambda peer_id, tx_id, amount -> bool,

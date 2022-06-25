@@ -6,7 +6,7 @@ import celaut_pb2 as celaut
 import build, utils
 from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
     add_container, add_peer, container_modify_system_params, default_cost, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, prune_container, \
-    spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR
+    spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
@@ -663,7 +663,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         refound_gas = []
         if not spend_gas(
             id = token, 
-            gas_to_spend = MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR * GAS_COST_FACTOR,
+            gas_to_spend = MODIFY_SERVICE_SYSTEM_RESOURCES_COST * GAS_COST_FACTOR,
             refund_gas_function_container = refound_gas
         ): raise Exception('Launch service error spending gas for '+context.peer())
         if not container_modify_system_params(
@@ -932,7 +932,7 @@ if __name__ == "__main__":
     l.LOGGER('MANAGER ITERATION TIME-> '+ str(MANAGER_ITERATION_TIME))
     l.LOGGER('AVG COST MAX PROXIMITY FACTOR-> '+ str(COST_AVERAGE_VARIATION))
     l.LOGGER('GAS_COST_FACTOR-> '+ str(GAS_COST_FACTOR))
-    l.LOGGER('MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR-> '+ str(MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR))
+    l.LOGGER('MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR-> '+ str(MODIFY_SERVICE_SYSTEM_RESOURCES_COST))
 
     l.LOGGER('Starting gateway at port'+ str(GATEWAY_PORT))    
 
