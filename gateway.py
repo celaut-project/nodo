@@ -120,7 +120,7 @@ def service_balancer(
     peers = PeerCostList()
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
     try:
-        print('service_balancer -> ', execution_cost(service_buffer = service_buffer, metadata = metadata) * GAS_COST_FACTOR + (initial_gas_amount if initial_gas_amount else default_cost())))
+        print('service_balancer -> ', execution_cost(service_buffer = service_buffer, metadata = metadata) * GAS_COST_FACTOR + (initial_gas_amount if initial_gas_amount else default_cost()))
         peers.add_elem(
             weight = gateway_pb2.EstimatedCost(
                 cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * GAS_COST_FACTOR + (initial_gas_amount if initial_gas_amount else int(default_cost())), 
