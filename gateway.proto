@@ -9,7 +9,7 @@ message TokenMessage {
 }
 
 message EstimatedCost {
-    int32 cost = 1;
+    int64 cost = 1;
     float variance = 2;
 }
 
