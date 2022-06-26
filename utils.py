@@ -105,6 +105,7 @@ def get_only_the_ip_from_context_method(context_peer: str) -> str:
             return ip[1:-1] if ipv == 'ipv6' else ip
     except Exception as e:
         LOGGER('Error getting the ip from the context: ' + str(e))
+        raise e
 
 get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
 
@@ -131,9 +132,13 @@ def address_in_network( ip_or_uri, net) -> bool:
 
 def get_network_name( ip_or_uri: str) -> str:
     #  https://stackoverflow.com/questions/819355/how-can-i-check-if-an-ip-is-in-a-network-in-python
-    for network in ni.interfaces():
-        try:
-            if address_in_network(ip_or_uri = ip_or_uri, net = network):
-                return network
-        except KeyError:
-            continue
+    try:
+        for network in ni.interfaces():
+            try:
+                if address_in_network(ip_or_uri = ip_or_uri, net = network):
+                    return network
+            except KeyError:
+                continue
+    except Exception as e:
+        LOGGER('Error getting the network name: ' + str(e))
+        raise e
