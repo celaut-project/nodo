@@ -97,7 +97,12 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
         l.LOGGER('DOCKER API ERROR ')
 
 
-def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignore_network: str = None) -> dict: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
+def service_balancer(
+    service_buffer: bytes, 
+    metadata: celaut.Any.Metadata, 
+    ignore_network: str = None,
+    initial_gas_amount: int = None,
+    ) -> dict: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
     class PeerCostList:
         # Sorts the list from the element with the smallest weight to the element with the largest weight.
         
@@ -116,7 +121,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
     try:
         peers.add_elem(
             weight = gateway_pb2.EstimatedCost(
-                cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * int(GAS_COST_FACTOR) + int(default_cost()), 
+                cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * int(GAS_COST_FACTOR) + (initial_gas_amount if initial_gas_amount else int(default_cost())), 
                 variance = 0
             )
         )
@@ -145,7 +150,7 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
                         partitions_message_mode_parser = True,
                         indices_serializer = GetServiceEstimatedCost_input,
                         partitions_serializer = {2: StartService_input_partitions_v2[2]},
-                        input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),
+                        input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),  # TODO añadir initial_gas_amount y el resto de la configuracion inicial, si es que se especifica.
                     ))
                 )
             except Exception as e: l.LOGGER('Error taking the cost on '+ peer_uri +' : '+str(e))
@@ -184,7 +189,8 @@ def launch_service(
             metadata = metadata,
             ignore_network = utils.get_network_name(
                 ip_or_uri = father_ip
-            ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None
+            ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None,
+            initial_gas_amount  = initial_gas_amount
         ).items():
             if abort_it: abort_it = False
             l.LOGGER('Balancer select peer ' + str(peer_instance_uri) + ' with cost ' + str(cost))
