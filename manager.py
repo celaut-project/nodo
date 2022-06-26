@@ -346,7 +346,7 @@ def default_cost(
     b = DEFAULT_INITIAL_GAS_AMOUNT_FACTOR
     c = a * b
     print(a, b, c)
-    return c
+    return int(c)
 
     return ( int(__get_gas_amount_by_father_ip( father_ip = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR) ) if father_ip else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
