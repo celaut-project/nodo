@@ -1,3 +1,4 @@
+from curses import meta
 from mimetypes import init
 from typing import Generator
 from buffer_pb2 import Buffer
@@ -119,6 +120,7 @@ def service_balancer(
     peers = PeerCostList()
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
     try:
+        print(execution_cost(service_buffer = service_buffer, metadata=metadata), int(GAS_COST_FACTOR), initial_gas_amount, default_cost())
         peers.add_elem(
             weight = gateway_pb2.EstimatedCost(
                 cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * int(GAS_COST_FACTOR) + (initial_gas_amount if initial_gas_amount else int(default_cost())), 
