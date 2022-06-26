@@ -275,16 +275,16 @@ def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
         raise Exception('Manager error: cannot increase local gas for peer '+peer_id+' by '+str(amount))
     return True
 
-def __get_gas_amount_by_father_ip(father_ip: str) -> int:
-    l.LOGGER('Get gas amount for '+father_ip)
-    if father_ip in peer_instances:
-        return peer_instances[father_ip]
-    elif father_ip in cache_service_perspective:
+def __get_gas_amount_by_ip(ip: str) -> int:
+    l.LOGGER('Get gas amount for '+ip)
+    if ip in peer_instances:
+        return peer_instances[ip]
+    elif ip in cache_service_perspective:
         return system_cache[
-            cache_service_perspective[father_ip]
+            cache_service_perspective[ip]
         ]['gas']
     else:
-        raise Exception('Manager error: cannot get gas amount for '+father_ip+' Caches -> '+str(cache_service_perspective) + str(system_cache) + str(peer_instances))
+        raise Exception('Manager error: cannot get gas amount for '+ip+' Caches -> '+str(cache_service_perspective) + str(system_cache) + str(peer_instances))
 
 
 def validate_payment_process(peer: str, amount: int, tx_id: str, ledger: str) -> bool:
@@ -333,7 +333,7 @@ def add_peer(
 
     if peer_id not in peer_instances:
         peer_instances[peer_id] = 0
-        return __increase_local_gas_for_peer(peer_id, INITIAL_PEER_DEPOSIT_FACTOR * MIN_PEER_DEPOSIT)
+        return __increase_local_gas_for_peer(peer_id = peer_id, amount = INITIAL_PEER_DEPOSIT_FACTOR * MIN_PEER_DEPOSIT)
     return False
 
 
@@ -341,7 +341,7 @@ def default_cost(
     father_ip: str = None
 ) -> int:
     l.LOGGER('Default cost for '+(father_ip if father_ip else 'local'))
-    return ( int(__get_gas_amount_by_father_ip( father_ip = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR) ) if father_ip else int(DEFAULT_INTIAL_GAS_AMOUNT)
+    return ( int( __get_gas_amount_by_ip( ip = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR ) ) if father_ip else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
 def add_container(
     father_ip: str,
@@ -394,6 +394,13 @@ def container_modify_system_params(
 
 def pop_container_on_cache(token: str) -> bool:
     l.LOGGER('Pop container on cache '+ token)
+    __increase_deposit_on_peer(
+        peer_ip = token.split('##')[0],
+        amount = __get_gas_amount_by_ip(
+            ip = token.split('##')[1]
+        )
+    )
+
     if __modify_sysreq(
         token = token,
         sys_req = celaut_pb2.Sysresources(
