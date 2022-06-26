@@ -123,6 +123,9 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
     except build.UnsupportedArquitectureException:
         l.LOGGER('UNSUPPORTED ARQUITECTURE')
         pass
+    except Exception as e:
+        l.LOGGER('Error getting the local cost ' + str(e))
+        raise e
 
     try:
         for peer in utils.peers_iterator(ignore_network = ignore_network):
