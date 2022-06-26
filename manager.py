@@ -63,6 +63,17 @@ def insert_instance_on_mongo(instance: celaut.Instance):
         upsert = True
     )
 
+# SYSTEM CACHE
+
+system_cache_lock = Lock()
+system_cache = {} # token : { mem_limit: 0, gas: 0 }
+
+peer_instances_lock = Lock()
+peer_instances = {'192.168.1.13': pow(10, 16)} # id: amount_of_gas -> other peers' deposits on this node.
+
+deposits_on_other_peers_lock = Lock()
+deposits_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
+
 container_cache_lock = threading.Lock()
 container_cache = {}  # ip_father:[dependencies]
 
@@ -173,17 +184,6 @@ def purgue_external(father_ip, node_uri, token):
 
     container_cache_lock.release()
 
-
-# SYSTEM CACHE
-
-system_cache_lock = Lock()
-system_cache = {} # token : { mem_limit: 0, gas: 0 }
-
-peer_instances_lock = Lock()
-peer_instances = {'192.168.1.13': 999999} # id: amount_of_gas -> other peers' deposits on this node.
-
-deposits_on_other_peers_lock = Lock()
-deposits_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
 
 def __push_token(token: str): 
     with system_cache_lock: system_cache[token] = { "mem_limit": 0 }
