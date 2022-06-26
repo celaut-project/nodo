@@ -7,6 +7,7 @@ from grpcbigbuffer import Dir
 import pymongo
 import netifaces as ni
 from verify import get_service_hex_main_hash
+from logger import LOGGER
 
 GET_ENV = lambda env, default: type(default)(os.environ.get(env)) if env in os.environ.keys() else default
 
@@ -97,10 +98,13 @@ def get_free_port() -> int:
 get_only_the_ip_from_context = lambda context_peer: get_only_the_ip_from_context_method(context_peer)
 
 def get_only_the_ip_from_context_method(context_peer: str) -> str:
-    ipv = context_peer.split(':')[0]
-    if ipv in ('ipv4', 'ipv6'):
-        ip = context_peer[5:-1*(len(context_peer.split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
-        return ip[1:-1] if ipv == 'ipv6' else ip
+    try:
+        ipv = context_peer.split(':')[0]
+        if ipv in ('ipv4', 'ipv6'):
+            ip = context_peer[5:-1*(len(context_peer.split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
+            return ip[1:-1] if ipv == 'ipv6' else ip
+    except Exception as e:
+        LOGGER('Error getting the ip from the context: ' + str(e))
 
 get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
 
