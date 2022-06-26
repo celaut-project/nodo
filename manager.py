@@ -477,6 +477,9 @@ def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
             EXECUTION_BENEFIT
         ]) 
     except build.UnsupportedArquitectureException as e: raise e
+    except Exception as e:
+        l.LOGGER('Error calculating execution cost '+str(e))
+        raise e
 
 def start_service_cost(
     metadata,
