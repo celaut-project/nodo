@@ -7,7 +7,7 @@ import celaut_pb2 as celaut
 import build, utils
 from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
     add_container, add_peer, container_modify_system_params, default_cost, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, prune_container, \
-    spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST
+    spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, get_token_by_uri
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
@@ -51,14 +51,6 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     return gateway_pb2.Instance(
         instance = instance
     )
-
-
-def get_token_by_uri(uri: str) -> str:
-    try:
-        return cache_service_perspective[uri]
-    except Exception as e:
-        l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e)+ ' '+str(cache_service_perspective)+ ' '+str(uri))  # TODO. Study the imposibility of that.
-        raise e
 
 
 def set_config(container_id: str, config: celaut.Configuration, resources: celaut.Sysresources, api: celaut.Service.Container.Config):

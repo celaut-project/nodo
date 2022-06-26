@@ -185,6 +185,13 @@ def purgue_external(father_ip, node_uri, token):
     container_cache_lock.release()
 
 
+def get_token_by_uri(uri: str) -> str:
+    try:
+        return cache_service_perspective[uri]
+    except Exception as e:
+        l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e)+ ' '+str(cache_service_perspective)+ ' '+str(uri))  # TODO. Study the imposibility of that.
+        raise e
+
 def __push_token(token: str): 
     with system_cache_lock: system_cache[token] = { "mem_limit": 0 }
 
@@ -281,7 +288,7 @@ def __get_gas_amount_by_ip(ip: str) -> int:
         return peer_instances[ip]
     elif ip in cache_service_perspective:
         return system_cache[
-            cache_service_perspective[ip]
+            get_token_by_uri(uri = ip)
         ]['gas']
     else:
         raise Exception('Manager error: cannot get gas amount for '+ip+' Caches -> '+str(cache_service_perspective) + str(system_cache) + str(peer_instances))
