@@ -116,12 +116,12 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
     try:
         peers.add_elem(
             weight = gateway_pb2.EstimatedCost(
-                cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * GAS_COST_FACTOR + default_cost(), 
+                cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * int(GAS_COST_FACTOR) + int(default_cost()), 
                 variance = 0
             )
         )
     except build.UnsupportedArquitectureException:
-        l.LOGGER('UNSUPPORTED ARQUITECTURE')
+        l.LOGGER('UNSUPPORTED ARQUITECTURE.')
         pass
     except Exception as e:
         l.LOGGER('Error getting the local cost ' + str(e))
