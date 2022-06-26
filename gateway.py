@@ -501,6 +501,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     system_requeriments = r.min_sysreq
 
                 if r.HasField('initial_gas_amount'):
+                    print('initial_gas_amount', r.initial_gas_amount)
                     initial_gas_amount = r.initial_gas_amount
 
 
