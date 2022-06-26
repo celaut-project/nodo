@@ -120,7 +120,9 @@ def service_balancer(service_buffer: bytes, metadata: celaut.Any.Metadata, ignor
                 variance = 0
             )
         )
-    except build.UnsupportedArquitectureException: pass
+    except build.UnsupportedArquitectureException:
+        l.LOGGER('UNSUPPORTED ARQUITECTURE')
+        pass
 
     try:
         for peer in utils.peers_iterator(ignore_network = ignore_network):
