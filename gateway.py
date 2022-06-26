@@ -171,6 +171,7 @@ def launch_service(
                             metadata = metadata,
                             id = id,
                         )
+    l.LOGGER('Is complete? ' + str(is_complete))
     while True:
         abort_it = True
         for peer_instance_uri, cost in service_balancer(
