@@ -341,10 +341,7 @@ def default_cost(
     father_ip: str = None
 ) -> int:
     l.LOGGER('Default cost for '+father_ip)
-    if father_ip:
-        return __get_gas_amount_by_father_ip(father_ip = father_ip) * int(DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
-    else:
-        int(DEFAULT_INTIAL_GAS_AMOUNT)
+    return ( __get_gas_amount_by_father_ip( father_ip = father_ip ) * int(DEFAULT_INITIAL_GAS_AMOUNT_FACTOR) ) if father_ip else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
 def add_container(
     father_ip: str,
@@ -473,6 +470,7 @@ def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
     return COST_OF_BUILD
 
 def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
+    l.LOGGER('Get execution cost')
     try:
         return sum([
             len( DOCKER_CLIENT().containers.list() )* COMPUTE_POWER_RATE,
