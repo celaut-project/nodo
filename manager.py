@@ -341,7 +341,7 @@ def default_cost(
     father_ip: str = None
 ) -> int:
     l.LOGGER('Default cost for '+(father_ip if father_ip else 'local'))
-    return ( __get_gas_amount_by_father_ip( father_ip = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR ) if father_ip else int(DEFAULT_INTIAL_GAS_AMOUNT)
+    return ( int(__get_gas_amount_by_father_ip( father_ip = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR) ) if father_ip else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
 def add_container(
     father_ip: str,
