@@ -114,12 +114,19 @@ def set_external_on_cache(father_ip : str, external_token: str, ip_or_uri: str):
     )
 
 
-def purgue_internal(father_ip, container_id, container_ip):
+def __purgue_internal(father_ip = None, container_id = None, container_ip = None, token = None) -> int:
+    if token is None and (father_ip is None or container_id is None or container_ip is None):
+        raise Exception('purgue_internal: token is None and (father_ip is None or container_id is None or container_ip is None)')
+
     try:
         DOCKER_CLIENT().containers.get(container_id).remove(force=True)
     except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
         l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
         raise e
+
+    amount = __get_gas_amount_by_ip(
+            ip = container_ip
+        )
 
     container_cache_lock.acquire()
 
@@ -136,18 +143,20 @@ def purgue_internal(father_ip, container_id, container_ip):
         l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e)+ ' ' + str(cache_service_perspective)+ ' ' + str(container_id))  # TODO. Study the imposibility of that.
         raise e
 
+    with system_cache_lock: del system_cache[token]
+
     if container_ip in container_cache:
         for dependency in container_cache[container_ip]:
             # Si la dependencia esta en local.
             if get_network_name(ip_or_uri = dependency.split('##')[0]) == DOCKER_NETWORK:
-                purgue_internal(
+                amount += __purgue_internal(
                     father_ip = container_ip,
                     container_id = dependency.split('##')[1],
                     container_ip = dependency.split('##')[0]
                 )
             # Si la dependencia se encuentra en otro nodo.
             else:
-                purgue_external(
+                amount += __purgue_external(
                     father_ip = father_ip,
                     node_uri = dependency.split('##')[0],
                     token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
@@ -160,9 +169,10 @@ def purgue_internal(father_ip, container_id, container_ip):
             l.LOGGER(str(e) + container_ip + ' not in ' + str(container_cache.keys()))
 
     container_cache_lock.release()
+    return amount
 
 
-def purgue_external(father_ip, node_uri, token):
+def __purgue_external(father_ip, node_uri, token) -> int:
     if len(node_uri.split(':')) < 2:
         l.LOGGER('Should be an uri not an ip. Something was wrong. The node uri is ' + node_uri)
         return None
@@ -188,10 +198,12 @@ def purgue_external(father_ip, node_uri, token):
                 token = token
             )
         ))
+        # TODO comprobar el gas sobrante.
     except grpc.RpcError as e:
         l.LOGGER('Error during remove a container on ' + node_uri + ' ' + str(e))
 
     container_cache_lock.release()
+    return 0 # TODO.
 
 
 def get_token_by_uri(uri: str) -> str:
@@ -415,24 +427,6 @@ def container_modify_system_params(
 
     return False 
 
-def pop_container_on_cache(token: str) -> bool:
-    l.LOGGER('Pop container on cache '+ token)
-    __increase_deposit_on_peer(
-        peer_ip = token.split('##')[0],
-        amount = __get_gas_amount_by_ip(
-            ip = token.split('##')[1]
-        )
-    )
-
-    if __modify_sysreq(
-        token = token,
-        sys_req = celaut_pb2.Sysresources(
-            mem_limit = 0
-        )
-    ):
-        with system_cache_lock: del system_cache[token]
-        return True
-    return False
 
 def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
     return IOBigData().prevent_kill(len = sysreq.mem_limit) # Prevent kill dice de lo que dispone actualmente libre.
@@ -450,23 +444,19 @@ def prune_container(token: str) -> bool:
     l.LOGGER('Prune container '+ token)
     if get_network_name(ip_or_uri = token.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
         try:
-            purgue_internal(
+            amount = __purgue_internal(
                 father_ip = token.split('##')[0],
                 container_id = token.split('##')[2],
-                container_ip = token.split('##')[1]
+                container_ip = token.split('##')[1],
+                token = token
             )
         except Exception as e:
             l.LOGGER('Error purging '+token+' '+str(e))
             return False
-        if not pop_container_on_cache(
-            token = token
-        ):
-            l.LOGGER('Error purging '+token)
-            return False
         
     else:
         try:
-            purgue_external(
+            amount = __purgue_external(
                 father_ip = token.split('##')[0],
                 node_uri = token.split('##')[1],
                 token = token[len( token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
@@ -475,7 +465,10 @@ def prune_container(token: str) -> bool:
             l.LOGGER('Error purging '+token+' '+str(e))
             return False
     
-    return True
+    return  __increase_deposit_on_peer(
+                peer_ip = token.split('##')[0],
+                amount = amount
+            )
 
 
 
@@ -531,8 +524,7 @@ def maintain():
     for token, sysreq in dict(system_cache).items():  # Parse the system cache to other dict to avoid concurrent access.
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
-                if not pop_container_on_cache(token = token):
-                    l.LOGGER('Manager error: the service '+ token+' could not be stopped.')
+                prune_container(token = token)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
             l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO GET THE CONTAINER ' + token)
         
