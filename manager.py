@@ -291,7 +291,8 @@ def __get_gas_amount_by_ip(ip: str) -> int:
             get_token_by_uri(uri = ip)
         ]['gas']
     else:
-        raise Exception('Manager error: cannot get gas amount for '+ip+' Caches -> '+str(cache_service_perspective) + str(system_cache) + str(peer_instances))
+        l.LOGGER('Manager error: cannot get gas amount for '+ip+' Caches -> '+str(cache_service_perspective) + str(system_cache) + str(peer_instances))
+        raise Exception('Manager error: cannot get gas amount for '+ip)
 
 
 def validate_payment_process(peer: str, amount: int, tx_id: str, ledger: str) -> bool:
