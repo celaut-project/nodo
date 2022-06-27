@@ -18,7 +18,7 @@ message Refund {
 }
 
 message Payment {
-    int32 amount = 1;
+    int64 amount = 1;
     string tx_id = 2;
     string ledger = 3;
 }
