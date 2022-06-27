@@ -119,6 +119,7 @@ def purgue_internal(father_ip, container_id, container_ip):
         DOCKER_CLIENT().containers.get(container_id).remove(force=True)
     except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
         l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
+        raise e
 
     container_cache_lock.acquire()
 
