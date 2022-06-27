@@ -190,7 +190,7 @@ def launch_service(
                     l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer_instance_uri))
                     refound_gas = []
                     if not spend_gas(
-                        id = father_ip,
+                        token = father_ip,
                         gas_to_spend =  cost.cost * GAS_COST_FACTOR * cost.variance * COST_AVERAGE_VARIATION,
                         refund_gas_function_container = refound_gas
                     ): raise Exception('Launch service error spending gas for '+father_ip)
@@ -230,7 +230,7 @@ def launch_service(
             if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_RESOURCES
             refound_gas = []
             if not spend_gas(
-                id = father_ip,
+                token = father_ip,
                 gas_to_spend = start_service_cost(
                     initial_gas_amount = initial_gas_amount if initial_gas_amount else default_cost(),
                     service_buffer = service_buffer,
@@ -654,7 +654,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
         refound_gas = []
         if not spend_gas(
-            id = token, 
+            token = token, 
             gas_to_spend = MODIFY_SERVICE_SYSTEM_RESOURCES_COST * GAS_COST_FACTOR,
             refund_gas_function_container = refound_gas
         ): raise Exception('Launch service error spending gas for '+context.peer())
