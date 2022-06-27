@@ -124,7 +124,7 @@ def __purgue_internal(father_ip = None, container_id = None, container_ip = None
         l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
         raise e
 
-    amount = __get_gas_amount_by_ip(
+    refund = __get_gas_amount_by_ip(
             ip = container_ip
         )
 
@@ -149,14 +149,14 @@ def __purgue_internal(father_ip = None, container_id = None, container_ip = None
         for dependency in container_cache[container_ip]:
             # Si la dependencia esta en local.
             if get_network_name(ip_or_uri = dependency.split('##')[0]) == DOCKER_NETWORK:
-                amount += __purgue_internal(
+                refund += __purgue_internal(
                     father_ip = container_ip,
                     container_id = dependency.split('##')[1],
                     container_ip = dependency.split('##')[0]
                 )
             # Si la dependencia se encuentra en otro nodo.
             else:
-                amount += __purgue_external(
+                refund += __purgue_external(
                     father_ip = father_ip,
                     node_uri = dependency.split('##')[0],
                     token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
@@ -169,7 +169,7 @@ def __purgue_internal(father_ip = None, container_id = None, container_ip = None
             l.LOGGER(str(e) + container_ip + ' not in ' + str(container_cache.keys()))
 
     container_cache_lock.release()
-    return amount
+    return refund
 
 
 def __purgue_external(father_ip, node_uri, token) -> int:
