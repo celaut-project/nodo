@@ -467,7 +467,7 @@ def prune_container(token: str) -> int:
             return False
     
     __increase_deposit_on_peer(
-        peer_ip = token.split('##')[0],
+        peer_id = token.split('##')[0],
         amount = refund
     )
     return refund
@@ -545,7 +545,7 @@ def pair_deposits():
     for peer, deposit in deposits_on_other_peers.items():
         if deposit < MIN_PEER_DEPOSIT:
             l.LOGGER('Manager error: the peer '+ str(peer)+' has not enough deposit.')
-            if not __increase_deposit_on_peer(peer = peer):
+            if not __increase_deposit_on_peer(peer_id = peer):
                 l.LOGGER('Manager error: the peer '+ str(peer)+' could not be increased.')
                 del deposits_on_other_peers[peer]
 
