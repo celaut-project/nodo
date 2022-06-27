@@ -323,48 +323,50 @@ def validate_payment_process(peer: str, amount: int, tx_id: str, ledger: str) ->
 
 
 def spend_gas(
-    token: str,
+    token_or_container_ip: str,   #  If its peer, the token is the peer id. 
+                                  #  If its a local service, the token could be the token or the container ip, 
+                                  #  on the last case, it take the token with cache service perspective.
     gas_to_spend: int,
     refund_gas_function_container: list = None
 ) -> bool:
     gas_to_spend = int(gas_to_spend)
-    l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token)
+    l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
     try:
-        if token in peer_instances and (peer_instances[token] >= gas_to_spend or ALLOW_GAS_DEBT):
-            l.LOGGER( str(gas_to_spend)+' of '+str(peer_instances[token]))
-            peer_instances[token] -= gas_to_spend
+        if token_or_container_ip in peer_instances and (peer_instances[token_or_container_ip] >= gas_to_spend or ALLOW_GAS_DEBT):
+            l.LOGGER( str(gas_to_spend)+' of '+str(peer_instances[token_or_container_ip]))
+            peer_instances[token_or_container_ip] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
                 cache = peer_instances, 
-                id = token, 
+                id = token_or_container_ip, 
                 container = refund_gas_function_container
             )
             return True
-        elif token in system_cache and (system_cache[token]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
-            l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[token]['gas']))
-            with system_cache_lock: system_cache[token]['gas'] -= gas_to_spend
+        elif token_or_container_ip in system_cache and (system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
+            l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[token_or_container_ip]['gas']))
+            with system_cache_lock: system_cache[token_or_container_ip]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
                 cache = peer_instances, 
-                id = token, 
+                id = token_or_container_ip, 
                 container = refund_gas_function_container
             )
             return True
         
-        token = cache_service_perspective[token]
-        if token in system_cache and (system_cache[token]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
-            l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[token]['gas']))
-            with system_cache_lock: system_cache[token]['gas'] -= gas_to_spend
+        token_or_container_ip = cache_service_perspective[token_or_container_ip]
+        if token_or_container_ip in system_cache and (system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
+            l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[token_or_container_ip]['gas']))
+            with system_cache_lock: system_cache[token_or_container_ip]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
                 cache = peer_instances, 
-                id = token, 
+                id = token_or_container_ip, 
                 container = refund_gas_function_container
             )
             return True
     except Exception as e: l.LOGGER('Manager error '+str(e))
     
-    l.LOGGER(token+" can't spend "+str(gas_to_spend)+" gas. \n Status the list of avaliable gas: "+str(peer_instances)+ " and "+str(system_cache))
+    l.LOGGER(token_or_container_ip+" can't spend "+str(gas_to_spend)+" gas. \n Status the list of avaliable gas: "+str(peer_instances)+ " and "+str(system_cache))
     return False
 
 
@@ -543,7 +545,7 @@ def maintain():
             l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO GET THE CONTAINER ' + token)
         
         if not spend_gas(
-            token = token,
+            token_or_container_ip = token,
             gas_to_spend = maintain_cost(sysreq)
         ):
             try:
