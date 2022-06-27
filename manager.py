@@ -447,6 +447,7 @@ def get_sysresources(token: str) -> celaut_pb2.Sysresources:
 # PRUNE CONTAINER METHOD
 
 def prune_container(token: str) -> bool:
+    l.LOGGER('Prune container '+ token)
     if get_network_name(ip_or_uri = token.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
         try:
             purgue_internal(
