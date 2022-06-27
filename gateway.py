@@ -606,20 +606,22 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     def StopService(self, request_iterator, context):
-        token_message = next(grpcbf.parse_from_buffer(
-            request_iterator = request_iterator,
-            indices = gateway_pb2.TokenMessage,
-            partitions_message_mode=True
-        ))
+        try:
+            l.LOGGER('Stopping service.')
+            for b in grpcbf.serialize_to_buffer(
+                message_iterator = gateway_pb2.Refund(
+                    amount = prune_container(
+                        token = next(grpcbf.parse_from_buffer(
+                                    request_iterator = request_iterator,
+                                    indices = gateway_pb2.TokenMessage,
+                                    partitions_message_mode=True
+                                )).token
+                    )
+                )
+            ): yield b
+        except Exception as e:
+            raise Exception('Was imposible stop the service. ' + str(e))
 
-        if not prune_container(token = token_message.token):
-            raise Exception('Was imposible stop the service'+ str(token_message))
-        
-        l.LOGGER('Stopped the instance with token -> ' + token_message.token)
-        yield gateway_pb2.buffer__pb2.Buffer(
-            chunk = bytes(''.encode('utf-8')),
-            separator = True
-        )
 
     
     def Hynode(self, request_iterator, context):

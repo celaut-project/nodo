@@ -177,8 +177,9 @@ def __purgue_external(father_ip, node_uri, token) -> int:
         l.LOGGER('Should be an uri not an ip. Something was wrong. The node uri is ' + node_uri)
         return None
     
+    refund = 0
     container_cache_lock.acquire()
-    
+
     try:
         container_cache[father_ip].remove(node_uri + '##' + token)
     except ValueError as e:
@@ -188,7 +189,7 @@ def __purgue_external(father_ip, node_uri, token) -> int:
 
     # Le manda al otro nodo que elimine esa instancia.
     try:
-        next(grpcbf.client_grpc(
+        refund = next(grpcbf.client_grpc(
             method = gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
                             node_uri
@@ -196,14 +197,14 @@ def __purgue_external(father_ip, node_uri, token) -> int:
                     ).StopService,
             input = gateway_pb2.TokenMessage(
                 token = token
-            )
-        ))
-        # TODO comprobar el gas sobrante.
+            ),
+            output = gateway_pb2.Refund()
+        )).amount
     except grpc.RpcError as e:
         l.LOGGER('Error during remove a container on ' + node_uri + ' ' + str(e))
 
     container_cache_lock.release()
-    return 0 # TODO.
+    return refund
 
 
 def get_token_by_uri(uri: str) -> str:
@@ -440,11 +441,11 @@ def get_sysresources(token: str) -> celaut_pb2.Sysresources:
 
 # PRUNE CONTAINER METHOD
 
-def prune_container(token: str) -> bool:
+def prune_container(token: str) -> int:
     l.LOGGER('Prune container '+ token)
     if get_network_name(ip_or_uri = token.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
         try:
-            amount = __purgue_internal(
+            refund = __purgue_internal(
                 father_ip = token.split('##')[0],
                 container_id = token.split('##')[2],
                 container_ip = token.split('##')[1],
@@ -456,7 +457,7 @@ def prune_container(token: str) -> bool:
         
     else:
         try:
-            amount = __purgue_external(
+            refund = __purgue_external(
                 father_ip = token.split('##')[0],
                 node_uri = token.split('##')[1],
                 token = token[len( token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
@@ -465,10 +466,11 @@ def prune_container(token: str) -> bool:
             l.LOGGER('Error purging '+token+' '+str(e))
             return False
     
-    return  __increase_deposit_on_peer(
-                peer_ip = token.split('##')[0],
-                amount = amount
-            )
+    __increase_deposit_on_peer(
+        peer_ip = token.split('##')[0],
+        amount = refund
+    )
+    return refund
 
 
 
@@ -531,9 +533,13 @@ def maintain():
         if not spend_gas(
             id = token,
             gas_to_spend = maintain_cost(sysreq)
-        ) and not prune_container(
-                    token = token
-                ): raise Exception('Manager error: the service '+ token+' could not be stopped.')
+        ):
+            try:
+                prune_container(token=token)
+            except Exception as e:
+                l.LOGGER('Error purging '+token+' '+str(e))
+                raise Exception('Error purging '+token+' '+str(e))
+
 
 def pair_deposits():
     for peer, deposit in deposits_on_other_peers.items():
