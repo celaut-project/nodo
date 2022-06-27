@@ -272,7 +272,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                     grpc.insecure_channel(
                                         peer_id+':8090', # TODO with port. Tiene que buscar en mongo, cuando se guarden por identificador.
                                     )
-                                ).Payment,
+                                ).Payable,
                         partitions_message_mode_parser = True,
                         input = gateway_pb2.Payment(
                             amount = amount,
