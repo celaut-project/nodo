@@ -1,12 +1,10 @@
-from curses import meta
-from mimetypes import init
 from typing import Generator
 from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
 from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
-    add_container, add_peer, container_modify_system_params, default_cost, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, prune_container, set_external_on_cache, \
+    add_container, add_peer, container_modify_system_params, default_cost, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, prune_container, set_external_on_cache, \
     spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, get_token_by_uri
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
@@ -14,14 +12,12 @@ from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, comple
 import subprocess, os, threading, shutil
 import grpc, gateway_pb2, gateway_pb2_grpc
 from concurrent import futures
-import pymongo, json
-from google.protobuf.json_format import MessageToJson
 import docker as docker_lib
 import netifaces as ni
 from gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input, GetServiceTar_input, StartService_input_partitions_v2
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
-from manager import insert_instance_on_mongo, set_on_cache, DOCKER_NETWORK, LOCAL_NETWORK
+from manager import insert_instance_on_mongo, DOCKER_NETWORK, LOCAL_NETWORK, set_external_on_cache
 
 DOCKER_CLIENT = lambda: docker_lib.from_env()
 GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
