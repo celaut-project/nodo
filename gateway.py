@@ -620,6 +620,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             chunk = bytes(''.encode('utf-8')),
             separator = True
         )
+
     
     def Hynode(self, request_iterator, context):
         instance = next(grpcbf.parse_from_buffer(
@@ -642,6 +643,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 )
             )            
         ): yield b
+
 
     def ModifyServiceSystemResources(self, request_iterator, context):
         l.LOGGER('Request for modify service system resources.')
