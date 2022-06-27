@@ -77,7 +77,7 @@ deposits_on_other_peers = {}  # id: amount of gas -> the deposits in other peers
 container_cache_lock = threading.Lock()
 container_cache = {}  # ip_father:[dependencies]
 
-cache_service_perspective = {} # service_ip:(container_id or external_service_token)
+cache_service_perspective = {} # service_ip:(local_token or external_service_token)
 
 # internal token -> str( peer_ip##container_ip##container_id )   peer_ip se refiere a la direccion del servicio padre (que puede ser interno o no).
 # external token -> str( peer_ip##node_ip:node_port##his_token )
@@ -88,7 +88,7 @@ cache_service_perspective = {} # service_ip:(container_id or external_service_to
 #   nosotros a nuestro servicio solicitante le daremos un token con el formato node_ip##his_token.
 
 
-def set_on_cache( father_ip : str, id_or_token: str, ip_or_uri: str):
+def __set_on_cache( father_ip : str, container_id_or_external_token: str, local_or_external_token: str, ip_or_uri: str):
 
     # En caso de ser un nodo externo:
     if not father_ip in container_cache:
@@ -100,10 +100,18 @@ def set_on_cache( father_ip : str, id_or_token: str, ip_or_uri: str):
 
 
     # Añade el nuevo servicio como dependencia.
-    container_cache[father_ip].append(ip_or_uri + '##' + id_or_token)
-    cache_service_perspective[ip_or_uri] = id_or_token
-    l.LOGGER('Set on cache ' + ip_or_uri + '##' + id_or_token + ' as dependency of ' + father_ip )
+    container_cache[father_ip].append(ip_or_uri + '##' + container_id_or_external_token)
+    cache_service_perspective[ip_or_uri] = local_or_external_token
+    l.LOGGER('Set on cache ' + ip_or_uri + '##' + container_id_or_external_token + ' as dependency of ' + father_ip )
 
+
+def set_external_on_cache(father_ip : str, external_token: str, ip_or_uri: str):
+    __set_on_cache(
+        father_ip = father_ip,
+        container_id_or_external_token = external_token,
+        local_or_external_token = external_token,
+        ip_or_uri = ip_or_uri
+    )
 
 
 def purgue_internal(father_ip, container_id, container_ip):
@@ -362,6 +370,12 @@ def add_container(
     if token in system_cache.keys(): raise Exception('Manager error: '+token+' exists.')
 
     __push_token(token = token)
+    __set_on_cache(
+        father_ip = father_ip,
+        container_id_or_external_token = container.id,
+        ip_or_uri = container.attrs['NetworkSettings']['IPAddress'],
+        local_or_external_token = token,
+    )
     with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_cost(father_ip = father_ip)
     if not container_modify_system_params(
         token = token,

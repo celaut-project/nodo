@@ -6,7 +6,7 @@ from buffer_pb2 import Buffer
 import celaut_pb2 as celaut
 import build, utils
 from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
-    add_container, add_peer, container_modify_system_params, default_cost, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, prune_container, \
+    add_container, add_peer, container_modify_system_params, default_cost, pop_container_on_cache, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, prune_container, set_external_on_cache, \
     spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, get_token_by_uri
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
@@ -21,7 +21,7 @@ import netifaces as ni
 from gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input, GetServiceTar_input, StartService_input_partitions_v2
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
-from manager import insert_instance_on_mongo, cache_service_perspective, set_on_cache, DOCKER_NETWORK, LOCAL_NETWORK
+from manager import insert_instance_on_mongo, set_on_cache, DOCKER_NETWORK, LOCAL_NETWORK
 
 DOCKER_CLIENT = lambda: docker_lib.from_env()
 GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
@@ -216,10 +216,10 @@ def launch_service(
                                 max_sysreq = max_sysreq
                             )
                     ))
-                    set_on_cache(
+                    set_external_on_cache(
                         father_ip = father_ip,
                         ip_or_uri =  peer_instance_uri, # Add node_uri.
-                        id_or_token = service_instance.token  # Add token.
+                        external_token = service_instance.token  # Add token.
                     )
                     service_instance.token = father_ip + '##' + peer_instance_uri.split(':')[0] + '##' + service_instance.token  # TODO adapt for ipv6 too.
                     return service_instance
@@ -291,13 +291,6 @@ def launch_service(
 
                 # Reload this object from the server again and update attrs with the new data.
                 container.reload()
-                container_ip = container.attrs['NetworkSettings']['IPAddress']
-
-                set_on_cache(
-                    father_ip = father_ip,
-                    id_or_token = container.id,
-                    ip_or_uri = container_ip
-                )
 
                 for slot in service.api.slot:
                     uri_slot = celaut.Instance.Uri_Slot()
@@ -305,7 +298,7 @@ def launch_service(
 
                     # Since it is internal, we know that it will only have one possible address per slot.
                     uri = celaut.Instance.Uri()
-                    uri.ip = container_ip
+                    uri.ip = container.attrs['NetworkSettings']['IPAddress']
                     uri.port = slot.port
                     uri_slot.uri.append(uri)
 
@@ -326,12 +319,6 @@ def launch_service(
 
                 # Reload this object from the server again and update attrs with the new data.
                 container.reload()
-
-                set_on_cache(
-                    father_ip = father_ip,
-                    id_or_token = container.id,
-                    ip_or_uri = container.attrs['NetworkSettings']['IPAddress']
-                )
 
                 for port in assigment_ports:
                     uri_slot = celaut.Instance.Uri_Slot()
