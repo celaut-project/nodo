@@ -58,6 +58,7 @@ def Zeroconf(network: str) -> list:
 
 if __name__ == "__main__":
     import sys
+    print('Connecting to peer -> ', sys.argv[1])
     insert_instance_on_mongo(
         instance = next(client_grpc(
             method = gateway_pb2_grpc.GatewayStub(
