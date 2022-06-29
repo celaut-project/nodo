@@ -18,9 +18,10 @@ message Refund {
 }
 
 message Payment {
-    int64 amount = 1;
-    string tx_id = 2;
+    string token = 1;
+    string session_id = 2;
     string ledger = 3;
+    int64 amount = 4;
 }
 
 message Instance {

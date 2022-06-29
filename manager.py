@@ -276,7 +276,8 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                         partitions_message_mode_parser = True,
                         input = gateway_pb2.Payment(
                             amount = amount,
-                            tx_id = avaliable_payment_process(amount = amount, peer_id = peer_id),
+                            session_id = avaliable_payment_process(amount = amount, peer_id = peer_id),
+                            token_id = peer_id,
                             ledger = payment_ledger,                            
                         )
                     )
@@ -317,8 +318,8 @@ def __get_gas_amount_by_ip(ip: str) -> int:
         raise Exception('Manager error: cannot get gas amount for '+ip)
 
 
-def validate_payment_process(peer: str, amount: int, tx_id: str, ledger: str) -> bool:
-    return __check_payment_process(peer = peer, amount = amount, tx_id = tx_id, ledger = ledger) \
+def validate_payment_process(peer: str, amount: int, session_id: str, ledger: str) -> bool:
+    return __check_payment_process(peer = peer, amount = amount, tx_id = session_id, ledger = ledger) \
          and __increase_local_gas_for_peer(peer_id = get_only_the_ip_from_context_method(context_peer = peer), amount = amount)
 
 
