@@ -3,10 +3,16 @@ from importlib.resources import Package
 
 # Singleton class
 class VyperDepositContractInterface:
+
+    def __new__(cls):
+        """ creates a singleton object, if it is not created,
+        or else returns the previous singleton object"""
+        if not hasattr(cls, 'instance'):
+            cls.instance = super(VyperDepositContractInterface, cls).__new__(cls)
+        return cls.instance
+
     def __init__(self):
         self.contract = None
-
-
 
     def process_payment(self, amount: int, peer_id: int) -> str:
         print("Processing payment...")
