@@ -18,10 +18,9 @@ message Refund {
 }
 
 message Payment {
-    string token = 1;
-    string session_id = 2;
-    string ledger = 3;
-    int64 amount = 4;
+    string deposit_token = 1;
+    bytes contract_ledger = 3;
+    int64 gas_amount = 4;
 }
 
 message Instance {

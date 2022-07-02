@@ -6,3 +6,5 @@ docker
 pymongo
 psutil
 netifaces
+web3
+vyper
