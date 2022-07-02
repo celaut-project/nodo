@@ -22,7 +22,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\x1a\x0c\x62uffer.proto\x1a\rcompile.proto\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"/\n\rEstimatedCost\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x03\x12\x10\n\x08variance\x18\x02 \x01(\x02\"\x18\n\x06Refund\x12\x0e\n\x06\x61mount\x18\x01 \x01(\x03\"L\n\x07Payment\x12\r\n\x05token\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12\x0e\n\x06ledger\x18\x03 \x01(\t\x12\x0e\n\x06\x61mount\x18\x04 \x01(\x03\"\x90\x01\n\x08Instance\x12\x30\n\rinstance_meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.MetadataH\x00\x88\x01\x01\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\x12\x12\n\x05token\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x10\n\x0e_instance_metaB\x08\n\x06_token\"[\n\x0fServiceWithMeta\x12&\n\x08metadata\x18\x01 \x01(\x0b\x32\x14.celaut.Any.Metadata\x12 \n\x07service\x18\x02 \x01(\x0b\x32\x0f.celaut.Service\"\x9c\x02\n\x0eHashWithConfig\x12/\n\x04hash\x18\x01 \x01(\x0b\x32!.celaut.Any.Metadata.HashTag.Hash\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\x12-\n\nmin_sysreq\x18\x04 \x01(\x0b\x32\x14.celaut.SysresourcesH\x00\x88\x01\x01\x12-\n\nmax_sysreq\x18\x05 \x01(\x0b\x32\x14.celaut.SysresourcesH\x01\x88\x01\x01\x12\x1f\n\x12initial_gas_amount\x18\x06 \x01(\x05H\x02\x88\x01\x01\x42\r\n\x0b_min_sysreqB\r\n\x0b_max_sysreqB\x15\n\x13_initial_gas_amount\"\x99\x02\n\x11ServiceWithConfig\x12)\n\x07service\x18\x02 \x01(\x0b\x32\x18.gateway.ServiceWithMeta\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\x12-\n\nmin_sysreq\x18\x04 \x01(\x0b\x32\x14.celaut.SysresourcesH\x00\x88\x01\x01\x12-\n\nmax_sysreq\x18\x05 \x01(\x0b\x32\x14.celaut.SysresourcesH\x01\x88\x01\x01\x12\x1f\n\x12initial_gas_amount\x18\x06 \x01(\x05H\x02\x88\x01\x01\x42\r\n\x0b_min_sysreqB\r\n\x0b_max_sysreqB\x15\n\x13_initial_gas_amount\"U\n\x0c\x43ompileInput\x12\x0c\n\x04repo\x18\x01 \x01(\x0c\x12\x37\n\x10partitions_model\x18\x02 \x03(\x0b\x32\x1d.buffer.Buffer.Head.Partition\"F\n\rCompileOutput\x12\n\n\x02id\x18\x01 \x01(\x0c\x12)\n\x07service\x18\x02 \x01(\x0b\x32\x18.compile.ServiceWithMeta\"w\n!ModifyServiceSystemResourcesInput\x12(\n\nmin_sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12(\n\nmax_sysreq\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources2\xf5\x03\n\x07Gateway\x12\x34\n\x0cStartService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bStopService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12.\n\x06Hynode\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x44\n\x1cModifyServiceSystemResources\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07GetFile\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07\x43ompile\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x35\n\rGetServiceTar\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12?\n\x17GetServiceEstimatedCost\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07Payable\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\x1a\x0c\x62uffer.proto\x1a\rcompile.proto\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"/\n\rEstimatedCost\x12\x0c\n\x04\x63ost\x18\x01 \x01(\x03\x12\x10\n\x08variance\x18\x02 \x01(\x02\"\x18\n\x06Refund\x12\x0e\n\x06\x61mount\x18\x01 \x01(\x03\"M\n\x07Payment\x12\x15\n\rdeposit_token\x18\x01 \x01(\t\x12\x17\n\x0f\x63ontract_ledger\x18\x03 \x01(\x0c\x12\x12\n\ngas_amount\x18\x04 \x01(\x03\"\x90\x01\n\x08Instance\x12\x30\n\rinstance_meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.MetadataH\x00\x88\x01\x01\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\x12\x12\n\x05token\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x10\n\x0e_instance_metaB\x08\n\x06_token\"[\n\x0fServiceWithMeta\x12&\n\x08metadata\x18\x01 \x01(\x0b\x32\x14.celaut.Any.Metadata\x12 \n\x07service\x18\x02 \x01(\x0b\x32\x0f.celaut.Service\"\x9c\x02\n\x0eHashWithConfig\x12/\n\x04hash\x18\x01 \x01(\x0b\x32!.celaut.Any.Metadata.HashTag.Hash\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\x12-\n\nmin_sysreq\x18\x04 \x01(\x0b\x32\x14.celaut.SysresourcesH\x00\x88\x01\x01\x12-\n\nmax_sysreq\x18\x05 \x01(\x0b\x32\x14.celaut.SysresourcesH\x01\x88\x01\x01\x12\x1f\n\x12initial_gas_amount\x18\x06 \x01(\x05H\x02\x88\x01\x01\x42\r\n\x0b_min_sysreqB\r\n\x0b_max_sysreqB\x15\n\x13_initial_gas_amount\"\x99\x02\n\x11ServiceWithConfig\x12)\n\x07service\x18\x02 \x01(\x0b\x32\x18.gateway.ServiceWithMeta\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\x12-\n\nmin_sysreq\x18\x04 \x01(\x0b\x32\x14.celaut.SysresourcesH\x00\x88\x01\x01\x12-\n\nmax_sysreq\x18\x05 \x01(\x0b\x32\x14.celaut.SysresourcesH\x01\x88\x01\x01\x12\x1f\n\x12initial_gas_amount\x18\x06 \x01(\x05H\x02\x88\x01\x01\x42\r\n\x0b_min_sysreqB\r\n\x0b_max_sysreqB\x15\n\x13_initial_gas_amount\"U\n\x0c\x43ompileInput\x12\x0c\n\x04repo\x18\x01 \x01(\x0c\x12\x37\n\x10partitions_model\x18\x02 \x03(\x0b\x32\x1d.buffer.Buffer.Head.Partition\"F\n\rCompileOutput\x12\n\n\x02id\x18\x01 \x01(\x0c\x12)\n\x07service\x18\x02 \x01(\x0b\x32\x18.compile.ServiceWithMeta\"w\n!ModifyServiceSystemResourcesInput\x12(\n\nmin_sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12(\n\nmax_sysreq\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources2\xf5\x03\n\x07Gateway\x12\x34\n\x0cStartService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bStopService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12.\n\x06Hynode\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x44\n\x1cModifyServiceSystemResources\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07GetFile\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07\x43ompile\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x35\n\rGetServiceTar\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12?\n\x17GetServiceEstimatedCost\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07Payable\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x62\x06proto3'
   ,
   dependencies=[celaut__pb2.DESCRIPTOR,buffer__pb2.DESCRIPTOR,compile__pb2.DESCRIPTOR,])
 
@@ -141,28 +141,21 @@ _PAYMENT = _descriptor.Descriptor(
   create_key=_descriptor._internal_create_key,
   fields=[
     _descriptor.FieldDescriptor(
-      name='token', full_name='gateway.Payment.token', index=0,
+      name='deposit_token', full_name='gateway.Payment.deposit_token', index=0,
       number=1, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=b"".decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='session_id', full_name='gateway.Payment.session_id', index=1,
-      number=2, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=b"".decode('utf-8'),
+      name='contract_ledger', full_name='gateway.Payment.contract_ledger', index=1,
+      number=3, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"",
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='ledger', full_name='gateway.Payment.ledger', index=2,
-      number=3, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=b"".decode('utf-8'),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='amount', full_name='gateway.Payment.amount', index=3,
+      name='gas_amount', full_name='gateway.Payment.gas_amount', index=2,
       number=4, type=3, cpp_type=2, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
@@ -181,7 +174,7 @@ _PAYMENT = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=175,
-  serialized_end=251,
+  serialized_end=252,
 )
 
 
@@ -236,8 +229,8 @@ _INSTANCE = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=254,
-  serialized_end=398,
+  serialized_start=255,
+  serialized_end=399,
 )
 
 
@@ -275,8 +268,8 @@ _SERVICEWITHMETA = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=400,
-  serialized_end=491,
+  serialized_start=401,
+  serialized_end=492,
 )
 
 
@@ -350,8 +343,8 @@ _HASHWITHCONFIG = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=494,
-  serialized_end=778,
+  serialized_start=495,
+  serialized_end=779,
 )
 
 
@@ -425,8 +418,8 @@ _SERVICEWITHCONFIG = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=781,
-  serialized_end=1062,
+  serialized_start=782,
+  serialized_end=1063,
 )
 
 
@@ -464,8 +457,8 @@ _COMPILEINPUT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1064,
-  serialized_end=1149,
+  serialized_start=1065,
+  serialized_end=1150,
 )
 
 
@@ -503,8 +496,8 @@ _COMPILEOUTPUT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1151,
-  serialized_end=1221,
+  serialized_start=1152,
+  serialized_end=1222,
 )
 
 
@@ -542,8 +535,8 @@ _MODIFYSERVICESYSTEMRESOURCESINPUT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1223,
-  serialized_end=1342,
+  serialized_start=1224,
+  serialized_end=1343,
 )
 
 _INSTANCE.fields_by_name['instance_meta'].message_type = celaut__pb2._ANY_METADATA
@@ -685,8 +678,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=1345,
-  serialized_end=1846,
+  serialized_start=1346,
+  serialized_end=1847,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',
