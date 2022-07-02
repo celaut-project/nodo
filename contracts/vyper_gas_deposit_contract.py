@@ -4,7 +4,7 @@ from importlib.resources import Package
 # Singleton class
 class VyperDepositContractInterface:
     def __init__(self):
-        self.contract_address = None
+        self.contract = None
 
 
 
