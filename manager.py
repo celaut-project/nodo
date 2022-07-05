@@ -1,4 +1,6 @@
+from hashlib import sha256
 import json
+import string
 from threading import Lock
 import threading
 from time import sleep
@@ -13,7 +15,7 @@ import logger as l
 from verify import get_service_hex_main_hash
 import celaut_pb2 as celaut
 import gateway_pb2_grpc,gateway_pb2, grpc, grpcbigbuffer as grpcbf
-import contracts.vyper_gas_deposit_contract as vyper_gdc
+import contracts.vyper_gas_deposit_contract.interface as vyper_gdc
 from google.protobuf.json_format import MessageToJson
 
 db = pymongo.MongoClient(
@@ -295,9 +297,9 @@ def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
         return True
     return False
 
-def __check_payment_process(peer_id: str, amount: int, ledger: str, token: str) -> bool:
-    l.LOGGER('Check payment process to '+peer_id+' by '+str(amount))
-    return PAYMENT_PROCESS_VALIDATORS[ledger](peer_id, amount, token)
+def __check_payment_process( amount: int, ledger: str, token: str, contract: bytes, contract_id: string) -> bool:
+    l.LOGGER('Check payment process to '+token+' by '+str(amount))
+    return PAYMENT_PROCESS_VALIDATORS[sha256(contract)]( amount, token, ledger, contract_id)
 
 def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for peer '+peer_id+' by '+str(amount))
@@ -318,8 +320,8 @@ def __get_gas_amount_by_ip(ip: str) -> int:
         raise Exception('Manager error: cannot get gas amount for '+ip)
 
 
-def validate_payment_process(peer: str, amount: int, ledger: str, token: str) -> bool:
-    return __check_payment_process(peer = peer, amount = amount, ledger = ledger, token = token) \
+def validate_payment_process(peer: str, amount: int, ledger: str, contract: bytes, contract_id: str, token: str) -> bool:
+    return __check_payment_process(amount = amount, ledger = ledger, token = token, contract = contract, contract_id = contract_id) \
          and __increase_local_gas_for_peer(peer_id = get_only_the_ip_from_context_method(context_peer = peer), amount = amount)
 
 

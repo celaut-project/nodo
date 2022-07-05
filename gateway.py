@@ -857,7 +857,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
         if not validate_payment_process(
             peer = context.peer(),
             amount = payment.gas_amount,
-            ledger = payment.contract_ledger,
+            ledger = payment.contract_ledger.ledger[0],
+            contract = payment.contract_ledger.contract,
+            contract_id = payment.contract_ledger.contract_id,
             token = payment.deposit_token,
         ): raise Exception('Error: payment not valid.')
         l.LOGGER('Payment is valid.')
