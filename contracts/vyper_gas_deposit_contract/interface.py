@@ -1,11 +1,9 @@
-from importlib.resources import Package
 import json
-from time import sleep
-from utils import catch_event
-from hashlib import sha256
-from web3 import Web3, HTTPProvider
-from web3.middleware import geth_poa_middleware
+from multiprocessing import Lock
 from main import utils, singleton
+from typing import Dict
+from web3 import Web3
+
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
 
@@ -13,6 +11,14 @@ class LedgerContractInterface:
 
     def __init__(self, w3_generator, contract_addr):
         self.w3 = next(w3_generator)
+        self.contract_addr = contract_addr
+        
+        self.contract = lambda w3: w3.eth.contract(
+            abi = json.load(open('abi.json')),
+            bytecode = json.load(open('bytecode.json')),
+        )
+
+        print('Init session on contract:', contract_addr)
 
         self.contract = self.w3.eth.contract(
             address = Web3.toChecksumAddress(contract_addr),
@@ -22,13 +28,11 @@ class LedgerContractInterface:
 
         print('Init session on contract:', contract_addr)
 
-        # TODO
-
         self.sessions = {}
-
+        self.sessions_lock = Lock()
 
         # Update Session Event.
-        catch_event(
+        utils.catch_event(
             contractAddress = Web3.toChecksumAddress(contract_addr),
             w3 = self.w3,
             contract = self.contract,
@@ -39,28 +43,39 @@ class LedgerContractInterface:
                     )
         )
 
+
     def __new_session(self, token, amount):
         print('New session:', token, amount)
-        self.sessions[token] += amount if token in self.sessions else amount
+        self.sessions_lock.acquire()
+        if token not in self.sessions:
+            self.sessions[token] = amount
+        else:
+            self.sessions[token] += amount
+        self.sessions_lock.release()
+
 
 
     def transfer_property(self, new_owner):
         self.w3.eth.wait_for_transaction_receipt(
-            self.contract.functions.transfer_property(
+            self.contract(self.w3).functions.transfer_property(
                 new_owner = new_owner
             ).transact()
         )
 
     def validate_session(self, token, amount) -> bool:
-        # TODO inspect event and return True or False. Check if the value is equivalent to the amount.
-        return True
+        if self.sessions[token] >= amount:
+            self.sessions_lock.acquire()
+            self.sessions[token] -= amount
+            self.sessions_lock.release()
+            return True
+        return False
 
 
 # Singleton class
 class VyperDepositContractInterface(singleton.Singleton):
 
     def __init__(self):
-        self.ledger_providers = {}
+        self.ledger_providers: Dict[str: LedgerContractInterface] = {}
         for ledger, contract_address in utils.get_interface_ledgers_from_mongodb('vyper_deposit_contract').items():
             self.ledger_providers[ledger] = LedgerContractInterface(
                 w3_generator = utils.w3_generator_factory(ledger = ledger),
@@ -69,7 +84,7 @@ class VyperDepositContractInterface(singleton.Singleton):
 
     # TODO si necesitas añadir un nuevo ledger, deberás reiniciar el nodo, a no ser que se implemente un método set_ledger_on_interface()
 
-    def process_payment(self, amount: int, peer_id: int) -> str:
+    def process_payment(self, amount: int, peer_id: int, ledger: str, contract_id: str) -> str:
         print("Processing payment...")
         return '0x0000000000000000000000000000000000000000'  # TODO
 
@@ -77,11 +92,11 @@ class VyperDepositContractInterface(singleton.Singleton):
     def payment_process_validator(self, amount: int, token: str, ledger: str, contract_id: str) -> bool:
         print("Validating payment...")
         assert contract_id == utils.get_ledger_contract_from_mongodb(ledger)
-        return utils.ledger_providers(ledger).validate_session(token, amount) 
+        return self.ledger_providers(ledger).validate_session(token, amount) 
 
 
 def process_payment(amount: int, peer_id: int, ledger, contract_id) -> str:
-    return VyperDepositContractInterface().process_payment(amount, peer_id)
+    return VyperDepositContractInterface().process_payment(amount, peer_id, ledger, contract_id)
 
 def payment_process_validator(amount: int, token: str, ledger: str, contract_id: str) -> bool:
     return VyperDepositContractInterface().payment_process_validator(amount, token, ledger, contract_id)
