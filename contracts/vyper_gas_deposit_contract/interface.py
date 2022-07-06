@@ -15,21 +15,13 @@ class LedgerContractInterface:
     def __init__(self, w3_generator, contract_addr):
         self.w3 = next(w3_generator)
         self.contract_addr = contract_addr
+        self.contract_hash  = sha256(open('bytecode', 'rb').read().encode('utf-8')).digest()
         
-        self.contract = lambda w3: w3.eth.contract(
-            abi = json.load(open('abi.json')),
-            bytecode = json.load(open('bytecode.json')),
-        )
-
-        print('Init session on contract:', contract_addr)
-
         self.contract = self.w3.eth.contract(
             address = Web3.toChecksumAddress(contract_addr),
             abi = json.load(open('abi.json')), 
             bytecode = open('bytecode', 'rb').read()
         )
-
-        print('Init session on contract:', contract_addr)
 
         self.sessions: Dict[bytes, int] = {}
         self.sessions_lock = Lock()
@@ -101,9 +93,10 @@ class VyperDepositContractInterface(singleton.Singleton):
 
     def process_payment(self, amount: int, token: str) -> gateway_pb2.ContractLedger:
         print("Processing payment...")
-        ledger, contract_id: tuple(str, str) = utils.get_contract_ledger_from_mongodb(contract_hash)
+        ledger_provider = self.ledger_providers[token]
+        ledger, contract_id: tuple(str, str) = utils.get_contract_ledger_from_mongodb(ledger_provider.contract_hash)
         assert contract_id == utils.get_ledger_contract_from_mongodb(ledger)
-        self.ledger_providers(ledger).add_gas(token, amount)
+        ledger_provider.add_gas(token, amount)
         return gateway_pb2.ContractLedger(
             ledger = ledger,
             contract_id = contract_id
