@@ -281,7 +281,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                             gas_amount = amount,
                             deposit_token = peer_id,
                             contract_ledger = available_payment_process(
-                                amount = amount, 
+                                amount = amount,
                                 token = peer_id,
                             ),                            
                         )
