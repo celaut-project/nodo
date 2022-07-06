@@ -71,5 +71,5 @@ def set_provider_on_mongodb(provider: str, ledger: str):
 def set_ledger_contract_on_mongodb(ledger: str, contract_addr: str):
     pass
 
-def get_ledger_contract_from_mongodb(ledger: str) -> str:
+def get_ledger_contract_from_mongodb(ledger: str, contract_addr: str) -> str:
     pass

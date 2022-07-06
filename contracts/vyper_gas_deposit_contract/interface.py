@@ -110,14 +110,14 @@ class VyperDepositContractInterface(singleton.Singleton):
         )
 
 
-    def payment_process_validator(self, amount: int, token: str, ledger: str, contract_id: str) -> bool:
+    def payment_process_validator(self, amount: int, token: str, ledger: str, contract_addr: str) -> bool:
         print("Validating payment...")
-        assert contract_id == utils.get_ledger_contract_from_mongodb(ledger)
+        assert contract_addr == utils.get_ledger_contract_from_mongodb(ledger, contract_addr)
         return self.ledger_providers(ledger).validate_session(token, amount) 
 
 
 def process_payment(amount: int, token: str) -> gateway_pb2.ContractLedger:
     return VyperDepositContractInterface().process_payment(amount, token)
 
-def payment_process_validator(amount: int, token: str, ledger: str, contract_id: str) -> bool:
-    return VyperDepositContractInterface().payment_process_validator(amount, token, ledger, contract_id)
+def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str) -> bool:
+    return VyperDepositContractInterface().payment_process_validator(amount, token, ledger, contract_addr)
