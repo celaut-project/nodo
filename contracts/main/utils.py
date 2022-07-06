@@ -7,7 +7,7 @@ async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, c
         for event in event_filter.get_new_entries():
             print(event_name, event)
             receipt = w3.eth.waitForTransactionReceipt(event['transactionHash'])
-            result = getattr(contract.events, event_name).processReceipt(receipt)
+            result = getattr(contract.events, event_name)().processReceipt(receipt)
             opt(args = result[0]['args'])
             time.sleep(poll_interval)
 
