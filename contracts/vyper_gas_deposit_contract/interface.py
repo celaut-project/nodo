@@ -28,7 +28,7 @@ class LedgerContractInterface:
 
         print('Init session on contract:', contract_addr)
 
-        self.sessions = {}
+        self.sessions: Dict[bytes, int] = {}
         self.sessions_lock = Lock()
 
         # Update Session Event.
