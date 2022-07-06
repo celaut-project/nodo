@@ -1,8 +1,10 @@
 import json
 from multiprocessing import Lock
+from contracts.main.utils import transact
 from main import utils, singleton
 from typing import Dict
 from web3 import Web3
+from hashlib import sha256
 
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
@@ -71,6 +73,64 @@ class LedgerContractInterface:
         return False
 
 
+    def add_gas(self, token, amount) -> str:
+        return transact(
+            w3 = self.w3,
+            method = self.contract.functions.add_gas(
+                sha256(token.encode('utf-8')).digest(), 
+                amount
+            ),
+            priv = self.priv,
+            value = 20
+        )
+
+
+class Session:
+
+    def __init__(self, w3, contract_addr, private_key):
+        self.w3 = w3
+        self.priv = private_key
+        self.pub = w3.eth.account.privateKeyToAccount(private_key).address
+
+        self.contract = w3.eth.contract(
+            address = Web3.toChecksumAddress(contract_addr),
+            abi = json.load(open('dist/abi.json')), 
+            bytecode = open('dist/bytecode', 'rb').read()
+        )
+
+        print('Init session on contract:', contract_addr)
+
+        input_hash = sha256("192.168.1.16".encode('utf-8'))
+        print('Input hash:', input_hash.hexdigest())
+
+        input_bytes = sha256("192.168.1.16".encode('utf-8')).digest()
+        print('Input:', str(input))
+
+        tx_hash = transact(
+            w3 = w3,
+            method = self.contract.functions.add_gas(input_bytes),
+            priv = self.priv,
+            value = 20
+        )
+        print('Session tx_hash: ', tx_hash)
+
+        response = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+        if response['status'] == 0:
+            raise Exception('Session init failed ' + str(response))
+
+        try:
+            response = self.contract.functions.get_gas(input_bytes).call({'from': self.pub})
+            print('Session gas: ', response)
+        except: print('Session gas not found')
+
+    def refund_gas(self):
+        self.w3.eth.wait_for_transaction_receipt(
+            self.contract.functions.refund_gas(
+                from_session_id = self.session_id,
+            ).transact()
+        )
+
+
 # Singleton class
 class VyperDepositContractInterface(singleton.Singleton):
 
@@ -84,9 +144,10 @@ class VyperDepositContractInterface(singleton.Singleton):
 
     # TODO si necesitas añadir un nuevo ledger, deberás reiniciar el nodo, a no ser que se implemente un método set_ledger_on_interface()
 
-    def process_payment(self, amount: int, peer_id: int, ledger: str, contract_id: str) -> str:
+    def process_payment(self, amount: int, ledger: str, contract_id: str, token: str) -> str:
         print("Processing payment...")
-        return '0x0000000000000000000000000000000000000000'  # TODO
+        assert contract_id == utils.get_ledger_contract_from_mongodb(ledger)
+        self.ledger_providers(ledger).add_gas(token, amount)
 
 
     def payment_process_validator(self, amount: int, token: str, ledger: str, contract_id: str) -> bool:
@@ -95,8 +156,8 @@ class VyperDepositContractInterface(singleton.Singleton):
         return self.ledger_providers(ledger).validate_session(token, amount) 
 
 
-def process_payment(amount: int, peer_id: int, ledger, contract_id) -> str:
-    return VyperDepositContractInterface().process_payment(amount, peer_id, ledger, contract_id)
+def process_payment(amount: int, ledger, contract_id: str, token: str) -> str:
+    return VyperDepositContractInterface().process_payment(amount, ledger, contract_id, token)
 
 def payment_process_validator(amount: int, token: str, ledger: str, contract_id: str) -> bool:
     return VyperDepositContractInterface().payment_process_validator(amount, token, ledger, contract_id)

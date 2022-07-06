@@ -4,6 +4,7 @@ import string
 from threading import Lock
 import threading
 from time import sleep
+from typing import Dict
 import build
 import docker as docker_lib
 from utils import GET_ENV, get_network_name, get_only_the_ip_from_context_method
@@ -46,8 +47,8 @@ GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only o
 MODIFY_SERVICE_SYSTEM_RESOURCES_COST = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
 ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = True)  # Could be used with the reputation system.
 
-PAYMENT_PROCESS_VALIDATORS = {'VYPER': vyper_gdc.payment_process_validator}     # ledger_id:  lambda peer_id, tx_id, amount -> bool,
-AVALIABLE_PAYMENT_PROCESS = {'VYPER': vyper_gdc.process_payment}   #ledger_id:   lambda amount, peer_id -> tx_id,
+PAYMENT_PROCESS_VALIDATORS: Dict[str, function] = {vyper_gdc.contract_hash : vyper_gdc.payment_process_validator}     # contract:  lambda peer_id, tx_id, amount -> bool,
+AVAILABLE_PAYMENT_PROCESS: Dict[str, function] = {vyper_gdc.contract_hash : vyper_gdc.process_payment}   # contract:   lambda amount, peer_id -> tx_id,
 
 MEMSWAP_FACTOR = 0 # 0 - 1
 
@@ -267,7 +268,7 @@ def __refound_gas_function_factory(
 
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
     l.LOGGER('Peer payment process to '+peer_id+' by '+str(amount))
-    for payment_ledger, avaliable_payment_process in AVALIABLE_PAYMENT_PROCESS.items(): # check if the payment process is compatible with this peer.
+    for available_payment_process in AVAILABLE_PAYMENT_PROCESS.values():   # check if the payment process is compatible with this peer.
         try:            
             next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
@@ -277,10 +278,12 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                 ).Payable,
                         partitions_message_mode_parser = True,
                         input = gateway_pb2.Payment(
-                            amount = amount,
-                            session_id = avaliable_payment_process(amount = amount, peer_id = peer_id),
-                            token_id = peer_id,
-                            ledger = payment_ledger,                            
+                            gas_amount = amount,
+                            deposit_token = peer_id,
+                            contract_ledger = available_payment_process(
+                                amount = amount, 
+                                token = peer_id,
+                            ),                            
                         )
                     )
                 )
