@@ -300,9 +300,9 @@ def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
         return True
     return False
 
-def __check_payment_process( amount: int, ledger: str, token: str, contract: bytes, contract_id: string) -> bool:
+def __check_payment_process( amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
     l.LOGGER('Check payment process to '+token+' by '+str(amount))
-    return PAYMENT_PROCESS_VALIDATORS[sha256(contract)]( amount, token, ledger, contract_id)
+    return PAYMENT_PROCESS_VALIDATORS[sha256(contract)]( amount, token, ledger, contract_addr)
 
 def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for peer '+peer_id+' by '+str(amount))
@@ -323,8 +323,8 @@ def __get_gas_amount_by_ip(ip: str) -> int:
         raise Exception('Manager error: cannot get gas amount for '+ip)
 
 
-def validate_payment_process(peer: str, amount: int, ledger: str, contract: bytes, contract_id: str, token: str) -> bool:
-    return __check_payment_process(amount = amount, ledger = ledger, token = token, contract = contract, contract_id = contract_id) \
+def validate_payment_process(peer: str, amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
+    return __check_payment_process(amount = amount, ledger = ledger, token = token, contract = contract, contract_addr = contract_addr) \
          and __increase_local_gas_for_peer(peer_id = get_only_the_ip_from_context_method(context_peer = peer), amount = amount)
 
 

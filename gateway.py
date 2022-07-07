@@ -859,7 +859,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             amount = payment.gas_amount,
             ledger = payment.contract_ledger.ledger[0],
             contract = payment.contract_ledger.contract,
-            contract_id = payment.contract_ledger.contract_id,
+            contract_addr = payment.contract_ledger.contract_addr,
             token = payment.deposit_token,
         ): raise Exception('Error: payment not valid.')
         l.LOGGER('Payment is valid.')

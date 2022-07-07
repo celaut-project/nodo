@@ -1,3 +1,4 @@
+import typing
 from web3.middleware import geth_poa_middleware
 from web3 import HTTPProvider, Web3
 import asyncio, time, json
@@ -11,14 +12,14 @@ async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, c
             opt(args = result[0]['args'])
             time.sleep(poll_interval)
 
-def catch_event(contractAddress, w3, contract, event_name, opt):
+def catch_event(contractAddress, w3, contract, event_name, opt, poll_interval: int = 1):
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(
             asyncio.gather(
                 log_loop(
                     event_filter = w3.eth.filter({'fromBlock':'latest', 'address':contractAddress}),
-                    poll_interval = 2, event_name = event_name, opt = opt, w3 = w3, contract = contract
+                    poll_interval = poll_interval, event_name = event_name, opt = opt, w3 = w3, contract = contract
                 )))
     finally:
         # close loop to free up system resources
@@ -48,7 +49,7 @@ def transact(
 def check_provider_availability(provider) -> bool:
     return True  # TODO check if the provider is avialable.
 
-def w3_generator_factory(ledger: str):
+def w3_generator_factory(ledger: str) -> typing.Generator:
     while True:
         for provider in get_ledger_providers_from_mongodb(ledger = ledger):
             if not check_provider_availability(provider = provider): continue

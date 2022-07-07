@@ -6,6 +6,7 @@ from typing import Dict
 from web3 import Web3
 from hashlib import sha256
 import gateway_pb2
+from time import sleep
 
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
@@ -13,9 +14,9 @@ import gateway_pb2
 class LedgerContractInterface:
 
     def __init__(self, w3_generator, contract_addr):
-        self.w3 = next(w3_generator)
-        self.contract_addr = contract_addr
-        self.contract_hash  = sha256(open('bytecode', 'rb').read().encode('utf-8')).digest()
+        self.w3: Web3 = next(w3_generator)
+        self.contract_addr: str = contract_addr
+        self.contract_hash: bytes  = sha256(open('bytecode', 'rb').read().encode('utf-8')).digest()
         
         self.contract = self.w3.eth.contract(
             address = Web3.toChecksumAddress(contract_addr),
@@ -26,6 +27,8 @@ class LedgerContractInterface:
         self.sessions: Dict[bytes, int] = {}
         self.sessions_lock = Lock()
 
+        self.poll_interval: int = 2
+
         # Update Session Event.
         utils.catch_event(
             contractAddress = Web3.toChecksumAddress(contract_addr),
@@ -35,7 +38,8 @@ class LedgerContractInterface:
             opt = lambda args: self.__new_session(
                         token = args['token'], 
                         amount = args['gas_amount']
-                    )
+                    ),
+            poll_interval = self.poll_interval,
         )
 
 
@@ -58,6 +62,7 @@ class LedgerContractInterface:
         )
 
     def validate_session(self, token, amount) -> bool:
+        sleep(self.poll_interval)
         if self.sessions[token] >= amount:
             self.sessions_lock.acquire()
             self.sessions[token] -= amount
@@ -105,8 +110,9 @@ class VyperDepositContractInterface(singleton.Singleton):
 
     def payment_process_validator(self, amount: int, token: str, ledger: str, contract_addr: str) -> bool:
         print("Validating payment...")
-        assert contract_addr == utils.get_ledger_contract_from_mongodb(ledger, contract_addr)
-        return self.ledger_providers(ledger).validate_session(token, amount) 
+        ledger_provider = self.ledger_providers[ledger]
+        assert contract_addr == ledger_provider.contract_addr
+        return ledger_provider.validate_session(token, amount) 
 
 
 def process_payment(amount: int, token: str) -> gateway_pb2.ContractLedger:
