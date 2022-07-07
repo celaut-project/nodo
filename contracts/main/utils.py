@@ -57,10 +57,10 @@ def w3_generator_factory(ledger: str) -> typing.Generator:
             w3.middleware_onion.inject(geth_poa_middleware, layer=0)
             yield w3
 
-def get_interface_ledgers_from_mongodb(interface_id) -> dict:
+def get_interface_ledgers_from_mongodb(interface_id) -> typing.Dict[str, str]:
     raise NotImplementedError
 
-def get_ledger_providers_from_mongodb(ledger: str) -> list:
+def get_ledger_providers_from_mongodb(ledger: str) -> typing.List[str]:
     pass
 
 def set_ledger_on_mongodb(ledger: str):

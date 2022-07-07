@@ -8,6 +8,7 @@ from hashlib import sha256
 import gateway_pb2
 from time import sleep
 
+CONTRACT_HASH: bytes = sha256(open('bytecode', 'rb').read().encode('utf-8')).digest()
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
 
@@ -16,13 +17,13 @@ class LedgerContractInterface:
     def __init__(self, w3_generator, contract_addr):
         self.w3: Web3 = next(w3_generator)
         self.contract_addr: str = contract_addr
-        self.contract_hash: bytes  = sha256(open('bytecode', 'rb').read().encode('utf-8')).digest()
         
-        self.contract = self.w3.eth.contract(
-            address = Web3.toChecksumAddress(contract_addr),
+        self.generate_contract = lambda addr: self.w3.eth.contract(
+            address = Web3.toChecksumAddress(addr),
             abi = json.load(open('abi.json')), 
-            bytecode = open('bytecode', 'rb').read()
+            bytecode = open('bytecode', 'rb').read()            
         )
+        self.contract = self.generate_contract(addr = contract_addr)
 
         self.sessions: Dict[bytes, int] = {}
         self.sessions_lock = Lock()
@@ -71,10 +72,10 @@ class LedgerContractInterface:
         return False
 
 
-    def add_gas(self, token, amount) -> str:
+    def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
         return transact(
             w3 = self.w3,
-            method = self.contract.functions.add_gas(
+            method = self.generate_contract(addr = contract_addr).functions.add_gas(
                 sha256(token.encode('utf-8')).digest(), 
                 amount
             ),
@@ -96,15 +97,13 @@ class VyperDepositContractInterface(singleton.Singleton):
 
     # TODO si necesitas añadir un nuevo ledger, deberás reiniciar el nodo, a no ser que se implemente un método set_ledger_on_interface()
 
-    def process_payment(self, amount: int, token: str) -> gateway_pb2.ContractLedger:
+    def process_payment(self, amount: int, token: str, ledger: str, contract_addr: str) -> gateway_pb2.ContractLedger:
         print("Processing payment...")
-        ledger_provider = self.ledger_providers[token]
-        ledger, contract_id: tuple(str, str) = utils.get_contract_ledger_from_mongodb(ledger_provider.contract_hash)
-        assert contract_id == utils.get_ledger_contract_from_mongodb(ledger)
-        ledger_provider.add_gas(token, amount)
+        ledger_provider = self.ledger_providers[ledger]
+        ledger_provider.add_gas(token, amount, contract_addr)
         return gateway_pb2.ContractLedger(
             ledger = ledger,
-            contract_id = contract_id
+            contract_addr = contract_addr
         )
 
 

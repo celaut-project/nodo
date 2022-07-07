@@ -1,5 +1,6 @@
 import socket, os
 from typing import Generator
+import typing
 
 import celaut_pb2, gateway_pb2
 from compile import REGISTRY
@@ -142,3 +143,7 @@ def get_network_name( ip_or_uri: str) -> str:
     except Exception as e:
         LOGGER('Error getting the network name: ' + str(e))
         raise e
+
+
+def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: str, peer_id: str) -> typing.Tuple[str, str]:
+    return 'ledger', 'contract_addr'

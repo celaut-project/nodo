@@ -7,7 +7,7 @@ from time import sleep
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import GET_ENV, get_network_name, get_only_the_ip_from_context_method
+from utils import GET_ENV, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -47,8 +47,8 @@ GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only o
 MODIFY_SERVICE_SYSTEM_RESOURCES_COST = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
 ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = True)  # Could be used with the reputation system.
 
-PAYMENT_PROCESS_VALIDATORS: Dict[str, function] = {vyper_gdc.contract_hash : vyper_gdc.payment_process_validator}     # contract:  lambda peer_id, tx_id, amount -> bool,
-AVAILABLE_PAYMENT_PROCESS: Dict[str, function] = {vyper_gdc.contract_hash : vyper_gdc.process_payment}   # contract:   lambda amount, peer_id -> tx_id,
+PAYMENT_PROCESS_VALIDATORS: Dict[str, function] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.payment_process_validator}     # contract_hash:  lambda peer_id, tx_id, amount -> bool,
+AVAILABLE_PAYMENT_PROCESS: Dict[str, function] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.process_payment}   # contract_hash:   lambda amount, peer_id -> tx_id,
 
 MEMSWAP_FACTOR = 0 # 0 - 1
 
@@ -268,8 +268,10 @@ def __refound_gas_function_factory(
 
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
     l.LOGGER('Peer payment process to '+peer_id+' by '+str(amount))
-    for available_payment_process in AVAILABLE_PAYMENT_PROCESS.values():   # check if the payment process is compatible with this peer.
-        try:            
+    for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():   # check if the payment process is compatible with this peer.
+        try:
+            ledger, contract_address = get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash = contract_hash, peer_id = peer_id)
+            deposit_token = None     # TODO le tengo que pasar el token que representa como el me identifica.
             next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
@@ -279,10 +281,12 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                         partitions_message_mode_parser = True,
                         input = gateway_pb2.Payment(
                             gas_amount = amount,
-                            deposit_token = peer_id,
-                            contract_ledger = available_payment_process(
+                            deposit_token = deposit_token,
+                            contract_ledger = process_payment(
                                 amount = amount,
-                                token = peer_id,
+                                token = deposit_token,
+                                ledger = ledger,
+                                contract_address = contract_address
                             ),                            
                         )
                     )
