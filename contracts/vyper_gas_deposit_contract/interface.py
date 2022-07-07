@@ -114,8 +114,8 @@ class VyperDepositContractInterface(singleton.Singleton):
         return ledger_provider.validate_session(token, amount) 
 
 
-def process_payment(amount: int, token: str) -> gateway_pb2.ContractLedger:
-    return VyperDepositContractInterface().process_payment(amount, token)
+def process_payment(amount: int, token: str, ledger: str, contract_address: str) -> gateway_pb2.ContractLedger:
+    return VyperDepositContractInterface().process_payment(amount, token, ledger, contract_address)
 
 def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str) -> bool:
     return VyperDepositContractInterface().payment_process_validator(amount, token, ledger, contract_addr)
