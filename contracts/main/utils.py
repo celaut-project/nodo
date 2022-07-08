@@ -57,7 +57,7 @@ def w3_generator_factory(ledger: str) -> typing.Generator:
             w3.middleware_onion.inject(geth_poa_middleware, layer=0)
             yield w3
 
-def get_ledger_and_contract_addr_from_contract(contract_hash: bytes) -> typing.Dict[str, str]:
+def get_ledger_and_contract_addr_from_contract(contract_hash: bytes) -> typing.List[typing.Dict[str, str]]:
     return pymongo.MongoClient(
                 "mongodb://localhost:27017/"
             )["mongo"]["contracts"].find({"contract_hash": contract_hash})["instances"]
@@ -71,6 +71,7 @@ def get_priv_from_ledger(ledger: str) -> str:
     return pymongo.MongoClient(
             "mongodb://localhost:27017/"
         )["mongo"]["contracts"].find({"ledger": ledger})["priv"]
+
 
 def set_ledger_on_mongodb(ledger: str):
     pass

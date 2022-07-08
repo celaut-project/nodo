@@ -35,7 +35,7 @@ from contracts.vyper_gas_deposit_contract.interface import CONTRACT_HASH as DEFA
 def generate_contract_ledger() -> celaut.Service.Api.ContractLedger:  # TODO generate_contract_ledger tambien es un método auxiliar.
     contract_ledger = celaut.Service.Api.ContractLedger()
     contract_ledger.contract = DEFAULT_PROVISIONAL_CONTRACT
-    contract_ledger.ledger, contract_ledger.contract_addr = get_ledger_and_contract_addr_from_contract(DEFAULT_PROVISIONAL_CONTRACT_HASH)
+    contract_ledger.ledger, contract_ledger.contract_addr = get_ledger_and_contract_addr_from_contract(DEFAULT_PROVISIONAL_CONTRACT_HASH)[0]
     return contract_ledger
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
