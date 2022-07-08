@@ -5,7 +5,7 @@ from contracts.main.singleton import Singleton
 from typing import Dict
 from web3 import Web3
 from hashlib import sha256
-import gateway_pb2
+import gateway_pb2, celaut_pb2
 from time import sleep
 
 DIR = 'contracts/vyper_gas_deposit_contract/'
@@ -90,7 +90,7 @@ class VyperDepositContractInterface(Singleton):
 
     # TODO si necesitas añadir un nuevo ledger, deberás reiniciar el nodo, a no ser que se implemente un método set_ledger_on_interface()
 
-    def process_payment(self, amount: int, token: str, ledger: str, contract_addr: str) -> gateway_pb2.ContractLedger:
+    def process_payment(self, amount: int, token: str, ledger: str, contract_addr: str) -> celaut_pb2.Service.Api.ContractLedger:
         print("Processing payment...")
         ledger_provider = self.ledger_providers[ledger]
         ledger_provider.add_gas(token, amount, contract_addr)
@@ -107,7 +107,7 @@ class VyperDepositContractInterface(Singleton):
         return ledger_provider.validate_session(token, amount) 
 
 
-def process_payment(amount: int, token: str, ledger: str, contract_address: str) -> gateway_pb2.ContractLedger:
+def process_payment(amount: int, token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
     return VyperDepositContractInterface().process_payment(amount, token, ledger, contract_address)
 
 def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str) -> bool:
