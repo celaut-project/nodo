@@ -1,7 +1,7 @@
 import typing
 from web3.middleware import geth_poa_middleware
 from web3 import HTTPProvider, Web3
-import asyncio, time, json
+import asyncio, time, pymongo
 
 async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, contract):
     while True:
@@ -57,11 +57,15 @@ def w3_generator_factory(ledger: str) -> typing.Generator:
             w3.middleware_onion.inject(geth_poa_middleware, layer=0)
             yield w3
 
-def get_ledger_and_contract_addr_from_contract(contract_hash: bytes) -> typing.Tuple[str, str]:
-    pass
+def get_ledger_and_contract_addr_from_contract(contract_hash: bytes) -> typing.Dict[str, str]:
+    return pymongo.MongoClient(
+                "mongodb://localhost:27017/"
+            )["mongo"]["contracts"].find({"contract_hash": contract_hash})["instances"]
 
 def get_ledger_providers(ledger: str) -> typing.List[str]:
-    pass
+    return pymongo.MongoClient(
+            "mongodb://localhost:27017/"
+        )["mongo"]["contracts"].find({"ledger": ledger})["providers"]
 
 def set_ledger_on_mongodb(ledger: str):
     pass
