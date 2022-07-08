@@ -29,21 +29,21 @@ def catch_event(contractAddress, w3, contract, event_name, opt, poll_interval: i
 def transact(
     w3, method, priv, value = 0, gas = 2000000, pub = None
 ) -> str:
-        pub = w3.eth.account.privateKeyToAccount(priv).address if not pub else pub  # Not verify the correctness, 
-                                                                                    #     pub param is only for skip that step.
-        
-        transaction = method.buildTransaction({'gasPrice': w3.eth.gasPrice})
-        transaction.update({
-            'from': pub, # Only 'from' address, don't insert 'to' address
-            'value': value, # Add how many ethers you'll transfer during the deploy
-            'gas': gas, # Trying to make it dynamic ..
-            'nonce': w3.eth.getTransactionCount(pub), # Get Nonce
-            'chainId': json.load(open('scripts/provider.json'))['chain_id'],
-        })
-        # Sign the transaction using your private key
-        signed = w3.eth.account.signTransaction(transaction, priv)
-        tx_hash = w3.eth.sendRawTransaction(signed.rawTransaction)
-        return tx_hash.hex()
+    pub = w3.eth.account.privateKeyToAccount(priv).address if not pub else pub  # Not verify the correctness, 
+                                                                                #     pub param is only for skip that step.
+    
+    transaction = method.buildTransaction({'gasPrice': w3.eth.gasPrice})
+    transaction.update({
+        'from': pub, # Only 'from' address, don't insert 'to' address
+        'value': value, # Add how many ethers you'll transfer during the deploy
+        'gas': gas, # Trying to make it dynamic ..
+        'nonce': w3.eth.getTransactionCount(pub), # Get Nonce
+        'chainId': json.load(open('scripts/provider.json'))['chain_id'],
+    })
+    # Sign the transaction using your private key
+    signed = w3.eth.account.signTransaction(transaction, priv)
+    tx_hash = w3.eth.sendRawTransaction(signed.rawTransaction)
+    return tx_hash.hex()
 
 
 def check_provider_availability(provider) -> bool:

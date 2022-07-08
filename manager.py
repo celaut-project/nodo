@@ -7,7 +7,7 @@ from time import sleep
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import GET_ENV, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger
+from utils import GET_ENV, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -271,7 +271,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
     for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():   # check if the payment process is compatible with this peer.
         try:
             ledger, contract_address = get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash = contract_hash, peer_id = peer_id)
-            deposit_token = None     # TODO le tengo que pasar el token que representa como el me identifica.
+            deposit_token = get_own_token_from_peer_id(peer_id = peer_id)
             next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(

@@ -632,9 +632,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ))
         l.LOGGER('\nAdding peer ' + str(instance))
         insert_instance_on_mongo(instance = instance.instance)
-        add_peer(
+        if not add_peer(
             peer_id = instance.instance.uri_slot[0].uri[0].ip  # TODO use generic id for peers.
-        )
+        ): raise Exception('Was imposible add the peer.')
 
         for b in grpcbf.serialize_to_buffer(
             generate_gateway_instance(

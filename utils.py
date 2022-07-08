@@ -147,3 +147,6 @@ def get_network_name( ip_or_uri: str) -> str:
 
 def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: str, peer_id: str) -> typing.Tuple[str, str]:
     return 'ledger', 'contract_addr'
+
+def get_own_token_from_peer_id(peer_id: str) -> str:
+    return 'token'
