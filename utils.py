@@ -29,7 +29,7 @@ def peers_uri_iterator(ignore_network: str = None) -> Generator[celaut_pb2.Insta
             )["mongo"]["peerInstances"].find())
 
     for peer in peers:
-        peer_uri = peer['uriSlot'][0]['uri'][0]
+        peer_uri = peer['instance']['uriSlot'][0]['uri'][0]
         if not ignore_network or ignore_network and not address_in_network(
             ip_or_uri = peer_uri['ip'],
             net = ignore_network
@@ -155,9 +155,9 @@ def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes
             )["mongo"]["peerInstances"].find())
 
     for peer in peers:
-        if peer_id != peer['uriSlot'][0]['uri'][0]: # TODO peer_id no debería de ser esto, cuando sea un dict, buscara por las llaves.
-            if sha256(peer['api']['contract_ledger'][0]['contract']).digest() == contract_hash:
-                return peer['api']['contract_ledger'][0]['ledger'], peer['api']['contract_ledger'][0]['contract_addr']
+        if peer_id != peer['instance']['uriSlot'][0]['uri'][0]: # TODO peer_id no debería de ser esto, cuando sea un dict, buscara por las llaves.
+            if sha256(peer['instance']['api']['contract_ledger'][0]['contract']).digest() == contract_hash:
+                return peer['instance']['api']['contract_ledger'][0]['ledger'], peer['instance']['api']['contract_ledger'][0]['contract_addr']
     raise Exception('No ledger found for contract: ' + str(contract_hash))
 
 def get_own_token_from_peer_id(peer_id: str) -> str:

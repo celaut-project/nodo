@@ -56,7 +56,7 @@ MEMSWAP_FACTOR = 0 # 0 - 1
 # CONTAINER CACHE
 
 # Insert the instance if it does not exists.
-def insert_instance_on_mongo(instance: celaut.Instance):
+def insert_instance_on_mongo(instance: gateway_pb2.Instance):
     parsed_instance = json.loads(MessageToJson(instance))
     pymongo.MongoClient(
         "mongodb://localhost:27017/"
