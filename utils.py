@@ -1,8 +1,11 @@
+from hashlib import sha256
 import socket, os
+from sqlite3 import connect
 from typing import Generator
 import typing
 
 import celaut_pb2, gateway_pb2
+from contracts.main.singleton import Singleton
 from compile import REGISTRY
 from grpcbigbuffer import Dir
 import pymongo
@@ -12,6 +15,7 @@ from logger import LOGGER
 
 GET_ENV = lambda env, default: type(default)(os.environ.get(env)) if env in os.environ.keys() else default
 
+
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
@@ -19,7 +23,7 @@ def read_file(filename) -> bytes:
                 yield chunk
     return b''.join([b for b in generator(filename)])
 
-def peers_iterator(ignore_network: str = None) -> Generator[celaut_pb2.Instance.Uri, None, None]:
+def peers_uri_iterator(ignore_network: str = None) -> Generator[celaut_pb2.Instance.Uri, None, None]:
     peers = list(pymongo.MongoClient(
                 "mongodb://localhost:27017/"
             )["mongo"]["peerInstances"].find())
@@ -145,8 +149,23 @@ def get_network_name( ip_or_uri: str) -> str:
         raise e
 
 
-def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: str, peer_id: str) -> typing.Tuple[str, str]:
-    return 'ledger', 'contract_addr'
+def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes, peer_id: str) -> typing.Tuple[str, str]:
+    peers = list(pymongo.MongoClient(
+                "mongodb://localhost:27017/"
+            )["mongo"]["peerInstances"].find())
+
+    for peer in peers:
+        if peer_id != peer['uriSlot'][0]['uri'][0]: # TODO peer_id no debería de ser esto, cuando sea un dict, buscara por las llaves.
+            if sha256(peer['api']['contract_ledger'][0]['contract']).digest() == contract_hash:
+                return peer['api']['contract_ledger'][0]['ledger'], peer['api']['contract_ledger'][0]['contract_addr']
+    raise Exception('No ledger found for contract: ' + str(contract_hash))
 
 def get_own_token_from_peer_id(peer_id: str) -> str:
-    return 'token'
+    peers = list(pymongo.MongoClient(
+                "mongodb://localhost:27017/"
+            )["mongo"]["peerInstances"].find())
+
+    for peer in peers:
+        if peer_id != peer['uriSlot'][0]['uri'][0]: # TODO peer_id no debería de ser esto, cuando sea un dict, buscara por las llaves.
+            return peer['token']
+    raise Exception('No token found for peer: ' + str(peer_id))

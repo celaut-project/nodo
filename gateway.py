@@ -136,7 +136,7 @@ def service_balancer(
         raise e
 
     try:
-        for peer in utils.peers_iterator(ignore_network = ignore_network):
+        for peer in utils.peers_uri_iterator(ignore_network = ignore_network):
             l.LOGGER('Peer ' + peer['ip'] + ' ' + str(peer['port']))
             # TODO could use async or concurrency ¿numba?. And use timeout.
             peer_uri = peer['ip']+':'+str(peer['port'])
@@ -390,7 +390,7 @@ def search_container(
         ignore_network: str = None
     ) -> Generator[gateway_pb2.buffer__pb2.Buffer, None, None]:
     # Search a service tar container.
-    for peer in utils.peers_iterator(ignore_network = ignore_network):
+    for peer in utils.peers_uri_iterator(ignore_network = ignore_network):
         try:
             next(grpcbf.client_grpc(
                 method = gateway_pb2_grpc.GatewayStub(
@@ -407,7 +407,7 @@ def search_container(
 
 def search_file(hashes: list, ignore_network: str = None) -> Generator[celaut.Any, None, None]:
     # TODO: It can search for other 'Service ledger' or 'ANY ledger' instances that could've this type of files.
-    for peer in  utils.peers_iterator(ignore_network = ignore_network):
+    for peer in  utils.peers_uri_iterator(ignore_network = ignore_network):
         try:
             for buffer in grpcbf.client_grpc(
                 method = gateway_pb2_grpc.GatewayStub(
@@ -871,7 +871,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         if not validate_payment_process(
             peer = context.peer(),
             amount = payment.gas_amount,
-            ledger = payment.contract_ledger.ledger[0],
+            ledger = payment.contract_ledger.ledger,
             contract = payment.contract_ledger.contract,
             contract_addr = payment.contract_ledger.contract_addr,
             token = payment.deposit_token,

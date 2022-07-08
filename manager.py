@@ -47,8 +47,8 @@ GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only o
 MODIFY_SERVICE_SYSTEM_RESOURCES_COST = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
 ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = True)  # Could be used with the reputation system.
 
-PAYMENT_PROCESS_VALIDATORS: Dict[str, function] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.payment_process_validator}     # contract_hash:  lambda peer_id, tx_id, amount -> bool,
-AVAILABLE_PAYMENT_PROCESS: Dict[str, function] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.process_payment}   # contract_hash:   lambda amount, peer_id -> tx_id,
+PAYMENT_PROCESS_VALIDATORS: Dict[bytes, function] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.payment_process_validator}     # contract_hash:  lambda peer_id, tx_id, amount -> bool,
+AVAILABLE_PAYMENT_PROCESS: Dict[bytes, function] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.process_payment}   # contract_hash:   lambda amount, peer_id -> tx_id,
 
 MEMSWAP_FACTOR = 0 # 0 - 1
 
