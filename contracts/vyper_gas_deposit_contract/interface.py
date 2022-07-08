@@ -3,6 +3,7 @@ from multiprocessing import Lock
 from contracts.main.utils import get_priv_from_ledger, transact, w3_generator_factory, get_ledger_and_contract_addr_from_contract, catch_event
 from contracts.main.singleton import Singleton
 from typing import Dict
+from logger import LOGGER
 from web3 import Web3
 from hashlib import sha256
 import gateway_pb2, celaut_pb2
@@ -16,6 +17,7 @@ CONTRACT_HASH: bytes = sha256(open(DIR+'bytecode', 'rb').read()).digest()
 class LedgerContractInterface:
 
     def __init__(self, w3_generator, contract_addr, priv):
+        LOGGER('Vyper gas deposit contract interface init for '+ str(contract_addr))
         self.w3: Web3 = next(w3_generator)
         self.contract_addr: str = contract_addr
 
