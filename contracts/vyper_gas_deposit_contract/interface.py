@@ -8,7 +8,8 @@ from hashlib import sha256
 import gateway_pb2
 from time import sleep
 
-CONTRACT_HASH: bytes = sha256(open('bytecode', 'rb').read().encode('utf-8')).digest()
+DIR = 'contracts/vyper_gas_deposit_contract/'
+CONTRACT_HASH: bytes = sha256(open(DIR+'bytecode', 'rb').read().encode('utf-8')).digest()
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
 
@@ -20,8 +21,8 @@ class LedgerContractInterface:
         
         self.generate_contract = lambda addr: self.w3.eth.contract(
             address = Web3.toChecksumAddress(addr),
-            abi = json.load(open('abi.json')), 
-            bytecode = open('bytecode', 'rb').read()            
+            abi = json.load(open(DIR+'abi.json')), 
+            bytecode = open(DIR+'bytecode', 'rb').read()            
         )
         self.contract = self.generate_contract(addr = contract_addr)
 
