@@ -67,6 +67,11 @@ def get_ledger_providers(ledger: str) -> typing.List[str]:
             "mongodb://localhost:27017/"
         )["mongo"]["contracts"].find({"ledger": ledger})["providers"]
 
+def get_priv_from_ledger(ledger: str) -> str:
+    return pymongo.MongoClient(
+            "mongodb://localhost:27017/"
+        )["mongo"]["contracts"].find({"ledger": ledger})["priv"]
+
 def set_ledger_on_mongodb(ledger: str):
     pass
 

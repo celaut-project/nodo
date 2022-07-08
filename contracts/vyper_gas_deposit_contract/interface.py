@@ -1,6 +1,6 @@
 import json
 from multiprocessing import Lock
-from contracts.main.utils import transact, w3_generator_factory, get_ledger_and_contract_addr_from_contract
+from contracts.main.utils import transact, w3_generator_factory, get_ledger_and_contract_addr_from_contract, catch_event
 from contracts.main.singleton import Singleton
 from typing import Dict
 from web3 import Web3
@@ -15,9 +15,11 @@ CONTRACT_HASH: bytes = sha256(open(DIR+'bytecode', 'rb').read()).digest()
 
 class LedgerContractInterface:
 
-    def __init__(self, w3_generator, contract_addr):
+    def __init__(self, w3_generator, contract_addr, priv):
         self.w3: Web3 = next(w3_generator)
         self.contract_addr: str = contract_addr
+
+        self.priv = priv
         
         self.generate_contract = lambda addr: self.w3.eth.contract(
             address = Web3.toChecksumAddress(addr),
@@ -32,7 +34,7 @@ class LedgerContractInterface:
         self.poll_interval: int = 2
 
         # Update Session Event.
-        utils.catch_event(
+        catch_event(
             contractAddress = Web3.toChecksumAddress(contract_addr),
             w3 = self.w3,
             contract = self.contract,
@@ -85,7 +87,8 @@ class VyperDepositContractInterface(Singleton):
         for ledger, contract_address in get_ledger_and_contract_addr_from_contract(contract_hash = CONTRACT_HASH).items():
             self.ledger_providers[ledger] = LedgerContractInterface(
                 w3_generator = w3_generator_factory(ledger = ledger),
-                contract_addr = contract_address
+                contract_addr = contract_address,
+                priv = get_priv_from_ledger(ledger)
             )
 
     # TODO si necesitas añadir un nuevo ledger, deberás reiniciar el nodo, a no ser que se implemente un método set_ledger_on_interface()
