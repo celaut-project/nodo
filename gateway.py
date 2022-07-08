@@ -18,6 +18,7 @@ from gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
 from manager import insert_instance_on_mongo, DOCKER_NETWORK, LOCAL_NETWORK, set_external_on_cache
+from contracts.main.utils import get_ledger_and_contract_addr_from_contract
 
 DOCKER_CLIENT = lambda: docker_lib.from_env()
 GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
@@ -25,6 +26,17 @@ MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
 IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = True)
 SEND_ONLY_HASHES_ASKING_COST = utils.GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default=False)
 DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = utils.GET_ENV(env = 'DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH', default=False)
+
+
+#  TODO auxiliares
+DEFAULT_PROVISIONAL_CONTRACT = open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()
+from contracts.vyper_gas_deposit_contract.interface import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH
+
+def generate_contract_ledger() -> celaut.Service.Api.ContractLedger:  # TODO generate_contract_ledger tambien es un método auxiliar.
+    contract_ledger = celaut.Service.Api.ContractLedger()
+    contract_ledger.contract = DEFAULT_PROVISIONAL_CONTRACT
+    contract_ledger.ledger, contract_ledger.contract_addr = get_ledger_and_contract_addr_from_contract(DEFAULT_PROVISIONAL_CONTRACT_HASH)
+    return contract_ledger
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
@@ -44,6 +56,8 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     slot = celaut.Service.Api.Slot()
     slot.port = GATEWAY_PORT
     instance.api.slot.append(slot)
+
+    instance.api.contract_ledger.append(generate_contract_ledger())
     return gateway_pb2.Instance(
         instance = instance
     )

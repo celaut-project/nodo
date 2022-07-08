@@ -77,8 +77,14 @@ message Service {
             int32 port = 1;
             bytes transport_protocol = 2;
         }
+        message ContractLedger {
+            bytes contract = 1;
+            string contract_addr = 2;
+            string ledger = 3;
+        }
         AppDef app_protocol = 1;
         repeated Slot slot = 2;
+        repeated ContractLedger contract_ledger = 3;
         // Cost function can be applied. <- must be optional.
     }
 
