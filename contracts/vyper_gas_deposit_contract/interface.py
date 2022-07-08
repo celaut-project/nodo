@@ -54,14 +54,6 @@ class LedgerContractInterface:
         self.sessions_lock.release()
 
 
-
-    def transfer_property(self, new_owner):
-        self.w3.eth.wait_for_transaction_receipt(
-            self.contract(self.w3).functions.transfer_property(
-                new_owner = new_owner
-            ).transact()
-        )
-
     def validate_session(self, token, amount) -> bool:
         sleep(self.poll_interval)
         if self.sessions[token] >= amount:
