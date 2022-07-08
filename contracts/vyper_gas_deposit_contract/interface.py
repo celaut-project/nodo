@@ -81,7 +81,7 @@ class VyperDepositContractInterface(singleton.Singleton):
 
     def __init__(self):
         self.ledger_providers: Dict[str: LedgerContractInterface] = {}
-        for ledger, contract_address in utils.get_interface_ledgers_from_mongodb('vyper_deposit_contract').items():
+        for ledger, contract_address in utils.get_ledger_and_contract_addr_from_contract(contract_hash = CONTRACT_HASH).items():
             self.ledger_providers[ledger] = LedgerContractInterface(
                 w3_generator = utils.w3_generator_factory(ledger = ledger),
                 contract_addr = contract_address

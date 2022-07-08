@@ -47,30 +47,24 @@ def transact(
 
 
 def check_provider_availability(provider) -> bool:
-    return True  # TODO check if the provider is avialable.
+    return True  # TODO check if the provider is avialable.  ¿ping?
 
 def w3_generator_factory(ledger: str) -> typing.Generator:
     while True:
-        for provider in get_ledger_providers_from_mongodb(ledger = ledger):
+        for provider in get_ledger_providers(ledger = ledger):
             if not check_provider_availability(provider = provider): continue
             w3  = Web3(HTTPProvider(provider))
             w3.middleware_onion.inject(geth_poa_middleware, layer=0)
             yield w3
 
-def get_interface_ledgers_from_mongodb(interface_id) -> typing.Dict[str, str]:
-    raise NotImplementedError
+def get_ledger_and_contract_addr_from_contract(contract_hash) -> typing.Dict[str, str]:
+    pass
 
-def get_ledger_providers_from_mongodb(ledger: str) -> typing.List[str]:
+def get_ledger_providers(ledger: str) -> typing.List[str]:
     pass
 
 def set_ledger_on_mongodb(ledger: str):
     pass
 
 def set_provider_on_mongodb(provider: str, ledger: str):
-    pass
-
-def set_ledger_contract_on_mongodb(ledger: str, contract_addr: str):
-    pass
-
-def get_ledger_contract_from_mongodb(ledger: str, contract_addr: str) -> str:
     pass
