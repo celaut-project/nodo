@@ -1,7 +1,7 @@
 import json
 from multiprocessing import Lock
-from contracts.main.utils import transact
-from main import utils, singleton
+from contracts.main.utils import transact, w3_generator_factory, get_ledger_and_contract_addr_from_contract
+from contracts.main.singleton import Singleton
 from typing import Dict
 from web3 import Web3
 from hashlib import sha256
@@ -77,13 +77,13 @@ class LedgerContractInterface:
 
 
 # Singleton class
-class VyperDepositContractInterface(singleton.Singleton):
+class VyperDepositContractInterface(Singleton):
 
     def __init__(self):
         self.ledger_providers: Dict[str: LedgerContractInterface] = {}
-        for ledger, contract_address in utils.get_ledger_and_contract_addr_from_contract(contract_hash = CONTRACT_HASH).items():
+        for ledger, contract_address in get_ledger_and_contract_addr_from_contract(contract_hash = CONTRACT_HASH).items():
             self.ledger_providers[ledger] = LedgerContractInterface(
-                w3_generator = utils.w3_generator_factory(ledger = ledger),
+                w3_generator = w3_generator_factory(ledger = ledger),
                 contract_addr = contract_address
             )
 
