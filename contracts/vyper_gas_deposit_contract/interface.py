@@ -9,7 +9,7 @@ import gateway_pb2
 from time import sleep
 
 DIR = 'contracts/vyper_gas_deposit_contract/'
-CONTRACT_HASH: bytes = sha256(open(DIR+'bytecode', 'rb').read().encode('utf-8')).digest()
+CONTRACT_HASH: bytes = sha256(open(DIR+'bytecode', 'rb').read()).digest()
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
 
