@@ -552,7 +552,7 @@ def start_service_cost(
 # THREAD
 
 def maintain():
-    l.LOGGER('Maintain '+str(system_cache))
+    # l.LOGGER('Maintain '+str(system_cache))
     for token, sysreq in dict(system_cache).items():  # Parse the system cache to other dict to avoid concurrent access.
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
