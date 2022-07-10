@@ -59,13 +59,11 @@ MEMSWAP_FACTOR = 0 # 0 - 1
 # Insert the instance if it does not exists.
 def insert_instance_on_mongo(instance: gateway_pb2.Instance):
     parsed_instance = json.loads(MessageToJson(instance))
+    l.LOGGER('Inserting instance on mongo: ' + str(parsed_instance))
     pymongo.MongoClient(
         "mongodb://localhost:27017/"
-    )["mongo"]["peerInstances"].update_one(
-        filter = parsed_instance,
-        update={'$setOnInsert': parsed_instance},
-        upsert = True
-    )
+    )["mongo"]["peerInstances"].insert_one(parsed_instance)
+
 
 # SYSTEM CACHE
 
