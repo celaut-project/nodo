@@ -266,10 +266,11 @@ def __refound_gas_function_factory(
 # Payment process for the manager.
 
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
-    l.LOGGER('Peer payment process to '+peer_id+' by '+str(amount))
+    l.LOGGER('Peer payment process to '+peer_id+' of '+str(amount))
     for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():   # check if the payment process is compatible with this peer.
         try:
             ledger, contract_address = get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash = contract_hash, peer_id = peer_id)
+            l.LOGGER('Ledger: '+str(ledger)+' Contract address: '+str(contract_address))
             contract_ledger = process_payment(
                                 amount = amount,
                                 token = deposit_token,
@@ -277,7 +278,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                 contract_address = contract_address
                             )
 
-            l.LOGGER('Peer payment process to '+peer_id+' by '+str(amount)+' done.')
+            l.LOGGER('Peer payment process to '+peer_id+' of '+str(amount)+' done.')
             deposit_token = get_own_token_from_peer_id(peer_id = peer_id)
             next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
@@ -293,7 +294,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                         )
                     )
                 )
-            l.LOGGER('Peer payment process to '+peer_id+' by '+str(amount)+' communicated.')
+            l.LOGGER('Peer payment process to '+peer_id+' of '+str(amount)+' communicated.')
         except Exception as e:
             l.LOGGER('Peer payment process error: '+str(e))
             return False
