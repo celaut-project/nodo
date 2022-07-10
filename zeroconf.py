@@ -72,6 +72,6 @@ if __name__ == "__main__":
                         network=get_network_name(ip_or_uri=sys.argv[1]),
                         peer_id = sys.argv[1].split(':')[0]
                     )
-        )).instance
+        ))
     )
     l.LOGGER('\nAdded peer ' + sys.argv[1])
