@@ -78,15 +78,16 @@ class IOBigData(metaclass=Singleton):
             return "%s %s" % (s, size_name[i])
         except ValueError: return "%s %s" % (size_bytes, size_name[0])
 
-    def __stats(self, message: str):
-        with self.amount_lock:
-            self.log('\n--------- '+message+' -------------')
-            self.log('RAM POOL       -> '+ IOBigData.convert_size(self.ram_pool()))
-            self.log('RAM LOCKED     -> '+ IOBigData.convert_size(self.ram_locked))
-            self.log('RAM AVALIABLE  -> '+ IOBigData.convert_size(self.get_ram_avaliable()))
-            self.log('RAM WAITING    -> '+ IOBigData.convert_size(sum(self.wait)))
-            #self.log('GAS            -> '+ str(self.gas))  TODO
-            self.log('-----------------------------------------\n')
+    def __stats(self, message: str, comments: bool = False):
+        if comments:
+            with self.amount_lock:
+                self.log('\n--------- '+message+' -------------')
+                self.log('RAM POOL       -> '+ IOBigData.convert_size(self.ram_pool()))
+                self.log('RAM LOCKED     -> '+ IOBigData.convert_size(self.ram_locked))
+                self.log('RAM AVALIABLE  -> '+ IOBigData.convert_size(self.get_ram_avaliable()))
+                self.log('RAM WAITING    -> '+ IOBigData.convert_size(sum(self.wait)))
+                #self.log('GAS            -> '+ str(self.gas))  TODO
+                self.log('-----------------------------------------\n')
 
 
 

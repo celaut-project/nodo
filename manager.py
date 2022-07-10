@@ -349,7 +349,7 @@ def spend_gas(
     refund_gas_function_container: list = None
 ) -> bool:
     gas_to_spend = int(gas_to_spend)
-    l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
+    # l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
     try:
         if token_or_container_ip in peer_instances and (peer_instances[token_or_container_ip] >= gas_to_spend or ALLOW_GAS_DEBT):
             l.LOGGER( str(gas_to_spend)+' of '+str(peer_instances[token_or_container_ip]))
