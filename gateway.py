@@ -38,7 +38,7 @@ def generate_contract_ledger() -> celaut.Service.Api.ContractLedger:  # TODO gen
     contract_ledger.ledger, contract_ledger.contract_addr = get_ledger_and_contract_addr_from_contract(DEFAULT_PROVISIONAL_CONTRACT_HASH)[0]
     return contract_ledger
 
-def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
+def generate_gateway_instance(network: str, peer_id: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
 
     uri = celaut.Instance.Uri()
@@ -59,7 +59,8 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
 
     instance.api.contract_ledger.append(generate_contract_ledger())
     return gateway_pb2.Instance(
-        instance = instance
+        instance = instance,
+        token = peer_id
     )
 
 
@@ -645,9 +646,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_message_mode = True
         ))
         l.LOGGER('\nAdding peer ' + str(instance))
+        peer_id = instance.instance.uri_slot[0].uri[0].ip   # TODO use generic id for peers.
         insert_instance_on_mongo(instance = instance)
         if not add_peer(
-            peer_id = instance.instance.uri_slot[0].uri[0].ip  # TODO use generic id for peers.
+            peer_id = peer_id  
         ): raise Exception('Was imposible add the peer.')
 
         for b in grpcbf.serialize_to_buffer(
@@ -656,7 +658,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     ip_or_uri = utils.get_only_the_ip_from_context(
                         context_peer = context.peer()
                     )
-                )
+                ),
+                peer_id = peer_id
             )            
         ): yield b
 
