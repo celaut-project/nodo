@@ -320,13 +320,18 @@ def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
 
 def __get_gas_amount_by_ip(ip: str) -> int:
     l.LOGGER('Get gas amount for '+ip)
-    if ip in peer_instances:
-        return peer_instances[ip]
-    elif ip in cache_service_perspective:
-        return system_cache[
-            get_token_by_uri(uri = ip)
-        ]['gas']
-    else:
+    try:
+        if ip in cache_service_perspective:
+            return system_cache[
+                get_token_by_uri(uri = ip)
+            ]['gas']
+        elif ip in peer_instances:
+            return peer_instances[ip]
+        else:
+            l.LOGGER('Address '+ip+' added on peer_instances.')
+            peer_instances[ip] = 0
+            return 0
+    except:
         l.LOGGER('Manager error: cannot get gas amount for '+ip+' Caches -> '+str(cache_service_perspective) + str(system_cache) + str(peer_instances))
         raise Exception('Manager error: cannot get gas amount for '+ip)
 
