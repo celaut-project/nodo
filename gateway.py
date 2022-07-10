@@ -38,7 +38,7 @@ def generate_contract_ledger() -> celaut.Service.Api.ContractLedger:  # TODO gen
     contract_ledger.ledger, contract_ledger.contract_addr = get_ledger_and_contract_addr_from_contract(DEFAULT_PROVISIONAL_CONTRACT_HASH)[0]
     return contract_ledger
 
-def generate_gateway_instance(network: str, peer_id: str) -> gateway_pb2.Instance:
+def generate_gateway_instance(network: str, peer_id: str = '') -> gateway_pb2.Instance:
     instance = celaut.Instance()
 
     uri = celaut.Instance.Uri()

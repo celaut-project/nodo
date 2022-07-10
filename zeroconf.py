@@ -69,7 +69,8 @@ if __name__ == "__main__":
             indices_parser = Instance,
             partitions_message_mode_parser = True,
             input = generate_gateway_instance(
-                        network=get_network_name(ip_or_uri=sys.argv[1])
+                        network=get_network_name(ip_or_uri=sys.argv[1]),
+                        peer_id = sys.argv[1].split(':')[0]
                     )
         )).instance
     )
