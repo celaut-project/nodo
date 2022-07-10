@@ -41,7 +41,7 @@ COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
 MANAGER_ITERATION_TIME = GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 3)
 MEMORY_LIMIT_COST_FACTOR = GET_ENV(env = 'MEMORY_LIMIT_COST_FACTOR', default = 1/pow(10,6))
-MIN_PEER_DEPOSIT = GET_ENV(env = 'MIN_PEER_DEPOSIT', default = 10)
+MIN_DEPOSIT_PEER = GET_ENV(env = 'MIN_PEER_DEPOSIT', default = 10)
 INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', default = 20)
 COST_AVERAGE_VARIATION = GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
 GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only outside the manager. (not in maintain_cost)
@@ -391,7 +391,7 @@ def add_peer(
 
     if peer_id not in peer_instances:
         peer_instances[peer_id] = 0
-        return __increase_local_gas_for_peer(peer_id = peer_id, amount = INITIAL_PEER_DEPOSIT_FACTOR * MIN_PEER_DEPOSIT)
+        return __increase_local_gas_for_peer(peer_id = peer_id, amount = INITIAL_PEER_DEPOSIT_FACTOR * MIN_DEPOSIT_PEER)
     return False
 
 
@@ -494,10 +494,7 @@ def prune_container(token: str) -> int:
             l.LOGGER('Error purging '+token+' '+str(e))
             return False
     
-    __increase_deposit_on_peer(
-        peer_id = token.split('##')[0],
-        amount = refund
-    )
+    __refound_gas() # TODO refound gas to parent. Need to check what cache is. peer_instances or system_cache.
     return refund
 
 
@@ -571,9 +568,9 @@ def maintain():
 
 def pair_deposits():
     for peer, deposit in deposits_on_other_peers.items():
-        if deposit < MIN_PEER_DEPOSIT:
+        if deposit < MIN_DEPOSIT_PEER:
             l.LOGGER('Manager error: the peer '+ str(peer)+' has not enough deposit.')
-            if not __increase_deposit_on_peer(peer_id = peer):
+            if not __increase_deposit_on_peer(peer_id = peer, amount = MIN_DEPOSIT_PEER - deposit):
                 l.LOGGER('Manager error: the peer '+ str(peer)+' could not be increased.')
                 del deposits_on_other_peers[peer]
 
