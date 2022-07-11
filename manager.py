@@ -8,7 +8,7 @@ from types import LambdaType
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import GET_ENV, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id
+from utils import GET_ENV, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, peers_uri_iterator
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -578,7 +578,12 @@ def pair_deposits():
                 del deposits_on_other_peers[peer]
 
 
+def load_peer_instances_from_disk():
+    for peer_uri in peers_uri_iterator():
+        add_peer(peer_id = peer_uri['ip'])  # TODO use the id.
+
 def manager_thread():
+    load_peer_instances_from_disk()
     while True:
         maintain()
         pair_deposits()
