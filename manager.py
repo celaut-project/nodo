@@ -361,6 +361,8 @@ def spend_gas(
                 container = refund_gas_function_container
             )
             return True
+
+        # En caso de que token_or_container_ip sea el token del contenedor.
         elif token_or_container_ip in system_cache and (system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
             l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[token_or_container_ip]['gas']))
             with system_cache_lock: system_cache[token_or_container_ip]['gas'] -= gas_to_spend
@@ -372,6 +374,7 @@ def spend_gas(
             )
             return True
         
+        # En caso de que token_or_container_ip sea la ip del contenedor.
         token_or_container_ip = cache_service_perspective[token_or_container_ip]
         if token_or_container_ip in system_cache and (system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
             l.LOGGER( str(gas_to_spend)+' of '+str(system_cache[token_or_container_ip]['gas']))
