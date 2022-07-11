@@ -157,6 +157,7 @@ def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes
 
     try:
         for peer in peers:
+            print('peer_id ', peer_id, peer['instance']['uriSlot'][0]['uri'][0])
             if peer_id == peer['instance']['uriSlot'][0]['uri'][0]:  # TODO Cuando se use peer_id podra usar filter.
                 if sha256(base64.b64decode(peer['instance']['api']['contractLedger'][0]['contract'])).digest() == contract_hash:
                     return peer['instance']['api']['contractLedger'][0]['ledger'], peer['instance']['api']['contractLedger'][0]['contractAddr']
