@@ -162,7 +162,9 @@ def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes
                 print('correct peerid')
                 if sha256(base64.b64decode(peer['instance']['api']['contractLedger'][0]['contract'])).digest() == contract_hash:
                     print('the contract is correct.')
-                    return peer['instance']['api']['contractLedger'][0]['ledger'], peer['instance']['api']['contractLedger'][0]['contractAddr']
+                    ledger, contract_addr = peer['instance']['api']['contractLedger'][0]['ledger'], peer['instance']['api']['contractLedger'][0]['contractAddr']
+                    print('ledger and addr ', ledger, contract_addr)
+                    return ledger, contract_addr
     except Exception as e: print(str(e))
     raise Exception('No ledger found for contract: ' + str(contract_hash))
 
