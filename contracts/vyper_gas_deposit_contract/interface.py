@@ -1,5 +1,6 @@
 from base64 import encode
-import sys, os; sys.path.append(os.getcwd())
+import sys, os
+from threading import Thread; sys.path.append(os.getcwd())
 
 import json
 from multiprocessing import Lock
@@ -40,7 +41,7 @@ class LedgerContractInterface:
         self.poll_interval: int = 2
 
         # Update Session Event.
-        catch_event(
+        catch_event = lambda: catch_event(
             contractAddress = Web3.toChecksumAddress(contract_addr),
             w3 = self.w3,
             contract = self.contract,
@@ -51,7 +52,8 @@ class LedgerContractInterface:
                     ),
             poll_interval = self.poll_interval,
         )
-
+        Thread(target='catch_event').start()
+        
 
     def __new_session(self, token, amount):
         print('New session:', token, amount)
