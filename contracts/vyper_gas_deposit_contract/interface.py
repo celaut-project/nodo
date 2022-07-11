@@ -79,11 +79,10 @@ class LedgerContractInterface:
         return transact(
             w3 = self.w3,
             method = self.generate_contract(addr = contract_addr).functions.add_gas(
-                sha256(token.encode('utf-8')).digest(), 
-                amount
+                sha256(token.encode('utf-8')).digest(),
             ),
             priv = self.priv,
-            value = 20
+            value = amount
         )
 
 
