@@ -9,6 +9,9 @@ from hashlib import sha256
 import gateway_pb2, celaut_pb2
 from time import sleep
 
+import sys
+sys.path.append('../../')
+
 DIR = 'contracts/vyper_gas_deposit_contract/'
 CONTRACT_HASH: bytes = sha256(open(DIR+'bytecode', 'rb').read()).digest()
 
