@@ -156,8 +156,8 @@ def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes
 
     for peer in peers:
         if peer_id != peer['instance']['uriSlot'][0]['uri'][0]:  # TODO Cuando se use peer_id podra usar filter.
-            if sha256(peer['instance']['api']['contract_ledger'][0]['contract']).digest() == contract_hash:
-                return peer['instance']['api']['contract_ledger'][0]['ledger'], peer['instance']['api']['contract_ledger'][0]['contract_addr']
+            if sha256(peer['instance']['api']['contractLedger'][0]['contract']).digest() == contract_hash:
+                return peer['instance']['api']['contractLedger'][0]['ledger'], peer['instance']['api']['contractLedger'][0]['contractAddr']
     raise Exception('No ledger found for contract: ' + str(contract_hash))
 
 def get_own_token_from_peer_id(peer_id: str) -> str:
