@@ -1,4 +1,4 @@
-import sys; sys.path.append('../../')
+import sys, os; sys.path.append(os.getcwd())
 
 import json
 from multiprocessing import Lock
@@ -12,7 +12,7 @@ import gateway_pb2, celaut_pb2
 from time import sleep
 
 
-DIR = 'contracts/vyper_gas_deposit_contract/'
+DIR = os.getcwd() + '/contracts/vyper_gas_deposit_contract/'
 CONTRACT_HASH: bytes = sha256(open(DIR+'bytecode', 'rb').read()).digest()
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
