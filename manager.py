@@ -272,6 +272,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
             ledger, contract_address = get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash = contract_hash, peer_id = peer_id)
             l.LOGGER('Peer payment process:   Ledger: '+str(ledger)+' Contract address: '+str(contract_address))
             deposit_token = get_own_token_from_peer_id(peer_id = peer_id)
+            print('deposit token', deposit_token)
             next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(

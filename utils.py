@@ -155,12 +155,10 @@ def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes
                 "mongodb://localhost:27017/"
             )["mongo"]["peerInstances"].find())
 
-    try:
-        for peer in peers:
-            if peer_id == peer['instance']['uriSlot'][0]['uri'][0]['ip']:  # TODO Cuando se use peer_id podra usar filter.
-                if sha256(base64.b64decode(peer['instance']['api']['contractLedger'][0]['contract'])).digest() == contract_hash:
-                    return peer['instance']['api']['contractLedger'][0]['ledger'], peer['instance']['api']['contractLedger'][0]['contractAddr']
-    except Exception as e: print(str(e))
+    for peer in peers:
+        if peer_id == peer['instance']['uriSlot'][0]['uri'][0]['ip']:  # TODO Cuando se use peer_id podra usar filter.
+            if sha256(base64.b64decode(peer['instance']['api']['contractLedger'][0]['contract'])).digest() == contract_hash:
+                return peer['instance']['api']['contractLedger'][0]['ledger'], peer['instance']['api']['contractLedger'][0]['contractAddr']
     raise Exception('No ledger found for contract: ' + str(contract_hash))
 
 def get_own_token_from_peer_id(peer_id: str) -> str:
