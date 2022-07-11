@@ -1,3 +1,4 @@
+from base64 import encode
 import sys, os; sys.path.append(os.getcwd())
 
 import json
@@ -73,10 +74,12 @@ class LedgerContractInterface:
 
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
+        encoded_token = sha256(token.encode('utf-8')).digest()
+        print('encoded_token -> ', encoded_token)
         return transact(
             w3 = self.w3,
             method = self.generate_contract(addr = contract_addr).functions.add_gas(
-                sha256(token.encode('utf-8')).digest(), 
+                encoded_token, 
                 amount
             ),
             priv = self.priv,
