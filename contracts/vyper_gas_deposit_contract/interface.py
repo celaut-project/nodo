@@ -105,7 +105,7 @@ class VyperDepositContractInterface(Singleton):
         print("Processing payment...")
         ledger_provider = self.ledger_providers[ledger]
         ledger_provider.add_gas(token, amount, contract_addr)
-        return gateway_pb2.ContractLedger(
+        return gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
             ledger = ledger,
             contract_addr = contract_addr
         )
