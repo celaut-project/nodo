@@ -338,7 +338,7 @@ def __get_gas_amount_by_ip(ip: str) -> int:
 
 def validate_payment_process(peer: str, amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
     return __check_payment_process(amount = amount, ledger = ledger, token = token, contract = contract, contract_addr = contract_addr) \
-         and __increase_local_gas_for_peer(peer_id = get_only_the_ip_from_context_method(context_peer = peer), amount = amount)
+         and __increase_local_gas_for_peer(peer_id = get_only_the_ip_from_context_method(context_peer = peer), amount = amount)  # TODO allow for containers too.
 
 
 def spend_gas(
