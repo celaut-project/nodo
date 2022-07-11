@@ -271,13 +271,6 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         try:
             ledger, contract_address = get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash = contract_hash, peer_id = peer_id)
             l.LOGGER('Ledger: '+str(ledger)+' Contract address: '+str(contract_address))
-            contract_ledger = process_payment(
-                                amount = amount,
-                                token = deposit_token,
-                                ledger = ledger,
-                                contract_address = contract_address
-                            )
-
             l.LOGGER('Peer payment process to '+peer_id+' of '+str(amount)+' done.')
             deposit_token = get_own_token_from_peer_id(peer_id = peer_id)
             next(grpcbf.client_grpc(
@@ -290,7 +283,12 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                         input = gateway_pb2.Payment(
                             gas_amount = amount,
                             deposit_token = deposit_token,
-                            contract_ledger = contract_ledger,                            
+                            contract_ledger = process_payment(
+                                amount = amount,
+                                token = deposit_token,
+                                ledger = ledger,
+                                contract_address = contract_address
+                            ),                            
                         )
                     )
                 )
