@@ -394,7 +394,8 @@ def add_peer(
 
     if peer_id not in peer_instances:
         peer_instances[peer_id] = 0
-        return __increase_local_gas_for_peer(peer_id = peer_id, amount = INITIAL_PEER_DEPOSIT_FACTOR * MIN_DEPOSIT_PEER)
+        # return __increase_local_gas_for_peer(peer_id = peer_id, amount = INITIAL_PEER_DEPOSIT_FACTOR * MIN_DEPOSIT_PEER)
+        return __increase_deposit_on_peer(peer_id = peer_id, amount = MIN_DEPOSIT_PEER)
     return False
 
 
