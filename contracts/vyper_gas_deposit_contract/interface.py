@@ -118,6 +118,7 @@ class VyperDepositContractInterface(Singleton):
 
 
 def process_payment(amount: int, token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
+    print('process payment lambda')
     return VyperDepositContractInterface().process_payment(amount, token, ledger, contract_address)
 
 def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str) -> bool:
