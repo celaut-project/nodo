@@ -13,7 +13,8 @@ async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, c
             time.sleep(poll_interval)
 
 def catch_event(contractAddress, w3, contract, event_name, opt, poll_interval: int = 1):
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(
             asyncio.gather(
