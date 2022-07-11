@@ -497,7 +497,7 @@ def prune_container(token: str) -> int:
             l.LOGGER('Error purging '+token+' '+str(e))
             return False
     
-    __refound_gas() # TODO refound gas to parent. Need to check what cache is. peer_instances or system_cache.
+    # __refound_gas() # TODO refound gas to parent. Need to check what cache is. peer_instances or system_cache. Podría usar una variable de entorno para hacerlo o no.
     return refund
 
 
