@@ -74,13 +74,10 @@ class LedgerContractInterface:
 
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
-        print('go to add gas.')
-        encoded_token = sha256(token.encode('utf-8')).digest()
-        print('encoded_token -> ', encoded_token)
         return transact(
             w3 = self.w3,
             method = self.generate_contract(addr = contract_addr).functions.add_gas(
-                encoded_token, 
+                sha256(token.encode('utf-8')).digest(), 
                 amount
             ),
             priv = self.priv,
