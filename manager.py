@@ -286,7 +286,6 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                             )
             attempt = 0
             while True:
-                l.LOGGER('Peer payment communication process:   Attempt: '+str(i))
                 try:
                     next(grpcbf.client_grpc(
                                 method = gateway_pb2_grpc.GatewayStub(

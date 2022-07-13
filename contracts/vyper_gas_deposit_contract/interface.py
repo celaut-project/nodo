@@ -60,13 +60,12 @@ class LedgerContractInterface:
         )
 
     def __new_session(self, token, amount):
-        print('New session:', token, amount)
-        self.sessions_lock.acquire()
-        if token not in self.sessions:
-            self.sessions[token] = amount
-        else:
-            self.sessions[token] += amount
-        self.sessions_lock.release()
+        with self.sessions_lock:
+            print('\nNew session:', token, amount)
+            if token not in self.sessions:
+                self.sessions[token] = amount
+            else:
+                self.sessions[token] += amount
 
 
     def validate_session(self, token: str, amount: int, validate_token = None) -> bool:
