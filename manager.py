@@ -284,6 +284,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                 contract_address = contract_address
                             )
             for i in range(COMMUNICATION_ATTEMPTS):
+                l.LOGGER('Peer payment communication process:   Attempt: '+str(i))
                 next(grpcbf.client_grpc(
                             method = gateway_pb2_grpc.GatewayStub(
                                         grpc.insecure_channel(
