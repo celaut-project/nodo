@@ -307,7 +307,7 @@ def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
 
 def __check_payment_process( amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
     l.LOGGER('Check payment process to '+token+' of '+str(amount))
-    return PAYMENT_PROCESS_VALIDATORS[sha256(contract)]( amount, token, ledger, contract_addr)
+    return PAYMENT_PROCESS_VALIDATORS[sha256(contract).digest()]( amount, token, ledger, contract_addr)
 
 def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for peer '+peer_id+' of '+str(amount))
