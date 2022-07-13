@@ -44,10 +44,11 @@ class LedgerContractInterface:
         self.pool_iterations: int = 5
 
 
-        Thread(target='catch_event_thread', args=(contract_addr,)).start()
+        Thread(target=self.catch_event_thread, args=(contract_addr,)).start()
         
     # Update Session Event.
     def catch_event_thread(self, contract_addr):
+        print('Catch event thread started')
         catch_event(
             contractAddress = Web3.toChecksumAddress(contract_addr),
             w3 = self.w3,
