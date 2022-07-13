@@ -43,8 +43,12 @@ class LedgerContractInterface:
         self.poll_interval: int = 2
         self.pool_iterations: int = 5
 
-        # Update Session Event.
-        catch_event = lambda: catch_event(
+
+        Thread(target='catch_event_thread', args=(contract_addr,)).start()
+        
+    # Update Session Event.
+    def catch_event_thread(self, contract_addr):
+        catch_event(
             contractAddress = Web3.toChecksumAddress(contract_addr),
             w3 = self.w3,
             contract = self.contract,
@@ -55,8 +59,6 @@ class LedgerContractInterface:
                     ),
             poll_interval = self.poll_interval,
         )
-        Thread(target='catch_event').start()
-        
 
     def __new_session(self, token, amount):
         print('New session:', token, amount)
