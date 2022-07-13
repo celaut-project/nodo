@@ -41,6 +41,7 @@ class LedgerContractInterface:
         self.sessions_lock = Lock()
 
         self.poll_interval: int = 2
+        self.pool_iterations: int = 5
 
         # Update Session Event.
         catch_event = lambda: catch_event(
@@ -70,13 +71,17 @@ class LedgerContractInterface:
     def validate_session(self, token, amount) -> bool:
         token = sha256(token.encode('utf-8')).digest()
         print('Validate session:', token, amount, token in self.sessions)
-        sleep(self.poll_interval)
-        if self.sessions[token] >= amount:
-            self.sessions_lock.acquire()
-            self.sessions[token] -= amount
-            self.sessions_lock.release()
-            return True
-        return False
+        for i in range(self.pool_iterations):
+            if token in self.sessions and self.sessions[token] >= amount:
+                self.sessions_lock.acquire()
+                self.sessions[token] -= amount
+                self.sessions_lock.release()
+                return True 
+            if i < 5:              
+                sleep(self.poll_interval)
+            else: 
+                print('Session not found')
+                return False
 
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
