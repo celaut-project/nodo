@@ -3,6 +3,7 @@ from base64 import encode
 import sys, os
 from threading import Thread; sys.path.append(os.getcwd())
 
+from logger import LOGGER
 import json
 from multiprocessing import Lock
 from contracts.main.utils import get_priv_from_ledger, transact, w3_generator_factory, get_ledger_and_contract_addr_from_contract, catch_event
@@ -61,7 +62,7 @@ class LedgerContractInterface:
         )
 
     def __new_session(self, token, amount):
-        print('New session:', token, amount)
+        LOGGER('New session:', token, amount)
         self.sessions_lock.acquire()
         if token not in self.sessions:
             self.sessions[token] = amount
@@ -73,7 +74,7 @@ class LedgerContractInterface:
     def validate_session(self, token: str, amount: int, validate_token = None) -> bool:
         token_encoded = sha256(token.encode('utf-8')).digest()
         for i in range(self.pool_iterations):
-            print('('+str(i)+') Go to validate session:', token, amount, token_encoded in self.sessions,  not validate_token or validate_token(token))
+            LOGGER('('+str(i)+') Go to validate session:', token, amount, token_encoded in self.sessions,  not validate_token or validate_token(token))
             print(token_encoded, self.sessions)
             if token_encoded in self.sessions and self.sessions[token_encoded] >= amount and \
                 ( not validate_token or validate_token(token)):
@@ -83,7 +84,7 @@ class LedgerContractInterface:
                 return True 
             else: 
                 sleep(self.poll_interval)
-        print('Session not found', self.sessions)
+        LOGGER('Session not found', self.sessions)
         return False
 
 
@@ -114,7 +115,7 @@ class VyperDepositContractInterface(Singleton):
     # TODO si necesitas añadir un nuevo ledger, deberás reiniciar el nodo, a no ser que se implemente un método set_ledger_on_interface()
 
     def process_payment(self, amount: int, token: str, ledger: str, contract_addr: str) -> celaut_pb2.Service.Api.ContractLedger:
-        print("Processing payment...")
+        LOGGER("Processing payment...")
         ledger_provider = self.ledger_providers[ledger]
         ledger_provider.add_gas(token, amount, contract_addr)
         return gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
@@ -125,7 +126,7 @@ class VyperDepositContractInterface(Singleton):
 
 
     def payment_process_validator(self, amount: int, token: str, ledger: str, contract_addr: str, validate_token) -> bool:
-        print("Validating payment...")
+        LOGGER("Validating payment...")
         ledger_provider = self.ledger_providers[ledger]
         assert contract_addr == ledger_provider.contract_addr
         return ledger_provider.validate_session(token, amount, validate_token) 
