@@ -68,6 +68,8 @@ class LedgerContractInterface:
 
 
     def validate_session(self, token, amount) -> bool:
+        token = sha256(token.encode('utf-8')).digest()
+        print('Validate session:', token, amount, token in self.sessions)
         sleep(self.poll_interval)
         if self.sessions[token] >= amount:
             self.sessions_lock.acquire()
