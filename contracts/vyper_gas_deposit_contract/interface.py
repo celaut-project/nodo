@@ -122,11 +122,11 @@ class VyperDepositContractInterface(Singleton):
         )
 
 
-    def payment_process_validator(self, amount: int, token: str, ledger: str, contract_addr: str) -> bool:
+    def payment_process_validator(self, amount: int, token: str, ledger: str, contract_addr: str, validate_token) -> bool:
         print("Validating payment...")
         ledger_provider = self.ledger_providers[ledger]
         assert contract_addr == ledger_provider.contract_addr
-        return ledger_provider.validate_session(token, amount) 
+        return ledger_provider.validate_session(token, amount, validate_token) 
 
 
 def process_payment(amount: int, token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
