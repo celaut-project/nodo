@@ -80,7 +80,7 @@ class LedgerContractInterface:
             if i < 5:              
                 sleep(self.poll_interval)
             else: 
-                print('Session not found')
+                print('Session not found', self.sessions)
                 return False
 
 
