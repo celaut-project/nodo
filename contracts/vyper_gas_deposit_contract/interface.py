@@ -70,7 +70,7 @@ class LedgerContractInterface:
         self.sessions_lock.release()
 
 
-    def validate_session(self, token: str, amount: int, validate_token: function = None) -> bool:
+    def validate_session(self, token: str, amount: int, validate_token = None) -> bool:
         token_encoded = sha256(token.encode('utf-8')).digest()
         for i in range(self.pool_iterations):
             print('('+i+') Validate session:', token, amount, token_encoded in self.sessions)
