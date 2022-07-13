@@ -276,7 +276,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
             ledger, contract_address = get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash = contract_hash, peer_id = peer_id)
             l.LOGGER('Peer payment process:   Ledger: '+str(ledger)+' Contract address: '+str(contract_address))
             deposit_token = get_own_token_from_peer_id(peer_id = peer_id)
-            grpcbf.client_grpc(
+            next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
                                         peer_id+':8090', # TODO with port. Tiene que buscar en mongo, cuando se guarden por identificador.
@@ -294,6 +294,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                             ),                            
                         )
                     )
+                )
             l.LOGGER('Peer payment process to '+peer_id+' of '+str(amount)+' communicated.')
         except Exception as e:
             l.LOGGER('Peer payment process error: '+str(e))
