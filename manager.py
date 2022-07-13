@@ -285,20 +285,22 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                             )
             for i in range(COMMUNICATION_ATTEMPTS):
                 l.LOGGER('Peer payment communication process:   Attempt: '+str(i))
-                next(grpcbf.client_grpc(
-                            method = gateway_pb2_grpc.GatewayStub(
-                                        grpc.insecure_channel(
-                                            peer_id+':8090', # TODO with port. Tiene que buscar en mongo, cuando se guarden por identificador.
-                                        )
-                                    ).Payable,
-                            partitions_message_mode_parser = True,
-                            input = gateway_pb2.Payment(
-                                gas_amount = amount,
-                                deposit_token = deposit_token,
-                                contract_ledger = contract_ledger,                            
+                try:
+                    next(grpcbf.client_grpc(
+                                method = gateway_pb2_grpc.GatewayStub(
+                                            grpc.insecure_channel(
+                                                peer_id+':8090', # TODO with port. Tiene que buscar en mongo, cuando se guarden por identificador.
+                                            )
+                                        ).Payable,
+                                partitions_message_mode_parser = True,
+                                input = gateway_pb2.Payment(
+                                    gas_amount = amount,
+                                    deposit_token = deposit_token,
+                                    contract_ledger = contract_ledger,                            
+                                )
                             )
                         )
-                    )
+                except: pass
             l.LOGGER('Peer payment process to '+peer_id+' of '+str(amount)+' communicated.')
         except Exception as e:
             l.LOGGER('Peer payment process error: '+str(e))
