@@ -243,10 +243,13 @@ def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Contai
 def __refound_gas(
     gas: int,
     cache: dict,
+    cache_lock: threading.Lock,
     id: int
 ) -> bool: 
     try:
+        cache_lock.acquire()
         cache[id] += gas
+        cache_lock.release()
     except Exception as e:
         l.LOGGER('Manager error: '+str(e))
         return False
@@ -256,10 +259,11 @@ def __refound_gas(
 def __refound_gas_function_factory(
     gas: int,
     cache: dict,
+    cache_lock: threading.Lock,
     id: int,
     container: list = None
 ) -> lambda: None: 
-    def use(l = [lambda: __refound_gas(gas, cache, id)]): l.pop()()
+    def use(l = [lambda: __refound_gas(gas, cache, cache_lock, id)]): l.pop()()
     if container: container.append( lambda: use() )
 
 
@@ -311,7 +315,11 @@ def __check_payment_process( amount: int, ledger: str, token: str, contract: byt
 
 def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for peer '+peer_id+' of '+str(amount))
-    if not __refound_gas(gas = amount, cache = peer_instances, id = peer_id):
+    if peer_id not in peer_instances:
+        peer_instances_lock.acquire() 
+        peer_instances[peer_id] = 0
+        peer_instances_lock.release()
+    if not __refound_gas(gas = amount, cache = peer_instances, cache_lock = peer_instances_lock, id = peer_id):
         raise Exception('Manager error: cannot increase local gas for peer '+peer_id+' by '+str(amount))
     return True
 
@@ -349,6 +357,7 @@ def spend_gas(
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
                 cache = peer_instances, 
+                cache_lock = peer_instances_lock,
                 id = token_or_container_ip, 
                 container = refund_gas_function_container
             )
@@ -360,7 +369,8 @@ def spend_gas(
             with system_cache_lock: system_cache[token_or_container_ip]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
-                cache = peer_instances, 
+                cache = system_cache, 
+                cache_lock = system_cache_lock,
                 id = token_or_container_ip, 
                 container = refund_gas_function_container
             )
@@ -373,7 +383,8 @@ def spend_gas(
             with system_cache_lock: system_cache[token_or_container_ip]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
-                cache = peer_instances, 
+                cache = system_cache, 
+                cache_lock = system_cache_lock,
                 id = token_or_container_ip, 
                 container = refund_gas_function_container
             )
