@@ -284,7 +284,8 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                 ledger = ledger,
                                 contract_address = contract_address
                             )
-            for i in range(COMMUNICATION_ATTEMPTS):
+            attempt = 0
+            while True:
                 l.LOGGER('Peer payment communication process:   Attempt: '+str(i))
                 try:
                     next(grpcbf.client_grpc(
@@ -301,7 +302,13 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                 )
                             )
                         )
-                except:  sleep(COMMUNICATION_ATTEMPTS_DELAY)
+                    break
+                except:  
+                    attempt += 1
+                    if attempt == COMMUNICATION_ATTEMPTS:
+                        l.LOGGER('Peer payment communication process:   Failed.')
+                        return False
+                    sleep(COMMUNICATION_ATTEMPTS_DELAY)
                     
             l.LOGGER('Peer payment process to '+peer_id+' of '+str(amount)+' communicated.')
         except Exception as e:
