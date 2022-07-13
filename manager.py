@@ -284,6 +284,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                 ledger = ledger,
                                 contract_address = contract_address
                             )
+            l.LOGGER('Peer payment process: payment process executed. Ledger: '+str(contract_ledger.ledger)+' Contract address: '+str(contract_ledger.contract_address))
             attempt = 0
             while True:
                 try:
@@ -319,7 +320,8 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase deposit on peer '+peer_id+' by '+str(amount))
     if __peer_payment_process(peer_id = peer_id, amount = amount):  # process the payment on the peer.
-        deposits_on_other_peers[peer_id] = deposits_on_other_peers[peer_id] + amount if peer_id in deposits_on_other_peers else amount
+        with deposits_on_other_peers_lock:
+            deposits_on_other_peers[peer_id] = deposits_on_other_peers[peer_id] + amount if peer_id in deposits_on_other_peers else amount
         return True
     return False
 
