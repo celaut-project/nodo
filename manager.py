@@ -295,9 +295,9 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                         )
                     )
             try:
-                print(next(g))
+                print('g -> ',next(g))
             except Exception as e:
-                print(e)
+                print('e -> ', e)
             l.LOGGER('Peer payment process to '+peer_id+' of '+str(amount)+' communicated.')
         except Exception as e:
             l.LOGGER('Peer payment process error: '+str(e))
