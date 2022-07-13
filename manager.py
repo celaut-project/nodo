@@ -48,6 +48,7 @@ GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only o
 MODIFY_SERVICE_SYSTEM_RESOURCES_COST = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
 ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = True)  # Could be used with the reputation system.
 COMMUNICATION_ATTEMPTS = GET_ENV(env = 'COMMUNICATION_ATTEMPTS', default = 5)
+COMMUNICATION_ATTEMPTS_DELAY = GET_ENV(env = 'COMMUNICATION_ATTEMPTS_DELAY', default = 2)
 
 PAYMENT_PROCESS_VALIDATORS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.payment_process_validator}     # contract_hash:  lambda peer_id, tx_id, amount -> bool,
 AVAILABLE_PAYMENT_PROCESS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.process_payment}   # contract_hash:   lambda amount, peer_id -> tx_id,
@@ -300,7 +301,8 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                 )
                             )
                         )
-                except: pass
+                except:  sleep(COMMUNICATION_ATTEMPTS_DELAY)
+                    
             l.LOGGER('Peer payment process to '+peer_id+' of '+str(amount)+' communicated.')
         except Exception as e:
             l.LOGGER('Peer payment process error: '+str(e))
