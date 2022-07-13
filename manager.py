@@ -304,7 +304,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                     break
                 except:  
                     attempt += 1
-                    if attempt == COMMUNICATION_ATTEMPTS:
+                    if attempt >= COMMUNICATION_ATTEMPTS:
                         l.LOGGER('Peer payment communication process:   Failed.')
                         return False
                     sleep(COMMUNICATION_ATTEMPTS_DELAY)
