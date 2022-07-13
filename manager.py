@@ -1,7 +1,7 @@
 from hashlib import sha256
 import json
 import string
-from threading import Lock
+from threading import Lock, Thread
 import threading
 from time import sleep
 from types import LambdaType
@@ -402,7 +402,8 @@ def add_peer(
 
     if peer_id not in peer_instances:
         peer_instances[peer_id] = 0
-        return __increase_deposit_on_peer(peer_id = peer_id, amount = MIN_DEPOSIT_PEER)
+        Thread(target = __increase_deposit_on_peer, args=(peer_id, MIN_DEPOSIT_PEER, )).start()
+        return True
     return False
 
 
