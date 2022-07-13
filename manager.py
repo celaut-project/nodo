@@ -47,6 +47,7 @@ COST_AVERAGE_VARIATION = GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
 GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only outside the manager. (not in maintain_cost)
 MODIFY_SERVICE_SYSTEM_RESOURCES_COST = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
 ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = True)  # Could be used with the reputation system.
+COMMUNICATION_ATTEMPTS = GET_ENV(env = 'COMMUNICATION_ATTEMPTS', default = 20)
 
 PAYMENT_PROCESS_VALIDATORS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.payment_process_validator}     # contract_hash:  lambda peer_id, tx_id, amount -> bool,
 AVAILABLE_PAYMENT_PROCESS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.process_payment}   # contract_hash:   lambda amount, peer_id -> tx_id,
@@ -276,25 +277,27 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
             ledger, contract_address = get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash = contract_hash, peer_id = peer_id)
             l.LOGGER('Peer payment process:   Ledger: '+str(ledger)+' Contract address: '+str(contract_address))
             deposit_token = get_own_token_from_peer_id(peer_id = peer_id)
-            next(grpcbf.client_grpc(
-                        method = gateway_pb2_grpc.GatewayStub(
-                                    grpc.insecure_channel(
-                                        peer_id+':8090', # TODO with port. Tiene que buscar en mongo, cuando se guarden por identificador.
-                                    )
-                                ).Payable,
-                        partitions_message_mode_parser = True,
-                        input = gateway_pb2.Payment(
-                            gas_amount = amount,
-                            deposit_token = deposit_token,
-                            contract_ledger = process_payment(
+            contract_ledger = process_payment(
                                 amount = amount,
                                 token = deposit_token,
                                 ledger = ledger,
                                 contract_address = contract_address
-                            ),                            
+                            )
+            for i in range(COMMUNICATION_ATTEMPTS):
+                next(grpcbf.client_grpc(
+                            method = gateway_pb2_grpc.GatewayStub(
+                                        grpc.insecure_channel(
+                                            peer_id+':8090', # TODO with port. Tiene que buscar en mongo, cuando se guarden por identificador.
+                                        )
+                                    ).Payable,
+                            partitions_message_mode_parser = True,
+                            input = gateway_pb2.Payment(
+                                gas_amount = amount,
+                                deposit_token = deposit_token,
+                                contract_ledger = contract_ledger,                            
+                            )
                         )
                     )
-                )
             l.LOGGER('Peer payment process to '+peer_id+' of '+str(amount)+' communicated.')
         except Exception as e:
             l.LOGGER('Peer payment process error: '+str(e))
