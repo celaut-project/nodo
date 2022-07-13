@@ -1,3 +1,4 @@
+from ast import Bytes
 from base64 import encode
 import sys, os
 from threading import Thread; sys.path.append(os.getcwd())
@@ -15,7 +16,8 @@ from time import sleep
 
 
 DIR = os.getcwd() + '/contracts/vyper_gas_deposit_contract/'
-CONTRACT_HASH: bytes = sha256(open(DIR+'bytecode', 'rb').read()).digest()
+CONTRACT: bytes = open(DIR+'bytecode', 'rb').read()
+CONTRACT_HASH: bytes = sha256(CONTRACT).digest()
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
 
@@ -107,7 +109,8 @@ class VyperDepositContractInterface(Singleton):
         ledger_provider.add_gas(token, amount, contract_addr)
         return gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
             ledger = ledger,
-            contract_addr = contract_addr
+            contract_addr = contract_addr,
+            contract = CONTRACT
         )
 
 
