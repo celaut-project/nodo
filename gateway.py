@@ -882,7 +882,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             token = payment.deposit_token,
         ): raise Exception('Error: payment not valid.')
         l.LOGGER('Payment is valid.')
-        yield gateway_pb2.buffer__pb2.Buffer(separator = True)
+        for b in grpcbf.serialize_to_buffer(): yield b
 
 
 if __name__ == "__main__":
