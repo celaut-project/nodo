@@ -284,7 +284,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                 ledger = ledger,
                                 contract_address = contract_address
                             )
-            l.LOGGER('Peer payment process: payment process executed. Ledger: '+str(contract_ledger.ledger)+' Contract address: '+str(contract_ledger.contract_address))
+            l.LOGGER('Peer payment process: payment process executed. Ledger: '+str(contract_ledger.ledger)+' Contract address: '+str(contract_ledger.contract_addr))
             attempt = 0
             while True:
                 try:
