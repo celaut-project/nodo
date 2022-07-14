@@ -322,11 +322,13 @@ def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     if __peer_payment_process(peer_id = peer_id, amount = amount):  # process the payment on the peer.
         with deposits_on_other_peers_lock:
             deposits_on_other_peers[peer_id] = deposits_on_other_peers[peer_id] + amount if peer_id in deposits_on_other_peers else amount
+        print('increase deposit TRUE.')
         return True
     else:
         if peer_id not in deposits_on_other_peers:
             with deposits_on_other_peers_lock:
                 deposits_on_other_peers[peer_id] = 0
+        print('Increate deposit FALSE.')
         return False
 
 def __check_payment_process( amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
