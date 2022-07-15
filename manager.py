@@ -601,7 +601,7 @@ def maintain():
 
 
 def pair_deposits():
-    print('Pair deposits', deposits_on_other_peers)
+    print('\n\nPair deposits', deposits_on_other_peers)
     for peer, deposit in deposits_on_other_peers.items():
         if deposit < MIN_DEPOSIT_PEER:
             l.LOGGER('Manager error: the peer '+ str(peer)+' has not enough deposit.')
@@ -617,7 +617,6 @@ def load_peer_instances_from_disk():
 def manager_thread():
     load_peer_instances_from_disk()
     while True:
-        print('Manager thread')
         maintain()
         pair_deposits()
         sleep(MANAGER_ITERATION_TIME) 
