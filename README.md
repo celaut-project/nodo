@@ -26,7 +26,7 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 
 14.Optional: activate ssh, https://linuxize.com/post/how-to-enable-ssh-on-ubuntu-18-04/
 
-15. Add enviroment variableS: 
+15. Add enviroment variables: 
 - COMPUTE_POWER_RATE
 - GATEWAY_PORT
 - COST_OF_BUILD
@@ -51,3 +51,5 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 - MIN_PEER_DEPOSIT
 - INITIAL_PEER_DEPOSIT_FACTOR
 - ALLOW_GAS_DEBT
+- COMMUNICATION_ATTEMPTS_DELAY
+- COMMUNICATION_ATTEMPTS
