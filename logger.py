@@ -1,5 +1,5 @@
 import logging, os
-GET_ENV = lambda env, default: type(default)(os.environ.get(env)) if env in os.environ.keys() else default
+GET_ENV = lambda env, default: ( type(default)(os.environ.get(env)) if type(default)!=bool else os.environ.get(env) in ['True', 'true', 'T', 't']) if env in os.environ.keys() else default
 USE_PRINT = GET_ENV(env = 'USE_PRINT', default = False)
 
 logging.basicConfig(filename='/node/app.log', level=logging.DEBUG, format='%(asctime)s %(levelname)-8s %(message)s')
