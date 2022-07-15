@@ -40,7 +40,7 @@ class LedgerContractInterface:
         self.sessions_lock = Lock()
 
         self.poll_interval: int = 2   # TODO this three variables depends on the ledger, so they should be moved on the mongo.contracts collection.
-        self.poll_iterations: int = 50
+        self.poll_iterations: int = 5
         self.poll_init_delay: int = 20
 
 
