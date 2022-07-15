@@ -120,7 +120,8 @@ def service_balancer(
             return {k : v for k, v in sorted(self.dict.items(), key=lambda item: item[1].cost)}  # TODO ordenar en function de la varianza tambien.
 
     
-    peers = PeerCostList()
+    print('service_balancer without -> ', ignore_network)
+    peers: PeerCostList = PeerCostList()
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
     try:
         peers.add_elem(
@@ -140,7 +141,7 @@ def service_balancer(
         for peer in utils.peers_uri_iterator(ignore_network = ignore_network):
             l.LOGGER('Peer ' + peer['ip'] + ' ' + str(peer['port']))
             # TODO could use async or concurrency ¿numba?. And use timeout.
-            peer_uri = peer['ip']+':'+str(peer['port'])
+            peer_uri: str = peer['ip']+':'+str(peer['port'])
             try:
                 peers.add_elem(
                     elem = peer_uri,
