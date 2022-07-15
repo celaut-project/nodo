@@ -101,6 +101,7 @@ class LedgerContractInterface:
 class VyperDepositContractInterface(Singleton):
 
     def __init__(self):
+        print('Vyper gas deposit contract interface init')
         self.ledger_providers: Dict[str: LedgerContractInterface] = {}
         for d in get_ledger_and_contract_addr_from_contract(contract_hash = CONTRACT_HASH):
             ledger, contract_address = d.values()
@@ -109,6 +110,7 @@ class VyperDepositContractInterface(Singleton):
                 contract_addr = contract_address,
                 priv = get_priv_from_ledger(ledger)
             )
+        print('Vyper gas deposit contract interface init done')
 
     # TODO si necesitas añadir un nuevo ledger, deberás reiniciar el nodo, a no ser que se implemente un método set_ledger_on_interface()
 
