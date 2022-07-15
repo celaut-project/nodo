@@ -14,12 +14,12 @@ import itertools
 from verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
 
-WAIT_FOR_CONTAINER = utils.GET_ENV(env = 'WAIT_FOR_CONTAINER_TIME', default = 60)
-BUILD_CONTAINER_MEMORY_SIZE_FACTOR = utils.GET_ENV(env = 'BUILD_CONTAINER_MEMORY_SIZE_FACTOR', default = 3.1)
+WAIT_FOR_CONTAINER = l.GET_ENV(env = 'WAIT_FOR_CONTAINER_TIME', default = 60)
+BUILD_CONTAINER_MEMORY_SIZE_FACTOR = l.GET_ENV(env = 'BUILD_CONTAINER_MEMORY_SIZE_FACTOR', default = 3.1)
 
 SUPPORTED_ARCHITECTURES = [       # The first element of each list is the Docker buildx tag.
-    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if utils.GET_ENV(env = 'ARM_SUPPORT', default=True) else [],
-    ['linux/amd64', 'x86_64', 'amd64'] if utils.GET_ENV(env = 'X86_SUPPORT', default=False) else []
+    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if l.GET_ENV(env = 'ARM_SUPPORT', default=True) else [],
+    ['linux/amd64', 'x86_64', 'amd64'] if l.GET_ENV(env = 'X86_SUPPORT', default=False) else []
 ]
 
 def get_arch_tag(metadata: celaut_pb2.Any.Metadata) -> str:
