@@ -582,7 +582,9 @@ def start_service_cost(
 
 def maintain():
     # l.LOGGER('Maintain '+str(system_cache))
-    for token, sysreq in dict(system_cache).items():  # Parse the system cache to other dict to avoid concurrent access.
+    for i in range(len(system_cache)):  # Parse the system cache to other dict to avoid concurrent access.
+        if i >= len(system_cache): break
+        token, sysreq = list(system_cache.items())[i]
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
                 prune_container(token = token)
@@ -602,7 +604,9 @@ def maintain():
 
 def pair_deposits():
     print('\n\nPair deposits', deposits_on_other_peers)
-    for peer, deposit in deposits_on_other_peers.items():
+    for i in range(len(deposits_on_other_peers)):
+        if i >= len(deposits_on_other_peers): break
+        peer, deposit = list(deposits_on_other_peers.items())[i]
         if deposit < MIN_DEPOSIT_PEER:
             l.LOGGER('Manager error: the peer '+ str(peer)+' has not enough deposit.')
             if not __increase_deposit_on_peer(peer_id = peer, amount = MIN_DEPOSIT_PEER - deposit):
