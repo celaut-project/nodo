@@ -9,7 +9,7 @@ async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, c
             receipt = w3.eth.waitForTransactionReceipt(event['transactionHash'])
             result = getattr(contract.events, event_name)().processReceipt(receipt)
             opt(args = result[0]['args'])
-            time.sleep(poll_interval)
+        time.sleep(poll_interval)
 
 
 def catch_event(contractAddress, w3, contract, event_name, opt, init_delay: int = 0, poll_interval: int = 1):
