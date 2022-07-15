@@ -23,7 +23,7 @@ from contracts.main.utils import get_ledger_and_contract_addr_from_contract
 DOCKER_CLIENT = lambda: docker_lib.from_env()
 GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
 MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
-IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = True)
+IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = False)
 SEND_ONLY_HASHES_ASKING_COST = utils.GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default=False)
 DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = utils.GET_ENV(env = 'DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH', default=False)
 
