@@ -65,7 +65,7 @@ class LedgerContractInterface:
                 self.sessions[token] = amount
             else:
                 self.sessions[token] += amount
-            print('\nNew session:', token, amount, self.sessions)
+            print('\nNew session:', token, amount, self.sessions, self)
 
 
     def validate_session(self, token: str, amount: int, validate_token = None) -> bool:
