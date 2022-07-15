@@ -4,12 +4,16 @@ from web3 import HTTPProvider, Web3
 import asyncio, time, pymongo
 
 async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, contract):
-    while True:
-        for event in event_filter.get_new_entries():
-            receipt = w3.eth.waitForTransactionReceipt(event['transactionHash'])
-            result = getattr(contract.events, event_name)().processReceipt(receipt)
-            opt(args = result[0]['args'])
-        time.sleep(poll_interval)
+    try:
+        while True:
+            for event in event_filter.get_new_entries():
+                receipt = w3.eth.waitForTransactionReceipt(event['transactionHash'])
+                result = getattr(contract.events, event_name)().processReceipt(receipt)
+                opt(args = result[0]['args'])
+            time.sleep(poll_interval)
+    except Exception as e:
+        print('Exception on catch_event log_loop: ', e)
+        raise e
 
 
 def catch_event(contractAddress, w3, contract, event_name, opt, init_delay: int = 0, poll_interval: int = 1):
