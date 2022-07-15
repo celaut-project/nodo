@@ -608,7 +608,6 @@ def pair_deposits():
             l.LOGGER('Manager error: the peer '+ str(peer)+' has not enough deposit.')
             if not __increase_deposit_on_peer(peer_id = peer, amount = MIN_DEPOSIT_PEER - deposit):
                 l.LOGGER('Manager error: the peer '+ str(peer)+' could not be increased.')
-                del deposits_on_other_peers[peer]
 
 
 def load_peer_instances_from_disk():
