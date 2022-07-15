@@ -46,7 +46,7 @@ INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', defau
 COST_AVERAGE_VARIATION = GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
 GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only outside the manager. (not in maintain_cost)
 MODIFY_SERVICE_SYSTEM_RESOURCES_COST = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
-ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = True)  # Could be used with the reputation system.
+ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = False)  # Could be used with the reputation system.
 COMMUNICATION_ATTEMPTS = GET_ENV(env = 'COMMUNICATION_ATTEMPTS', default = 5)
 COMMUNICATION_ATTEMPTS_DELAY = GET_ENV(env = 'COMMUNICATION_ATTEMPTS_DELAY', default = 2)
 
