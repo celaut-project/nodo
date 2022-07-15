@@ -582,7 +582,7 @@ def start_service_cost(
 
 def maintain():
     # l.LOGGER('Maintain '+str(system_cache))
-    for i in range(len(system_cache)):  # Parse the system cache to other dict to avoid concurrent access.
+    for i in range(len(system_cache)):
         if i >= len(system_cache): break
         token, sysreq = list(system_cache.items())[i]
         try:
