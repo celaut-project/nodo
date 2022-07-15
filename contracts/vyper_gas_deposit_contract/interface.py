@@ -98,7 +98,7 @@ class LedgerContractInterface:
 
 
 # Singleton class
-class VyperDepositContractInterface(Singleton):
+class VyperDepositContractInterface(metaclass=Singleton):
 
     def __init__(self):
         print('Vyper gas deposit contract interface init')
