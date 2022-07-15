@@ -120,7 +120,7 @@ def service_balancer(
             return {k : v for k, v in sorted(self.dict.items(), key=lambda item: item[1].cost)}  # TODO ordenar en function de la varianza tambien.
 
     
-    print('service_balancer without -> ', ignore_network)
+    print('service_balancer without -> ', ignore_network, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER)
     peers: PeerCostList = PeerCostList()
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
     try:
