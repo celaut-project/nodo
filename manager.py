@@ -8,7 +8,7 @@ from types import LambdaType
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import GET_ENV, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, peers_uri_iterator
+from utils import get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, peers_uri_iterator
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -34,21 +34,21 @@ DEFAULT_SYSTEM_RESOURCES = celaut_pb2.Sysresources(
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
-DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT_FACTOR', default = 1/pow(10,6))  # Perdentage of the parent's gas amount.
-DEFAULT_INTIAL_GAS_AMOUNT = GET_ENV(env = 'DEFAULT_INTIAL_GAS_AMOUNT', default = pow(10, 9)) # Only for services launched by the node.
-COMPUTE_POWER_RATE = GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
-COST_OF_BUILD = GET_ENV(env = 'COST_OF_BUILD', default = 5)
-EXECUTION_BENEFIT = GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
-MANAGER_ITERATION_TIME = GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 3)
-MEMORY_LIMIT_COST_FACTOR = GET_ENV(env = 'MEMORY_LIMIT_COST_FACTOR', default = 1/pow(10,6))
-MIN_DEPOSIT_PEER = GET_ENV(env = 'MIN_PEER_DEPOSIT', default = pow(10, 9))
-INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', default = 0.5)
-COST_AVERAGE_VARIATION = GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
-GAS_COST_FACTOR = GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only outside the manager. (not in maintain_cost)
-MODIFY_SERVICE_SYSTEM_RESOURCES_COST = GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
-ALLOW_GAS_DEBT = GET_ENV(env = 'ALLOW_GAS_DEBT', default = False)  # Could be used with the reputation system.
-COMMUNICATION_ATTEMPTS = GET_ENV(env = 'COMMUNICATION_ATTEMPTS', default = 5)
-COMMUNICATION_ATTEMPTS_DELAY = GET_ENV(env = 'COMMUNICATION_ATTEMPTS_DELAY', default = 2)
+DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = l.GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT_FACTOR', default = 1/pow(10,6))  # Perdentage of the parent's gas amount.
+DEFAULT_INTIAL_GAS_AMOUNT = l.GET_ENV(env = 'DEFAULT_INTIAL_GAS_AMOUNT', default = pow(10, 9)) # Only for services launched by the node.
+COMPUTE_POWER_RATE = l.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
+COST_OF_BUILD = l.GET_ENV(env = 'COST_OF_BUILD', default = 5)
+EXECUTION_BENEFIT = l.GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
+MANAGER_ITERATION_TIME = l.GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 3)
+MEMORY_LIMIT_COST_FACTOR = l.GET_ENV(env = 'MEMORY_LIMIT_COST_FACTOR', default = 1/pow(10,6))
+MIN_DEPOSIT_PEER = l.GET_ENV(env = 'MIN_PEER_DEPOSIT', default = pow(10, 9))
+INITIAL_PEER_DEPOSIT_FACTOR = l.GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', default = 0.5)
+COST_AVERAGE_VARIATION = l.GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
+GAS_COST_FACTOR = l.GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only outside the manager. (not in maintain_cost)
+MODIFY_SERVICE_SYSTEM_RESOURCES_COST = l.GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
+ALLOW_GAS_DEBT = l.GET_ENV(env = 'ALLOW_GAS_DEBT', default = False)  # Could be used with the reputation system.
+COMMUNICATION_ATTEMPTS = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS', default = 5)
+COMMUNICATION_ATTEMPTS_DELAY = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS_DELAY', default = 2)
 
 PAYMENT_PROCESS_VALIDATORS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.payment_process_validator}     # contract_hash:  lambda peer_id, tx_id, amount -> bool,
 AVAILABLE_PAYMENT_PROCESS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.process_payment}   # contract_hash:   lambda amount, peer_id -> tx_id,
