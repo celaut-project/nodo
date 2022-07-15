@@ -4,36 +4,35 @@ from web3 import HTTPProvider, Web3
 import asyncio, time, pymongo
 
 async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, contract):
-    try:
-        while True:
-            for event in event_filter.get_new_entries():
-                receipt = w3.eth.waitForTransactionReceipt(event['transactionHash'])
-                result = getattr(contract.events, event_name)().processReceipt(receipt)
-                opt(args = result[0]['args'])
-            time.sleep(poll_interval)
-    except Exception as e:
-        print('Exception on catch_event log_loop: ', e)
-        raise e
+    while True:
+        for event in event_filter.get_new_entries():
+            receipt = w3.eth.waitForTransactionReceipt(event['transactionHash'])
+            result = getattr(contract.events, event_name)().processReceipt(receipt)
+            opt(args = result[0]['args'])
+        time.sleep(poll_interval)
 
 
-def catch_event(contractAddress, w3, contract, event_name, opt, init_delay: int = 0, poll_interval: int = 1):
-    block: int = w3.eth.get_block('latest')['number'] - init_delay
-    print("Catching event from block number: ", block)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(
-            asyncio.gather(
-                log_loop(
-                    event_filter = w3.eth.filter({
-                        'fromBlock': block,
-                        'address': contractAddress
-                    }),
-                    poll_interval = poll_interval, event_name = event_name, opt = opt, w3 = w3, contract = contract
-                )))
-    finally:
-        # close loop to free up system resources
-        loop.close()
+def catch_event(contractAddress, w3, contract, event_name, opt, init_delay: int = 1, poll_interval: int = 1):
+    while True:
+        block: int = w3.eth.get_block('latest')['number'] - init_delay
+        print("Catching event from block number: ", block)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                asyncio.gather(
+                    log_loop(
+                        event_filter = w3.eth.filter({
+                            'fromBlock': block,
+                            'address': contractAddress
+                        }),
+                        poll_interval = poll_interval, event_name = event_name, opt = opt, w3 = w3, contract = contract
+                    )))
+        except Exception as e:
+            print('Exception on catch event: ', e)
+        finally:
+            # close loop to free up system resources
+            loop.close()
 
 
 def transact(
