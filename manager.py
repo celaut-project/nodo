@@ -603,7 +603,6 @@ def maintain():
 
 
 def pair_deposits():
-    print('\n\nPair deposits', deposits_on_other_peers)
     for i in range(len(deposits_on_other_peers)):
         if i >= len(deposits_on_other_peers): break
         peer, deposit = list(deposits_on_other_peers.items())[i]

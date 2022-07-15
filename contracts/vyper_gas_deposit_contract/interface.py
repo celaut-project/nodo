@@ -71,12 +71,8 @@ class LedgerContractInterface:
     def validate_session(self, token: str, amount: int, validate_token = None) -> bool:
         token_encoded = sha256(token.encode('utf-8')).digest()
         for i in range(self.pool_iterations):
-            with self.sessions_lock:
-                print('\n\n('+str(i)+') Go to validate session:', token, amount, token_encoded in self.sessions,  not validate_token or validate_token(token))
-                print(token_encoded, self.sessions)
             if token_encoded in self.sessions and self.sessions[token_encoded] >= amount and \
                 ( not validate_token or validate_token(token)):
-                print('('+str(i)+') Validate session:', token, amount)
                 with self.sessions_lock: 
                     self.sessions[token_encoded] -= amount
                 return True 
@@ -101,7 +97,6 @@ class LedgerContractInterface:
 class VyperDepositContractInterface(metaclass=Singleton):
 
     def __init__(self):
-        print('Vyper gas deposit contract interface init')
         self.ledger_providers: Dict[str: LedgerContractInterface] = {}
         for d in get_ledger_and_contract_addr_from_contract(contract_hash = CONTRACT_HASH):
             ledger, contract_address = d.values()
@@ -110,7 +105,6 @@ class VyperDepositContractInterface(metaclass=Singleton):
                 contract_addr = contract_address,
                 priv = get_priv_from_ledger(ledger)
             )
-        print('Vyper gas deposit contract interface init done')
 
     # TODO si necesitas añadir un nuevo ledger, deberás reiniciar el nodo, a no ser que se implemente un método set_ledger_on_interface()
 
