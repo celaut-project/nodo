@@ -53,7 +53,7 @@ class LedgerContractInterface:
             w3 = self.w3,
             contract = self.contract,
             event_name = 'NewSession',
-            init_delay = self.pool_init_delay,
+            init_delay = self.poll_init_delay,
             opt = lambda args: self.__new_session(
                         token = args['token'], 
                         amount = args['gas_amount']
