@@ -13,6 +13,8 @@ async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, c
 
 
 def catch_event(contractAddress, w3, contract, event_name, opt, init_delay: int = 0, poll_interval: int = 1):
+    block: int = w3.eth.get_block('latest')['number'] - init_delay
+    print("Catching event from block number: ", block)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -20,7 +22,7 @@ def catch_event(contractAddress, w3, contract, event_name, opt, init_delay: int 
             asyncio.gather(
                 log_loop(
                     event_filter = w3.eth.filter({
-                        'fromBlock': w3.eth.get_block('latest')['number'] - init_delay,
+                        'fromBlock': block,
                         'address': contractAddress
                     }),
                     poll_interval = poll_interval, event_name = event_name, opt = opt, w3 = w3, contract = contract
