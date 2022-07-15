@@ -11,14 +11,18 @@ async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, c
             opt(args = result[0]['args'])
             time.sleep(poll_interval)
 
-def catch_event(contractAddress, w3, contract, event_name, opt, poll_interval: int = 1):
+
+def catch_event(contractAddress, w3, contract, event_name, opt, init_delay: int = 0, poll_interval: int = 1):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(
             asyncio.gather(
                 log_loop(
-                    event_filter = w3.eth.filter({'fromBlock':'latest', 'address':contractAddress}),
+                    event_filter = w3.eth.filter({
+                        'fromBlock': w3.eth.get_block('latest') - init_delay,
+                        'address': contractAddress
+                    }),
                     poll_interval = poll_interval, event_name = event_name, opt = opt, w3 = w3, contract = contract
                 )))
     finally:

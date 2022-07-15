@@ -40,7 +40,8 @@ class LedgerContractInterface:
         self.sessions_lock = Lock()
 
         self.poll_interval: int = 2
-        self.pool_iterations: int = 50
+        self.poll_iterations: int = 50
+        self.poll_init_delay: int = 20
 
 
         Thread(target=self.catch_event_thread, args=(contract_addr,)).start()
@@ -52,6 +53,7 @@ class LedgerContractInterface:
             w3 = self.w3,
             contract = self.contract,
             event_name = 'NewSession',
+            init_delay = self.pool_init_delay,
             opt = lambda args: self.__new_session(
                         token = args['token'], 
                         amount = args['gas_amount']
@@ -70,7 +72,7 @@ class LedgerContractInterface:
 
     def validate_session(self, token: str, amount: int, validate_token = None) -> bool:
         token_encoded = sha256(token.encode('utf-8')).digest()
-        for i in range(self.pool_iterations):
+        for i in range(self.poll_iterations):
             if token_encoded in self.sessions and self.sessions[token_encoded] >= amount and \
                 ( not validate_token or validate_token(token)):
                 with self.sessions_lock: 
