@@ -14,8 +14,6 @@ import netifaces as ni
 from verify import get_service_hex_main_hash
 from logger import LOGGER
 
-GET_ENV = lambda env, default: ( type(default)(os.environ.get(env)) if type(default)!=bool else os.environ.get(env) in ['True', 't', 'true'] ) if env in os.environ.keys() else default
-
 
 def read_file(filename) -> bytes:
     def generator(filename):

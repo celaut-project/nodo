@@ -1,7 +1,5 @@
-from ast import Bytes
-from base64 import encode
-import sys, os
-from threading import Thread; sys.path.append(os.getcwd())
+import sys, os; sys.path.append(os.getcwd())
+from threading import Thread
 
 import json
 from multiprocessing import Lock

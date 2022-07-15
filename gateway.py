@@ -19,13 +19,14 @@ import grpcbigbuffer as grpcbf
 import iobigdata as iobd
 from manager import insert_instance_on_mongo, DOCKER_NETWORK, LOCAL_NETWORK, set_external_on_cache
 from contracts.main.utils import get_ledger_and_contract_addr_from_contract
+from logger import GET_ENV
 
 DOCKER_CLIENT = lambda: docker_lib.from_env()
-GATEWAY_PORT = utils.GET_ENV(env = 'GATEWAY_PORT', default = 8090)
-MEMORY_LOGS = utils.GET_ENV(env = 'MEMORY_LOGS', default = False)
-IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = utils.GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = True)
-SEND_ONLY_HASHES_ASKING_COST = utils.GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default=False)
-DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = utils.GET_ENV(env = 'DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH', default=False)
+GATEWAY_PORT = GET_ENV(env = 'GATEWAY_PORT', default = 8090)
+MEMORY_LOGS = GET_ENV(env = 'MEMORY_LOGS', default = False)
+IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = True)
+SEND_ONLY_HASHES_ASKING_COST = GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default=False)
+DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = GET_ENV(env = 'DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH', default=False)
 
 
 #  TODO auxiliares
