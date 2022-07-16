@@ -126,7 +126,7 @@ def __purgue_internal(father_ip = None, container_id = None, container_ip = None
         DOCKER_CLIENT().containers.get(container_id).remove(force=True)
     except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
         l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
-        raise e
+        return 0
 
     refund = __get_gas_amount_by_ip(
             ip = container_ip
