@@ -408,7 +408,6 @@ def spend_gas(
             return True
     except Exception as e: l.LOGGER('Manager error '+str(e))
     
-    l.LOGGER(token_or_container_ip+" can't spend "+str(gas_to_spend)+" gas. \n Status the list of avaliable gas: "+str(peer_instances)+ " and "+str(system_cache))
     return False
 
 
