@@ -162,7 +162,7 @@ def __purgue_internal(father_ip = None, container_id = None, container_ip = None
             else:
                 refund += __purgue_external(
                     father_ip = father_ip,
-                    node_uri = dependency.split('##')[0],
+                    peer_id = dependency.split('##')[0],
                     token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
                 )
 
@@ -176,18 +176,18 @@ def __purgue_internal(father_ip = None, container_id = None, container_ip = None
     return refund
 
 
-def __purgue_external(father_ip, node_uri, token) -> int:
-    if len(node_uri.split(':')) < 2:
-        l.LOGGER('Should be an uri not an ip. Something was wrong. The node uri is ' + node_uri)
+def __purgue_external(father_ip, peer_id, token) -> int:
+    if len(peer_id.split(':')) < 2:
+        l.LOGGER('Should be an uri not an ip. Something was wrong. The node uri is ' + peer_id)
         return None
     
     refund = 0
     container_cache_lock.acquire()
 
     try:
-        container_cache[father_ip].remove(node_uri + '##' + token)
+        container_cache[father_ip].remove(peer_id + '##' + token)
     except ValueError as e:
-        l.LOGGER(str(e) + str(container_cache[father_ip]) + ' trying to remove ' + node_uri + '##' + token)
+        l.LOGGER(str(e) + str(container_cache[father_ip]) + ' trying to remove ' + peer_id + '##' + token)
     except KeyError as e:
         l.LOGGER(str(e) + father_ip + ' not in ' + str(container_cache.keys()))
 
@@ -196,7 +196,7 @@ def __purgue_external(father_ip, node_uri, token) -> int:
         refund = next(grpcbf.client_grpc(
             method = gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
-                            node_uri
+                            peer_id    # TODO parse to a uri when it's implemented.
                         )
                     ).StopService,
             input = gateway_pb2.TokenMessage(
@@ -206,7 +206,7 @@ def __purgue_external(father_ip, node_uri, token) -> int:
             partitions_message_mode_parser = True
         )).amount
     except grpc.RpcError as e:
-        l.LOGGER('Error during remove a container on ' + node_uri + ' ' + str(e))
+        l.LOGGER('Error during remove a container on ' + peer_id + ' ' + str(e))
 
     container_cache_lock.release()
     return refund
@@ -516,7 +516,7 @@ def prune_container(token: str) -> int:
         try:
             refund = __purgue_external(
                 father_ip = token.split('##')[0],
-                node_uri = token.split('##')[1],
+                peer_id = token.split('##')[1],
                 token = token[len( token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
             )
         except Exception as e:
@@ -526,6 +526,39 @@ def prune_container(token: str) -> int:
     # __refound_gas() # TODO refound gas to parent. Need to check what cache is. peer_instances or system_cache. Podría usar una variable de entorno para hacerlo o no.
     return refund
 
+
+# GET METRICS
+
+def __get_metrics_internal(token: str) -> gateway_pb2.Metrics:
+    return gateway_pb2.Metrics(
+        gas_amount = system_cache[token]['gas'],
+    )
+
+def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
+    for i in range(COMMUNICATION_ATTEMPTS):
+        return next(grpcbf.client_grpc(
+            method = gateway_pb2_grpc.GatewayStub(
+                            grpc.insecure_channel(
+                                peer_id  # TODO parse to a uri when it's implemented.
+                            )
+                        ).GetMetrics,
+            input = gateway_pb2.TokenMessage(
+                token = token
+            ),
+            indices_parser = gateway_pb2.Metrics,
+            partitions_message_mode_parser = True
+        ))
+    l.LOGGER('Error getting metrics from '+peer_id+'.')
+    raise Exception('Error getting metrics from '+peer_id+'.')
+
+def get_metrics(token: str) -> gateway_pb2.Metrics:
+    if get_network_name(ip_or_uri = token.split('##')[1]) == DOCKER_NETWORK:
+        return __get_metrics_internal(token = token)
+    else:
+        return __get_metrics_external(
+            peer_id = token.split('##')[1],
+            token = token[len( token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
+        )
 
 
 # COST FUNCTIONS
