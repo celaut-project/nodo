@@ -633,10 +633,10 @@ def maintain():
 def pair_deposits():
     for i in range(len(deposits_on_other_peers)):
         if i >= len(deposits_on_other_peers): break
-        peer, deposit = list(deposits_on_other_peers.items())[i]
-        if deposit < MIN_DEPOSIT_PEER:
+        peer, estimated_deposit = list(deposits_on_other_peers.items())[i]
+        if estimated_deposit < MIN_DEPOSIT_PEER or get_metrics(token = peer).gas_amount < MIN_DEPOSIT_PEER:
             l.LOGGER('Manager error: the peer '+ str(peer)+' has not enough deposit.')
-            if not __increase_deposit_on_peer(peer_id = peer, amount = MIN_DEPOSIT_PEER - deposit):
+            if not __increase_deposit_on_peer(peer_id = peer, amount = MIN_DEPOSIT_PEER):
                 l.LOGGER('Manager error: the peer '+ str(peer)+' could not be increased.')
 
 

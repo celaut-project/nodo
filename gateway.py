@@ -4,7 +4,7 @@ from buffer_pb2 import Buffer
 import celaut_pb2 as celaut
 import build, utils
 from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
-    add_container, add_peer, container_modify_system_params, default_cost, could_ve_this_sysreq, execution_cost, get_sysresources, manager_thread, prune_container, set_external_on_cache, \
+    add_container, add_peer, container_modify_system_params, default_cost, could_ve_this_sysreq, execution_cost, get_metrics, get_sysresources, manager_thread, prune_container, set_external_on_cache, \
     spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, get_token_by_uri
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
