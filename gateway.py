@@ -884,6 +884,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Payment is valid.')
         for b in grpcbf.serialize_to_buffer(): yield b
 
+    
+    def GetMetrics(self, request_iterator, context):
+        l.LOGGER('Request for metrics.')
+        for b in grpcbf.serialize_to_buffer(
+            message_iterator = ,
+            indices = gateway_pb2.Metrics,
+        ): yield b
+
 
 if __name__ == "__main__":
     # Create __hycache__ if it does not exists.

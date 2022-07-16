@@ -34,7 +34,7 @@ DEFAULT_SYSTEM_RESOURCES = celaut_pb2.Sysresources(
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
-DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = l.GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT_FACTOR', default = 1/pow(10,6))  # Perdentage of the parent's gas amount.
+DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = l.GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT_FACTOR', default = 1/pow(10,6))  # Percentage of the parent's gas amount.
 DEFAULT_INTIAL_GAS_AMOUNT = l.GET_ENV(env = 'DEFAULT_INTIAL_GAS_AMOUNT', default = pow(10, 9)) # Only for services launched by the node.
 COMPUTE_POWER_RATE = l.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
 COST_OF_BUILD = l.GET_ENV(env = 'COST_OF_BUILD', default = 5)
@@ -202,7 +202,8 @@ def __purgue_external(father_ip, node_uri, token) -> int:
             input = gateway_pb2.TokenMessage(
                 token = token
             ),
-            output = gateway_pb2.Refund()
+            indices_parser = gateway_pb2.Refund,
+            partitions_message_mode_parser = True
         )).amount
     except grpc.RpcError as e:
         l.LOGGER('Error during remove a container on ' + node_uri + ' ' + str(e))
