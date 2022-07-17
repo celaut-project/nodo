@@ -551,13 +551,16 @@ def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
     l.LOGGER('Error getting metrics from '+peer_id+'.')
     raise Exception('Error getting metrics from '+peer_id+'.')
 
-def get_metrics(token: str) -> gateway_pb2.Metrics:
-    if get_network_name(ip_or_uri = token.split('##')[1]) == DOCKER_NETWORK:
-        return __get_metrics_internal(token = token)
+def get_metrics(token_or_peer_id: str) -> gateway_pb2.Metrics:
+    if get_network_name(
+        ip_or_uri = token_or_peer_id.split('##')[1] if '##' in token_or_peer_id else token_or_peer_id,
+
+    ) == DOCKER_NETWORK:
+        return __get_metrics_internal(token = token_or_peer_id)
     else:
         return __get_metrics_external(
-            peer_id = token.split('##')[1],
-            token = token[len( token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
+            peer_id = token_or_peer_id.split('##')[1],
+            token = token_or_peer_id[len( token_or_peer_id.split('##')[1] ) + 1:] # Por si el token comienza en # ...
         )
 
 
@@ -634,7 +637,7 @@ def pair_deposits():
     for i in range(len(deposits_on_other_peers)):
         if i >= len(deposits_on_other_peers): break
         peer, estimated_deposit = list(deposits_on_other_peers.items())[i]
-        if estimated_deposit < MIN_DEPOSIT_PEER or get_metrics(token = peer).gas_amount < MIN_DEPOSIT_PEER:
+        if estimated_deposit < MIN_DEPOSIT_PEER or get_metrics(token_or_peer_id = peer).gas_amount < MIN_DEPOSIT_PEER:
             l.LOGGER('Manager error: the peer '+ str(peer)+' has not enough deposit.')
             if not __increase_deposit_on_peer(peer_id = peer, amount = MIN_DEPOSIT_PEER):
                 l.LOGGER('Manager error: the peer '+ str(peer)+' could not be increased.')
