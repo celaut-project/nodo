@@ -39,7 +39,7 @@ DEFAULT_INTIAL_GAS_AMOUNT = l.GET_ENV(env = 'DEFAULT_INTIAL_GAS_AMOUNT', default
 COMPUTE_POWER_RATE = l.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
 COST_OF_BUILD = l.GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = l.GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
-MANAGER_ITERATION_TIME = l.GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 3)
+MANAGER_ITERATION_TIME = l.GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 10)
 MEMORY_LIMIT_COST_FACTOR = l.GET_ENV(env = 'MEMORY_LIMIT_COST_FACTOR', default = 1/pow(10,6))
 MIN_DEPOSIT_PEER = l.GET_ENV(env = 'MIN_PEER_DEPOSIT', default = pow(10, 9))
 INITIAL_PEER_DEPOSIT_FACTOR = l.GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', default = 0.5)
@@ -639,7 +639,7 @@ def pair_deposits():
         peer_id, estimated_deposit = list(deposits_on_other_peers.items())[i]
         if estimated_deposit < MIN_DEPOSIT_PEER or \
             __get_metrics_external(
-                peer_id = peer_id,
+                peer_id = peer_id+':8090',
                 token = get_own_token_from_peer_id(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
             ).gas_amount < MIN_DEPOSIT_PEER:
                 l.LOGGER('Manager error: the peer '+ str(peer_id)+' has not enough deposit.')
