@@ -139,7 +139,7 @@ def service_balancer(
 
     try:
         for peer in utils.peers_uri_iterator(ignore_network = ignore_network):
-            l.LOGGER('Peer ' + peer['ip'] + ' ' + str(peer['port']))
+            l.LOGGER('Check cost on peer ' + peer['ip'] + ' ' + str(peer['port']))
             # TODO could use async or concurrency ¿numba?. And use timeout.
             peer_uri: str = peer['ip']+':'+str(peer['port'])
             try:
