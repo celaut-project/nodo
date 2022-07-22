@@ -889,7 +889,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Request for metrics.')
         for b in grpcbf.serialize_to_buffer(
             message_iterator = get_metrics(
-                token_or_peer_id = next(grpcbf.parse_from_buffer(
+                token = next(grpcbf.parse_from_buffer(
                     request_iterator = request_iterator,
                     indices = gateway_pb2.TokenMessage,
                     partitions_message_mode=True
