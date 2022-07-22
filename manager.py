@@ -529,6 +529,11 @@ def prune_container(token: str) -> int:
 
 # GET METRICS
 
+def __get_metrics_peer(peer_id) -> gateway_pb2.Metrics:
+    return gateway_pb2.Metrics(
+        gas_amount = peer_instances[peer_id],
+    )
+
 def __get_metrics_internal(token: str) -> gateway_pb2.Metrics:
     return gateway_pb2.Metrics(
         gas_amount = system_cache[token]['gas'],
@@ -552,7 +557,8 @@ def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
     raise Exception('Error getting metrics from '+peer_id+'.')
 
 def get_metrics(token: str) -> gateway_pb2.Metrics:
-    if get_network_name(
+    if '##' not in token: return __get_metrics_peer(peer_id = token)
+    elif get_network_name(
         ip_or_uri = token.split('##')[1],
 
     ) == DOCKER_NETWORK:
