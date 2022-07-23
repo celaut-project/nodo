@@ -408,7 +408,11 @@ def spend_gas(
             )
             return True
     except Exception as e: 
-        l.LOGGER('Manager error spending gas '+str(e)+' '+str(gas_to_spend)+' '+token_or_container_ip+'\n '+str(peer_instances)+'\n '+str(system_cache)+'\n '+str(cache_service_perspective)+'\n\n\n----------------------\n\n\n')
+        l.LOGGER('Manager error spending gas '+str(e)+' '+str(gas_to_spend)+' '+token_or_container_ip+\
+            '\n peer instances -> '+str(peer_instances)+\
+            '\n system cache -> '+str(system_cache)+\
+            '\n cache service perspective -> '+str(cache_service_perspective)+\
+            '\n        ----------------------\n\n\n')
     
     return False
 
