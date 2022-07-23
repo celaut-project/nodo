@@ -4,27 +4,32 @@ import "celaut.proto";
 import "buffer.proto";
 import "compile.proto";
 
+message GasAmount {
+    uint64 gas_amount = 1;
+    int32 exponent = 2;
+}
+
 message TokenMessage {
     string token = 1;
 }
 
 message EstimatedCost {
-    string cost = 1;
+    GasAmount cost = 1;
     float variance = 2;
 }
 
 message Refund {
-    string amount = 1;
+    GasAmount amount = 1;
 }
 
 message Payment {
     string deposit_token = 1;
     celaut.Service.Api.ContractLedger contract_ledger = 3;
-    string gas_amount = 4;
+    GasAmount gas_amount = 4;
 }
 
 message Metrics {
-    string gas_amount = 1;
+    GasAmount gas_amount = 1;
 }
 
 message Instance {
@@ -44,14 +49,14 @@ message HashWithConfig { // H^C
     celaut.Configuration config = 3;
     optional celaut.Sysresources min_sysreq = 4;  // init system specs.
     optional celaut.Sysresources max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
-    optional string initial_gas_amount = 6;
+    optional GasAmount initial_gas_amount = 6;
 }
 message ServiceWithConfig { // S^C
     ServiceWithMeta service = 2;
     celaut.Configuration config = 3;
     optional celaut.Sysresources min_sysreq = 4;  // init system specs.
     optional celaut.Sysresources max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
-    optional string initial_gas_amount = 6;
+    optional GasAmount initial_gas_amount = 6;
 }
 
 message CompileInput {
