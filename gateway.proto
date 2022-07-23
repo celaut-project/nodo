@@ -9,22 +9,22 @@ message TokenMessage {
 }
 
 message EstimatedCost {
-    int64 cost = 1;
+    string cost = 1;
     float variance = 2;
 }
 
 message Refund {
-    int64 amount = 1;
+    string amount = 1;
 }
 
 message Payment {
     string deposit_token = 1;
     celaut.Service.Api.ContractLedger contract_ledger = 3;
-    int64 gas_amount = 4;
+    string gas_amount = 4;
 }
 
 message Metrics {
-    int64 gas_amount = 1;
+    string gas_amount = 1;
 }
 
 message Instance {
@@ -44,14 +44,14 @@ message HashWithConfig { // H^C
     celaut.Configuration config = 3;
     optional celaut.Sysresources min_sysreq = 4;  // init system specs.
     optional celaut.Sysresources max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
-    optional int64 initial_gas_amount = 6;
+    optional string initial_gas_amount = 6;
 }
 message ServiceWithConfig { // S^C
     ServiceWithMeta service = 2;
     celaut.Configuration config = 3;
     optional celaut.Sysresources min_sysreq = 4;  // init system specs.
     optional celaut.Sysresources max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
-    optional int64 initial_gas_amount = 6;
+    optional string initial_gas_amount = 6;
 }
 
 message CompileInput {
