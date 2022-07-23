@@ -1,3 +1,4 @@
+from functools import cache
 from hashlib import sha256
 import json
 import string
@@ -407,7 +408,8 @@ def spend_gas(
                 container = refund_gas_function_container
             )
             return True
-    except Exception as e: l.LOGGER('Manager error '+str(e))
+    except Exception as e: 
+        l.LOGGER('Manager error spending gas '+str(e)+' '+str(gas_to_spend)+' '+token_or_container_ip+'\n '+str(peer_instances)+'\n '+str(system_cache)+'\n '+str(cache_service_perspective)+'\n\n\n----------------------\n\n\n')
     
     return False
 
