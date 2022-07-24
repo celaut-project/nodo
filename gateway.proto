@@ -5,7 +5,7 @@ import "buffer.proto";
 import "compile.proto";
 
 message GasAmount {
-    uint64 gas_amount = 1;
+    float gas_amount = 1;
     int32 exponent = 2;
 }
 

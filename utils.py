@@ -168,3 +168,14 @@ def get_own_token_from_peer_id(peer_id: str) -> str:
         if peer_id == peer['instance']['uriSlot'][0]['uri'][0]['ip']:  # TODO Cuando se use peer_id podra usar filter.
             return peer['token']
     raise Exception('No token found for peer: ' + str(peer_id))
+
+def toGasAmount(gas_amount: int) -> gateway_pb2.GasAmount:
+    s: str =  "{:e}".format(gas_amount)
+    return gateway_pb2.GasAmount(
+        gas_amount = float(s.split('e+')[0]),
+        exponent = int(s.split('e+')[1])
+    )
+
+def fromGasAmount(gas_amount: gateway_pb2.GasAmount) -> int:
+    i: int = str(gas_amount.gas_amount)[::-1].find('.')
+    return int(gas_amount.gas_amount * pow(10, i) * pow(10, gas_amount.exponent-i))
