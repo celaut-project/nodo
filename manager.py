@@ -73,7 +73,7 @@ system_cache_lock = Lock()
 system_cache = {} # token : { mem_limit: 0, gas: 0 }
 
 peer_instances_lock = Lock()
-peer_instances = {'192.168.43.199': pow(10, 128)} # id: amount_of_gas -> other peers' deposits on this node.
+peer_instances = {'192.168.43.39': pow(10, 128)} # id: amount_of_gas -> other peers' deposits on this node.
 
 deposits_on_other_peers_lock = Lock()
 deposits_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
