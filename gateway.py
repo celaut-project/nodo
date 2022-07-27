@@ -107,7 +107,7 @@ def service_balancer(
     metadata: celaut.Any.Metadata, 
     ignore_network: str = None,
     initial_gas_amount: int = None,
-    ) -> dict: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
+    ) -> Dict[str, int]: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
     class PeerCostList:
         # Sorts the list from the element with the smallest weight to the element with the largest weight.
         
@@ -115,13 +115,12 @@ def service_balancer(
             self.dict = {} # elem : weight
         
         def add_elem(self, weight: gateway_pb2.EstimatedCost, elem: str = 'local' ) -> None:
-            self.dict.update({elem: weight})
+            self.dict.update({
+                elem: int(utils.from_gas_amount(weight.cost) * GAS_COST_FACTOR * weight.variance * COST_AVERAGE_VARIATION)
+            })
         
         def get(self) -> Dict[str, int]:
-            return {k : v for k, v in sorted(
-                    self.dict.items(), 
-                    key=lambda item: utils.from_gas_amount(item[1].cost)  # TODO ordenar en function de la varianza tambien.
-                )} 
+            return {k : v for k, v in sorted(self.dict.items(), key=lambda item: item[1] )}
 
 
     peers: PeerCostList = PeerCostList()
@@ -209,7 +208,7 @@ def launch_service(
                     refound_gas = []
                     if not spend_gas(
                         token_or_container_ip = father_ip,
-                        gas_to_spend =  cost.cost * GAS_COST_FACTOR * cost.variance * COST_AVERAGE_VARIATION,
+                        gas_to_spend = cost,
                         refund_gas_function_container = refound_gas
                     ): raise Exception('Launch service error spending gas for '+father_ip)
                     service_instance = next(grpcbf.client_grpc(
