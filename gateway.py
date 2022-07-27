@@ -1,4 +1,4 @@
-from typing import Generator
+from typing import Dict, Generator
 from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
@@ -114,11 +114,14 @@ def service_balancer(
         def __init__(self) -> None:
             self.dict = {} # elem : weight
         
-        def add_elem(self, weight: int, elem: str = 'local' ) -> None:
+        def add_elem(self, weight: gateway_pb2.EstimatedCost, elem: str = 'local' ) -> None:
             self.dict.update({elem: weight})
         
-        def get(self) -> dict:
-            return {k : v for k, v in sorted(self.dict.items(), key=lambda item: item[1].cost)}  # TODO ordenar en function de la varianza tambien.
+        def get(self) -> Dict[str, int]:
+            return {k : v for k, v in sorted(
+                    self.dict.items(), 
+                    key=lambda item: utils.from_gas_amount(item[1].cost)  # TODO ordenar en function de la varianza tambien.
+                )} 
 
 
     peers: PeerCostList = PeerCostList()
@@ -145,7 +148,7 @@ def service_balancer(
             try:
                 peers.add_elem(
                     elem = peer_uri,
-                    weight = utils.from_gas_amount(next(grpcbf.client_grpc(
+                    weight = next(grpcbf.client_grpc(
                         method =  gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
                                         peer_uri
@@ -156,8 +159,8 @@ def service_balancer(
                         indices_serializer = GetServiceEstimatedCost_input,
                         partitions_serializer = {2: StartService_input_partitions_v2[2]},
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),  # TODO añadir initial_gas_amount y el resto de la configuracion inicial, si es que se especifica.
-                    )).cost
-                ))
+                    ))
+                )
             except Exception as e: l.LOGGER('Error taking the cost on '+ peer_uri +' : '+str(e))
     except Exception as e: l.LOGGER('Error iterating peers on service balancer ->>'+ str(e))
 
