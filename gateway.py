@@ -491,7 +491,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     system_requeriments = r.min_sysreq
 
                 if r.HasField('initial_gas_amount'):
-                    initial_gas_amount = r.initial_gas_amount
+                    initial_gas_amount = utils.from_gas_amount(r.initial_gas_amount)
 
 
             # Captura la configuracion si puede.
@@ -549,7 +549,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     system_requeriments = r.min_sysreq
 
                 if r.HasField('initial_gas_amount'):
-                    initial_gas_amount = r.initial_gas_amount
+                    initial_gas_amount = utils.from_gas_amount(r.initial_gas_amount)
 
 
             elif r is gateway_pb2.ServiceWithMeta:
