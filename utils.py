@@ -53,6 +53,7 @@ def service_extended(
         min_sysreq: celaut_pb2.Sysresources = None,
         max_sysreq: celaut_pb2.Sysresources = None,
         send_only_hashes: bool = False,
+        initial_gas_amount: int = None,
     ) -> Generator[object, None, None]:
         set_config = True if config else False
         for hash in metadata.hashtag.hash:
@@ -63,6 +64,7 @@ def service_extended(
                     config = config,
                     min_sysreq = min_sysreq,
                     max_sysreq = max_sysreq,
+                    initial_gas_amount = to_gas_amount(initial_gas_amount)
                 )
                 continue
             yield hash
@@ -80,7 +82,8 @@ def service_extended(
                             service = any,
                             config = config,
                             min_sysreq = min_sysreq,
-                            max_sysreq = max_sysreq
+                            max_sysreq = max_sysreq,
+                            initial_gas_amount = to_gas_amount(initial_gas_amount)
                         ),
                         Dir(REGISTRY + hash + '/p2')
                     )
@@ -164,7 +167,8 @@ def get_own_token_from_peer_id(peer_id: str) -> str:
             return peer['token']
     raise Exception('No token found for peer: ' + str(peer_id))
 
-def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
+def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount | None:
+    if gas_amount is None: return None
     s: str =  "{:e}".format(gas_amount)
     return gateway_pb2.GasAmount(
         gas_amount = float(s.split('e+')[0]),

@@ -429,7 +429,7 @@ def add_peer(
     return False
 
 
-def default_cost(
+def default_initial_cost(
     father_ip: str = None
 ) -> int:
     l.LOGGER('Default cost for '+(father_ip if father_ip else 'local'))
@@ -452,7 +452,7 @@ def add_container(
         ip_or_uri = container.attrs['NetworkSettings']['IPAddress'],
         local_or_external_token = token,
     )
-    with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_cost(father_ip = father_ip)
+    with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(father_ip = father_ip)
     if not container_modify_system_params(
         token = token,
         system_requeriments_range = system_requeriments_range
