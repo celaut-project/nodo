@@ -211,7 +211,6 @@ def build(
         try:
             # check if it's locally.
             check_output('/usr/bin/docker inspect '+id+'.docker', shell=True)
-            l.LOGGER('\nThe container ' + id + ' is locally.')
             return id
 
         except CalledProcessError:
