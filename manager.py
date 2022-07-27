@@ -304,7 +304,8 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                             )
                         )
                     break
-                except:  
+                except Exception as e:
+                    print('Exception during payment process: '+str(e))
                     attempt += 1
                     if attempt >= COMMUNICATION_ATTEMPTS:
                         l.LOGGER('Peer payment communication process:   Failed.')
