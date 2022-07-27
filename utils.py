@@ -1,5 +1,6 @@
 import base64
 from hashlib import sha256
+import socket
 from typing import Generator
 import typing
 
