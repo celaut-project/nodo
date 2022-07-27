@@ -205,44 +205,40 @@ def build(
         id = None,
         complete = False
     ) -> str:
+    if not id: id = get_service_hex_main_hash( metadata = metadata)
+    if get_it: l.LOGGER('\nBuilding ' + id)
     try:
-        if not id: id = get_service_hex_main_hash( metadata = metadata)
-        if get_it: l.LOGGER('\nBuilding ' + id)
-        try:
-            # check if it's locally.
-            check_output('/usr/bin/docker inspect '+id+'.docker', shell=True)
-            return id
+        # check if it's locally.
+        check_output('/usr/bin/docker inspect '+id+'.docker', shell=True)
+        return id
 
-        except CalledProcessError:
-            if complete:
-                sleep(1)  # TODO -> TMB(typical multithread bug).
-                if get_it and id not in actual_building_processes:
-                    actual_building_processes_lock.acquire()
-                    actual_building_processes.append(id)
-                    actual_building_processes_lock.release()
+    except CalledProcessError:
+        if complete:
+            sleep(1)  # TODO -> TMB(typical multithread bug).
+            if get_it and id not in actual_building_processes:
+                actual_building_processes_lock.acquire()
+                actual_building_processes.append(id)
+                actual_building_processes_lock.release()
 
-                    threading.Thread(
-                            target = build_container_from_definition,
-                            args = (
-                                service_buffer,
-                                metadata,
-                                id
-                            )
-                        ).start()
-                else: sleep( WAIT_FOR_CONTAINER )
+                threading.Thread(
+                        target = build_container_from_definition,
+                        args = (
+                            service_buffer,
+                            metadata,
+                            id
+                        )
+                    ).start()
+            else: sleep( WAIT_FOR_CONTAINER )
+            raise WaitBuildException
+        else:
+            if id not in actual_building_processes:
+                actual_building_processes_lock.acquire()
+                actual_building_processes.append(id)
+                actual_building_processes_lock.release()
+                threading.Thread(
+                        target = get_container_from_outside,
+                        args = (id, service_buffer, metadata)          
+                    ).start() if get_it else sleep( WAIT_FOR_CONTAINER )
                 raise WaitBuildException
-            else:
-                if id not in actual_building_processes:
-                    actual_building_processes_lock.acquire()
-                    actual_building_processes.append(id)
-                    actual_building_processes_lock.release()
-                    threading.Thread(
-                            target = get_container_from_outside,
-                            args = (id, service_buffer, metadata)          
-                        ).start() if get_it else sleep( WAIT_FOR_CONTAINER )
-                    raise WaitBuildException
-    except Exception as e:
-        l.LOGGER('Exception during build the container ' + id + ': ' + str(e))
-        raise Exception('Error building the container.')
 
     # verify() TODO ??
