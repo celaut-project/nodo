@@ -654,7 +654,7 @@ def pair_deposits():
                 __get_metrics_external(
                     peer_id = peer_id+':8090',
                     token = get_own_token_from_peer_id(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
-                )
+                ).gas_amount
             ) < MIN_DEPOSIT_PEER:
                 l.LOGGER('Manager error: the peer '+ str(peer_id)+' has not enough deposit.')
                 if not __increase_deposit_on_peer(peer_id = peer_id, amount = MIN_DEPOSIT_PEER):

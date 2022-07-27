@@ -156,7 +156,7 @@ def service_balancer(
                         indices_serializer = GetServiceEstimatedCost_input,
                         partitions_serializer = {2: StartService_input_partitions_v2[2]},
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),  # TODO añadir initial_gas_amount y el resto de la configuracion inicial, si es que se especifica.
-                    ))
+                    )).cost
                 ))
             except Exception as e: l.LOGGER('Error taking the cost on '+ peer_uri +' : '+str(e))
     except Exception as e: l.LOGGER('Error iterating peers on service balancer ->>'+ str(e))
