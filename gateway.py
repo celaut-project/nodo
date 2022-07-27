@@ -276,9 +276,10 @@ def launch_service(
                 getting_container = True
                 continue
             except Exception as e:
+                print('Error building the container: ' + str(e))
                 try:
                     refound_gas.pop()() # Refund the gas.
-                except IndexError: pass
+                except IndexError: l.LOGGER('Error refunding the gas.')
                 l.LOGGER(str(e))
                 raise e
 
