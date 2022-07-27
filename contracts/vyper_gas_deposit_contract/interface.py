@@ -70,7 +70,6 @@ class LedgerContractInterface:
 
     def validate_session(self, token: str, amount: int, validate_token = None) -> bool:
         token_encoded = sha256(token.encode('utf-8')).digest()
-        print('\nValidating session:', token, amount, self.sessions[token_encoded] if token_encoded in self.sessions else 0)
         for i in range(self.poll_iterations):
             if token_encoded in self.sessions and self.sessions[token_encoded] >= amount and \
                 ( not validate_token or validate_token(token)):
