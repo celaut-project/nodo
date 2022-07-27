@@ -625,13 +625,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
             l.LOGGER('Stopping service.')
             for b in grpcbf.serialize_to_buffer(
                 message_iterator = gateway_pb2.Refund(
-                    amount = prune_container(
+                    amount = utils.to_gas_amount(prune_container(
                         token = next(grpcbf.parse_from_buffer(
                                     request_iterator = request_iterator,
                                     indices = gateway_pb2.TokenMessage,
                                     partitions_message_mode=True
                                 )).token
-                    )
+                    ))
                 )
             ): yield b
         except Exception as e:
@@ -875,7 +875,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ))
         if not validate_payment_process(
             peer = context.peer(),
-            amount = payment.gas_amount,
+            amount = utils.from_gas_amount(payment.gas_amount),
             ledger = payment.contract_ledger.ledger,
             contract = payment.contract_ledger.contract,
             contract_addr = payment.contract_ledger.contract_addr,

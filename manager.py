@@ -193,7 +193,7 @@ def __purgue_external(father_ip, peer_id, token) -> int:
 
     # Le manda al otro nodo que elimine esa instancia.
     try:
-        refund = next(grpcbf.client_grpc(
+        refund = from_gas_amount(next(grpcbf.client_grpc(
             method = gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
                             peer_id    # TODO parse to a uri when it's implemented.
@@ -204,7 +204,7 @@ def __purgue_external(father_ip, peer_id, token) -> int:
             ),
             indices_parser = gateway_pb2.Refund,
             partitions_message_mode_parser = True
-        )).amount
+        )).amount)
     except grpc.RpcError as e:
         l.LOGGER('Error during remove a container on ' + peer_id + ' ' + str(e))
 
@@ -297,7 +297,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                         ).Payable,
                                 partitions_message_mode_parser = True,
                                 input = gateway_pb2.Payment(
-                                    gas_amount = amount,
+                                    gas_amount = to_gas_amount(amount),
                                     deposit_token = deposit_token,
                                     contract_ledger = contract_ledger,                            
                                 )
