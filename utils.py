@@ -1,18 +1,14 @@
 import base64
 from hashlib import sha256
-import socket, os
-from sqlite3 import connect
 from typing import Generator
 import typing
 
 import celaut_pb2, gateway_pb2
-from contracts.main.singleton import Singleton
 from compile import REGISTRY
 from grpcbigbuffer import Dir
 import pymongo
 import netifaces as ni
 from verify import get_service_hex_main_hash
-from logger import LOGGER
 
 
 def read_file(filename) -> bytes:
@@ -108,8 +104,7 @@ def get_only_the_ip_from_context_method(context_peer: str) -> str:
             ip = context_peer[5:-1*(len(context_peer.split(':')[-1])+1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
             return ip[1:-1] if ipv == 'ipv6' else ip
     except Exception as e:
-        LOGGER('Error getting the ip from the context: ' + str(e))
-        raise e
+        raise Exception('Error getting the ip from the context: ' + str(e))
 
 get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
 
@@ -144,8 +139,7 @@ def get_network_name( ip_or_uri: str) -> str:
             except KeyError:
                 continue
     except Exception as e:
-        LOGGER('Error getting the network name: ' + str(e))
-        raise e
+        raise Exception('Error getting the network name: ' + str(e))
 
 
 def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes, peer_id: str) -> typing.Tuple[str, str]:
@@ -169,13 +163,13 @@ def get_own_token_from_peer_id(peer_id: str) -> str:
             return peer['token']
     raise Exception('No token found for peer: ' + str(peer_id))
 
-def toGasAmount(gas_amount: int) -> gateway_pb2.GasAmount:
+def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
     s: str =  "{:e}".format(gas_amount)
     return gateway_pb2.GasAmount(
         gas_amount = float(s.split('e+')[0]),
         exponent = int(s.split('e+')[1])
     )
 
-def fromGasAmount(gas_amount: gateway_pb2.GasAmount) -> int:
+def from_gas_amount(gas_amount: gateway_pb2.GasAmount) -> int:
     i: int = str(gas_amount.gas_amount)[::-1].find('.')
     return int(gas_amount.gas_amount * pow(10, i) * pow(10, gas_amount.exponent-i))
