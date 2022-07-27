@@ -167,7 +167,7 @@ def get_own_token_from_peer_id(peer_id: str) -> str:
             return peer['token']
     raise Exception('No token found for peer: ' + str(peer_id))
 
-def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount | None:
+def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
     if gas_amount is None: return None
     s: str =  "{:e}".format(gas_amount)
     return gateway_pb2.GasAmount(
