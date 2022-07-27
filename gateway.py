@@ -126,7 +126,7 @@ def service_balancer(
     try:
         peers.add_elem(
             weight = gateway_pb2.EstimatedCost(
-                cost = execution_cost(service_buffer = service_buffer, metadata = metadata) * GAS_COST_FACTOR + (initial_gas_amount if initial_gas_amount else int(default_cost())), 
+                cost = utils.to_gas_amount(execution_cost(service_buffer = service_buffer, metadata = metadata) * GAS_COST_FACTOR + (initial_gas_amount if initial_gas_amount else int(default_cost()))), 
                 variance = 0
             )
         )
@@ -145,7 +145,7 @@ def service_balancer(
             try:
                 peers.add_elem(
                     elem = peer_uri,
-                    weight = next(grpcbf.client_grpc(
+                    weight = utils.from_gas_amount(next(grpcbf.client_grpc(
                         method =  gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
                                         peer_uri
@@ -157,7 +157,7 @@ def service_balancer(
                         partitions_serializer = {2: StartService_input_partitions_v2[2]},
                         input = utils.service_extended(service_buffer = service_buffer, metadata = metadata, send_only_hashes = SEND_ONLY_HASHES_ASKING_COST),  # TODO añadir initial_gas_amount y el resto de la configuracion inicial, si es que se especifica.
                     ))
-                )
+                ))
             except Exception as e: l.LOGGER('Error taking the cost on '+ peer_uri +' : '+str(e))
     except Exception as e: l.LOGGER('Error iterating peers on service balancer ->>'+ str(e))
 
@@ -859,7 +859,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         if cost is None: raise Exception("I dont've the service.")
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.EstimatedCost(
-                                cost = cost,
+                                cost = utils.to_gas_amount(cost),
                                 variance = 0.01  # TODO dynamic variance.
                             ),
             indices = gateway_pb2.EstimatedCost
