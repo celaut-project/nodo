@@ -8,7 +8,7 @@ from types import LambdaType
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, peers_uri_iterator
+from utils import get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, peers_uri_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -536,12 +536,12 @@ def prune_container(token: str) -> int:
 
 def __get_metrics_peer(peer_id) -> gateway_pb2.Metrics:
     return gateway_pb2.Metrics(
-        gas_amount = (peer_instances[peer_id]),
+        gas_amount = to_gas_amount(peer_instances[peer_id]),
     )
 
 def __get_metrics_internal(token: str) -> gateway_pb2.Metrics:
     return gateway_pb2.Metrics(
-        gas_amount = system_cache[token]['gas'],
+        gas_amount = to_gas_amount(system_cache[token]['gas']),
     )
 
 def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
