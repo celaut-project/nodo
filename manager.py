@@ -75,8 +75,8 @@ system_cache = {} # token : { mem_limit: 0, gas: 0 }
 peer_instances_lock = Lock()
 peer_instances = {'192.168.43.40': pow(10, 128)} # id: amount_of_gas -> other peers' deposits on this node.
 
-deposits_on_other_peers_lock = Lock()
-deposits_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
+total_deposits_on_other_peers_lock = Lock()
+total_deposits_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
 
 container_cache_lock = threading.Lock()
 container_cache = {}  # ip_father:[dependencies]
@@ -321,13 +321,13 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase deposit on peer '+peer_id+' by '+str(amount))
     if __peer_payment_process(peer_id = peer_id, amount = amount):  # process the payment on the peer.
-        with deposits_on_other_peers_lock:
-            deposits_on_other_peers[peer_id] = deposits_on_other_peers[peer_id] + amount if peer_id in deposits_on_other_peers else amount
+        with total_deposits_on_other_peers_lock:
+            total_deposits_on_other_peers[peer_id] = total_deposits_on_other_peers[peer_id] + amount if peer_id in total_deposits_on_other_peers else amount
         return True
     else:
-        if peer_id not in deposits_on_other_peers:
-            with deposits_on_other_peers_lock:
-                deposits_on_other_peers[peer_id] = 0
+        if peer_id not in total_deposits_on_other_peers:
+            with total_deposits_on_other_peers_lock:
+                total_deposits_on_other_peers[peer_id] = 0
         return False
 
 def __check_payment_process( amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
@@ -372,8 +372,9 @@ def spend_gas(
     gas_to_spend = int(gas_to_spend)
     # l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
     try:
+        # En caso de que sea un peer, el token es el peer id.
         if token_or_container_ip in peer_instances and (peer_instances[token_or_container_ip] >= gas_to_spend or ALLOW_GAS_DEBT):
-            peer_instances[token_or_container_ip] -= gas_to_spend
+            with peer_instances_lock: peer_instances[token_or_container_ip] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
                 cache = peer_instances, 
@@ -645,9 +646,9 @@ def maintain():
 
 
 def pair_deposits():
-    for i in range(len(deposits_on_other_peers)):
-        if i >= len(deposits_on_other_peers): break
-        peer_id, estimated_deposit = list(deposits_on_other_peers.items())[i]
+    for i in range(len(total_deposits_on_other_peers)):
+        if i >= len(total_deposits_on_other_peers): break
+        peer_id, estimated_deposit = list(total_deposits_on_other_peers.items())[i]
         if estimated_deposit < MIN_DEPOSIT_PEER or \
             from_gas_amount(
                 __get_metrics_external(
