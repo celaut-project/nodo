@@ -222,7 +222,7 @@ def launch_service(
                     if gas_amount_on_other_peer(
                         peer_id = peer_instance_uri[:-5]  # TODO use peer_id
                     ) <= cost and not increase_deposit_on_peer(
-                        peer_id = peer_instance_uri, 
+                        peer_id = peer_instance_uri[:-5], # TODO use peer_id
                         amount = cost
                     ):  raise Exception('Launch service error increasing deposit on '+peer_instance_uri+' when it didn\'t have enough gas.')
                     
