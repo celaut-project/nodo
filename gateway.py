@@ -3,8 +3,8 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
-    add_container, add_peer, container_modify_system_params, default_initial_cost, could_ve_this_sysreq, execution_cost, get_metrics, get_sysresources, manager_thread, prune_container, set_external_on_cache, \
+from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, MIN_DEPOSIT_PEER, \
+    add_container, add_peer, container_modify_system_params, default_initial_cost, could_ve_this_sysreq, execution_cost, gas_amount_on_other_peer, get_metrics, get_sysresources, increase_deposit_on_peer, manager_thread, prune_container, set_external_on_cache, \
     spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, get_token_by_uri
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
@@ -212,11 +212,20 @@ def launch_service(
                 try:
                     l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer_instance_uri))
                     refound_gas = []
+
                     if not spend_gas(
                         token_or_container_ip = father_ip,
                         gas_to_spend = cost,
                         refund_gas_function_container = refound_gas
                     ): raise Exception('Launch service error spending gas for '+father_ip)
+                    
+                    if gas_amount_on_other_peer(
+                        peer_id = peer_instance_uri
+                    ) <= cost and not increase_deposit_on_peer(
+                        peer_id = peer_instance_uri, 
+                        amount = cost
+                    ):  raise Exception('Launch service error increasing deposit on '+peer_instance_uri+' when it didn\'t have enough gas.')
+                    
                     service_instance = next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
@@ -244,7 +253,7 @@ def launch_service(
                     service_instance.token = father_ip + '##' + peer_instance_uri.split(':')[0] + '##' + service_instance.token  # TODO adapt for ipv6 too.
                     return service_instance
                 except Exception as e:
-                    l.LOGGER('Failed starting a service on peer, occurs the eror: ' + str(e))
+                    l.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
                     try:
                         refound_gas.pop()()
                     except IndexError: pass

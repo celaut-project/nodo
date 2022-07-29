@@ -330,6 +330,10 @@ def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
                 total_deposits_on_other_peers[peer_id] = 0
         return False
 
+
+def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
+    return __increase_deposit_on_peer(peer_id = peer_id, amount = amount + MIN_DEPOSIT_PEER)
+
 def __check_payment_process( amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
     l.LOGGER('Check payment process to '+token+' of '+str(amount))
     return PAYMENT_PROCESS_VALIDATORS[sha256(contract).digest()]( amount, token, ledger, contract_addr, validate_token = lambda token: token in peer_instances)
@@ -562,6 +566,17 @@ def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
     l.LOGGER('Error getting metrics from '+peer_id+'.')
     raise Exception('Error getting metrics from '+peer_id+'.')
 
+
+# Retur the integer gas amount of this node on other peer.
+def gas_amount_on_other_peer(peer_id: str) -> int:
+    return from_gas_amount(
+                __get_metrics_external(
+                    peer_id = peer_id+':8090',
+                    token = get_own_token_from_peer_id(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
+                ).gas_amount
+            )
+
+
 def get_metrics(token: str) -> gateway_pb2.Metrics:
     if '##' not in token: return __get_metrics_peer(peer_id = token)
     elif get_network_name(
@@ -650,11 +665,8 @@ def pair_deposits():
         if i >= len(total_deposits_on_other_peers): break
         peer_id, estimated_deposit = list(total_deposits_on_other_peers.items())[i]
         if estimated_deposit < MIN_DEPOSIT_PEER or \
-            from_gas_amount(
-                __get_metrics_external(
-                    peer_id = peer_id+':8090',
-                    token = get_own_token_from_peer_id(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
-                ).gas_amount
+            gas_amount_on_other_peer(
+                peer_id = peer_id,
             ) < MIN_DEPOSIT_PEER:
                 l.LOGGER('Manager error: the peer '+ str(peer_id)+' has not enough deposit.')
                 if not __increase_deposit_on_peer(peer_id = peer_id, amount = MIN_DEPOSIT_PEER):
