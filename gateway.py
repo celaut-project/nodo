@@ -141,7 +141,7 @@ def service_balancer(
         raise e
 
     try:
-        for peer in utils.peers_uri_iterator(ignore_network = ignore_network):
+        for peer in utils.peers_uri_iterator(ignore_network = ignore_network):  # TODO iterate peer_id
             l.LOGGER('Check cost on peer ' + peer['ip'] + ' ' + str(peer['port']))
             # TODO could use async or concurrency ¿numba?. And use timeout.
             peer_uri: str = peer['ip']+':'+str(peer['port'])
@@ -220,7 +220,7 @@ def launch_service(
                     ): raise Exception('Launch service error spending gas for '+father_ip)
                     
                     if gas_amount_on_other_peer(
-                        peer_id = peer_instance_uri
+                        peer_id = peer_instance_uri[:-5]  # TODO use peer_id
                     ) <= cost and not increase_deposit_on_peer(
                         peer_id = peer_instance_uri, 
                         amount = cost
