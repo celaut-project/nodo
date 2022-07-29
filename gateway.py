@@ -112,7 +112,7 @@ def service_balancer(
         # Sorts the list from the element with the smallest weight to the element with the largest weight.
         
         def __init__(self) -> None:
-            self.dict = {} # elem : weight
+            self.dict: dict = {} # elem : weight
         
         def add_elem(self, weight: gateway_pb2.EstimatedCost, elem: str = 'local' ) -> None:
             self.dict.update({
@@ -124,7 +124,7 @@ def service_balancer(
 
 
     peers: PeerCostList = PeerCostList()
-    initial_gas_amount = 0 # TODO initial_gas_amount if initial_gas_amount else int(default_initial_cost())
+    initial_gas_amount: int = 0 # TODO initial_gas_amount if initial_gas_amount else int(default_initial_cost())
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
     try:
         peers.add_elem(
@@ -232,7 +232,8 @@ def launch_service(
                                 metadata = metadata,
                                 config = config,
                                 min_sysreq = system_requeriments,
-                                max_sysreq = max_sysreq
+                                max_sysreq = max_sysreq,
+                                initial_gas_amount = initial_gas_amount,
                             )
                     ))
                     set_external_on_cache(
