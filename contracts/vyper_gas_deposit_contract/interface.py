@@ -18,6 +18,14 @@ CONTRACT_HASH: bytes = sha256(CONTRACT).digest()
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
 
+
+# TODO el contrato debería tener factor de paridad a 52
+def contract_to_gas(amount: int) -> int:
+    return amount * 10**52
+
+def gas_to_contract(amount: int) -> int:
+    return int(amount / 10**52)
+
 class LedgerContractInterface:
 
     def __init__(self, w3_generator, contract_addr, priv):
@@ -60,6 +68,7 @@ class LedgerContractInterface:
         )
 
     def __new_session(self, token, amount):
+        amount = contract_to_gas(amount)
         with self.sessions_lock:
             if token not in self.sessions:
                 self.sessions[token] = amount
@@ -89,7 +98,7 @@ class LedgerContractInterface:
                 sha256(token.encode('utf-8')).digest(),
             ),
             priv = self.priv,
-            value = amount
+            value = gas_to_contract(amount)
         )
 
 
