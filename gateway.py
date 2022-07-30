@@ -226,6 +226,7 @@ def launch_service(
                         amount = cost
                     ):  raise Exception('Launch service error increasing deposit on '+peer_instance_uri+' when it didn\'t have enough gas.')
                     
+                    l.LOGGER('Spended gas, go to launch the service on ' + str(peer_instance_uri))
                     service_instance = next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
