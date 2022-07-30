@@ -49,14 +49,14 @@ class LedgerContractInterface:
     # Update Session Event.
     def catch_event_thread(self, contract_addr):
         catch_event(
-            contractAddress = Web3.toChecksumAddress(contract_addr),
+            contract_address = Web3.toChecksumAddress(contract_addr),
             w3 = self.w3,
             contract = self.contract,
             event_name = 'NewSession',
             init_delay = self.poll_init_delay,
             opt = lambda args: self.__new_session(
                         token = args['token'], 
-                        amount = args['gas_amount']
+                        amount = args['amount']
                     ),
             poll_interval = self.poll_interval,
         )
