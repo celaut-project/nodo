@@ -18,14 +18,7 @@ CONTRACT_HASH: bytes = sha256(CONTRACT).digest()
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
 
-
-# TODO el contrato debería tener factor de paridad a 52
-def contract_to_gas(amount: int) -> int:
-    return amount * 10**52
-
-def gas_to_contract(amount: int) -> int:
-    return int(amount / 10**52)
-
+gas_to_contract = lambda amount, parity_factor: int(amount / 10**parity_factor)
 class LedgerContractInterface:
 
     def __init__(self, w3_generator, contract_addr, priv):
@@ -49,6 +42,7 @@ class LedgerContractInterface:
         self.poll_iterations: int = 5
         self.poll_init_delay: int = 20
 
+        self.contract_to_gas = lambda amount: amount * 10**self.contract.functions.get_parity_factor().call()
 
         Thread(target=self.catch_event_thread, args=(contract_addr,)).start()
         
@@ -68,7 +62,7 @@ class LedgerContractInterface:
         )
 
     def __new_session(self, token, amount):
-        amount = contract_to_gas(amount)
+        amount = self.contract_to_gas(amount)
         with self.sessions_lock:
             if token not in self.sessions:
                 self.sessions[token] = amount
@@ -92,13 +86,14 @@ class LedgerContractInterface:
 
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
+        contract = self.generate_contract(addr = contract_addr)
         return transact(
             w3 = self.w3,
-            method = self.generate_contract(addr = contract_addr).functions.add_gas(
+            method = contract.functions.add_gas(
                 sha256(token.encode('utf-8')).digest(),
             ),
             priv = self.priv,
-            value = gas_to_contract(amount)
+            value = gas_to_contract(amount, contract.functions.get_parity_factor().call()),
         )
 
 
