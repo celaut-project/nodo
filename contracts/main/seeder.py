@@ -18,7 +18,7 @@ mongo.insert_one({
         "instances": [
             {
                 "ledger": "fuji",
-                "contract_addr": "0x590981761d5F1A733D29c3940eFC294bD41BE0C1",
+                "contract_addr": "0x6639fdB1eb6f0D42577c73fB6807ee15B1cc1784",
             },
         ]
     })
