@@ -212,13 +212,15 @@ def launch_service(
                 try:
                     l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer_instance_uri))
                     refound_gas = []
-
+                    
+                    cost += initial_gas_amount  # TODO no debería hacer esto cuando el balancer agrege el costo inicial.
+                    
                     if not spend_gas(
                         token_or_container_ip = father_ip,
                         gas_to_spend = cost,
                         refund_gas_function_container = refound_gas
                     ): raise Exception('Launch service error spending gas for '+father_ip)
-                    
+
                     if gas_amount_on_other_peer(
                         peer_id = peer_instance_uri[:-5]  # TODO use peer_id
                     ) <= cost and not increase_deposit_on_peer(
