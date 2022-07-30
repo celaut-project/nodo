@@ -332,7 +332,11 @@ def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
 
 
 def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
-    return __increase_deposit_on_peer(peer_id = peer_id, amount = amount + MIN_DEPOSIT_PEER)
+    try:
+        return __increase_deposit_on_peer(peer_id = peer_id, amount = amount + MIN_DEPOSIT_PEER)
+    except Exception as e:
+        l.LOGGER('Manager error: '+str(e))
+        return False
 
 def __check_payment_process( amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
     l.LOGGER('Check payment process to '+token+' of '+str(amount))
@@ -569,12 +573,16 @@ def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
 
 # Retur the integer gas amount of this node on other peer.
 def gas_amount_on_other_peer(peer_id: str) -> int:
-    return from_gas_amount(
-                __get_metrics_external(
-                    peer_id = peer_id+':8090',
-                    token = get_own_token_from_peer_id(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
-                ).gas_amount
-            )
+    try:
+        return from_gas_amount(
+                    __get_metrics_external(
+                        peer_id = peer_id+':8090',
+                        token = get_own_token_from_peer_id(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
+                    ).gas_amount
+                )
+    except Exception as e:
+        l.LOGGER('Error getting gas amount from '+peer_id+'.')
+        raise Exception('Error getting gas amount from '+peer_id+'.')
 
 
 def get_metrics(token: str) -> gateway_pb2.Metrics:
