@@ -52,6 +52,7 @@ def transact(
     signed = w3.eth.account.signTransaction(transaction, priv)
     tx_hash = w3.eth.sendRawTransaction(signed.rawTransaction).hex()
     if timeout and poll_latency: w3.eth.wait_for_transaction_receipt(tx_hash, timeout, poll_latency)
+    print('Transaction hash: ', tx_hash, ' executed and minted \n')
     return tx_hash
 
 
