@@ -124,7 +124,7 @@ class LedgerContractInterface:
                 print('Timeout while adding gas for token: ', token, '\n')
                 return ''
             except Exception as e:
-                    print(type(e))
+                    print(str(e), str(e) == "{'code': -32000, 'message': 'already known'}")
                     print('Transaction already known: ', token, '\n')
                     return ''
 
