@@ -131,6 +131,9 @@ class LedgerContractInterface:
                     print('Transaction already known: ', token, '\n')
                     eth_gas+=1000
                     continue
+                else:
+                    print('Error '+str(e)+' while adding gas for token: ', token, '\n')
+                    return ''
 
 
 # Singleton class
