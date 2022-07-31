@@ -18,7 +18,7 @@ from gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
 from manager import insert_instance_on_mongo, DOCKER_NETWORK, LOCAL_NETWORK, set_external_on_cache
-from contracts.main.utils import get_ledger_and_contract_addr_from_contract
+from contracts.eth_main.utils import get_ledger_and_contract_addr_from_contract
 from logger import GET_ENV
 
 DOCKER_CLIENT = lambda: docker_lib.from_env()
