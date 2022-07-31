@@ -32,6 +32,7 @@ class LedgerContractInterface:
         self.nonce: int = self.w3.eth.getTransactionCount(
             self.w3.eth.account.privateKeyToAccount(priv).address
         )
+        print('Account with nonce -> ', self.nonce)
         
         self.generate_contract = lambda addr: self.w3.eth.contract(
             address = Web3.toChecksumAddress(addr),
