@@ -70,7 +70,7 @@ class LedgerContractInterface:
                 self.sessions[token] = amount
             else:
                 self.sessions[token] += amount
-            print('\nNew session:', token, amount)
+            print('\nNew session:', token, amount, '\n')
 
 
     def validate_session(self, token: str, amount: int, validate_token = None) -> bool:
@@ -83,7 +83,7 @@ class LedgerContractInterface:
                 return True 
             else: 
                 sleep(self.poll_interval)
-        print('Session not found', self.sessions.keys(), token, token_encoded, amount)
+        print('Session not found', self.sessions.keys(), token, token_encoded, amount, '\n')
         return False
 
 
@@ -101,7 +101,7 @@ class LedgerContractInterface:
                 poll_latency = self.wait_mint_poll_latency,
             )
         except exceptions.TimeExhausted:
-            print('Timeout while adding gas for token: ', token)
+            print('Timeout while adding gas for token: ', token, '\n')
             return ''
 
 
