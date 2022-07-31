@@ -121,7 +121,7 @@ class LedgerContractInterface:
                     value = gas_to_contract(amount, contract.functions.get_parity_factor().call()),
                     timeout = self.wait_mint_timeout,
                     poll_latency = self.wait_mint_poll_latency,
-                    gas = eth_gas
+                    gas = int(eth_gas)
                 )
             except exceptions.TimeExhausted:
                 print('Timeout while adding gas for token: ', token, '\n')
