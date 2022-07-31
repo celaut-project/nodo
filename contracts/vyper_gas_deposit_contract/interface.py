@@ -40,7 +40,7 @@ class LedgerContractInterface:
         
         # TODO this variables depends on the ledger, so they should be moved on the mongo.contracts collection OR be dynamically updated.
         self.poll_interval: int = 2
-        self.poll_iterations: int = 5
+        self.poll_iterations: int = 60
         self.poll_init_delay: int = 20
         self.wait_mint_timeout: int = 120
         self.wait_mint_poll_latency: float = 0.1

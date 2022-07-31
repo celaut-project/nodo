@@ -47,8 +47,8 @@ COST_AVERAGE_VARIATION = l.GET_ENV(env = 'COST_AVERAGE_VARIATION', default=1)
 GAS_COST_FACTOR = l.GET_ENV(env = 'GAS_COST_FACTOR', default = 1) # Applied only outside the manager. (not in maintain_cost)
 MODIFY_SERVICE_SYSTEM_RESOURCES_COST = l.GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default = 1)
 ALLOW_GAS_DEBT = l.GET_ENV(env = 'ALLOW_GAS_DEBT', default = False)  # Could be used with the reputation system.
-COMMUNICATION_ATTEMPTS = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS', default = 5)
-COMMUNICATION_ATTEMPTS_DELAY = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS_DELAY', default = 10)
+COMMUNICATION_ATTEMPTS = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS', default = 1)
+COMMUNICATION_ATTEMPTS_DELAY = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS_DELAY', default = 60)
 
 PAYMENT_PROCESS_VALIDATORS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.payment_process_validator}     # contract_hash:  lambda peer_id, tx_id, amount -> bool,
 AVAILABLE_PAYMENT_PROCESS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.process_payment}   # contract_hash:   lambda amount, peer_id -> tx_id,
@@ -308,6 +308,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                     attempt += 1
                     if attempt >= COMMUNICATION_ATTEMPTS:
                         l.LOGGER('Peer payment communication process:   Failed.')
+                        # TODO subtract node reputation
                         return False
                     sleep(COMMUNICATION_ATTEMPTS_DELAY)
                     
@@ -554,21 +555,18 @@ def __get_metrics_internal(token: str) -> gateway_pb2.Metrics:
     )
 
 def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
-    for i in range(COMMUNICATION_ATTEMPTS):
-        return next(grpcbf.client_grpc(
-            method = gateway_pb2_grpc.GatewayStub(
-                            grpc.insecure_channel(
-                                peer_id  # TODO parse to a uri when it's implemented.
-                            )
-                        ).GetMetrics,
-            input = gateway_pb2.TokenMessage(
-                token = token
-            ),
-            indices_parser = gateway_pb2.Metrics,
-            partitions_message_mode_parser = True
-        ))
-    l.LOGGER('Error getting metrics from '+peer_id+'.')
-    raise Exception('Error getting metrics from '+peer_id+'.')
+    return next(grpcbf.client_grpc(
+        method = gateway_pb2_grpc.GatewayStub(
+                        grpc.insecure_channel(
+                            peer_id  # TODO parse to a uri when it's implemented.
+                        )
+                    ).GetMetrics,
+        input = gateway_pb2.TokenMessage(
+            token = token
+        ),
+        indices_parser = gateway_pb2.Metrics,
+        partitions_message_mode_parser = True
+    ))
 
 
 # Retur the integer gas amount of this node on other peer.
