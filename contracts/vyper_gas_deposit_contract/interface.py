@@ -107,9 +107,9 @@ class LedgerContractInterface:
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
         contract = self.generate_contract(addr = contract_addr)
-        while True:
-            nonce = self.get_nonce()
-            eth_gas = 2000000
+        nonce = self.get_nonce()
+        eth_gas = 2000000
+        while True:    
             try:
                 return transact(
                     w3 = self.w3,
@@ -129,7 +129,7 @@ class LedgerContractInterface:
             except Exception as e:
                 if str(e) == "{'code': -32000, 'message': 'already known'}":
                     print('Transaction already known: ', token, '\n')
-                    eth_gas += 1
+                    eth_gas+=1000
                     continue
 
 
