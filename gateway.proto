@@ -5,8 +5,7 @@ import "buffer.proto";
 import "compile.proto";
 
 message GasAmount {
-    float gas_amount = 1;
-    int32 exponent = 2;
+    string n = 1;
 }
 
 message TokenMessage {

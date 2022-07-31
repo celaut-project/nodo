@@ -167,6 +167,7 @@ def get_own_token_from_peer_id(peer_id: str) -> str:
             return peer['token']
     raise Exception('No token found for peer: ' + str(peer_id))
 
+"""
 def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
     if gas_amount is None: return None
     s: str =  "{:e}".format(gas_amount)
@@ -178,3 +179,10 @@ def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
 def from_gas_amount(gas_amount: gateway_pb2.GasAmount) -> int:
     i: int = str(gas_amount.gas_amount)[::-1].find('.')
     return int(gas_amount.gas_amount * pow(10, i) * pow(10, gas_amount.exponent-i))
+"""
+
+def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
+    return gateway_pb2.GasAmount(n = str(gas_amount))
+
+def from_gas_amount(gas_amount: gateway_pb2.GasAmount) -> int:
+    return int(gas_amount.n)
