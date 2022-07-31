@@ -6,7 +6,7 @@ from multiprocessing import Lock
 from contracts.main.utils import get_priv_from_ledger, transact, w3_generator_factory, get_ledger_and_contract_addr_from_contract, catch_event
 from contracts.main.singleton import Singleton
 from typing import Dict
-from web3 import Web3
+from web3 import Web3, exceptions
 from hashlib import sha256
 import gateway_pb2, celaut_pb2
 from time import sleep
@@ -38,9 +38,11 @@ class LedgerContractInterface:
         self.sessions: Dict[bytes, int] = {}
         self.sessions_lock = Lock()
 
-        self.poll_interval: int = 2   # TODO this three variables depends on the ledger, so they should be moved on the mongo.contracts collection.
+        self.poll_interval: int = 2   # TODO this three variables depends on the ledger, so they should be moved on the mongo.contracts collection OR be dynamically updated.
         self.poll_iterations: int = 5
         self.poll_init_delay: int = 20
+        self.wait_mint_timeout: int = 120
+        self.wait_mint_poll_latency: float = 0.1
 
         self.contract_to_gas = lambda amount: amount * 10**self.contract.functions.get_parity_factor().call()
 
@@ -87,14 +89,20 @@ class LedgerContractInterface:
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
         contract = self.generate_contract(addr = contract_addr)
-        return transact(
-            w3 = self.w3,
-            method = contract.functions.add_gas(
-                sha256(token.encode('utf-8')).digest(),
-            ),
-            priv = self.priv,
-            value = gas_to_contract(amount, contract.functions.get_parity_factor().call()),
-        )
+        try:
+            return transact(
+                w3 = self.w3,
+                method = contract.functions.add_gas(
+                    sha256(token.encode('utf-8')).digest(),
+                ),
+                priv = self.priv,
+                value = gas_to_contract(amount, contract.functions.get_parity_factor().call()),
+                timeout = self.wait_mint_timeout,
+                poll_latency = self.wait_mint_poll_latency,
+            )
+        except exceptions.TimeExhausted:
+            print('Timeout while adding gas for token: ', token)
+            return ''
 
 
 # Singleton class
