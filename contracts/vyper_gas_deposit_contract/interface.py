@@ -28,10 +28,10 @@ class LedgerContractInterface:
 
         # TODO debe de ir en una clase para el Ledger, sin un contrato concreto.
         self.priv = priv
+        self.pub = self.w3.eth.account.privateKeyToAccount(priv).address
         self.transaction_lock = Lock()
-        self.nonce: int = self.w3.eth.getTransactionCount(
-            self.w3.eth.account.privateKeyToAccount(priv).address
-        )
+        self.last_nonce: int = 0
+        self.nonce_count: int = 0
         print('Account with nonce -> ', self.nonce)
         
         self.generate_contract = lambda addr: self.w3.eth.contract(
@@ -57,8 +57,15 @@ class LedgerContractInterface:
         
 
     def get_nonce(self) -> int:
-        self.nonce += 1
-        return self.nonce
+        with self.transaction_lock:
+            last_nonce = self.w3.eth.getTransactionCount(self.pub)
+            if last_nonce == self.last_nonce:
+                self.nonce_count += 1
+                return self.nonce_count + last_nonce
+            else:
+                self.nonce_count = 0
+                self.last_nonce = last_nonce
+                return last_nonce
 
     # Update Session Event.
     def catch_event_thread(self, contract_addr):
@@ -102,18 +109,17 @@ class LedgerContractInterface:
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
         contract = self.generate_contract(addr = contract_addr)
         try:
-            with self.transaction_lock:
-                return transact(
-                    w3 = self.w3,
-                    method = contract.functions.add_gas(
-                        sha256(token.encode('utf-8')).digest(),
-                    ),
-                    priv = self.priv,
-                    nonce = self.get_nonce(),
-                    value = gas_to_contract(amount, contract.functions.get_parity_factor().call()),
-                    timeout = self.wait_mint_timeout,
-                    poll_latency = self.wait_mint_poll_latency,
-                )
+            return transact(
+                w3 = self.w3,
+                method = contract.functions.add_gas(
+                    sha256(token.encode('utf-8')).digest(),
+                ),
+                priv = self.priv,
+                nonce = self.get_nonce(),
+                value = gas_to_contract(amount, contract.functions.get_parity_factor().call()),
+                timeout = self.wait_mint_timeout,
+                poll_latency = self.wait_mint_poll_latency,
+            )
         except exceptions.TimeExhausted:
             print('Timeout while adding gas for token: ', token, '\n')
             return ''
