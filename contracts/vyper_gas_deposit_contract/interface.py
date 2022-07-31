@@ -131,6 +131,9 @@ class LedgerContractInterface:
                     print('Transaction already known: ', token, '\n')
                     eth_gas+=eth_gas*0.1
                     continue
+                elif str(e) == "{'code': -32000, 'message': 'replacement transaction underpriced'}":
+                    nonce = self.get_nonce()
+                    continue
                 else:
                     print('Error '+str(e)+' while adding gas for token: ', token, '\n')
                     return ''
