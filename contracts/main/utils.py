@@ -40,18 +40,23 @@ def transact(
 ) -> str:
     pub = w3.eth.account.privateKeyToAccount(priv).address if not pub else pub  # Not verify the correctness, 
                                                                                 #     pub param is only for skip that step.
-    
-    transaction = method.buildTransaction({'gasPrice': w3.eth.gasPrice})
-    transaction.update({
-        'from': pub, # Only 'from' address, don't insert 'to' address
-        'value': value, # Add how many ethers you'll transfer during the deploy
-        'gas': gas, # Trying to make it dynamic ..
-        'nonce': w3.eth.getTransactionCount(pub), # Get Nonce
-        'chainId': w3.eth.chainId,
-    })
-    # Sign the transaction using your private key
-    signed = w3.eth.account.signTransaction(transaction, priv)
-    tx_hash = w3.eth.sendRawTransaction(signed.rawTransaction).hex()
+    for i in range(10):
+        print(i)
+        transaction = method.buildTransaction({'gasPrice': w3.eth.gasPrice})
+        try:
+            transaction.update({
+                'from': pub, # Only 'from' address, don't insert 'to' address
+                'value': value, # Add how many ethers you'll transfer during the deploy
+                'gas': gas, # Trying to make it dynamic ..
+                'nonce': w3.eth.getTransactionCount(pub), # Get Nonce
+                'chainId': w3.eth.chainId,
+            })
+        except Exception as e: print('ipdate -< ', e)
+        # Sign the transaction using your private key
+        signed = w3.eth.account.signTransaction(transaction, priv)
+        try:
+            tx_hash = w3.eth.sendRawTransaction(signed.rawTransaction).hex()
+        except Exception as e: print('sendRawTransaction -< ', e)
     if timeout and poll_latency: w3.eth.wait_for_transaction_receipt(tx_hash, timeout, poll_latency)
     return tx_hash
 
