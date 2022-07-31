@@ -2,6 +2,7 @@ from asyncore import poll
 import typing
 from web3.middleware import geth_poa_middleware
 from web3 import HTTPProvider, Web3
+from web3.eth import wait_for_transaction_receipt
 import asyncio, time, pymongo
 
 async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, contract):
@@ -52,7 +53,7 @@ def transact(
     # Sign the transaction using your private key
     signed = w3.eth.account.signTransaction(transaction, priv)
     tx_hash = w3.eth.sendRawTransaction(signed.rawTransaction).hex()
-    if timeout and poll_latency: w3.wait_for_transaction_receipt(tx_hash, timeout, poll_latency)
+    if timeout and poll_latency: wait_for_transaction_receipt(tx_hash, timeout, poll_latency)
     return tx_hash
 
 
