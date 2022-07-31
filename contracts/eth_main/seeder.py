@@ -7,7 +7,7 @@ mongo = pymongo.MongoClient(
     
 mongo.insert_one({
         "ledger": "fuji",
-        "priv": "6cd2eae3a10960fb3c68e4854de498a4114df46d1d19480740174c8ba8661579",
+        "priv": open("fuji.priv", "r").read(),
         "providers": [
             "https://api.avax-test.network/ext/bc/C/rpc",
         ]
