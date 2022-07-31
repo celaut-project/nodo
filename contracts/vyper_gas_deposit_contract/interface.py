@@ -107,21 +107,26 @@ class LedgerContractInterface:
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
         contract = self.generate_contract(addr = contract_addr)
-        try:
-            return transact(
-                w3 = self.w3,
-                method = contract.functions.add_gas(
-                    sha256(token.encode('utf-8')).digest(),
-                ),
-                priv = self.priv,
-                nonce = self.get_nonce(),
-                value = gas_to_contract(amount, contract.functions.get_parity_factor().call()),
-                timeout = self.wait_mint_timeout,
-                poll_latency = self.wait_mint_poll_latency,
-            )
-        except exceptions.TimeExhausted:
-            print('Timeout while adding gas for token: ', token, '\n')
-            return ''
+        while True:
+            try:
+                return transact(
+                    w3 = self.w3,
+                    method = contract.functions.add_gas(
+                        sha256(token.encode('utf-8')).digest(),
+                    ),
+                    priv = self.priv,
+                    nonce = self.get_nonce(),
+                    value = gas_to_contract(amount, contract.functions.get_parity_factor().call()),
+                    timeout = self.wait_mint_timeout,
+                    poll_latency = self.wait_mint_poll_latency,
+                )
+            except exceptions.TimeExhausted:
+                print('Timeout while adding gas for token: ', token, '\n')
+                return ''
+            except Exception as e:
+                    print(type(e))
+                    print('Transaction already known: ', token, '\n')
+                    return ''
 
 
 # Singleton class
