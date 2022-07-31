@@ -32,7 +32,6 @@ class LedgerContractInterface:
         self.transaction_lock = Lock()
         self.last_nonce: int = 0
         self.nonce_count: int = 0
-        print('Account with nonce -> ', self.nonce)
         
         self.generate_contract = lambda addr: self.w3.eth.contract(
             address = Web3.toChecksumAddress(addr),
@@ -60,12 +59,11 @@ class LedgerContractInterface:
         with self.transaction_lock:
             last_nonce = self.w3.eth.getTransactionCount(self.pub)
             if last_nonce == self.last_nonce:
-                self.nonce_count += 1
-                return self.nonce_count + last_nonce
+                self.nonce_count += 1    
             else:
                 self.nonce_count = 0
                 self.last_nonce = last_nonce
-                return last_nonce
+            return self.nonce_count + last_nonce
 
     # Update Session Event.
     def catch_event_thread(self, contract_addr):
