@@ -63,6 +63,7 @@ class LedgerContractInterface:
             else:
                 self.nonce_count = 0
                 self.last_nonce = last_nonce
+            print('             nonce:', self.nonce_count + last_nonce)
             return self.nonce_count + last_nonce
 
     # Update Session Event.
