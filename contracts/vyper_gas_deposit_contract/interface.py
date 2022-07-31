@@ -3,8 +3,8 @@ from threading import Thread
 
 import json
 from multiprocessing import Lock
-from contracts.main.utils import get_priv_from_ledger, transact, w3_generator_factory, get_ledger_and_contract_addr_from_contract, catch_event
-from contracts.main.singleton import Singleton
+from contracts.eth_main.utils import get_priv_from_ledger, transact, w3_generator_factory, get_ledger_and_contract_addr_from_contract, catch_event
+from contracts.eth_main.singleton import Singleton
 from typing import Dict
 from web3 import Web3, exceptions
 from hashlib import sha256
