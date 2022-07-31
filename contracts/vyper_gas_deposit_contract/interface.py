@@ -121,7 +121,7 @@ class LedgerContractInterface:
             )
         except exceptions.TimeExhausted:
             print('Timeout while adding gas for token: ', token, '\n')
-            return None
+            return ''
 
 
 # Singleton class
@@ -142,7 +142,7 @@ class VyperDepositContractInterface(metaclass=Singleton):
     def process_payment(self, amount: int, token: str, ledger: str, contract_addr: str) -> celaut_pb2.Service.Api.ContractLedger:
         print("Processing payment...")
         ledger_provider = self.ledger_providers[ledger]
-        if ledger_provider.add_gas(token, amount, contract_addr):
+        if ledger_provider.add_gas(token, amount, contract_addr) != '':
             return gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
                 ledger = ledger,
                 contract_addr = contract_addr,
