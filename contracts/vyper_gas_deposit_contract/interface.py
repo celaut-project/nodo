@@ -108,6 +108,8 @@ class LedgerContractInterface:
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
         contract = self.generate_contract(addr = contract_addr)
         while True:
+            nonce = self.get_nonce()
+            eth_gas = 2000000
             try:
                 return transact(
                     w3 = self.w3,
@@ -115,18 +117,20 @@ class LedgerContractInterface:
                         sha256(token.encode('utf-8')).digest(),
                     ),
                     priv = self.priv,
-                    nonce = self.get_nonce(),
+                    nonce = nonce,
                     value = gas_to_contract(amount, contract.functions.get_parity_factor().call()),
                     timeout = self.wait_mint_timeout,
                     poll_latency = self.wait_mint_poll_latency,
+                    gas = eth_gas
                 )
             except exceptions.TimeExhausted:
                 print('Timeout while adding gas for token: ', token, '\n')
                 return ''
             except Exception as e:
-                    print(str(e), str(e) == "{'code': -32000, 'message': 'already known'}")
+                if str(e) == "{'code': -32000, 'message': 'already known'}":
                     print('Transaction already known: ', token, '\n')
-                    return ''
+                    eth_gas += 1
+                    continue
 
 
 # Singleton class
