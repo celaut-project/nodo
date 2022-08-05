@@ -8,7 +8,7 @@ from types import LambdaType
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import from_gas_amount, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, peers_uri_iterator, to_gas_amount
+from utils import from_gas_amount, generate_new_peer_id, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, peers_uri_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -59,12 +59,23 @@ MEMSWAP_FACTOR = 0 # 0 - 1
 # CONTAINER CACHE
 
 # Insert the instance if it does not exists.
-def insert_instance_on_mongo(instance: gateway_pb2.Instance):
+def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> str:
+    dbp = pymongo.MongoClient(
+        "mongodb://localhost:27017/"
+    )["mongo"]["peerInstances"]
+
+    if not id:
+        while True:
+            id: str = generate_new_peer_id()
+            if not dbp.find_one({'_id': id}):
+                break
+
     parsed_instance = json.loads(MessageToJson(instance))
     l.LOGGER('Inserting instance on mongo: ' + str(parsed_instance))
-    pymongo.MongoClient(
-        "mongodb://localhost:27017/"
-    )["mongo"]["peerInstances"].insert_one(parsed_instance)
+    dbp.replace_one({
+        '_id': id,
+    }, parsed_instance, upsert=True)
+    return id
 
 
 # SYSTEM CACHE

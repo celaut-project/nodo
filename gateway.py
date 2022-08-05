@@ -668,7 +668,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_message_mode = True
         ))
         l.LOGGER('\nAdding peer ' + str(instance))
-        peer_id = instance.instance.uri_slot[0].uri[0].ip   # TODO use generic id for peers.
         insert_instance_on_mongo(instance = instance)
         if not add_peer(
             peer_id = peer_id  

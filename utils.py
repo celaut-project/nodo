@@ -1,5 +1,6 @@
 import base64
 from hashlib import sha256
+import os
 import socket
 from typing import Generator
 import typing
@@ -30,6 +31,10 @@ def peers_uri_iterator(ignore_network: str = None) -> Generator[celaut_pb2.Insta
             ip_or_uri = peer_uri['ip'],
             net = ignore_network
         ): yield peer_uri
+
+# Generates a random string
+def generate_new_peer_id() -> str: 
+    return sha256(base64.b64encode(os.urandom(16))).hexdigest()
 
 def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
     for slot in instance.api.slot:
