@@ -124,7 +124,7 @@ def service_balancer(
 
 
     peers: PeerCostList = PeerCostList()
-    initial_gas_amount: int = 0 # TODO initial_gas_amount if initial_gas_amount else int(default_initial_cost())
+    initial_gas_amount: int = initial_gas_amount if initial_gas_amount else int(default_initial_cost())
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
     try:
         peers.add_elem(

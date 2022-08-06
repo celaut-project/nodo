@@ -36,7 +36,8 @@ DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
 DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = l.GET_ENV(env = 'DEFAULT_INITIAL_GAS_AMOUNT_FACTOR', default = 1/pow(10,6))  # Percentage of the parent's gas amount.
-DEFAULT_INTIAL_GAS_AMOUNT = l.GET_ENV(env = 'DEFAULT_INTIAL_GAS_AMOUNT', default = pow(10, 9)) # Only for services launched by the node.
+USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = l.GET_ENV(env = 'USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR', default = False)  # Use DEFAULT_INITIAL_GAS_AMOUNT_FACTOR to calculate the initial gas amount.
+DEFAULT_INTIAL_GAS_AMOUNT = l.GET_ENV(env = 'DEFAULT_INTIAL_GAS_AMOUNT', default = pow(10, 9))
 COMPUTE_POWER_RATE = l.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
 COST_OF_BUILD = l.GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = l.GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
@@ -458,7 +459,7 @@ def default_initial_cost(
     father_ip: str = None
 ) -> int:
     l.LOGGER('Default cost for '+(father_ip if father_ip else 'local'))
-    return ( int( __get_gas_amount_by_ip( ip = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR ) ) if father_ip else int(DEFAULT_INTIAL_GAS_AMOUNT)
+    return ( int( __get_gas_amount_by_ip( ip = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR ) ) if father_ip and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
 def add_container(
     father_ip: str,
