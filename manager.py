@@ -589,7 +589,7 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
     try:
         return from_gas_amount(
                     __get_metrics_external(
-                        peer_id = peer_id+':8090',
+                        peer_id = peer_id,
                         token = get_own_token_from_peer_id(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
                     ).gas_amount
                 )

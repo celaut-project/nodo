@@ -195,7 +195,7 @@ def launch_service(
                         )
     while True:
         abort_it = True
-        for peer_instance_uri, cost in service_balancer(
+        for peer, cost in service_balancer(
             service_buffer = service_buffer,
             metadata = metadata,
             ignore_network = utils.get_network_name(
@@ -204,12 +204,12 @@ def launch_service(
             initial_gas_amount  = initial_gas_amount
         ).items():
             if abort_it: abort_it = False
-            l.LOGGER('Balancer select peer ' + str(peer_instance_uri) + ' with cost ' + str(cost))
+            l.LOGGER('Balancer select peer ' + str(peer) + ' with cost ' + str(cost))
             
             # Delegate the service instance execution.
-            if peer_instance_uri != 'local':
+            if peer != 'local':
                 try:
-                    l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer_instance_uri))
+                    l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer))
                     refound_gas = []
                     
                     cost += initial_gas_amount  # TODO no debería hacer esto cuando el balancer agrege el costo inicial.
@@ -221,17 +221,17 @@ def launch_service(
                     ): raise Exception('Launch service error spending gas for '+father_ip)
 
                     if gas_amount_on_other_peer(
-                        peer_id = peer_instance_uri[:-5]  # TODO use peer_id
+                        peer_id = peer,
                     ) <= cost and not increase_deposit_on_peer(
-                        peer_id = peer_instance_uri[:-5], # TODO use peer_id
+                        peer_id = peer,
                         amount = cost
-                    ):  raise Exception('Launch service error increasing deposit on '+peer_instance_uri+' when it didn\'t have enough gas.')
+                    ):  raise Exception('Launch service error increasing deposit on '+peer+' when it didn\'t have enough gas.')
                     
-                    l.LOGGER('Spended gas, go to launch the service on ' + str(peer_instance_uri))
+                    l.LOGGER('Spended gas, go to launch the service on ' + str(peer))
                     service_instance = next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
-                                        peer_instance_uri
+                                        utils.generate_uris_by_peer_id(peer)[0]
                                     )
                                 ).StartService, # TODO se debe hacer que al pedir un servicio exista un timeout.
                         partitions_message_mode_parser = True,
@@ -249,10 +249,10 @@ def launch_service(
                     ))
                     set_external_on_cache(
                         father_ip = father_ip,
-                        ip_or_uri =  peer_instance_uri, # Add node_uri.
+                        ip_or_uri =  peer, # Add node_uri.
                         external_token = service_instance.token  # Add token.
                     )
-                    service_instance.token = father_ip + '##' + peer_instance_uri.split(':')[0] + '##' + service_instance.token  # TODO adapt for ipv6 too.
+                    service_instance.token = father_ip + '##' + peer + '##' + service_instance.token  # TODO adapt for ipv6 too.
                     return service_instance
                 except Exception as e:
                     l.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
