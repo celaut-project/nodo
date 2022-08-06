@@ -19,6 +19,7 @@ import celaut_pb2 as celaut
 import gateway_pb2_grpc,gateway_pb2, grpc, grpcbigbuffer as grpcbf
 import contracts.vyper_gas_deposit_contract.interface as vyper_gdc
 from google.protobuf.json_format import MessageToJson
+from bson.objectid import ObjectId
 
 db = pymongo.MongoClient(
             "mongodb://localhost:27017/"
@@ -59,23 +60,24 @@ MEMSWAP_FACTOR = 0 # 0 - 1
 # CONTAINER CACHE
 
 # Insert the instance if it does not exists.
-def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> str:
-    dbp = pymongo.MongoClient(
-        "mongodb://localhost:27017/"
-    )["mongo"]["peerInstances"]
-
-    if not id:
-        while True:
-            id: str = generate_new_peer_id()
-            if not dbp.find_one({'_id': id}):
-                break
-
+def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> str:                
     parsed_instance = json.loads(MessageToJson(instance))
     l.LOGGER('Inserting instance on mongo: ' + str(parsed_instance))
-    dbp.replace_one({
-        '_id': id,
-    }, parsed_instance, upsert=True)
-    return id
+
+    result = pymongo.MongoClient(
+            "mongodb://localhost:27017/"
+        )["mongo"]["peerInstances"].update_one(
+            {'_id': ObjectId(id)},
+            {'$set': parsed_instance}
+        ) if id else pymongo.MongoClient(
+            "mongodb://localhost:27017/"
+        )["mongo"]["peerInstances"].insert_one(parsed_instance)
+    
+    if not result.acknowledged:
+        raise Exception('Could not insert instance on mongo.')
+    
+    return id if id else str(result.inserted_id)
+
 
 
 # SYSTEM CACHE
