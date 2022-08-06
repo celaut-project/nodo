@@ -2,7 +2,7 @@ from time import sleep, time
 import threading
 from gateway_pb2_grpcbf import GetServiceTar_input
 import gateway_pb2, gateway_pb2_grpc, grpc, os, celaut_pb2, utils, iobigdata
-from utils import peers_uri_iterator, service_extended, read_file
+from utils import generate_uris_by_peer_id, peers_id_iterator, service_extended, read_file
 from grpcbigbuffer import save_chunks_to_file, serialize_to_buffer
 from compile import HYCACHE, REGISTRY
 import logger as l
@@ -156,17 +156,18 @@ def get_container_from_outside( # TODO could take it from a specific ledger.
     # search container in a service. (docker-tar, docker-tar.gz, filesystem, ....)
 
     l.LOGGER('\nIt is not locally, ' + id + ' go to search the container in other node.')
-    for peer in peers_uri_iterator():
+    for peer in peers_id_iterator():
         try:
-            peer_uri = peer['uriSlot'][0]['uri'][0]
-            l.LOGGER('\nUsing the peer ' + str(peer_uri) + ' for get the container of '+ id)
+            l.LOGGER('\nUsing the peer ' + peer + ' for get the container of '+ id)
             
             #  Write the buffer to a file.
             save_chunks_to_file(
                 filename = HYCACHE + id + '.tar',
                 # chunks = search_container(service = service) TODO ??
                 chunks = gateway_pb2_grpc.GatewayStub(  # Parse_from_buffer is not necesary because chunks're it.
-                            grpc.insecure_channel(peer_uri['ip'] + ':' + str(peer_uri['port']))
+                            grpc.insecure_channel(
+                                generate_uris_by_peer_id(peer)[0]
+                            )
                         ).GetServiceTar(
                             serialize_to_buffer(
                                 service_extended(service = service_buffer, metadata = metadata),

@@ -22,17 +22,19 @@ def read_file(filename) -> bytes:
     return b''.join([b for b in generator(filename)])
 
 
-def peers_uri_iterator(ignore_network: str = None) -> Generator[celaut_pb2.Instance.Uri, None, None]:
+def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     peers = list(pymongo.MongoClient(
                 "mongodb://localhost:27017/"
             )["mongo"]["peerInstances"].find())
 
     for peer in peers:
-        peer_uri = peer['instance']['uriSlot'][0]['uri'][0]
-        if not ignore_network or ignore_network and not address_in_network(
-            ip_or_uri = peer_uri['ip'],
+        if not ignore_network or ignore_network and True not in [ address_in_network(
+            ip_or_uri = uri,
             net = ignore_network
-        ): yield peer_uri
+        ) for uri in generate_uris_by_peer_id(
+                peer_id = peer['_id']
+            ) ]: 
+                yield peer['_id']
 
 
 def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:

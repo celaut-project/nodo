@@ -141,17 +141,16 @@ def service_balancer(
         raise e
 
     try:
-        for peer in utils.peers_uri_iterator(ignore_network = ignore_network):  # TODO iterate peer_id
-            l.LOGGER('Check cost on peer ' + peer['ip'] + ' ' + str(peer['port']))
+        for peer in utils.peers_id_iterator(ignore_network = ignore_network):
+            l.LOGGER('Check cost on peer ' +peer)
             # TODO could use async or concurrency ¿numba?. And use timeout.
-            peer_uri: str = peer['ip']+':'+str(peer['port'])
             try:
                 peers.add_elem(
-                    elem = peer_uri,
+                    elem = peer,
                     weight = next(grpcbf.client_grpc(
                         method =  gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
-                                        peer_uri
+                                        utils.generate_uris_by_peer_id(peer)[0]
                                     )
                                 ).GetServiceEstimatedCost,
                         indices_parser = gateway_pb2.EstimatedCost,
@@ -166,7 +165,7 @@ def service_balancer(
                         ),  # TODO añadir initial_gas_amount y el resto de la configuracion inicial, si es que se especifica.
                     ))
                 )
-            except Exception as e: l.LOGGER('Error taking the cost on '+ peer_uri +' : '+str(e))
+            except Exception as e: l.LOGGER('Error taking the cost on '+ peer +' : '+str(e))
     except Exception as e: l.LOGGER('Error iterating peers on service balancer ->>'+ str(e))
 
     try:
@@ -413,11 +412,13 @@ def search_container(
         ignore_network: str = None
     ) -> Generator[gateway_pb2.buffer__pb2.Buffer, None, None]:
     # Search a service tar container.
-    for peer in utils.peers_uri_iterator(ignore_network = ignore_network):
+    for peer in utils.peers_id_iterator(ignore_network = ignore_network):
         try:
             next(grpcbf.client_grpc(
                 method = gateway_pb2_grpc.GatewayStub(
-                            grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
+                            grpc.insecure_channel(
+                                utils.generate_uris_by_peer_id(peer)[0],
+                            )
                         ).GetServiceTar,
                 input = utils.service_extended(
                             service_buffer = service_buffer,
@@ -430,11 +431,13 @@ def search_container(
 
 def search_file(hashes: list, ignore_network: str = None) -> Generator[celaut.Any, None, None]:
     # TODO: It can search for other 'Service ledger' or 'ANY ledger' instances that could've this type of files.
-    for peer in  utils.peers_uri_iterator(ignore_network = ignore_network):
+    for peer in  utils.peers_id_iterator(ignore_network = ignore_network):
         try:
             for buffer in grpcbf.client_grpc(
                 method = gateway_pb2_grpc.GatewayStub(
-                            grpc.insecure_channel(peer['ip'] + ':' + str(peer['port']))
+                            grpc.insecure_channel(
+                                utils.generate_uris_by_peer_id(peer)[0],
+                            )
                         ).GetFile,
                 output_field = celaut.Any,
                 input = utils.service_hashes(

@@ -8,7 +8,7 @@ from types import LambdaType
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, get_peer_id_by_ip, peers_uri_iterator, to_gas_amount
+from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, get_peer_id_by_ip, peers_id_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -695,10 +695,8 @@ def pair_deposits():
 
 
 def load_peer_instances_from_disk():
-    for peer in list(pymongo.MongoClient(
-                    "mongodb://localhost:27017/"
-                )["mongo"]["peerInstances"].find()):
-        add_peer(peer_id = peer['_id'])
+    for peer in peers_id_iterator():
+        add_peer(peer_id = peer)
 
 def manager_thread():
     load_peer_instances_from_disk()
