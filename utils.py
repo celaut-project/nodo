@@ -163,6 +163,7 @@ def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes
     except:
         raise Exception('No ledger found for contract: ' + str(contract_hash))
 
+
 def get_own_token_from_peer_id(peer_id: str) -> str:
     try:
         return pymongo.MongoClient(
@@ -170,6 +171,14 @@ def get_own_token_from_peer_id(peer_id: str) -> str:
                 )["mongo"]["peerInstances"].find_one({'_id': ObjectId(peer_id)})['token']
     except:
         raise Exception('No token found for peer: ' + str(peer_id))
+
+
+def get_peer_id_by_ip(ip: str) -> str:
+    try:
+        return str(pymongo.MongoClient("mongodb://localhost:27017/")["mongo"]["peerInstances"].find_one({'instance.uriSlot.uri.ip': ip})['_id'])
+    except:
+        raise Exception('No peer found for ip: ' + str(ip))
+
 
 """
 def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:

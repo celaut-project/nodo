@@ -372,10 +372,12 @@ def __get_gas_amount_by_ip(ip: str) -> int:
         return system_cache[
             get_token_by_uri(uri = ip)
         ]['gas']
-    elif ip in peer_instances:
-        return peer_instances[ip]
+
+    peer_id = get_peer_id_by_ip(ip = ip)
+    if peer_id in peer_instances:
+        return peer_instances[peer_id]
     else:
-        l.LOGGER('Manager error: cannot get gas amount for '+ip+' Caches -> '+str(cache_service_perspective) + str(system_cache) + str(peer_instances))
+        l.LOGGER('Manager error: cannot get gas amount for '+ip+peer_id+' Caches -> '+str(cache_service_perspective) + str(system_cache) + str(peer_instances))
         raise Exception('Manager error: cannot get gas amount for '+ip)
 
 
