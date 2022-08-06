@@ -180,6 +180,29 @@ def get_peer_id_by_ip(ip: str) -> str:
         raise Exception('No peer found for ip: ' + str(ip))
 
 
+def is_open(ip: str, port: int) -> bool:
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        sock.connect((ip, port))
+        sock.close()
+        return True
+    except:
+        return False
+
+
+def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
+    try:
+        peer = pymongo.MongoClient(
+                    "mongodb://localhost:27017/"
+                )["mongo"]["peerInstances"].find_one({'_id': ObjectId(peer_id)})
+        for uri in peer['instance']['uriSlot']['uri']:
+            if is_open(ip = uri['ip'], port = uri['port']):
+                yield uri['ip'] + ':' + str(uri['port'])
+    except:
+        raise Exception('No uris found for peer: ' + str(peer_id))
+
+
 """
 def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
     if gas_amount is None: return None
