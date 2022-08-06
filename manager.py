@@ -8,7 +8,7 @@ from types import LambdaType
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import from_gas_amount, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, peers_uri_iterator, to_gas_amount
+from utils import from_gas_amount, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, get_peer_id_by_ip, peers_uri_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
