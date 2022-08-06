@@ -718,6 +718,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
         ): yield b
 
+
     def GetFile(self, request_iterator, context):
         l.LOGGER('Request for give a service definition.')
         hashes = []
