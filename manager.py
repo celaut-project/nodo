@@ -8,7 +8,7 @@ from types import LambdaType
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import from_gas_amount, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, get_peer_id_by_ip, peers_uri_iterator, to_gas_amount
+from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, get_peer_id_by_ip, peers_uri_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -209,7 +209,7 @@ def __purgue_external(father_ip, peer_id, token) -> int:
         refund = from_gas_amount(next(grpcbf.client_grpc(
             method = gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
-                            peer_id    # TODO parse to a uri when it's implemented.
+                            generate_uris_by_peer_id(peer_id = peer_id)[0]
                         )
                     ).StopService,
             input = gateway_pb2.TokenMessage(
@@ -305,7 +305,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                     next(grpcbf.client_grpc(
                                 method = gateway_pb2_grpc.GatewayStub(
                                             grpc.insecure_channel(
-                                                peer_id+':8090', # TODO with port. Tiene que buscar en mongo, cuando se guarden por identificador.
+                                                generate_uris_by_peer_id(peer_id = peer_id)[0]
                                             )
                                         ).Payable,
                                 partitions_message_mode_parser = True,
@@ -573,7 +573,7 @@ def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
     return next(grpcbf.client_grpc(
         method = gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
-                            peer_id  # TODO parse to a uri when it's implemented.
+                            generate_uris_by_peer_id(peer_id = peer_id)[0]
                         )
                     ).GetMetrics,
         input = gateway_pb2.TokenMessage(
@@ -695,8 +695,10 @@ def pair_deposits():
 
 
 def load_peer_instances_from_disk():
-    for peer_uri in peers_uri_iterator():
-        add_peer(peer_id = peer_uri['ip'])  # TODO use the id.
+    for peer in list(pymongo.MongoClient(
+                    "mongodb://localhost:27017/"
+                )["mongo"]["peerInstances"].find()):
+        add_peer(peer_id = peer['_id'])
 
 def manager_thread():
     load_peer_instances_from_disk()
