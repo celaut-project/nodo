@@ -668,7 +668,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_message_mode = True
         ))
         l.LOGGER('\nAdding peer ' + str(instance))
-        insert_instance_on_mongo(instance = instance)
+        peer_id = insert_instance_on_mongo(instance = instance)
         if not add_peer(
             peer_id = peer_id  
         ): raise Exception('Was imposible add the peer.')

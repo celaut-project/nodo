@@ -4,6 +4,8 @@ import logger as l
 from gateway import generate_gateway_instance, insert_instance_on_mongo
 from utils import get_network_name
 from grpcbigbuffer import client_grpc
+from bson.objectid import ObjectId
+import pymongo
 
 def Zeroconf(network: str) -> list:
     
@@ -59,6 +61,17 @@ def Zeroconf(network: str) -> list:
 if __name__ == "__main__":
     import sys
     print('Connecting to peer -> ', sys.argv[1])
+    
+    while True:
+        peer_id: ObjectId = ObjectId()
+        try: 
+            if pymongo.MongoClient(
+                "mongodb://localhost:27017/"
+            )["mongo"]["peerInstances"].insert_one({'_id': peer_id}).acknowledged:
+                break
+        except pymongo.errors.DuplicateKeyError:
+            continue
+
     insert_instance_on_mongo(
         instance = next(client_grpc(
             method = gateway_pb2_grpc.GatewayStub(
@@ -70,8 +83,9 @@ if __name__ == "__main__":
             partitions_message_mode_parser = True,
             input = generate_gateway_instance(
                         network=get_network_name(ip_or_uri=sys.argv[1]),
-                        peer_id = sys.argv[1].split(':')[0]
+                        peer_id = str(peer_id)
                     )
-        ))
+        )),
+        peer_id = str(peer_id)
     )
     l.LOGGER('\nAdded peer ' + sys.argv[1])
