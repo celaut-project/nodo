@@ -833,14 +833,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
         parse_iterator = grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
             indices = GetServiceEstimatedCost_input,
-            partitions_model={2: StartService_input_partitions_v2[2]},
-            partitions_message_mode={1: True, 2: [True, False]}
+            partitions_model = {2: StartService_input_partitions_v2[2]},
+            partitions_message_mode = {1: True, 2: [True, False]}
         )
         while True:
             try:
                 r = next(parse_iterator)
             except StopIteration: break
             cost = None
+            initial_service_cost = None
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
                 if r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
@@ -878,8 +879,32 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         ) * GAS_COST_FACTOR
                 except build.UnsupportedArquitectureException as e: raise e
                 break
+
+            if r is gateway_pb2.ServiceWithConfig:
+                if DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
+                service_with_config = next(parse_iterator)
+                initial_service_cost: int = utils.from_gas_amount(service_with_config.initial_gas_amount)
+                service_with_meta = service_with_config.service
+                second_partition_dir = next(parse_iterator)
+                if type(second_partition_dir) is not str: raise Exception('Error: fail sending service.')
+                try:
+                    cost = execution_cost(
+                            service_buffer = get_service_buffer_from_registry(
+                                hash = save_service(
+                                    service_p1 = service_with_meta.service.SerializeToString(),
+                                    service_p2 = second_partition_dir,
+                                    metadata = service_with_meta.metadata,
+                                    hash = None
+                                )
+                            ),
+                            metadata = service_with_meta.metadata
+                        ) * GAS_COST_FACTOR
+                except build.UnsupportedArquitectureException as e: raise e
+                break
         
-        # TODO cost = cost + default_initial_cost(father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer()))
+        if not initial_service_cost: 
+            initial_service_cost: int = default_initial_cost(father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer()))
+        cost: int = cost + initial_service_cost
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost) + ' with benefit ' + str(0))
         if cost is None: raise Exception("I dont've the service.")
         for b in grpcbf.serialize_to_buffer(
