@@ -20,6 +20,7 @@ def read_file(filename) -> bytes:
                 yield chunk
     return b''.join([b for b in generator(filename)])
 
+
 def peers_uri_iterator(ignore_network: str = None) -> Generator[celaut_pb2.Instance.Uri, None, None]:
     peers = list(pymongo.MongoClient(
                 "mongodb://localhost:27017/"
@@ -32,9 +33,6 @@ def peers_uri_iterator(ignore_network: str = None) -> Generator[celaut_pb2.Insta
             net = ignore_network
         ): yield peer_uri
 
-# Generates a random string
-def generate_new_peer_id() -> str: 
-    return sha256(base64.b64encode(os.urandom(16))).hexdigest()
 
 def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
     for slot in instance.api.slot:
@@ -45,11 +43,13 @@ def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
                 return uri_slot.uri[0]
     raise Exception('Grpc over Http/2 not supported on this service ' + str(instance))
 
+
 def service_hashes(
         hashes: list = []
     ) -> Generator[celaut_pb2.Any.Metadata.HashTag.Hash, None, None]:
         for hash in hashes:
             yield hash 
+
 
 def service_extended(
         service_buffer: bytes,
