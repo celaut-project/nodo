@@ -321,7 +321,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                 except Exception as e:
                     attempt += 1
                     if attempt >= COMMUNICATION_ATTEMPTS:
-                        l.LOGGER('Peer payment communication process:   Failed.')
+                        l.LOGGER('Peer payment communication process:   Failed. ' + str(e))
                         # TODO subtract node reputation
                         return False
                     sleep(COMMUNICATION_ATTEMPTS_DELAY)
