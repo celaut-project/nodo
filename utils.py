@@ -27,16 +27,13 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     for peer in list(pymongo.MongoClient(
                 "mongodb://localhost:27017/"
             )["mongo"]["peerInstances"].find()):
-            return str(peer['_id'])
-
-    for peer in peers:
         if not ignore_network or ignore_network and True not in [ address_in_network(
             ip_or_uri = uri,
             net = ignore_network
         ) for uri in generate_uris_by_peer_id(
-                peer_id = peer['_id']
+                peer_id = str(peer['_id'])
             ) ]: 
-                yield peer['_id']
+                yield str(peer['_id'])
 
 
 def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
