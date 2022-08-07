@@ -199,7 +199,7 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
                     "mongodb://localhost:27017/"
                 )["mongo"]["peerInstances"].find_one({'_id': ObjectId(peer_id)})
         for uri in peer['instance']['uriSlot'][0]['uri']:
-            if is_open(ip = uri['ip'], port = uri['port']):
+            if is_open(ip = uri['ip'], port = int(uri['port'])):
                 yield uri['ip'] + ':' + str(uri['port'])
     except:
         raise Exception('No uris found for peer: ' + str(peer_id))
