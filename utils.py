@@ -188,8 +188,10 @@ def is_open(ip: str, port: int) -> bool:
         sock.settimeout(1)
         sock.connect((ip, port))
         sock.close()
+        print('uri open')
         return True
     except:
+        print('uri not connected.')
         return False
 
 
@@ -199,6 +201,7 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
                     "mongodb://localhost:27017/"
                 )["mongo"]["peerInstances"].find_one({'_id': ObjectId(peer_id)})
         for uri in peer['instance']['uriSlot']['uri']:
+            print('     uri ', uri)
             if is_open(ip = uri['ip'], port = uri['port']):
                 yield uri['ip'] + ':' + str(uri['port'])
     except:
