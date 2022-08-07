@@ -210,7 +210,7 @@ def __purgue_external(father_ip, peer_id, token) -> int:
         refund = from_gas_amount(next(grpcbf.client_grpc(
             method = gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
-                            generate_uris_by_peer_id(peer_id = peer_id)[0]
+                            next(generate_uris_by_peer_id(peer_id = peer_id))
                         )
                     ).StopService,
             input = gateway_pb2.TokenMessage(
@@ -306,7 +306,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                     next(grpcbf.client_grpc(
                                 method = gateway_pb2_grpc.GatewayStub(
                                             grpc.insecure_channel(
-                                                generate_uris_by_peer_id(peer_id = peer_id)[0]
+                                                next(generate_uris_by_peer_id(peer_id = peer_id))
                                             )
                                         ).Payable,
                                 partitions_message_mode_parser = True,
@@ -574,7 +574,7 @@ def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
     return next(grpcbf.client_grpc(
         method = gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
-                            generate_uris_by_peer_id(peer_id = peer_id)[0]
+                            next(generate_uris_by_peer_id(peer_id = peer_id))
                         )
                     ).GetMetrics,
         input = gateway_pb2.TokenMessage(

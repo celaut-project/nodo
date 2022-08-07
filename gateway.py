@@ -150,7 +150,7 @@ def service_balancer(
                     weight = next(grpcbf.client_grpc(
                         method =  gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
-                                        utils.generate_uris_by_peer_id(peer)[0]
+                                        next(utils.generate_uris_by_peer_id(peer))
                                     )
                                 ).GetServiceEstimatedCost,
                         indices_parser = gateway_pb2.EstimatedCost,
@@ -231,7 +231,7 @@ def launch_service(
                     service_instance = next(grpcbf.client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                     grpc.insecure_channel(
-                                        utils.generate_uris_by_peer_id(peer)[0]
+                                        next(utils.generate_uris_by_peer_id(peer))
                                     )
                                 ).StartService, # TODO se debe hacer que al pedir un servicio exista un timeout.
                         partitions_message_mode_parser = True,
@@ -417,7 +417,7 @@ def search_container(
             next(grpcbf.client_grpc(
                 method = gateway_pb2_grpc.GatewayStub(
                             grpc.insecure_channel(
-                                utils.generate_uris_by_peer_id(peer)[0],
+                                next(utils.generate_uris_by_peer_id(peer)),
                             )
                         ).GetServiceTar,
                 input = utils.service_extended(
@@ -436,7 +436,7 @@ def search_file(hashes: list, ignore_network: str = None) -> Generator[celaut.An
             for buffer in grpcbf.client_grpc(
                 method = gateway_pb2_grpc.GatewayStub(
                             grpc.insecure_channel(
-                                utils.generate_uris_by_peer_id(peer)[0],
+                                next(utils.generate_uris_by_peer_id(peer)),
                             )
                         ).GetFile,
                 output_field = celaut.Any,

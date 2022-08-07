@@ -166,7 +166,7 @@ def get_container_from_outside( # TODO could take it from a specific ledger.
                 # chunks = search_container(service = service) TODO ??
                 chunks = gateway_pb2_grpc.GatewayStub(  # Parse_from_buffer is not necesary because chunks're it.
                             grpc.insecure_channel(
-                                generate_uris_by_peer_id(peer)[0]
+                                next(generate_uris_by_peer_id(peer)),
                             )
                         ).GetServiceTar(
                             serialize_to_buffer(
