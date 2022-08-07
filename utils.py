@@ -24,9 +24,10 @@ def read_file(filename) -> bytes:
 
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
-    peers = list(pymongo.MongoClient(
+    for peer in list(pymongo.MongoClient(
                 "mongodb://localhost:27017/"
-            )["mongo"]["peerInstances"].find())
+            )["mongo"]["peerInstances"].find()):
+            return str(peer['_id'])
 
     for peer in peers:
         if not ignore_network or ignore_network and True not in [ address_in_network(
