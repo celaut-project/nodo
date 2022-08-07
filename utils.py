@@ -189,8 +189,7 @@ def is_open(ip: str, port: int) -> bool:
         sock.connect((ip, port))
         sock.close()
         return True
-    except Exception as e:
-        print(str(e))
+    except:
         return False
 
 
