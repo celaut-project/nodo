@@ -86,6 +86,6 @@ if __name__ == "__main__":
                         peer_id = str(peer_id)
                     )
         )),
-        peer_id = str(peer_id)
+        id = str(peer_id)
     )
     l.LOGGER('\nAdded peer ' + sys.argv[1])
