@@ -161,7 +161,7 @@ def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes
 
         if sha256(base64.b64decode(peer['instance']['api']['contractLedger'][0]['contract'])).digest() == contract_hash:
             return peer['instance']['api']['contractLedger'][0]['ledger'], peer['instance']['api']['contractLedger'][0]['contractAddr']
-    except:
+    except Exception:
         raise Exception('No ledger found for contract: ' + str(contract_hash))
 
 
@@ -170,7 +170,7 @@ def get_own_token_from_peer_id(peer_id: str) -> str:
         return pymongo.MongoClient(
                     "mongodb://localhost:27017/"
                 )["mongo"]["peerInstances"].find_one({'_id': ObjectId(peer_id)})['token']
-    except:
+    except Exception:
         raise Exception('No token found for peer: ' + str(peer_id))
 
 
@@ -178,7 +178,7 @@ def get_peer_id_by_ip(ip: str) -> str:
     if ip in DEV_CLIENTS: return 'dev'
     try:
         return str(pymongo.MongoClient("mongodb://localhost:27017/")["mongo"]["peerInstances"].find_one({'instance.uriSlot.uri.ip': ip})['_id'])
-    except:
+    except Exception:
         raise Exception('No peer found for ip: ' + str(ip))
 
 
@@ -189,7 +189,7 @@ def is_open(ip: str, port: int) -> bool:
         sock.connect((ip, port))
         sock.close()
         return True
-    except:
+    except Exception:
         return False
 
 
@@ -201,8 +201,7 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
         for uri in peer['instance']['uriSlot'][0]['uri']:
             if is_open(ip = uri['ip'], port = int(uri['port'])):
                 yield uri['ip'] + ':' + str(uri['port'])
-    except Exception as e:
-        print('No uris found -> ', e)
+    except Exception:
         raise Exception('No uris found for peer: ' + str(peer_id))
 
 
