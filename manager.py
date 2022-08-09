@@ -364,7 +364,6 @@ def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
         peer_instances_lock.acquire() 
         peer_instances[peer_id] = 0
         peer_instances_lock.release()
-        print('Increased local gas for peer '+peer_id+' of '+str(amount), peer_instances[peer_id])
     if not __refound_gas(gas = amount, cache = peer_instances, cache_lock = peer_instances_lock, id = peer_id):
         raise Exception('Manager error: cannot increase local gas for peer '+peer_id+' by '+str(amount))
     return True
@@ -563,7 +562,6 @@ def prune_container(token: str) -> int:
 # GET METRICS
 
 def __get_metrics_peer(peer_id) -> gateway_pb2.Metrics:
-    print('gas of peer -< ', peer_id, '>-', peer_instances[peer_id])
     return gateway_pb2.Metrics(
         gas_amount = to_gas_amount(peer_instances[peer_id]),
     )
