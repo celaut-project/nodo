@@ -686,10 +686,12 @@ def pair_deposits():
     for i in range(len(total_deposits_on_other_peers)):
         if i >= len(total_deposits_on_other_peers): break
         peer_id, estimated_deposit = list(total_deposits_on_other_peers.items())[i]
-        if estimated_deposit < MIN_DEPOSIT_PEER or \
-            gas_amount_on_other_peer(
+        gas_deposit = gas_amount_on_other_peer(
                 peer_id = peer_id,
-            ) < MIN_DEPOSIT_PEER:
+            )
+        print('Peer '+peer_id+' has '+str(gas_deposit)+' gas.')
+        if estimated_deposit < MIN_DEPOSIT_PEER or \
+            gas_deposit < MIN_DEPOSIT_PEER:
                 l.LOGGER('Manager error: the peer '+ str(peer_id)+' has not enough deposit. ')
                 print(gas_amount_on_other_peer(
                     peer_id = peer_id,
