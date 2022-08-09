@@ -124,9 +124,9 @@ def __set_on_cache( father_ip : str, container_id_or_external_token: str, local_
     l.LOGGER('Set on cache ' + ip_or_uri + '##' + container_id_or_external_token + ' as dependency of ' + father_ip )
 
 
-def set_external_on_cache(father_ip : str, external_token: str, ip_or_uri: str):
+def set_external_on_cache(father_id : str, external_token: str, ip_or_uri: str):
     __set_on_cache(
-        father_ip = father_ip,
+        father_ip = father_id,
         container_id_or_external_token = external_token,
         local_or_external_token = external_token,
         ip_or_uri = ip_or_uri
@@ -463,23 +463,23 @@ def default_initial_cost(
     return ( int( __get_gas_amount_by_ip( ip = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR ) ) if father_ip and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
 def add_container(
-    father_ip: str,
+    father_id: str,
     container: docker_lib.models.containers.Container,
     initial_gas_amount: int,
     system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> str:
-    l.LOGGER('Add container for '+ father_ip)
-    token = father_ip + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
+    l.LOGGER('Add container for '+ father_id)
+    token = father_id + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
     if token in system_cache.keys(): raise Exception('Manager error: '+token+' exists.')
 
     __push_token(token = token)
     __set_on_cache(
-        father_ip = father_ip,
+        father_ip = father_id,
         container_id_or_external_token = container.id,
         ip_or_uri = container.attrs['NetworkSettings']['IPAddress'],
         local_or_external_token = token,
     )
-    with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(father_ip = father_ip)
+    with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(father_ip = father_id)
     if not container_modify_system_params(
         token = token,
         system_requeriments_range = system_requeriments_range

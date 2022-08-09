@@ -179,6 +179,7 @@ def launch_service(
         service_buffer: bytes, 
         metadata: celaut.Any.Metadata, 
         father_ip: str, 
+        father_id: str = None,
         id: str = None,
         system_requeriments: celaut.Sysresources = None,
         max_sysreq = None,
@@ -187,6 +188,7 @@ def launch_service(
     ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
     if service_buffer == None: raise Exception("Service object can't be None")
+    if not father_id: father_id: str = father_ip if utils.get_network_name(father_ip) == DOCKER_NETWORK else utils.get_peer_id_by_ip(father_ip)
     getting_container = False  # Here it asks the balancer if it should assign the job to a peer.
     is_complete = completeness(
                             service_buffer = service_buffer,
@@ -215,10 +217,10 @@ def launch_service(
                     cost += initial_gas_amount  # TODO no debería hacer esto cuando el balancer agrege el costo inicial.
                     
                     if not spend_gas(
-                        token_or_container_ip = father_ip,
+                        token_or_container_ip = father_id,
                         gas_to_spend = cost,
                         refund_gas_function_container = refound_gas
-                    ): raise Exception('Launch service error spending gas for '+father_ip)
+                    ): raise Exception('Launch service error spending gas for '+father_id)
 
                     if gas_amount_on_other_peer(
                         peer_id = peer,
@@ -248,11 +250,11 @@ def launch_service(
                             )
                     ))
                     set_external_on_cache(
-                        father_ip = father_ip,
+                        father_id = father_id,
                         ip_or_uri =  peer, # Add node_uri.
                         external_token = service_instance.token  # Add token.
                     )
-                    service_instance.token = father_ip + '##' + peer + '##' + service_instance.token  # TODO adapt for ipv6 too.
+                    service_instance.token = father_id + '##' + peer + '##' + service_instance.token  # TODO adapt for ipv6 too.
                     return service_instance
                 except Exception as e:
                     l.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
@@ -265,13 +267,13 @@ def launch_service(
             if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_RESOURCES
             refound_gas = []
             if not spend_gas(
-                token_or_container_ip = father_ip,
+                token_or_container_ip = father_id,
                 gas_to_spend = start_service_cost(
                     initial_gas_amount = initial_gas_amount if initial_gas_amount else default_initial_cost(),
                     service_buffer = service_buffer,
                     metadata = metadata
                 ) * GAS_COST_FACTOR,
-            ): raise Exception('Launch service error spending gas for '+father_ip)
+            ): raise Exception('Launch service error spending gas for '+father_id)
             try:
                 id = build.build(
                         service_buffer = service_buffer, 
@@ -305,7 +307,7 @@ def launch_service(
             service = celaut.Service()
             service.ParseFromString(service_buffer)
             # If the request is made by a local service.
-            if utils.get_network_name(father_ip) == DOCKER_NETWORK:
+            if father_id == father_ip:
                 container = create_container(
                     id = id,
                     entrypoint = service.container.entrypoint
@@ -364,10 +366,10 @@ def launch_service(
                     uri.port = assigment_ports[port]
                     uri_slot.uri.append(uri)
 
-            l.LOGGER('Thrown out a new instance by ' + father_ip + ' of the container_id ' + container.id)
+            l.LOGGER('Thrown out a new instance by ' + father_id + ' of the container_id ' + container.id)
             return gateway_pb2.Instance(
                 token = add_container(
-                            father_ip = father_ip,
+                            father_id = father_id,
                             container = container,
                             initial_gas_amount = initial_gas_amount if initial_gas_amount else default_initial_cost(father_ip = father_ip),
                             system_requeriments_range = gateway_pb2.ModifyServiceSystemResourcesInput(min_sysreq = system_requeriments, max_sysreq = system_requeriments)
