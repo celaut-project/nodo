@@ -924,7 +924,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_message_mode = True
         ))
         if not validate_payment_process(
-            peer = context.peer(),
+            peer = utils.get_peer_id_by_ip(
+                ip = utils.get_only_the_ip_from_context(
+                        context_peer = context.peer()
+                    )
+            ),
             amount = utils.from_gas_amount(payment.gas_amount),
             ledger = payment.contract_ledger.ledger,
             contract = payment.contract_ledger.contract,
