@@ -188,7 +188,7 @@ def launch_service(
     l.LOGGER('Go to launch a service. ')
     if service_buffer == None: raise Exception("Service object can't be None")
     father_id: str = father_ip if utils.get_network_name(father_ip) == DOCKER_NETWORK else utils.get_peer_id_by_ip(father_ip)
-    initial_gas_amount if initial_gas_amount else default_initial_cost(father_id = father_id)
+    initial_gas_amount: int = initial_gas_amount if initial_gas_amount else default_initial_cost(father_id = father_id)
     getting_container = False  # Here it asks the balancer if it should assign the job to a peer.
     is_complete = completeness(
                             service_buffer = service_buffer,
@@ -212,10 +212,8 @@ def launch_service(
             # Delegate the service instance execution.
             if peer != 'local':
                 try:
-                    l.LOGGER('El servicio se lanza en el nodo con uri ' + str(peer))
+                    l.LOGGER('El servicio se lanza en el nodo ' + str(peer))
                     refound_gas = []
-                    
-                    cost += initial_gas_amount  # TODO no debería hacer esto cuando el balancer agrege el costo inicial.
                     
                     if not spend_gas(
                         token_or_container_ip = father_id,
