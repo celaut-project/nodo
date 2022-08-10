@@ -63,6 +63,7 @@ def service_extended(
         initial_gas_amount: int = None,
     ) -> Generator[object, None, None]:
         set_config = True if config or initial_gas_amount else False
+        print('metadata -> ', metadata)
         for hash in metadata.hashtag.hash:
             if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
                 set_config = False
