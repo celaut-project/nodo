@@ -847,9 +847,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
             hash = None
 
             if type(r) is gateway_pb2.HashWithConfig:
-                r = hash = r.hash
                 if r.HasField('initial_gas_amount'):
                     initial_service_cost = utils.from_gas_amount(r.initial_gas_amount)
+                r = hash = r.hash
 
 
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
