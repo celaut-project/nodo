@@ -77,6 +77,7 @@ def service_extended(
             yield hash
         
         if not send_only_hashes:
+            print('Sending service ...')
             any = celaut_pb2.Any(
                     metadata = metadata,
                     value = service_buffer
