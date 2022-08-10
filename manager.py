@@ -368,19 +368,25 @@ def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
         raise Exception('Manager error: cannot increase local gas for peer '+peer_id+' by '+str(amount))
     return True
 
-def __get_gas_amount_by_ip(ip: str) -> int:
-    l.LOGGER('Get gas amount for '+ip)
-    if ip in cache_service_perspective:
+def __get_gas_amount_by_id(id: str) -> int:
+    l.LOGGER('Get gas amount for '+id)
+
+    if id in cache_service_perspective:
         return system_cache[
-            get_token_by_uri(uri = ip)
+            get_token_by_uri(uri = id)
         ]['gas']
 
-    peer_id = get_peer_id_by_ip(ip = ip)
+    if id in peer_instances: 
+        return peer_instances[id]
+
+    peer_id = get_peer_id_by_ip(ip = id)
     if peer_id in peer_instances:
         return peer_instances[peer_id]
-    else:
-        l.LOGGER('Manager error: cannot get gas amount for '+ip+peer_id+' Caches -> '+str(cache_service_perspective) + str(system_cache) + str(peer_instances))
-        raise Exception('Manager error: cannot get gas amount for '+ip)
+
+    raise Exception('Manager error: '+id+' not found.')
+
+def __get_gas_amount_by_ip(ip: str) -> int:
+    return __get_gas_amount_by_id(id = ip)
 
 
 def validate_payment_process(peer: str, amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
@@ -457,10 +463,10 @@ def add_peer(
 
 
 def default_initial_cost(
-    father_ip: str = None
+    father_id: str = None,
 ) -> int:
-    l.LOGGER('Default cost for '+(father_ip if father_ip else 'local'))
-    return ( int( __get_gas_amount_by_ip( ip = father_ip ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR ) ) if father_ip and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
+    l.LOGGER('Default cost for '+(father_id if father_id else 'local'))
+    return ( int( __get_gas_amount_by_id( id = father_id ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR ) ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
 def add_container(
     father_id: str,
@@ -479,7 +485,7 @@ def add_container(
         ip_or_uri = container.attrs['NetworkSettings']['IPAddress'],
         local_or_external_token = token,
     )
-    with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(father_ip = father_id)
+    with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(father_id = father_id)
     if not container_modify_system_params(
         token = token,
         system_requeriments_range = system_requeriments_range
