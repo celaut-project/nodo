@@ -115,7 +115,6 @@ def service_balancer(
             self.dict: dict = {} # elem : weight
         
         def add_elem(self, weight: gateway_pb2.EstimatedCost, elem: str = 'local' ) -> None:
-            print('\nADDING ELEM ' + elem + ' WITH WEIGHT ', weight, type(weight), int(utils.from_gas_amount(weight.cost) * (1 + weight.variance * COST_AVERAGE_VARIATION)), '\n')
             self.dict.update({
                 elem: int(utils.from_gas_amount(weight.cost) * (1 + weight.variance * COST_AVERAGE_VARIATION))
             })
@@ -924,7 +923,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         for b in grpcbf.serialize_to_buffer(
             message_iterator = gateway_pb2.EstimatedCost(
                                 cost = utils.to_gas_amount(cost),
-                                variance = 0.001  # TODO dynamic variance.
+                                variance = 0  # TODO dynamic variance.
                             ),
             indices = gateway_pb2.EstimatedCost
         ): yield b
