@@ -844,6 +844,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
             except StopIteration: break
             cost = None
             initial_service_cost = None
+            hash = None
+
+            if type(r) is gateway_pb2.HashWithConfig:
+                r = hash = r.hash
+                if r.HasField('initial_gas_amount'):
+                    initial_service_cost = utils.from_gas_amount(r.initial_gas_amount)
+
+
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
                 if r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal = True)
@@ -862,6 +870,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         continue
                 elif DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
 
+
             if r is gateway_pb2.ServiceWithMeta:
                 if DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
                 service_with_meta = next(parse_iterator)
@@ -874,13 +883,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                     service_p1 = service_with_meta.service.SerializeToString(),
                                     service_p2 = second_partition_dir,
                                     metadata = service_with_meta.metadata,
-                                    hash = None
+                                    hash = hash
                                 )
                             ),
                             metadata = service_with_meta.metadata
                         ) * GAS_COST_FACTOR
                 except build.UnsupportedArquitectureException as e: raise e
                 break
+
 
             if r is gateway_pb2.ServiceWithConfig:
                 if DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
@@ -896,7 +906,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                     service_p1 = service_with_meta.service.SerializeToString(),
                                     service_p2 = second_partition_dir,
                                     metadata = service_with_meta.metadata,
-                                    hash = None
+                                    hash = hash
                                 )
                             ),
                             metadata = service_with_meta.metadata
