@@ -156,7 +156,7 @@ def service_balancer(
                         indices_parser = gateway_pb2.EstimatedCost,
                         partitions_message_mode_parser = True,
                         indices_serializer = GetServiceEstimatedCost_input,
-                        partitions_serializer = {2: StartService_input_partitions_v2[2]},
+                        partitions_serializer = StartService_input_partitions_v2,
                         input = utils.service_extended(
                             service_buffer = service_buffer, 
                             metadata = metadata, 
@@ -835,7 +835,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         parse_iterator = grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
             indices = GetServiceEstimatedCost_input,
-            partitions_model = {2: StartService_input_partitions_v2[2]},
+            partitions_model = StartService_input_partitions_v2,
             partitions_message_mode = {1: True, 2: [True, False]}
         )
         while True:
