@@ -9,7 +9,7 @@ from types import LambdaType
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, get_peer_id_by_ip, peers_id_iterator, to_gas_amount
+from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, get_peer_id_by_ip, is_peer_available, peers_id_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -52,6 +52,7 @@ MODIFY_SERVICE_SYSTEM_RESOURCES_COST = l.GET_ENV(env = 'MODIFY_SERVICE_SYSTEM_RE
 ALLOW_GAS_DEBT = l.GET_ENV(env = 'ALLOW_GAS_DEBT', default = False)  # Could be used with the reputation system.
 COMMUNICATION_ATTEMPTS = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS', default = 1)
 COMMUNICATION_ATTEMPTS_DELAY = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS_DELAY', default = 60)
+MIN_SLOTS_OPEN_PER_PEER = l.GET_ENV(env = 'MIN_SLOTS_OPEN_PER_PEER', default = 1)
 
 PAYMENT_PROCESS_VALIDATORS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.payment_process_validator}     # contract_hash:  lambda peer_id, tx_id, amount -> bool,
 AVAILABLE_PAYMENT_PROCESS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.process_payment}   # contract_hash:   lambda amount, peer_id -> tx_id,
@@ -693,6 +694,9 @@ def pair_deposits():
     for i in range(len(total_deposits_on_other_peers)):
         if i >= len(total_deposits_on_other_peers): break
         peer_id, estimated_deposit = list(total_deposits_on_other_peers.items())[i]
+        if not is_peer_available(peer_id = peer_id, min_slots_open = MIN_SLOTS_OPEN_PER_PEER):
+            l.LOGGER('Peer '+peer_id+' is not available.')
+            continue
         if estimated_deposit < MIN_DEPOSIT_PEER or \
             gas_amount_on_other_peer(
                 peer_id = peer_id,

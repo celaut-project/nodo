@@ -205,6 +205,13 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
         raise Exception('No uris found for peer: ' + str(peer_id))
 
 
+def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
+    try:
+        return any(generate_uris_by_peer_id(peer_id)) if min_slots_open == 1  else \
+            len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open
+    except Exception:
+        return False
+
 """
 def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
     if gas_amount is None: return None
