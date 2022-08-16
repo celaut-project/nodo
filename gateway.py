@@ -115,7 +115,7 @@ def service_balancer(
             self.dict: dict = {} # elem : weight
         
         def add_elem(self, weight: gateway_pb2.EstimatedCost, elem: str = 'local' ) -> None:
-            l.LOGGER('ADDING ELEM ' + elem + ' WITH WEIGHT ' + str(weight.cost))
+            l.LOGGER('    adding elem ' + elem + ' with weight ' + str(weight.cost))
             self.dict.update({
                 elem: int(utils.from_gas_amount(weight.cost) * (1 + weight.variance * COST_AVERAGE_VARIATION))
             })
