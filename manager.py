@@ -456,12 +456,20 @@ def add_peer(
 ) -> bool:
     l.LOGGER('Add peer '+ peer_id)
 
-    if peer_id not in peer_instances:
-        peer_instances[peer_id] = 0
+    try:
         if is_peer_available(peer_id = peer_id):
             Thread(target = __increase_deposit_on_peer, args=(peer_id, MIN_DEPOSIT_PEER, )).start()
+
+        if peer_id not in total_deposits_on_other_peers:
+            with total_deposits_on_other_peers_lock:
+                total_deposits_on_other_peers[peer_id] = 0
+
+        if peer_id not in peer_instances:
+            peer_instances[peer_id] = 0
+
         return True
-    return False
+    except:
+        return False
 
 
 def default_initial_cost(
