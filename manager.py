@@ -457,9 +457,6 @@ def add_peer(
     l.LOGGER('Add peer '+ peer_id)
 
     try:
-        if is_peer_available(peer_id = peer_id):
-            Thread(target = __increase_deposit_on_peer, args=(peer_id, MIN_DEPOSIT_PEER, )).start()
-
         if peer_id not in total_deposits_on_other_peers:
             with total_deposits_on_other_peers_lock:
                 total_deposits_on_other_peers[peer_id] = 0
