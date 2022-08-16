@@ -202,7 +202,8 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
             if is_open(ip = uri['ip'], port = int(uri['port'])):
                 yield uri['ip'] + ':' + str(uri['port'])
     except Exception:
-        raise Exception('No uris found for peer: ' + str(peer_id))
+        pass
+    raise Exception('No uris found for peer: ' + str(peer_id))
 
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
