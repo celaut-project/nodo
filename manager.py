@@ -458,7 +458,8 @@ def add_peer(
 
     if peer_id not in peer_instances:
         peer_instances[peer_id] = 0
-        Thread(target = __increase_deposit_on_peer, args=(peer_id, MIN_DEPOSIT_PEER, )).start()
+        if is_peer_available(peer_id = peer_id):
+            Thread(target = __increase_deposit_on_peer, args=(peer_id, MIN_DEPOSIT_PEER, )).start()
         return True
     return False
 
