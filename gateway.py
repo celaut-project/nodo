@@ -759,6 +759,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         except:
             raise Exception('Was imposible get the service definition.')
 
+
     def Compile(self, request_iterator, context):
         l.LOGGER('Go to compile a proyect.')
         input = grpcbf.parse_from_buffer(
@@ -772,6 +773,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             repo = next(input),
             partitions_model = next(input)
         ): yield b
+
 
     def GetServiceTar(self, request_iterator, context):
         # TODO se debe de hacer que gestione mejor tomar todo el servicio, como hace GetServiceEstimatedCost.
