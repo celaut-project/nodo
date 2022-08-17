@@ -339,6 +339,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         return True
     return False
 
+
 def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase deposit on peer '+peer_id+' by '+str(amount))
     if __peer_payment_process(peer_id = peer_id, amount = amount):  # process the payment on the peer.
@@ -359,9 +360,11 @@ def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
         l.LOGGER('Manager error: '+str(e))
         return False
 
+
 def __check_payment_process( amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
     l.LOGGER('Check payment process to '+token+' of '+str(amount))
     return PAYMENT_PROCESS_VALIDATORS[sha256(contract).digest()]( amount, token, ledger, contract_addr, validate_token = lambda token: token in clients)
+
 
 def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for client '+client_id+' of '+str(amount))
@@ -372,6 +375,7 @@ def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     if not __refound_gas(gas = amount, cache = clients, cache_lock = clients_lock, id = client_id):
         raise Exception('Manager error: cannot increase local gas for client '+client_id+' by '+str(amount))
     return True
+
 
 def __get_gas_amount_by_id(id: str) -> int:
     l.LOGGER('Get gas amount for '+id)
@@ -491,7 +495,7 @@ def add_peer(
 
         if peer_id not in clients_on_other_peers:
             generate_client_id_in_other_peer(peer_id = peer_id)
-            
+
         return True
     except:
         return False
