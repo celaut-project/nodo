@@ -9,7 +9,7 @@ from types import LambdaType
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, is_peer_available, peers_id_iterator, to_gas_amount
+from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, get_client_id_from_peer_id, is_peer_available, peers_id_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -294,7 +294,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         try:
             ledger, contract_address = get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash = contract_hash, peer_id = peer_id)
             l.LOGGER('Peer payment process:   Ledger: '+str(ledger)+' Contract address: '+str(contract_address))
-            deposit_token = get_own_token_from_peer_id(peer_id = peer_id)
+            deposit_token = get_client_id_from_peer_id(peer_id = peer_id)
             contract_ledger = process_payment(
                                 amount = amount,
                                 token = deposit_token,
@@ -598,7 +598,7 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
         return from_gas_amount(
                     __get_metrics_external(
                         peer_id = peer_id,
-                        token = get_own_token_from_peer_id(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
+                        token = get_client_id_from_peer_id(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
                     ).gas_amount
                 )
     except Exception as e:

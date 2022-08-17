@@ -169,7 +169,7 @@ def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes
         raise Exception('No ledger found for contract: ' + str(contract_hash))
 
 
-def get_own_token_from_peer_id(peer_id: str) -> str:
+def get_client_id_from_peer_id(peer_id: str) -> str:
     try:
         return pymongo.MongoClient(
                     "mongodb://localhost:27017/"
