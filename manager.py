@@ -95,6 +95,9 @@ clients = {'dev': pow(10, 128)} # id: amount_of_gas -> other peers' deposits on 
 total_deposits_on_other_peers_lock = Lock()
 total_deposits_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
 
+clients_on_other_peers_lock = Lock()
+clients_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
+
 container_cache_lock = threading.Lock()
 container_cache = {}  # ip_father:[dependencies]
 
@@ -460,6 +463,22 @@ def generate_client() -> gateway_pb2.Client:
             )
 
 
+def generate_client_id_in_other_peer(peer_id: str) -> str:
+    l.LOGGER('\nGenerating client for ' + peer_id)
+
+    # Associate the client with the peer.
+    with clients_on_other_peers_lock:
+        clients_on_other_peers[peer_id] = str(next(grpcbf.client_grpc(
+        method = gateway_pb2_grpc.GatewayStub(
+                    grpc.insecure_channel(
+                        next(generate_uris_by_peer_id(peer_id = peer_id))
+                    )
+                ).GenerateClient,
+        indices_parser = gateway_pb2.Client,
+        partitions_message_mode_parser = True
+    )).client_id)
+
+
 def add_peer(
     peer_id: str
 ) -> bool:
@@ -470,6 +489,9 @@ def add_peer(
             with total_deposits_on_other_peers_lock:
                 total_deposits_on_other_peers[peer_id] = 0
 
+        if peer_id not in clients_on_other_peers:
+            generate_client_id_in_other_peer(peer_id = peer_id)
+            
         return True
     except:
         return False
@@ -727,6 +749,7 @@ def pair_deposits():
 def load_peer_instances_from_disk():
     for peer in peers_id_iterator():
         add_peer(peer_id = peer)
+
 
 def manager_thread():
     load_peer_instances_from_disk()
