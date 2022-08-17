@@ -507,6 +507,7 @@ def default_initial_cost(
     l.LOGGER('Default cost for '+(father_id if father_id else 'local'))
     return ( int( __get_gas_amount_by_id( id = father_id ) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR ) ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
+
 def add_container(
     father_id: str,
     container: docker_lib.models.containers.Container,
@@ -530,6 +531,7 @@ def add_container(
         system_requeriments_range = system_requeriments_range
     ): raise Exception('Manager error adding '+token+'.')
     return token
+
 
 def container_modify_system_params(
         token: str, 
@@ -566,6 +568,7 @@ def container_modify_system_params(
 def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
     return IOBigData().prevent_kill(len = sysreq.mem_limit) # Prevent kill dice de lo que dispone actualmente libre.
     # It's not possible local, but other pair can, returns True.
+
 
 def get_sysresources(token: str) -> celaut_pb2.Sysresources:
     return celaut_pb2.Sysresources(
