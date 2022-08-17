@@ -34,7 +34,6 @@ message Metrics {
 message Instance {
     optional celaut.Any.Metadata instance_meta = 1;
     celaut.Instance instance = 2;
-    optional string token = 3;
 }
 
 message ServiceWithMeta {
@@ -78,7 +77,7 @@ message ModifyServiceSystemResourcesInput {
 service Gateway {
     rpc StartService( stream buffer.Buffer) returns ( stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S, celaut.Configuration & celaut.Sysresources=C; { H v S v H^C v S^C } ) -> Instance
     rpc StopService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Refund
-    rpc Hynode(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Instance -> Instance
+    rpc GetInstance(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  -> Instance
     
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput -> celaut.Sysresources
 
