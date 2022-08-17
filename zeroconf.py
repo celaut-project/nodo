@@ -80,11 +80,7 @@ if __name__ == "__main__":
                         )
                     ).Hynode,
             indices_parser = Instance,
-            partitions_message_mode_parser = True,
-            input = generate_gateway_instance(
-                        network=get_network_name(ip_or_uri=sys.argv[1]),
-                        peer_id = str(peer_id)
-                    )
+            partitions_message_mode_parser = True
         )),
         id = str(peer_id)
     )
