@@ -567,9 +567,9 @@ def prune_container(token: str) -> int:
 
 # GET METRICS
 
-def __get_metrics_peer(peer_id) -> gateway_pb2.Metrics:
+def __get_metrics_client(client_id) -> gateway_pb2.Metrics:
     return gateway_pb2.Metrics(
-        gas_amount = to_gas_amount(clients[peer_id]),
+        gas_amount = to_gas_amount(clients[client_id]),
     )
 
 def __get_metrics_internal(token: str) -> gateway_pb2.Metrics:
@@ -607,12 +607,18 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
 
 
 def get_metrics(token: str) -> gateway_pb2.Metrics:
-    if '##' not in token: return __get_metrics_peer(peer_id = token)
+    if token in clients: 
+        return __get_metrics_client(client_id = token)
+    
+    elif '##' not in token: 
+        raise Exception('Invalid token, it should be a client_id or a token with ##.')
+
     elif get_network_name(
         ip_or_uri = token.split('##')[1],
 
     ) == DOCKER_NETWORK:
         return __get_metrics_internal(token = token)
+
     else:
         return __get_metrics_external(
             peer_id = token.split('##')[1],
