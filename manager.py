@@ -457,9 +457,6 @@ def add_peer(
             with total_deposits_on_other_peers_lock:
                 total_deposits_on_other_peers[peer_id] = 0
 
-        if peer_id not in clients:
-            clients[peer_id] = 0
-
         return True
     except:
         return False
