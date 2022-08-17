@@ -1,4 +1,4 @@
-from gateway_pb2 import Instance
+from gateway_pb2 import Instance, Client
 import gateway_pb2_grpc, grpc
 import logger as l
 from gateway import generate_gateway_instance, insert_instance_on_mongo
@@ -84,9 +84,21 @@ if __name__ == "__main__":
         )),
         id = str(peer_id)
     )
-    
+
     l.LOGGER('\nAdded peer ' + sys.argv[1])
 
     l.LOGGER('\nGenerating client for ' + sys.argv[1])
+
+    client_id = next(client_grpc(
+        method = gateway_pb2_grpc.GatewayStub(
+                    grpc.insecure_channel(
+                        sys.argv[1]
+                    )
+                ).GenerateClient,
+        indices_parser = Client,
+        partitions_message_mode_parser = True
+    ))
     
+    # Associate the client with the peer.
+
     l.LOGGER('\nClient generated')

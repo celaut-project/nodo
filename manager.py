@@ -1,6 +1,7 @@
 from hashlib import sha256
 import json
 from os import system
+from random import random
 import string
 from threading import Lock, Thread
 import threading
@@ -447,6 +448,18 @@ def spend_gas(
     return False
 
 
+def generate_client() -> gateway_pb2.Client:
+    while True:
+        client_id = str(random.randint(0, 1000000))
+        if client_id not in clients:
+            clients_lock.acquire()
+            clients[client_id] = 0
+            clients_lock.release()
+            return gateway_pb2.Client(
+                client_id = client_id,
+            )
+
+
 def add_peer(
     peer_id: str
 ) -> bool:
@@ -592,7 +605,7 @@ def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
     ))
 
 
-# Retur the integer gas amount of this node on other peer.
+# Return the integer gas amount of this node on other peer.
 def gas_amount_on_other_peer(peer_id: str) -> int:
     try:
         return from_gas_amount(
