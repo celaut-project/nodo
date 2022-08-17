@@ -9,7 +9,7 @@ from types import LambdaType
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_only_the_ip_from_context_method, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, get_peer_id_by_ip, is_peer_available, peers_id_iterator, to_gas_amount
+from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, get_own_token_from_peer_id, is_peer_available, peers_id_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -359,14 +359,14 @@ def __check_payment_process( amount: int, ledger: str, token: str, contract: byt
     l.LOGGER('Check payment process to '+token+' of '+str(amount))
     return PAYMENT_PROCESS_VALIDATORS[sha256(contract).digest()]( amount, token, ledger, contract_addr, validate_token = lambda token: token in clients)
 
-def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
-    l.LOGGER('Increase local gas for peer '+peer_id+' of '+str(amount))
-    if peer_id not in clients:  # TODO no debería de añadir un peer que no existe.
+def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
+    l.LOGGER('Increase local gas for client '+client_id+' of '+str(amount))
+    if client_id not in clients:  # TODO no debería de añadir un peer que no existe.
         clients_lock.acquire() 
-        clients[peer_id] = 0
+        clients[client_id] = 0
         clients_lock.release()
-    if not __refound_gas(gas = amount, cache = clients, cache_lock = clients_lock, id = peer_id):
-        raise Exception('Manager error: cannot increase local gas for peer '+peer_id+' by '+str(amount))
+    if not __refound_gas(gas = amount, cache = clients, cache_lock = clients_lock, id = client_id):
+        raise Exception('Manager error: cannot increase local gas for client '+client_id+' by '+str(amount))
     return True
 
 def __get_gas_amount_by_id(id: str) -> int:
@@ -380,19 +380,15 @@ def __get_gas_amount_by_id(id: str) -> int:
     if id in clients: 
         return clients[id]
 
-    peer_id = get_peer_id_by_ip(ip = id)
-    if peer_id in clients:
-        return clients[peer_id]
-
     raise Exception('Manager error: '+id+' not found.')
 
 def __get_gas_amount_by_ip(ip: str) -> int:
     return __get_gas_amount_by_id(id = ip)
 
 
-def validate_payment_process(peer: str, amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
+def validate_payment_process(client: str, amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
     return __check_payment_process(amount = amount, ledger = ledger, token = token, contract = contract, contract_addr = contract_addr) \
-         and __increase_local_gas_for_peer(peer_id = peer, amount = amount)  # TODO allow for containers too.
+         and __increase_local_gas_for_client(client_id = client, amount = amount)  # TODO allow for containers too.
 
 
 def spend_gas(
