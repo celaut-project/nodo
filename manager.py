@@ -88,8 +88,8 @@ def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> 
 system_cache_lock = Lock()
 system_cache = {} # token : { mem_limit: 0, gas: 0 }
 
-peer_instances_lock = Lock()
-peer_instances = {'dev': pow(10, 128)} # id: amount_of_gas -> other peers' deposits on this node.
+clients_lock = Lock()
+clients = {'dev': pow(10, 128)} # id: amount_of_gas -> other peers' deposits on this node.
 
 total_deposits_on_other_peers_lock = Lock()
 total_deposits_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
@@ -357,15 +357,15 @@ def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
 
 def __check_payment_process( amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
     l.LOGGER('Check payment process to '+token+' of '+str(amount))
-    return PAYMENT_PROCESS_VALIDATORS[sha256(contract).digest()]( amount, token, ledger, contract_addr, validate_token = lambda token: token in peer_instances)
+    return PAYMENT_PROCESS_VALIDATORS[sha256(contract).digest()]( amount, token, ledger, contract_addr, validate_token = lambda token: token in clients)
 
 def __increase_local_gas_for_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for peer '+peer_id+' of '+str(amount))
-    if peer_id not in peer_instances:  # TODO no debería de añadir un peer que no existe.
-        peer_instances_lock.acquire() 
-        peer_instances[peer_id] = 0
-        peer_instances_lock.release()
-    if not __refound_gas(gas = amount, cache = peer_instances, cache_lock = peer_instances_lock, id = peer_id):
+    if peer_id not in clients:  # TODO no debería de añadir un peer que no existe.
+        clients_lock.acquire() 
+        clients[peer_id] = 0
+        clients_lock.release()
+    if not __refound_gas(gas = amount, cache = clients, cache_lock = clients_lock, id = peer_id):
         raise Exception('Manager error: cannot increase local gas for peer '+peer_id+' by '+str(amount))
     return True
 
@@ -377,12 +377,12 @@ def __get_gas_amount_by_id(id: str) -> int:
             get_token_by_uri(uri = id)
         ]['gas']
 
-    if id in peer_instances: 
-        return peer_instances[id]
+    if id in clients: 
+        return clients[id]
 
     peer_id = get_peer_id_by_ip(ip = id)
-    if peer_id in peer_instances:
-        return peer_instances[peer_id]
+    if peer_id in clients:
+        return clients[peer_id]
 
     raise Exception('Manager error: '+id+' not found.')
 
@@ -406,12 +406,12 @@ def spend_gas(
     # l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
     try:
         # En caso de que sea un peer, el token es el peer id.
-        if token_or_container_ip in peer_instances and (peer_instances[token_or_container_ip] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with peer_instances_lock: peer_instances[token_or_container_ip] -= gas_to_spend
+        if token_or_container_ip in clients and (clients[token_or_container_ip] >= gas_to_spend or ALLOW_GAS_DEBT):
+            with clients_lock: clients[token_or_container_ip] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
-                cache = peer_instances, 
-                cache_lock = peer_instances_lock,
+                cache = clients, 
+                cache_lock = clients_lock,
                 id = token_or_container_ip, 
                 container = refund_gas_function_container
             )
@@ -443,7 +443,7 @@ def spend_gas(
             return True
     except Exception as e: 
         l.LOGGER('Manager error spending gas '+str(e)+' '+str(gas_to_spend)+' '+token_or_container_ip+\
-            '\n peer instances -> '+str(peer_instances)+\
+            '\n peer instances -> '+str(clients)+\
             '\n system cache -> '+str(system_cache)+\
             '\n cache service perspective -> '+str(cache_service_perspective)+\
             '\n        ----------------------\n\n\n')
@@ -461,8 +461,8 @@ def add_peer(
             with total_deposits_on_other_peers_lock:
                 total_deposits_on_other_peers[peer_id] = 0
 
-        if peer_id not in peer_instances:
-            peer_instances[peer_id] = 0
+        if peer_id not in clients:
+            clients[peer_id] = 0
 
         return True
     except:
@@ -576,7 +576,7 @@ def prune_container(token: str) -> int:
 
 def __get_metrics_peer(peer_id) -> gateway_pb2.Metrics:
     return gateway_pb2.Metrics(
-        gas_amount = to_gas_amount(peer_instances[peer_id]),
+        gas_amount = to_gas_amount(clients[peer_id]),
     )
 
 def __get_metrics_internal(token: str) -> gateway_pb2.Metrics:
