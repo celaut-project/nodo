@@ -665,7 +665,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
 
     
-    def Hynode(self, request_iterator, context):
+    def GetInstance(self, request_iterator, context):
         for b in grpcbf.serialize_to_buffer(
             generate_gateway_instance(
                 network = utils.get_network_name(

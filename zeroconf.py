@@ -78,10 +78,15 @@ if __name__ == "__main__":
                         grpc.insecure_channel(
                             sys.argv[1]
                         )
-                    ).Hynode,
+                    ).GetInstance,
             indices_parser = Instance,
             partitions_message_mode_parser = True
         )),
         id = str(peer_id)
     )
+    
     l.LOGGER('\nAdded peer ' + sys.argv[1])
+
+    l.LOGGER('\nGenerating client for ' + sys.argv[1])
+    
+    l.LOGGER('\nClient generated')
