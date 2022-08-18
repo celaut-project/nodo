@@ -623,7 +623,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             max_sysreq = max_sysreq,
                             initial_gas_amount = initial_gas_amount,
                             id = hash,
-                            father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                            father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer()),
+                            father_id = client_id,
                         )
                     ): yield buffer
                     return
@@ -646,7 +647,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     system_requeriments = system_requeriments,
                     max_sysreq = max_sysreq,
                     initial_gas_amount = initial_gas_amount,
-                    father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                    father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer()),
+                    father_id = client_id,
                 )
             ): yield b
 
