@@ -180,6 +180,7 @@ def launch_service(
         service_buffer: bytes, 
         metadata: celaut.Any.Metadata, 
         father_ip: str, 
+        father_id: str = None,
         id: str = None,
         system_requeriments: celaut.Sysresources = None,
         max_sysreq = None,
@@ -188,7 +189,12 @@ def launch_service(
     ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
     if service_buffer == None: raise Exception("Service object can't be None")
-    father_id: str = father_ip if utils.get_network_name(father_ip) == DOCKER_NETWORK else utils.get_peer_id_by_ip(father_ip)
+
+    if not father_id: 
+        father_id = father_ip
+    if father_ip == father_id and not utils.get_network_name(father_ip) == DOCKER_NETWORK: 
+        raise Exception('Client id not provided.')
+        
     initial_gas_amount: int = initial_gas_amount if initial_gas_amount else default_initial_cost(father_id = father_id)
     getting_container = False  # Here it asks the balancer if it should assign the job to a peer.
     is_complete = completeness(
@@ -371,7 +377,7 @@ def launch_service(
                 token = add_container(
                             father_id = father_id,
                             container = container,
-                            initial_gas_amount = initial_gas_amount if initial_gas_amount else default_initial_cost(father_id = father_ip),
+                            initial_gas_amount = initial_gas_amount if initial_gas_amount else default_initial_cost(father_id = father_id),
                             system_requeriments_range = gateway_pb2.ModifyServiceSystemResourcesInput(min_sysreq = system_requeriments, max_sysreq = system_requeriments)
                         ),
                 instance = celaut.Instance(
@@ -549,7 +555,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 system_requeriments = system_requeriments,
                                 max_sysreq = max_sysreq,
                                 initial_gas_amount = initial_gas_amount,
-                                father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer())
+                                father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer()),
+                                father_id = client_id,
                             )
                         ): yield b
                         return
@@ -933,7 +940,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_message_mode = True
         ))
         if not validate_payment_process(
-            client = payment.client_token,
             amount = utils.from_gas_amount(payment.gas_amount),
             ledger = payment.contract_ledger.ledger,
             contract = payment.contract_ledger.contract,
