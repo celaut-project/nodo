@@ -686,6 +686,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     
     def GetInstance(self, request_iterator, context):
+        l.LOGGER('Request for instance by '+str(context.peer()))
         for b in grpcbf.serialize_to_buffer(
             generate_gateway_instance(
                 network = utils.get_network_name(
