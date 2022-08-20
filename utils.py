@@ -175,15 +175,6 @@ def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes
         raise Exception('No ledger found for contract: ' + str(contract_hash))
 
 
-def get_client_id_from_peer_id(peer_id: str) -> str:
-    try:
-        return pymongo.MongoClient(
-                    "mongodb://localhost:27017/"
-                )["mongo"]["peerInstances"].find_one({'_id': ObjectId(peer_id)})['token']
-    except Exception:
-        raise Exception('No token found for peer: ' + str(peer_id))
-
-
 def get_peer_id_by_ip(ip: str) -> str:
     try:
         return str(pymongo.MongoClient("mongodb://localhost:27017/")["mongo"]["peerInstances"].find_one({'instance.uriSlot.uri.ip': ip})['_id'])

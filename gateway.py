@@ -5,7 +5,7 @@ from buffer_pb2 import Buffer
 import celaut_pb2 as celaut
 import build, utils
 from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, MIN_DEPOSIT_PEER, \
-    add_container, container_modify_system_params, default_initial_cost, could_ve_this_sysreq, execution_cost, gas_amount_on_other_peer, get_metrics, get_sysresources, \
+    add_container, container_modify_system_params, default_initial_cost, could_ve_this_sysreq, execution_cost, gas_amount_on_other_peer, generate_client_id_in_other_peer, get_metrics, get_sysresources, \
     increase_deposit_on_peer, manager_thread, prune_container, set_external_on_cache, generate_client, \
     spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, get_token_by_uri
 from compile import REGISTRY, HYCACHE, compile
@@ -164,7 +164,7 @@ def service_balancer(
                             metadata = metadata, 
                             send_only_hashes = SEND_ONLY_HASHES_ASKING_COST,
                             initial_gas_amount = initial_gas_amount,
-                            client_id = utils.get_client_id_from_peer_id(peer_id=peer)
+                            client_id = generate_client_id_in_other_peer(peer_id=peer)
                         ),  # TODO añadir initial_gas_amount y el resto de la configuracion inicial, si es que se especifica.
                     ))
                 )
@@ -255,7 +255,7 @@ def launch_service(
                                 min_sysreq = system_requeriments,
                                 max_sysreq = max_sysreq,
                                 initial_gas_amount = initial_gas_amount,
-                                client_id = utils.get_client_id_from_peer_id( peer_id = peer )
+                                client_id = generate_client_id_in_other_peer( peer_id = peer )
                             )
                     ))
                     encrypted_external_token = sha256(service_instance.token).encode('utf-8')

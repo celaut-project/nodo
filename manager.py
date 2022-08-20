@@ -10,7 +10,7 @@ from types import LambdaType
 from typing import Dict
 import build
 import docker as docker_lib
-from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, get_client_id_from_peer_id, is_peer_available, peers_id_iterator, to_gas_amount
+from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, is_peer_available, peers_id_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -303,7 +303,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         try:
             ledger, contract_address = get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash = contract_hash, peer_id = peer_id)
             l.LOGGER('Peer payment process:   Ledger: '+str(ledger)+' Contract address: '+str(contract_address))
-            deposit_token = get_client_id_from_peer_id(peer_id = peer_id)
+            deposit_token = generate_client_id_in_other_peer(peer_id = peer_id)
             contract_ledger = process_payment(
                                 amount = amount,
                                 token = deposit_token,
@@ -475,17 +475,23 @@ def generate_client() -> gateway_pb2.Client:
 def generate_client_id_in_other_peer(peer_id: str) -> str:
     l.LOGGER('\nGenerating client for ' + peer_id)
 
-    # Associate the client with the peer.
-    with clients_on_other_peers_lock:
-        clients_on_other_peers[peer_id] = str(next(grpcbf.client_grpc(
-        method = gateway_pb2_grpc.GatewayStub(
-                    grpc.insecure_channel(
-                        next(generate_uris_by_peer_id(peer_id = peer_id))
-                    )
-                ).GenerateClient,
-        indices_parser = gateway_pb2.Client,
-        partitions_message_mode_parser = True
-    )).client_id)
+    if not is_peer_available(peer_id = peer_id, min_slots_open = MIN_SLOTS_OPEN_PER_PEER):
+        l.LOGGER('Peer '+peer_id+' is not available.')
+        raise Exception('Peer not available.')
+
+    if peer_id not in clients_on_other_peers: 
+        with clients_on_other_peers_lock:
+            clients_on_other_peers[peer_id] = str(next(grpcbf.client_grpc(
+            method = gateway_pb2_grpc.GatewayStub(
+                        grpc.insecure_channel(
+                            next(generate_uris_by_peer_id(peer_id = peer_id))
+                        )
+                    ).GenerateClient,
+            indices_parser = gateway_pb2.Client,
+            partitions_message_mode_parser = True
+        )).client_id)
+    
+    return clients_on_other_peers[peer_id]
 
 
 def add_peer(
@@ -498,8 +504,7 @@ def add_peer(
             with total_deposits_on_other_peers_lock:
                 total_deposits_on_other_peers[peer_id] = 0
 
-        if peer_id not in clients_on_other_peers:
-            generate_client_id_in_other_peer(peer_id = peer_id)
+        generate_client_id_in_other_peer(peer_id = peer_id)
 
         return True
     except:
@@ -645,7 +650,7 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
         return from_gas_amount(
                     __get_metrics_external(
                         peer_id = peer_id,
-                        token = get_client_id_from_peer_id(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
+                        token = generate_client_id_in_other_peer(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
                     ).gas_amount
                 )
     except Exception as e:
