@@ -73,6 +73,7 @@ if __name__ == "__main__":
         except pymongo.errors.DuplicateKeyError:
             continue
 
+    print('Get instance for peer -> ', peer_id)
     insert_instance_on_mongo(
         instance = next(client_grpc(
             method = gateway_pb2_grpc.GatewayStub(
