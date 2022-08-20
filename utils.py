@@ -59,14 +59,22 @@ def service_hashes(
 
 def service_extended(
         service_buffer: bytes,
-        metadata: celaut_pb2.Any.Metadata,  
+        metadata: celaut_pb2.Any.Metadata,
         config: celaut_pb2.Configuration = None,
         min_sysreq: celaut_pb2.Sysresources = None,
         max_sysreq: celaut_pb2.Sysresources = None,
         send_only_hashes: bool = False,
         initial_gas_amount: int = None,
+        client_id: str = None,
     ) -> Generator[object, None, None]:
+
         set_config = True if config or initial_gas_amount else False
+
+        if client_id: 
+            yield gateway_pb2.Client(
+                client_id = client_id
+            )
+
         for hash in metadata.hashtag.hash:
             if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
                 set_config = False

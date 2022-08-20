@@ -163,7 +163,8 @@ def service_balancer(
                             service_buffer = service_buffer, 
                             metadata = metadata, 
                             send_only_hashes = SEND_ONLY_HASHES_ASKING_COST,
-                            initial_gas_amount = initial_gas_amount
+                            initial_gas_amount = initial_gas_amount,
+                            client_id = utils.get_client_id_from_peer_id(peer_id=peer)
                         ),  # TODO añadir initial_gas_amount y el resto de la configuracion inicial, si es que se especifica.
                     ))
                 )
@@ -242,7 +243,7 @@ def launch_service(
                                     grpc.insecure_channel(
                                         next(utils.generate_uris_by_peer_id(peer))
                                     )
-                                ).StartService, # TODO se debe hacer que al pedir un servicio exista un timeout.
+                                ).StartService,      # TODO se debe hacer que al pedir un servicio exista un timeout.
                         partitions_message_mode_parser = True,
                         indices_serializer = StartService_input,
                         partitions_serializer = StartService_input_partitions_v2,
@@ -254,6 +255,7 @@ def launch_service(
                                 min_sysreq = system_requeriments,
                                 max_sysreq = max_sysreq,
                                 initial_gas_amount = initial_gas_amount,
+                                client_id = utils.get_client_id_from_peer_id( peer_id = peer )
                             )
                     ))
                     encrypted_external_token = sha256(service_instance.token).encode('utf-8')
