@@ -133,11 +133,12 @@ def __set_on_cache( father_ip : str, container_id_or_external_token: str, local_
     l.LOGGER('Set on cache ' + container_ip_or_peer_id + '##' + container_id_or_external_token + ' as dependency of ' + father_ip )
 
 
-def set_external_on_cache(father_id : str, external_token: str, peer_id: str):
+def set_external_on_cache(father_id : str, encrypted_external_token: str, external_token: str, peer_id: str):
+    external_token_hash_map[encrypted_external_token] = external_token
     __set_on_cache(
         father_ip = father_id,
         container_id_or_external_token = external_token,
-        local_or_external_token = external_token,
+        local_or_external_token = encrypted_external_token,
         container_ip_or_peer_id = peer_id
     )
 
