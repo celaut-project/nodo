@@ -1,3 +1,4 @@
+from hashlib import sha256
 from typing import Dict, Generator
 from buffer_pb2 import Buffer
 
@@ -255,12 +256,13 @@ def launch_service(
                                 initial_gas_amount = initial_gas_amount,
                             )
                     ))
+                    encrypted_external_token = sha256(service_instance.token).encode('utf-8')
                     set_external_on_cache(
                         father_id = father_id,
                         ip_or_uri =  peer, # Add node_uri.
-                        external_token = service_instance.token  # Add token.
+                        external_token = encrypted_external_token  # Add token.
                     )
-                    service_instance.token = father_id + '##' + peer + '##' + service_instance.token  # TODO adapt for ipv6 too.
+                    service_instance.token = father_id + '##' + peer + '##' + encrypted_external_token  # TODO adapt for ipv6 too.
                     return service_instance
                 except Exception as e:
                     l.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
