@@ -501,12 +501,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
         system_requeriments = None
         initial_gas_amount = None
         max_sysreq = None
+        client_id = None
         hashes = []
         parser_generator = grpcbf.parse_from_buffer(
             request_iterator = request_iterator, 
             indices = StartService_input,
             partitions_model = StartService_input_partitions_v2,
-            partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False]}
+            partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False], 5: True}
         )
         while True:
             try:
@@ -514,6 +515,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
             except StopIteration: break
             hash = None
             service_with_meta = None
+
+            if type(r) is gateway_pb2.Client:
+                client_id = r.client_id
+                continue
 
             if type(r) is gateway_pb2.HashWithConfig:
                 configuration = r.config
@@ -854,6 +859,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
             cost = None
             initial_service_cost = None
             hash = None
+            client_id = None
+
+            if type(r) is gateway_pb2.Client:
+                client_id = r.client_id
 
             if type(r) is gateway_pb2.HashWithConfig:
                 if r.HasField('initial_gas_amount'):
@@ -924,7 +933,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 break
         
         if not initial_service_cost: 
-            initial_service_cost: int = default_initial_cost(father_id = utils.get_only_the_ip_from_context(context_peer = context.peer()))
+            initial_service_cost: int = default_initial_cost(
+                    father_id = client_id if client_id else utils.get_only_the_ip_from_context(context_peer = context.peer())
+                )
         cost: int = cost + initial_service_cost
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost) + ' with benefit ' + str(0))
         if cost is None: raise Exception("I dont've the service.")
