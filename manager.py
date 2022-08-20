@@ -101,7 +101,11 @@ clients_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
 container_cache_lock = threading.Lock()
 container_cache = {}  # ip_father:[dependencies]
 
+# TODO evaluate the necesity of cache_service_perspective_lock
 cache_service_perspective = {} # service_ip:(local_token or external_service_token)
+
+# Lock not needed.
+external_token_hash_map = {}  #  sha256( container_token ) -> container_token
 
 # internal token -> str( peer_ip##container_ip##container_id )   peer_ip se refiere a la direccion del servicio padre (que puede ser interno o no).
 # external token -> str( peer_ip##node_ip:node_port##his_token )
