@@ -668,8 +668,8 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
 
     else:
         return __get_metrics_external(
-            peer_id = external_token_hash_map[token.split('##')[1]],
-            token = token[len( token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
+            peer_id = token.split('##')[1],  # peer_id
+            token = external_token_hash_map[ token.split['##'][2] ] # Por si el token comienza en # ...
         )
 
 
