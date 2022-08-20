@@ -74,17 +74,20 @@ if __name__ == "__main__":
             continue
 
     print('Get instance for peer -> ', peer_id)
-    insert_instance_on_mongo(
-        instance = next(client_grpc(
-            method = gateway_pb2_grpc.GatewayStub(
-                        grpc.insecure_channel(
-                            sys.argv[1]
-                        )
-                    ).GetInstance,
-            indices_parser = Instance,
-            partitions_message_mode_parser = True
-        )),
-        id = str(peer_id)
-    )
-
+    try:
+        insert_instance_on_mongo(
+            instance = next(client_grpc(
+                method = gateway_pb2_grpc.GatewayStub(
+                            grpc.insecure_channel(
+                                sys.argv[1]
+                            )
+                        ).GetInstance,
+                indices_parser = Instance,
+                partitions_message_mode_parser = True
+            )),
+            id = str(peer_id)
+        )
+    except Exception as e:
+        print(e)
+        
     l.LOGGER('\nAdded peer ' + sys.argv[1])
