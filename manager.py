@@ -116,7 +116,7 @@ external_token_hash_map = {}  #  sha256( container_token ) -> container_token
 #   nosotros a nuestro servicio solicitante le daremos un token con el formato node_ip##his_token.
 
 
-def __set_on_cache( father_ip : str, container_id_or_external_token: str, local_or_external_token: str, ip_or_uri: str):
+def __set_on_cache( father_ip : str, container_id_or_external_token: str, local_or_external_token: str, container_ip_or_peer_id: str):
 
     # En caso de ser un nodo externo:
     if not father_ip in container_cache:
@@ -128,17 +128,17 @@ def __set_on_cache( father_ip : str, container_id_or_external_token: str, local_
 
 
     # Añade el nuevo servicio como dependencia.
-    container_cache[father_ip].append(ip_or_uri + '##' + container_id_or_external_token)
-    cache_service_perspective[ip_or_uri] = local_or_external_token
-    l.LOGGER('Set on cache ' + ip_or_uri + '##' + container_id_or_external_token + ' as dependency of ' + father_ip )
+    container_cache[father_ip].append(container_ip_or_peer_id + '##' + container_id_or_external_token)
+    cache_service_perspective[container_ip_or_peer_id] = local_or_external_token
+    l.LOGGER('Set on cache ' + container_ip_or_peer_id + '##' + container_id_or_external_token + ' as dependency of ' + father_ip )
 
 
-def set_external_on_cache(father_id : str, external_token: str, ip_or_uri: str):
+def set_external_on_cache(father_id : str, external_token: str, peer_id: str):
     __set_on_cache(
         father_ip = father_id,
         container_id_or_external_token = external_token,
         local_or_external_token = external_token,
-        ip_or_uri = ip_or_uri
+        container_ip_or_peer_id = peer_id
     )
 
 
@@ -526,7 +526,7 @@ def add_container(
     __set_on_cache(
         father_ip = father_id,
         container_id_or_external_token = container.id,
-        ip_or_uri = container.attrs['NetworkSettings']['IPAddress'],
+        container_ip_or_peer_id = container.attrs['NetworkSettings']['IPAddress'],
         local_or_external_token = token,
     )
     with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(father_id = father_id)

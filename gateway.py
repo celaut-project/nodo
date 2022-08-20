@@ -259,7 +259,7 @@ def launch_service(
                     encrypted_external_token = sha256(service_instance.token).encode('utf-8')
                     set_external_on_cache(
                         father_id = father_id,
-                        ip_or_uri =  peer, # Add node_uri.
+                        peer_id =  peer, # Add node_uri.
                         external_token = encrypted_external_token  # Add token.
                     )
                     service_instance.token = father_id + '##' + peer + '##' + encrypted_external_token  # TODO adapt for ipv6 too.
