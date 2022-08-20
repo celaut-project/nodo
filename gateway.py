@@ -852,6 +852,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_model = StartService_input_partitions_v2,
             partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False]}
         )
+        
+        client_id = None
         while True:
             try:
                 r = next(parse_iterator)
@@ -859,8 +861,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             cost = None
             initial_service_cost = None
             hash = None
-            client_id = None
-
+            
             if type(r) is gateway_pb2.Client:
                 client_id = r.client_id
 
