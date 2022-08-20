@@ -850,7 +850,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             request_iterator=request_iterator,
             indices = GetServiceEstimatedCost_input,
             partitions_model = StartService_input_partitions_v2,
-            partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False]}
+            partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False], 5: True}
         )
         
         client_id = None
