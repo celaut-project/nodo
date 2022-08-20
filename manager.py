@@ -224,7 +224,7 @@ def __purgue_external(father_ip, peer_id, token) -> int:
                         )
                     ).StopService,
             input = gateway_pb2.TokenMessage(
-                token = token
+                token = external_token_hash_map[token]
             ),
             indices_parser = gateway_pb2.Refund,
             partitions_message_mode_parser = True
@@ -631,7 +631,7 @@ def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
                         )
                     ).GetMetrics,
         input = gateway_pb2.TokenMessage(
-            token = token
+            token = external_token_hash_map[token]
         ),
         indices_parser = gateway_pb2.Metrics,
         partitions_message_mode_parser = True
