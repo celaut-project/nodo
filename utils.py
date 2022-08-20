@@ -13,8 +13,6 @@ import netifaces as ni
 from verify import get_service_hex_main_hash
 from bson.objectid import ObjectId
 
-DEV_CLIENTS = ['192.168.43.200', '192.168.43.39']
-
 def read_file(filename) -> bytes:
     def generator(filename):
         with open(filename, 'rb') as entry:
@@ -187,7 +185,6 @@ def get_client_id_from_peer_id(peer_id: str) -> str:
 
 
 def get_peer_id_by_ip(ip: str) -> str:
-    if ip in DEV_CLIENTS: return 'dev'
     try:
         return str(pymongo.MongoClient("mongodb://localhost:27017/")["mongo"]["peerInstances"].find_one({'instance.uriSlot.uri.ip': ip})['_id'])
     except Exception:
