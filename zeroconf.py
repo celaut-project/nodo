@@ -87,7 +87,3 @@ if __name__ == "__main__":
     )
 
     l.LOGGER('\nAdded peer ' + sys.argv[1])
-
-    generate_client_id_in_other_peer(peer_id = peer_id)
-
-    l.LOGGER('\nClient generated')
