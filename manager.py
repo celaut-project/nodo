@@ -476,6 +476,7 @@ def generate_client_id_in_other_peer(peer_id: str) -> str:
         raise Exception('Peer not available.')
 
     if peer_id not in clients_on_other_peers: 
+        l.LOGGER('Generate new client for peer '+peer_id)
         with clients_on_other_peers_lock:
             clients_on_other_peers[peer_id] = str(next(grpcbf.client_grpc(
             method = gateway_pb2_grpc.GatewayStub(
