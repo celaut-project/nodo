@@ -773,6 +773,7 @@ def load_peer_instances_from_disk():
 def manager_thread():
     load_peer_instances_from_disk()
     while True:
+        print('\nManager thread iteration.')
         maintain()
         pair_deposits()
         sleep(MANAGER_ITERATION_TIME) 
