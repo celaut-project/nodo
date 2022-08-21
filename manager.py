@@ -646,7 +646,7 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
         return from_gas_amount(
                     __get_metrics_external(
                         peer_id = peer_id,
-                        token = generate_client_id_in_other_peer(peer_id = peer_id)  # TODO could be in dict peer_id -> own_token
+                        token = generate_client_id_in_other_peer(peer_id = peer_id)
                     ).gas_amount
                 )
     except Exception as e:
