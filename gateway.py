@@ -258,7 +258,7 @@ def launch_service(
                                 client_id = generate_client_id_in_other_peer( peer_id = peer )
                             )
                     ))
-                    encrypted_external_token = sha256(service_instance.token).encode('utf-8')
+                    encrypted_external_token = sha256(service_instance.token.encode('utf-8')).hexdigest()
                     set_external_on_cache(
                         father_id = father_id,
                         peer_id =  peer, # Add node_uri.
