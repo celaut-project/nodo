@@ -752,7 +752,7 @@ def pair_deposits():
         if i >= len(total_deposits_on_other_peers): break
         peer_id, estimated_deposit = list(total_deposits_on_other_peers.items())[i]
         if not is_peer_available(peer_id = peer_id, min_slots_open = MIN_SLOTS_OPEN_PER_PEER):
-            l.LOGGER('Peer '+peer_id+' is not available.')
+            l.LOGGER('Peer '+peer_id+' is not available .')
             continue
         if estimated_deposit < MIN_DEPOSIT_PEER or \
             gas_amount_on_other_peer(
