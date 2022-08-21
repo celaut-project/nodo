@@ -299,12 +299,13 @@ def __refound_gas_function_factory(
 # Payment process for the manager.
 
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
-    l.LOGGER('Peer payment process to '+peer_id+' of '+str(amount))
+    deposit_token: str = generate_client_id_in_other_peer(peer_id = peer_id)
+    l.LOGGER('Peer payment process to peer '+peer_id+' with client '+deposit_token+' of '+str(amount))
     for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():   # check if the payment process is compatible with this peer.
         try:
             ledger, contract_address = get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash = contract_hash, peer_id = peer_id)
             l.LOGGER('Peer payment process:   Ledger: '+str(ledger)+' Contract address: '+str(contract_address))
-            deposit_token = generate_client_id_in_other_peer(peer_id = peer_id)
+            deposit_token = deposit_token,
             contract_ledger = process_payment(
                                 amount = amount,
                                 token = deposit_token,
