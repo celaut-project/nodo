@@ -471,8 +471,6 @@ def generate_client() -> gateway_pb2.Client:
 
 
 def generate_client_id_in_other_peer(peer_id: str) -> str:
-    l.LOGGER('\nGenerating client for ' + peer_id)
-
     if not is_peer_available(peer_id = peer_id, min_slots_open = MIN_SLOTS_OPEN_PER_PEER):
         l.LOGGER('Peer '+peer_id+' is not available.')
         raise Exception('Peer not available.')
