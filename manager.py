@@ -305,7 +305,6 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         try:
             ledger, contract_address = get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash = contract_hash, peer_id = peer_id)
             l.LOGGER('Peer payment process:   Ledger: '+str(ledger)+' Contract address: '+str(contract_address))
-            deposit_token = deposit_token,
             contract_ledger = process_payment(
                                 amount = amount,
                                 token = deposit_token,
