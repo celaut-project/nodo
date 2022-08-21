@@ -749,7 +749,9 @@ def maintain():
 
 def pair_deposits():
     for i in range(len(total_deposits_on_other_peers)):
-        if i >= len(total_deposits_on_other_peers): break
+        if i >= len(total_deposits_on_other_peers): 
+            print('break')
+            break
         peer_id, estimated_deposit = list(total_deposits_on_other_peers.items())[i]
         if not is_peer_available(peer_id = peer_id, min_slots_open = MIN_SLOTS_OPEN_PER_PEER):
             l.LOGGER('Peer '+peer_id+' is not available .')
