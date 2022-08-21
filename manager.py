@@ -642,16 +642,22 @@ def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
 
 # Return the integer gas amount of this node on other peer.
 def gas_amount_on_other_peer(peer_id: str) -> int:
-    try:
-        return from_gas_amount(
-                    __get_metrics_external(
-                        peer_id = peer_id,
-                        token = generate_client_id_in_other_peer(peer_id = peer_id)
-                    ).gas_amount
-                )
-    except Exception as e:
-        l.LOGGER('Error getting gas amount from '+peer_id+'.')
-        raise Exception('Error getting gas amount from '+peer_id+'.')
+    while True:
+        try:
+            return from_gas_amount(
+                        __get_metrics_external(
+                            peer_id = peer_id,
+                            token = generate_client_id_in_other_peer(peer_id = peer_id)
+                        ).gas_amount
+                    )
+        except Exception as e:
+            l.LOGGER('Error getting gas amount from '+peer_id+'.')
+            if is_peer_available(peer_id=peer_id):
+                l.LOGGER('It is assumed that the client was invalid on peer '+peer_id)
+                with clients_on_other_peers_lock:
+                    del clients_on_other_peers[peer_id]
+            else:
+                break
 
 
 def get_metrics(token: str) -> gateway_pb2.Metrics:
