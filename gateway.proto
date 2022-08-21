@@ -34,6 +34,7 @@ message Metrics {
 message Instance {
     optional celaut.Any.Metadata instance_meta = 1;
     celaut.Instance instance = 2;
+    optional string token = 3;
 }
 
 message Client {
