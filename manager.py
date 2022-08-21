@@ -8,6 +8,7 @@ import threading
 from time import sleep
 from types import LambdaType
 from typing import Dict
+import uuid
 import build
 import docker as docker_lib
 from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, is_peer_available, peers_id_iterator, to_gas_amount
@@ -461,15 +462,12 @@ def spend_gas(
 
 
 def generate_client() -> gateway_pb2.Client:
-    while True:
-        client_id = str(random.randint(0, 1000000))
-        if client_id not in clients:
-            clients_lock.acquire()
-            clients[client_id] = 0
-            clients_lock.release()
-            return gateway_pb2.Client(
-                client_id = client_id,
-            )
+    # No collisions expected.
+    client_id = uuid.uuid4().hex
+    clients[client_id] = 0
+    return gateway_pb2.Client(
+        client_id = client_id,
+    )
 
 
 def generate_client_id_in_other_peer(peer_id: str) -> str:
