@@ -144,8 +144,8 @@ def set_external_on_cache(father_id : str, encrypted_external_token: str, extern
     )
 
 
-def __purgue_internal(father_ip = None, container_id = None, container_ip = None, token = None) -> int:
-    if token is None and (father_ip is None or container_id is None or container_ip is None):
+def __purgue_internal(agent_id = None, container_id = None, container_ip = None, token = None) -> int:
+    if token is None and (agent_id is None or container_id is None or container_ip is None):
         raise Exception('purgue_internal: token is None and (father_ip is None or container_id is None or container_ip is None)')
 
     try:
@@ -161,11 +161,11 @@ def __purgue_internal(father_ip = None, container_id = None, container_ip = None
     container_cache_lock.acquire()
 
     try:
-        container_cache[father_ip].remove(container_ip + '##' + container_id)
+        container_cache[agent_id].remove(container_ip + '##' + container_id)
     except ValueError as e:
-        l.LOGGER(str(e) + str(container_cache[father_ip]) + ' trying to remove ' + container_ip + '##' + container_id)
+        l.LOGGER(str(e) + str(container_cache[agent_id]) + ' trying to remove ' + container_ip + '##' + container_id)
     except KeyError as e:
-        l.LOGGER(str(e) + father_ip + ' not in ' + str(container_cache.keys()))
+        l.LOGGER(str(e) + agent_id + ' not in ' + str(container_cache.keys()))
 
     try:
         del cache_service_perspective[container_ip]
@@ -180,14 +180,14 @@ def __purgue_internal(father_ip = None, container_id = None, container_ip = None
             # Si la dependencia esta en local.
             if get_network_name(ip_or_uri = dependency.split('##')[0]) == DOCKER_NETWORK:
                 refund += __purgue_internal(
-                    father_ip = container_ip,
+                    agent_id = container_ip,
                     container_id = dependency.split('##')[1],
                     container_ip = dependency.split('##')[0]
                 )
             # Si la dependencia se encuentra en otro nodo.
             else:
                 refund += __purgue_external(
-                    father_ip = father_ip,
+                    agent_id = agent_id,
                     peer_id = dependency.split('##')[0],
                     token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
                 )
@@ -202,20 +202,16 @@ def __purgue_internal(father_ip = None, container_id = None, container_ip = None
     return refund
 
 
-def __purgue_external(father_ip, peer_id, token) -> int:
-    if len(peer_id.split(':')) < 2:
-        l.LOGGER('Should be an uri not an ip. Something was wrong. The node uri is ' + peer_id)
-        return None
-    
+def __purgue_external(agent_id, peer_id, token) -> int:    
     refund = 0
     container_cache_lock.acquire()
 
     try:
-        container_cache[father_ip].remove(peer_id + '##' + token)
+        container_cache[agent_id].remove(peer_id + '##' + token)
     except ValueError as e:
-        l.LOGGER(str(e) + str(container_cache[father_ip]) + ' trying to remove ' + peer_id + '##' + token)
+        l.LOGGER(str(e) + str(container_cache[agent_id]) + ' trying to remove ' + peer_id + '##' + token)
     except KeyError as e:
-        l.LOGGER(str(e) + father_ip + ' not in ' + str(container_cache.keys()))
+        l.LOGGER(str(e) + agent_id + ' not in ' + str(container_cache.keys()))
 
     # Le manda al otro nodo que elimine esa instancia.
     try:
@@ -590,7 +586,7 @@ def prune_container(token: str) -> int:
     if get_network_name(ip_or_uri = token.split('##')[1]) == DOCKER_NETWORK: # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
         try:
             refund = __purgue_internal(
-                father_ip = token.split('##')[0],
+                agent_id = token.split('##')[0],
                 container_id = token.split('##')[2],
                 container_ip = token.split('##')[1],
                 token = token
@@ -602,7 +598,7 @@ def prune_container(token: str) -> int:
     else:
         try:
             refund = __purgue_external(
-                father_ip = token.split('##')[0],
+                agent_id = token.split('##')[0],
                 peer_id = token.split('##')[1],
                 token = token[len( token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
             )
