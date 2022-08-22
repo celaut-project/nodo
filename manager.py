@@ -209,7 +209,7 @@ def __purgue_external(agent_id, peer_id, token) -> int:
     try:
         container_cache[agent_id].remove(peer_id + '##' + token)
     except ValueError as e:
-        l.LOGGER(str(e) + str(container_cache[agent_id]) + ' trying to remove ' + peer_id + '##' + token)
+        l.LOGGER(str(e) + '. Container cache of ' + agent_id + str(container_cache[agent_id]) + ' trying to remove ' + peer_id + '##' + token)
     except KeyError as e:
         l.LOGGER(str(e) + agent_id + ' not in ' + str(container_cache.keys()))
 
