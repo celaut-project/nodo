@@ -117,30 +117,35 @@ external_token_hash_map = {}  #  sha256( container_token ) -> container_token
 #   nosotros a nuestro servicio solicitante le daremos un token con el formato node_ip##his_token.
 
 
-def __set_on_cache( father_ip : str, container_id_or_external_token: str, local_or_external_token: str, container_ip_or_peer_id: str):
+def __set_on_cache( 
+        agent_id : str, 
+        container_ip___peer_id: str, 
+        container_id___his_token_encrypt: str, 
+        container_id____his_token: str
+    ):
 
     # En caso de ser un nodo externo:
-    if not father_ip in container_cache:
+    if not agent_id in container_cache:
         container_cache_lock.acquire()
-        container_cache.update({father_ip: []})
+        container_cache.update({agent_id: []})
         container_cache_lock.release()
         # Si peer_ip es un servicio del nodo ya
         # debería estar en el registro.
 
 
     # Añade el nuevo servicio como dependencia.
-    container_cache[father_ip].append(container_ip_or_peer_id + '##' + container_id_or_external_token)
-    cache_service_perspective[container_ip_or_peer_id] = local_or_external_token
-    l.LOGGER('Set on cache ' + container_ip_or_peer_id + '##' + container_id_or_external_token + ' as dependency of ' + father_ip )
+    container_cache[agent_id].append(container_ip___peer_id + '##' + container_id___his_token_encrypt)
+    cache_service_perspective[container_ip___peer_id] = container_id____his_token
+    l.LOGGER('Set on cache ' + container_ip___peer_id + '##' + container_id___his_token_encrypt + ' as dependency of ' + agent_id )
 
 
-def set_external_on_cache(father_id : str, encrypted_external_token: str, external_token: str, peer_id: str):
+def set_external_on_cache(agent_id : str, encrypted_external_token: str, external_token: str, peer_id: str):
     external_token_hash_map[encrypted_external_token] = external_token
     __set_on_cache(
-        father_ip = father_id,
-        container_id_or_external_token = external_token,
-        local_or_external_token = encrypted_external_token,
-        container_ip_or_peer_id = peer_id
+        agent_id = agent_id,
+        container_id___his_token_encrypt = encrypted_external_token,
+        container_id____his_token = external_token,
+        container_ip___peer_id = peer_id
     )
 
 
@@ -523,10 +528,10 @@ def add_container(
 
     __push_token(token = token)
     __set_on_cache(
-        father_ip = father_id,
-        container_id_or_external_token = container.id,
-        container_ip_or_peer_id = container.attrs['NetworkSettings']['IPAddress'],
-        local_or_external_token = token,
+        agent_id = father_id,
+        container_id___his_token_encrypt = container.id,
+        container_ip___peer_id = container.attrs['NetworkSettings']['IPAddress'],
+        container_id____his_token = token,
     )
     with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(father_id = father_id)
     if not container_modify_system_params(
