@@ -189,7 +189,7 @@ def __purgue_internal(agent_id = None, container_id = None, container_ip = None,
                 refund += __purgue_external(
                     agent_id = agent_id,
                     peer_id = dependency.split('##')[0],
-                    token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
+                    his_token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
                 )
 
         try:
@@ -202,14 +202,14 @@ def __purgue_internal(agent_id = None, container_id = None, container_ip = None,
     return refund
 
 
-def __purgue_external(agent_id, peer_id, token) -> int:    
+def __purgue_external(agent_id, peer_id, his_token) -> int:    
     refund = 0
     container_cache_lock.acquire()
 
     try:
-        container_cache[agent_id].remove(peer_id + '##' + token)
+        container_cache[agent_id].remove(peer_id + '##' + his_token)
     except ValueError as e:
-        l.LOGGER(str(e) + '. Container cache of ' + agent_id + str(container_cache[agent_id]) + ' trying to remove ' + peer_id + '##' + token)
+        l.LOGGER(str(e) + '. Container cache of ' + agent_id + str(container_cache[agent_id]) + ' trying to remove ' + peer_id + '##' + his_token)
     except KeyError as e:
         l.LOGGER(str(e) + agent_id + ' not in ' + str(container_cache.keys()))
 
@@ -222,7 +222,7 @@ def __purgue_external(agent_id, peer_id, token) -> int:
                         )
                     ).StopService,
             input = gateway_pb2.TokenMessage(
-                token = external_token_hash_map[token]
+                token = external_token_hash_map[his_token]
             ),
             indices_parser = gateway_pb2.Refund,
             partitions_message_mode_parser = True
@@ -600,7 +600,7 @@ def prune_container(token: str) -> int:
             refund = __purgue_external(
                 agent_id = token.split('##')[0],
                 peer_id = token.split('##')[1],
-                token = token[len( token.split('##')[1] ) + 1:] # Por si el token comienza en # ...
+                his_token = token.split('##')[2],
             )
         except Exception as e:
             l.LOGGER('Error purging '+token+' '+str(e))
