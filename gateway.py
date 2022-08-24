@@ -4,7 +4,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
-from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, MIN_DEPOSIT_PEER, \
+from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, MIN_DEPOSIT_PEER, recursion_guard_tokens, generate_recursion_guard_token, \
     add_container, container_modify_system_params, default_initial_cost, could_ve_this_sysreq, execution_cost, gas_amount_on_other_peer, generate_client_id_in_other_peer, get_metrics, get_sysresources, \
     increase_deposit_on_peer, manager_thread, prune_container, set_external_on_cache, generate_client, \
     spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, get_token_by_uri
@@ -108,6 +108,7 @@ def service_balancer(
     metadata: celaut.Any.Metadata, 
     ignore_network: str = None,
     initial_gas_amount: int = None,
+    recursion_guard_token: str = None,
     ) -> Dict[str, int]: # sorted by cost, dict of celaut.Instances or 'local'  and cost.
     class PeerCostList:
         # Sorts the list from the element with the smallest weight to the element with the largest weight.
@@ -164,7 +165,8 @@ def service_balancer(
                             metadata = metadata, 
                             send_only_hashes = SEND_ONLY_HASHES_ASKING_COST,
                             initial_gas_amount = initial_gas_amount,
-                            client_id = generate_client_id_in_other_peer(peer_id=peer)
+                            client_id = generate_client_id_in_other_peer(peer_id=peer),
+                            recursion_guard_token = recursion_guard_token
                         ),  # TODO añadir initial_gas_amount y el resto de la configuracion inicial, si es que se especifica.
                     ))
                 )
@@ -188,13 +190,21 @@ def launch_service(
         max_sysreq = None,
         config: celaut.Configuration = None,
         initial_gas_amount: int = None,
+        recursion_guard_token: str = None,
     ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
     if service_buffer == None: raise Exception("Service object can't be None")
 
+    if not recursion_guard_token: 
+        recursion_guard_token = generate_recursion_guard_token()
+    else:
+        if recursion_guard_token in recursion_guard_tokens:
+            raise Exception('Recursion infinite loop blocked.')
+    recursion_guard_tokens[recursion_guard_token] = None
+
     if not father_id: 
         father_id = father_ip
-    if father_ip == father_id and not utils.get_network_name(father_ip) == DOCKER_NETWORK: 
+    if father_ip == father_id and utils.get_network_name(father_ip) != DOCKER_NETWORK: 
         raise Exception('Client id not provided.')
         
     initial_gas_amount: int = initial_gas_amount if initial_gas_amount else default_initial_cost(father_id = father_id)
@@ -213,7 +223,8 @@ def launch_service(
             ignore_network = utils.get_network_name(
                 ip_or_uri = father_ip
             ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None,
-            initial_gas_amount  = initial_gas_amount
+            initial_gas_amount  = initial_gas_amount,
+            recursion_guard_token = recursion_guard_token
         ).items():
             if abort_it: abort_it = False
             l.LOGGER('Balancer select peer ' + str(peer) + ' with cost ' + str(cost))
@@ -255,7 +266,8 @@ def launch_service(
                                 min_sysreq = system_requeriments,
                                 max_sysreq = max_sysreq,
                                 initial_gas_amount = initial_gas_amount,
-                                client_id = generate_client_id_in_other_peer( peer_id = peer )
+                                client_id = generate_client_id_in_other_peer( peer_id = peer ),
+                                recursion_guard_token = recursion_guard_token
                             )
                     ))
                     encrypted_external_token: str = sha256(service_instance.token.encode('utf-8')).hexdigest()
@@ -503,13 +515,16 @@ class Gateway(gateway_pb2_grpc.Gateway):
         system_requeriments = None
         initial_gas_amount = None
         max_sysreq = None
+
         client_id = None
+        recursion_guard_token = None
+
         hashes = []
         parser_generator = grpcbf.parse_from_buffer(
             request_iterator = request_iterator, 
             indices = StartService_input,
             partitions_model = StartService_input_partitions_v2,
-            partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False], 5: True}
+            partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False], 5: True, 6: True}
         )
         while True:
             try:
@@ -520,6 +535,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             if type(r) is gateway_pb2.Client:
                 client_id = r.client_id
+                continue
+
+            if type(r) is gateway_pb2.RecursionGuard:
+                recursion_guard_token = r.token
                 continue
 
             if type(r) is gateway_pb2.HashWithConfig:
@@ -567,6 +586,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 initial_gas_amount = initial_gas_amount,
                                 father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer()),
                                 father_id = client_id,
+                                recursion_guard_token = recursion_guard_token
                             )
                         ): yield b
                         return
@@ -635,6 +655,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             id = hash,
                             father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer()),
                             father_id = client_id,
+                            recursion_guard_token = recursion_guard_token
                         )
                     ): yield buffer
                     return
@@ -659,6 +680,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     initial_gas_amount = initial_gas_amount,
                     father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer()),
                     father_id = client_id,
+                    recursion_guard_token = recursion_guard_token
                 )
             ): yield b
 
@@ -846,17 +868,18 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     # Estimacion de coste de ejecución de un servicio con la cantidad de gas por defecto.
     def GetServiceEstimatedCost(self, request_iterator, context):
-        # TODO podría comparar costes de otros pares, (menos del que le pregunta.)
+        # TODO check cost in other peers (use recursion guard token to prevent infinite loops).
 
         l.LOGGER('Request for the cost of a service.')
         parse_iterator = grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
             indices = GetServiceEstimatedCost_input,
             partitions_model = StartService_input_partitions_v2,
-            partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False], 5: True}
+            partitions_message_mode = {1: True, 2: [True, False], 3: True, 4: [True, False], 5: True, 6: True}
         )
         
         client_id = None
+        recursion_guard_token = None
         while True:
             try:
                 r = next(parse_iterator)
@@ -867,6 +890,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
             
             if type(r) is gateway_pb2.Client:
                 client_id = r.client_id
+                continue
+
+            if type(r) is gateway_pb2.RecursionGuard:
+                recursion_guard_token = r.token
+                continue
 
             if type(r) is gateway_pb2.HashWithConfig:
                 if r.HasField('initial_gas_amount'):

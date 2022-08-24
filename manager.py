@@ -3,7 +3,7 @@ import json
 from os import system
 from random import random
 import string
-from threading import Lock, Thread
+from threading import Lock
 import threading
 from time import sleep
 from types import LambdaType
@@ -106,7 +106,7 @@ container_cache = {}  # ip_father:[dependencies]
 cache_service_perspective = {} # service_ip:(local_token or external_service_token)
 
 # Lock not needed.
-external_token_hash_map = {}  #  sha256( container_token ) -> container_token
+external_token_hash_map = {}  #  sha256( token ) : token
 
 # internal token -> str( peer_ip##container_ip##container_id )   peer_ip se refiere a la direccion del servicio padre (que puede ser interno o no).
 # external token -> str( peer_ip##node_ip:node_port##his_token )

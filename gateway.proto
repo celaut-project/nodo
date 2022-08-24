@@ -41,6 +41,10 @@ message Client {
     string client_id = 1;
 }
 
+message RecursionGuard {
+    string token = 1;
+}
+
 message ServiceWithMeta {
     celaut.Any.Metadata metadata = 1;
     celaut.Service service = 2;

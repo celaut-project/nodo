@@ -64,6 +64,7 @@ def service_extended(
         send_only_hashes: bool = False,
         initial_gas_amount: int = None,
         client_id: str = None,
+        recursion_guard_token: str = None
     ) -> Generator[object, None, None]:
 
         set_config = True if config or initial_gas_amount else False
@@ -71,6 +72,11 @@ def service_extended(
         if client_id: 
             yield gateway_pb2.Client(
                 client_id = client_id
+            )
+
+        if recursion_guard_token:
+            yield gateway_pb2.RecursionGuard(
+                token = recursion_guard_token
             )
 
         for hash in metadata.hashtag.hash:
