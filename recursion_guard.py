@@ -4,17 +4,17 @@ class Singleton(type):
   _instances = {}
   _lock = threading.Lock()
 
-  def __call__(cls):
+  def __call__(cls, *args, **kwargs):
     if cls not in cls._instances:
       with cls._lock:
         # another thread could have created the instance
         # before we acquired the lock. So check that the
         # instance is still nonexistent.
         if cls not in cls._instances:
-          cls._instances[cls] = super().__call__()
+          cls._instances[cls] = super().__call__(*args, **kwargs)
     return cls._instances[cls]
 
-class Registry(Singleton):
+class Registry(metaclass = Singleton):
 
     def __init__(self):
         self.tokens = {}
@@ -23,17 +23,21 @@ class Registry(Singleton):
         self.tokens[token] = None
 
     def delete(self, token):
-        del self.tokens[token]
+        if token: del self.tokens[token]
 
 class RecursionGuard(object):
 
-    def __init__(self, token):
-        self.token = token if token else uuid.uuid4().hex
+    def __init__(self, token: str, generate: bool):
+        if generate:
+            self.token = token if token else uuid.uuid4().hex
 
-        if self.token in Registry().tokens:
-            raise Exception('Raise recursion guard.')
+            if self.token in Registry().tokens:
+                raise Exception('Raise recursion guard.')
+            else:
+                Registry().add(self.token)
+                
         else:
-            Registry().add(self.token)
+            self.token = None
 
     def __enter__(self):
         return self.token
