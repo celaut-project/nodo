@@ -91,13 +91,13 @@ system_cache_lock = Lock()
 system_cache = {}  # token : { mem_limit: 0, gas: 0 }
 
 clients_lock = Lock()
-clients = {'dev': pow(10, 128)}  # id: amount_of_gas -> other peers' deposits on this node.
+clients = {'dev': pow(10, 128)}  # client_id: amount_of_gas -> deposits on this node.
 
-total_deposits_on_other_peers_lock = Lock()
-total_deposits_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
+total_deposited_on_other_peers_lock = Lock()
+total_deposited_on_other_peers = {}  # client_id: amount of gas -> the deposits in other peers.
 
 clients_on_other_peers_lock = Lock()
-clients_on_other_peers = {}  # id: amount of gas -> the deposits in other peers.
+clients_on_other_peers = {}  # peer_id : client_id
 
 container_cache_lock = threading.Lock()
 container_cache = {}  # ip_father:[dependencies]
@@ -350,13 +350,13 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase deposit on peer '+peer_id+' by '+str(amount))
     if __peer_payment_process(peer_id = peer_id, amount = amount):  # process the payment on the peer.
-        with total_deposits_on_other_peers_lock:
-            total_deposits_on_other_peers[peer_id] = total_deposits_on_other_peers[peer_id] + amount if peer_id in total_deposits_on_other_peers else amount
+        with total_deposited_on_other_peers_lock:
+            total_deposited_on_other_peers[peer_id] = total_deposited_on_other_peers[peer_id] + amount if peer_id in total_deposited_on_other_peers else amount
         return True
     else:
-        if peer_id not in total_deposits_on_other_peers:
-            with total_deposits_on_other_peers_lock:
-                total_deposits_on_other_peers[peer_id] = 0
+        if peer_id not in total_deposited_on_other_peers:
+            with total_deposited_on_other_peers_lock:
+                total_deposited_on_other_peers[peer_id] = 0
         return False
 
 
@@ -498,9 +498,9 @@ def add_peer(
     l.LOGGER('Add peer '+ peer_id)
 
     try:
-        if peer_id not in total_deposits_on_other_peers:
-            with total_deposits_on_other_peers_lock:
-                total_deposits_on_other_peers[peer_id] = 0
+        if peer_id not in total_deposited_on_other_peers:
+            with total_deposited_on_other_peers_lock:
+                total_deposited_on_other_peers[peer_id] = 0
 
         generate_client_id_in_other_peer(peer_id = peer_id)
 
@@ -752,9 +752,9 @@ def maintain():
 
 
 def pair_deposits():
-    for i in range(len(total_deposits_on_other_peers)):
-        if i >= len(total_deposits_on_other_peers): break
-        peer_id, estimated_deposit = list(total_deposits_on_other_peers.items())[i]
+    for i in range(len(total_deposited_on_other_peers)):
+        if i >= len(total_deposited_on_other_peers): break
+        peer_id, estimated_deposit = list(total_deposited_on_other_peers.items())[i]
         if not is_peer_available(peer_id = peer_id, min_slots_open = MIN_SLOTS_OPEN_PER_PEER):
             l.LOGGER('Peer '+peer_id+' is not available .')
             continue
