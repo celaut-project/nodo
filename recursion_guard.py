@@ -32,10 +32,10 @@ class RecursionGuard(object):
             self.token = token if token else uuid.uuid4().hex
 
             if self.token in Registry().tokens:
-                raise Exception('Raise recursion guard.')
+                raise Exception('Block recursion loop.')
             else:
                 Registry().add(self.token)
-                
+
         else:
             self.token = None
 
