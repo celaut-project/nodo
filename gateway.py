@@ -867,7 +867,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     # Estimacion de coste de ejecución de un servicio con la cantidad de gas por defecto.
     def GetServiceEstimatedCost(self, request_iterator, context):
-        # TODO check cost in other peers (use recursion guard token to prevent infinite loops).
+        # TODO check cost in other peers (use RecursionGuard to prevent infinite loops).
 
         l.LOGGER('Request for the cost of a service.')
         parse_iterator = grpcbf.parse_from_buffer(
