@@ -1,11 +1,13 @@
 from hashlib import sha256
+from http import client
 import json
 from os import system
-from random import random
+from random import randint, random
 import string
 from threading import Lock
 import threading
 from time import sleep
+import time
 from types import LambdaType
 from typing import Dict
 import uuid
@@ -45,6 +47,7 @@ COMPUTE_POWER_RATE = l.GET_ENV(env = 'COMPUTE_POWER_RATE', default = 2)
 COST_OF_BUILD = l.GET_ENV(env = 'COST_OF_BUILD', default = 5)
 EXECUTION_BENEFIT = l.GET_ENV(env = 'EXECUTION_BENEFIT', default = 1)
 MANAGER_ITERATION_TIME = l.GET_ENV(env = 'MANAGER_ITERATION_TIME', default = 10)
+TIME_TO_PRUNE_ZERO_CLIENT = l.GET_ENV(env = 'TIME_TO_PRUNE_ZERO_CLIENT', default = 540)
 MEMORY_LIMIT_COST_FACTOR = l.GET_ENV(env = 'MEMORY_LIMIT_COST_FACTOR', default = 1/pow(10,6))
 MIN_DEPOSIT_PEER = l.GET_ENV(env = 'MIN_PEER_DEPOSIT', default = pow(10, 64))
 INITIAL_PEER_DEPOSIT_FACTOR = l.GET_ENV(env = 'INITIAL_PEER_DEPOSIT_FACTOR', default = 0.5)
@@ -729,7 +732,7 @@ def start_service_cost(
 
 # THREAD
 
-def maintain():
+def maintain_containers():
     # l.LOGGER('Maintain '+str(system_cache))
     for i in range(len(system_cache)):
         if i >= len(system_cache): break
@@ -751,7 +754,18 @@ def maintain():
                 raise Exception('Error purging '+token+' '+str(e))
 
 
-def pair_deposits():
+def maintain_clients():
+    zeros: list = []
+    for client_id, gas in clients.items():
+        if gas == 0: zeros.append(client_id)
+
+    for zero in zeros:
+        if clients[zero] == 0 and \
+            randint(len(zeros), len(clients)) > int(( len(zeros) + len(clients) ) /2):
+                del clients[zero]
+
+
+def peer_deposits():
     for i in range(len(total_deposited_on_other_peers)):
         if i >= len(total_deposited_on_other_peers): break
         peer_id, estimated_deposit = list(total_deposited_on_other_peers.items())[i]
@@ -775,6 +789,7 @@ def load_peer_instances_from_disk():
 def manager_thread():
     load_peer_instances_from_disk()
     while True:
-        maintain()
-        pair_deposits()
+        maintain_containers()
+        maintain_clients()
+        peer_deposits()
         sleep(MANAGER_ITERATION_TIME) 
