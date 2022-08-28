@@ -786,12 +786,18 @@ def peer_deposits():
                     l.LOGGER('Manager error: the peer '+ str(peer_id)+' could not be increased.')
 
 
+
+def init_contract_interfaces():
+    vyper_gdc.VyperDepositContractInterface()
+
+
 def load_peer_instances_from_disk():
     for peer in peers_id_iterator():
         add_peer(peer_id = peer)
 
 
 def manager_thread():
+    init_contract_interfaces()
     load_peer_instances_from_disk()
     while True:
         maintain_containers()
