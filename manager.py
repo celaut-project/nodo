@@ -766,6 +766,7 @@ def maintain_clients():
     for zero in zeros:
         if clients[zero] == 0 and \
             randint(len(zeros), len(clients)) > int(( len(zeros) + len(clients) ) /2):
+                l.LOGGER('Delete client '+zero)
                 del clients[zero]
 
 
