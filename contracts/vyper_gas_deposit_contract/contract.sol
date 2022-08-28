@@ -1,6 +1,7 @@
 pragma solidity ^0.8.11;
 
 contract Deposit {
+    uint256 public parity_factor;
     address public owner;
     mapping(bytes32 => uint256) public token_list;
 
@@ -10,8 +11,13 @@ contract Deposit {
     );
 
 
-    constructor() public {
+    constructor(uint256 pf) public {
         owner = msg.sender;
+        parity_factor = pf;
+    }
+
+    function get_parity_factor() public view returns (uint256) {
+        return parity_factor;
     }
 
     function add_gas(bytes32 token) public payable {
