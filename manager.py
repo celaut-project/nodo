@@ -795,6 +795,6 @@ def manager_thread():
     load_peer_instances_from_disk()
     while True:
         maintain_containers()
-        maintain_clients()
+        # maintain_clients()
         peer_deposits()
         sleep(MANAGER_ITERATION_TIME) 
