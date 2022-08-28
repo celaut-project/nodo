@@ -472,6 +472,7 @@ def generate_client() -> gateway_pb2.Client:
     # No collisions expected.
     client_id = uuid.uuid4().hex
     clients[client_id] = 0
+    l.LOGGER('New client created '+client_id)
     return gateway_pb2.Client(
         client_id = client_id,
     )
