@@ -102,7 +102,9 @@ class LedgerContractInterface:
             else: 
                 sleep(self.poll_interval)
         print('Session not found', self.sessions,'\n', token, token_encoded, amount, '\n',
-                 token_encoded in self.sessions, self.sessions[token_encoded] >= amount, '\n')
+                 token_encoded in self.sessions, self.sessions[token_encoded] >= amount, '\n',
+                 not validate_token, validate_token(token), '\n'
+                 )
         return False
 
 
