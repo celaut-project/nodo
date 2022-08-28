@@ -9,7 +9,7 @@ from typing import Dict
 from web3 import Web3, exceptions
 from hashlib import sha256
 import gateway_pb2, celaut_pb2
-from time import sleep
+from time import sleep, time
 
 
 DIR = os.getcwd() + '/contracts/vyper_gas_deposit_contract/'
@@ -88,7 +88,7 @@ class LedgerContractInterface:
                 self.sessions[token] = amount
             else:
                 self.sessions[token] += amount
-            print('\nNew session:', token, amount, '\n')
+            print('\n',int(time()),'New session:', token, amount, '\n')
 
 
     def validate_session(self, token: str, amount: int, validate_token = None) -> bool:
