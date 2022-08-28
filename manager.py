@@ -501,15 +501,15 @@ def generate_client_id_in_other_peer(peer_id: str) -> str:
 def add_peer(
     peer_id: str
 ) -> bool:
-    l.LOGGER('Add peer '+ peer_id)
 
     try:
         if peer_id not in total_deposited_on_other_peers:
             with total_deposited_on_other_peers_lock:
                 total_deposited_on_other_peers[peer_id] = 0
 
-        generate_client_id_in_other_peer(peer_id = peer_id)
-
+        l.LOGGER('Add peer '+ peer_id+' with client '+ 
+            generate_client_id_in_other_peer(peer_id=peer_id)
+        )
         return True
     except:
         return False
