@@ -373,6 +373,7 @@ def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
 
 def __check_payment_process( amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
     l.LOGGER('Check payment process to '+token+' of '+str(amount))
+    print('Validate token -> ', token in clients)
     return PAYMENT_PROCESS_VALIDATORS[sha256(contract).digest()]( amount, token, ledger, contract_addr, validate_token = lambda token: token in clients)
 
 
