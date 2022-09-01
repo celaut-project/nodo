@@ -10,6 +10,7 @@ from web3 import Web3, exceptions
 from hashlib import sha256
 import gateway_pb2, celaut_pb2
 from time import sleep, time
+from logger import LOGGER
 
 
 DIR = os.getcwd() + '/contracts/vyper_gas_deposit_contract/'
@@ -63,7 +64,7 @@ class LedgerContractInterface:
             else:
                 self.nonce_count = 0
                 self.last_nonce = last_nonce
-            print('             nonce:', self.nonce_count + last_nonce)
+            LOGGER('             nonce:', self.nonce_count + last_nonce)
             return self.nonce_count + last_nonce
 
     # Update Session Event.
