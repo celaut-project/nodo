@@ -585,10 +585,16 @@ def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
     # It's not possible local, but other pair can, returns True.
 
 
-def get_sysresources(token: str) -> celaut_pb2.Sysresources:
-    return celaut_pb2.Sysresources(
-        mem_limit = system_cache[token]["mem_limit"]
+def get_sysresources(token: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
+    return gateway_pb2.ModifyServiceSystemResourcesOutput(
+        sysreq = celaut_pb2.Sysresources(
+            mem_limit = system_cache[token]["mem_limit"],
+        ),
+        gas = to_gas_amount(
+            gas_amount = system_cache[token]["gas"]
+        )
     )
+    
 
 
 # PRUNE CONTAINER METHOD
