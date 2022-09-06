@@ -509,7 +509,7 @@ def get_from_registry(hash: str) -> celaut.Any:
 class Gateway(gateway_pb2_grpc.Gateway):
 
     def StartService(self, request_iterator, context):
-        l.LOGGER('Starting service ...')
+        l.LOGGER('Starting service by '+str(context.peer())+' ...')
         configuration = None
         system_requeriments = None
         initial_gas_amount = None
