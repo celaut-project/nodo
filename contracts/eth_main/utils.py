@@ -31,7 +31,7 @@ def catch_event(contract_address, w3, contract, event_name, opt, init_delay: int
                         poll_interval = poll_interval, event_name = event_name, opt = opt, w3 = w3, contract = contract
                     )))
         except Exception as e:
-            LOGGER('Exception on catch event: ', e)
+            LOGGER('Exception on catch event: '+ str(e))
         finally:
             # close loop to free up system resources
             loop.close()

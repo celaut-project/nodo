@@ -1,3 +1,4 @@
+from ast import Str
 import sys, os; sys.path.append(os.getcwd())
 from threading import Thread
 
@@ -64,7 +65,7 @@ class LedgerContractInterface:
             else:
                 self.nonce_count = 0
                 self.last_nonce = last_nonce
-            LOGGER('             nonce:', self.nonce_count + last_nonce)
+            LOGGER('             nonce:'+ str(self.nonce_count + last_nonce))
             return self.nonce_count + last_nonce
 
     # Update Session Event.
