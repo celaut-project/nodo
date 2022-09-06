@@ -619,7 +619,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 try:
                     r = next(parser_generator) # Can raise StopIteration
                     if type(r) is not gateway_pb2.ServiceWithMeta: raise Exception
-                except StopIteration: l.LOGGER('BUG ABOUT EXCEPTION, IT`S STOP ITERATION.')
                 except Exception: raise Exception('Grpcbf error: partition corrupted')
                 service_with_meta = r
  
