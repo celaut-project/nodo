@@ -598,7 +598,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             elif r is gateway_pb2.ServiceWithConfig: # We now that is partitionated.
                 try:
-                    l.LOGGER('PARSING DONDE FALLA')
+                    l.LOGGER('PARSING DONDE FALLA'+str(r))
                     r = next(parser_generator)
                     l.LOGGER('PARSED -> '+str(r))
                     if type(r) is not gateway_pb2.ServiceWithConfig: raise Exception
@@ -619,9 +619,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             elif r is gateway_pb2.ServiceWithMeta:
                 try:
-                    l.LOGGER('PARSING DONDE FALLA 2')
+                    l.LOGGER('PARSING DONDE FALLA 2'+str(r))
                     r = next(parser_generator) # Can raise StopIteration
-                    l.LOGGER('PARSED 2 -> '+str(r))
+                    l.LOGGER('PARSED 2 -> '+str(r)+' '+str(type(r)))
                     if type(r) is not gateway_pb2.ServiceWithMeta: raise Exception
                 except Exception: raise Exception('Grpcbb error: partition corrupted')
                 service_with_meta = r
