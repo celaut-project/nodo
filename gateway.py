@@ -666,7 +666,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
         try:
             for b in grpcbf.serialize_to_buffer(
                 message_iterator = launch_service(
-                    indices={},
                     service_buffer = search_definition(hashes = hashes),
                     metadata = celaut.Any.Metadata(
                         hashtag = celaut.Any.Metadata.HashTag(
