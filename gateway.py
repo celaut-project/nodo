@@ -619,20 +619,22 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             elif r is gateway_pb2.ServiceWithMeta:
                 try:
+                    l.LOGGER('PARSING DONDE FALLA 2')
                     r = next(parser_generator) # Can raise StopIteration
+                    l.LOGGER('PARSED 2 -> '+str(r))
                     if type(r) is not gateway_pb2.ServiceWithMeta: raise Exception
-                except Exception: raise Exception('Grpcbf error: partition corrupted')
+                except Exception: raise Exception('Grpcbb error: partition corrupted')
                 service_with_meta = r
  
             # Si me da servicio.  
             if service_with_meta:
                 # Iterate the second partition.
                 try:
-                    l.LOGGER('PARSING DONDE FALLA 2')
+                    l.LOGGER('PARSING DONDE FALLA 3')
                     second_partition_dir = next(parser_generator)
-                    l.LOGGER('PARSED 2 -> '+str(second_partition_dir))
+                    l.LOGGER('PARSED 3 -> '+str(second_partition_dir))
                     if type(second_partition_dir) is not str: raise Exception
-                except: raise Exception('Grpcbf error: partition corrupted')
+                except: raise Exception('Grpcbb error: partition corrupted')
                 hash = get_service_hex_main_hash(
                     service_buffer = (service_with_meta.service, second_partition_dir) if second_partition_dir else service_with_meta.service,
                     metadata = service_with_meta.metadata,
