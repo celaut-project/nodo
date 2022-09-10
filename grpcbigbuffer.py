@@ -349,7 +349,11 @@ def parse_from_buffer(
         with mem_manager(len = 3*sum([os.path.getsize(dir) for dir in dirs[:-1]]) + 2*os.path.getsize(dirs[-1])):
             if (len(remote_partitions_model)==0 or len(remote_partitions_model)==1) and len(dirs)==1:
                 main_object = pf_object()
-                main_object.ParseFromString(open(dirs[0], 'rb').read())
+                try:
+                    main_object.ParseFromString(open(dirs[0], 'rb').read())
+                except Exception as e:
+                    print(str(e))
+                    print('DIR -> ', dirs[0])
                 remove_file(file=dirs[0])
             elif len(remote_partitions_model)!=len(dirs): 
                 raise Exception("Error: remote partitions model are not correct with the buffer.")
