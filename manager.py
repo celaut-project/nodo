@@ -128,7 +128,7 @@ clients_on_other_peers = {}  # peer_id : client_id
 container_cache_lock = threading.Lock()
 container_cache = {}  # ip_father:[dependencies]
 
-# TODO evaluate the necesity of cache_service_perspective_lock
+# Lock not needed.
 cache_service_perspective = {} # service_ip:(local_token or external_service_token)
 
 # Lock not needed.
