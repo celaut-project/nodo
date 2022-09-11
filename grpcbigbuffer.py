@@ -352,8 +352,7 @@ def parse_from_buffer(
                 try:
                     main_object.ParseFromString(open(dirs[0], 'rb').read())
                 except Exception as e:
-                    print(str(e))
-                    print('DIR -> ', dirs[0])
+                    raise Exception( str(e) + 'DIR -> '+ str(dirs[0]))
                 remove_file(file=dirs[0])
             elif len(remote_partitions_model)!=len(dirs): 
                 raise Exception("Error: remote partitions model are not correct with the buffer.")
