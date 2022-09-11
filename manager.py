@@ -13,7 +13,7 @@ from typing import Dict
 import uuid
 import build
 import docker as docker_lib
-from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, is_peer_available, peers_id_iterator, to_gas_amount
+from utils import Singleton, from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, is_peer_available, peers_id_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -89,6 +89,30 @@ def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> 
 
 
 # SYSTEM CACHE
+
+class LockCaches(metaclass = Singleton):
+    def __init__(self):
+        self.d = {}  # key, token
+
+    def lock(self, token: str):
+        if token not in self.d:
+            self.d[token] = CacheLock()
+
+        return self.d[token]
+
+    def delete(self, token: str):
+        del self.d[token]
+
+class CacheLock:
+    def __init__(self):
+        self.lock = Lock()
+
+    def __enter__(self):
+        self.lock.__enter__()
+    
+    def __exit__(self, exception_type, exception_value, traceback):
+        self.lock.__exit__()
+
 
 system_cache_lock = Lock()
 system_cache = {}  # token : { mem_limit: 0, gas: 0 }
