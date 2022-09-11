@@ -598,9 +598,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             elif r is gateway_pb2.ServiceWithConfig: # We now that is partitionated.
                 try:
-                    l.LOGGER('PARSING DONDE FALLA'+str(r))
                     r = next(parser_generator)
-                    l.LOGGER('PARSED -> '+str(r))
                     if type(r) is not gateway_pb2.ServiceWithConfig: raise Exception
                 except Exception: raise Exception('Grpcbb error: partition corrupted')
                 configuration = r.config
@@ -619,9 +617,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             elif r is gateway_pb2.ServiceWithMeta:
                 try:
-                    l.LOGGER('PARSING DONDE FALLA 2'+str(r))
                     r = next(parser_generator) # Can raise StopIteration
-                    l.LOGGER('PARSED 2 -> '+str(r)+' '+str(type(r)))
                     if type(r) is not gateway_pb2.ServiceWithMeta: raise Exception
                 except Exception: raise Exception('Grpcbb error: partition corrupted')
                 service_with_meta = r
@@ -630,9 +626,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             if service_with_meta:
                 # Iterate the second partition.
                 try:
-                    l.LOGGER('PARSING DONDE FALLA 3')
                     second_partition_dir = next(parser_generator)
-                    l.LOGGER('PARSED 3 -> '+str(second_partition_dir))
                     if type(second_partition_dir) is not str: raise Exception
                 except: raise Exception('Grpcbb error: partition corrupted')
                 hash = get_service_hex_main_hash(
@@ -641,7 +635,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     other_hashes = hashes
                     )
 
-                l.LOGGER('SAVE SERVICE ON DISK')
+                l.LOGGER('Save service on disk')
                 save_service(
                     service_p1 = service_with_meta.service.SerializeToString(),
                     service_p2 = second_partition_dir,
@@ -649,7 +643,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     hash = hash if hash else None
                 )
                 if configuration:
-                    l.LOGGER('LAUNCH SERVICE WITH CONFIGURATION')
+                    l.LOGGER('Launch service with configuration')
                     for buffer in grpcbf.serialize_to_buffer(
                         indices={},
                         message_iterator = launch_service(
