@@ -1,8 +1,6 @@
 from hashlib import sha256
-from http import client
 import json
-from os import system
-from random import randint, random
+from random import randint
 import string
 from threading import Lock
 import threading
@@ -13,7 +11,7 @@ from typing import Dict
 import uuid
 import build
 import docker as docker_lib
-from utils import Singleton, from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, is_peer_available, peers_id_iterator, to_gas_amount
+from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, is_peer_available, peers_id_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
 import pymongo
@@ -90,7 +88,7 @@ def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> 
 
 # SYSTEM CACHE
 
-class LockCaches(metaclass = Singleton):
+class LockCaches():
     def __init__(self):
         self.d = {}  # key, token
 
@@ -114,7 +112,8 @@ class CacheLock:
         self.lock.__exit__()
 
 
-system_cache_lock = Lock()
+cache_locks = LockCaches()
+
 system_cache = {}  # token : { mem_limit: 0, gas: 0 }
 
 clients_lock = Lock()
@@ -205,7 +204,8 @@ def __purgue_internal(agent_id = None, container_id = None, container_ip = None,
         l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e)+ ' ' + str(cache_service_perspective)+ ' ' + str(container_id))  # TODO. Study the imposibility of that.
         raise e
 
-    with system_cache_lock: del system_cache[token]
+    del system_cache[token]
+    cache_locks.delete(token)
 
     if container_ip in container_cache:
         for dependency in container_cache[container_ip]:
@@ -274,7 +274,7 @@ def get_token_by_uri(uri: str) -> str:
         raise e
 
 def __push_token(token: str): 
-    with system_cache_lock: system_cache[token] = { "mem_limit": 0 }
+    with cache_locks.lock(token): system_cache[token] = { "mem_limit": 0 }
 
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
     if token not in system_cache.keys(): raise Exception('Manager error: token '+token+' does not exists.')
@@ -288,7 +288,7 @@ def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
             IOBigData().unlock_ram(ram_amount = variation)
 
         if variation != 0: 
-            with system_cache_lock: system_cache[token]['mem_limit'] = sys_req.mem_limit
+            with cache_locks.lock(token): system_cache[token]['mem_limit'] = sys_req.mem_limit
 
     return True
 
@@ -300,13 +300,11 @@ def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Contai
 def __refound_gas(
     gas: int,
     cache: dict,
-    cache_lock: threading.Lock,
-    id: int
+    token: str
 ) -> bool: 
     try:
-        cache_lock.acquire()
-        cache[id] += gas
-        cache_lock.release()
+        with cache_locks.lock(token):
+            cache[token] += gas
     except Exception as e:
         l.LOGGER('Manager error: '+str(e))
         return False
@@ -316,11 +314,10 @@ def __refound_gas(
 def __refound_gas_function_factory(
     gas: int,
     cache: dict,
-    cache_lock: threading.Lock,
-    id: int,
+    token: str,
     container: list = None
 ) -> lambda: None: 
-    def use(l = [lambda: __refound_gas(gas, cache, cache_lock, id)]): l.pop()()
+    def use(l = [lambda: __refound_gas(gas, cache, token)]): l.pop()()
     if container: container.append( lambda: use() )
 
 
@@ -409,7 +406,7 @@ def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
         clients_lock.acquire() 
         clients[client_id] = 0
         clients_lock.release()
-    if not __refound_gas(gas = amount, cache = clients, cache_lock = clients_lock, id = client_id):
+    if not __refound_gas(gas = amount, cache = clients, token = client_id):
         raise Exception('Manager error: cannot increase local gas for client '+client_id+' by '+str(amount))
     return True
 
@@ -451,21 +448,19 @@ def spend_gas(
             with clients_lock: clients[token_or_container_ip] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
-                cache = clients, 
-                cache_lock = clients_lock,
-                id = token_or_container_ip, 
+                cache = clients,
+                token = token_or_container_ip, 
                 container = refund_gas_function_container
             )
             return True
 
         # En caso de que token_or_container_ip sea el token del contenedor.
         elif token_or_container_ip in system_cache and (system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with system_cache_lock: system_cache[token_or_container_ip]['gas'] -= gas_to_spend
+            with cache_locks.lock(token_or_container_ip): system_cache[token_or_container_ip]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
-                cache = system_cache, 
-                cache_lock = system_cache_lock,
-                id = token_or_container_ip, 
+                cache = system_cache,
+                token = token_or_container_ip, 
                 container = refund_gas_function_container
             )
             return True
@@ -473,12 +468,11 @@ def spend_gas(
         # En caso de que token_or_container_ip sea la ip del contenedor.
         token_or_container_ip = cache_service_perspective[token_or_container_ip]
         if token_or_container_ip in system_cache and (system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with system_cache_lock: system_cache[token_or_container_ip]['gas'] -= gas_to_spend
+            with cache_locks.lock(token_or_container_ip): system_cache[token_or_container_ip]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
-                cache = system_cache, 
-                cache_lock = system_cache_lock,
-                id = token_or_container_ip, 
+                cache = system_cache,
+                token = token_or_container_ip, 
                 container = refund_gas_function_container
             )
             return True
@@ -564,7 +558,7 @@ def add_container(
         container_ip___peer_id = container.attrs['NetworkSettings']['IPAddress'],
         container_id____his_token = token,
     )
-    with system_cache_lock: system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(father_id = father_id)
+    with cache_locks.lock(token): system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(father_id = father_id)
     if not container_modify_system_params(
         token = token,
         system_requeriments_range = system_requeriments_range
