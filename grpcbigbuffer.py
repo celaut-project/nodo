@@ -359,7 +359,7 @@ def parse_from_buffer(
                         main_object.ParseFromString(open(dirs[0], 'rb').read())
                         break
                     except Exception as e:
-                        import os, logging; logging.getLogger(__name__).info('ERROR AL LEER ARCHIVO '+str(dirs[0])+' '+str(os.path.getsize(dirs[0]))+' '+str(e)+'\n')
+                        import logging; logging.getLogger(__name__).info('ERROR AL LEER ARCHIVO '+str(dirs[0])+' '+str(os.path.getsize(dirs[0]))+' '+str(e)+'\n')
 
                 remove_file(file=dirs[0])
             elif len(remote_partitions_model)!=len(dirs): 
