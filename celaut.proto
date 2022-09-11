@@ -84,7 +84,7 @@ message Service {
         }
         AppDef app_protocol = 1;
         repeated Slot slot = 2;
-        // repeated ContractLedger contract_ledger = 3;
+        repeated ContractLedger contract_ledger = 3;
         // Cost function can be applied. <- must be optional.
     }
 
