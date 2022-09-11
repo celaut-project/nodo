@@ -6,9 +6,9 @@ MAX_DIR = 999999999
 import os, gc, itertools, sys
 
 from google import protobuf
-import buffer_pb2
+import buffer_pb2 as buffer_pb2
 from random import randint
-from typing import Generator, Union
+from typing import Generator, Union, final
 from threading import Condition
 
 class EmptyBufferException(Exception):
@@ -104,13 +104,9 @@ def save_chunks_to_file(buffer_iterator, filename, signal = None):
     if not signal: signal = Signal(exist=False)
     signal.wait()
     with open(filename, 'wb') as f:
-        import logging; logging.getLogger(__name__).info('ESCRIBIENDO ARCHIVO '+filename+'\n')
         signal.wait()
-        for buffer in buffer_iterator: 
-            import logging; logging.getLogger(__name__).info('  ESCRIBIENDO '+filename+'\n')
-            f.write(buffer.chunk) # MAYBE IT'S MORE SLOW, BUT USES ONLY THE CHUNK LEN OF RAM.
+        for buffer in buffer_iterator: f.write(buffer.chunk) # MAYBE IT'S MORE SLOW, BUT USES ONLY THE CHUNK LEN OF RAM.
         # f.write(b''.join([buffer.chunk for buffer in buffer_iterator])) # MAYBE IT'S FASTER BUT CONSUMES A LOT OF RAM with big buffers.
-    import logging; logging.getLogger(__name__).info('ARCHIVO ESCRITO '+filename+'\n')
 
 def get_subclass(partition, object_cls):
     return get_subclass(
@@ -296,7 +292,6 @@ def parse_from_buffer(
                 ),
                 signal = signal,
             )
-            import logging; logging.getLogger(__name__).info('NOMBRE DEVUELTO '+filename+'\n')
             return filename
         except Exception as e:
             remove_file(file=filename)
@@ -354,13 +349,7 @@ def parse_from_buffer(
         with mem_manager(len = 3*sum([os.path.getsize(dir) for dir in dirs[:-1]]) + 2*os.path.getsize(dirs[-1])):
             if (len(remote_partitions_model)==0 or len(remote_partitions_model)==1) and len(dirs)==1:
                 main_object = pf_object()
-                while True:
-                    try:
-                        main_object.ParseFromString(open(dirs[0], 'rb').read())
-                        break
-                    except Exception as e:
-                        import logging; logging.getLogger(__name__).info('ERROR AL LEER ARCHIVO '+str(dirs[0])+' '+str(os.path.getsize(dirs[0]))+' '+str(e)+'\n')
-
+                main_object.ParseFromString(open(dirs[0], 'rb').read())
                 remove_file(file=dirs[0])
             elif len(remote_partitions_model)!=len(dirs): 
                 raise Exception("Error: remote partitions model are not correct with the buffer.")
