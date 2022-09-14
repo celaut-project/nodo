@@ -113,16 +113,15 @@ class CacheLock:
 
 
 cache_locks = LockCaches()
+# with cache_locks.lock(token):
+# cache_locks.delete(token)
 
 system_cache = {}  # token : { mem_limit: 0, gas: 0 }
 
-clients_lock = Lock()
 clients = {'dev': pow(10, 128)}  # client_id: amount_of_gas -> deposits on this node.
 
-total_deposited_on_other_peers_lock = Lock()
 total_deposited_on_other_peers = {}  # client_id: amount of gas -> the deposits in other peers.
 
-clients_on_other_peers_lock = Lock()
 clients_on_other_peers = {}  # peer_id : client_id
 
 container_cache_lock = threading.Lock()
@@ -374,12 +373,12 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase deposit on peer '+peer_id+' by '+str(amount))
     if __peer_payment_process(peer_id = peer_id, amount = amount):  # process the payment on the peer.
-        with total_deposited_on_other_peers_lock:
+        with cache_locks.lock(peer_id):
             total_deposited_on_other_peers[peer_id] = total_deposited_on_other_peers[peer_id] + amount if peer_id in total_deposited_on_other_peers else amount
         return True
     else:
         if peer_id not in total_deposited_on_other_peers:
-            with total_deposited_on_other_peers_lock:
+            with cache_locks.lock(peer_id):
                 total_deposited_on_other_peers[peer_id] = 0
         return False
 
@@ -403,9 +402,7 @@ def __check_payment_process( amount: int, ledger: str, token: str, contract: byt
 def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for client '+client_id+' of '+str(amount))
     if client_id not in clients:  # TODO no debería de añadir un peer que no existe.
-        clients_lock.acquire() 
-        clients[client_id] = 0
-        clients_lock.release()
+        with cache_locks.lock(client_id):  clients[client_id] = 0
     if not __refound_gas(gas = amount, cache = clients, token = client_id):
         raise Exception('Manager error: cannot increase local gas for client '+client_id+' by '+str(amount))
     return True
@@ -445,7 +442,7 @@ def spend_gas(
     try:
         # En caso de que sea un peer, el token es el peer id.
         if token_or_container_ip in clients and (clients[token_or_container_ip] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with clients_lock: clients[token_or_container_ip] -= gas_to_spend
+            with cache_locks.lock(token_or_container_ip): clients[token_or_container_ip] -= gas_to_spend
             __refound_gas_function_factory(
                 gas = gas_to_spend, 
                 cache = clients,
@@ -503,7 +500,7 @@ def generate_client_id_in_other_peer(peer_id: str) -> str:
 
     if peer_id not in clients_on_other_peers: 
         l.LOGGER('Generate new client for peer '+peer_id)
-        with clients_on_other_peers_lock:
+        with cache_locks.lock(peer_id):
             clients_on_other_peers[peer_id] = str(next(grpcbf.client_grpc(
             method = gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
@@ -523,7 +520,7 @@ def add_peer(
 
     try:
         if peer_id not in total_deposited_on_other_peers:
-            with total_deposited_on_other_peers_lock:
+            with cache_locks.lock(peer_id):
                 total_deposited_on_other_peers[peer_id] = 0
 
         l.LOGGER('Add peer '+ peer_id+' with client '+ 
@@ -687,8 +684,8 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
             l.LOGGER('Error getting gas amount from '+peer_id+'.')
             if is_peer_available(peer_id=peer_id):
                 l.LOGGER('It is assumed that the client was invalid on peer '+peer_id)
-                with clients_on_other_peers_lock:
-                    del clients_on_other_peers[peer_id]
+                cache_locks.delete(peer_id)
+                del clients_on_other_peers[peer_id]
             else:
                 break
 
