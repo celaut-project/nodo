@@ -6,6 +6,7 @@ from threading import Lock
 import threading
 from time import sleep
 import time
+from tkinter.messagebox import NO
 from types import LambdaType
 from typing import Dict
 import uuid
@@ -118,7 +119,22 @@ cache_locks = LockCaches()
 
 system_cache = {}  # token : { mem_limit: 0, gas: 0 }
 
-clients = {'dev': pow(10, 128)}  # client_id: amount_of_gas -> deposits on this node.
+
+class Client:
+    
+    def __init__(self, gas: int):
+        self.gas: int = gas
+        self.last_usage: float = time.time()
+
+
+def add_gas_on_client(key: str, gas: int):
+    clients[key].gas += gas
+
+clients = {
+        'dev': Client(
+            gas = pow(10, 128)
+        )
+    }  # client_id: amount_of_gas -> deposits on this node.
 
 total_deposited_on_other_peers = {}  # client_id: amount of gas -> the deposits in other peers.
 
@@ -297,13 +313,19 @@ def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Contai
     )
 
 def __refound_gas(
-    gas: int,
-    cache: dict,
-    token: str
+    gas: int = None,
+    token: str = None,
+    cache: dict = None,
+    add_function = None,  # Lambda function if cache is not a dict of token:gas
 ) -> bool: 
     try:
         with cache_locks.lock(token):
-            cache[token] += gas
+            if add_function:
+                add_function(gas)
+            elif cache:
+                cache[token] += gas
+            else:
+                raise Exception('Function usage error: Not add_function or cache provided.')
     except Exception as e:
         l.LOGGER('Manager error: '+str(e))
         return False
@@ -311,12 +333,13 @@ def __refound_gas(
 
 # Only can be executed once.
 def __refound_gas_function_factory(
-    gas: int,
-    cache: dict,
-    token: str,
-    container: list = None
+    gas: int = None,
+    cache: dict = None,
+    token: str = None,
+    container: list = None,
+    add_function = None
 ) -> lambda: None: 
-    def use(l = [lambda: __refound_gas(gas, cache, token)]): l.pop()()
+    def use(l = [lambda: __refound_gas(gas = gas, cache = cache, token = token, add_function = add_function)]): l.pop()()
     if container: container.append( lambda: use() )
 
 
@@ -403,7 +426,11 @@ def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for client '+client_id+' of '+str(amount))
     if client_id not in clients:  # TODO no debería de añadir un peer que no existe.
         with cache_locks.lock(client_id):  clients[client_id] = 0
-    if not __refound_gas(gas = amount, cache = clients, token = client_id):
+    if not __refound_gas(
+            gas = amount, 
+            add_function = lambda gas: add_gas_on_client(key = client_id, gas = gas), 
+            token = client_id
+        ):
         raise Exception('Manager error: cannot increase local gas for client '+client_id+' by '+str(amount))
     return True
 
@@ -444,9 +471,9 @@ def spend_gas(
         if token_or_container_ip in clients and (clients[token_or_container_ip] >= gas_to_spend or ALLOW_GAS_DEBT):
             with cache_locks.lock(token_or_container_ip): clients[token_or_container_ip] -= gas_to_spend
             __refound_gas_function_factory(
-                gas = gas_to_spend, 
-                cache = clients,
+                gas = gas_to_spend,
                 token = token_or_container_ip, 
+                add_function = lambda gas: add_gas_on_client(key = token_or_container_ip, gas = gas),
                 container = refund_gas_function_container
             )
             return True
