@@ -59,6 +59,7 @@ COMMUNICATION_ATTEMPTS = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS', default = 1)
 COMMUNICATION_ATTEMPTS_DELAY = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS_DELAY', default = 60)
 MIN_SLOTS_OPEN_PER_PEER = l.GET_ENV(env = 'MIN_SLOTS_OPEN_PER_PEER', default = 1)
 CLIENT_EXPIRATION_TIME = l.GET_ENV(env = 'CLIENT_EXPIRATION_TIME', default = 1200)
+CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = l.GET_ENV(env = 'CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME', default = pow(10, 3))
 
 PAYMENT_PROCESS_VALIDATORS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.payment_process_validator}     # contract_hash:  lambda peer_id, tx_id, amount -> bool,
 AVAILABLE_PAYMENT_PROCESS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.process_payment}   # contract_hash:   lambda amount, peer_id -> tx_id,
@@ -126,18 +127,18 @@ class Client:
     
     def __init__(self, gas: int = 0):
         self.gas: int = gas
-        self.last_usage: float = time.time()
+        self.last_usage: float = None
 
-    def add_gas(self, gas: int):
-        self.last_usage = time.time()
+    def add_gas(self, gas: int):        
         self.gas += gas
+        if self.last_usage and self.gas >= CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME: self.last_usage = None
 
     def reduce_gas(self, gas: int):
-        self.last_usage = time.time()
         self.gas -= gas
+        if self.gas == 0 and self.last_usage: self.last_usage = time.time()
 
     def is_expired(self) -> bool:
-        return time.time() - self.last_usage >= CLIENT_EXPIRATION_TIME
+        return self.last_usage and ( (time.time() - self.last_usage) >= CLIENT_EXPIRATION_TIME)
 
 clients = {
         'dev': Client(
