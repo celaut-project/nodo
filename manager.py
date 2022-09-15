@@ -1,5 +1,6 @@
 from hashlib import sha256
 import json
+from pydoc import cli
 from random import randint
 import string
 from threading import Lock
@@ -122,13 +123,15 @@ system_cache = {}  # token : { mem_limit: 0, gas: 0 }
 
 class Client:
     
-    def __init__(self, gas: int):
+    def __init__(self, gas: int = 0):
         self.gas: int = gas
         self.last_usage: float = time.time()
 
+    def add_gas(self, gas: int):
+        self.gas += gas
 
-def add_gas_on_client(key: str, gas: int):
-    clients[key].gas += gas
+    def reduce_gas(self, gas: int):
+        self.gas -= gas
 
 clients = {
         'dev': Client(
@@ -425,10 +428,10 @@ def __check_payment_process( amount: int, ledger: str, token: str, contract: byt
 def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for client '+client_id+' of '+str(amount))
     if client_id not in clients:  # TODO no debería de añadir un peer que no existe.
-        with cache_locks.lock(client_id):  clients[client_id] = 0
+        raise Exception('Client '+client_id+' does not exists.')
     if not __refound_gas(
             gas = amount, 
-            add_function = lambda gas: add_gas_on_client(key = client_id, gas = gas), 
+            add_function = lambda gas: clients[client_id].add_gas(gas), 
             token = client_id
         ):
         raise Exception('Manager error: cannot increase local gas for client '+client_id+' by '+str(amount))
@@ -444,7 +447,7 @@ def __get_gas_amount_by_id(id: str) -> int:
         ]['gas']
 
     if id in clients: 
-        return clients[id]
+        return clients[id].gas
 
     raise Exception('Manager error: '+id+' not found.')
 
@@ -468,12 +471,12 @@ def spend_gas(
     # l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
     try:
         # En caso de que sea un peer, el token es el peer id.
-        if token_or_container_ip in clients and (clients[token_or_container_ip] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with cache_locks.lock(token_or_container_ip): clients[token_or_container_ip] -= gas_to_spend
+        if token_or_container_ip in clients and (clients[token_or_container_ip].gas >= gas_to_spend or ALLOW_GAS_DEBT):
+            with cache_locks.lock(token_or_container_ip): clients[token_or_container_ip].reduce_gas(gas=gas_to_spend)
             __refound_gas_function_factory(
                 gas = gas_to_spend,
                 token = token_or_container_ip, 
-                add_function = lambda gas: add_gas_on_client(key = token_or_container_ip, gas = gas),
+                add_function = lambda gas: clients[token_or_container_ip].add_gas(gas),
                 container = refund_gas_function_container
             )
             return True
@@ -513,7 +516,7 @@ def spend_gas(
 def generate_client() -> gateway_pb2.Client:
     # No collisions expected.
     client_id = uuid.uuid4().hex
-    clients[client_id] = 0
+    clients[client_id] = Client()
     l.LOGGER('New client created '+client_id)
     return gateway_pb2.Client(
         client_id = client_id,
@@ -674,7 +677,7 @@ def prune_container(token: str) -> int:
 
 def __get_metrics_client(client_id) -> gateway_pb2.Metrics:
     return gateway_pb2.Metrics(
-        gas_amount = to_gas_amount(clients[client_id]),
+        gas_amount = to_gas_amount(clients[client_id].gas),
     )
 
 def __get_metrics_internal(token: str) -> gateway_pb2.Metrics:
