@@ -54,3 +54,5 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 - ALLOW_GAS_DEBT
 - COMMUNICATION_ATTEMPTS_DELAY
 - COMMUNICATION_ATTEMPTS
+- MIN_SLOTS_OPEN_PER_PEER
+- CLIENT_EXPIRATION_TIME

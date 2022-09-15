@@ -58,6 +58,7 @@ ALLOW_GAS_DEBT = l.GET_ENV(env = 'ALLOW_GAS_DEBT', default = False)  # Could be 
 COMMUNICATION_ATTEMPTS = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS', default = 1)
 COMMUNICATION_ATTEMPTS_DELAY = l.GET_ENV(env = 'COMMUNICATION_ATTEMPTS_DELAY', default = 60)
 MIN_SLOTS_OPEN_PER_PEER = l.GET_ENV(env = 'MIN_SLOTS_OPEN_PER_PEER', default = 1)
+CLIENT_EXPIRATION_TIME = l.GET_ENV(env = 'CLIENT_EXPIRATION_TIME', default = 1200)
 
 PAYMENT_PROCESS_VALIDATORS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.payment_process_validator}     # contract_hash:  lambda peer_id, tx_id, amount -> bool,
 AVAILABLE_PAYMENT_PROCESS: Dict[bytes, LambdaType] = {vyper_gdc.CONTRACT_HASH : vyper_gdc.process_payment}   # contract_hash:   lambda amount, peer_id -> tx_id,
@@ -134,6 +135,9 @@ class Client:
     def reduce_gas(self, gas: int):
         self.last_usage = time.time()
         self.gas -= gas
+
+    def is_expired(self) -> bool:
+        return time.time() - self.last_usage >= CLIENT_EXPIRATION_TIME
 
 clients = {
         'dev': Client(
@@ -812,16 +816,12 @@ def maintain_containers():
 
 
 def maintain_clients():
-    zeros: list = []
-    for client_id, gas in clients.items():
-        if gas == 0: zeros.append(client_id)
-
-    for zero in zeros:
-        if clients[zero] == 0 and \
-            randint(len(zeros), len(clients)) > int(( len(zeros) + len(clients) ) /2):
-                l.LOGGER('Delete client '+zero)
-                del cache_locks.delete(zero)
-                del clients[zero]
+    for client_id, client in clients.items():
+        if client.is_expired():
+            l.LOGGER('Delete client '+client_id)
+            with cache_locks.lock(client_id): 
+                del clients[client_id]
+            cache_locks.delete(client_id)
 
 
 def peer_deposits():
@@ -855,6 +855,6 @@ def manager_thread():
     load_peer_instances_from_disk()
     while True:
         maintain_containers()
-        # maintain_clients()
+        maintain_clients()
         peer_deposits()
         sleep(MANAGER_ITERATION_TIME) 
