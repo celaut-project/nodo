@@ -128,9 +128,11 @@ class Client:
         self.last_usage: float = time.time()
 
     def add_gas(self, gas: int):
+        self.last_usage = time.time()
         self.gas += gas
 
     def reduce_gas(self, gas: int):
+        self.last_usage = time.time()
         self.gas -= gas
 
 clients = {
