@@ -164,13 +164,13 @@ def get_container_from_outside( # TODO could take it from a specific ledger.
             save_chunks_to_file(
                 filename = HYCACHE + id + '.tar',
                 # chunks = search_container(service = service) TODO ??
-                chunks = gateway_pb2_grpc.GatewayStub(  # Parse_from_buffer is not necesary because chunks're it.
+                buffer_iterator = gateway_pb2_grpc.GatewayStub(  # Parse_from_buffer is not necesary because chunks're it.
                             grpc.insecure_channel(
                                 next(generate_uris_by_peer_id(peer)),
                             )
                         ).GetServiceTar(
                             serialize_to_buffer(
-                                service_extended(service = service_buffer, metadata = metadata),
+                                service_extended(service_buffer = service_buffer, metadata = metadata),
                                 indices=GetServiceTar_input
                             )
                         )
@@ -179,7 +179,7 @@ def get_container_from_outside( # TODO could take it from a specific ledger.
             l.LOGGER('    Buffer on file.')
             break
         except grpc.RpcError: # Other exception is raised.
-            l.LOGGER('\nThe container with hash ' + id + ' is not in peer ' + str(peer_uri))
+            l.LOGGER('\nThe container with hash ' + id + ' is not in peer ' + peer)
             continue
     l.LOGGER('Finded the container, go to build it.')
 
