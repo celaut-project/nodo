@@ -4,6 +4,7 @@ from buffer_pb2 import Buffer
 
 import celaut_pb2 as celaut
 import build, utils
+from duplicate_grabber import DuplicateGrabber
 from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, MIN_DEPOSIT_PEER, \
     add_container, container_modify_system_params, default_initial_cost, could_ve_this_sysreq, execution_cost, gas_amount_on_other_peer, generate_client_id_in_other_peer, get_metrics, get_sysresources, \
     increase_deposit_on_peer, manager_thread, prune_container, set_external_on_cache, generate_client, \
@@ -626,7 +627,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
             if service_with_meta:
                 # Iterate the second partition.
                 try:
-                    second_partition_dir = next(parser_generator)
+                    second_partition_dir = DuplicateGrabber().next(
+                            hashes = hashes,
+                            generator = parser_generator
+                        )
                     if type(second_partition_dir) is not str: raise Exception
                 except: raise Exception('Grpcbb error: partition corrupted')
                 hash = get_service_hex_main_hash(
