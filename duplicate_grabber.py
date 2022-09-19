@@ -3,23 +3,18 @@ from typing import Any, Dict, Generator, List
 import uuid
 import celaut_pb2 as celaut
 from utils import Singleton
-from threading import Barrier, Event, Lock
+from threading import Event, Lock
 
 class Session:
     
     def __init__(self) -> None:
         self.event = Event()
         self.value = None
-        self.barrier_count_lock = Lock()
-        self.barrier_count = 0
 
     def wait(self):
-        with self.barrier_count_lock:
-            self.barrier_count += 1
         self.event.wait()
 
     def set(self):
-        self.barrier = Barrier(self.barrier_count)
         self.event.set()
 
 class DuplicateGrabber(metaclass=Singleton):
@@ -39,7 +34,6 @@ class DuplicateGrabber(metaclass=Singleton):
             self.sessions[session].wait()
             if self.sessions[session].value is None: raise Exception('Session not ended.')
             value =  self.sessions[session].value
-            self.sessions[session].barrier.wait()
             return value
 
         else:
