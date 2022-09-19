@@ -1,16 +1,15 @@
 from multiprocessing import Lock
-from signal import signal
 from typing import Any, Dict, Generator, List, Tuple
 import uuid
 import celaut_pb2 as celaut
 from utils import Singleton
 
 
-class DuplicateGrabber(metaclass = Singleton):
+class DuplicateGrabber(metaclass=Singleton):
 
     def __init__(self):
         self.hashes: Dict[celaut.Any.Metadata.HashTag.Hash, str] = {}
-        self.sessions: Dict[str: Tuple[signal, Any] ] = {}
+        self.sessions: Dict[str: Tuple[, Any] ] = {}
         self.lock = Lock()
 
     def next(self,
@@ -31,4 +30,6 @@ class DuplicateGrabber(metaclass = Singleton):
             self.sessions[session] = (signal(), None)
 
             result = next(generator)
+            self.sessions[session][1] = result
+            self.sessions[session][0].
             return result
