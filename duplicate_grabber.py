@@ -33,22 +33,25 @@ class DuplicateGrabber(metaclass=Singleton):
         #  UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa7 in position 0: invalid start byte
         hashes: List[str] = [ str(hash) for hash in hashes ]
 
-        if True in [hashes in self.hashes.keys()]:
+        for hash in hashes:
+            if hash not in self.hashes.keys():
+                continue
+
             session: str = self.hashes[hashes[0]]
             l.LOGGER('It is already downloading. waiting for it to end. '+session)
             self.sessions[session].wait()
+
             if self.sessions[session].value is None: raise Exception('Session not ended.')
             value =  self.sessions[session].value
             return value
 
-        else:
-            session = uuid()
-            l.LOGGER('Start download '+session)
-            for hash in hashes:
-                self.hashes[hash] = session
-            self.sessions[session] = Session()
+        session = uuid()
+        l.LOGGER('Start download '+session)
+        for hash in hashes:
+            self.hashes[hash] = session
+        self.sessions[session] = Session()
 
-            result = next(generator)
-            self.sessions[session].value = result
-            self.sessions[session].set()
-            return result
+        result = next(generator)
+        self.sessions[session].value = result
+        self.sessions[session].set()
+        return result
