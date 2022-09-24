@@ -45,7 +45,7 @@ class DuplicateGrabber(metaclass=Singleton):
             value =  self.sessions[session].value
             return value
 
-        session = uuid4()
+        session = uuid4().hex
         l.LOGGER('Start download '+session)
         for hash in hashes:
             self.hashes[hash] = session
