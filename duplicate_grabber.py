@@ -1,9 +1,9 @@
-from multiprocessing import Lock
 from typing import Any, Dict, Generator, List
 import uuid
 import celaut_pb2 as celaut
 from utils import Singleton
 from threading import Event, Lock
+import logger as l
 
 class Session:
     
@@ -29,8 +29,11 @@ class DuplicateGrabber(metaclass=Singleton):
         generator: Generator
     ) -> Any:
 
+        hashes: List[str] = [ hash.type.decode('utf-8')+':'+hash.value.decode('utf-8') for hash in hashes ]
+
         if True in [hashes in self.hashes.keys()]:
             session: str = self.hashes[hashes[0]]
+            l.LOGGER('It is already downloading. waiting for it to end. '+session)
             self.sessions[session].wait()
             if self.sessions[session].value is None: raise Exception('Session not ended.')
             value =  self.sessions[session].value
@@ -38,6 +41,7 @@ class DuplicateGrabber(metaclass=Singleton):
 
         else:
             session = uuid()
+            l.LOGGER('Start download '+session)
             for hash in hashes:
                 self.hashes[hash] = session
             self.sessions[session] = Session()
