@@ -1,5 +1,5 @@
 from typing import Any, Dict, Generator, List
-import uuid
+from uuid import uuid4
 import celaut_pb2 as celaut
 from utils import Singleton
 from threading import Event, Lock
@@ -45,7 +45,7 @@ class DuplicateGrabber(metaclass=Singleton):
             value =  self.sessions[session].value
             return value
 
-        session = uuid()
+        session = uuid4()
         l.LOGGER('Start download '+session)
         for hash in hashes:
             self.hashes[hash] = session
