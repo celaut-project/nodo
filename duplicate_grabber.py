@@ -29,7 +29,9 @@ class DuplicateGrabber(metaclass=Singleton):
         generator: Generator
     ) -> Any:
 
-        hashes: List[str] = [ hash.type.decode('utf-8')+':'+hash.value.decode('utf-8') for hash in hashes ]
+        # hash.type.decode('utf-8')+':'+hash.value.decode('utf-8')  
+        #  UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa7 in position 0: invalid start byte
+        hashes: List[str] = [ str(hash) for hash in hashes ]
 
         if True in [hashes in self.hashes.keys()]:
             session: str = self.hashes[hashes[0]]
