@@ -20,7 +20,7 @@ class Session:
 class DuplicateGrabber(metaclass=Singleton):
 
     def __init__(self):
-        self.hashes: Dict[celaut.Any.Metadata.HashTag.Hash, str] = {}
+        self.hashes: Dict[str, str] = {}
         self.sessions: Dict[str: Session ] = {}
         self.lock = Lock()
 
