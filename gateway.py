@@ -20,7 +20,7 @@ import netifaces as ni
 from gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input, GetServiceTar_input, StartService_input_partitions_v2
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
-from manager import DOCKER_NETWORK, LOCAL_NETWORK, set_external_on_cache
+from manager import DOCKER_NETWORK, LOCAL_NETWORK, set_external_on_cache, insert_instance_on_mongo
 from contracts.eth_main.utils import get_ledger_and_contract_addr_from_contract
 from logger import GET_ENV
 from recursion_guard import RecursionGuard
