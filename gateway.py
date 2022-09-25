@@ -597,34 +597,33 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         continue
             
 
-            elif r is gateway_pb2.ServiceWithConfig: # We now that is partitionated.
+            elif r is gateway_pb2.ServiceWithConfig or r is gateway_pb2.ServiceWithMeta:
                 try:
-                    r = next(parser_generator)
-                    if type(r) is not gateway_pb2.ServiceWithConfig: raise Exception
+                    # Iterate the first partition.
+                    r = DuplicateGrabber().next(   # Use DuplicateGrabber for the total of the message.
+                        hashes = hashes,
+                        generator = parser_generator
+                    )
+
+                    if type(r) not in [gateway_pb2.ServiceWithConfig, gateway_pb2.ServiceWithMeta]: raise Exception
                 except Exception: raise Exception('Grpcbb error: partition corrupted')
-                configuration = r.config
-                service_with_meta = r.service
 
-                if r.HasField('max_sysreq') and not could_ve_this_sysreq(sysreq = r.max_sysreq): 
-                    raise Exception("The node can't execute the service with this requeriments.")
-                else: max_sysreq = r.max_sysreq
-                
-                if r.HasField('min_sysreq'):
-                    system_requeriments = r.min_sysreq
+                if type(r) is gateway_pb2.ServiceWithConfig:
+                    configuration = r.config
+                    service_with_meta = r.service
 
-                if r.HasField('initial_gas_amount'):
-                    initial_gas_amount = utils.from_gas_amount(r.initial_gas_amount)
+                    if r.HasField('max_sysreq') and not could_ve_this_sysreq(sysreq = r.max_sysreq): 
+                        raise Exception("The node can't execute the service with this requeriments.")
+                    else: max_sysreq = r.max_sysreq
+                    
+                    if r.HasField('min_sysreq'):
+                        system_requeriments = r.min_sysreq
 
+                    if r.HasField('initial_gas_amount'):
+                        initial_gas_amount = utils.from_gas_amount(r.initial_gas_amount)
+                else:
+                    service_with_meta = r
 
-            elif r is gateway_pb2.ServiceWithMeta:
-                try:
-                    r = next(parser_generator) # Can raise StopIteration
-                    if type(r) is not gateway_pb2.ServiceWithMeta: raise Exception
-                except Exception: raise Exception('Grpcbb error: partition corrupted')
-                service_with_meta = r
- 
-            # Si me da servicio.  
-            if service_with_meta:
                 # Iterate the second partition.
                 try:
                     second_partition_dir = DuplicateGrabber().next(
