@@ -600,7 +600,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             elif r is gateway_pb2.ServiceWithConfig or r is gateway_pb2.ServiceWithMeta:
                 try:
                     # Iterate the first partition.
-                    r = DuplicateGrabber().next(   # Use DuplicateGrabber for the total of the message.
+                    r = DuplicateGrabber().next(
                         hashes = hashes,
                         generator = parser_generator
                     )

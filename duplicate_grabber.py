@@ -1,15 +1,18 @@
-from typing import Any, Dict, Generator, List
+import itertools
+from typing import Dict, Generator, List
 from uuid import uuid4
 import celaut_pb2 as celaut
 from utils import Singleton
 from threading import Event, Lock
 import logger as l
 
+generator_of_values = lambda session: itertools.chain(session.values)
+
 class Session:
     
     def __init__(self) -> None:
-        self.event = Event()
-        self.value = None
+        self.event: Event = Event()
+        self.values: List = []
 
     def wait(self):
         self.event.wait()
@@ -24,34 +27,40 @@ class DuplicateGrabber(metaclass=Singleton):
         self.sessions: Dict[str: Session ] = {}
         self.lock = Lock()
 
-    def next(self,
+    def generator(self,
         hashes: List[celaut.Any.Metadata.HashTag.Hash],
         generator: Generator
-    ) -> Any:
+    ) -> Generator:
 
         # hash.type.decode('utf-8')+':'+hash.value.decode('utf-8')  
         #  UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa7 in position 0: invalid start byte
         hashes: List[str] = [ str(hash) for hash in hashes ]
+        wait: bool = False
 
-        for hash in hashes:
-            if hash not in self.hashes.keys():
-                continue
+        with self.lock:
+            for hash in hashes:
+                if hash in self.hashes.keys():
+                    session = self.hashes[hash]
+                    wait = True
+                    break
+            
+            if not wait:
+                session = uuid4().hex
+                l.LOGGER('Start download '+session)
+                for hash in hashes:
+                    self.hashes[hash] = session
+                self.sessions[session] = Session()
 
-            session: str = self.hashes[hashes[0]]
+        if wait:
             l.LOGGER('It is already downloading. waiting for it to end. '+session)
             self.sessions[session].wait()
+            return generator_of_values(
+                session = self.sessions[session]
+                )
 
-            if self.sessions[session].value is None: raise Exception('Session not ended.')
-            value =  self.sessions[session].value
-            return value
-
-        session = uuid4().hex
-        l.LOGGER('Start download '+session)
-        for hash in hashes:
-            self.hashes[hash] = session
-        self.sessions[session] = Session()
-
-        result = next(generator)
-        self.sessions[session].value = result
-        self.sessions[session].set()
-        return result
+        else:
+            self.sessions[session].values = [e for e in generator]
+            self.sessions[session].set()
+            return generator_of_values(
+                session = self.sessions[session]
+                )
