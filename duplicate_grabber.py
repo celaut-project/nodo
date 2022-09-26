@@ -44,7 +44,6 @@ class DuplicateGrabber(metaclass=Singleton):
             
             if not wait:
                 session = uuid4().hex
-                l.LOGGER('Start download '+session)
                 for hash in hashes:
                     self.hashes[hash] = session
                 self.sessions[session] = Session()
@@ -55,6 +54,7 @@ class DuplicateGrabber(metaclass=Singleton):
             return self.sessions[session], False
 
         else:
+            l.LOGGER('Start download '+session)
             self.sessions[session].value = next(generator)
             self.sessions[session].set()
             return self.sessions[session].value, True
