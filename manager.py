@@ -10,6 +10,7 @@ from typing import Dict
 import uuid
 import build
 import docker as docker_lib
+from duplicate_grabber import DuplicateGrabber
 from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, is_peer_available, peers_id_iterator, to_gas_amount
 import celaut_pb2
 from iobigdata import IOBigData
@@ -855,4 +856,5 @@ def manager_thread():
         maintain_containers()
         maintain_clients()
         peer_deposits()
+        DuplicateGrabber().manager()
         sleep(MANAGER_ITERATION_TIME) 

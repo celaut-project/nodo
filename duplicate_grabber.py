@@ -1,4 +1,4 @@
-import itertools
+from time import time
 from typing import Any, Dict, Generator, List, Tuple
 from uuid import uuid4
 import celaut_pb2 as celaut
@@ -11,12 +11,14 @@ class Session:
     def __init__(self) -> None:
         self.event: Event = Event()
         self.value: List = []
+        self.end_time = None
 
     def wait(self):
         self.event.wait()
 
     def set(self):
         self.event.set()
+        self.end_time = time()
 
 class DuplicateGrabber(metaclass=Singleton):
 
@@ -24,6 +26,13 @@ class DuplicateGrabber(metaclass=Singleton):
         self.hashes: Dict[str, str] = {}
         self.sessions: Dict[str: Session ] = {}
         self.lock = Lock()
+
+    def manager(self, completion_time: float = 1):
+        for session in self.sessions.keys():
+            end_time: float = self.sessions[session].end_time
+            if end_time and \
+                time() - end_time > completion_time:
+                del self.sessions[session]
 
     def next(self,
         hashes: List[celaut.Any.Metadata.HashTag.Hash],
