@@ -968,10 +968,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
             if r is gateway_pb2.ServiceWithMeta:
                 if DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
                 service_with_meta = next(parse_iterator)
-                second_partition_dir = DuplicateGrabber().next(
-                            hashes = [hash],
-                            generator = parse_iterator
-                        )
+                #second_partition_dir = DuplicateGrabber().next(
+                #            hashes = [hash],
+                #            generator = parse_iterator
+                #        )
+                second_partition_dir = next(parse_iterator)
                 if type(second_partition_dir) is not str: raise Exception('Error: fail sending service.')
                 try:
                     cost = execution_cost(
