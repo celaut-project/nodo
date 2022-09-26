@@ -967,12 +967,25 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             if r is gateway_pb2.ServiceWithMeta:
                 if DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
-                service_with_meta = next(parse_iterator)
-                #second_partition_dir = DuplicateGrabber().next(
-                #            hashes = [hash],
-                #            generator = parse_iterator
-                #        )
-                second_partition_dir = next(parse_iterator)
+                value, is_primary = DuplicateGrabber().next(
+                            hashes = [hash],
+                            generator = parse_iterator
+                        )
+                service_with_meta = value
+                if is_primary:
+                    second_partition_dir = next(parse_iterator)
+                elif hash.type == SHA3_256_ID:
+                    for i in range(GENERAL_ATTEMPTS):
+                        if hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
+                            second_partition_dir = get_from_registry(
+                                    hash = r.value.hex()
+                                )
+                        else:
+                            sleep(GENERAL_WAIT_TIME)
+                if not second_partition_dir:
+                    next(parse_iterator)  # Download all the message again.
+                    second_partition_dir = next(parse_iterator)
+
                 if type(second_partition_dir) is not str: raise Exception('Error: fail sending service.')
                 try:
                     cost = execution_cost(
