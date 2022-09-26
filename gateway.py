@@ -1,4 +1,7 @@
 from hashlib import sha256
+import itertools
+from pickle import GET
+from time import sleep
 from typing import Dict, Generator
 from buffer_pb2 import Buffer
 
@@ -29,8 +32,10 @@ DOCKER_CLIENT = lambda: docker_lib.from_env()
 GATEWAY_PORT = GET_ENV(env = 'GATEWAY_PORT', default = 8090)
 MEMORY_LOGS = GET_ENV(env = 'MEMORY_LOGS', default = False)
 IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = True)
-SEND_ONLY_HASHES_ASKING_COST = GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default=False)
-DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = GET_ENV(env = 'DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH', default=False)
+SEND_ONLY_HASHES_ASKING_COST = GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', default = False)
+DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = GET_ENV(env = 'DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH', default = False)
+GENERAL_WAIT_TIME = GET_ENV(env = 'GENERAL_WAIT_TIME', default = 2)
+GENERAL_ATTEMPTS = GET_ENV(env = 'GENERAL_ATTEMPTS', default = 10)
 
 
 #  TODO auxiliares
@@ -598,12 +603,52 @@ class Gateway(gateway_pb2_grpc.Gateway):
             
 
             elif r is gateway_pb2.ServiceWithConfig or r is gateway_pb2.ServiceWithMeta:
-                try:
-                    # Iterate the first partition.
-                    r = DuplicateGrabber().next(
+                if (configuration or r is gateway_pb2.ServiceWithMeta):
+                    value, is_primary = DuplicateGrabber().next(
                         hashes = hashes,
                         generator = parser_generator
                     )
+                    if is_primary:
+                        parser_generator = itertools.chain([value], parser_generator)
+                    else:
+                        for hash in hashes:
+                            if SHA3_256_ID == hash.type:
+                                registry_hash = hash.value.hex()
+                        if registry_hash:
+                            for i in range(GENERAL_ATTEMPTS):
+                                if registry_hash in [s for s in os.listdir(REGISTRY)]:
+                                    try:
+                                        p1 = get_from_registry(
+                                                    hash = hash.value.hex()
+                                                )
+                                        if hash not in p1.metadata.hashtag.hash:
+                                            p1.metadata.hashtag.hash.append(hash)
+                                        for b in grpcbf.serialize_to_buffer(
+                                            indices={},
+                                            message_iterator = launch_service(
+                                                service_buffer = p1.value,
+                                                metadata = p1.metadata, 
+                                                config = configuration,
+                                                system_requeriments = system_requeriments,
+                                                max_sysreq = max_sysreq,
+                                                initial_gas_amount = initial_gas_amount,
+                                                father_ip = utils.get_only_the_ip_from_context(context_peer = context.peer()),
+                                                father_id = client_id,
+                                                recursion_guard_token = recursion_guard_token
+                                            )
+                                        ): yield b
+                                        return
+
+                                    except Exception as e:
+                                        l.LOGGER('Exception launching a service ' + str(e))
+                                        pass
+                                
+                                else:
+                                    sleep(GENERAL_WAIT_TIME)
+
+                try:    
+                    # Iterate the first partition.
+                    r = next(parser_generator)
 
                     if type(r) not in [gateway_pb2.ServiceWithConfig, gateway_pb2.ServiceWithMeta]: raise Exception
                 except Exception: raise Exception('Grpcbb error: partition corrupted')
@@ -626,10 +671,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
                 # Iterate the second partition.
                 try:
-                    second_partition_dir = DuplicateGrabber().next(
-                            hashes = hashes,
-                            generator = parser_generator
-                        )
+                    second_partition_dir = next(parser_generator)
                     if type(second_partition_dir) is not str: raise Exception
                 except: raise Exception('Grpcbb error: partition corrupted')
                 hash = get_service_hex_main_hash(
@@ -664,7 +706,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     ): yield buffer
                     return
 
-                
         l.LOGGER('The service is not in the registry and the request does not have the definition.' \
             + str([(hash.type.hex(), hash.value.hex()) for hash in hashes]))
         

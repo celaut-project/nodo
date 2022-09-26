@@ -57,3 +57,5 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 - MIN_SLOTS_OPEN_PER_PEER
 - CLIENT_EXPIRATION_TIME
 - CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME
+- GENERAL_ATTEMPTS
+- GENERAL_WAIT_TIME

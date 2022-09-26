@@ -1,18 +1,16 @@
 import itertools
-from typing import Dict, Generator, List
+from typing import Any, Dict, Generator, List, Tuple
 from uuid import uuid4
 import celaut_pb2 as celaut
 from utils import Singleton
 from threading import Event, Lock
 import logger as l
 
-generator_of_values = lambda session: itertools.chain(session.values)
-
 class Session:
     
     def __init__(self) -> None:
         self.event: Event = Event()
-        self.values: List = []
+        self.value: List = []
 
     def wait(self):
         self.event.wait()
@@ -27,10 +25,10 @@ class DuplicateGrabber(metaclass=Singleton):
         self.sessions: Dict[str: Session ] = {}
         self.lock = Lock()
 
-    def generator(self,
+    def next(self,
         hashes: List[celaut.Any.Metadata.HashTag.Hash],
         generator: Generator
-    ) -> Generator:
+    ) -> Tuple[Any, bool]:
 
         # hash.type.decode('utf-8')+':'+hash.value.decode('utf-8')  
         #  UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa7 in position 0: invalid start byte
@@ -54,13 +52,9 @@ class DuplicateGrabber(metaclass=Singleton):
         if wait:
             l.LOGGER('It is already downloading. waiting for it to end. '+session)
             self.sessions[session].wait()
-            return generator_of_values(
-                session = self.sessions[session]
-                )
+            return self.sessions[session], False
 
         else:
-            self.sessions[session].values = [e for e in generator]
+            self.sessions[session].value = next(generator)
             self.sessions[session].set()
-            return generator_of_values(
-                session = self.sessions[session]
-                )
+            return self.sessions[session].value, True
