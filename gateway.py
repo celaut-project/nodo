@@ -97,10 +97,12 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
     os.rmdir(HYCACHE + container_id)
 
 
-
 create_container_sem = threading.Semaphore(CONCURRENT_CONTAINER_CREATIONS)
 def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
+    import requests
+    l.LOGGER('CREATE CONTAINER '+id)
     with create_container_sem:
+        l.LOGGER('GO TO '+id)
         try:
             return DOCKER_CLIENT().containers.create(
                 image = id + '.docker', # https://github.com/moby/moby/issues/20972#issuecomment-193381422
@@ -112,6 +114,9 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
             raise e
         except docker_lib.errors.APIError as e:
             l.LOGGER('DOCKER API ERROR ')
+            raise e
+        except requests.exceptions.ReadTimeout as e:
+            l.LOGGER('READ TIMEOUT '+str(e))
             raise e
         except Exception as e:
             l.LOGGER('DOCKER RUN ERROR -> '+str(e))
