@@ -100,27 +100,21 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
 create_container_sem = threading.Semaphore(CONCURRENT_CONTAINER_CREATIONS)
 def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
     import requests
-    l.LOGGER('CREATE CONTAINER '+id)
-    with create_container_sem:
-        l.LOGGER('GO TO '+id)
-        try:
-            return DOCKER_CLIENT().containers.create(
-                image = id + '.docker', # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-                entrypoint = ' '.join(entrypoint),
-                ports = use_other_ports
-            )
-        except docker_lib.errors.ImageNotFound as e:
-            l.LOGGER('IMAGE WOULD BE IN DOCKER REGISTRY. BUT NOT FOUND.')     # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
-            raise e
-        except docker_lib.errors.APIError as e:
-            l.LOGGER('DOCKER API ERROR ')
-            raise e
-        except requests.exceptions.ReadTimeout as e:
-            l.LOGGER('READ TIMEOUT '+str(e))
-            raise e
-        except Exception as e:
-            l.LOGGER('DOCKER RUN ERROR -> '+str(e))
-            raise e
+    l.LOGGER('CREATE CONTAINER ')
+    create_container_sem.acquire()
+    l.LOGGER('GO TO ')
+    try:
+        result = DOCKER_CLIENT().containers.create(
+            image = id + '.docker', # https://github.com/moby/moby/issues/20972#issuecomment-193381422
+            entrypoint = ' '.join(entrypoint),
+            ports = use_other_ports
+        )
+        create_container_sem.release()
+        return result
+    except Exception as e:
+        create_container_sem.release()
+        l.LOGGER('DOCKER RUN ERROR -> '+str(e))
+        raise e
 
 
 def service_balancer(
