@@ -99,7 +99,6 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
 
 create_container_sem = threading.Semaphore(CONCURRENT_CONTAINER_CREATIONS)
 def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
-    import requests
     l.LOGGER('CREATE CONTAINER ')
     create_container_sem.acquire()
     l.LOGGER('GO TO ')
