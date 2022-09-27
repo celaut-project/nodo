@@ -2,6 +2,7 @@ from hashlib import sha256
 import itertools
 from pickle import GET
 from time import sleep
+from tkinter import E
 from typing import Dict, Generator
 from buffer_pb2 import Buffer
 
@@ -108,6 +109,9 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
         l.LOGGER('IMAGE WOULD BE IN DOCKER REGISTRY. BUT NOT FOUND.')     # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
     except docker_lib.errors.APIError:
         l.LOGGER('DOCKER API ERROR ')
+    except Exception as e:
+        l.LOGGER('DOCKER RUN ERROR -> '+str(e))
+        raise e
 
 
 def service_balancer(
