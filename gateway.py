@@ -1,8 +1,6 @@
 from hashlib import sha256
 import itertools
-from pickle import GET
 from time import sleep
-from tkinter import E
 from typing import Dict, Generator
 from buffer_pb2 import Buffer
 
