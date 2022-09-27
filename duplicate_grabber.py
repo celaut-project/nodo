@@ -57,10 +57,9 @@ class DuplicateGrabber(metaclass=Singleton):
                     self.hashes[hash] = session
                 self.sessions[session] = Session()
 
-        if session.end_time:
-            return self.sessions[session].value, False
-
         if wait:
+            if self.sessions[session].end_time:
+                return self.sessions[session].value, False
             l.LOGGER('It is already downloading. waiting for it to end. '+session)
             self.sessions[session].wait()
             return self.sessions[session].value, False
