@@ -97,21 +97,15 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
     os.rmdir(HYCACHE + container_id)
 
 
-create_container_sem = threading.Semaphore(CONCURRENT_CONTAINER_CREATIONS)
 def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
-    l.LOGGER('CREATE CONTAINER ')
-    create_container_sem.acquire()
-    l.LOGGER('GO TO ')
     try:
         result = DOCKER_CLIENT().containers.create(
             image = id + '.docker', # https://github.com/moby/moby/issues/20972#issuecomment-193381422
             entrypoint = ' '.join(entrypoint),
             ports = use_other_ports
         )
-        create_container_sem.release()
         return result
     except Exception as e:
-        create_container_sem.release()
         l.LOGGER('DOCKER RUN ERROR -> '+str(e))
         raise e
 
