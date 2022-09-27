@@ -97,6 +97,7 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
 
 
 def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
+    import requests
     try:
         return DOCKER_CLIENT().containers.create(
             image = id + '.docker', # https://github.com/moby/moby/issues/20972#issuecomment-193381422
@@ -107,6 +108,10 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
         l.LOGGER('IMAGE WOULD BE IN DOCKER REGISTRY. BUT NOT FOUND.')     # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
     except docker_lib.errors.APIError:
         l.LOGGER('DOCKER API ERROR ')
+
+    except requests.exceptions.ReadTimeout:
+        l.LOGGER('DOCKER RUN Timeout -> '+str(e))
+        raise e
     except Exception as e:
         l.LOGGER('DOCKER RUN ERROR -> '+str(e))
         raise e
