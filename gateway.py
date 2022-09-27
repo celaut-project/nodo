@@ -35,6 +35,7 @@ SEND_ONLY_HASHES_ASKING_COST = GET_ENV(env = 'SEND_ONLY_HASHES_ASKING_COST', def
 DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = GET_ENV(env = 'DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH', default = False)
 GENERAL_WAIT_TIME = GET_ENV(env = 'GENERAL_WAIT_TIME', default = 2)
 GENERAL_ATTEMPTS = GET_ENV(env = 'GENERAL_ATTEMPTS', default = 10)
+CONCURRENT_CONTAINER_CREATIONS = GET_ENV(env = 'CONCURRENT_CONTAINER_CREATIONS', default = 10)
 
 
 #  TODO auxiliares
@@ -96,25 +97,25 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
     os.rmdir(HYCACHE + container_id)
 
 
-def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
-    import requests
-    try:
-        return DOCKER_CLIENT().containers.create(
-            image = id + '.docker', # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-            entrypoint = ' '.join(entrypoint),
-            ports = use_other_ports
-        )
-    except docker_lib.errors.ImageNotFound:
-        l.LOGGER('IMAGE WOULD BE IN DOCKER REGISTRY. BUT NOT FOUND.')     # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
-    except docker_lib.errors.APIError:
-        l.LOGGER('DOCKER API ERROR ')
 
-    except requests.exceptions.ReadTimeout:
-        l.LOGGER('DOCKER RUN Timeout -> '+str(e))
-        raise e
-    except Exception as e:
-        l.LOGGER('DOCKER RUN ERROR -> '+str(e))
-        raise e
+create_container_sem = threading.Semaphore(CONCURRENT_CONTAINER_CREATIONS)
+def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
+    with create_container_sem:
+        try:
+            return DOCKER_CLIENT().containers.create(
+                image = id + '.docker', # https://github.com/moby/moby/issues/20972#issuecomment-193381422
+                entrypoint = ' '.join(entrypoint),
+                ports = use_other_ports
+            )
+        except docker_lib.errors.ImageNotFound as e:
+            l.LOGGER('IMAGE WOULD BE IN DOCKER REGISTRY. BUT NOT FOUND.')     # LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
+            raise e
+        except docker_lib.errors.APIError as e:
+            l.LOGGER('DOCKER API ERROR ')
+            raise e
+        except Exception as e:
+            l.LOGGER('DOCKER RUN ERROR -> '+str(e))
+            raise e
 
 
 def service_balancer(
