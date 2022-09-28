@@ -212,48 +212,46 @@ def __purgue_internal(agent_id = None, container_id = None, container_ip = None,
             ip = container_ip
         )
 
-    container_cache_lock.acquire()
-
-    try:
-        container_cache[agent_id].remove(container_ip + '##' + container_id)
-    except ValueError as e:
-        l.LOGGER(str(e) + str(container_cache[agent_id]) + ' trying to remove ' + container_ip + '##' + container_id)
-    except KeyError as e:
-        l.LOGGER(str(e) + agent_id + ' not in ' + str(container_cache.keys()))
-
-    try:
-        del cache_service_perspective[container_ip]
-    except Exception as e:
-        l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e)+ ' ' + str(cache_service_perspective)+ ' ' + str(container_id))  # TODO. Study the imposibility of that.
-        raise e
-
-    del system_cache[token]
-    cache_locks.delete(token)
-
-    if container_ip in container_cache:
-        for dependency in container_cache[container_ip]:
-            # Si la dependencia esta en local.
-            if get_network_name(ip_or_uri = dependency.split('##')[0]) == DOCKER_NETWORK:
-                refund += __purgue_internal(
-                    agent_id = container_ip,
-                    container_id = dependency.split('##')[1],
-                    container_ip = dependency.split('##')[0]
-                )
-            # Si la dependencia se encuentra en otro nodo.
-            else:
-                refund += __purgue_external(
-                    agent_id = agent_id,
-                    peer_id = dependency.split('##')[0],
-                    his_token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
-                )
+    with container_cache_lock:
+        try:
+            container_cache[agent_id].remove(container_ip + '##' + container_id)
+        except ValueError as e:
+            l.LOGGER(str(e) + str(container_cache[agent_id]) + ' trying to remove ' + container_ip + '##' + container_id)
+        except KeyError as e:
+            l.LOGGER(str(e) + agent_id + ' not in ' + str(container_cache.keys()))
 
         try:
-            l.LOGGER('Deleting the instance ' + container_id + ' from cache with ' + str(container_cache[container_ip]) + ' dependencies.')
-            del container_cache[container_ip]
-        except KeyError as e:
-            l.LOGGER(str(e) + container_ip + ' not in ' + str(container_cache.keys()))
+            del cache_service_perspective[container_ip]
+        except Exception as e:
+            l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO '+ str(e)+ ' ' + str(cache_service_perspective)+ ' ' + str(container_id))  # TODO. Study the imposibility of that.
+            raise e
 
-    container_cache_lock.release()
+        del system_cache[token]
+        cache_locks.delete(token)
+
+        if container_ip in container_cache:
+            for dependency in container_cache[container_ip]:
+                # Si la dependencia esta en local.
+                if get_network_name(ip_or_uri = dependency.split('##')[0]) == DOCKER_NETWORK:
+                    refund += __purgue_internal(
+                        agent_id = container_ip,
+                        container_id = dependency.split('##')[1],
+                        container_ip = dependency.split('##')[0]
+                    )
+                # Si la dependencia se encuentra en otro nodo.
+                else:
+                    refund += __purgue_external(
+                        agent_id = agent_id,
+                        peer_id = dependency.split('##')[0],
+                        his_token = dependency[len(dependency.split('##')[0]) + 1:] # Por si el token comienza en # ...
+                    )
+
+            try:
+                l.LOGGER('Deleting the instance ' + container_id + ' from cache with ' + str(container_cache[container_ip]) + ' dependencies.')
+                del container_cache[container_ip]
+            except KeyError as e:
+                l.LOGGER(str(e) + container_ip + ' not in ' + str(container_cache.keys()))
+
     return refund
 
 
@@ -793,7 +791,6 @@ def start_service_cost(
 # THREAD
 
 def maintain_containers():
-    # l.LOGGER('Maintain '+str(system_cache))
     for i in range(len(system_cache)):
         if i >= len(system_cache): break
         token, sysreq = list(system_cache.items())[i]
