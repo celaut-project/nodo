@@ -27,7 +27,10 @@ from contracts.eth_main.utils import get_ledger_and_contract_addr_from_contract
 from logger import GET_ENV
 from recursion_guard import RecursionGuard
 
-DOCKER_CLIENT = lambda: docker_lib.from_env()
+DOCKER_CLIENT = lambda: docker_lib.from_env(
+    timeout = GET_ENV(env = 'DOCKER_CLIENT_TIMEOUT', default = 120),
+    max_pool_size = GET_ENV(env = 'DOCKER_MAX_CONNECTIONS', default = 50)
+)
 GATEWAY_PORT = GET_ENV(env = 'GATEWAY_PORT', default = 8090)
 MEMORY_LOGS = GET_ENV(env = 'MEMORY_LOGS', default = False)
 IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = GET_ENV(env = 'IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER', default = True)

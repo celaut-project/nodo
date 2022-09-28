@@ -60,3 +60,5 @@ https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 - GENERAL_ATTEMPTS
 - GENERAL_WAIT_TIME
 - CONCURRENT_CONTAINER_CREATIONS
+- DOCKER_CLIENT_TIMEOUT
+- DOCKER_MAX_CONNECTIONS
