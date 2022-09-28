@@ -798,7 +798,7 @@ def maintain_containers():
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
                 prune_container(token = token)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-            l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO GET THE CONTAINER ' + token)
+            continue
         
         if not spend_gas(
             token_or_container_ip = token,
