@@ -207,7 +207,7 @@ def build(
         complete = False
     ) -> str:
     if not id: id = get_service_hex_main_hash( metadata = metadata)
-    if get_it: l.LOGGER('\nBuilding ' + id)
+    if get_it: l.LOGGER('Building ' + id)
     try:
         # check if it's locally.
         check_output('/usr/bin/docker inspect '+id+'.docker', shell=True)
