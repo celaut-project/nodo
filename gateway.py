@@ -28,8 +28,8 @@ from logger import GET_ENV
 from recursion_guard import RecursionGuard
 
 DOCKER_CLIENT = lambda: docker_lib.from_env(
-    timeout = GET_ENV(env = 'DOCKER_CLIENT_TIMEOUT', default = 120),
-    max_pool_size = GET_ENV(env = 'DOCKER_MAX_CONNECTIONS', default = 50)
+    timeout = GET_ENV(env = 'DOCKER_CLIENT_TIMEOUT', default = 480),
+    max_pool_size = GET_ENV(env = 'DOCKER_MAX_CONNECTIONS', default = 1000)
 )
 GATEWAY_PORT = GET_ENV(env = 'GATEWAY_PORT', default = 8090)
 MEMORY_LOGS = GET_ENV(env = 'MEMORY_LOGS', default = False)
@@ -108,6 +108,10 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
             ports = use_other_ports
         )
         return result
+    except docker_lib.errors.ImageNotFound as e:
+        l.LOGGER('CONTAINER IMAGE NOT FOUND')
+        # TODO build(id) using agents model.
+        raise e
     except Exception as e:
         l.LOGGER('DOCKER RUN ERROR -> '+str(e))
         raise e
