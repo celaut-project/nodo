@@ -760,7 +760,8 @@ def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
                 COST_OF_BUILD * (is_built is False),
                 # Coste de obtener el contenedor ... #TODO
             ])
-    except:
+    except Exception as e:
+        l.LOGGER('Manager - build cost exception: '+ str(e))
         pass
     return COST_OF_BUILD
 
