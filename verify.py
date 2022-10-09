@@ -1,10 +1,9 @@
 from typing import Union
 
-from google.protobuf import message
 import grpcbigbuffer as grpcbf
 from logger import LOGGER
 import hashlib
-from celaut_pb2 import Any, Any, Service
+from protos.celaut_pb2 import Any, Service
 
 # -- HASH IDs --
 SHAKE_256_ID = bytes.fromhex("46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f")

@@ -2,27 +2,27 @@ from hashlib import sha256
 import itertools
 from time import sleep
 from typing import Dict, Generator
-from buffer_pb2 import Buffer
+from protos.buffer_pb2 import Buffer
 
-import celaut_pb2 as celaut
+from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 import build, utils
 from duplicate_grabber import DuplicateGrabber
-from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, MIN_DEPOSIT_PEER, \
+from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
     add_container, container_modify_system_params, default_initial_cost, could_ve_this_sysreq, execution_cost, gas_amount_on_other_peer, generate_client_id_in_other_peer, get_metrics, get_sysresources, \
-    increase_deposit_on_peer, manager_thread, prune_container, set_external_on_cache, generate_client, \
+    increase_deposit_on_peer, manager_thread, prune_container, generate_client, \
     spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, get_token_by_uri
 from compile import REGISTRY, HYCACHE, compile
 import logger as l
 from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
 import subprocess, os, threading, shutil
-import grpc, gateway_pb2, gateway_pb2_grpc
+import grpc
 from concurrent import futures
 import docker as docker_lib
 import netifaces as ni
-from gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input, GetServiceTar_input, StartService_input_partitions_v2
+from protos.gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input, GetServiceTar_input, StartService_input_partitions_v2
 import grpcbigbuffer as grpcbf
 import iobigdata as iobd
-from manager import DOCKER_NETWORK, LOCAL_NETWORK, set_external_on_cache, insert_instance_on_mongo
+from manager import DOCKER_NETWORK, LOCAL_NETWORK, set_external_on_cache
 from contracts.eth_main.utils import get_ledger_and_contract_addr_from_contract
 from logger import GET_ENV
 from recursion_guard import RecursionGuard
@@ -130,7 +130,7 @@ def service_balancer(
         def __init__(self) -> None:
             self.dict: dict = {} # elem : weight
         
-        def add_elem(self, weight: gateway_pb2.EstimatedCost, elem: str = 'local' ) -> None:
+        def add_elem(self, weight: gateway_pb2.EstimatedCost, elem: str = 'local') -> None:
             l.LOGGER('    adding elem ' + elem + ' with weight ' + str(weight.cost))
             self.dict.update({
                 elem: int(utils.from_gas_amount(weight.cost) * (1 + weight.variance * COST_AVERAGE_VARIATION))

@@ -1,12 +1,11 @@
 import base64
 from hashlib import sha256
-import os
 import socket
 import threading
 from typing import Generator
 import typing
 
-import celaut_pb2, gateway_pb2
+from protos import celaut_pb2, gateway_pb2
 from compile import REGISTRY
 from grpcbigbuffer import Dir
 import pymongo
@@ -116,21 +115,21 @@ def service_extended(
             hash = get_service_hex_main_hash(service_buffer = service_buffer, metadata = metadata)
             if set_config: 
                 yield (
-                        gateway_pb2.ServiceWithConfig,
-                        gateway_pb2.ServiceWithConfig(
+                    gateway_pb2.ServiceWithConfig,
+                    gateway_pb2.ServiceWithConfig(
                             service = any,
                             config = config,
                             min_sysreq = min_sysreq,
                             max_sysreq = max_sysreq,
                             initial_gas_amount = to_gas_amount(initial_gas_amount)
                         ),
-                        Dir(REGISTRY + hash + '/p2')
+                    Dir(REGISTRY + hash + '/p2')
                     )
             else:
                 yield (
-                        gateway_pb2.ServiceWithMeta,
-                        any,
-                        Dir(REGISTRY + hash + '/p2')
+                    gateway_pb2.ServiceWithMeta,
+                    any,
+                    Dir(REGISTRY + hash + '/p2')
                     )
 
 def get_free_port() -> int:

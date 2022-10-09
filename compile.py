@@ -5,7 +5,8 @@ import sys, shutil
 import json
 import os, subprocess
 import iobigdata
-import celaut_pb2 as celaut, grpcbigbuffer, buffer_pb2, gateway_pb2, compile_pb2
+import grpcbigbuffer
+from protos import buffer_pb2, celaut_pb2 as celaut, compile_pb2, gateway_pb2
 from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_main_hash
 from logger import GET_ENV
 
@@ -354,7 +355,7 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
     )
     dirs = sorted([d for d in os.listdir(HYCACHE+'compile'+id)])
     for b in grpcbigbuffer.serialize_to_buffer(
-        message_iterator = tuple([gateway_pb2.CompileOutput])+tuple([grpcbigbuffer.Dir(dir=HYCACHE+'compile'+id+'/'+d) for d in dirs]),
+        message_iterator =tuple([gateway_pb2.CompileOutput]) + tuple([grpcbigbuffer.Dir(dir=HYCACHE + 'compile' + id + '/' + d) for d in dirs]),
         partitions_model = list(partitions_model),
         indices = gateway_pb2.CompileOutput
     ): yield b
@@ -363,10 +364,11 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
 
 
 if __name__ == "__main__":
-    from gateway_pb2_grpcbf import StartService_input_partitions_v2
+    from protos.gateway_pb2_grpcbf import StartService_input_partitions_v2
     id = repo_ok(
         repo = sys.argv[1],
-        partitions_model = StartService_input_partitions_v2[2] if not len(sys.argv) > 1 else [buffer_pb2.Buffer.Head.Partition()]
+        partitions_model = StartService_input_partitions_v2[2] if not len(sys.argv) > 1 else [
+            buffer_pb2.Buffer.Head.Partition()]
     )
     os.system('mv '+HYCACHE+'compile'+id+' '+REGISTRY+id)
     print(id)

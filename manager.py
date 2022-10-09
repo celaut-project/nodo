@@ -9,17 +9,15 @@ from types import LambdaType
 from typing import Dict
 import uuid
 import build
-import docker as docker_lib
 from duplicate_grabber import DuplicateGrabber
 from utils import from_gas_amount, generate_uris_by_peer_id, get_network_name, get_ledger_and_contract_address_from_peer_id_and_ledger, is_peer_available, peers_id_iterator, to_gas_amount
-import celaut_pb2
+from protos import celaut_pb2, celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 from iobigdata import IOBigData
 import pymongo
 import docker as docker_lib
 import logger as l
 from verify import get_service_hex_main_hash
-import celaut_pb2 as celaut
-import gateway_pb2_grpc,gateway_pb2, grpc, grpcbigbuffer as grpcbf
+import grpc, grpcbigbuffer as grpcbf
 import contracts.vyper_gas_deposit_contract.interface as vyper_gdc
 from google.protobuf.json_format import MessageToJson
 from bson.objectid import ObjectId

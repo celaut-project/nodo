@@ -1,4 +1,3 @@
-from ast import Str
 import sys, os; sys.path.append(os.getcwd())
 from threading import Thread
 
@@ -9,7 +8,7 @@ from contracts.eth_main.singleton import Singleton
 from typing import Dict
 from web3 import Web3, exceptions
 from hashlib import sha256
-import gateway_pb2, celaut_pb2
+from protos import celaut_pb2, gateway_pb2
 from time import sleep, time
 from logger import LOGGER
 

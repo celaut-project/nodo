@@ -1,9 +1,8 @@
-from gateway_pb2 import Instance, Client
-import gateway_pb2_grpc, grpc
-from manager import generate_client_id_in_other_peer
+from protos.gateway_pb2 import Instance
+import grpc
+from protos import gateway_pb2_grpc
 import logger as l
 from gateway import generate_gateway_instance, insert_instance_on_mongo
-from utils import get_network_name
 from grpcbigbuffer import client_grpc
 from bson.objectid import ObjectId
 import pymongo
