@@ -2,7 +2,7 @@ from time import time
 from typing import Any, Dict, Generator, List, Tuple
 from uuid import uuid4
 from protos import celaut_pb2 as celaut
-from utils import Singleton
+from src.utils.singleton import Singleton
 from threading import Event, Lock
 import logger as l
 

@@ -40,7 +40,6 @@ def delete_instance(docker_name):
     else: print('Canceled.')
 
 def delete_image(image):
-    import os
     print('Confirm to delete '+image+' [Yes/No] ')
     inpt = input()
     if inpt == 'Y' or inpt == 'y' or inpt == 'yes' or inpt == 'Yes':
@@ -66,8 +65,8 @@ if __name__ == "__main__":
 
     import sys
     id = sys.argv[1]
-    from gateway import get_from_registry
-    from build import build
+    from src.gateway import get_from_registry
+    from src.builder import build
     print('Go to build ', id)
     service_with_meta = get_from_registry(id)
     print(

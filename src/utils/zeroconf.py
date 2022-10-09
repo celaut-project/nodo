@@ -1,8 +1,9 @@
 from protos.gateway_pb2 import Instance
 import grpc
 from protos import gateway_pb2_grpc
-from utils import logger as l
-from gateway import generate_gateway_instance, insert_instance_on_mongo
+from src.manager.manager import insert_instance_on_mongo
+from src.utils import logger as l
+from src.gateway.gateway import generate_gateway_instance
 from grpcbigbuffer import client_grpc
 from bson.objectid import ObjectId
 import pymongo

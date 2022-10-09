@@ -1,5 +1,16 @@
-import utils.logger as l
+from protos import gateway_pb2, gateway_pb2_grpc
+from protos.gateway_pb2_grpcbf import GetServiceEstimatedCost_input, StartService_input_partitions_v2
+from src import utils as l
 import protos.celaut_pb2 as celaut
+from typing import Dict
+
+from src.gateway.gateway import SEND_ONLY_HASHES_ASKING_COST
+from src.manager.manager import COST_AVERAGE_VARIATION, default_initial_cost, GAS_COST_FACTOR, execution_cost, \
+    generate_client_id_in_other_peer
+from src.utils.utils import from_gas_amount, to_gas_amount, peers_id_iterator, generate_uris_by_peer_id, \
+    service_extended
+from src.builder import build
+import grpcbigbuffer as grpcbf
 
 def service_balancer(
         service_buffer: bytes,
@@ -17,7 +28,7 @@ def service_balancer(
         def add_elem(self, weight: gateway_pb2.EstimatedCost, elem: str = 'local') -> None:
             l.LOGGER('    adding elem ' + elem + ' with weight ' + str(weight.cost))
             self.dict.update({
-                elem: int(utils.from_gas_amount(weight.cost) * (1 + weight.variance * COST_AVERAGE_VARIATION))
+                elem: int(from_gas_amount(weight.cost) * (1 + weight.variance * COST_AVERAGE_VARIATION))
             })
 
         def get(self) -> Dict[str, int]:
@@ -29,7 +40,7 @@ def service_balancer(
     try:
         peers.add_elem(
             weight=gateway_pb2.EstimatedCost(
-                cost=utils.to_gas_amount(execution_cost(service_buffer=service_buffer,
+                cost=to_gas_amount(execution_cost(service_buffer=service_buffer,
                                                         metadata=metadata) * GAS_COST_FACTOR + initial_gas_amount),
                 variance=0
             )
@@ -42,7 +53,7 @@ def service_balancer(
         raise e
 
     try:
-        for peer in utils.peers_id_iterator(ignore_network=ignore_network):
+        for peer in peers_id_iterator(ignore_network=ignore_network):
             l.LOGGER('Check cost on peer ' + peer)
             # TODO could use async or concurrency ¿numba?. And use timeout.
             try:
@@ -51,14 +62,14 @@ def service_balancer(
                     weight=next(grpcbf.client_grpc(
                         method=gateway_pb2_grpc.GatewayStub(
                             grpc.insecure_channel(
-                                next(utils.generate_uris_by_peer_id(peer))
+                                next(generate_uris_by_peer_id(peer))
                             )
                         ).GetServiceEstimatedCost,
                         indices_parser=gateway_pb2.EstimatedCost,
                         partitions_message_mode_parser=True,
                         indices_serializer=GetServiceEstimatedCost_input,
                         partitions_serializer=StartService_input_partitions_v2,
-                        input=utils.service_extended(
+                        input=service_extended(
                             service_buffer=service_buffer,
                             metadata=metadata,
                             send_only_hashes=SEND_ONLY_HASHES_ASKING_COST,

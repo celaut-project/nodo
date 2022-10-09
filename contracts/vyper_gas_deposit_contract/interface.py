@@ -10,7 +10,7 @@ from web3 import Web3, exceptions
 from hashlib import sha256
 from protos import celaut_pb2, gateway_pb2
 from time import sleep, time
-from utils.logger import LOGGER
+from src.utils.logger import LOGGER
 
 
 DIR = os.getcwd() + '/contracts/vyper_gas_deposit_contract/'

@@ -1,7 +1,8 @@
 import uuid
-from utils import Singleton
+from src.utils.singleton import Singleton
 
-class Registry(metaclass = Singleton):
+
+class Registry(metaclass=Singleton):
 
     def __init__(self):
         self.tokens = {}
@@ -10,7 +11,9 @@ class Registry(metaclass = Singleton):
         self.tokens[token] = None
 
     def delete(self, token):
-        if token: del self.tokens[token]
+        if token:
+            del self.tokens[token]
+
 
 class RecursionGuard(object):
 

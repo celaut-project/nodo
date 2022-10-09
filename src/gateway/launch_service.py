@@ -1,17 +1,21 @@
-from gateway.gateway import IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, create_container, set_config
-from gateway.service_balancer import service_balancer
-from manager import DOCKER_NETWORK, default_initial_cost, spend_gas, gas_amount_on_other_peer, increase_deposit_on_peer, \
-    generate_client_id_in_other_peer, set_external_on_cache, DEFAULT_SYSTEM_RESOURCES, start_service_cost, \
-    GAS_COST_FACTOR
+from src.gateway.gateway import IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, create_container, set_config
+from src.gateway.service_balancer import service_balancer
+from src.manager.manager import DOCKER_NETWORK, default_initial_cost, spend_gas, \
+    generate_client_id_in_other_peer, DEFAULT_SYSTEM_RESOURCES, start_service_cost, \
+    GAS_COST_FACTOR, add_container
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2
-from utils import utils
-from utils.recursion_guard import RecursionGuard
-from utils import logger as l
-from utils.verify import completeness
+from src.manager.system_cache import SystemCache
+from src.manager.metrics import gas_amount_on_other_peer
+from src.manager.payment_process import increase_deposit_on_peer
+from src.utils import utils, logger as l
+from src.utils.recursion_guard import RecursionGuard
+from src.utils.verify import completeness
 import grpcbigbuffer as grpcbf
 import docker as docker_lib
 from hashlib import sha256
+from src.builder import build
+import grpc
 
 def launch_service(
         service_buffer: bytes,
@@ -30,7 +34,7 @@ def launch_service(
 
     with RecursionGuard(
             token=recursion_guard_token,
-            generate=lambda: bool(father_id)  # Use only if is from outside.
+            generate=bool(father_id)  # Use only if is from outside.
     ) as recursion_guard_token:
 
         if not father_id:
@@ -104,7 +108,7 @@ def launch_service(
                             )
                         ))
                         encrypted_external_token: str = sha256(service_instance.token.encode('utf-8')).hexdigest()
-                        set_external_on_cache(
+                        SystemCache().set_external_on_cache(
                             agent_id=father_id,
                             peer_id=peer,  # Add node_uri.
                             encrypted_external_token=encrypted_external_token,  # Add token.
