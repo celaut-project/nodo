@@ -6,14 +6,14 @@ from protos.buffer_pb2 import Buffer
 
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 import build, utils
-from duplicate_grabber import DuplicateGrabber
+from utils.duplicate_grabber import DuplicateGrabber
 from manager import COMPUTE_POWER_RATE, COST_OF_BUILD, DEFAULT_SYSTEM_RESOURCES, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
     add_container, container_modify_system_params, default_initial_cost, could_ve_this_sysreq, execution_cost, gas_amount_on_other_peer, generate_client_id_in_other_peer, get_metrics, get_sysresources, \
     increase_deposit_on_peer, manager_thread, prune_container, generate_client, \
     spend_gas, start_service_cost, validate_payment_process, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, get_token_by_uri
 from compile import REGISTRY, HYCACHE, compile
-import logger as l
-from verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
+from utils import logger as l
+from utils.verify import SHA3_256_ID, check_service, get_service_hex_main_hash, completeness
 import subprocess, os, threading, shutil
 import grpc
 from concurrent import futures
@@ -24,8 +24,8 @@ import grpcbigbuffer as grpcbf
 import iobigdata as iobd
 from manager import DOCKER_NETWORK, LOCAL_NETWORK, set_external_on_cache
 from contracts.eth_main.utils import get_ledger_and_contract_addr_from_contract
-from logger import GET_ENV
-from recursion_guard import RecursionGuard
+from utils.logger import GET_ENV
+from utils.recursion_guard import RecursionGuard
 
 DOCKER_CLIENT = lambda: docker_lib.from_env(
     timeout = GET_ENV(env = 'DOCKER_CLIENT_TIMEOUT', default = 480),
@@ -1092,7 +1092,7 @@ if __name__ == "__main__":
     except:
         pass
 
-    from zeroconf import Zeroconf
+    from utils.zeroconf import Zeroconf
     import iobigdata
     from psutil import virtual_memory
     

@@ -1,7 +1,7 @@
 from typing import Union
 
 import grpcbigbuffer as grpcbf
-from logger import LOGGER
+from utils.logger import LOGGER
 import hashlib
 from protos.celaut_pb2 import Any, Service
 

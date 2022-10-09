@@ -1,14 +1,14 @@
 from typing import Generator
 
-import logger as l
+from utils import logger as l
 import sys, shutil
 import json
 import os, subprocess
 import iobigdata
 import grpcbigbuffer
 from protos import buffer_pb2, celaut_pb2 as celaut, compile_pb2, gateway_pb2
-from verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_main_hash
-from logger import GET_ENV
+from utils.verify import get_service_list_of_hashes, calculate_hashes, get_service_hex_main_hash
+from utils.logger import GET_ENV
 
 #  -------------------------------------------------
 #  -------------------------------------------------

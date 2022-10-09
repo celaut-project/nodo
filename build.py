@@ -3,16 +3,15 @@ import threading
 from protos.gateway_pb2_grpcbf import GetServiceTar_input
 import grpc, os, iobigdata
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
-from utils import generate_uris_by_peer_id, peers_id_iterator, service_extended, read_file
+from utils import generate_uris_by_peer_id, peers_id_iterator, service_extended, read_file, logger as l
 from grpcbigbuffer import save_chunks_to_file, serialize_to_buffer
 from compile import HYCACHE, REGISTRY
-import logger as l
 
 from shutil import rmtree
 from subprocess import run
 import itertools
 
-from verify import get_service_hex_main_hash
+from utils.verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
 
 WAIT_FOR_CONTAINER = l.GET_ENV(env = 'WAIT_FOR_CONTAINER_TIME', default = 60)

@@ -10,7 +10,7 @@ from compile import REGISTRY
 from grpcbigbuffer import Dir
 import pymongo
 import netifaces as ni
-from verify import get_service_hex_main_hash
+from utils.verify import get_service_hex_main_hash
 from bson.objectid import ObjectId
 
 
