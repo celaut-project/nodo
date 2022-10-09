@@ -1,0 +1,193 @@
+//  -----------------------
+//  -----------------------
+//       CEL•AUT•WEB
+//  -----------------------
+//  -----------------------
+syntax = "proto3";
+package celaut;
+
+
+//  -----------------------
+//  DEFINITIONS.
+//  -----------------------
+
+message FieldDef {
+    message PrimitiveDef {
+        optional string regex = 1;  // {0-10}, ...
+        // Primitive specification can be applied. <- must be optional
+    }
+    message EnumDef {
+        map<string, int32> value = 1;
+    }
+    message MessageDef {
+        message ParamDef {
+            FieldDef field = 1;
+            bool repeated = 2;
+        }
+        message OneofDef {
+            repeated int32 index = 1;
+        }
+        map<int32, ParamDef> param = 1;
+        repeated OneofDef oneof = 2; // have a list of oneof's params' index.
+    }
+    oneof value{
+        MessageDef message = 1;
+        PrimitiveDef primitive = 2;
+        EnumDef enum = 3;
+    }
+}
+
+message Any {
+    message Metadata {
+        message HashTag {
+            message Hash {
+                bytes type = 1;
+                bytes value = 2;
+            }
+            message AttrHashTag {
+                int32 key = 1;  // the attribute's index. 
+                repeated HashTag value = 2;  // HashTag, if it's a repeated field, the HashTags of every one.
+            }
+            repeated Hash hash = 1;
+            repeated string tag = 2;
+            repeated AttrHashTag attr_hashtag = 3; // List of metadata fields. Ordened by indexes defined on format.
+        }
+        optional HashTag hashtag = 1;
+        optional FieldDef format = 2;
+    }
+    optional Metadata metadata = 1;
+    bytes value = 2;
+}
+
+
+//  -----------------------
+//  SERVICE SPECIFICATION.
+//  -----------------------
+message Service {
+    // API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
+    message Api {
+        message AppDef {
+            message MethodDef {
+                FieldDef input = 1;
+                FieldDef output = 2;
+            }
+            map<string, MethodDef> method = 1; // Exemple of method call: 8080.1()
+        }
+        message Slot {
+            int32 port = 1;
+            bytes transport_protocol = 2;
+        }
+        message ContractLedger {
+            bytes contract = 1;
+            string contract_addr = 2;
+            string ledger = 3;
+        }
+        AppDef app_protocol = 1;
+        repeated Slot slot = 2;
+        repeated ContractLedger contract_ledger = 3;
+        // Cost function can be applied. <- must be optional.
+    }
+
+    // Container:  Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
+    message Container {
+        message Filesystem {
+            message ItemBranch {
+                message Link {
+                    string src = 1;
+                    string dst = 2;
+                }
+                string name = 1; // id for path
+                oneof item {
+                    bytes file = 2;
+                    Link link = 3;
+                    Filesystem filesystem = 4;
+                }
+            }
+            repeated ItemBranch branch = 1;
+        }
+        message Config {
+            repeated string path = 1;
+            FieldDef format = 2;
+        }
+        message ExpectedGateway {
+            Api.AppDef gateway_app_protocol = 1;
+            repeated bytes gateway_transport_protocol = 2;
+        }
+        bytes architecture = 1;
+        bytes filesystem = 2;
+        map<string, FieldDef> enviroment_variables = 3;
+        repeated string entrypoint = 4;
+        Config config = 5;
+        ExpectedGateway expected_gateway = 6;
+    }
+
+    // Tensor:  Defines the “intelligence” that the service can provide, I think it would be a description of a polynomial (without coefficients and describing the variables).
+    message Tensor {
+        map<string, FieldDef> index = 1;
+        int32 rank = 2;
+    }
+
+    // Ledger:  Defines the database that the service can provide.
+    message Ledger {
+        message ClassDiagram {
+            message RelationDef {
+                FieldDef field = 1;
+                string relation = 2;  // {0-10}, * ...
+            }
+            map<int32, RelationDef> clases = 1;
+        }
+        ClassDiagram class_diagram = 1;
+        optional bytes consensus_protocol = 2; // Can've no consensus.
+    }
+
+    Container container = 1;
+    Api api = 2;
+    Tensor tensor = 3;
+    Ledger ledger = 4;
+}
+
+
+//  ------------------------
+//  INSTANCE SPECIFICATION.
+//  ------------------------
+// Used for specify node peers, node-host instancies, ledger-nodes instancies and tensor instancies.
+message Instance {
+    message Uri {
+        string ip = 1;
+        int32 port = 2;
+    }
+    message Uri_Slot {
+        int32 internal_port = 1;
+        repeated Uri uri = 2;
+    }
+    Service.Api api = 1;
+    repeated Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899], 
+}
+
+
+//  -------------------------------
+//  SERVICE INITIAL CONFIGURATION.
+//  -------------------------------
+// The __config__ file is mounted on each service on the filesystem's root.
+
+message Configuration {
+    map<string, bytes> enviroment_variables = 1;
+    repeated int32 spec_slot = 2;
+}
+
+message ConfigurationFile {
+    Instance gateway = 1;
+    Configuration config = 2;
+    Sysresources initial_sysresources = 3;
+}
+
+//  ------------------------
+//  System resources.
+//  ------------------------
+message Sysresources {                           //  https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
+    optional uint64 blkio_weight = 1;
+    optional uint64 cpu_period = 2;
+    optional uint64 cpu_quota = 3;  // https://wbhegedus.me/understanding-kubernetes-cpu-limits/
+    optional uint64 mem_limit = 4;
+    optional uint64 disk_space = 5;
+}

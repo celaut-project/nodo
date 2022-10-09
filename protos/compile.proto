@@ -1,0 +1,34 @@
+syntax = "proto3";
+package compile;
+import "celaut.proto";
+
+message Service {
+    message Container {
+        message Filesystem {
+            message ItemBranch {
+                string name = 1; // id for path
+                oneof item {
+                    bytes file = 2;
+                    string link = 3;
+                    celaut.Service.Container.Filesystem filesystem = 4;
+                }
+            }
+            repeated ItemBranch branch = 1;
+        }
+        bytes architecture = 1;
+        celaut.Service.Container.Filesystem filesystem = 2;
+        map<string, celaut.FieldDef> enviroment_variables = 3;
+        repeated string entrypoint = 4;
+        celaut.Service.Container.Config config = 5;
+        celaut.Service.Container.ExpectedGateway expected_gateway = 6;
+    }
+    Container container = 1;
+    celaut.Service.Api api = 2;
+    celaut.Service.Tensor tensor = 3;
+    celaut.Service.Ledger ledger = 4;
+}
+
+message ServiceWithMeta {
+    celaut.Any.Metadata metadata = 1;
+    Service service = 2;
+}

@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package buffer;
+
+message Empty {}
+
+message Buffer  {
+    message Head {
+        message Partition {
+            map<int32, Partition> index = 1;
+        }
+        int32 index = 1;
+        repeated Partition partitions = 2;
+    }
+    optional bytes chunk = 1;
+    optional bool separator = 2;
+    optional bool signal = 3;
+    optional Head head = 4;
+}
