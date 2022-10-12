@@ -66,7 +66,7 @@ def get_service_hex_main_hash(
             return SHA3_256(
                 value=service_buffer if type(service_buffer) is bytes
                 else open(service_buffer, 'rb').read() if type(service_buffer) is str
-                else service_buffer.SerializeToString()
+                else Service(service_buffer).SerializeToString()
             ).hex()
         except Exception as e:
             LOGGER('Exception getting a service hash: ' + str(e))

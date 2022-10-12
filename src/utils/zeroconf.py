@@ -39,7 +39,7 @@ def Zeroconf(network: str) -> list:
                     next(client_grpc(
                         method = gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(peer_uri)
-                            ).Hynode,
+                            ).GetInstance,
                         indices_parser = Instance,
                         input = generate_gateway_instance(
                                     network = network
@@ -57,6 +57,8 @@ def Zeroconf(network: str) -> list:
     # Insert the instances.
     for peer_instance in peer_instances:
         insert_instance_on_mongo(instance=peer_instance.instance)
+
+    return peer_instances
 
 
 if __name__ == "__main__":

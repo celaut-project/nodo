@@ -1,7 +1,6 @@
 import base64
 from hashlib import sha256
 import socket
-import threading
 from typing import Generator
 import typing
 
@@ -20,7 +19,7 @@ def read_file(filename) -> bytes:
         with open(filename, 'rb') as entry:
             for chunk in iter(lambda: entry.read(1024 * 1024), b''):
                 yield chunk
-    return b''.join([b for b in generator(filename)])
+    return b''.join([b for b in generator(filename=filename)])
 
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
@@ -146,7 +145,7 @@ def address_in_network( ip_or_uri, net) -> bool:
                 string1 = ni.ifaddresses(net)[ni.AF_INET][0]['addr'],
                 string2 = ni.ifaddresses(net)[ni.AF_INET][0]['broadcast'],
                 split = '.'
-            ) or \
+            ) or
             longestSublistFinder(
                 string1 = ni.ifaddresses(net)[ni.AF_INET6][0]['addr'],
                 string2 = ni.ifaddresses(net)[ni.AF_INET6][0]['broadcast'],

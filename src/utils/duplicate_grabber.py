@@ -41,20 +41,20 @@ class DuplicateGrabber(metaclass=Singleton):
 
         # hash.type.decode('utf-8')+':'+hash.value.decode('utf-8')  
         #  UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa7 in position 0: invalid start byte
-        hashes: List[str] = [ str(hash) for hash in hashes ]
+        hashes: List[str] = [str(hash_element) for hash_element in hashes]
         wait: bool = False
 
         with self.lock:
-            for hash in hashes:
-                if hash in self.hashes.keys():
-                    session = self.hashes[hash]
+            for hash_element in hashes:
+                if hash_element in self.hashes.keys():
+                    session = self.hashes[hash_element]
                     wait = True
                     break
             
             if not wait:
                 session = uuid4().hex
-                for hash in hashes:
-                    self.hashes[hash] = session
+                for hash_element in hashes:
+                    self.hashes[hash_element] = session
                 self.sessions[session] = Session()
 
         if wait:
