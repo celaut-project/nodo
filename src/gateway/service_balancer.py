@@ -1,6 +1,6 @@
 from protos import gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import GetServiceEstimatedCost_input, StartService_input_partitions_v2
-from src import utils as l
+from src.utils import logger as l
 import protos.celaut_pb2 as celaut
 from typing import Dict
 

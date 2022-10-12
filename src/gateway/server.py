@@ -2,12 +2,13 @@ import itertools
 import os
 from time import sleep
 
-from protos import gateway_pb2_grpc, gateway_pb2
+from iobigdata import mem_manager
+from protos import gateway_pb2_grpc, gateway_pb2, gateway_pb2_grpcbf
 from protos import celaut_pb2 as celaut
 from protos.buffer_pb2 import Buffer
 from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2, GetServiceTar_input, \
     GetServiceEstimatedCost_input
-from src.compiler.compile import REGISTRY, HYCACHE
+from src.compiler.compile import REGISTRY, HYCACHE, compile
 from src.gateway.gateway import get_from_registry, GENERAL_ATTEMPTS, GENERAL_WAIT_TIME, save_service, search_definition, \
     generate_gateway_instance, search_file, search_container, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, \
     get_service_buffer_from_registry
@@ -254,7 +255,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         except Exception as e:
             raise Exception('Was imposible start the service. ' + str(e))
 
-    def StopService(self, request_iterator, context):
+    def StopService(self, request_iterator, context, **kwargs):
         try:
             l.LOGGER('Stopping service.')
             for b in grpcbf.serialize_to_buffer(
@@ -271,7 +272,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         except Exception as e:
             raise Exception('Was imposible stop the service. ' + str(e))
 
-    def GetInstance(self, request_iterator, context):
+    def GetInstance(self, request_iterator, context, **kwargs):
         l.LOGGER('Request for instance by ' + str(context.peer()))
         for b in grpcbf.serialize_to_buffer(
                 generate_gateway_instance(
@@ -283,13 +284,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 )
         ): yield b
 
-    def GenerateClient(self, request_iterator, context):
+    def GenerateClient(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?
         for b in grpcbf.serialize_to_buffer(
                 message_iterator=generate_client()
         ): yield b
 
-    def ModifyServiceSystemResources(self, request_iterator, context):
+    def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
         l.LOGGER('Request for modify service system resources.')
         token = get_token_by_uri(
             uri=get_only_the_ip_from_context(context_peer=context.peer())
@@ -320,7 +321,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 )
         ): yield b
 
-    def GetFile(self, request_iterator, context):
+    def GetFile(self, request_iterator, context, **kwargs):
         l.LOGGER('Request for give a service definition.')
         hashes = []
         for hash in grpcbf.parse_from_buffer(
@@ -365,7 +366,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         except:
             raise Exception('Was imposible get the service definition.')
 
-    def Compile(self, request_iterator, context):
+    def Compile(self, request_iterator, context, **kwargs):
         l.LOGGER('Go to compile a proyect.')
         input = grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
@@ -380,9 +381,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 partitions_model=next(input)
         ): yield b
 
-    def GetServiceTar(self, request_iterator, context):
+    def GetServiceTar(self, request_iterator, context, **kwargs):
         # TODO se debe de hacer que gestione mejor tomar todo el servicio, como hace GetServiceEstimatedCost.
 
+        service_hash = None
+        service_buffer = None
         l.LOGGER('Request for give a service container.')
         for r in grpcbf.parse_from_buffer(
                 request_iterator=request_iterator,
@@ -392,44 +395,54 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
-                hash = r.value.hex()
+                service_hash = r.value.hex()
                 break
 
             # Si me da servicio.
             if type(r) is celaut.Any:
-                hash = get_service_hex_main_hash(service_buffer=r.value)
+                service_hash = get_service_hex_main_hash(service_buffer=r.value)
+                service_partitions_iterator = grpcbf.parse_from_buffer.conversor(
+                    iterator=itertools.chain([r.value]),
+                    pf_object=gateway_pb2.ServiceWithMeta,
+                    remote_partitions_model=gateway_pb2_grpcbf.StartService_input_partitions_v2[2],
+                    mem_manager=mem_manager,
+                    yield_remote_partition_dir=False,
+                    partitions_message_mode=[True, False]
+                )
                 save_service(  # TODO
-                    service_p1=r.value,
+                    service_p1=next(service_partitions_iterator),
+                    service_p2=next(service_partitions_iterator),
                     metadata=r.metadata
                 )
                 service_buffer = r.value
                 break
 
-        l.LOGGER('Getting the container of service ' + hash)
-        if hash and hash in [s for s in os.listdir(REGISTRY)]:
+        l.LOGGER('Getting the container of service ' + service_hash)
+        if service_hash and service_hash in [s for s in os.listdir(REGISTRY)]:
             try:
-                os.system('docker save ' + hash + '.service > ' + HYCACHE + hash + '.tar')
+                os.system('docker save ' + service_hash + '.service > ' + HYCACHE + service_hash + '.tar')
                 l.LOGGER('Returned the tar container buffer.')
-                yield grpcbf.get_file_chunks(filename=HYCACHE + hash + '.tar')
+                yield grpcbf.get_file_chunks(filename=HYCACHE + service_hash + '.tar')
             except:
-                l.LOGGER('Error saving the container ' + hash)
-        else:
+                l.LOGGER('Error saving the container ' + service_hash)
+        elif service_buffer:
             # Puede buscar el contenedor en otra red distinta a la del solicitante.
             try:
                 yield search_container(
                     ignore_network=get_network_name(
                         ip_or_uri=get_only_the_ip_from_context(context_peer=context.peer())
                     ),
-                    service_buffer=service_buffer
+                    service_buffer=service_buffer,
+                    metadata=celaut.Any.Metadata()
                 )
             except:
-                l.LOGGER('The service ' + hash + ' was not found.')
+                l.LOGGER('The service ' + service_hash + ' was not found.')
 
         yield gateway_pb2.buffer__pb2.Buffer(separator=True)
         raise Exception('Was imposible get the service container.')
 
     # Estimacion de coste de ejecución de un servicio con la cantidad de gas por defecto.
-    def GetServiceEstimatedCost(self, request_iterator, context):
+    def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
         # TODO check cost in other peers (use RecursionGuard to prevent infinite loops).
 
         l.LOGGER('Request for the cost of a service.')
@@ -442,14 +455,16 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
         client_id = None
         recursion_guard_token = None
+        initial_service_cost = None
+        cost = None
+        initial_service_cost = None
+        service_hash = None
+        second_partition_dir = None
         while True:
             try:
                 r = next(parse_iterator)
             except StopIteration:
                 break
-            cost = None
-            initial_service_cost = None
-            hash = None
 
             if type(r) is gateway_pb2.Client:
                 client_id = r.client_id
@@ -462,7 +477,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             if type(r) is gateway_pb2.HashWithConfig:
                 if r.HasField('initial_gas_amount'):
                     initial_service_cost = from_gas_amount(r.initial_gas_amount)
-                r = hash = r.hash
+                r = service_hash = r.hash
 
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
                 if r.value.hex() in [s for s in os.listdir(REGISTRY)]:
@@ -487,15 +502,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
             if r is gateway_pb2.ServiceWithMeta:
                 if DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
                 value, is_primary = DuplicateGrabber().next(
-                    hashes=[hash],
+                    hashes=[service_hash],
                     generator=parse_iterator
                 )
                 service_with_meta = value
                 if is_primary:
                     second_partition_dir = next(parse_iterator)
-                elif hash.type == SHA3_256_ID:
+                elif service_hash.type == SHA3_256_ID:
                     for i in range(GENERAL_ATTEMPTS):
-                        if hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
+                        if service_hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                             second_partition_dir = get_from_registry(
                                 service_hash=r.value.hex()
                             )
@@ -513,7 +528,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 service_p1=service_with_meta.service.SerializeToString(),
                                 service_p2=second_partition_dir,
                                 metadata=service_with_meta.metadata,
-                                service_hash=hash
+                                service_hash=service_hash
                             )
                         ),
                         metadata=service_with_meta.metadata
@@ -536,7 +551,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 service_p1=service_with_meta.service.SerializeToString(),
                                 service_p2=second_partition_dir,
                                 metadata=service_with_meta.metadata,
-                                service_hash=hash
+                                service_hash=service_hash
                             )
                         ),
                         metadata=service_with_meta.metadata
@@ -549,7 +564,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             initial_service_cost: int = default_initial_cost(
                 father_id=client_id if client_id else get_only_the_ip_from_context(context_peer=context.peer())
             )
-        cost: int = cost + initial_service_cost
+        cost: int = cost + initial_service_cost if cost else initial_service_cost
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost) + ' with benefit ' + str(0))
         if cost is None: raise Exception("I dont've the service.")
         for b in grpcbf.serialize_to_buffer(
@@ -560,7 +575,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 indices=gateway_pb2.EstimatedCost
         ): yield b
 
-    def Payable(self, request_iterator, context):
+    def Payable(self, request_iterator, context, **kwargs):
         l.LOGGER('Request for payment.')
         payment = next(grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
@@ -577,7 +592,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Payment is valid.')
         for b in grpcbf.serialize_to_buffer(): yield b
 
-    def GetMetrics(self, request_iterator, context):
+    def GetMetrics(self, request_iterator, context, **kwargs):
         for b in grpcbf.serialize_to_buffer(
                 message_iterator=get_metrics(
                     token=next(grpcbf.parse_from_buffer(

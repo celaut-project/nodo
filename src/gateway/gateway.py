@@ -156,7 +156,7 @@ def save_service(
 
 def search_container(
         service_buffer: bytes,
-        metadata: celaut.Any.Metadata,
+        metadata: celaut.Any.Metadata = celaut.Any.Metadata(),
         ignore_network: str = None
 ) -> Generator[gateway_pb2.buffer__pb2.Buffer, None, None]:
     # Search a service tar container.
