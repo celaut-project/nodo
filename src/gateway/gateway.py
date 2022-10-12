@@ -231,13 +231,13 @@ def search_definition(hashes: list, ignore_network: str = None) -> bytes:
     raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
 
 
-def get_service_buffer_from_registry(hash: str) -> bytes:
-    return get_from_registry(hash=hash).value
+def get_service_buffer_from_registry(service_hash: str) -> bytes:
+    return get_from_registry(service_hash=service_hash).value
 
 
-def get_from_registry(hash: str) -> celaut.Any:
-    l.LOGGER('Getting ' + hash + ' service from the local registry.')
-    first_partition_dir = REGISTRY + hash + '/p1'
+def get_from_registry(service_hash: str) -> celaut.Any:
+    l.LOGGER('Getting ' + service_hash + ' service from the local registry.')
+    first_partition_dir = REGISTRY + service_hash + '/p1'
     try:
         with iobd.mem_manager(2 * os.path.getsize(first_partition_dir)) as iolock:
             any = celaut.Any()

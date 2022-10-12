@@ -22,15 +22,15 @@ def launch_service(
         metadata: celaut.Any.Metadata,
         father_ip: str,
         father_id: str = None,
-        id: str = None,
-        system_requeriments: celaut.Sysresources = None,
+        service_id: str = None,
+        system_requirements: celaut.Sysresources = None,
         max_sysreq=None,
         config: celaut.Configuration = None,
         initial_gas_amount: int = None,
         recursion_guard_token: str = None,
 ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
-    if service_buffer == None: raise Exception("Service object can't be None")
+    if service_buffer is None: raise Exception("Service object can't be None")
 
     with RecursionGuard(
             token=recursion_guard_token,
@@ -48,7 +48,7 @@ def launch_service(
         is_complete = completeness(
             service_buffer=service_buffer,
             metadata=metadata,
-            id=id,
+            id=service_id,
         )
 
         while True:
@@ -100,7 +100,7 @@ def launch_service(
                                 service_buffer=service_buffer,
                                 metadata=metadata,
                                 config=config,
-                                min_sysreq=system_requeriments,
+                                min_sysreq=system_requirements,
                                 max_sysreq=max_sysreq,
                                 initial_gas_amount=initial_gas_amount,
                                 client_id=generate_client_id_in_other_peer(peer_id=peer),
@@ -125,7 +125,7 @@ def launch_service(
 
                 #  The node launches the service locally.
                 if getting_container: l.LOGGER('El nodo lanza el servicio localmente.')
-                if not system_requeriments: system_requeriments = DEFAULT_SYSTEM_RESOURCES
+                if not system_requirements: system_requirements = DEFAULT_SYSTEM_RESOURCES
                 refound_gas = []
                 if not spend_gas(
                         token_or_container_ip=father_id,
@@ -136,10 +136,10 @@ def launch_service(
                         ) * GAS_COST_FACTOR,
                 ): raise Exception('Launch service error spending gas for ' + father_id)
                 try:
-                    id = build.build(
+                    service_id = build.build(
                         service_buffer=service_buffer,
                         metadata=metadata,
-                        id=id,
+                        id=service_id,
                         get_it=not getting_container,
                         complete=is_complete
                     )  # If the container is not built, build it.
@@ -173,11 +173,11 @@ def launch_service(
                 # If the request is made by a local service.
                 if father_id == father_ip:
                     container = create_container(
-                        id=id,
+                        id=service_id,
                         entrypoint=service.container.entrypoint
                     )
 
-                    set_config(container_id=container.id, config=config, resources=system_requeriments,
+                    set_config(container_id=container.id, config=config, resources=system_requirements,
                                api=service.container.config)
 
                     # The container must be started after adding the configuration file and
@@ -207,10 +207,10 @@ def launch_service(
                     assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
                     container = create_container(
                         use_other_ports=assigment_ports,
-                        id=id,
+                        id=service_id,
                         entrypoint=service.container.entrypoint
                     )
-                    set_config(container_id=container.id, config=config, resources=system_requeriments,
+                    set_config(container_id=container.id, config=config, resources=system_requirements,
                                api=service.container.config)
                     try:
                         container.start()
@@ -241,7 +241,7 @@ def launch_service(
                         initial_gas_amount=initial_gas_amount if initial_gas_amount else default_initial_cost(
                             father_id=father_id),
                         system_requeriments_range=gateway_pb2.ModifyServiceSystemResourcesInput(
-                            min_sysreq=system_requeriments, max_sysreq=system_requeriments)
+                            min_sysreq=system_requirements, max_sysreq=system_requirements)
                     ),
                     instance=celaut.Instance(
                         api=service.api,
@@ -250,5 +250,5 @@ def launch_service(
                 )
 
             if abort_it:
-                l.LOGGER("Can't launch this service " + id)
-                raise Exception("Can't launch this service " + id)
+                l.LOGGER("Can't launch this service " + service_id)
+                raise Exception("Can't launch this service " + service_id)
