@@ -1,3 +1,4 @@
+import itertools
 import os
 import shutil
 import subprocess
@@ -13,6 +14,7 @@ import netifaces as ni
 import iobigdata as iobd
 from contracts.eth_main.utils import get_ledger_and_contract_addr_from_contract
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
+from protos import gateway_pb2_grpcbf
 from protos.gateway_pb2_grpcbf import GetServiceTar_input
 from src import utils
 from src.compiler.compile import REGISTRY, HYCACHE
@@ -128,7 +130,9 @@ def save_service(
         service_hash: str = None
 ) -> str:
     if not service_p1 or not service_p2:
-        l.LOGGER('Save service ')
+        l.LOGGER('Save service partitions required.')
+        raise Exception('Save service partitions required.')
+
     if not service_hash:
         service_hash = get_service_hex_main_hash(
             service_buffer=(service_p1, service_p2),
@@ -171,7 +175,8 @@ def search_container(
                 indices_serializer=GetServiceTar_input
             ))
             break
-        except:
+        except Exception as e:
+            l.LOGGER('Exception during search container process: ' + str(e))
             pass
 
 
@@ -189,8 +194,10 @@ def search_file(hashes: list, ignore_network: str = None) -> Generator[celaut.An
                     input=utils.service_hashes(
                         hashes=hashes
                     )
-            ): yield buffer
-        except:
+            ):
+                yield buffer
+        except Exception as e:
+            l.LOGGER('Exception during search file process: ' + str(e))
             pass
 
 
@@ -204,10 +211,18 @@ def search_definition(hashes: list, ignore_network: str = None) -> bytes:
                 service_buffer=any.value,
                 hashes=hashes
         ):
+            service_partitions_iterator = grpcbf.parse_from_buffer.conversor(
+                iterator=itertools.chain([any.value]),
+                pf_object=gateway_pb2.ServiceWithMeta,
+                remote_partitions_model=gateway_pb2_grpcbf.StartService_input_partitions_v2[2],
+                mem_manager=iobd.mem_manager,
+                yield_remote_partition_dir=False,
+                partitions_message_mode=[True, False]
+            )
             #  Save the service on the registry.
-            save_service(  # TODO
-                service_p1=any.value,
-                service_p2=None,
+            save_service(
+                service_p1=next(service_partitions_iterator),
+                service_p2=next(service_partitions_iterator),
                 metadata=any.metadata
             )
             return any.value
