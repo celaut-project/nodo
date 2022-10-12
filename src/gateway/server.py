@@ -204,7 +204,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     service_p1=service_with_meta.service.SerializeToString(),
                     service_p2=second_partition_dir,
                     metadata=service_with_meta.metadata,
-                    hash=hash if hash else None
+                    service_hash=hash if hash else None
                 )
                 if configuration:
                     l.LOGGER('Launch service with configuration')
@@ -509,7 +509,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 service_p1=service_with_meta.service.SerializeToString(),
                                 service_p2=second_partition_dir,
                                 metadata=service_with_meta.metadata,
-                                hash=hash
+                                service_hash=hash
                             )
                         ),
                         metadata=service_with_meta.metadata
@@ -532,7 +532,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 service_p1=service_with_meta.service.SerializeToString(),
                                 service_p2=second_partition_dir,
                                 metadata=service_with_meta.metadata,
-                                hash=hash
+                                service_hash=hash
                             )
                         ),
                         metadata=service_with_meta.metadata

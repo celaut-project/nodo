@@ -24,6 +24,7 @@ from src.manager.manager import DOCKER_NETWORK, LOCAL_NETWORK
 from src.utils import logger as l
 from src.utils.logger import GET_ENV
 from src.utils.verify import check_service, get_service_hex_main_hash
+from src.utils import utils as utils
 
 DOCKER_CLIENT = lambda: docker_lib.from_env(
     timeout=GET_ENV(env='DOCKER_CLIENT_TIMEOUT', default=480),
@@ -119,21 +120,25 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
         raise e
 
 
+# If the service is not on the registry, save it.
 def save_service(
         service_p1: bytes,
         service_p2: str,
         metadata: celaut.Any.Metadata,
-        hash: str = None
+        service_hash: str = None
 ) -> str:
-    # If the service is not on the registry, save it.
-    if not hash: hash = get_service_hex_main_hash(
-        service_buffer=(service_p1, service_p2) if service_p2 else None,
-        metadata=metadata
-    )
-    if not os.path.isdir(REGISTRY + hash):
-        os.mkdir(REGISTRY + hash)
-        with open(REGISTRY + hash + '/p1',
-                  'wb') as file:  # , iobd.mem_manager(len=len(service_p1)): TODO check mem-58 bug.
+    if not service_p1 or not service_p2:
+        l.LOGGER('Save service ')
+    if not service_hash:
+        service_hash = get_service_hex_main_hash(
+            service_buffer=(service_p1, service_p2),
+            metadata=metadata
+        )
+    if not os.path.isdir(REGISTRY + service_hash):
+        os.mkdir(REGISTRY + service_hash)
+        with open(
+                REGISTRY + service_hash + '/p1', 'wb'
+        ) as file:  # , iobd.mem_manager(len=len(service_p1)): TODO check mem-58 bug.
             file.write(
                 celaut.Any(
                     metadata=metadata,
@@ -141,8 +146,8 @@ def save_service(
                 ).SerializeToString()
             )
         if service_p2:
-            shutil.move(service_p2, REGISTRY + hash + '/p2')
-    return hash
+            shutil.move(service_p2, REGISTRY + service_hash + '/p2')
+    return service_hash
 
 
 def search_container(
@@ -153,7 +158,7 @@ def search_container(
     # Search a service tar container.
     for peer in utils.peers_id_iterator(ignore_network=ignore_network):
         try:
-            next(grpcbf.client_grpc(
+            yield next(grpcbf.client_grpc(
                 method=gateway_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(
                         next(utils.generate_uris_by_peer_id(peer)),
@@ -202,6 +207,7 @@ def search_definition(hashes: list, ignore_network: str = None) -> bytes:
             #  Save the service on the registry.
             save_service(  # TODO
                 service_p1=any.value,
+                service_p2=None,
                 metadata=any.metadata
             )
             return any.value

@@ -44,7 +44,7 @@ def check_service(service_buffer: bytes, hashes: list) -> bool:
 
 # Return the service's sha3-256 hash on hexadecimal format.
 def get_service_hex_main_hash(
-        service_buffer: Union[bytes, str, Service, tuple] = None,
+        service_buffer: Union[bytes, str, Service, tuple],
         partitions_model: tuple = None,
         metadata: Any.Metadata = Any.Metadata(),
         other_hashes: list = []
@@ -54,31 +54,32 @@ def get_service_hex_main_hash(
         if hash.type == SHA3_256_ID:
             return hash.value.hex()
 
-    # If not but the spec. is complete, calculate the hash prunning it before.
-    # If not and is incomplete, it's going to be imposible calculate any hash.
+    # If not but the spec. is complete, calculate the hash pruning it before.
+    # If not and is incomplete, it's going to be impossible calculate any hash.
 
-    if service_buffer:
-        if type(service_buffer) is not tuple:
-            try:
-                return SHA3_256(
-                    value=service_buffer if type(service_buffer) is bytes \
-                        else open(service_buffer, 'rb').read() if type(service_buffer) is str \
-                        else service_buffer.SerializeToString()
-                ).hex()
-            except:
-                pass
+    if not service_buffer:
+        LOGGER(' sha3-256 hash function is not implemented on this method.')
+        raise Exception(' sha3-256 hash function is not implemented on this method.')
 
-        elif partitions_model:
+    if type(service_buffer) is not tuple:
+        try:
             return SHA3_256(
-                value=grpcbf.partitions_to_buffer(
-                    message_type=Service,
-                    partitions_model=partitions_model,
-                    partitions=service_buffer
-                )
+                value=service_buffer if type(service_buffer) is bytes
+                else open(service_buffer, 'rb').read() if type(service_buffer) is str
+                else service_buffer.SerializeToString()
             ).hex()
+        except Exception as e:
+            LOGGER('Exception getting a service hash: ' + str(e))
+            pass
 
-    LOGGER(' sha3-256 hash function is not implemented on this method.')
-    raise Exception(' sha3-256 hash function is not implemented on this method.')
+    elif partitions_model:
+        return SHA3_256(
+            value=grpcbf.partitions_to_buffer(
+                message_type=Service,
+                partitions_model=partitions_model,
+                partitions=service_buffer
+            )
+        ).hex()
 
 
 def get_service_list_of_hashes(service_buffer: bytes, metadata: Any.Metadata, complete=True) -> list:
