@@ -18,6 +18,7 @@ def maintain_containers():
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
                 prune_container(token=token)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
+            l.LOGGER('Exception on maintain container process: ' + str(e))
             continue
 
         if not spend_gas(

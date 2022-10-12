@@ -120,7 +120,7 @@ class SystemCache(metaclass=Singleton):
             container_ip___peer_id=peer_id
         )
 
-    def __purgue_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
+    def purgue_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
         if token is None and (agent_id is None or container_id is None or container_ip is None):
             raise Exception(
                 'purgue_internal: token is None and (father_ip is None or container_id is None or container_ip is None)')
@@ -158,14 +158,14 @@ class SystemCache(metaclass=Singleton):
                 for dependency in self.container_cache[container_ip]:
                     # Si la dependencia esta en local.
                     if get_network_name(ip_or_uri=dependency.split('##')[0]) == DOCKER_NETWORK:
-                        refund += self.__purgue_internal(
+                        refund += self.purgue_internal(
                             agent_id=container_ip,
                             container_id=dependency.split('##')[1],
                             container_ip=dependency.split('##')[0]
                         )
                     # Si la dependencia se encuentra en otro nodo.
                     else:
-                        refund += self.__purgue_external(
+                        refund += self.purgue_external(
                             agent_id=agent_id,
                             peer_id=dependency.split('##')[0],
                             his_token=dependency[len(dependency.split('##')[0]) + 1:]
@@ -181,7 +181,7 @@ class SystemCache(metaclass=Singleton):
 
         return refund
 
-    def __purgue_external(self, agent_id, peer_id, his_token) -> int:
+    def purgue_external(self, agent_id, peer_id, his_token) -> int:
         refund = 0
         self.container_cache_lock.acquire()
 

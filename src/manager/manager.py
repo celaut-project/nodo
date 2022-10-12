@@ -59,7 +59,7 @@ CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = l.GET_ENV(env='CLIENT_MIN_GAS_A
 
 MEMSWAP_FACTOR = 0  # 0 - 1
 
-system_cache = SystemCache()
+sc = SystemCache()
 
 # CONTAINER CACHE
 
@@ -86,21 +86,21 @@ def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> 
 
 def get_token_by_uri(uri: str) -> str:
     try:
-        return system_cache.cache_service_perspective[uri]
+        return sc.cache_service_perspective[uri]
     except Exception as e:
         l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO ' + str(e) + ' ' + str(
-            system_cache.cache_service_perspective) + ' ' + str(uri))  # TODO. Study the imposibility of that.
+            sc.cache_service_perspective) + ' ' + str(uri))  # TODO. Study the imposibility of that.
         raise e
 
 
 def __push_token(token: str):
-    with system_cache.cache_locks.lock(token): system_cache[token] = {"mem_limit": 0}
+    with sc.cache_locks.lock(token): sc.system_cache[token] = {"mem_limit": 0}
 
 
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
-    if token not in system_cache.keys(): raise Exception('Manager error: token ' + token + ' does not exists.')
+    if token not in sc.system_cache.keys(): raise Exception('Manager error: token ' + token + ' does not exists.')
     if sys_req.HasField('mem_limit'):
-        variation = system_cache[token]['mem_limit'] - sys_req.mem_limit
+        variation = sc.system_cache[token]['mem_limit'] - sys_req.mem_limit
 
         if variation < 0:
             IOBigData().lock_ram(ram_amount=abs(variation))
@@ -109,7 +109,7 @@ def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
             IOBigData().unlock_ram(ram_amount=variation)
 
         if variation != 0:
-            with system_cache.cache_locks.lock(token): system_cache[token]['mem_limit'] = sys_req.mem_limit
+            with sc.cache_locks.lock(token): sc.system_cache[token]['mem_limit'] = sys_req.mem_limit
 
     return True
 
@@ -127,7 +127,7 @@ def __refound_gas(
         add_function=None,  # Lambda function if cache is not a dict of token:gas
 ) -> bool:
     try:
-        with system_cache.cache_locks.lock(token):
+        with sc.cache_locks.lock(token):
             if add_function:
                 add_function(gas)
             elif cache:
@@ -155,11 +155,11 @@ def __refound_gas_function_factory(
 
 def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for client ' + client_id + ' of ' + str(amount))
-    if client_id not in system_cache.clients:  # TODO no debería de añadir un peer que no existe.
+    if client_id not in sc.clients:  # TODO no debería de añadir un peer que no existe.
         raise Exception('Client ' + client_id + ' does not exists.')
     if not __refound_gas(
             gas=amount,
-            add_function=lambda gas: system_cache.clients[client_id].add_gas(gas),
+            add_function=lambda gas: sc.clients[client_id].add_gas(gas),
             token=client_id
     ):
         raise Exception('Manager error: cannot increase local gas for client ' + client_id + ' by ' + str(amount))
@@ -169,13 +169,13 @@ def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
 def __get_gas_amount_by_id(id: str) -> int:
     l.LOGGER('Get gas amount for ' + id)
 
-    if id in system_cache.cache_service_perspective:
-        return system_cache[
+    if id in sc.cache_service_perspective:
+        return sc.system_cache[
             get_token_by_uri(uri=id)
         ]['gas']
 
-    if id in system_cache.clients:
-        return system_cache.clients[id].gas
+    if id in sc.clients:
+        return sc.clients[id].gas
 
     raise Exception('Manager error: ' + id + ' not found.')
 
@@ -201,47 +201,47 @@ def spend_gas(
     # l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
     try:
         # En caso de que sea un peer, el token es el peer id.
-        if token_or_container_ip in system_cache.clients and (system_cache.clients[token_or_container_ip].gas >= gas_to_spend or ALLOW_GAS_DEBT):
-            with system_cache.cache_locks.lock(token_or_container_ip):
-                system_cache.clients[token_or_container_ip].reduce_gas(gas=gas_to_spend)
+        if token_or_container_ip in sc.clients and (sc.clients[token_or_container_ip].gas >= gas_to_spend or ALLOW_GAS_DEBT):
+            with sc.cache_locks.lock(token_or_container_ip):
+                sc.clients[token_or_container_ip].reduce_gas(gas=gas_to_spend)
             __refound_gas_function_factory(
                 gas=gas_to_spend,
                 token=token_or_container_ip,
-                add_function=lambda gas: system_cache.clients[token_or_container_ip].add_gas(gas),
+                add_function=lambda gas: sc.clients[token_or_container_ip].add_gas(gas),
                 container=refund_gas_function_container
             )
             return True
 
         # En caso de que token_or_container_ip sea el token del contenedor.
-        elif token_or_container_ip in system_cache and (
-                system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with system_cache.cache_locks.lock(token_or_container_ip):
-                system_cache[token_or_container_ip]['gas'] -= gas_to_spend
+        elif token_or_container_ip in sc.system_cache and (
+                sc.system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
+            with sc.cache_locks.lock(token_or_container_ip):
+                sc.system_cache[token_or_container_ip]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
                 gas=gas_to_spend,
-                cache=system_cache,
+                cache=sc.system_cache,
                 token=token_or_container_ip,
                 container=refund_gas_function_container
             )
             return True
 
         # En caso de que token_or_container_ip sea la ip del contenedor.
-        token_or_container_ip = cache_service_perspective[token_or_container_ip]
-        if token_or_container_ip in system_cache and (
-                system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with system_cache.cache_locks.lock(token_or_container_ip): system_cache[token_or_container_ip]['gas'] -= gas_to_spend
+        token_or_container_ip = sc.cache_service_perspective[token_or_container_ip]
+        if token_or_container_ip in sc and (
+                sc.system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
+            with sc.cache_locks.lock(token_or_container_ip): sc.system_cache[token_or_container_ip]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
                 gas=gas_to_spend,
-                cache=system_cache,
+                cache=sc.system_cache,
                 token=token_or_container_ip,
                 container=refund_gas_function_container
             )
             return True
     except Exception as e:
         l.LOGGER('Manager error spending gas ' + str(e) + ' ' + str(gas_to_spend) + ' ' + token_or_container_ip + \
-                 '\n peer instances -> ' + str(system_cache.clients) + \
-                 '\n system cache -> ' + str(system_cache) + \
-                 '\n cache service perspective -> ' + str(cache_service_perspective) + \
+                 '\n peer instances -> ' + str(sc.clients) + \
+                 '\n system cache -> ' + str(sc) + \
+                 '\n cache service perspective -> ' + str(sc.cache_service_perspective) + \
                  '\n        ----------------------\n\n\n')
 
     return False
@@ -250,7 +250,7 @@ def spend_gas(
 def generate_client() -> gateway_pb2.Client:
     # No collisions expected.
     client_id = uuid.uuid4().hex
-    system_cache.clients[client_id] = Client()
+    sc.clients[client_id] = Client()
     l.LOGGER('New client created ' + client_id)
     return gateway_pb2.Client(
         client_id=client_id,
@@ -262,10 +262,10 @@ def generate_client_id_in_other_peer(peer_id: str) -> str:
         l.LOGGER('Peer ' + peer_id + ' is not available.')
         raise Exception('Peer not available.')
 
-    if peer_id not in system_cache.clients_on_other_peers:
+    if peer_id not in sc.clients_on_other_peers:
         l.LOGGER('Generate new client for peer ' + peer_id)
-        with system_cache.cache_locks.lock(peer_id):
-            system_cache.clients_on_other_peers[peer_id] = str(next(grpcbf.client_grpc(
+        with sc.cache_locks.lock(peer_id):
+            sc.clients_on_other_peers[peer_id] = str(next(grpcbf.client_grpc(
                 method=gateway_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(
                         next(generate_uris_by_peer_id(peer_id=peer_id))
@@ -275,16 +275,16 @@ def generate_client_id_in_other_peer(peer_id: str) -> str:
                 partitions_message_mode_parser=True
             )).client_id)
 
-    return system_cache.clients_on_other_peers[peer_id]
+    return sc.clients_on_other_peers[peer_id]
 
 
 def add_peer(
         peer_id: str
 ) -> bool:
     try:
-        if peer_id not in system_cache.total_deposited_on_other_peers:
-            with system_cache.cache_locks.lock(peer_id):
-                system_cache.total_deposited_on_other_peers[peer_id] = 0
+        if peer_id not in sc.total_deposited_on_other_peers:
+            with sc.cache_locks.lock(peer_id):
+                sc.total_deposited_on_other_peers[peer_id] = 0
 
         l.LOGGER('Add peer ' + peer_id + ' with client ' +
                  generate_client_id_in_other_peer(peer_id=peer_id)
@@ -311,17 +311,17 @@ def add_container(
 ) -> str:
     l.LOGGER('Add container for ' + father_id)
     token = father_id + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
-    if token in system_cache.keys(): raise Exception('Manager error: ' + token + ' exists.')
+    if token in sc.system_cache.keys(): raise Exception('Manager error: ' + token + ' exists.')
 
     __push_token(token=token)
-    system_cache.__set_on_cache(
+    sc.system_cache.__set_on_cache(
         agent_id=father_id,
         container_id___his_token_encrypt=container.id,
         container_ip___peer_id=container.attrs['NetworkSettings']['IPAddress'],
         container_id____his_token=token,
     )
-    with system_cache.cache_locks.lock(token):
-        system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(
+    with sc.cache_locks.lock(token):
+        sc.system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(
             father_id=father_id)
     if not container_modify_system_params(
             token=token,
@@ -370,10 +370,10 @@ def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
 def get_sysresources(token: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
     return gateway_pb2.ModifyServiceSystemResourcesOutput(
         sysreq=celaut_pb2.Sysresources(
-            mem_limit=system_cache[token]["mem_limit"],
+            mem_limit=sc.system_cache[token]["mem_limit"],
         ),
         gas=to_gas_amount(
-            gas_amount=system_cache[token]["gas"]
+            gas_amount=sc.system_cache[token]["gas"]
         )
     )
 
@@ -385,7 +385,7 @@ def prune_container(token: str) -> int:
     if get_network_name(ip_or_uri=token.split('##')[
         1]) == DOCKER_NETWORK:  # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
         try:
-            refund = system_cache.__purgue_internal(
+            refund = sc.purgue_internal(
                 agent_id=token.split('##')[0],
                 container_id=token.split('##')[2],
                 container_ip=token.split('##')[1],
@@ -397,7 +397,7 @@ def prune_container(token: str) -> int:
 
     else:
         try:
-            refund = system_cache.__purgue_external(
+            refund = sc.purgue_external(
                 agent_id=token.split('##')[0],
                 peer_id=token.split('##')[1],
                 his_token=token.split('##')[2],
@@ -418,7 +418,7 @@ def maintain_cost(sysreq: dict) -> int:
 
 
 def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
-    is_built = (get_service_hex_main_hash(service_buffer=service_buffer, metadata=metadata) \
+    is_built = (get_service_hex_main_hash(service_buffer=service_buffer, metadata=metadata)
                 in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()])
     if not is_built and \
             not build.check_supported_architecture(metadata=metadata): raise build.UnsupportedArquitectureException
