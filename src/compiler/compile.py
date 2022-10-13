@@ -110,7 +110,7 @@ class Hyper:
                     with open(self.path+env+".field", "rb") as env_desc:
                         self.service.container.enviroment_variables[env].ParseFromString(env_desc.read())
                 except FileNotFoundError:
-                    self.service.container.enviroment_variables[env]        
+                    pass
 
         # Entrypoint
         if self.json.get('entrypoint'):
@@ -253,7 +253,7 @@ class Hyper:
                     )
                 )
 
-    def save(self, partitions_model: list) -> str:
+    def save(self, partitions_model: tuple) -> str:
         service_buffer = self.service.SerializeToString() # 2*len
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(
@@ -297,23 +297,25 @@ class Hyper:
         return id
 
 
-def ok(path, aux_id, partitions_model = [buffer_pb2.Buffer.Head.Partition()]):
-    Hyperfile = Hyper(path = path, aux_id = aux_id)
+def ok( path, aux_id,
+        partitions_model = (buffer_pb2.Buffer.Head.Partition())
+    ):
+    spec_file = Hyper(path = path, aux_id = aux_id)
 
-    with iobigdata.mem_manager(len = COMPILER_MEMORY_SIZE_FACTOR*Hyperfile.buffer_len):
-        Hyperfile.parseContainer()
-        Hyperfile.parseApi()
-        Hyperfile.parseLedger()
-        Hyperfile.parseTensor()
+    with iobigdata.mem_manager(len = COMPILER_MEMORY_SIZE_FACTOR*spec_file.buffer_len):
+        spec_file.parseContainer()
+        spec_file.parseApi()
+        spec_file.parseLedger()
+        spec_file.parseTensor()
 
-        id = Hyperfile.save(
+        identifier = spec_file.save(
             partitions_model=partitions_model
             )
 
-    os.system('/usr/bin/docker tag builder'+aux_id+' '+id+'.docker')
+    os.system('/usr/bin/docker tag builder' + aux_id +' ' + identifier + '.docker')
     os.system('/usr/bin/docker rmi builder'+aux_id)
     os.system('rm -rf '+HYCACHE+aux_id+'/')
-    return id
+    return identifier
 
 def repo_ok(
     repo: str,

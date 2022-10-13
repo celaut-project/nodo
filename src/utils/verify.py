@@ -44,12 +44,14 @@ def check_service(service_buffer: bytes, hashes: list) -> bool:
 
 # Return the service's sha3-256 hash on hexadecimal format.
 def get_service_hex_main_hash(
-        service_buffer: Union[bytes, str, Service, tuple],
+        service_buffer: Union[bytes, str, Service, tuple, None],
         partitions_model: tuple = None,
         metadata: Any.Metadata = Any.Metadata(),
-        other_hashes: list = []
+        other_hashes: list = None
 ) -> str:
     # Find if it has the hash.
+    if other_hashes is None:
+        other_hashes = []
     for hash in list(metadata.hashtag.hash) + other_hashes:
         if hash.type == SHA3_256_ID:
             return hash.value.hex()

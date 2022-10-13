@@ -148,9 +148,11 @@ def __refound_gas_function_factory(
         container: list = None,
         add_function=None
 ) -> lambda: None:
-    def use(l=[lambda: __refound_gas(gas=gas, cache=cache, token=token, add_function=add_function)]): l.pop()()
 
-    if container: container.append(lambda: use())
+    if container:
+        container.append(
+            lambda:  __refound_gas(gas=gas, cache=cache, token=token, add_function=add_function)
+        )
 
 
 def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:

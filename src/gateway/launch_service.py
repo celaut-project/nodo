@@ -139,7 +139,7 @@ def launch_service(
                     service_id = build.build(
                         service_buffer=service_buffer,
                         metadata=metadata,
-                        id=service_id,
+                        service_id=service_id,
                         get_it=not getting_container,
                         complete=is_complete
                     )  # If the container is not built, build it.

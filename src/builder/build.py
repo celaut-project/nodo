@@ -204,22 +204,31 @@ def build(
         service_buffer: bytes,
         metadata: gateway_pb2.celaut__pb2.Any.Metadata,
         get_it: bool = True,
-        id = None,
+        service_id = None,
         complete = False
     ) -> str:
-    if not id: id = get_service_hex_main_hash( metadata = metadata)
-    if get_it: l.LOGGER('Building ' + id)
+    if not service_id:
+        try:
+            service_id = get_service_hex_main_hash(
+                service_buffer=None,
+                metadata=metadata
+            )
+        except Exception as e:
+            l.LOGGER("Builder exception: can't obtain the service identifier")
+            raise e
+
+    if get_it: l.LOGGER('Building ' + service_id)
     try:
         # check if it's locally.
-        check_output('/usr/bin/docker inspect '+id+'.docker', shell=True)
-        return id
+        check_output('/usr/bin/docker inspect ' + service_id + '.docker', shell=True)
+        return service_id
 
     except CalledProcessError:
         if complete:
             sleep(1)  # TODO -> TMB(typical multithread bug).
-            if get_it and id not in actual_building_processes:
+            if get_it and service_id not in actual_building_processes:
                 actual_building_processes_lock.acquire()
-                actual_building_processes.append(id)
+                actual_building_processes.append(service_id)
                 actual_building_processes_lock.release()
 
                 threading.Thread(
@@ -227,19 +236,19 @@ def build(
                         args = (
                             service_buffer,
                             metadata,
-                            id
+                            service_id
                         )
                     ).start()
             else: sleep( WAIT_FOR_CONTAINER )
             raise WaitBuildException
         else:
-            if id not in actual_building_processes:
+            if service_id not in actual_building_processes:
                 actual_building_processes_lock.acquire()
-                actual_building_processes.append(id)
+                actual_building_processes.append(service_id)
                 actual_building_processes_lock.release()
                 threading.Thread(
                         target = get_container_from_outside,
-                        args = (id, service_buffer, metadata)          
+                        args = (service_id, service_buffer, metadata)
                     ).start() if get_it else sleep( WAIT_FOR_CONTAINER )
                 raise WaitBuildException
 
