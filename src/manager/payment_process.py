@@ -9,7 +9,7 @@ from contracts.vyper_gas_deposit_contract import interface as vyper_gdc
 
 from protos import gateway_pb2_grpc, gateway_pb2
 
-from src.manager.manager import generate_client_id_in_other_peer, __increase_local_gas_for_client
+from src.manager.manager import generate_client_id_in_other_peer, increase_local_gas_for_client
 from src.manager.system_cache import SystemCache
 
 from src.utils import logger as l
@@ -96,7 +96,7 @@ def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
 def validate_payment_process(amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
     return __check_payment_process(amount=amount, ledger=ledger, token=token, contract=contract,
                                    contract_addr=contract_addr) \
-           and __increase_local_gas_for_client(client_id=token, amount=amount)  # TODO allow for containers too.
+           and increase_local_gas_for_client(client_id=token, amount=amount)  # TODO allow for containers too.
 
 
 def __check_payment_process(amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:

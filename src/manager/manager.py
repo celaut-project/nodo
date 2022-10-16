@@ -114,7 +114,7 @@ def __refound_gas_function_factory(
         )
 
 
-def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
+def increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for client ' + client_id + ' of ' + str(amount))
     if client_id not in sc.clients:  # TODO no debería de añadir un peer que no existe.
         raise Exception('Client ' + client_id + ' does not exists.')
@@ -164,7 +164,7 @@ def spend_gas(
 
         # En caso de que token_or_container_ip sea la ip del contenedor.
         token_or_container_ip = sc.cache_service_perspective[token_or_container_ip]
-        if token_or_container_ip in sc and (
+        if token_or_container_ip in sc.system_cache and (
                 sc.system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
             with sc.cache_locks.lock(token_or_container_ip): sc.system_cache[token_or_container_ip]['gas'] -= gas_to_spend
             __refound_gas_function_factory(
@@ -175,9 +175,9 @@ def spend_gas(
             )
             return True
     except Exception as e:
-        l.LOGGER('Manager error spending gas ' + str(e) + ' ' + str(gas_to_spend) + ' ' + token_or_container_ip + \
+        l.LOGGER('Manager error spending gas: ' + str(e) + ' ' + str(gas_to_spend) + ' ' + token_or_container_ip + \
                  '\n peer instances -> ' + str(sc.clients) + \
-                 '\n system cache -> ' + str(sc) + \
+                 '\n system cache -> ' + str(sc.system_cache) + \
                  '\n cache service perspective -> ' + str(sc.cache_service_perspective) + \
                  '\n        ----------------------\n\n\n')
 
