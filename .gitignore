@@ -4,5 +4,6 @@ __pycache__
 __hycache__
 __cache__
 __registry__
+*.log
 app.log
-contracts.eth_main.fuji.priv
+start.sh
