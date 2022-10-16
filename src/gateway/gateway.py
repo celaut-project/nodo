@@ -205,7 +205,7 @@ def get_from_registry(service_hash: str) -> celaut.Any:
         raise FileNotFoundError
 
 
-if __name__ == "__main__":
+def main():
     # Create __hycache__ if it does not exists.
     try:
         os.system('mkdir ' + HYCACHE)
