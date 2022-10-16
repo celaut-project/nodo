@@ -17,9 +17,8 @@ from src.utils import utils as utils
 from src.utils.env import GATEWAY_PORT, REGISTRY
 from src.utils.verify import check_service, get_service_hex_main_hash
 
-#  TODO auxiliares
-DEFAULT_PROVISIONAL_CONTRACT = open('../../contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()
-from contracts.vyper_gas_deposit_contract.interface import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH
+from contracts.vyper_gas_deposit_contract.interface \
+    import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH, CONTRACT as DEFAULT_PROVISIONAL_CONTRACT
 
 
 def generate_contract_ledger() -> celaut.Service.Api.ContractLedger:  # TODO generate_contract_ledger tambien es un método auxiliar.
