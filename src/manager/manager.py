@@ -49,15 +49,8 @@ def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> 
     return id if id else str(result.inserted_id)
 
 
-
 def get_token_by_uri(uri: str) -> str:
-    try:
-        return sc.cache_service_perspective[uri]
-    except Exception as e:
-        l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO ' + str(e) + ' ' + str(
-            sc.cache_service_perspective) + ' ' + str(uri))  # TODO. Study the imposibility of that.
-        raise e
-
+    return sc.get_token_by_uri(uri=uri)
 
 def __push_token(token: str):
     with sc.cache_locks.lock(token): sc.system_cache[token] = {"mem_limit": 0}

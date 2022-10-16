@@ -118,6 +118,15 @@ class SystemCache(metaclass=Singleton):
             container_ip___peer_id=peer_id
         )
 
+    def get_token_by_uri(self, uri: str) -> str:
+        try:
+            return self.cache_service_perspective[uri]
+        except Exception as e:
+            l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO ' + str(e) + ' ' + str(
+                self.cache_service_perspective) + ' ' + str(uri))  # TODO. Study the imposibility of that.
+            raise e
+
+
     def get_gas_amount_by_id(self, id: str) -> int:
         l.LOGGER('Get gas amount for ' + id)
 
