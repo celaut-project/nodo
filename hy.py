@@ -1,3 +1,5 @@
+from src.gateway.server import get_from_registry
+
 GATEWAY_HOST = '127.0.0.1:8080'
 
 def docker_container_id_from_name(docker_name):
@@ -65,14 +67,25 @@ if __name__ == "__main__":
 
     import sys
     id = sys.argv[1]
-    from src.gateway import get_from_registry
-    from src.builder import build
+    from src.builder.build import build
     print('Go to build ', id)
     service_with_meta = get_from_registry(id)
     print(
         build(
             service_buffer = service_with_meta.value,
             metadata = service_with_meta.metadata,
-            id = id
+            service_id = id
         )
-    ) 
+    )
+
+def print_cache():
+    from src.manager.system_cache import SystemCache
+
+    system_cache = SystemCache()
+    print('\nSystem cache -> ', system_cache.system_cache)
+    print('\nClients -> ', system_cache.clients)
+    print('\nTotal deposited on other peers -> ', system_cache.total_deposited_on_other_peers)
+    print('\nClietns on other peers -> ', system_cache.clients_on_other_peers)
+    print('\nContainer cache -> ', system_cache.container_cache)
+    print('\nCache service perspective -> ', system_cache.cache_service_perspective)
+    print('\nExternal token map -> ', system_cache.external_token_hash_map)
