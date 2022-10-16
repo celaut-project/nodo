@@ -18,8 +18,9 @@ from src.gateway.launch_service import launch_service
 
 from src.manager.manager import could_ve_this_sysreq, prune_container, generate_client, get_token_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources, \
-    execution_cost, default_initial_cost, validate_payment_process
+    execution_cost, default_initial_cost
 from src.manager.metrics import get_metrics
+from src.manager.payment_process import validate_payment_process
 
 from src.utils import logger as l
 from src.utils.duplicate_grabber import DuplicateGrabber
