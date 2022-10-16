@@ -1,4 +1,4 @@
-from src.manager.system_cache import SystemCache
+from system_cache import SystemCache
 
 system_cache = SystemCache()
 print('\nSystem cache -> ', system_cache.system_cache)
