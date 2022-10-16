@@ -1,7 +1,6 @@
 import itertools
 import os
 import shutil
-import subprocess
 import threading
 from concurrent import futures
 from typing import Generator
@@ -11,7 +10,7 @@ import grpc
 import grpcbigbuffer as grpcbf
 import netifaces as ni
 
-import src.iobigdata as iobd
+import iobigdata as iobd
 from contracts.eth_main.utils import get_ledger_and_contract_addr_from_contract
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 from protos import gateway_pb2_grpcbf
