@@ -1,4 +1,4 @@
-from src.gateway.gateway import IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, create_container, set_config
+from src.gateway.gateway import IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER
 from src.gateway.service_balancer import service_balancer
 from src.manager.manager import DOCKER_NETWORK, default_initial_cost, spend_gas, \
     generate_client_id_in_other_peer, DEFAULT_SYSTEM_RESOURCES, start_service_cost, \
@@ -16,6 +16,49 @@ import docker as docker_lib
 from hashlib import sha256
 from src.builder import build
 import grpc
+
+
+
+def set_config(container_id: str, config: celaut.Configuration, resources: celaut.Sysresources,
+               api: celaut.Service.Container.Config):
+    __config__ = celaut.ConfigurationFile()
+    __config__.gateway.CopyFrom(generate_gateway_instance(network=DOCKER_NETWORK).instance)
+    if config: __config__.config.CopyFrom(config)
+    if resources: __config__.initial_sysresources.CopyFrom(resources)
+
+    os.mkdir(HYCACHE + container_id)
+    # TODO: Check if api.format is valid or make the serializer for it.
+
+    with open(HYCACHE + container_id + '/__config__', 'wb') as file:
+        file.write(__config__.SerializeToString())
+    while 1:
+        try:
+            subprocess.run(
+                '/usr/bin/docker cp ' + HYCACHE + container_id + '/__config__ ' + container_id + ':/' + '/'.join(
+                    api.path),
+                shell=True
+            )
+            break
+        except subprocess.CalledProcessError as e:
+            l.LOGGER(e.output)
+    os.remove(HYCACHE + container_id + '/__config__')
+    os.rmdir(HYCACHE + container_id)
+
+def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
+    try:
+        result = DOCKER_CLIENT().containers.create(
+            image=id + '.docker',  # https://github.com/moby/moby/issues/20972#issuecomment-193381422
+            entrypoint=' '.join(entrypoint),
+            ports=use_other_ports
+        )
+        return result
+    except docker_lib.errors.ImageNotFound as e:
+        l.LOGGER('CONTAINER IMAGE NOT FOUND')
+        # TODO build(id) using agents model.
+        raise e
+    except Exception as e:
+        l.LOGGER('DOCKER RUN ERROR -> ' + str(e))
+        raise e
 
 def launch_service(
         service_buffer: bytes,
