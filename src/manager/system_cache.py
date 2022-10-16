@@ -89,12 +89,12 @@ class SystemCache(metaclass=Singleton):
     #   en vez de usar la ip del servicio se pone el token que nos dió ese servicio,
     #   nosotros a nuestro servicio solicitante le daremos un token con el formato node_ip##his_token.
 
-    def __set_on_cache(self,
-            agent_id: str,
-            container_ip___peer_id: str,
-            container_id___his_token_encrypt: str,
-            container_id____his_token: str
-    ):
+    def set_on_cache(self,
+                     agent_id: str,
+                     container_ip___peer_id: str,
+                     container_id___his_token_encrypt: str,
+                     container_id____his_token: str
+                     ):
         # En caso de ser un nodo externo:
         if not agent_id in self.container_cache:
             self.container_cache_lock.acquire()
@@ -111,7 +111,7 @@ class SystemCache(metaclass=Singleton):
 
     def set_external_on_cache(self, agent_id: str, encrypted_external_token: str, external_token: str, peer_id: str):
         self.external_token_hash_map[encrypted_external_token] = external_token
-        self.__set_on_cache(
+        self.set_on_cache(
             agent_id=agent_id,
             container_id___his_token_encrypt=encrypted_external_token,
             container_id____his_token=external_token,

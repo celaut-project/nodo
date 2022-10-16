@@ -258,7 +258,7 @@ def add_container(
     if token in sc.system_cache.keys(): raise Exception('Manager error: ' + token + ' exists.')
 
     __push_token(token=token)
-    sc.system_cache.__set_on_cache(
+    sc.set_on_cache(
         agent_id=father_id,
         container_id___his_token_encrypt=container.id,
         container_ip___peer_id=container.attrs['NetworkSettings']['IPAddress'],
