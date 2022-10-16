@@ -1,13 +1,16 @@
+import grpc
+import grpcbigbuffer as grpcbf
+
 from protos import gateway_pb2, gateway_pb2_grpc
+
 from src.manager.manager import generate_client_id_in_other_peer
 from src.manager.system_cache import SystemCache
+
 from src.utils.env import DOCKER_NETWORK
 from src.utils.utils import from_gas_amount, is_peer_available, get_network_name, generate_uris_by_peer_id, \
     to_gas_amount
-
-import grpc
-import grpcbigbuffer as grpcbf
 from src.utils import logger as l
+
 
 sc = SystemCache()
 

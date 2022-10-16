@@ -10,9 +10,11 @@ from google.protobuf.json_format import MessageToJson
 
 from iobigdata import IOBigData
 from protos import celaut_pb2, celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
+
 from src.builder import build
-from src.manager.payment_process import __check_payment_process
+
 from src.manager.system_cache import Client, SystemCache
+
 from src.utils import logger as l
 from src.utils.env import ALLOW_GAS_DEBT, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
     DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
@@ -130,12 +132,6 @@ def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     ):
         raise Exception('Manager error: cannot increase local gas for client ' + client_id + ' by ' + str(amount))
     return True
-
-
-def validate_payment_process(amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
-    return __check_payment_process(amount=amount, ledger=ledger, token=token, contract=contract,
-                                   contract_addr=contract_addr) \
-           and __increase_local_gas_for_client(client_id=token, amount=amount)  # TODO allow for containers too.
 
 
 def spend_gas(

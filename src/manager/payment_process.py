@@ -1,21 +1,23 @@
 import string
 from hashlib import sha256
 from time import sleep
+import grpc
+import grpcbigbuffer as grpcbf
 
 from contracts.envs import AVAILABLE_PAYMENT_PROCESS, PAYMENT_PROCESS_VALIDATORS
+from contracts.vyper_gas_deposit_contract import interface as vyper_gdc
+
 from protos import gateway_pb2_grpc, gateway_pb2
-from src.manager.manager import generate_client_id_in_other_peer
+
+from src.manager.manager import generate_client_id_in_other_peer, __increase_local_gas_for_client
 from src.manager.system_cache import SystemCache
+
+from src.utils import logger as l
 from src.utils.env import COMMUNICATION_ATTEMPTS, COMMUNICATION_ATTEMPTS_DELAY, \
     MIN_DEPOSIT_PEER
 from src.utils.utils import generate_uris_by_peer_id, to_gas_amount, \
     get_ledger_and_contract_address_from_peer_id_and_ledger
 
-import grpc
-import grpcbigbuffer as grpcbf
-from src.utils import logger as l
-
-from contracts.vyper_gas_deposit_contract import interface as vyper_gdc
 
 sc = SystemCache()
 
@@ -89,6 +91,12 @@ def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     except Exception as e:
         l.LOGGER('Manager error: ' + str(e))
         return False
+
+
+def validate_payment_process(amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
+    return __check_payment_process(amount=amount, ledger=ledger, token=token, contract=contract,
+                                   contract_addr=contract_addr) \
+           and __increase_local_gas_for_client(client_id=token, amount=amount)  # TODO allow for containers too.
 
 
 def __check_payment_process(amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
