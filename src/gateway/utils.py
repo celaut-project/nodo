@@ -159,5 +159,9 @@ def search_definition(hashes: list, ignore_network: str = None) -> bytes:
             )
             return any.value
 
-    l.LOGGER('The service ' + hashes[0].value.hex() + ' was not found.')
-    raise Exception('The service ' + hashes[0].value.hex() + ' was not found.')
+    try:
+        identifier = hashes[0].value.hex()
+    except: identifier = '__not_provided__'
+    
+    l.LOGGER('The service ' + identifier + ' was not found.')
+    raise Exception('The service ' + identifier + ' was not found.')
