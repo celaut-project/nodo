@@ -1,9 +1,9 @@
 from typing import Union
-
 import grpcbigbuffer as grpcbf
 
 from src.utils.env import SHA3_256_ID, SHA3_256, SHAKE_256_ID, SHAKE_256, HASH_FUNCTIONS
 from src.utils.logger import LOGGER
+
 from protos.celaut_pb2 import Any, Service
 
 def calculate_hashes(value) -> list:

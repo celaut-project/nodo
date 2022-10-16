@@ -3,24 +3,23 @@ from hashlib import sha256
 import socket
 from typing import Generator
 import typing
-
-from protos import celaut_pb2, gateway_pb2
+from bson.objectid import ObjectId
 from grpcbigbuffer import Dir
 import pymongo
 import netifaces as ni
 
+from protos import celaut_pb2, gateway_pb2
+
 from src.utils.env import REGISTRY
 from src.utils.verify import get_service_hex_main_hash
-from bson.objectid import ObjectId
-
 
 
 def read_file(filename) -> bytes:
-    def generator(filename):
-        with open(filename, 'rb') as entry:
+    def generator(file):
+        with open(file, 'rb') as entry:
             for chunk in iter(lambda: entry.read(1024 * 1024), b''):
                 yield chunk
-    return b''.join([b for b in generator(filename=filename)])
+    return b''.join([b for b in generator(file=filename)])
 
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:

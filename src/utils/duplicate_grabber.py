@@ -1,10 +1,12 @@
 from time import time
 from typing import Any, Dict, Generator, List, Tuple
 from uuid import uuid4
-from protos import celaut_pb2 as celaut
-from src.utils.singleton import Singleton
 from threading import Event, Lock
-import logger as l
+
+from src.utils.singleton import Singleton
+from src.utils import logger as l
+
+from protos import celaut_pb2 as celaut
 
 class Session:
     
