@@ -1,11 +1,8 @@
+import hashlib
 import os
-from types import LambdaType
-from typing import Dict
 
 import docker as docker_lib
-import hashlib
 
-from contracts.vyper_gas_deposit_contract import interface as vyper_gdc
 from protos import celaut_pb2
 
 GET_ENV = lambda env, default: ( type(default)(os.environ.get(env)) if type(default)!=bool \
@@ -89,14 +86,6 @@ CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = GET_ENV(env='CLIENT_MIN_GAS_AMO
                                                            default=pow(10, 3))
 
 MEMSWAP_FACTOR = 0  # 0 - 1
-
-
-# Payment process
-
-PAYMENT_PROCESS_VALIDATORS: Dict[bytes, LambdaType] = {
-    vyper_gdc.CONTRACT_HASH: vyper_gdc.payment_process_validator}  # contract_hash:  lambda peer_id, tx_id, amount -> bool,
-AVAILABLE_PAYMENT_PROCESS: Dict[bytes, LambdaType] = {
-    vyper_gdc.CONTRACT_HASH: vyper_gdc.process_payment}  # contract_hash:   lambda amount, peer_id -> tx_id,
 
 
 # Hashes

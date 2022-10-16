@@ -1,10 +1,13 @@
-import sys, os; sys.path.append(os.getcwd())
+import sys, os;
+
+from src.utils.logger import LOGGER
+
+sys.path.append(os.getcwd())
 
 import typing
 from web3.middleware import geth_poa_middleware
 from web3 import HTTPProvider, Web3
 import asyncio, time, pymongo
-from src.utils.logger import LOGGER
 
 async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, contract):
     while True:

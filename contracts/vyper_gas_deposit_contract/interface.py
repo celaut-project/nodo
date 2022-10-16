@@ -1,17 +1,21 @@
-import sys, os; sys.path.append(os.getcwd())
+import sys, os;
+
+from src.utils.singleton import Singleton
+
+sys.path.append(os.getcwd())
 from threading import Thread
 
 import json
 from multiprocessing import Lock
-from contracts.eth_main.utils import get_priv_from_ledger, transact, w3_generator_factory, get_ledger_and_contract_addr_from_contract, catch_event
-from contracts.eth_main.singleton import Singleton
+
+from time import sleep, time
 from typing import Dict
 from web3 import Web3, exceptions
 from hashlib import sha256
-from protos import celaut_pb2, gateway_pb2
-from time import sleep, time
-from src.utils.logger import LOGGER
 
+from protos import celaut_pb2, gateway_pb2
+from src.utils.logger import LOGGER
+from contracts.eth_main.utils import get_priv_from_ledger, transact, w3_generator_factory, get_ledger_and_contract_addr_from_contract, catch_event
 
 DIR = os.getcwd() + '/contracts/vyper_gas_deposit_contract/'
 CONTRACT: bytes = open(DIR+'bytecode', 'rb').read()

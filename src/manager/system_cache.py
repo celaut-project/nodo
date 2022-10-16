@@ -12,7 +12,7 @@ from src.utils.env import CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME, CLIENT
 from src.utils.singleton import Singleton
 from src.utils.utils import get_network_name, from_gas_amount, generate_uris_by_peer_id
 
-class LockCaches():
+class LockCaches:
     def __init__(self):
         self.d = {}  # key, token
 

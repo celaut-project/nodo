@@ -2,11 +2,12 @@ import string
 from hashlib import sha256
 from time import sleep
 
+from contracts.envs import AVAILABLE_PAYMENT_PROCESS, PAYMENT_PROCESS_VALIDATORS
 from protos import gateway_pb2_grpc, gateway_pb2
 from src.manager.manager import generate_client_id_in_other_peer
 from src.manager.system_cache import SystemCache
-from src.utils.env import AVAILABLE_PAYMENT_PROCESS, COMMUNICATION_ATTEMPTS, COMMUNICATION_ATTEMPTS_DELAY, \
-    MIN_DEPOSIT_PEER, PAYMENT_PROCESS_VALIDATORS
+from src.utils.env import COMMUNICATION_ATTEMPTS, COMMUNICATION_ATTEMPTS_DELAY, \
+    MIN_DEPOSIT_PEER
 from src.utils.utils import generate_uris_by_peer_id, to_gas_amount, \
     get_ledger_and_contract_address_from_peer_id_and_ledger
 
