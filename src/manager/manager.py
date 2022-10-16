@@ -14,6 +14,9 @@ from src.builder import build
 from src.manager.payment_process import __check_payment_process
 from src.manager.system_cache import Client, SystemCache
 from src.utils import logger as l
+from src.utils.env import ALLOW_GAS_DEBT, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
+    DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
+    MEMORY_LIMIT_COST_FACTOR, DOCKER_CLIENT, COST_OF_BUILD, COMPUTE_POWER_RATE, EXECUTION_BENEFIT
 from src.utils.utils import generate_uris_by_peer_id, get_network_name, \
     is_peer_available, to_gas_amount, \
     get_service_hex_main_hash
@@ -22,46 +25,7 @@ db = pymongo.MongoClient(
     "mongodb://localhost:27017/"
 )["mongo"]["serviceInstances"]
 
-# TODO get from enviroment variables.
-
-DOCKER_CLIENT = lambda: docker_lib.from_env()
-DEFAULT_SYSTEM_RESOURCES = celaut_pb2.Sysresources(
-    mem_limit=50 * pow(10, 6),
-)
-
-DOCKER_NETWORK = 'docker0'
-LOCAL_NETWORK = 'lo'
-
-DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = l.GET_ENV(env='DEFAULT_INITIAL_GAS_AMOUNT_FACTOR',
-                                              default=1 / pow(10, 6))  # Percentage of the parent's gas amount.
-USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = l.GET_ENV(env='USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR',
-                                                  default=False)  # Use DEFAULT_INITIAL_GAS_AMOUNT_FACTOR to calculate the initial gas amount.
-DEFAULT_INTIAL_GAS_AMOUNT = l.GET_ENV(env='DEFAULT_INTIAL_GAS_AMOUNT', default=pow(10, 9))
-COMPUTE_POWER_RATE = l.GET_ENV(env='COMPUTE_POWER_RATE', default=2)
-COST_OF_BUILD = l.GET_ENV(env='COST_OF_BUILD', default=5)
-EXECUTION_BENEFIT = l.GET_ENV(env='EXECUTION_BENEFIT', default=1)
-MANAGER_ITERATION_TIME = l.GET_ENV(env='MANAGER_ITERATION_TIME', default=10)
-TIME_TO_PRUNE_ZERO_CLIENT = l.GET_ENV(env='TIME_TO_PRUNE_ZERO_CLIENT', default=540)
-MEMORY_LIMIT_COST_FACTOR = l.GET_ENV(env='MEMORY_LIMIT_COST_FACTOR', default=1 / pow(10, 6))
-MIN_DEPOSIT_PEER = l.GET_ENV(env='MIN_PEER_DEPOSIT', default=pow(10, 64))
-INITIAL_PEER_DEPOSIT_FACTOR = l.GET_ENV(env='INITIAL_PEER_DEPOSIT_FACTOR', default=0.5)
-COST_AVERAGE_VARIATION = l.GET_ENV(env='COST_AVERAGE_VARIATION', default=1)
-GAS_COST_FACTOR = l.GET_ENV(env='GAS_COST_FACTOR',
-                            default=1)  # Applied only outside the manager. (not in maintain_cost)
-MODIFY_SERVICE_SYSTEM_RESOURCES_COST = l.GET_ENV(env='MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR', default=1)
-ALLOW_GAS_DEBT = l.GET_ENV(env='ALLOW_GAS_DEBT', default=False)  # Could be used with the reputation system.
-COMMUNICATION_ATTEMPTS = l.GET_ENV(env='COMMUNICATION_ATTEMPTS', default=1)
-COMMUNICATION_ATTEMPTS_DELAY = l.GET_ENV(env='COMMUNICATION_ATTEMPTS_DELAY', default=60)
-MIN_SLOTS_OPEN_PER_PEER = l.GET_ENV(env='MIN_SLOTS_OPEN_PER_PEER', default=1)
-CLIENT_EXPIRATION_TIME = l.GET_ENV(env='CLIENT_EXPIRATION_TIME', default=1200)
-CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = l.GET_ENV(env='CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME',
-                                                           default=pow(10, 3))
-
-MEMSWAP_FACTOR = 0  # 0 - 1
-
 sc = SystemCache()
-
-# CONTAINER CACHE
 
 # Insert the instance if it does not exists.
 def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> str:
@@ -166,24 +130,6 @@ def __increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     ):
         raise Exception('Manager error: cannot increase local gas for client ' + client_id + ' by ' + str(amount))
     return True
-
-
-def __get_gas_amount_by_id(id: str) -> int:
-    l.LOGGER('Get gas amount for ' + id)
-
-    if id in sc.cache_service_perspective:
-        return sc.system_cache[
-            get_token_by_uri(uri=id)
-        ]['gas']
-
-    if id in sc.clients:
-        return sc.clients[id].gas
-
-    raise Exception('Manager error: ' + id + ' not found.')
-
-
-def __get_gas_amount_by_ip(ip: str) -> int:
-    return __get_gas_amount_by_id(id=ip)
 
 
 def validate_payment_process(amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
@@ -300,7 +246,7 @@ def default_initial_cost(
         father_id: str = None,
 ) -> int:
     l.LOGGER('Default cost for ' + (father_id if father_id else 'local'))
-    return (int(__get_gas_amount_by_id(
+    return (int(sc.get_gas_amount_by_id(
         id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(
         DEFAULT_INTIAL_GAS_AMOUNT)
 

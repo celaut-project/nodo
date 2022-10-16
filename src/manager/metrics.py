@@ -1,6 +1,7 @@
 from protos import gateway_pb2, gateway_pb2_grpc
-from src.manager.manager import generate_client_id_in_other_peer, DOCKER_NETWORK
-from src.manager.system_cache import cache_locks, clients_on_other_peers, clients, external_token_hash_map, system_cache
+from src.manager.manager import generate_client_id_in_other_peer
+from src.manager.system_cache import SystemCache
+from src.utils.env import DOCKER_NETWORK
 from src.utils.utils import from_gas_amount, is_peer_available, get_network_name, generate_uris_by_peer_id, \
     to_gas_amount
 
@@ -8,15 +9,17 @@ import grpc
 import grpcbigbuffer as grpcbf
 from src.utils import logger as l
 
+sc = SystemCache()
+
 def __get_metrics_client(client_id) -> gateway_pb2.Metrics:
     return gateway_pb2.Metrics(
-        gas_amount=to_gas_amount(clients[client_id].gas),
+        gas_amount=to_gas_amount(sc.clients[client_id].gas),
     )
 
 
 def __get_metrics_internal(token: str) -> gateway_pb2.Metrics:
     return gateway_pb2.Metrics(
-        gas_amount=to_gas_amount(system_cache[token]['gas']),
+        gas_amount=to_gas_amount(sc.system_cache[token]['gas']),
     )
 
 
@@ -49,14 +52,14 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
             l.LOGGER('Error getting gas amount from ' + peer_id + '.')
             if is_peer_available(peer_id=peer_id):
                 l.LOGGER('It is assumed that the client was invalid on peer ' + peer_id)
-                cache_locks.delete(peer_id)
-                del clients_on_other_peers[peer_id]
+                sc.cache_locks.delete(peer_id)
+                del sc.clients_on_other_peers[peer_id]
             else:
                 break
 
 
 def get_metrics(token: str) -> gateway_pb2.Metrics:
-    if token in clients:
+    if token in sc.clients:
         return __get_metrics_client(client_id=token)
 
     elif '##' not in token:
@@ -71,5 +74,5 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
     else:
         return __get_metrics_external(
             peer_id=token.split('##')[1],  # peer_id
-            token=external_token_hash_map[token.split['##'][2]]  # Por si el token comienza en # ...
+            token=sc.external_token_hash_map[token.split['##'][2]]  # Por si el token comienza en # ...
         )

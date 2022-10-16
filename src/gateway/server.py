@@ -2,29 +2,51 @@ import itertools
 import os
 from time import sleep
 
+import grpcbigbuffer as grpcbf
 from iobigdata import mem_manager
+
 from protos import gateway_pb2_grpc, gateway_pb2, gateway_pb2_grpcbf
 from protos import celaut_pb2 as celaut
 from protos.buffer_pb2 import Buffer
 from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2, GetServiceTar_input, \
     GetServiceEstimatedCost_input
-from src.compiler.compile import REGISTRY, HYCACHE, compile
-from src.gateway.gateway import get_from_registry, GENERAL_ATTEMPTS, GENERAL_WAIT_TIME, save_service, search_definition, \
-    generate_gateway_instance, search_file, search_container, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, \
-    get_service_buffer_from_registry
+
+from src.compiler.compile import compile
+from src.gateway.utils import save_service, search_definition, \
+    generate_gateway_instance, search_file, search_container
 from src.gateway.launch_service import launch_service
+
 from src.manager.manager import could_ve_this_sysreq, prune_container, generate_client, get_token_by_uri, spend_gas, \
-    MODIFY_SERVICE_SYSTEM_RESOURCES_COST, container_modify_system_params, GAS_COST_FACTOR, get_sysresources, \
+    container_modify_system_params, get_sysresources, \
     execution_cost, default_initial_cost, validate_payment_process
 from src.manager.metrics import get_metrics
-from src.utils import logger as l
-import grpcbigbuffer as grpcbf
 
+from src.utils import logger as l
 from src.utils.duplicate_grabber import DuplicateGrabber
-from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name
-from src.utils.verify import SHA3_256_ID, get_service_hex_main_hash
+from src.utils.env import GENERAL_ATTEMPTS, GENERAL_WAIT_TIME, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, SHA3_256_ID, \
+    MODIFY_SERVICE_SYSTEM_RESOURCES_COST, GAS_COST_FACTOR, REGISTRY, HYCACHE
+from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name, read_file
+from src.utils.verify import get_service_hex_main_hash
 
 from src.builder import build
+
+
+def get_service_buffer_from_registry(service_hash: str) -> bytes:
+    return get_from_registry(service_hash=service_hash).value
+
+
+def get_from_registry(service_hash: str) -> celaut.Any:
+    l.LOGGER('Getting ' + service_hash + ' service from the local registry.')
+    first_partition_dir = REGISTRY + service_hash + '/p1'
+    try:
+        with mem_manager(2 * os.path.getsize(first_partition_dir)) as iolock:
+            any = celaut.Any()
+            any.ParseFromString(read_file(filename=first_partition_dir))
+            return any
+    except (IOError, FileNotFoundError):
+        l.LOGGER('The service was not on registry.')
+        raise FileNotFoundError
+
 
 class Gateway(gateway_pb2_grpc.Gateway):
 

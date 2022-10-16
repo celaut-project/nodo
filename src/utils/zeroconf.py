@@ -3,7 +3,7 @@ import grpc
 from protos import gateway_pb2_grpc
 from src.manager.manager import insert_instance_on_mongo
 from src.utils import logger as l
-from src.gateway.gateway import generate_gateway_instance
+from src.gateway.utils import generate_gateway_instance
 from grpcbigbuffer import client_grpc
 from bson.objectid import ObjectId
 import pymongo

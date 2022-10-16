@@ -1,16 +1,21 @@
+from typing import Dict
+import grpcbigbuffer as grpcbf
+import grpc
+
+import protos.celaut_pb2 as celaut
 from protos import gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import GetServiceEstimatedCost_input, StartService_input_partitions_v2
-from src.utils import logger as l
-import protos.celaut_pb2 as celaut
-from typing import Dict
 
-from src.gateway.gateway import SEND_ONLY_HASHES_ASKING_COST
-from src.manager.manager import COST_AVERAGE_VARIATION, default_initial_cost, GAS_COST_FACTOR, execution_cost, \
+from src.manager.manager import default_initial_cost, execution_cost, \
     generate_client_id_in_other_peer
+
+from src.utils.env import SEND_ONLY_HASHES_ASKING_COST, COST_AVERAGE_VARIATION, GAS_COST_FACTOR
 from src.utils.utils import from_gas_amount, to_gas_amount, peers_id_iterator, generate_uris_by_peer_id, \
     service_extended
+from src.utils import logger as l
+
 from src.builder import build
-import grpcbigbuffer as grpcbf
+
 
 def service_balancer(
         service_buffer: bytes,

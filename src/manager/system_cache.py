@@ -5,14 +5,12 @@ import docker as docker_lib
 import grpc
 import grpcbigbuffer as grpcbf
 
-from manager import DOCKER_CLIENT
 from protos import gateway_pb2_grpc, gateway_pb2
-from src.manager.manager import CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME, CLIENT_EXPIRATION_TIME, \
-    DOCKER_NETWORK
 from src.utils import logger as l
+from src.utils.env import CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME, CLIENT_EXPIRATION_TIME, DOCKER_CLIENT, \
+    DOCKER_NETWORK
 from src.utils.singleton import Singleton
 from src.utils.utils import get_network_name, from_gas_amount, generate_uris_by_peer_id
-
 
 class LockCaches():
     def __init__(self):
@@ -119,6 +117,22 @@ class SystemCache(metaclass=Singleton):
             container_id____his_token=external_token,
             container_ip___peer_id=peer_id
         )
+
+    def get_gas_amount_by_id(self, id: str) -> int:
+        l.LOGGER('Get gas amount for ' + id)
+
+        if id in self.cache_service_perspective:
+            return self.system_cache[
+                self.get_token_by_uri(uri=id)
+            ]['gas']
+
+        if id in self.clients:
+            return self.clients[id].gas
+
+        raise Exception('Manager error: ' + id + ' not found.')
+
+    def __get_gas_amount_by_ip(self, ip: str) -> int:
+        return self.get_gas_amount_by_id(id=ip)
 
     def purgue_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
         if token is None and (agent_id is None or container_id is None or container_ip is None):

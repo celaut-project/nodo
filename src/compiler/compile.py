@@ -7,27 +7,9 @@ import os, subprocess
 import iobigdata
 import grpcbigbuffer
 from protos import buffer_pb2, celaut_pb2 as celaut, compile_pb2, gateway_pb2
+from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, HYCACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, REGISTRY
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes
-from src.utils.logger import GET_ENV
-
-#  -------------------------------------------------
-#  -------------------------------------------------
-#  DOCKERFILE AND JSON   to   PROTOBUF SERVICE SPEC.
-#  -------------------------------------------------
-#  -------------------------------------------------
-
-# DIRECTORIES
-HYCACHE = "/node/__hycache__/"
-REGISTRY = "/node/__registry__/"
-
-SAVE_ALL = False
-COMPILER_MEMORY_SIZE_FACTOR = GET_ENV(env = 'COMPILER_MEMORY_SIZE_FACTOR', default = 2.0)
-
-SUPPORTED_ARCHITECTURES = [       # The first element of each list is the Docker buildx tag.
-    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if GET_ENV(env = 'ARM_COMPILER_SUPPORT', default=True) else [],
-    ['linux/amd64', 'x86_64', 'amd64'] if GET_ENV(env = 'X86_COMPILER_SUPPORT', default=False) else []
-]
 
 class Hyper:
     def __init__(self, path, aux_id):
@@ -39,7 +21,7 @@ class Hyper:
         self.aux_id = aux_id
 
         arch = None
-        for a in SUPPORTED_ARCHITECTURES:
+        for a in COMPILER_SUPPORTED_ARCHITECTURES:
             if self.json.get('architecture') in a: arch = a[0]
 
         if not arch: raise Exception("Can't compile this service, not supported architecture.")

@@ -1,13 +1,12 @@
 import string
 from hashlib import sha256
 from time import sleep
-from types import LambdaType
-from typing import Dict
 
 from protos import gateway_pb2_grpc, gateway_pb2
-from src.manager.manager import PAYMENT_PROCESS_VALIDATORS, MIN_DEPOSIT_PEER, COMMUNICATION_ATTEMPTS, \
-    AVAILABLE_PAYMENT_PROCESS, generate_client_id_in_other_peer, COMMUNICATION_ATTEMPTS_DELAY
-from src.manager.system_cache import clients, total_deposited_on_other_peers, cache_locks
+from src.manager.manager import generate_client_id_in_other_peer
+from src.manager.system_cache import SystemCache
+from src.utils.env import AVAILABLE_PAYMENT_PROCESS, COMMUNICATION_ATTEMPTS, COMMUNICATION_ATTEMPTS_DELAY, \
+    MIN_DEPOSIT_PEER, PAYMENT_PROCESS_VALIDATORS
 from src.utils.utils import generate_uris_by_peer_id, to_gas_amount, \
     get_ledger_and_contract_address_from_peer_id_and_ledger
 
@@ -17,11 +16,7 @@ from src.utils import logger as l
 
 from contracts.vyper_gas_deposit_contract import interface as vyper_gdc
 
-
-PAYMENT_PROCESS_VALIDATORS: Dict[bytes, LambdaType] = {
-    vyper_gdc.CONTRACT_HASH: vyper_gdc.payment_process_validator}  # contract_hash:  lambda peer_id, tx_id, amount -> bool,
-AVAILABLE_PAYMENT_PROCESS: Dict[bytes, LambdaType] = {
-    vyper_gdc.CONTRACT_HASH: vyper_gdc.process_payment}  # contract_hash:   lambda amount, peer_id -> tx_id,
+sc = SystemCache()
 
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
     deposit_token: str = generate_client_id_in_other_peer(peer_id=peer_id)
@@ -76,14 +71,14 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     l.LOGGER('Increase deposit on peer ' + peer_id + ' by ' + str(amount))
     if __peer_payment_process(peer_id=peer_id, amount=amount):  # process the payment on the peer.
-        with cache_locks.lock(peer_id):
-            total_deposited_on_other_peers[peer_id] = total_deposited_on_other_peers[
-                                                          peer_id] + amount if peer_id in total_deposited_on_other_peers else amount
+        with sc.cache_locks.lock(peer_id):
+            sc.total_deposited_on_other_peers[peer_id] = sc.total_deposited_on_other_peers[
+                                                          peer_id] + amount if peer_id in sc.total_deposited_on_other_peers else amount
         return True
     else:
-        if peer_id not in total_deposited_on_other_peers:
-            with cache_locks.lock(peer_id):
-                total_deposited_on_other_peers[peer_id] = 0
+        if peer_id not in sc.total_deposited_on_other_peers:
+            with sc.cache_locks.lock(peer_id):
+                sc.total_deposited_on_other_peers[peer_id] = 0
         return False
 
 
@@ -97,11 +92,11 @@ def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
 
 def __check_payment_process(amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
     l.LOGGER('Check payment process to ' + token + ' of ' + str(amount))
-    if token not in clients:
-        l.LOGGER('Client ' + token + ' is not in ' + str(clients))
+    if token not in sc.clients:
+        l.LOGGER('Client ' + token + ' is not in ' + str(sc.clients))
         return False
     return PAYMENT_PROCESS_VALIDATORS[sha256(contract).digest()](amount, token, ledger, contract_addr,
-                                                                 validate_token=lambda token: token in clients)
+                                                                 validate_token=lambda t: t in sc.clients)
 
 
 def init_contract_interfaces():

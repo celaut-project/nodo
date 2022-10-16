@@ -1,23 +1,26 @@
-from src.gateway.gateway import IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER
-from src.gateway.service_balancer import service_balancer
-from src.manager.manager import DOCKER_NETWORK, default_initial_cost, spend_gas, \
-    generate_client_id_in_other_peer, DEFAULT_SYSTEM_RESOURCES, start_service_cost, \
-    GAS_COST_FACTOR, add_container
-from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2
-from src.manager.system_cache import SystemCache
-from src.manager.metrics import gas_amount_on_other_peer
-from src.manager.payment_process import increase_deposit_on_peer
-from src.utils import utils, logger as l
-from src.utils.recursion_guard import RecursionGuard
-from src.utils.verify import completeness
 import grpcbigbuffer as grpcbf
 import docker as docker_lib
 from hashlib import sha256
 from src.builder import build
-import grpc
+import grpc, os, subprocess
 
+from src.gateway.utils import generate_gateway_instance
+from src.gateway.service_balancer import service_balancer
 
+from src.manager.manager import default_initial_cost, spend_gas, \
+    generate_client_id_in_other_peer, start_service_cost, add_container
+from src.manager.system_cache import SystemCache
+from src.manager.metrics import gas_amount_on_other_peer
+from src.manager.payment_process import increase_deposit_on_peer
+
+from src.utils import utils, logger as l
+from src.utils.env import HYCACHE, DOCKER_CLIENT, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, DOCKER_NETWORK, \
+    DEFAULT_SYSTEM_RESOURCES, GAS_COST_FACTOR
+from src.utils.recursion_guard import RecursionGuard
+from src.utils.verify import completeness
+
+from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
+from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2
 
 def set_config(container_id: str, config: celaut.Configuration, resources: celaut.Sysresources,
                api: celaut.Service.Container.Config):

@@ -5,10 +5,11 @@ from typing import Generator
 import typing
 
 from protos import celaut_pb2, gateway_pb2
-from src.compiler.compile import REGISTRY
 from grpcbigbuffer import Dir
 import pymongo
 import netifaces as ni
+
+from src.utils.env import REGISTRY
 from src.utils.verify import get_service_hex_main_hash
 from bson.objectid import ObjectId
 
