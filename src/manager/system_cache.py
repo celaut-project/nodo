@@ -57,8 +57,6 @@ class Client:
 
 class SystemCache(metaclass=Singleton):
     cache_locks = LockCaches()
-    # with cache_locks.lock(token):
-    # cache_locks.delete(token)
 
     system_cache = {}  # token : { mem_limit: 0, gas: 0 }
 
