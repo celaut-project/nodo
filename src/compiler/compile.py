@@ -4,7 +4,7 @@ from src.utils import logger as l
 import sys, shutil
 import json
 import os, subprocess
-import iobigdata
+import src.manager.resources_manager as resources_manager
 import grpcbigbuffer
 from protos import buffer_pb2, celaut_pb2 as celaut, compile_pb2, gateway_pb2
 from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, HYCACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, REGISTRY
@@ -284,7 +284,7 @@ def ok( path, aux_id,
     ):
     spec_file = Hyper(path = path, aux_id = aux_id)
 
-    with iobigdata.mem_manager(len = COMPILER_MEMORY_SIZE_FACTOR*spec_file.buffer_len):
+    with resources_manager.mem_manager(len = COMPILER_MEMORY_SIZE_FACTOR*spec_file.buffer_len):
         spec_file.parseContainer()
         spec_file.parseApi()
         spec_file.parseLedger()

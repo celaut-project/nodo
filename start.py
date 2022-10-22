@@ -8,7 +8,7 @@ import grpcbigbuffer as grpcbf
 import netifaces as ni
 from psutil import virtual_memory
 
-import iobigdata as iobd
+import src.manager.resources_manager as iobd
 from protos import gateway_pb2, gateway_pb2_grpc
 from src.gateway.server import Gateway
 from src.manager.maintain_thread import manager_thread

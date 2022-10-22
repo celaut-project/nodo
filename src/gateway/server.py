@@ -3,7 +3,7 @@ import os
 from time import sleep
 
 import grpcbigbuffer as grpcbf
-from iobigdata import mem_manager
+from src.manager.resources_manager import mem_manager
 
 from protos import gateway_pb2_grpc, gateway_pb2, gateway_pb2_grpcbf
 from protos import celaut_pb2 as celaut

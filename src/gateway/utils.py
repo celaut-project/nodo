@@ -7,7 +7,7 @@ import grpcbigbuffer as grpcbf
 import netifaces as ni
 from typing import Generator
 
-import iobigdata as iobd
+import src.manager.resources_manager as iobd
 from contracts.eth_main.utils import get_ledger_and_contract_addr_from_contract
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 from protos import gateway_pb2_grpcbf

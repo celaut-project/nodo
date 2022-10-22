@@ -1,6 +1,5 @@
 # I/O Big Data utils.
 import gc
-from multiprocessing.connection import wait
 from time import sleep
 from threading import Lock
 
@@ -43,14 +42,10 @@ class IOBigData(metaclass=Singleton):
 
     def __init__(self, 
             log = lambda message: print(message),
-            ram_pool_method = None,
-            gas: int = 0,
-            modify_resources = None
+            ram_pool_method = None
         ) -> None:
 
         self.ram_pool = ram_pool_method
-        #self.gas = gas  # TODO will be a polynomy.
-        self.modify_resources = modify_resources  # {min_memory_limit, max_memory_limit} -> memory_limit_updated
 
         self.log = log
         self.ram_locked = 0
@@ -86,45 +81,14 @@ class IOBigData(metaclass=Singleton):
                 self.log('RAM LOCKED     -> '+ IOBigData.convert_size(self.ram_locked))
                 self.log('RAM AVALIABLE  -> '+ IOBigData.convert_size(self.get_ram_avaliable()))
                 self.log('RAM WAITING    -> '+ IOBigData.convert_size(sum(self.wait)))
-                #self.log('GAS            -> '+ str(self.gas))  TODO
                 self.log('-----------------------------------------\n')
 
 
 
     # Gas manager methods.
-    def __update_resources(self, modify_formula):
-        if self.modify_resources:
-            """
-            if self.gas < sum(self.wait) and sum(self.wait) - self.gas < self.gas \
-                or self.gas >= sum(self.wait) and self.gas < self.ram_locked:
-
-                print(self.gas < sum(self.wait))
-                print(sum(self.wait) - self.gas < self.gas)
-                print(self.gas >= sum(self.wait)) 
-
-                self.ram_pool = lambda: self.modify_resources((
-                        self.ram_pool() + sum(self.wait) - self.gas,  # min resources.
-                        self.ram_pool() + sum(self.wait) - self.gas  # max resources.
-                ))
-                self.gas += self.gas - sum(self.wait)        
-            """
-
-            v = self.modify_resources(
-                {
-                    "min": modify_formula(min),  # min resources.
-                    "max": modify_formula(sum)   # max resources.
-                }
-            )
-            self.ram_pool = lambda: v
-
     def __push_wait_list(self, l: int):
         with self.wait_lock:
             self.wait.append(l)
-        if sum(self.wait) > self.get_ram_avaliable():
-            with self.amount_lock:
-                self.__update_resources(
-                    modify_formula = lambda m: self.ram_locked + m(self.wait) # + self.gas * (X factor). TODO
-                )
 
     def __pop_wait_list(self, l: int):
         with self.wait_lock:
@@ -164,10 +128,6 @@ class IOBigData(metaclass=Singleton):
             else:
                 self.ram_locked = 0
 
-            if len(self.wait) == 0:
-                self.__update_resources(
-                    modify_formula = lambda m: self.ram_locked # + self.gas * (X factor). TODO
-                )
         self.__stats('unlocked ' + IOBigData.convert_size(ram_amount))
 
     def prevent_kill(self, len: int) -> bool:

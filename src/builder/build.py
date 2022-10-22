@@ -1,7 +1,7 @@
 from time import sleep, time
 import threading
 from protos.gateway_pb2_grpcbf import GetServiceTar_input
-import grpc, os, iobigdata
+import grpc, os, src.manager.resources_manager as resources_manager
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 from src.utils.env import SUPPORTED_ARCHITECTURES, BUILD_CONTAINER_MEMORY_SIZE_FACTOR, WAIT_FOR_CONTAINER
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator, service_extended, read_file
@@ -73,7 +73,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         raise UnsupportedArquitectureException
 
     l.LOGGER('Build process of '+ id + ': wait for unlock the memory.')
-    with iobigdata.mem_manager(len = len(service_buffer) + BUILD_CONTAINER_MEMORY_SIZE_FACTOR*os.path.getsize(second_partition_dir)):  # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
+    with resources_manager.mem_manager(len = len(service_buffer) + BUILD_CONTAINER_MEMORY_SIZE_FACTOR*os.path.getsize(second_partition_dir)):  # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
         l.LOGGER('Build process of '+ id + ': go to load all the buffer.')
         service = gateway_pb2.celaut__pb2.Service()
         service.ParseFromString(service_buffer)

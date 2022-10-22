@@ -8,7 +8,7 @@ import pymongo
 from bson.objectid import ObjectId
 from google.protobuf.json_format import MessageToJson
 
-from iobigdata import IOBigData
+from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 
 from src.builder import build
