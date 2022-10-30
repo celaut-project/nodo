@@ -1,0 +1,7 @@
+syntax = "proto3";
+package id;
+
+message Node {
+  bytes body = 1;
+  repeated bytes child = 2;
+}

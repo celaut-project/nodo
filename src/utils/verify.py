@@ -78,10 +78,3 @@ def get_service_list_of_hashes(service_buffer: bytes, metadata: Any.Metadata, co
         )
     else:
         raise Exception("Can't get the hashes if the service is not complete.")
-
-
-def completeness(
-        service_buffer: bytes,
-        metadata: Any.Metadata,
-        id: str,
-) -> bool:  return True  # TODO develop when celaut.proto finish.
