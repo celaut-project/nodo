@@ -251,16 +251,14 @@ class Hyper:
 
         try:
             if len(partitions_model) == 1:
-                message = gateway_pb2.CompileOutput(
+                message = service_capnp.CompileOutput(
                     id=bytes.fromhex(id),
                     service=service_capnp.ServiceWithMeta(
                         metadata=self.metadata.SerializeToString(),
                         service=self.service
-                    ).to_bytes()
+                    )
                 )
-                message_buffer = grpcbigbuffer.message_to_bytes(
-                            message = message
-                        )
+                message_buffer = message.to_bytes()
                 l.LOGGER('Compiler: send message '+ str(type(message)) + ' ' + str(len(message_buffer)))
                 with open(HYCACHE + 'compile' + id + '/p'+str(1), 'wb') as f:
                     f.write(

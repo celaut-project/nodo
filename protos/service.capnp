@@ -40,3 +40,7 @@ struct ServiceWithMeta @0xbaba2cfc033c573d {  # 0 bytes, 2 ptrs
   metadata @0 :Data;  # ptr[0]
   service @1 :Service;  # ptr[1]
 }
+struct CompileOutput @0xeb20fd67ea5b4f6c {  # 0 bytes, 2 ptrs
+  id @0 :Data;  # ptr[0]
+  service @1 :ServiceWithMeta;  # ptr[1]
+}

@@ -25,6 +25,7 @@ CAPNP_DECLARE_SCHEMA(b54bb139210ac401);
 CAPNP_DECLARE_SCHEMA(d393b03e8ba7f0c8);
 CAPNP_DECLARE_SCHEMA(8a3d618915535c50);
 CAPNP_DECLARE_SCHEMA(baba2cfc033c573d);
+CAPNP_DECLARE_SCHEMA(eb20fd67ea5b4f6c);
 
 }  // namespace schemas
 }  // namespace capnp
@@ -177,6 +178,21 @@ struct ServiceWithMeta {
 
   struct _capnpPrivate {
     CAPNP_DECLARE_STRUCT_HEADER(baba2cfc033c573d, 0, 2)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct CompileOutput {
+  CompileOutput() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(eb20fd67ea5b4f6c, 0, 2)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -1071,6 +1087,98 @@ public:
       : _typeless(kj::mv(typeless)) {}
 
   inline  ::Service::Pipeline getService();
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class CompileOutput::Reader {
+public:
+  typedef CompileOutput Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasId() const;
+  inline  ::capnp::Data::Reader getId() const;
+
+  inline bool hasService() const;
+  inline  ::ServiceWithMeta::Reader getService() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class CompileOutput::Builder {
+public:
+  typedef CompileOutput Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasId();
+  inline  ::capnp::Data::Builder getId();
+  inline void setId( ::capnp::Data::Reader value);
+  inline  ::capnp::Data::Builder initId(unsigned int size);
+  inline void adoptId(::capnp::Orphan< ::capnp::Data>&& value);
+  inline ::capnp::Orphan< ::capnp::Data> disownId();
+
+  inline bool hasService();
+  inline  ::ServiceWithMeta::Builder getService();
+  inline void setService( ::ServiceWithMeta::Reader value);
+  inline  ::ServiceWithMeta::Builder initService();
+  inline void adoptService(::capnp::Orphan< ::ServiceWithMeta>&& value);
+  inline ::capnp::Orphan< ::ServiceWithMeta> disownService();
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class CompileOutput::Pipeline {
+public:
+  typedef CompileOutput Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+  inline  ::ServiceWithMeta::Pipeline getService();
 private:
   ::capnp::AnyPointer::Pipeline _typeless;
   friend class ::capnp::PipelineHook;
@@ -1979,6 +2087,79 @@ inline void ServiceWithMeta::Builder::adoptService(
 }
 inline ::capnp::Orphan< ::Service> ServiceWithMeta::Builder::disownService() {
   return ::capnp::_::PointerHelpers< ::Service>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool CompileOutput::Reader::hasId() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool CompileOutput::Builder::hasId() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Data::Reader CompileOutput::Reader::getId() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Data::Builder CompileOutput::Builder::getId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void CompileOutput::Builder::setId( ::capnp::Data::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Data::Builder CompileOutput::Builder::initId(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void CompileOutput::Builder::adoptId(
+    ::capnp::Orphan< ::capnp::Data>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Data> CompileOutput::Builder::disownId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool CompileOutput::Reader::hasService() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool CompileOutput::Builder::hasService() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::ServiceWithMeta::Reader CompileOutput::Reader::getService() const {
+  return ::capnp::_::PointerHelpers< ::ServiceWithMeta>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::ServiceWithMeta::Builder CompileOutput::Builder::getService() {
+  return ::capnp::_::PointerHelpers< ::ServiceWithMeta>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::ServiceWithMeta::Pipeline CompileOutput::Pipeline::getService() {
+  return  ::ServiceWithMeta::Pipeline(_typeless.getPointerField(1));
+}
+#endif  // !CAPNP_LITE
+inline void CompileOutput::Builder::setService( ::ServiceWithMeta::Reader value) {
+  ::capnp::_::PointerHelpers< ::ServiceWithMeta>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::ServiceWithMeta::Builder CompileOutput::Builder::initService() {
+  return ::capnp::_::PointerHelpers< ::ServiceWithMeta>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void CompileOutput::Builder::adoptService(
+    ::capnp::Orphan< ::ServiceWithMeta>&& value) {
+  ::capnp::_::PointerHelpers< ::ServiceWithMeta>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::ServiceWithMeta> CompileOutput::Builder::disownService() {
+  return ::capnp::_::PointerHelpers< ::ServiceWithMeta>::disown(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
 
