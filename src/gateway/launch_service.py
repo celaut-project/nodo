@@ -17,7 +17,6 @@ from src.utils import utils, logger as l
 from src.utils.env import HYCACHE, DOCKER_CLIENT, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, DOCKER_NETWORK, \
     DEFAULT_SYSTEM_RESOURCES, GAS_COST_FACTOR
 from src.utils.recursion_guard import RecursionGuard
-from src.utils.verify import completeness
 
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2
@@ -91,11 +90,6 @@ def launch_service(
         initial_gas_amount: int = initial_gas_amount if initial_gas_amount else default_initial_cost(
             father_id=father_id)
         getting_container = False  # Here it asks the balancer if it should assign the job to a peer.
-        is_complete = completeness(
-            service_buffer=service_buffer,
-            metadata=metadata,
-            id=service_id,
-        )
 
         while True:
             abort_it = True
@@ -186,8 +180,7 @@ def launch_service(
                         service_buffer=service_buffer,
                         metadata=metadata,
                         service_id=service_id,
-                        get_it=not getting_container,
-                        complete=is_complete
+                        get_it=not getting_container
                     )  # If the container is not built, build it.
                 except build.UnsupportedArquitectureException as e:
                     try:
