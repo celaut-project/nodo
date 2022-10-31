@@ -2,7 +2,6 @@ syntax = "proto3";
 package gateway;
 import "celaut.proto";
 import "buffer.proto";
-import "compile.proto";
 
 message GasAmount {
     string n = 1;
@@ -45,11 +44,6 @@ message RecursionGuard {
     string token = 1;
 }
 
-message ServiceWithMeta {
-    celaut.Any.Metadata metadata = 1;
-    celaut.Service service = 2;
-}
-
 // ( celaut.Any.Metadata.HashTag.Hash=H, ServiceWithMeta=S, celaut.Configuration=C; { H v S v H^C v S^C } )
 message HashWithConfig { // H^C 
     celaut.Any.Metadata.HashTag.Hash hash = 1;
@@ -59,7 +53,7 @@ message HashWithConfig { // H^C
     optional GasAmount initial_gas_amount = 6;
 }
 message ServiceWithConfig { // S^C
-    ServiceWithMeta service = 2;
+    bytes service = 2;  // capnp ServiceWithMeta
     celaut.Configuration config = 3;
     optional celaut.Sysresources min_sysreq = 4;  // init system specs.
     optional celaut.Sysresources max_sysreq = 5;  // minimun system specs that the node needs to 've for it sometime.
@@ -73,7 +67,7 @@ message CompileInput {
 
 message CompileOutput {
     bytes id = 1;
-    compile.ServiceWithMeta service = 2;
+    bytes service = 2;  // capnp ServiceWithMeta
 }
 
 message ModifyServiceSystemResourcesOutput {

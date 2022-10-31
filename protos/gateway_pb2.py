@@ -10,7 +10,10 @@ from google.protobuf import symbol_database as _symbol_database
 
 _sym_db = _symbol_database.Default()
 
-from protos import buffer_pb2 as buffer__pb2, celaut_pb2 as celaut__pb2, compile_pb2 as compile__pb2
+
+import celaut_pb2 as celaut__pb2
+import buffer_pb2 as buffer__pb2
+
 
 DESCRIPTOR = _descriptor.FileDescriptor(
   name='gateway.proto',
@@ -18,9 +21,9 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\x1a\x0c\x62uffer.proto\x1a\rcompile.proto\"\x16\n\tGasAmount\x12\t\n\x01n\x18\x01 \x01(\t\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"C\n\rEstimatedCost\x12 \n\x04\x63ost\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\x12\x10\n\x08variance\x18\x02 \x01(\x02\",\n\x06Refund\x12\"\n\x06\x61mount\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\"\x85\x01\n\x07Payment\x12\x15\n\rdeposit_token\x18\x01 \x01(\t\x12;\n\x0f\x63ontract_ledger\x18\x03 \x01(\x0b\x32\".celaut.Service.Api.ContractLedger\x12&\n\ngas_amount\x18\x04 \x01(\x0b\x32\x12.gateway.GasAmount\"1\n\x07Metrics\x12&\n\ngas_amount\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\"\x90\x01\n\x08Instance\x12\x30\n\rinstance_meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.MetadataH\x00\x88\x01\x01\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\x12\x12\n\x05token\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x10\n\x0e_instance_metaB\x08\n\x06_token\"\x1b\n\x06\x43lient\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\x1f\n\x0eRecursionGuard\x12\r\n\x05token\x18\x01 \x01(\t\"[\n\x0fServiceWithMeta\x12&\n\x08metadata\x18\x01 \x01(\x0b\x32\x14.celaut.Any.Metadata\x12 \n\x07service\x18\x02 \x01(\x0b\x32\x0f.celaut.Service\"\xb0\x02\n\x0eHashWithConfig\x12/\n\x04hash\x18\x01 \x01(\x0b\x32!.celaut.Any.Metadata.HashTag.Hash\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\x12-\n\nmin_sysreq\x18\x04 \x01(\x0b\x32\x14.celaut.SysresourcesH\x00\x88\x01\x01\x12-\n\nmax_sysreq\x18\x05 \x01(\x0b\x32\x14.celaut.SysresourcesH\x01\x88\x01\x01\x12\x33\n\x12initial_gas_amount\x18\x06 \x01(\x0b\x32\x12.gateway.GasAmountH\x02\x88\x01\x01\x42\r\n\x0b_min_sysreqB\r\n\x0b_max_sysreqB\x15\n\x13_initial_gas_amount\"\xad\x02\n\x11ServiceWithConfig\x12)\n\x07service\x18\x02 \x01(\x0b\x32\x18.gateway.ServiceWithMeta\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\x12-\n\nmin_sysreq\x18\x04 \x01(\x0b\x32\x14.celaut.SysresourcesH\x00\x88\x01\x01\x12-\n\nmax_sysreq\x18\x05 \x01(\x0b\x32\x14.celaut.SysresourcesH\x01\x88\x01\x01\x12\x33\n\x12initial_gas_amount\x18\x06 \x01(\x0b\x32\x12.gateway.GasAmountH\x02\x88\x01\x01\x42\r\n\x0b_min_sysreqB\r\n\x0b_max_sysreqB\x15\n\x13_initial_gas_amount\"U\n\x0c\x43ompileInput\x12\x0c\n\x04repo\x18\x01 \x01(\x0c\x12\x37\n\x10partitions_model\x18\x02 \x03(\x0b\x32\x1d.buffer.Buffer.Head.Partition\"F\n\rCompileOutput\x12\n\n\x02id\x18\x01 \x01(\x0c\x12)\n\x07service\x18\x02 \x01(\x0b\x32\x18.compile.ServiceWithMeta\"k\n\"ModifyServiceSystemResourcesOutput\x12$\n\x06sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12\x1f\n\x03gas\x18\x02 \x01(\x0b\x32\x12.gateway.GasAmount\"w\n!ModifyServiceSystemResourcesInput\x12(\n\nmin_sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12(\n\nmax_sysreq\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources2\xe6\x04\n\x07Gateway\x12\x34\n\x0cStartService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bStopService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bGetInstance\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x36\n\x0eGenerateClient\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x44\n\x1cModifyServiceSystemResources\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07GetFile\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07\x43ompile\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x35\n\rGetServiceTar\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12?\n\x17GetServiceEstimatedCost\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07Payable\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x32\n\nGetMetrics\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x62\x06proto3'
+  serialized_pb=b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\x1a\x0c\x62uffer.proto\"\x16\n\tGasAmount\x12\t\n\x01n\x18\x01 \x01(\t\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"C\n\rEstimatedCost\x12 \n\x04\x63ost\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\x12\x10\n\x08variance\x18\x02 \x01(\x02\",\n\x06Refund\x12\"\n\x06\x61mount\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\"\x85\x01\n\x07Payment\x12\x15\n\rdeposit_token\x18\x01 \x01(\t\x12;\n\x0f\x63ontract_ledger\x18\x03 \x01(\x0b\x32\".celaut.Service.Api.ContractLedger\x12&\n\ngas_amount\x18\x04 \x01(\x0b\x32\x12.gateway.GasAmount\"1\n\x07Metrics\x12&\n\ngas_amount\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\"\x90\x01\n\x08Instance\x12\x30\n\rinstance_meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.MetadataH\x00\x88\x01\x01\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\x12\x12\n\x05token\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x10\n\x0e_instance_metaB\x08\n\x06_token\"\x1b\n\x06\x43lient\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\x1f\n\x0eRecursionGuard\x12\r\n\x05token\x18\x01 \x01(\t\"\xb0\x02\n\x0eHashWithConfig\x12/\n\x04hash\x18\x01 \x01(\x0b\x32!.celaut.Any.Metadata.HashTag.Hash\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\x12-\n\nmin_sysreq\x18\x04 \x01(\x0b\x32\x14.celaut.SysresourcesH\x00\x88\x01\x01\x12-\n\nmax_sysreq\x18\x05 \x01(\x0b\x32\x14.celaut.SysresourcesH\x01\x88\x01\x01\x12\x33\n\x12initial_gas_amount\x18\x06 \x01(\x0b\x32\x12.gateway.GasAmountH\x02\x88\x01\x01\x42\r\n\x0b_min_sysreqB\r\n\x0b_max_sysreqB\x15\n\x13_initial_gas_amount\"\x93\x02\n\x11ServiceWithConfig\x12\x0f\n\x07service\x18\x02 \x01(\x0c\x12%\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\x15.celaut.Configuration\x12-\n\nmin_sysreq\x18\x04 \x01(\x0b\x32\x14.celaut.SysresourcesH\x00\x88\x01\x01\x12-\n\nmax_sysreq\x18\x05 \x01(\x0b\x32\x14.celaut.SysresourcesH\x01\x88\x01\x01\x12\x33\n\x12initial_gas_amount\x18\x06 \x01(\x0b\x32\x12.gateway.GasAmountH\x02\x88\x01\x01\x42\r\n\x0b_min_sysreqB\r\n\x0b_max_sysreqB\x15\n\x13_initial_gas_amount\"U\n\x0c\x43ompileInput\x12\x0c\n\x04repo\x18\x01 \x01(\x0c\x12\x37\n\x10partitions_model\x18\x02 \x03(\x0b\x32\x1d.buffer.Buffer.Head.Partition\",\n\rCompileOutput\x12\n\n\x02id\x18\x01 \x01(\x0c\x12\x0f\n\x07service\x18\x02 \x01(\x0c\"k\n\"ModifyServiceSystemResourcesOutput\x12$\n\x06sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12\x1f\n\x03gas\x18\x02 \x01(\x0b\x32\x12.gateway.GasAmount\"w\n!ModifyServiceSystemResourcesInput\x12(\n\nmin_sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12(\n\nmax_sysreq\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources2\xe6\x04\n\x07Gateway\x12\x34\n\x0cStartService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bStopService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bGetInstance\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x36\n\x0eGenerateClient\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x44\n\x1cModifyServiceSystemResources\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07GetFile\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07\x43ompile\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x35\n\rGetServiceTar\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12?\n\x17GetServiceEstimatedCost\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07Payable\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x32\n\nGetMetrics\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x62\x06proto3'
   ,
-  dependencies=[celaut__pb2.DESCRIPTOR,buffer__pb2.DESCRIPTOR,compile__pb2.DESCRIPTOR,])
+  dependencies=[celaut__pb2.DESCRIPTOR,buffer__pb2.DESCRIPTOR,])
 
 
 
@@ -52,8 +55,8 @@ _GASAMOUNT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=69,
-  serialized_end=91,
+  serialized_start=54,
+  serialized_end=76,
 )
 
 
@@ -84,8 +87,8 @@ _TOKENMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=93,
-  serialized_end=122,
+  serialized_start=78,
+  serialized_end=107,
 )
 
 
@@ -123,8 +126,8 @@ _ESTIMATEDCOST = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=124,
-  serialized_end=191,
+  serialized_start=109,
+  serialized_end=176,
 )
 
 
@@ -155,8 +158,8 @@ _REFUND = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=193,
-  serialized_end=237,
+  serialized_start=178,
+  serialized_end=222,
 )
 
 
@@ -201,8 +204,8 @@ _PAYMENT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=240,
-  serialized_end=373,
+  serialized_start=225,
+  serialized_end=358,
 )
 
 
@@ -233,8 +236,8 @@ _METRICS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=375,
-  serialized_end=424,
+  serialized_start=360,
+  serialized_end=409,
 )
 
 
@@ -289,8 +292,8 @@ _INSTANCE = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=427,
-  serialized_end=571,
+  serialized_start=412,
+  serialized_end=556,
 )
 
 
@@ -321,8 +324,8 @@ _CLIENT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=573,
-  serialized_end=600,
+  serialized_start=558,
+  serialized_end=585,
 )
 
 
@@ -353,47 +356,8 @@ _RECURSIONGUARD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=602,
-  serialized_end=633,
-)
-
-
-_SERVICEWITHMETA = _descriptor.Descriptor(
-  name='ServiceWithMeta',
-  full_name='gateway.ServiceWithMeta',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  create_key=_descriptor._internal_create_key,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='metadata', full_name='gateway.ServiceWithMeta.metadata', index=0,
-      number=1, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-    _descriptor.FieldDescriptor(
-      name='service', full_name='gateway.ServiceWithMeta.service', index=1,
-      number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  serialized_options=None,
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=635,
-  serialized_end=726,
+  serialized_start=587,
+  serialized_end=618,
 )
 
 
@@ -467,8 +431,8 @@ _HASHWITHCONFIG = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=729,
-  serialized_end=1033,
+  serialized_start=621,
+  serialized_end=925,
 )
 
 
@@ -482,8 +446,8 @@ _SERVICEWITHCONFIG = _descriptor.Descriptor(
   fields=[
     _descriptor.FieldDescriptor(
       name='service', full_name='gateway.ServiceWithConfig.service', index=0,
-      number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
+      number=2, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"",
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
@@ -542,8 +506,8 @@ _SERVICEWITHCONFIG = _descriptor.Descriptor(
       create_key=_descriptor._internal_create_key,
     fields=[]),
   ],
-  serialized_start=1036,
-  serialized_end=1337,
+  serialized_start=928,
+  serialized_end=1203,
 )
 
 
@@ -581,8 +545,8 @@ _COMPILEINPUT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1339,
-  serialized_end=1424,
+  serialized_start=1205,
+  serialized_end=1290,
 )
 
 
@@ -603,8 +567,8 @@ _COMPILEOUTPUT = _descriptor.Descriptor(
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
       name='service', full_name='gateway.CompileOutput.service', index=1,
-      number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
+      number=2, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=b"",
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
@@ -620,8 +584,8 @@ _COMPILEOUTPUT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1426,
-  serialized_end=1496,
+  serialized_start=1292,
+  serialized_end=1336,
 )
 
 
@@ -659,8 +623,8 @@ _MODIFYSERVICESYSTEMRESOURCESOUTPUT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1498,
-  serialized_end=1605,
+  serialized_start=1338,
+  serialized_end=1445,
 )
 
 
@@ -698,8 +662,8 @@ _MODIFYSERVICESYSTEMRESOURCESINPUT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1607,
-  serialized_end=1726,
+  serialized_start=1447,
+  serialized_end=1566,
 )
 
 _ESTIMATEDCOST.fields_by_name['cost'].message_type = _GASAMOUNT
@@ -715,8 +679,6 @@ _INSTANCE.fields_by_name['instance_meta'].containing_oneof = _INSTANCE.oneofs_by
 _INSTANCE.oneofs_by_name['_token'].fields.append(
   _INSTANCE.fields_by_name['token'])
 _INSTANCE.fields_by_name['token'].containing_oneof = _INSTANCE.oneofs_by_name['_token']
-_SERVICEWITHMETA.fields_by_name['metadata'].message_type = celaut__pb2._ANY_METADATA
-_SERVICEWITHMETA.fields_by_name['service'].message_type = celaut__pb2._SERVICE
 _HASHWITHCONFIG.fields_by_name['hash'].message_type = celaut__pb2._ANY_METADATA_HASHTAG_HASH
 _HASHWITHCONFIG.fields_by_name['config'].message_type = celaut__pb2._CONFIGURATION
 _HASHWITHCONFIG.fields_by_name['min_sysreq'].message_type = celaut__pb2._SYSRESOURCES
@@ -731,7 +693,6 @@ _HASHWITHCONFIG.fields_by_name['max_sysreq'].containing_oneof = _HASHWITHCONFIG.
 _HASHWITHCONFIG.oneofs_by_name['_initial_gas_amount'].fields.append(
   _HASHWITHCONFIG.fields_by_name['initial_gas_amount'])
 _HASHWITHCONFIG.fields_by_name['initial_gas_amount'].containing_oneof = _HASHWITHCONFIG.oneofs_by_name['_initial_gas_amount']
-_SERVICEWITHCONFIG.fields_by_name['service'].message_type = _SERVICEWITHMETA
 _SERVICEWITHCONFIG.fields_by_name['config'].message_type = celaut__pb2._CONFIGURATION
 _SERVICEWITHCONFIG.fields_by_name['min_sysreq'].message_type = celaut__pb2._SYSRESOURCES
 _SERVICEWITHCONFIG.fields_by_name['max_sysreq'].message_type = celaut__pb2._SYSRESOURCES
@@ -746,7 +707,6 @@ _SERVICEWITHCONFIG.oneofs_by_name['_initial_gas_amount'].fields.append(
   _SERVICEWITHCONFIG.fields_by_name['initial_gas_amount'])
 _SERVICEWITHCONFIG.fields_by_name['initial_gas_amount'].containing_oneof = _SERVICEWITHCONFIG.oneofs_by_name['_initial_gas_amount']
 _COMPILEINPUT.fields_by_name['partitions_model'].message_type = buffer__pb2._BUFFER_HEAD_PARTITION
-_COMPILEOUTPUT.fields_by_name['service'].message_type = compile__pb2._SERVICEWITHMETA
 _MODIFYSERVICESYSTEMRESOURCESOUTPUT.fields_by_name['sysreq'].message_type = celaut__pb2._SYSRESOURCES
 _MODIFYSERVICESYSTEMRESOURCESOUTPUT.fields_by_name['gas'].message_type = _GASAMOUNT
 _MODIFYSERVICESYSTEMRESOURCESINPUT.fields_by_name['min_sysreq'].message_type = celaut__pb2._SYSRESOURCES
@@ -760,7 +720,6 @@ DESCRIPTOR.message_types_by_name['Metrics'] = _METRICS
 DESCRIPTOR.message_types_by_name['Instance'] = _INSTANCE
 DESCRIPTOR.message_types_by_name['Client'] = _CLIENT
 DESCRIPTOR.message_types_by_name['RecursionGuard'] = _RECURSIONGUARD
-DESCRIPTOR.message_types_by_name['ServiceWithMeta'] = _SERVICEWITHMETA
 DESCRIPTOR.message_types_by_name['HashWithConfig'] = _HASHWITHCONFIG
 DESCRIPTOR.message_types_by_name['ServiceWithConfig'] = _SERVICEWITHCONFIG
 DESCRIPTOR.message_types_by_name['CompileInput'] = _COMPILEINPUT
@@ -832,13 +791,6 @@ RecursionGuard = _reflection.GeneratedProtocolMessageType('RecursionGuard', (_me
   })
 _sym_db.RegisterMessage(RecursionGuard)
 
-ServiceWithMeta = _reflection.GeneratedProtocolMessageType('ServiceWithMeta', (_message.Message,), {
-  'DESCRIPTOR' : _SERVICEWITHMETA,
-  '__module__' : 'gateway_pb2'
-  # @@protoc_insertion_point(class_scope:gateway.ServiceWithMeta)
-  })
-_sym_db.RegisterMessage(ServiceWithMeta)
-
 HashWithConfig = _reflection.GeneratedProtocolMessageType('HashWithConfig', (_message.Message,), {
   'DESCRIPTOR' : _HASHWITHCONFIG,
   '__module__' : 'gateway_pb2'
@@ -890,8 +842,8 @@ _GATEWAY = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=1729,
-  serialized_end=2343,
+  serialized_start=1569,
+  serialized_end=2183,
   methods=[
   _descriptor.MethodDescriptor(
     name='StartService',

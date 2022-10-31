@@ -1,4 +1,5 @@
-from typing import Generator
+import string
+from typing import Generator, List
 
 from src.utils import logger as l
 import sys, shutil
@@ -6,7 +7,7 @@ import json
 import os, subprocess
 import src.manager.resources_manager as resources_manager
 import grpcbigbuffer
-from protos import buffer_pb2, celaut_pb2 as celaut, compile_pb2, gateway_pb2
+from protos import buffer_pb2, celaut_pb2 as celaut, service_capnp, gateway_pb2
 from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, HYCACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, REGISTRY
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes
@@ -14,7 +15,7 @@ from src.utils.verify import get_service_list_of_hashes, calculate_hashes
 class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
-        self.service = compile_pb2.Service()
+        self.service = service_capnp.Service()
         self.metadata = celaut.Any.Metadata()
         self.path = path
         self.json = json.load(open(self.path+"service.json", "r"))
@@ -48,20 +49,24 @@ class Hyper:
                     os.system("tar -xvf "+HYCACHE+self.aux_id+"/building/"+layer+"/layer.tar -C "+HYCACHE+self.aux_id+"/filesystem/")
 
             # Add filesystem data to filesystem buffer object.
-            def recursive_parsing(directory: str) -> celaut.Service.Container.Filesystem:
+            def recursive_parsing(directory: str) -> service_capnp.Filesystem:
                 host_dir = HYCACHE+self.aux_id+"/filesystem"
-                filesystem = celaut.Service.Container.Filesystem()
-                for b_name in os.listdir(host_dir + directory):
+                filesystem = service_capnp.Filesystem()
+                dir_list = os.listdir(host_dir + directory)
+                branches = filesystem.init('branch', len(dir_list))
+                for i in range(len(dir_list)):
+                    b_name = dir_list[i]
                     if b_name == '.wh..wh..opq':
                         # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
                         continue
-                    branch = celaut.Service.Container.Filesystem.ItemBranch()
+                    branch = service_capnp.Filesystem.ItemBranch()
                     branch.name = os.path.basename(b_name)
 
                     # It's a link.
                     if os.path.islink(host_dir + directory+b_name):
-                        branch.link.dst = directory+b_name
-                        branch.link.src = os.path.realpath(host_dir+directory+b_name)[len(host_dir):] if host_dir in os.path.realpath(host_dir+directory+b_name) else os.path.realpath(host_dir+directory+b_name)
+                        link = branch.init('link')
+                        link.dst = directory+b_name
+                        link.src = os.path.realpath(host_dir+directory+b_name)[len(host_dir):] if host_dir in os.path.realpath(host_dir+directory+b_name) else os.path.realpath(host_dir+directory+b_name)
 
                     # It's a file.
                     elif os.path.isfile(host_dir + directory+b_name):
@@ -70,23 +75,22 @@ class Hyper:
 
                     # It's a folder.
                     elif os.path.isdir(host_dir + directory+b_name):
-                        branch.filesystem.CopyFrom(
-                            recursive_parsing(directory = directory+b_name+'/')
-                            )
+                        branch.filesystem = recursive_parsing(directory = directory+b_name+'/')
 
-                    filesystem.branch.append(branch)
+                    branches[i] = branch
 
                 return filesystem
 
-            self.service.container.filesystem.CopyFrom(recursive_parsing( directory = "/" ))
+            filesystem: service_capnp.Filesystem = recursive_parsing( directory = "/" )
+            self.service.container.filesystem = filesystem
 
             return celaut.Any.Metadata.HashTag(
-                hash = calculate_hashes( value = self.service.container.filesystem.SerializeToString() )
+                hash = calculate_hashes( value = filesystem.to_bytes() )
             )
 
 
         # Envs
-        if self.json.get('envs'):
+        if False and self.json.get('envs'):
             for env in self.json.get('envs'):
                 try:
                     with open(self.path+env+".field", "rb") as env_desc:
@@ -96,16 +100,23 @@ class Hyper:
 
         # Entrypoint
         if self.json.get('entrypoint'):
-            self.service.container.entrypoint.append(self.json.get('entrypoint'))
+            entrypoint_list: List[str] = self.json.get('entrypoint')
+            entrypoint_length: int = len(entrypoint_list)
+            entrypoint = self.service.container.init('entrypoint', entrypoint_length)
+            for i in range(entrypoint_length):
+                entrypoint[i] = entrypoint_list[i]
+                
 
         # Arch
         
         
         # Config file spec.
-        self.service.container.config.path.append('__config__')
-        self.service.container.config.format.CopyFrom(
+        configuration = celaut.Service.Container.Config()
+        configuration.path.append('__config__')
+        configuration.format.CopyFrom(
             celaut.FieldDef() # celaut.ConfigFile definition.
         )
+        self.service.container.configuration = configuration.SerializeToString()
 
         # Expected Gateway.
 
@@ -201,42 +212,10 @@ class Hyper:
                     )
                 )
             )
-
-    def parseTensor(self):
-        tensor = self.json.get('tensor') or None
-        if tensor:
-            self.service.tensor.rank = tensor["rank"] or None
-            indexes = tensor.get('index') or None
-            if indexes:
-                for var in indexes:
-                    try:
-                        with open(self.path+var+".field", "rb") as var_desc:
-                            self.service.tensor.index[var].ParseFromString(var_desc.read())
-                    except FileNotFoundError: pass
-        
-                # Add tensor metadata to the global metadata.
-                self.metadata.hashtag.attr_hashtag.append(
-                    celaut.Any.Metadata.HashTag.AttrHashTag(
-                        key = 3,  # Tensor attr.
-                        value = [
-                            celaut.Any.Metadata.HashTag(
-                                attr_hashtag = [
-                                    celaut.Any.Metadata.HashTag.AttrHashTag(
-                                        key = 1,  # index attr.
-                                        value = [
-                                            celaut.Any.Metadata.HashTag(
-                                                tag = indexes[var]
-                                            ) for var in indexes
-                                        ]
-                                    )
-                                ]
-                            ),
-                        ]
-                    )
-                )
+            
 
     def save(self, partitions_model: tuple) -> str:
-        service_buffer = self.service.SerializeToString() # 2*len
+        service_buffer = self.service.to_bytes() # 2*len  
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(
                 service_buffer = service_buffer, 
@@ -262,8 +241,8 @@ class Hyper:
                             partition = partition, 
                             obj = gateway_pb2.CompileOutput(
                                 id = bytes.fromhex(id),
-                                service = compile_pb2.ServiceWithMeta(
-                                        metadata = self.metadata,
+                                service = service_capnp.ServiceWithMeta(
+                                        metadata = self.metadata.SerializeToString(),
                                         service = self.service
                                     )
                             )
@@ -286,9 +265,8 @@ def ok( path, aux_id,
 
     with resources_manager.mem_manager(len = COMPILER_MEMORY_SIZE_FACTOR*spec_file.buffer_len):
         spec_file.parseContainer()
-        spec_file.parseApi()
-        spec_file.parseLedger()
-        spec_file.parseTensor()
+        # spec_file.parseApi()
+        # spec_file.parseLedger()
 
         identifier = spec_file.save(
             partitions_model=partitions_model
