@@ -3,4 +3,5 @@ pymongo
 psutil
 netifaces
 web3
+capnp
 git+https://github.com/jossemii/GRPCBigBuffer

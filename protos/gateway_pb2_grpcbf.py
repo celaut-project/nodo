@@ -1,3 +1,4 @@
+import capnp
 from protos import buffer_pb2, gateway_pb2, service_capnp
 
 StartService_input = {
