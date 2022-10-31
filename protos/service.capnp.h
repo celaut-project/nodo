@@ -575,7 +575,7 @@ public:
   inline Which which() const;
   inline bool isFile() const;
   inline bool hasFile() const;
-  inline  ::capnp::Data::Reader getFile() const;
+  inline  ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>::Reader getFile() const;
 
   inline bool isLink() const;
   inline typename Link::Reader getLink() const;
@@ -615,11 +615,12 @@ public:
   inline Which which();
   inline bool isFile();
   inline bool hasFile();
-  inline  ::capnp::Data::Builder getFile();
-  inline void setFile( ::capnp::Data::Reader value);
-  inline  ::capnp::Data::Builder initFile(unsigned int size);
-  inline void adoptFile(::capnp::Orphan< ::capnp::Data>&& value);
-  inline ::capnp::Orphan< ::capnp::Data> disownFile();
+  inline  ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>::Builder getFile();
+  inline void setFile( ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>::Reader value);
+  inline void setFile(::kj::ArrayPtr<const  ::capnp::Data::Reader> value);
+  inline  ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>::Builder initFile(unsigned int size);
+  inline void adoptFile(::capnp::Orphan< ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>>&& value);
+  inline ::capnp::Orphan< ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>> disownFile();
 
   inline bool isLink();
   inline typename Link::Builder getLink();
@@ -1394,41 +1395,47 @@ inline bool Filesystem::ItemBranch::Item::Builder::hasFile() {
   return !_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
 }
-inline  ::capnp::Data::Reader Filesystem::ItemBranch::Item::Reader::getFile() const {
+inline  ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>::Reader Filesystem::ItemBranch::Item::Reader::getFile() const {
   KJ_IREQUIRE((which() == Filesystem::ItemBranch::Item::FILE),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>>::get(_reader.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
-inline  ::capnp::Data::Builder Filesystem::ItemBranch::Item::Builder::getFile() {
+inline  ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>::Builder Filesystem::ItemBranch::Item::Builder::getFile() {
   KJ_IREQUIRE((which() == Filesystem::ItemBranch::Item::FILE),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>>::get(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
-inline void Filesystem::ItemBranch::Item::Builder::setFile( ::capnp::Data::Reader value) {
+inline void Filesystem::ItemBranch::Item::Builder::setFile( ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>::Reader value) {
   _builder.setDataField<Filesystem::ItemBranch::Item::Which>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, Filesystem::ItemBranch::Item::FILE);
-  ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>>::set(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS), value);
 }
-inline  ::capnp::Data::Builder Filesystem::ItemBranch::Item::Builder::initFile(unsigned int size) {
+inline void Filesystem::ItemBranch::Item::Builder::setFile(::kj::ArrayPtr<const  ::capnp::Data::Reader> value) {
   _builder.setDataField<Filesystem::ItemBranch::Item::Which>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, Filesystem::ItemBranch::Item::FILE);
-  return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>::Builder Filesystem::ItemBranch::Item::Builder::initFile(unsigned int size) {
+  _builder.setDataField<Filesystem::ItemBranch::Item::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Filesystem::ItemBranch::Item::FILE);
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>>::init(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS), size);
 }
 inline void Filesystem::ItemBranch::Item::Builder::adoptFile(
-    ::capnp::Orphan< ::capnp::Data>&& value) {
+    ::capnp::Orphan< ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>>&& value) {
   _builder.setDataField<Filesystem::ItemBranch::Item::Which>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, Filesystem::ItemBranch::Item::FILE);
-  ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
+  ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>>::adopt(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::capnp::Data> Filesystem::ItemBranch::Item::Builder::disownFile() {
+inline ::capnp::Orphan< ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>> Filesystem::ItemBranch::Item::Builder::disownFile() {
   KJ_IREQUIRE((which() == Filesystem::ItemBranch::Item::FILE),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::capnp::List< ::capnp::Data,  ::capnp::Kind::BLOB>>::disown(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
 

@@ -13,7 +13,7 @@ struct Filesystem @0xe9cfc52d52153987 {  # 0 bytes, 1 ptrs
     name @0 :Text;  # ptr[0]
     item :group {
       union {  # tag bits [0, 16)
-        file @1 :Data;  # ptr[1], union tag = 0
+        file @1 :List(Data);  # ptr[1], union tag = 0
         link :group {  # union tag = 1
           src @2 :Text;  # ptr[1]
           dst @3 :Text;  # ptr[2]

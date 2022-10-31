@@ -1,4 +1,6 @@
 import string
+from math import ceil
+
 from typing import Generator, List
 
 from src.utils import logger as l
@@ -8,7 +10,8 @@ import os, subprocess
 import src.manager.resources_manager as resources_manager
 import grpcbigbuffer
 from protos import buffer_pb2, celaut_pb2 as celaut, service_capnp, gateway_pb2
-from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, HYCACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, REGISTRY
+from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, HYCACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, REGISTRY, \
+    BLOB_SIZE
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes
 
@@ -70,8 +73,18 @@ class Hyper:
 
                     # It's a file.
                     elif os.path.isfile(host_dir + directory+b_name):
-                        with open(host_dir + directory+b_name, 'rb') as file:
-                            branch.item.file = file.read()
+                        file_dir: str = host_dir + directory+b_name
+                        file = branch.item.init(
+                            'file',
+                            ceil(os.path.getsize(file_dir) / BLOB_SIZE)  # Number of chunks of 512 MB
+                        )
+                        with open(host_dir + directory+b_name, 'rb', buffering = BLOB_SIZE) as f:
+                            chunk_i: int = 0
+                            while True:
+                                f.flush()
+                                chunk = f.read(BLOB_SIZE)
+                                if len(chunk) == 0: break
+                                file[chunk_i] = chunk; chunk_i += 1
 
                     # It's a folder.
                     elif os.path.isdir(host_dir + directory+b_name):
