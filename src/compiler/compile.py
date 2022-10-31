@@ -64,18 +64,18 @@ class Hyper:
 
                     # It's a link.
                     if os.path.islink(host_dir + directory+b_name):
-                        link = branch.init('link')
+                        link = branch.item.init('link')
                         link.dst = directory+b_name
                         link.src = os.path.realpath(host_dir+directory+b_name)[len(host_dir):] if host_dir in os.path.realpath(host_dir+directory+b_name) else os.path.realpath(host_dir+directory+b_name)
 
                     # It's a file.
                     elif os.path.isfile(host_dir + directory+b_name):
                         with open(host_dir + directory+b_name, 'rb') as file:
-                            branch.file = file.read()
+                            branch.item.file = file.read()
 
                     # It's a folder.
                     elif os.path.isdir(host_dir + directory+b_name):
-                        branch.filesystem = recursive_parsing(directory = directory+b_name+'/')
+                        branch.item.filesystem = recursive_parsing(directory = directory+b_name+'/')
 
                     branches[i] = branch
 
