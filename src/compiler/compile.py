@@ -249,25 +249,45 @@ class Hyper:
 
         l.LOGGER('Compiler: DIR CREATED'+ HYCACHE + 'compile' + id + '/')
 
-        for i, partition in enumerate(partitions_model):
-            message = grpcbigbuffer.get_submessage(
-                            partition = partition, 
-                            obj = gateway_pb2.CompileOutput(
-                                id = bytes.fromhex(id),
-                                service = service_capnp.ServiceWithMeta(
-                                        metadata = self.metadata.SerializeToString(),
-                                        service = self.service
-                                    )
-                            )
-                        )
-            message_buffer = grpcbigbuffer.message_to_bytes(
-                        message = message
-                    )
-            l.LOGGER('Compiler: send message '+ str(type(message)) + ' ' + str(partition) + ' ' + str(len(message_buffer)))
-            with open(HYCACHE + 'compile' + id + '/p'+str(i+1), 'wb') as f:
-                f.write(
-                    message_buffer
+        try:
+            if len(partitions_model) == 1:
+                message = gateway_pb2.CompileOutput(
+                    id=bytes.fromhex(id),
+                    service=service_capnp.ServiceWithMeta(
+                        metadata=self.metadata.SerializeToString(),
+                        service=self.service
+                    ).to_bytes()
                 )
+                message_buffer = grpcbigbuffer.message_to_bytes(
+                            message = message
+                        )
+                l.LOGGER('Compiler: send message '+ str(type(message)) + ' ' + str(len(message_buffer)))
+                with open(HYCACHE + 'compile' + id + '/p'+str(1), 'wb') as f:
+                    f.write(
+                        message_buffer
+                    )
+            else:
+                for i, partition in enumerate(partitions_model):
+                    message = grpcbigbuffer.get_submessage(
+                                    partition = partition,
+                                    obj = gateway_pb2.CompileOutput(
+                                        id = bytes.fromhex(id),
+                                        service = service_capnp.ServiceWithMeta(
+                                                metadata = self.metadata.SerializeToString(),
+                                                service = self.service
+                                            ).to_bytes()
+                                    )
+                                )
+                    message_buffer = grpcbigbuffer.message_to_bytes(
+                                message = message
+                            )
+                    l.LOGGER('Compiler: send message '+ str(type(message)) + ' ' + str(partition) + ' ' + str(len(message_buffer)))
+                    with open(HYCACHE + 'compile' + id + '/p'+str(i+1), 'wb') as f:
+                        f.write(
+                            message_buffer
+                        )
+        except Exception as e:
+            l.LOGGER('E -> '+str(e))
         return id
 
 
