@@ -228,7 +228,7 @@ class Hyper:
             
 
     def save(self, partitions_model: tuple) -> str:
-        service_buffer = self.service.to_bytes() # 2*len  
+        service_buffer = self.service.to_bytes() # 2*len TODO CHECK -> capn proto duplicates the buffer too?
         self.metadata.hashtag.hash.extend(
             get_service_list_of_hashes(
                 service_buffer = service_buffer, 
@@ -349,9 +349,9 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
     )
     dirs = sorted([d for d in os.listdir(HYCACHE+'compile'+id)])
     for b in grpcbigbuffer.serialize_to_buffer(
-        message_iterator =tuple([gateway_pb2.CompileOutput]) + tuple([grpcbigbuffer.Dir(dir=HYCACHE + 'compile' + id + '/' + d) for d in dirs]),
+        message_iterator =tuple([service_capnp.CompileOutput]) + tuple([grpcbigbuffer.Dir(dir=HYCACHE + 'compile' + id + '/' + d) for d in dirs]),
         partitions_model = list(partitions_model),
-        indices = gateway_pb2.CompileOutput
+        indices = service_capnp.CompileOutput
     ): yield b
     shutil.rmtree(HYCACHE+'compile'+id)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
