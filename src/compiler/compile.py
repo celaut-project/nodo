@@ -251,20 +251,17 @@ class Hyper:
 
         try:
             if len(partitions_model) == 1:
-                message = service_capnp.CompileOutput(
+                service_capnp.CompileOutput(
                     id=bytes.fromhex(id),
                     service=service_capnp.ServiceWithMeta(
                         metadata=self.metadata.SerializeToString(),
                         service=self.service
                     )
+                ).write(
+                    open(HYCACHE + 'compile' + id + '/p' + str(1), 'w+b')
                 )
-                message_buffer = message.to_bytes()
-                l.LOGGER('Compiler: send message '+ str(type(message)) + ' ' + str(len(message_buffer)))
-                with open(HYCACHE + 'compile' + id + '/p'+str(1), 'wb') as f:
-                    f.write(
-                        message_buffer
-                    )
             else:
+                raise Exception('gRPCbb dont support partition conversion for capnp objects.')
                 for i, partition in enumerate(partitions_model):
                     message = grpcbigbuffer.get_submessage(
                                     partition = partition,
