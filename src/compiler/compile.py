@@ -318,7 +318,7 @@ def repo_ok(
     return ok(
         path = HYCACHE+aux_id+'/for_build/git/.service/',
         aux_id = aux_id,
-        partitions_model=partitions_model
+        # partitions_model=partitions_model
         )  # Hyperfile
 
 
@@ -344,13 +344,16 @@ def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[
         repo = repo,
         partitions_model = list(partitions_model)
     )
+    """
     dirs = sorted([d for d in os.listdir(HYCACHE+'compile'+id)])
     for b in grpcbigbuffer.serialize_to_buffer(
         message_iterator =tuple([service_capnp.CompileOutput]) + tuple([grpcbigbuffer.Dir(dir=HYCACHE + 'compile' + id + '/' + d) for d in dirs]),
-        partitions_model = list(partitions_model),
+        # partitions_model = list(partitions_model),
         indices = service_capnp.CompileOutput
     ): yield b
-    shutil.rmtree(HYCACHE+'compile'+id)
+    shutil.rmtree(HYCACHE+'compile'+id)    
+    """
+
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
 
 
