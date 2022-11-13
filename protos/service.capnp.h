@@ -25,6 +25,7 @@ CAPNP_DECLARE_SCHEMA(b54bb139210ac401);
 CAPNP_DECLARE_SCHEMA(d393b03e8ba7f0c8);
 CAPNP_DECLARE_SCHEMA(8a3d618915535c50);
 CAPNP_DECLARE_SCHEMA(baba2cfc033c573d);
+CAPNP_DECLARE_SCHEMA(bd8ca91c986ff0ea);
 CAPNP_DECLARE_SCHEMA(eb20fd67ea5b4f6c);
 
 }  // namespace schemas
@@ -178,6 +179,21 @@ struct ServiceWithMeta {
 
   struct _capnpPrivate {
     CAPNP_DECLARE_STRUCT_HEADER(baba2cfc033c573d, 0, 2)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct ServiceWithConfig {
+  ServiceWithConfig() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(bd8ca91c986ff0ea, 0, 5)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -1087,6 +1103,128 @@ public:
       : _typeless(kj::mv(typeless)) {}
 
   inline  ::Service::Pipeline getService();
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class ServiceWithConfig::Reader {
+public:
+  typedef ServiceWithConfig Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasService() const;
+  inline  ::ServiceWithMeta::Reader getService() const;
+
+  inline bool hasConfig() const;
+  inline  ::capnp::Data::Reader getConfig() const;
+
+  inline bool hasMinSysreq() const;
+  inline  ::capnp::Data::Reader getMinSysreq() const;
+
+  inline bool hasMaxSysreq() const;
+  inline  ::capnp::Data::Reader getMaxSysreq() const;
+
+  inline bool hasInitialGasAmount() const;
+  inline  ::capnp::Data::Reader getInitialGasAmount() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class ServiceWithConfig::Builder {
+public:
+  typedef ServiceWithConfig Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasService();
+  inline  ::ServiceWithMeta::Builder getService();
+  inline void setService( ::ServiceWithMeta::Reader value);
+  inline  ::ServiceWithMeta::Builder initService();
+  inline void adoptService(::capnp::Orphan< ::ServiceWithMeta>&& value);
+  inline ::capnp::Orphan< ::ServiceWithMeta> disownService();
+
+  inline bool hasConfig();
+  inline  ::capnp::Data::Builder getConfig();
+  inline void setConfig( ::capnp::Data::Reader value);
+  inline  ::capnp::Data::Builder initConfig(unsigned int size);
+  inline void adoptConfig(::capnp::Orphan< ::capnp::Data>&& value);
+  inline ::capnp::Orphan< ::capnp::Data> disownConfig();
+
+  inline bool hasMinSysreq();
+  inline  ::capnp::Data::Builder getMinSysreq();
+  inline void setMinSysreq( ::capnp::Data::Reader value);
+  inline  ::capnp::Data::Builder initMinSysreq(unsigned int size);
+  inline void adoptMinSysreq(::capnp::Orphan< ::capnp::Data>&& value);
+  inline ::capnp::Orphan< ::capnp::Data> disownMinSysreq();
+
+  inline bool hasMaxSysreq();
+  inline  ::capnp::Data::Builder getMaxSysreq();
+  inline void setMaxSysreq( ::capnp::Data::Reader value);
+  inline  ::capnp::Data::Builder initMaxSysreq(unsigned int size);
+  inline void adoptMaxSysreq(::capnp::Orphan< ::capnp::Data>&& value);
+  inline ::capnp::Orphan< ::capnp::Data> disownMaxSysreq();
+
+  inline bool hasInitialGasAmount();
+  inline  ::capnp::Data::Builder getInitialGasAmount();
+  inline void setInitialGasAmount( ::capnp::Data::Reader value);
+  inline  ::capnp::Data::Builder initInitialGasAmount(unsigned int size);
+  inline void adoptInitialGasAmount(::capnp::Orphan< ::capnp::Data>&& value);
+  inline ::capnp::Orphan< ::capnp::Data> disownInitialGasAmount();
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class ServiceWithConfig::Pipeline {
+public:
+  typedef ServiceWithConfig Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+  inline  ::ServiceWithMeta::Pipeline getService();
 private:
   ::capnp::AnyPointer::Pipeline _typeless;
   friend class ::capnp::PipelineHook;
@@ -2088,6 +2226,181 @@ inline void ServiceWithMeta::Builder::adoptService(
 inline ::capnp::Orphan< ::Service> ServiceWithMeta::Builder::disownService() {
   return ::capnp::_::PointerHelpers< ::Service>::disown(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool ServiceWithConfig::Reader::hasService() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool ServiceWithConfig::Builder::hasService() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::ServiceWithMeta::Reader ServiceWithConfig::Reader::getService() const {
+  return ::capnp::_::PointerHelpers< ::ServiceWithMeta>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::ServiceWithMeta::Builder ServiceWithConfig::Builder::getService() {
+  return ::capnp::_::PointerHelpers< ::ServiceWithMeta>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::ServiceWithMeta::Pipeline ServiceWithConfig::Pipeline::getService() {
+  return  ::ServiceWithMeta::Pipeline(_typeless.getPointerField(0));
+}
+#endif  // !CAPNP_LITE
+inline void ServiceWithConfig::Builder::setService( ::ServiceWithMeta::Reader value) {
+  ::capnp::_::PointerHelpers< ::ServiceWithMeta>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::ServiceWithMeta::Builder ServiceWithConfig::Builder::initService() {
+  return ::capnp::_::PointerHelpers< ::ServiceWithMeta>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void ServiceWithConfig::Builder::adoptService(
+    ::capnp::Orphan< ::ServiceWithMeta>&& value) {
+  ::capnp::_::PointerHelpers< ::ServiceWithMeta>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::ServiceWithMeta> ServiceWithConfig::Builder::disownService() {
+  return ::capnp::_::PointerHelpers< ::ServiceWithMeta>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool ServiceWithConfig::Reader::hasConfig() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool ServiceWithConfig::Builder::hasConfig() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Data::Reader ServiceWithConfig::Reader::getConfig() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Data::Builder ServiceWithConfig::Builder::getConfig() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void ServiceWithConfig::Builder::setConfig( ::capnp::Data::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Data::Builder ServiceWithConfig::Builder::initConfig(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void ServiceWithConfig::Builder::adoptConfig(
+    ::capnp::Orphan< ::capnp::Data>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Data> ServiceWithConfig::Builder::disownConfig() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool ServiceWithConfig::Reader::hasMinSysreq() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool ServiceWithConfig::Builder::hasMinSysreq() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Data::Reader ServiceWithConfig::Reader::getMinSysreq() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Data::Builder ServiceWithConfig::Builder::getMinSysreq() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void ServiceWithConfig::Builder::setMinSysreq( ::capnp::Data::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Data::Builder ServiceWithConfig::Builder::initMinSysreq(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void ServiceWithConfig::Builder::adoptMinSysreq(
+    ::capnp::Orphan< ::capnp::Data>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Data> ServiceWithConfig::Builder::disownMinSysreq() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool ServiceWithConfig::Reader::hasMaxSysreq() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool ServiceWithConfig::Builder::hasMaxSysreq() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Data::Reader ServiceWithConfig::Reader::getMaxSysreq() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Data::Builder ServiceWithConfig::Builder::getMaxSysreq() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void ServiceWithConfig::Builder::setMaxSysreq( ::capnp::Data::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Data::Builder ServiceWithConfig::Builder::initMaxSysreq(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void ServiceWithConfig::Builder::adoptMaxSysreq(
+    ::capnp::Orphan< ::capnp::Data>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Data> ServiceWithConfig::Builder::disownMaxSysreq() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline bool ServiceWithConfig::Reader::hasInitialGasAmount() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool ServiceWithConfig::Builder::hasInitialGasAmount() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Data::Reader ServiceWithConfig::Reader::getInitialGasAmount() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Data::Builder ServiceWithConfig::Builder::getInitialGasAmount() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void ServiceWithConfig::Builder::setInitialGasAmount( ::capnp::Data::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Data::Builder ServiceWithConfig::Builder::initInitialGasAmount(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), size);
+}
+inline void ServiceWithConfig::Builder::adoptInitialGasAmount(
+    ::capnp::Orphan< ::capnp::Data>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Data> ServiceWithConfig::Builder::disownInitialGasAmount() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
 }
 
 inline bool CompileOutput::Reader::hasId() const {
