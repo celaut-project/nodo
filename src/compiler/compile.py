@@ -244,43 +244,17 @@ class Hyper:
         #self.service.container.filesystem.ClearField('branch')
         # https://github.com/moby/moby/issues/20972#issuecomment-193381422
         del service_buffer # -len
-        os.mkdir(HYCACHE + 'compile' + id + '/')
-
-
-        l.LOGGER('Compiler: DIR CREATED'+ HYCACHE + 'compile' + id + '/')
 
         try:
-            if len(partitions_model) == 1:
-                service_capnp.CompileOutput(
-                    id=bytes.fromhex(id),
-                    service=service_capnp.ServiceWithMeta(
-                        metadata=self.metadata.SerializeToString(),
-                        service=self.service
-                    )
-                ).write(
-                    open(HYCACHE + 'compile' + id + '/p' + str(1), 'w+b')
+            service_capnp.CompileOutput(
+                id=bytes.fromhex(id),
+                service=service_capnp.ServiceWithMeta(
+                    metadata=self.metadata.SerializeToString(),
+                    service=self.service
                 )
-            else:
-                raise Exception('gRPCbb dont support partition conversion for capnp objects.')
-                for i, partition in enumerate(partitions_model):
-                    message = grpcbigbuffer.get_submessage(
-                                    partition = partition,
-                                    obj = gateway_pb2.CompileOutput(
-                                        id = bytes.fromhex(id),
-                                        service = service_capnp.ServiceWithMeta(
-                                                metadata = self.metadata.SerializeToString(),
-                                                service = self.service
-                                            ).to_bytes()
-                                    )
-                                )
-                    message_buffer = grpcbigbuffer.message_to_bytes(
-                                message = message
-                            )
-                    l.LOGGER('Compiler: send message '+ str(type(message)) + ' ' + str(partition) + ' ' + str(len(message_buffer)))
-                    with open(HYCACHE + 'compile' + id + '/p'+str(i+1), 'wb') as f:
-                        f.write(
-                            message_buffer
-                        )
+            ).write(
+                open(HYCACHE + 'compile' + id, 'w+b')
+            )
         except Exception as e:
             l.LOGGER('E -> '+str(e))
         return id
@@ -323,8 +297,7 @@ def repo_ok(
 
 
 def zipfile_ok(
-    repo: str,
-    partitions_model: list
+    repo: str
 ) -> str:
     import random
     aux_id = str(random.random())
@@ -334,25 +307,20 @@ def zipfile_ok(
     os.system('rm '+repo)
     return ok(
         path = HYCACHE+aux_id+'/for_build/',
-        aux_id = aux_id,
-        partitions_model=partitions_model
+        aux_id = aux_id
         )  # Hyperfile
 
-def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
+def compile(repo, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
     l.LOGGER('Compiling zip ' + str(repo))
     id = zipfile_ok(
-        repo = repo,
-        partitions_model = list(partitions_model)
+        repo = repo
     )
-    """
     dirs = sorted([d for d in os.listdir(HYCACHE+'compile'+id)])
     for b in grpcbigbuffer.serialize_to_buffer(
-        message_iterator =tuple([service_capnp.CompileOutput]) + tuple([grpcbigbuffer.Dir(dir=HYCACHE + 'compile' + id + '/' + d) for d in dirs]),
-        # partitions_model = list(partitions_model),
+        message_iterator =tuple([service_capnp.CompileOutput, grpcbigbuffer.Dir(dir=HYCACHE + 'compile' + id)]),
         indices = service_capnp.CompileOutput
     ): yield b
-    shutil.rmtree(HYCACHE+'compile'+id)    
-    """
+    shutil.rmtree(HYCACHE+'compile'+id)
 
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
 
