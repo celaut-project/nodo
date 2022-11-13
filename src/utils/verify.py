@@ -30,7 +30,7 @@ def check_service(service_buffer: bytes, hashes: list) -> bool:
 
 
 # Return the service's sha3-256 hash on hexadecimal format.
-def get_service_hex_main_hash(
+def get_service_hex_main_hash(  # TODO capnp
         service_buffer: Union[bytes, str, Service, tuple, None],
         partitions_model: tuple = None,
         metadata: Any.Metadata = Any.Metadata(),

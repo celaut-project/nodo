@@ -7,6 +7,9 @@ import grpcbigbuffer as grpcbf
 import netifaces as ni
 from typing import Generator
 
+import capnp
+from protos import service_capnp
+
 import src.manager.resources_manager as iobd
 from contracts.eth_main.utils import get_ledger_and_contract_addr_from_contract
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
@@ -56,33 +59,15 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
 
 # If the service is not on the registry, save it.
 def save_service(
-        service_p1: bytes,
-        service_p2: str,
-        metadata: celaut.Any.Metadata,
+        service_buffer: service_capnp.ServiceWithMeta,
         service_hash: str = None
 ) -> str:
-    if not service_p1 or not service_p2:
-        l.LOGGER('Save service partitions required.')
-        raise Exception('Save service partitions required.')
-
     if not service_hash:
         service_hash = get_service_hex_main_hash(
-            service_buffer=(service_p1, service_p2),
-            metadata=metadata
+            service_buffer=service_buffer
         )
-    if not os.path.isdir(REGISTRY + service_hash):
-        os.mkdir(REGISTRY + service_hash)
-        with open(
-                REGISTRY + service_hash + '/p1', 'wb'
-        ) as file:  # , iobd.mem_manager(len=len(service_p1)): TODO check mem-58 bug.
-            file.write(
-                celaut.Any(
-                    metadata=metadata,
-                    value=service_p1
-                ).SerializeToString()
-            )
-        if service_p2:
-            shutil.move(service_p2, REGISTRY + service_hash + '/p2')
+
+    # Move the buffer or os.path.copy  TODO check
     return service_hash
 
 
@@ -153,9 +138,7 @@ def search_definition(hashes: list, ignore_network: str = None) -> bytes:
             )
             #  Save the service on the registry.
             save_service(
-                service_p1=next(service_partitions_iterator),
-                service_p2=next(service_partitions_iterator),
-                metadata=any.metadata
+                service_buffer=next(service_partitions_iterator)
             )
             return any.value
 
