@@ -395,13 +395,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
             request_iterator=request_iterator,
             indices=gateway_pb2.CompileInput,
             partitions_model=[Buffer.Head.Partition(index={1: Buffer.Head.Partition()}),
-                              Buffer.Head.Partition(index={2: Buffer.Head.Partition()})],
+                              Buffer.Head.Partition(index={2: Buffer.Head.Partition()})],  # Deprecated usage of partitions for compile, not needed with capnp and mmap readers.
             partitions_message_mode=[False, True]
         )
         if next(input) != gateway_pb2.CompileInput: raise Exception('Compile Input wrong.')
         for b in compile(
-                repo=next(input),
-                partitions_model=next(input)
+                repo=next(input)
         ): yield b
 
     def GetServiceTar(self, request_iterator, context, **kwargs):
