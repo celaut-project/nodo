@@ -126,6 +126,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         )
                         metadata = celaut.Any.Metadata()
                         metadata.ParseFromString(service_with_meta.metadata)
+                        metadata = read_from_capnp(
+                            service_with_meta.metadata,
+                            celaut.Any.Metadata
+                        )
                         if service_hash not in metadata.hashtag.hash:
                             metadata.hashtag.hash.append(service_hash)
                         for b in grpcbf.serialize_to_buffer(
