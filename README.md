@@ -1,32 +1,32 @@
-2.git clone https://github.com/josemibnf/HyperNode.git node
+1.git clone https://github.com/josemibnf/HyperNode.git node
 
-3.sudo apt-get install python3 python3-pip
+2.sudo apt-get install python3 python3-pip
 
-4.pip3 install -r requirements.txt
+3.pip3 install -r requirements.txt
 
-5.Install Docker https://docs.docker.com/engine/install/ubuntu/
+4.Install Docker https://docs.docker.com/engine/install/ubuntu/
 
-6. if is wsl2 https://gist.github.com/djfdyuruiry/6720faa3f9fc59bfdf6284ee1f41f950
+5. if is wsl2 https://gist.github.com/djfdyuruiry/6720faa3f9fc59bfdf6284ee1f41f950
 
-7.systemd gateway.service
+6.systemd gateway.service
 
-8.create the file (is in other posit) on /etc/systemd/system/
+7.create the file (is in other posit) on /etc/systemd/system/
 https://docs.google.com/document/d/1VZ_M9mVKDe2VMsmMyHZAqedgWYrIuVEgqxc2t3-5UzM/edit
 
-9.systemctl start gateway.service
+8.systemctl start gateway.service
 
-10.systemctl enable gateway.service
+9.systemctl enable gateway.service
 
-11. https://www.digitalocean.com/community/tutorials/how-to-install-mongodb-on-ubuntu-20-04-es
+10. https://www.digitalocean.com/community/tutorials/how-to-install-mongodb-on-ubuntu-20-04-es
 
-12. Añadir base de datos 'peerInstances' a mongoDB.
+11. Añadir base de datos 'peerInstances' a mongoDB.
 
-13.Añadir emuladores de otra arquitectura. (Docker la detecta por si solo por lo que no es necesario crear un fork del nodo).
+12. Añadir emuladores de otra arquitectura. (Docker la detecta por si solo por lo que no es necesario crear un fork del nodo).
 https://www.stereolabs.com/docs/docker/building-arm-container-on-x86/
 
-14.Optional: activate ssh, https://linuxize.com/post/how-to-enable-ssh-on-ubuntu-18-04/
+13.Optional: activate ssh, https://linuxize.com/post/how-to-enable-ssh-on-ubuntu-18-04/
 
-15. Add enviroment variables: 
+14. Add enviroment variables: 
 - COMPUTE_POWER_RATE
 - GATEWAY_PORT
 - COST_OF_BUILD
