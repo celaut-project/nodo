@@ -3,7 +3,7 @@ from threading import Lock
 
 import docker as docker_lib
 import grpc
-import grpcbigbuffer as grpcbf
+from grpcbigbuffer import grpcbigbuffer as grpcbf
 
 from protos import gateway_pb2_grpc, gateway_pb2
 from src.utils import logger as l

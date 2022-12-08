@@ -1,5 +1,5 @@
 from typing import Dict
-import grpcbigbuffer as grpcbf
+from grpcbigbuffer import grpcbigbuffer as grpcbf
 import grpc
 
 import protos.celaut_pb2 as celaut
