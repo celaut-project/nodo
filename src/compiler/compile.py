@@ -6,7 +6,8 @@ import json
 import os, subprocess
 import src.manager.resources_manager as resources_manager
 from grpcbigbuffer import client as grpcbigbuffer
-from protos import buffer_pb2, celaut_pb2 as celaut, compile_pb2, gateway_pb2
+from grpcbigbuffer import buffer_pb2
+from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
 from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, HYCACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, REGISTRY
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes
