@@ -1,4 +1,4 @@
-from grpcbigbuffer import grpcbigbuffer as grpcbf
+from grpcbigbuffer import client as grpcbf
 import docker as docker_lib
 from hashlib import sha256
 from src.builder import build

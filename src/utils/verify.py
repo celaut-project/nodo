@@ -1,5 +1,5 @@
 from typing import Union
-from grpcbigbuffer import grpcbigbuffer as grpcbf
+from grpcbigbuffer import client as grpcbf
 
 from src.utils.env import SHA3_256_ID, SHA3_256, SHAKE_256_ID, SHAKE_256, HASH_FUNCTIONS
 from src.utils.logger import LOGGER

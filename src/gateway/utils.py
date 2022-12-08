@@ -3,7 +3,7 @@ import os
 import shutil
 
 import grpc
-from grpcbigbuffer import grpcbigbuffer as grpcbf
+from grpcbigbuffer import client as grpcbf
 import netifaces as ni
 from typing import Generator
 

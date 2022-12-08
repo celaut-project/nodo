@@ -2,7 +2,7 @@ import string
 from hashlib import sha256
 from time import sleep
 import grpc
-from grpcbigbuffer import grpcbigbuffer as grpcbf
+from grpcbigbuffer import client as grpcbf
 
 from contracts.envs import AVAILABLE_PAYMENT_PROCESS, PAYMENT_PROCESS_VALIDATORS
 from contracts.vyper_gas_deposit_contract import interface as vyper_gdc

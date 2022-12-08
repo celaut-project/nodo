@@ -2,7 +2,7 @@ import itertools
 import os
 from time import sleep
 
-from grpcbigbuffer import grpcbigbuffer as grpcbf
+from grpcbigbuffer import client as grpcbf
 from src.manager.resources_manager import mem_manager
 
 from protos import gateway_pb2_grpc, gateway_pb2, gateway_pb2_grpcbf

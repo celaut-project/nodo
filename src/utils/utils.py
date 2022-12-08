@@ -4,7 +4,7 @@ import socket
 from typing import Generator
 import typing
 from bson.objectid import ObjectId
-from grpcbigbuffer.grpcbigbuffer import Dir
+from grpcbigbuffer.client import Dir
 import pymongo
 import netifaces as ni
 

@@ -1,5 +1,5 @@
 import grpc
-from grpcbigbuffer import grpcbigbuffer as grpcbf
+from grpcbigbuffer import client as grpcbf
 
 from protos import gateway_pb2, gateway_pb2_grpc
 
