@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package buffer;
+package grpcbigbuffer.buffer;
 
 message Empty {}
 
@@ -12,8 +12,17 @@ message Buffer  {
         int32 index = 1;
         repeated Partition partitions = 2;
     }
+    message Block {
+        message Hash {
+            bytes type = 1;
+            bytes value = 2;
+        }
+        repeated Hash hashes = 1;
+        // If server sends a Block means that client needs generate the next from it.
+    }
     optional bytes chunk = 1;
     optional bool separator = 2;
     optional bool signal = 3;
     optional Head head = 4;
+    optional Block block = 5;
 }
