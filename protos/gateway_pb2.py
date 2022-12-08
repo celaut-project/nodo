@@ -12,7 +12,7 @@ _sym_db = _symbol_database.Default()
 
 
 import celaut_pb2 as celaut__pb2
-import buffer_pb2 as buffer__pb2
+from grpcbigbuffer import buffer_pb2 as buffer__pb2
 import compile_pb2 as compile__pb2
 
 
