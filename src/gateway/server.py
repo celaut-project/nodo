@@ -7,7 +7,7 @@ from src.manager.resources_manager import mem_manager
 
 from protos import gateway_pb2_grpc, gateway_pb2, gateway_pb2_grpcbf
 from protos import celaut_pb2 as celaut
-from protos.buffer_pb2 import Buffer
+from grpcbigbuffer.buffer_pb2 import Buffer
 from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2, GetServiceTar_input, \
     GetServiceEstimatedCost_input
 
