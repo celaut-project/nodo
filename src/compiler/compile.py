@@ -1,5 +1,7 @@
 from typing import Generator, List
 
+from protos.celaut_pb2 import Any
+
 from src.utils import logger as l
 import sys, shutil
 import json
@@ -11,7 +13,7 @@ from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
 from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, HYCACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, \
     REGISTRY, MIN_BUFFER_BLOCK_SIZE
 from src.utils.utils import get_service_hex_main_hash
-from src.utils.verify import get_service_list_of_hashes, calculate_hashes
+from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
 
 
 class Hyper:
@@ -101,7 +103,18 @@ class Hyper:
             self.service.container.filesystem.CopyFrom(recursive_parsing(directory="/"))
 
             return celaut.Any.Metadata.HashTag(
-                hash=calculate_hashes(value=self.service.container.filesystem.SerializeToString()) # TODO calculate hashes of the without blocks filesystem buffer.
+                hash=calculate_hashes(
+                    value=self.service.container.filesystem.SerializeToString()
+                ) if not self.blocks else
+                calculate_hashes_by_stream(
+                    value=grpcbigbuffer.read_multiblock_directory(
+                        directory=block_builder.build_multiblock(
+                            pf_object_with_block_pointers=self.service.container.filesystem,
+                            blocks=self.blocks
+                        )[1],
+                        delete_directory=True
+                    )
+                )
             )
 
         # Envs
@@ -253,31 +266,51 @@ class Hyper:
                 )
 
     def save(self, partitions_model: tuple) -> str:
-        service_buffer = self.service.SerializeToString()  # 2*len
-        self.metadata.hashtag.hash.extend(
-            get_service_list_of_hashes(
+        if not self.blocks:
+            service_buffer = self.service.SerializeToString()  # 2*len
+            self.metadata.hashtag.hash.extend(
+                get_service_list_of_hashes(
+                    service_buffer=service_buffer,
+                    metadata=self.metadata
+                )
+            )
+            service_id: str = get_service_hex_main_hash(
                 service_buffer=service_buffer,
                 metadata=self.metadata
             )
-        )
-        id = get_service_hex_main_hash(
-            service_buffer=service_buffer,
-            metadata=self.metadata
-        )
 
-        # Once service hashes are calculated, we prune the filesystem for save storage.
-        # self.service.container.filesystem.ClearField('branch')
-        # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-        del service_buffer  # -len
-        os.mkdir(HYCACHE + 'compile' + id + '/')
+            # Once service hashes are calculated, we prune the filesystem for save storage.
+            # self.service.container.filesystem.ClearField('branch')
+            # https://github.com/moby/moby/issues/20972#issuecomment-193381422
+            del service_buffer  # -len
 
-        l.LOGGER('Compiler: DIR CREATED' + HYCACHE + 'compile' + id + '/')
+        else:
+            bytes_id, directory = block_builder.build_multiblock(
+                                pf_object_with_block_pointers=self.service,
+                                blocks=self.blocks
+                            )
+            service_id: str = bytes_id.decode('utf-8')
+            self.metadata.hashtag.hash.extend(
+                calculate_hashes_by_stream(
+                    value=grpcbigbuffer.read_multiblock_directory(
+                        directory=directory,
+                        delete_directory=True
+                    )
+                )
+            )
+
+            if service_id != get_service_hex_main_hash(metadata=self.metadata):
+                raise Exception('Compiler error obtaining the service id -> '+service_id+' '+str(self.metadata))
+
+        os.mkdir(HYCACHE + 'compile' + service_id + '/')
+
+        l.LOGGER('Compiler: DIR CREATED' + HYCACHE + 'compile' + service_id + '/')
 
         for i, partition in enumerate(partitions_model):
             message = grpcbigbuffer.get_submessage(
                 partition=partition,
                 obj=gateway_pb2.CompileOutput(
-                    id=bytes.fromhex(id),
+                    id=bytes.fromhex(service_id),
                     service=compile_pb2.ServiceWithMeta(
                         metadata=self.metadata,
                         service=self.service
@@ -289,11 +322,11 @@ class Hyper:
             )
             l.LOGGER(
                 'Compiler: send message ' + str(type(message)) + ' ' + str(partition) + ' ' + str(len(message_buffer)))
-            with open(HYCACHE + 'compile' + id + '/p' + str(i + 1), 'wb') as f:
+            with open(HYCACHE + 'compile' + service_id + '/p' + str(i + 1), 'wb') as f:
                 f.write(
                     message_buffer
                 )
-        return id
+        return service_id
 
 
 def ok(path, aux_id,
