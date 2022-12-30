@@ -1,4 +1,4 @@
-from typing import Generator
+from typing import Generator, List
 
 from src.utils import logger as l
 import sys, shutil
@@ -6,9 +6,10 @@ import json
 import os, subprocess
 import src.manager.resources_manager as resources_manager
 from grpcbigbuffer import client as grpcbigbuffer
-from grpcbigbuffer import buffer_pb2
+from grpcbigbuffer import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
-from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, HYCACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, REGISTRY
+from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, HYCACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, \
+    REGISTRY, MIN_BUFFER_BLOCK_SIZE
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes
 
@@ -16,6 +17,7 @@ from src.utils.verify import get_service_list_of_hashes, calculate_hashes
 class Hyper:
     def __init__(self, path, aux_id):
         super().__init__()
+        self.blocks: List[bytes] = []
         self.service = compile_pb2.Service()
         self.metadata = celaut.Any.Metadata()
         self.path = path
@@ -52,7 +54,9 @@ class Hyper:
                 if os.path.isdir(HYCACHE + self.aux_id + "/building/" + layer):
                     l.LOGGER('Unzipping layer ' + layer)
                     os.system(
-                        "tar -xvf " + HYCACHE + self.aux_id + "/building/" + layer + "/layer.tar -C " + HYCACHE + self.aux_id + "/filesystem/")
+                        "tar -xvf " + HYCACHE + self.aux_id + "/building/" + layer + "/layer.tar -C "
+                        + HYCACHE + self.aux_id + "/filesystem/"
+                    )
 
             # Add filesystem data to filesystem buffer object.
             def recursive_parsing(directory: str) -> celaut.Service.Container.Filesystem:
@@ -74,8 +78,15 @@ class Hyper:
 
                     # It's a file.
                     elif os.path.isfile(host_dir + directory + b_name):
-                        with open(host_dir + directory + b_name, 'rb') as file:
-                            branch.file = file.read()
+                        if os.path.getsize(host_dir + directory + b_name) < MIN_BUFFER_BLOCK_SIZE:
+                            with open(host_dir + directory + b_name, 'rb') as file:
+                                branch.file = file.read()
+
+                        else:
+                            block_hash, block = block_builder.create_block(file_path=host_dir + directory + b_name)
+                            branch.file = block.SerializeToString()
+                            if block_hash not in self.blocks:
+                                self.blocks.append(block_hash)
 
                     # It's a folder.
                     elif os.path.isdir(host_dir + directory + b_name):
@@ -90,7 +101,7 @@ class Hyper:
             self.service.container.filesystem.CopyFrom(recursive_parsing(directory="/"))
 
             return celaut.Any.Metadata.HashTag(
-                hash=calculate_hashes(value=self.service.container.filesystem.SerializeToString())
+                hash=calculate_hashes(value=self.service.container.filesystem.SerializeToString()) # TODO calculate hashes of the without blocks filesystem buffer.
             )
 
         # Envs
