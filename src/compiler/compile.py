@@ -331,7 +331,7 @@ class Hyper:
 
 def ok(path, aux_id,
        partitions_model=(buffer_pb2.Buffer.Head.Partition())
-       ):
+       ) -> str:
     spec_file = Hyper(path=path, aux_id=aux_id)
 
     with resources_manager.mem_manager(len=COMPILER_MEMORY_SIZE_FACTOR * spec_file.buffer_len):
@@ -384,20 +384,20 @@ def zipfile_ok(
     )  # Hyperfile
 
 
-def compile(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
+def compile_repo(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
     l.LOGGER('Compiling zip ' + str(repo))
-    id = zipfile_ok(
+    service_id: str = zipfile_ok(
         repo=repo,
         partitions_model=list(partitions_model)
     )
-    dirs = sorted([d for d in os.listdir(HYCACHE + 'compile' + id)])
+    dirs: List[str] = sorted([d for d in os.listdir(HYCACHE + 'compile' + service_id)])
     for b in grpcbigbuffer.serialize_to_buffer(
             message_iterator=tuple([gateway_pb2.CompileOutput]) + tuple(
-                [grpcbigbuffer.Dir(dir=HYCACHE + 'compile' + id + '/' + d) for d in dirs]),
+                [grpcbigbuffer.Dir(dir=HYCACHE + 'compile' + service_id + '/' + d) for d in dirs]),
             partitions_model=list(partitions_model),
             indices=gateway_pb2.CompileOutput
     ): yield b
-    shutil.rmtree(HYCACHE + 'compile' + id)
+    shutil.rmtree(HYCACHE + 'compile' + service_id)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
 
 

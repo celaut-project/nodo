@@ -11,7 +11,7 @@ from grpcbigbuffer.buffer_pb2 import Buffer
 from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2, GetServiceTar_input, \
     GetServiceEstimatedCost_input
 
-from src.compiler.compile import compile
+from src.compiler.compile import compile_repo
 from src.gateway.utils import save_service, search_definition, \
     generate_gateway_instance, search_file, search_container
 from src.gateway.launch_service import launch_service
@@ -399,7 +399,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_message_mode=[False, True]
         )
         if next(input) != gateway_pb2.CompileInput: raise Exception('Compile Input wrong.')
-        for b in compile(
+        for b in compile_repo(
                 repo=next(input),
                 partitions_model=next(input)
         ): yield b
