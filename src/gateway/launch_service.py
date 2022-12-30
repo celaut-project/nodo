@@ -14,7 +14,7 @@ from src.manager.metrics import gas_amount_on_other_peer
 from src.manager.payment_process import increase_deposit_on_peer
 
 from src.utils import utils, logger as l
-from src.utils.env import HYCACHE, DOCKER_CLIENT, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, DOCKER_NETWORK, \
+from src.utils.env import CACHE, DOCKER_CLIENT, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, DOCKER_NETWORK, \
     DEFAULT_SYSTEM_RESOURCES, GAS_COST_FACTOR
 from src.utils.recursion_guard import RecursionGuard
 from src.utils.verify import completeness
@@ -29,23 +29,23 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
     if config: __config__.config.CopyFrom(config)
     if resources: __config__.initial_sysresources.CopyFrom(resources)
 
-    os.mkdir(HYCACHE + container_id)
+    os.mkdir(CACHE + container_id)
     # TODO: Check if api.format is valid or make the serializer for it.
 
-    with open(HYCACHE + container_id + '/__config__', 'wb') as file:
+    with open(CACHE + container_id + '/__config__', 'wb') as file:
         file.write(__config__.SerializeToString())
     while 1:
         try:
             subprocess.run(
-                '/usr/bin/docker cp ' + HYCACHE + container_id + '/__config__ ' + container_id + ':/' + '/'.join(
+                '/usr/bin/docker cp ' + CACHE + container_id + '/__config__ ' + container_id + ':/' + '/'.join(
                     api.path),
                 shell=True
             )
             break
         except subprocess.CalledProcessError as e:
             l.LOGGER(e.output)
-    os.remove(HYCACHE + container_id + '/__config__')
-    os.rmdir(HYCACHE + container_id)
+    os.remove(CACHE + container_id + '/__config__')
+    os.rmdir(CACHE + container_id)
 
 def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
     try:

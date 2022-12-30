@@ -16,9 +16,9 @@ GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(defau
 #  -------------------------------------------------
 
 # DIRECTORIES
-HYCACHE = "/node/__hycache__/"
+CACHE = "/node/__cache__/"
 REGISTRY = "/node/__registry__/"
-BLOCKDIR = "/node/__buffer_blocks__/"
+BLOCKDIR = "/node/__blocks__/"
 
 SAVE_ALL = False
 COMPILER_MEMORY_SIZE_FACTOR = GET_ENV(env='COMPILER_MEMORY_SIZE_FACTOR', default=2.0)

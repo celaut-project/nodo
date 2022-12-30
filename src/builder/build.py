@@ -7,7 +7,7 @@ from src.utils.env import SUPPORTED_ARCHITECTURES, BUILD_CONTAINER_MEMORY_SIZE_F
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator, service_extended, read_file
 import src.utils.logger as l
 from grpcbigbuffer.client import save_chunks_to_file, serialize_to_buffer
-from src.compiler.compile import HYCACHE, REGISTRY
+from src.compiler.compile import CACHE, REGISTRY
 
 from shutil import rmtree
 from subprocess import run
@@ -156,7 +156,7 @@ def get_container_from_outside( # TODO could take it from a specific ledger.
             
             #  Write the buffer to a file.
             save_chunks_to_file(
-                filename = HYCACHE + id + '.tar',
+                filename =CACHE + id + '.tar',
                 # chunks = search_container(service = service) TODO ??
                 buffer_iterator = gateway_pb2_grpc.GatewayStub(  # Parse_from_buffer is not necesary because chunks're it.
                             grpc.insecure_channel(
@@ -179,7 +179,7 @@ def get_container_from_outside( # TODO could take it from a specific ledger.
 
     #  Load the tar file to a docker container.
     try:
-        os.system('docker load < ' + HYCACHE + id + '.tar')
+        os.system('docker load < ' + CACHE + id + '.tar')
         os.system('docker tag ' + id + ' ' + id + '.docker')
         check_output('/usr/bin/docker inspect ' + id, shell=True)
     except:

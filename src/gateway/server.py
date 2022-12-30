@@ -25,7 +25,7 @@ from src.manager.payment_process import validate_payment_process
 from src.utils import logger as l
 from src.utils.duplicate_grabber import DuplicateGrabber
 from src.utils.env import GENERAL_ATTEMPTS, GENERAL_WAIT_TIME, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, SHA3_256_ID, \
-    MODIFY_SERVICE_SYSTEM_RESOURCES_COST, GAS_COST_FACTOR, REGISTRY, HYCACHE
+    MODIFY_SERVICE_SYSTEM_RESOURCES_COST, GAS_COST_FACTOR, REGISTRY, CACHE
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name, read_file
 from src.utils.verify import get_service_hex_main_hash
 
@@ -443,9 +443,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Getting the container of service ' + service_hash)
         if service_hash and service_hash in [s for s in os.listdir(REGISTRY)]:
             try:
-                os.system('docker save ' + service_hash + '.service > ' + HYCACHE + service_hash + '.tar')
+                os.system('docker save ' + service_hash + '.service > ' + CACHE + service_hash + '.tar')
                 l.LOGGER('Returned the tar container buffer.')
-                yield grpcbf.get_file_chunks(filename=HYCACHE + service_hash + '.tar')
+                yield grpcbf.get_file_chunks(filename=CACHE + service_hash + '.tar')
             except:
                 l.LOGGER('Error saving the container ' + service_hash)
         elif service_buffer:

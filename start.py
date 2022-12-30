@@ -14,23 +14,24 @@ from src.gateway.server import Gateway
 from src.manager.maintain_thread import manager_thread
 from src.utils import logger as l
 from src.utils.env import GATEWAY_PORT, MEMORY_LOGS, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
-    SEND_ONLY_HASHES_ASKING_COST, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, REGISTRY, HYCACHE, LOCAL_NETWORK, \
+    SEND_ONLY_HASHES_ASKING_COST, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, REGISTRY, CACHE, LOCAL_NETWORK, \
     DOCKER_NETWORK, COMPUTE_POWER_RATE, COST_OF_BUILD, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
     COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, BLOCKDIR
 from src.utils.zeroconf import Zeroconf
 
 if __name__ == '__main__':
-    # Create __hycache__ if it does not exists.
-    try:
-        os.system('mkdir ' + HYCACHE)
-    except:
-        pass
+    # Create __cache__ if it does not exists.
+    if not os.path.exists(CACHE):
+        os.makedirs(CACHE)
 
     # Create __registry__ if it does not exists.
-    try:
-        os.system('mkdir ' + REGISTRY)
-    except:
-        pass
+    if not os.path.exists(REGISTRY):
+        os.makedirs(REGISTRY)
+
+    # Create __block__ if it does not exists.
+    if not os.path.exists(BLOCKDIR):
+        os.makedirs(BLOCKDIR)
+
 
     iobd.IOBigData(
         ram_pool_method=lambda: virtual_memory().total
@@ -39,7 +40,7 @@ if __name__ == '__main__':
     )
 
     grpcbf.modify_env(
-        cache_dir=HYCACHE,
+        cache_dir=CACHE,
         mem_manager=iobd.mem_manager,
         block_dir=BLOCKDIR,
         block_depth=1

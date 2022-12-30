@@ -10,7 +10,7 @@ import src.manager.resources_manager as resources_manager
 from grpcbigbuffer import client as grpcbigbuffer
 from grpcbigbuffer import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
-from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, HYCACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, \
+from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, \
     REGISTRY, MIN_BUFFER_BLOCK_SIZE
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
@@ -33,17 +33,17 @@ class Hyper:
         if not arch: raise Exception("Can't compile this service, not supported architecture.")
 
         # Directories are created on cache.
-        os.system("mkdir " + HYCACHE + self.aux_id + "/building")
-        os.system("mkdir " + HYCACHE + self.aux_id + "/filesystem")
+        os.system("mkdir " + CACHE + self.aux_id + "/building")
+        os.system("mkdir " + CACHE + self.aux_id + "/filesystem")
 
         # Build container and get compressed layers.
         if not os.path.isfile(self.path + 'Dockerfile'): raise Exception("Error: Dockerfile no encontrado.")
         os.system(
             '/usr/bin/docker buildx build --platform ' + arch + ' --no-cache -t builder' + self.aux_id + ' ' + self.path)
         os.system(
-            "/usr/bin/docker save builder" + self.aux_id + " > " + HYCACHE + self.aux_id + "/building/container.tar")
+            "/usr/bin/docker save builder" + self.aux_id + " > " + CACHE + self.aux_id + "/building/container.tar")
         os.system(
-            "tar -xvf " + HYCACHE + self.aux_id + "/building/container.tar -C " + HYCACHE + self.aux_id + "/building/")
+            "tar -xvf " + CACHE + self.aux_id + "/building/container.tar -C " + CACHE + self.aux_id + "/building/")
 
         self.buffer_len = int(
             subprocess.check_output(["/usr/bin/docker image inspect builder" + aux_id + " --format='{{.Size}}'"],
@@ -52,17 +52,17 @@ class Hyper:
     def parseContainer(self):
         def parseFilesys() -> celaut.Any.Metadata.HashTag:
             # Save his filesystem on cache.
-            for layer in os.listdir(HYCACHE + self.aux_id + "/building/"):
-                if os.path.isdir(HYCACHE + self.aux_id + "/building/" + layer):
+            for layer in os.listdir(CACHE + self.aux_id + "/building/"):
+                if os.path.isdir(CACHE + self.aux_id + "/building/" + layer):
                     l.LOGGER('Unzipping layer ' + layer)
                     os.system(
-                        "tar -xvf " + HYCACHE + self.aux_id + "/building/" + layer + "/layer.tar -C "
-                        + HYCACHE + self.aux_id + "/filesystem/"
+                        "tar -xvf " + CACHE + self.aux_id + "/building/" + layer + "/layer.tar -C "
+                        + CACHE + self.aux_id + "/filesystem/"
                     )
 
             # Add filesystem data to filesystem buffer object.
             def recursive_parsing(directory: str) -> celaut.Service.Container.Filesystem:
-                host_dir = HYCACHE + self.aux_id + "/filesystem"
+                host_dir = CACHE + self.aux_id + "/filesystem"
                 filesystem = celaut.Service.Container.Filesystem()
                 for b_name in os.listdir(host_dir + directory):
                     if b_name == '.wh..wh..opq':
@@ -302,9 +302,9 @@ class Hyper:
             if service_id != get_service_hex_main_hash(metadata=self.metadata):
                 raise Exception('Compiler error obtaining the service id -> '+service_id+' '+str(self.metadata))
 
-        os.mkdir(HYCACHE + 'compile' + service_id + '/')
+        os.mkdir(CACHE + 'compile' + service_id + '/')
 
-        l.LOGGER('Compiler: DIR CREATED' + HYCACHE + 'compile' + service_id + '/')
+        l.LOGGER('Compiler: DIR CREATED' + CACHE + 'compile' + service_id + '/')
 
         for i, partition in enumerate(partitions_model):
             message = grpcbigbuffer.get_submessage(
@@ -322,7 +322,7 @@ class Hyper:
             )
             l.LOGGER(
                 'Compiler: send message ' + str(type(message)) + ' ' + str(partition) + ' ' + str(len(message_buffer)))
-            with open(HYCACHE + 'compile' + service_id + '/p' + str(i + 1), 'wb') as f:
+            with open(CACHE + 'compile' + service_id + '/p' + str(i + 1), 'wb') as f:
                 f.write(
                     message_buffer
                 )
@@ -346,7 +346,7 @@ def ok(path, aux_id,
 
     os.system('/usr/bin/docker tag builder' + aux_id + ' ' + identifier + '.docker')
     os.system('/usr/bin/docker rmi builder' + aux_id)
-    os.system('rm -rf ' + HYCACHE + aux_id + '/')
+    os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier
 
 
@@ -359,9 +359,9 @@ def repo_ok(
     git = str(repo)
     git_repo = git.split('::')[0]
     branch = git.split('::')[1]
-    os.system('git clone --branch ' + branch + ' ' + git_repo + ' ' + HYCACHE + aux_id + '/for_build/git')
+    os.system('git clone --branch ' + branch + ' ' + git_repo + ' ' + CACHE + aux_id + '/for_build/git')
     return ok(
-        path=HYCACHE + aux_id + '/for_build/git/.service/',
+        path=CACHE + aux_id + '/for_build/git/.service/',
         aux_id=aux_id,
         partitions_model=partitions_model
     )  # Hyperfile
@@ -373,12 +373,12 @@ def zipfile_ok(
 ) -> str:
     import random
     aux_id = str(random.random())
-    os.system('mkdir ' + HYCACHE + aux_id)
-    os.system('mkdir ' + HYCACHE + aux_id + '/for_build')
-    os.system('unzip ' + repo + ' -d ' + HYCACHE + aux_id + '/for_build')
+    os.system('mkdir ' + CACHE + aux_id)
+    os.system('mkdir ' + CACHE + aux_id + '/for_build')
+    os.system('unzip ' + repo + ' -d ' + CACHE + aux_id + '/for_build')
     os.system('rm ' + repo)
     return ok(
-        path=HYCACHE + aux_id + '/for_build/',
+        path=CACHE + aux_id + '/for_build/',
         aux_id=aux_id,
         partitions_model=partitions_model
     )  # Hyperfile
@@ -390,14 +390,14 @@ def compile_repo(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Gener
         repo=repo,
         partitions_model=list(partitions_model)
     )
-    dirs: List[str] = sorted([d for d in os.listdir(HYCACHE + 'compile' + service_id)])
+    dirs: List[str] = sorted([d for d in os.listdir(CACHE + 'compile' + service_id)])
     for b in grpcbigbuffer.serialize_to_buffer(
             message_iterator=tuple([gateway_pb2.CompileOutput]) + tuple(
-                [grpcbigbuffer.Dir(dir=HYCACHE + 'compile' + service_id + '/' + d) for d in dirs]),
+                [grpcbigbuffer.Dir(dir=CACHE + 'compile' + service_id + '/' + d) for d in dirs]),
             partitions_model=list(partitions_model),
             indices=gateway_pb2.CompileOutput
     ): yield b
-    shutil.rmtree(HYCACHE + 'compile' + service_id)
+    shutil.rmtree(CACHE + 'compile' + service_id)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
 
 
@@ -409,5 +409,5 @@ if __name__ == "__main__":
         partitions_model=StartService_input_partitions_v2[2] if not len(sys.argv) > 1 else [
             buffer_pb2.Buffer.Head.Partition()]
     )
-    os.system('mv ' + HYCACHE + 'compile' + id + ' ' + REGISTRY + id)
+    os.system('mv ' + CACHE + 'compile' + id + ' ' + REGISTRY + id)
     print(id)

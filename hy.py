@@ -28,8 +28,8 @@ def launch_instance(image):
 
 def clean_cache():
     import os
-    os.system('rm -rf __hycache__')
-    os.system('mkdir __hycache__')
+    os.system('rm -rf __cache__')
+    os.system('mkdir __cache__')
     print('Cleaned.')
 
 def delete_instance(docker_name):
