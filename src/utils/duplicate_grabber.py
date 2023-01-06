@@ -8,8 +8,9 @@ from src.utils import logger as l
 
 from protos import celaut_pb2 as celaut
 
+
 class Session:
-    
+
     def __init__(self) -> None:
         self.event: Event = Event()
         self.value: List = []
@@ -22,24 +23,24 @@ class Session:
         self.event.set()
         self.end_time = time()
 
+
 class DuplicateGrabber(metaclass=Singleton):
 
     def __init__(self):
         self.hashes: Dict[str, str] = {}
-        self.sessions: Dict[str: Session ] = {}
+        self.sessions: Dict[str: Session] = {}
         self.lock = Lock()
 
     def manager(self, completion_time: float = 1):
-        for session in self.sessions.keys():
-            end_time: float = self.sessions[session].end_time
-            if end_time and \
-                time() - end_time > completion_time:
-                del self.sessions[session]
+        for session, session_obj in self.sessions.items():
+            end_time: float = session_obj.end_time
+            if end_time and time() - end_time > completion_time:
+                self.sessions.pop(session)
 
     def next(self,
-        hashes: List[celaut.Any.Metadata.HashTag.Hash],
-        generator: Generator
-    ) -> Tuple[Any, bool]:
+             hashes: List[celaut.Any.Metadata.HashTag.Hash],
+             generator: Generator
+             ) -> Tuple[Any, bool]:
 
         # hash.type.decode('utf-8')+':'+hash.value.decode('utf-8')  
         #  UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa7 in position 0: invalid start byte
@@ -52,7 +53,7 @@ class DuplicateGrabber(metaclass=Singleton):
                     session = self.hashes[hash_element]
                     wait = True
                     break
-            
+
             if not wait:
                 session = uuid4().hex
                 for hash_element in hashes:
@@ -62,12 +63,12 @@ class DuplicateGrabber(metaclass=Singleton):
         if wait:
             if self.sessions[session].end_time:
                 return self.sessions[session].value, False
-            l.LOGGER('It is already downloading. waiting for it to end. '+session)
+            l.LOGGER('It is already downloading. waiting for it to end. ' + session)
             self.sessions[session].wait()
             return self.sessions[session].value, False
 
         else:
-            l.LOGGER('Start download '+session)
+            l.LOGGER('Start download ' + session)
             self.sessions[session].value = next(generator)
             self.sessions[session].set()
             return self.sessions[session].value, True
