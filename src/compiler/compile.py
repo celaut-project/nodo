@@ -1,3 +1,4 @@
+import codecs
 from typing import Generator, List
 
 from protos.celaut_pb2 import Any
@@ -289,7 +290,7 @@ class Hyper:
                                 pf_object_with_block_pointers=self.service,
                                 blocks=self.blocks
                             )
-            service_id: str = bytes_id.decode('utf-8')
+            service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
             self.metadata.hashtag.hash.extend(
                 calculate_hashes_by_stream(
                     value=grpcbigbuffer.read_multiblock_directory(
