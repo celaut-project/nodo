@@ -32,10 +32,10 @@ class DuplicateGrabber(metaclass=Singleton):
         self.lock = Lock()
 
     def manager(self, completion_time: float = 1):
-        for session, session_obj in self.sessions.items():
+        for session, session_obj in list(self.sessions.items()):
             end_time: float = session_obj.end_time
             if end_time and time() - end_time > completion_time:
-                self.sessions.pop(session)
+                del self.sessions[session]
 
     def next(self,
              hashes: List[celaut.Any.Metadata.HashTag.Hash],
