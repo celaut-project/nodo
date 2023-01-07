@@ -139,7 +139,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                     father_id=client_id,
                                     recursion_guard_token=recursion_guard_token
                                 )
-                        ): yield b
+                        ):
+                            yield b
                         return
 
                     except Exception as e:
@@ -183,7 +184,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                                     father_id=client_id,
                                                     recursion_guard_token=recursion_guard_token
                                                 )
-                                        ): yield b
+                                        ):
+                                            yield b
                                         return
 
                                     except Exception as e:
@@ -197,7 +199,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     # Iterate the first partition.
                     r = next(parser_generator)
 
-                    if type(r) not in [gateway_pb2.ServiceWithConfig, str]: raise Exception
+                    if type(r) not in [gateway_pb2.ServiceWithConfig, str]:
+                        raise Exception
                 except Exception:
                     raise Exception('Grpcbb error: partition corrupted')
 
@@ -224,7 +227,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     if SHA3_256_ID == h.type:
                         registry_hash = h.value.hex()
                         break
-                if not registry_hash: raise Exception
+                if not registry_hash:
+                    raise Exception
                 save_service(
                     service_with_meta_dir=service_with_meta_dir,
                     service_hash=registry_hash
@@ -248,7 +252,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 father_id=client_id,
                                 recursion_guard_token=recursion_guard_token
                             )
-                    ): yield buffer
+                    ):
+                        yield buffer
                     return
 
         l.LOGGER('The service is not in the registry and the request does not have the definition.' \
@@ -273,7 +278,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         father_id=client_id,
                         recursion_guard_token=recursion_guard_token
                     )
-            ): yield b
+            ):
+                yield b
 
         except Exception as e:
             raise Exception('Was imposible start the service. ' + str(e))
