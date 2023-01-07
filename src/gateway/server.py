@@ -121,7 +121,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         service_hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal=True)
                     try:
-                        service_with_meta = get_from_registry(
+                        service_with_meta: celaut.Any = get_from_registry(
                             service_hash=service_hash.value.hex()
                         )
                         if service_hash not in service_with_meta.metadata.hashtag.hash:
@@ -166,7 +166,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             for i in range(GENERAL_ATTEMPTS):
                                 if registry_hash in [s for s in os.listdir(REGISTRY)]:
                                     try:
-                                        service_with_meta = get_from_registry(
+                                        service_with_meta: celaut.Any = get_from_registry(
                                             service_hash=registry_hash
                                         )
 
@@ -234,14 +234,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     service_hash=registry_hash
                 )
 
-                service_with_meta: gateway_pb2.ServiceWithMeta = get_from_registry(service_hash=registry_hash)
+                service_with_meta: celaut.Any = get_from_registry(service_hash=registry_hash)
 
                 if configuration:
                     l.LOGGER('Launch service with configuration')
                     for buffer in grpcbf.serialize_to_buffer(
                             indices={},
                             message_iterator=launch_service(
-                                service_buffer=service_with_meta.service.SerializeToString(),
+                                service_buffer=service_with_meta.value,
                                 metadata=service_with_meta.metadata,
                                 config=configuration,
                                 system_requirements=system_requeriments,
@@ -364,16 +364,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if SHA3_256_ID == hash.type and \
                         hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal=True)  # Say stop to send more hashes.
-                    any = celaut.Any()
-                    any.ParseFromString(
-                        get_from_registry(
-                            service_hash=hash.value.hex()
-                        )
-                    )
                     for b in grpcbf.serialize_to_buffer(  # TODO check.
                             message_iterator=(
                                     celaut.Any,
-                                    any,
+                                    get_from_registry(
+                                        service_hash=hash.value.hex()
+                                    ),
                                     grpcbf.Dir(REGISTRY + '/' + hash.value.hex() + '/p2')
                             ),
                             partitions_model=StartService_input_partitions_v2[2]
