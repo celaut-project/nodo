@@ -85,16 +85,11 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         raise UnsupportedArquitectureException
 
     l.LOGGER('Build process of ' + service_id + ': wait for unlock the memory.')
-    with resources_manager.mem_manager(len=len(service_buffer) + BUILD_CONTAINER_MEMORY_SIZE_FACTOR * os.path.getsize(
-            second_partition_dir)):  # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
+    with resources_manager.mem_manager(len=len(service_buffer) * BUILD_CONTAINER_MEMORY_SIZE_FACTOR):
+        # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
         l.LOGGER('Build process of ' + service_id + ': go to load all the buffer.')
         service = gateway_pb2.celaut__pb2.Service()
         service.ParseFromString(service_buffer)
-        service.container.ParseFromString(
-            read_file(
-                filename=second_partition_dir
-            )
-        )
         l.LOGGER('Build process of ' + service_id + ': filesystem load in memmory.')
 
         # Take filesystem.
@@ -104,8 +99,9 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         )
 
         # Take architecture.
-        arch = get_arch_tag(
-            metadata=metadata)  # get_arch_tag, selecciona el tag de la arquitectura definida por el servicio, en base a la especificacion y metadatos, que tiene el nodo para esa arquitectura.
+        arch = get_arch_tag(metadata=metadata)
+        # get_arch_tag, selecciona el tag de la arquitectura definida por el servicio,
+        #  en base a la especificación y metadatos, que tiene el nodo para esa arquitectura.
         l.LOGGER('Build process of ' + service_id + ': select the architecture ' + str(arch))
 
         try:
