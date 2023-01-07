@@ -4,6 +4,7 @@ from time import sleep
 from typing import List, Optional
 
 from grpcbigbuffer import client as grpcbf
+from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
 from src.manager.resources_manager import mem_manager
 
 from protos import gateway_pb2_grpc, gateway_pb2, gateway_pb2_grpcbf
@@ -39,15 +40,20 @@ def get_service_buffer_from_registry(service_hash: str) -> bytes:
 
 def get_from_registry(service_hash: str) -> celaut.Any:
     l.LOGGER('Getting ' + service_hash + ' service from the local registry.')
-    first_partition_dir = REGISTRY + service_hash + '/p1'
+    filename: str = REGISTRY + service_hash
+    if not os.path.exists(filename):
+        return None
+
+    if os.path.isdir(filename):
+        filename = filename + '/' + WITHOUT_BLOCK_POINTERS_FILE_NAME
     try:
-        with mem_manager(2 * os.path.getsize(first_partition_dir)) as iolock:
+        with mem_manager(2 * os.path.getsize(filename)) as iolock:
             any = celaut.Any()
-            any.ParseFromString(read_file(filename=first_partition_dir))
+            any.ParseFromString(read_file(filename=filename))
             return any
     except (IOError, FileNotFoundError):
         l.LOGGER('The service was not on registry.')
-        raise FileNotFoundError
+        return None
 
 
 class Gateway(gateway_pb2_grpc.Gateway):
@@ -221,7 +227,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if not registry_hash: raise Exception
                 save_service(
                     service_with_meta_dir=service_with_meta_dir,
-                    hash=registry_hash
+                    service_hash=registry_hash
                 )
 
                 service_with_meta: gateway_pb2.ServiceWithMeta = get_from_registry(service_hash=registry_hash)
@@ -426,11 +432,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     yield_remote_partition_dir=False,
                     partitions_message_mode=[True, False]
                 )
-                save_service(  # TODO
-                    service_p1=next(service_partitions_iterator),
-                    service_p2=next(service_partitions_iterator),
-                    metadata=r.metadata
-                )
+                #save_service() TODO
                 service_buffer = r.value
                 break
 
@@ -542,9 +544,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     cost = execution_cost(
                         service_buffer=get_service_buffer_from_registry(
                             service_hash=save_service(
-                                service_p1=service_with_meta.service.SerializeToString(),
-                                service_p2=second_partition_dir,
-                                metadata=service_with_meta.metadata,
+                                service_with_meta_dir=service_with_meta, # TODO
                                 service_hash=service_hash
                             )
                         ),
@@ -565,9 +565,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     cost = execution_cost(
                         service_buffer=get_service_buffer_from_registry(
                             service_hash=save_service(
-                                service_p1=service_with_meta.service.SerializeToString(),
-                                service_p2=second_partition_dir,
-                                metadata=service_with_meta.metadata,
+                                service_with_meta_dir=service_with_config.service, # TODO
                                 service_hash=service_hash
                             )
                         ),

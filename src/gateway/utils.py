@@ -56,34 +56,16 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
 
 # If the service is not on the registry, save it.
 def save_service(
-        service_p1: bytes,
-        service_p2: str,
-        metadata: celaut.Any.Metadata,
-        service_hash: str = None
-) -> str:
-    if not service_p1 or not service_p2:
-        l.LOGGER('Save service partitions required.')
-        raise Exception('Save service partitions required.')
-
-    if not service_hash:
-        service_hash = get_service_hex_main_hash(
-            service_buffer=(service_p1, service_p2),
-            metadata=metadata
-        )
+        service_with_meta_dir: str,
+        service_hash: str
+) -> bool:
     if not os.path.isdir(REGISTRY + service_hash):
-        os.mkdir(REGISTRY + service_hash)
-        with open(
-                REGISTRY + service_hash + '/p1', 'wb'
-        ) as file:  # , iobd.mem_manager(len=len(service_p1)): TODO check mem-58 bug.
-            file.write(
-                celaut.Any(
-                    metadata=metadata,
-                    value=service_p1
-                ).SerializeToString()
-            )
-        if service_p2:
-            shutil.move(service_p2, REGISTRY + service_hash + '/p2')
-    return service_hash
+        try:
+            shutil.move(service_with_meta_dir, REGISTRY + service_hash)
+            return True
+        except Exception as e:
+            l.LOGGER('Exception saving a service: '+str(e))
+    return False
 
 
 def search_container(
@@ -152,11 +134,11 @@ def search_definition(hashes: List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.
                 partitions_message_mode=[True, False]
             )
             #  Save the service on the registry.
-            save_service(
-                service_p1=next(service_partitions_iterator),
-                service_p2=next(service_partitions_iterator),
-                metadata=any.metadata
-            )
+            #save_service(
+            #    service_p1=next(service_partitions_iterator),
+            #    service_p2=next(service_partitions_iterator),
+            #    metadata=any.metadata
+            #)
             return any.value
 
     try:
