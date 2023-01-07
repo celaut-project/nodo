@@ -50,7 +50,7 @@ def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
 
 
 def service_hashes(
-        hashes: list = None
+        hashes: typing.List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash]
     ) -> Generator[celaut_pb2.Any.Metadata.HashTag.Hash, None, None]:
         for hash in hashes:
             yield hash 

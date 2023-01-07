@@ -1,5 +1,6 @@
+import codecs
 from time import time
-from typing import Any, Dict, Generator, List, Tuple
+from typing import Any, Dict, Generator, List, Tuple, Union
 from uuid import uuid4
 from threading import Event, Lock
 
@@ -27,7 +28,7 @@ class Session:
 class DuplicateGrabber(metaclass=Singleton):
 
     def __init__(self):
-        self.hashes: Dict[str, str] = {}
+        self.hashes: Dict[str, str] = {}  # HASH : SESSION
         self.sessions: Dict[str: Session] = {}
         self.lock = Lock()
 
@@ -40,11 +41,12 @@ class DuplicateGrabber(metaclass=Singleton):
     def next(self,
              hashes: List[celaut.Any.Metadata.HashTag.Hash],
              generator: Generator
-             ) -> Tuple[Any, bool]:
+             ) -> Tuple[Union[Any, str], bool]:
 
         # hash.type.decode('utf-8')+':'+hash.value.decode('utf-8')  
         #  UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa7 in position 0: invalid start byte
-        hashes: List[str] = [str(hash_element) for hash_element in hashes]
+        def decode(element: bytes) -> str: return codecs.encode(element, 'hex').decode('utf-8')
+        hashes: List[str] = [decode(hash_element.type) + ':' + decode(hash_element.value) for hash_element in hashes]
         wait: bool = False
 
         with self.lock:

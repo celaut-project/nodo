@@ -5,7 +5,7 @@ import shutil
 import grpc
 from grpcbigbuffer import client as grpcbf
 import netifaces as ni
-from typing import Generator
+from typing import Generator, List
 
 import src.manager.resources_manager as iobd
 from contracts.eth_main.utils import get_ledger_and_contract_addr_from_contract
@@ -112,7 +112,7 @@ def search_container(
             pass
 
 
-def search_file(hashes: list, ignore_network: str = None) -> Generator[celaut.Any, None, None]:
+def search_file(hashes: List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash], ignore_network: str = None) -> Generator[celaut.Any, None, None]:
     # TODO: It can search for other 'Service ledger' or 'ANY ledger' instances that could've this type of files.
     for peer in utils.peers_id_iterator(ignore_network=ignore_network):
         try:
@@ -133,7 +133,7 @@ def search_file(hashes: list, ignore_network: str = None) -> Generator[celaut.An
             pass
 
 
-def search_definition(hashes: list, ignore_network: str = None) -> bytes:
+def search_definition(hashes: List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash], ignore_network: str = None) -> bytes:
     #  Search a service description.
     for any in search_file(
             hashes=hashes,
