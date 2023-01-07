@@ -287,9 +287,9 @@ class Hyper:
 
         else:
             bytes_id, directory = block_builder.build_multiblock(
-                                pf_object_with_block_pointers=self.service,
-                                blocks=self.blocks
-                            )
+                pf_object_with_block_pointers=self.service,
+                blocks=self.blocks
+            )
             service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
             self.metadata.hashtag.hash.extend(
                 calculate_hashes_by_stream(
@@ -301,7 +301,7 @@ class Hyper:
             )
 
             if service_id != get_service_hex_main_hash(metadata=self.metadata):
-                raise Exception('Compiler error obtaining the service id -> '+service_id+' '+str(self.metadata))
+                raise Exception('Compiler error obtaining the service id -> ' + service_id + ' ' + str(self.metadata))
 
         os.mkdir(CACHE + 'compile' + service_id + '/')
 
