@@ -64,9 +64,13 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
             write_fs(fs_element=b.filesystem, dir_element=dir_element + b.name + '/', symlinks_element=symlinks_element)
 
         elif b.HasField('file'):
-            open(dir_element + b.name, 'wb').write(
-                b.file
-            )
+            if not copy_block_if_exists(
+                buffer=b.file,
+                directory=dir_element + b.name
+            ):
+                open(dir_element + b.name, 'wb').write(
+                    b.file
+                )
 
         else:
             symlinks_element.append(b.link)
