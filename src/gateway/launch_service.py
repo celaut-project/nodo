@@ -22,6 +22,7 @@ from src.utils.verify import completeness
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2
 
+
 def set_config(container_id: str, config: celaut.Configuration, resources: celaut.Sysresources,
                api: celaut.Service.Container.Config):
     __config__ = celaut.ConfigurationFile()
@@ -47,6 +48,7 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
     os.remove(CACHE + container_id + '/__config__')
     os.rmdir(CACHE + container_id)
 
+
 def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
     try:
         result = DOCKER_CLIENT().containers.create(
@@ -62,6 +64,7 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
     except Exception as e:
         l.LOGGER('DOCKER RUN ERROR -> ' + str(e))
         raise e
+
 
 def launch_service(
         service_buffer: bytes,

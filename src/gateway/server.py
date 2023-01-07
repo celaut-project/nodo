@@ -121,16 +121,16 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         service_hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal=True)
                     try:
-                        p1 = get_from_registry(
+                        service_with_meta = get_from_registry(
                             service_hash=service_hash.value.hex()
                         )
-                        if service_hash not in p1.metadata.hashtag.hash:
-                            p1.metadata.hashtag.hash.append(service_hash)
+                        if service_hash not in service_with_meta.metadata.hashtag.hash:
+                            service_with_meta.metadata.hashtag.hash.append(service_hash)
                         for b in grpcbf.serialize_to_buffer(
                                 indices={},
                                 message_iterator=launch_service(
-                                    service_buffer=p1.value,
-                                    metadata=p1.metadata,
+                                    service_buffer=service_with_meta.value,
+                                    metadata=service_with_meta.metadata,
                                     config=configuration,
                                     system_requirements=system_requeriments,
                                     max_sysreq=max_sysreq,
@@ -165,15 +165,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             for i in range(GENERAL_ATTEMPTS):
                                 if registry_hash in [s for s in os.listdir(REGISTRY)]:
                                     try:
-                                        p1 = get_from_registry(
+                                        service_with_meta = get_from_registry(
                                             service_hash=registry_hash
                                         )
 
                                         for b in grpcbf.serialize_to_buffer(
                                                 indices={},
                                                 message_iterator=launch_service(
-                                                    service_buffer=p1.value,
-                                                    metadata=p1.metadata,
+                                                    service_buffer=service_with_meta.value,
+                                                    metadata=service_with_meta.metadata,
                                                     config=configuration,
                                                     system_requirements=system_requeriments,
                                                     max_sysreq=max_sysreq,
