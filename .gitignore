@@ -1,7 +1,6 @@
  .vscode
 __pycache__
 .idea
-__hycache__
 __cache__
 __registry__
 *.log

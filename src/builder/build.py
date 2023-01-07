@@ -109,12 +109,12 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         l.LOGGER('Build process of ' + service_id + ': select the architecture ' + str(arch))
 
         try:
-            os.mkdir('__hycache__')
+            os.mkdir(CACHE)
         except:
             pass
 
-        # Write all on hycache.
-        dir = '__hycache__/builder' + service_id
+        # Write all on cache.
+        dir = CACHE+'builder' + service_id
         os.mkdir(dir)
         fs_dir = dir + '/fs'
         os.mkdir(fs_dir)
