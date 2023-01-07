@@ -16,73 +16,86 @@ import itertools
 from src.utils.verify import get_service_hex_main_hash
 from subprocess import check_output, CalledProcessError
 
+
 def get_arch_tag(metadata: celaut_pb2.Any.Metadata) -> str:
     for l in SUPPORTED_ARCHITECTURES:
-        if any(a in l for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag):
+        if any(a in l for a in {ah.key: ah.value for ah in
+                                {ah.key: ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][
+            0].tag):
             return l[0]
+
 
 def check_supported_architecture(metadata: celaut_pb2.Any.Metadata) -> bool:
     try:
-        return any( a in list(itertools.chain.from_iterable(SUPPORTED_ARCHITECTURES)) for a in {ah.key:ah.value for ah in {ah.key:ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag )
-    except: return False
+        return any(a in list(itertools.chain.from_iterable(SUPPORTED_ARCHITECTURES)) for a in
+                   {ah.key: ah.value for ah in
+                    {ah.key: ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag)
+    except:
+        return False
+
 
 class WaitBuildException(Exception):
-    
+
     def __init__(self, *args):
         self.message = None
 
     def __str__(self):
         return "Getting the container, the process will've time"
+
+
 class UnsupportedArquitectureException(Exception):
-    
+
     def __init__(self, *args):
         self.message = None
-        
+
     def __str__(self):
         return 'Unsupported architecture.'
+
 
 actual_building_processes_lock = threading.Lock()
 actual_building_processes = []  # list of hexadecimal string sha256 value hashes.
 
-def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2.celaut__pb2.Any.Metadata, id: str):
+
+def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2.celaut__pb2.Any.Metadata, service_id: str):
     # Build the container from filesystem definition.
-    def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir: str, symlinks):
+    def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir_element: str, symlinks_element):
         if b.HasField('filesystem'):
-            os.mkdir(dir + b.name)
-            write_fs(fs = b.filesystem, dir = dir + b.name + '/', symlinks = symlinks)
+            os.mkdir(dir_element + b.name)
+            write_fs(fs_element=b.filesystem, dir_element=dir_element + b.name + '/', symlinks_element=symlinks_element)
 
         elif b.HasField('file'):
-            open(dir + b.name, 'wb').write(
+            open(dir_element + b.name, 'wb').write(
                 b.file
             )
-            
-        else:
-            symlinks.append(b.link)
 
-    def write_fs(fs: celaut_pb2.Service.Container.Filesystem, dir: str, symlinks):
-        for branch in fs.branch:
+        else:
+            symlinks_element.append(b.link)
+
+    def write_fs(fs_element: celaut_pb2.Service.Container.Filesystem, dir_element: str, symlinks_element):
+        for branch in fs_element.branch:
             write_item(
-                b = branch,
-                dir = dir,
-                symlinks = symlinks
+                b=branch,
+                dir_element=dir_element,
+                symlinks_element=symlinks_element
             )
 
-    second_partition_dir = REGISTRY + id + '/p2'
-    if not check_supported_architecture(metadata=metadata): 
-        l.LOGGER('Build process of '+ id + ': unsupported architecture.')
+    second_partition_dir = REGISTRY + service_id + '/p2'
+    if not check_supported_architecture(metadata=metadata):
+        l.LOGGER('Build process of ' + service_id + ': unsupported architecture.')
         raise UnsupportedArquitectureException
 
-    l.LOGGER('Build process of '+ id + ': wait for unlock the memory.')
-    with resources_manager.mem_manager(len = len(service_buffer) + BUILD_CONTAINER_MEMORY_SIZE_FACTOR*os.path.getsize(second_partition_dir)):  # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
-        l.LOGGER('Build process of '+ id + ': go to load all the buffer.')
+    l.LOGGER('Build process of ' + service_id + ': wait for unlock the memory.')
+    with resources_manager.mem_manager(len=len(service_buffer) + BUILD_CONTAINER_MEMORY_SIZE_FACTOR * os.path.getsize(
+            second_partition_dir)):  # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
+        l.LOGGER('Build process of ' + service_id + ': go to load all the buffer.')
         service = gateway_pb2.celaut__pb2.Service()
         service.ParseFromString(service_buffer)
         service.container.ParseFromString(
             read_file(
-                filename = second_partition_dir
+                filename=second_partition_dir
             )
         )
-        l.LOGGER('Build process of '+ id + ': filesystem load in memmory.')
+        l.LOGGER('Build process of ' + service_id + ': filesystem load in memmory.')
 
         # Take filesystem.
         fs = celaut_pb2.Service.Container.Filesystem()
@@ -91,88 +104,96 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         )
 
         # Take architecture.
-        arch = get_arch_tag(metadata = metadata) # get_arch_tag, selecciona el tag de la arquitectura definida por el servicio, en base a la especificacion y metadatos, que tiene el nodo para esa arquitectura.
-        l.LOGGER('Build process of '+ id + ': select the architecture '+str(arch))
+        arch = get_arch_tag(
+            metadata=metadata)  # get_arch_tag, selecciona el tag de la arquitectura definida por el servicio, en base a la especificacion y metadatos, que tiene el nodo para esa arquitectura.
+        l.LOGGER('Build process of ' + service_id + ': select the architecture ' + str(arch))
 
         try:
             os.mkdir('__hycache__')
-        except: pass
+        except:
+            pass
 
         # Write all on hycache.
-        dir = '__hycache__/builder'+id
+        dir = '__hycache__/builder' + service_id
         os.mkdir(dir)
         fs_dir = dir + '/fs'
         os.mkdir(fs_dir)
         symlinks = []
-        l.LOGGER('Build process of '+ id + ': writting filesystem.')
-        write_fs(fs = fs, dir = fs_dir + '/', symlinks = symlinks)
+        l.LOGGER('Build process of ' + service_id + ': writting filesystem.')
+        write_fs(fs_element=fs, dir_element=fs_dir + '/', symlinks_element=symlinks)
 
         # Build it.
-        l.LOGGER('Build process of '+ id + ': docker building it ...')
-        open(dir+'/Dockerfile', 'w').write('FROM scratch\nCOPY fs .')
-        cache_id = id+str(time())+'.cache'
-        check_output('docker buildx build --platform '+arch+' -t '+cache_id+' '+dir+'/.', shell=True)
-        l.LOGGER('Build process of '+ id + ': docker build it.')
+        l.LOGGER('Build process of ' + service_id + ': docker building it ...')
+        open(dir + '/Dockerfile', 'w').write('FROM scratch\nCOPY fs .')
+        cache_id = service_id + str(time()) + '.cache'
+        check_output('docker buildx build --platform ' + arch + ' -t ' + cache_id + ' ' + dir + '/.', shell=True)
+        l.LOGGER('Build process of ' + service_id + ': docker build it.')
         try:
             rmtree(dir)
-        except Exception: pass
+        except Exception:
+            pass
 
         # Generate the symlinks.
-        overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' "+cache_id, shell=True).decode('utf-8')[:-1]
-        l.LOGGER('Build process of '+ id + ': overlay dir '+str(overlay_dir))
+        overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' " + cache_id,
+                                   shell=True).decode('utf-8')[:-1]
+        l.LOGGER('Build process of ' + service_id + ': overlay dir ' + str(overlay_dir))
         for symlink in symlinks:
             try:
-                if check_output('ln -s '+symlink.src+' '+symlink.dst[1:], shell=True, cwd=overlay_dir)[:2] == 'ln': break
-            except CalledProcessError: 
-                l.LOGGER('Build process of '+ id + ': symlink error (CalledProcessError) '+str(symlink.src)+str(symlink.dst))
+                if check_output('ln -s ' + symlink.src + ' ' + symlink.dst[1:], shell=True, cwd=overlay_dir)[
+                   :2] == 'ln': break
+            except CalledProcessError:
+                l.LOGGER('Build process of ' + service_id + ': symlink error (CalledProcessError) ' + str(symlink.src) + str(
+                    symlink.dst))
                 break
-            except AttributeError: l.LOGGER('Build process of '+ id + ': symlink error (AttributeError) '+str(symlink.src)+str(symlink.dst))
+            except AttributeError:
+                l.LOGGER('Build process of ' + service_id + ': symlink error (AttributeError) ' + str(symlink.src) + str(
+                    symlink.dst))
 
-        l.LOGGER('Build process of '+ id + ': apply permissions.')
+        l.LOGGER('Build process of ' + service_id + ': apply permissions.')
         # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
         run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
         run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
-        
-        check_output('docker image tag '+cache_id+' '+id+'.docker', shell=True)
-        check_output('docker rmi '+cache_id, shell=True)
-        l.LOGGER('Build process of '+ id + ': finished.')
+
+        check_output('docker image tag ' + cache_id + ' ' + service_id + '.docker', shell=True)
+        check_output('docker rmi ' + cache_id, shell=True)
+        l.LOGGER('Build process of ' + service_id + ': finished.')
 
         actual_building_processes_lock.acquire()
-        actual_building_processes.remove(id)
+        actual_building_processes.remove(service_id)
         actual_building_processes_lock.release()
 
 
-def get_container_from_outside( # TODO could take it from a specific ledger.
-    id: str,
-    service_buffer: bytes,
-    metadata: gateway_pb2.celaut__pb2.Any.Metadata
+def get_container_from_outside(  # TODO could take it from a specific ledger.
+        id: str,
+        service_buffer: bytes,
+        metadata: gateway_pb2.celaut__pb2.Any.Metadata
 ):
     # search container in a service. (docker-tar, docker-tar.gz, filesystem, ....)
 
     l.LOGGER('\nIt is not locally, ' + id + ' go to search the container in other node.')
     for peer in peers_id_iterator():
         try:
-            l.LOGGER('\nUsing the peer ' + peer + ' for get the container of '+ id)
-            
+            l.LOGGER('\nUsing the peer ' + peer + ' for get the container of ' + id)
+
             #  Write the buffer to a file.
             save_chunks_to_file(
-                filename =CACHE + id + '.tar',
+                filename=CACHE + id + '.tar',
                 # chunks = search_container(service = service) TODO ??
-                buffer_iterator = gateway_pb2_grpc.GatewayStub(  # Parse_from_buffer is not necesary because chunks're it.
-                            grpc.insecure_channel(
-                                next(generate_uris_by_peer_id(peer)),
-                            )
-                        ).GetServiceTar(
-                            serialize_to_buffer(
-                                service_extended(service_buffer = service_buffer, metadata = metadata),
-                                indices=GetServiceTar_input
-                            )
-                        )
+                buffer_iterator=gateway_pb2_grpc.GatewayStub(  # Parse_from_buffer is not necesary because chunks're it.
+                    grpc.insecure_channel(
+                        next(generate_uris_by_peer_id(peer)),
+                    )
+                ).GetServiceTar(
+                    serialize_to_buffer(
+                        service_extended(service_buffer=service_buffer, metadata=metadata),
+                        indices=GetServiceTar_input
+                    )
+                )
             )
-            
+
             l.LOGGER('    Buffer on file.')
             break
-        except grpc.RpcError: # Other exception is raised.
+        except grpc.RpcError:  # Other exception is raised.
             l.LOGGER('\nThe container with hash ' + id + ' is not in peer ' + peer)
             continue
     l.LOGGER('Finded the container, go to build it.')
@@ -191,15 +212,15 @@ def get_container_from_outside( # TODO could take it from a specific ledger.
     actual_building_processes_lock.acquire()
     actual_building_processes.remove(id)
     actual_building_processes_lock.release()
-    
+
 
 def build(
         service_buffer: bytes,
         metadata: gateway_pb2.celaut__pb2.Any.Metadata,
         get_it: bool = True,
-        service_id = None,
-        complete = False
-    ) -> str:
+        service_id=None,
+        complete=False
+) -> str:
     if not service_id:
         try:
             service_id = get_service_hex_main_hash(
@@ -225,14 +246,15 @@ def build(
                 actual_building_processes_lock.release()
 
                 threading.Thread(
-                        target = build_container_from_definition,
-                        args = (
-                            service_buffer,
-                            metadata,
-                            service_id
-                        )
-                    ).start()
-            else: sleep( WAIT_FOR_CONTAINER )
+                    target=build_container_from_definition,
+                    args=(
+                        service_buffer,
+                        metadata,
+                        service_id
+                    )
+                ).start()
+            else:
+                sleep(WAIT_FOR_CONTAINER)
             raise WaitBuildException
         else:
             if service_id not in actual_building_processes:
@@ -240,9 +262,9 @@ def build(
                 actual_building_processes.append(service_id)
                 actual_building_processes_lock.release()
                 threading.Thread(
-                        target = get_container_from_outside,
-                        args = (service_id, service_buffer, metadata)
-                    ).start() if get_it else sleep( WAIT_FOR_CONTAINER )
+                    target=get_container_from_outside,
+                    args=(service_id, service_buffer, metadata)
+                ).start() if get_it else sleep(WAIT_FOR_CONTAINER)
                 raise WaitBuildException
 
     # verify() TODO ??
