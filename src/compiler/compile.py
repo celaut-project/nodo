@@ -87,6 +87,7 @@ class Hyper:
 
                         else:
                             block_hash, block = block_builder.create_block(file_path=host_dir + directory + b_name)
+                            l.LOGGER('      Block added -> '+str(block_hash))
                             branch.file = block.SerializeToString()
                             if block_hash not in self.blocks:
                                 self.blocks.append(block_hash)
