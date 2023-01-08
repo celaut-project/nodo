@@ -389,7 +389,9 @@ def compile_repo(repo, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
             indices=gateway_pb2.CompileOutput
     ):
         yield b
-    # TODO if saveit: convert dirs to local partition model and save it into the registry. Now only saves if has blocks.
+
+    shutil.rmtree(service_with_meta.name)
+    # TODO if saveit: convert dirs to local partition model and save it into the registry.
 
 
 """
