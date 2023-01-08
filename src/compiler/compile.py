@@ -296,7 +296,7 @@ class Hyper:
                 calculate_hashes_by_stream(
                     value=grpcbigbuffer.read_multiblock_directory(
                         directory=directory,
-                        delete_directory=False
+                        delete_directory=True
                     )
                 )
             )
@@ -399,7 +399,7 @@ def compile_repo(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Gener
             partitions_model=list(partitions_model),
             indices=gateway_pb2.CompileOutput
     ): yield b
-    shutil.rmtree(CACHE + 'compile' + service_id)
+    #shutil.rmtree(CACHE + 'compile' + service_id)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
 
 
