@@ -78,7 +78,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         while True:
             try:
                 r = next(parser_generator)
-                l.LOGGER('parse generator next -> '+str(type(r))+': '+str(r))
+                l.LOGGER('parse generator next -> ' + str(type(r)) + ': ' + str(r))
             except StopIteration:
                 break
             service_hash: Optional[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash] = None
@@ -263,8 +263,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
             for b in grpcbf.serialize_to_buffer(
                     message_iterator=launch_service(
                         service_buffer=search_definition(
-                                hashes=hashes
-                            ),
+                            hashes=hashes
+                        ),
                         metadata=celaut.Any.Metadata(
                             hashtag=celaut.Any.Metadata.HashTag(
                                 hash=hashes
@@ -400,11 +400,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
                               Buffer.Head.Partition(index={2: Buffer.Head.Partition()})],
             partitions_message_mode=[False, True]
         )
-        if next(input) != gateway_pb2.CompileInput: raise Exception('Compile Input wrong.')
+        if next(input) != gateway_pb2.CompileInput:
+            raise Exception('Compile Input wrong.')
         for b in compile_repo(
-                repo=next(input),
-                partitions_model=next(input)
-        ): yield b
+                repo=next(input)
+        ):
+            yield b
 
     def GetServiceTar(self, request_iterator, context, **kwargs):
         # TODO se debe de hacer que gestione mejor tomar todo el servicio, como hace GetServiceEstimatedCost.
@@ -434,7 +435,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     yield_remote_partition_dir=False,
                     partitions_message_mode=[True, False]
                 )
-                #save_service() TODO
+                # save_service() TODO
                 service_buffer = r.value
                 break
 
@@ -546,7 +547,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     cost = execution_cost(
                         service_buffer=get_service_buffer_from_registry(
                             service_hash=save_service(
-                                service_with_meta_dir=service_with_meta, # TODO
+                                service_with_meta_dir=service_with_meta,  # TODO
                                 service_hash=service_hash
                             )
                         ),
@@ -567,7 +568,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     cost = execution_cost(
                         service_buffer=get_service_buffer_from_registry(
                             service_hash=save_service(
-                                service_with_meta_dir=service_with_config.service, # TODO
+                                service_with_meta_dir=service_with_config.service,  # TODO
                                 service_hash=service_hash
                             )
                         ),

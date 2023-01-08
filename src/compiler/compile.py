@@ -1,5 +1,5 @@
 import codecs
-from typing import Generator, List
+from typing import Generator, List, Tuple, Union
 
 from protos.celaut_pb2 import Any
 
@@ -8,7 +8,7 @@ import sys, shutil
 import json
 import os, subprocess
 import src.manager.resources_manager as resources_manager
-from grpcbigbuffer import client as grpcbigbuffer
+from grpcbigbuffer import client as grpcbb
 from grpcbigbuffer import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
 from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, \
@@ -16,6 +16,7 @@ from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMO
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
 
+from protos.gateway_pb2_grpcbf import Compile_output_partitions_v1
 
 class Hyper:
     def __init__(self, path, aux_id):
@@ -109,7 +110,7 @@ class Hyper:
                     value=self.service.container.filesystem.SerializeToString()
                 ) if not self.blocks else
                 calculate_hashes_by_stream(
-                    value=grpcbigbuffer.read_multiblock_directory(
+                    value=grpcbb.read_multiblock_directory(
                         directory=block_builder.build_multiblock(
                             pf_object_with_block_pointers=self.service.container.filesystem,
                             blocks=self.blocks
@@ -267,7 +268,7 @@ class Hyper:
                     )
                 )
 
-    def save(self, partitions_model: tuple) -> str:
+    def save(self) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
         if not self.blocks:
             service_buffer = self.service.SerializeToString()  # 2*len
             self.metadata.hashtag.hash.extend(
@@ -286,7 +287,13 @@ class Hyper:
             # https://github.com/moby/moby/issues/20972#issuecomment-193381422
             del service_buffer  # -len
 
+            service_with_meta: compile_pb2.ServiceWithMeta = compile_pb2.ServiceWithMeta(
+                        metadata=self.metadata,
+                        service=self.service
+                    )
+
         else:
+            # Generate the hashes.
             bytes_id, directory = block_builder.build_multiblock(
                 pf_object_with_block_pointers=self.service,
                 blocks=self.blocks
@@ -294,7 +301,7 @@ class Hyper:
             service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
             self.metadata.hashtag.hash.extend(
                 calculate_hashes_by_stream(
-                    value=grpcbigbuffer.read_multiblock_directory(
+                    value=grpcbb.read_multiblock_directory(
                         directory=directory,
                         delete_directory=True
                     )
@@ -304,36 +311,19 @@ class Hyper:
             if service_id != get_service_hex_main_hash(metadata=self.metadata):
                 raise Exception('Compiler error obtaining the service id -> ' + service_id + ' ' + str(self.metadata))
 
-        os.mkdir(CACHE + 'compile' + service_id + '/')
-
-        l.LOGGER('Compiler: DIR CREATED' + CACHE + 'compile' + service_id + '/')
-
-        for i, partition in enumerate(partitions_model):
-            message = grpcbigbuffer.get_submessage(
-                partition=partition,
-                obj=gateway_pb2.CompileOutput(
-                    id=bytes.fromhex(service_id),
-                    service=compile_pb2.ServiceWithMeta(
+            # Generate the service with metadata.
+            service_with_meta: str = block_builder.build_multiblock(
+                pf_object_with_block_pointers=compile_pb2.ServiceWithMeta(
                         metadata=self.metadata,
                         service=self.service
-                    )
-                )
-            )
-            message_buffer = grpcbigbuffer.message_to_bytes(
-                message=message
-            )
-            l.LOGGER(
-                'Compiler: send message ' + str(type(message)) + ' ' + str(partition) + ' ' + str(len(message_buffer)))
-            with open(CACHE + 'compile' + service_id + '/p' + str(i + 1), 'wb') as f:
-                f.write(
-                    message_buffer
-                )
-        return service_id
+                    ),
+                blocks=self.blocks
+            )[1]
+
+        return service_id, service_with_meta
 
 
-def ok(path, aux_id,
-       partitions_model=(buffer_pb2.Buffer.Head.Partition())
-       ) -> str:
+def ok(path, aux_id) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
     spec_file = Hyper(path=path, aux_id=aux_id)
 
     with resources_manager.mem_manager(len=COMPILER_MEMORY_SIZE_FACTOR * spec_file.buffer_len):
@@ -342,16 +332,15 @@ def ok(path, aux_id,
         spec_file.parseLedger()
         spec_file.parseTensor()
 
-        identifier = spec_file.save(
-            partitions_model=partitions_model
-        )
+        identifier, service_with_meta = spec_file.save()
 
     os.system('/usr/bin/docker tag builder' + aux_id + ' ' + identifier + '.docker')
     os.system('/usr/bin/docker rmi builder' + aux_id)
     os.system('rm -rf ' + CACHE + aux_id + '/')
-    return identifier
+    return identifier, service_with_meta
 
 
+"""
 def repo_ok(
         repo: str,
         partitions_model: list
@@ -368,11 +357,12 @@ def repo_ok(
         partitions_model=partitions_model
     )  # Hyperfile
 
+"""
+
 
 def zipfile_ok(
-        repo: str,
-        partitions_model: list
-) -> str:
+        repo: str
+) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
     import random
     aux_id = str(random.random())
     os.system('mkdir ' + CACHE + aux_id)
@@ -382,34 +372,36 @@ def zipfile_ok(
     return ok(
         path=CACHE + aux_id + '/for_build/',
         aux_id=aux_id,
-        partitions_model=partitions_model
     )  # Hyperfile
 
 
-def compile_repo(repo, partitions_model: list, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
+def compile_repo(repo, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
     l.LOGGER('Compiling zip ' + str(repo))
-    service_id: str = zipfile_ok(
-        repo=repo,
-        partitions_model=list(partitions_model)
-    )
-    dirs: List[str] = sorted([d for d in os.listdir(CACHE + 'compile' + service_id)])
-    for b in grpcbigbuffer.serialize_to_buffer(
-            message_iterator=tuple([gateway_pb2.CompileOutput]) + tuple(
-                [grpcbigbuffer.Dir(dir=CACHE + 'compile' + service_id + '/' + d) for d in dirs]),
-            partitions_model=list(partitions_model),
+    service_id, service_with_meta = zipfile_ok(repo=repo)
+    if type(service_with_meta) is str:
+        service_with_meta = grpcbb.Dir(service_with_meta)
+    for b in grpcbb.serialize_to_buffer(
+            message_iterator=tuple([gateway_pb2.CompileOutput,
+                                    bytes.fromhex(service_id),
+                                    service_with_meta
+                                    ]),
+            partitions_model=Compile_output_partitions_v1,
             indices=gateway_pb2.CompileOutput
-    ): yield b
-    #shutil.rmtree(CACHE + 'compile' + service_id)
-    # TODO if saveit: convert dirs to local partition model and save it into the registry.
+    ):
+        yield b
+    # TODO if saveit: convert dirs to local partition model and save it into the registry. Now only saves if has blocks.
 
 
+"""
 if __name__ == "__main__":
-    from protos.gateway_pb2_grpcbf import StartService_input_partitions_v2
+    from protos.gateway_pb2_grpcbf import StartService_input_partitions_v1
 
     id = repo_ok(
         repo=sys.argv[1],
-        partitions_model=StartService_input_partitions_v2[2] if not len(sys.argv) > 1 else [
+        partitions_model=StartService_input_partitions_v1[2] if not len(sys.argv) > 1 else [
             buffer_pb2.Buffer.Head.Partition()]
     )
     os.system('mv ' + CACHE + 'compile' + id + ' ' + REGISTRY + id)
     print(id)
+
+"""
