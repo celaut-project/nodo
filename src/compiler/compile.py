@@ -393,7 +393,7 @@ def compile_repo(repo, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
     ):
         yield b
 
-    shutil.rmtree(service_with_meta.name)
+    # shutil.rmtree(service_with_meta.name)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
 
 
