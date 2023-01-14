@@ -313,13 +313,15 @@ class Hyper:
                 raise Exception('Compiler error obtaining the service id -> ' + service_id + ' ' + str(self.metadata))
 
             # Generate the service with metadata.
-            service_with_meta: str = block_builder.build_multiblock(
+            content_id, service_with_meta = block_builder.build_multiblock(
                 pf_object_with_block_pointers=compile_pb2.ServiceWithMeta(
                         metadata=self.metadata,
                         service=self.service
                     ),
                 blocks=self.blocks
-            )[1]
+            )
+
+            print('\n\nCONTENT ID -> ', codecs.encode(bytes_id, 'hex').decode('utf-8'))
 
         return service_id, service_with_meta
 
