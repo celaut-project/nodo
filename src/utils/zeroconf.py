@@ -8,6 +8,7 @@ import grpc
 from src.manager.manager import insert_instance_on_mongo
 from src.utils import logger as l
 from src.gateway.utils import generate_gateway_instance
+from src.utils.env import MONGODB
 
 
 def Zeroconf(network: str) -> list:
@@ -71,7 +72,7 @@ if __name__ == "__main__":
         peer_id: ObjectId = ObjectId()
         try: 
             if pymongo.MongoClient(
-                "mongodb://localhost:27017/"
+                "mongodb://"+MONGODB+"/"
             )["mongo"]["peerInstances"].insert_one({'_id': peer_id}).acknowledged:
                 break
         except pymongo.errors.DuplicateKeyError:

@@ -1,8 +1,9 @@
 from hashlib import sha256
 import pymongo
+from src.utils.env import MONGODB
 
 mongo = pymongo.MongoClient(
-        "mongodb://localhost:27017/"
+        "mongodb://"+MONGODB+"/"
     )["mongo"]["contracts"]
     
 mongo.insert_one({

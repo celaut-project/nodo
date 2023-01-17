@@ -17,14 +17,14 @@ from src.manager.system_cache import Client, SystemCache
 
 from src.utils import logger as l
 from src.utils.env import ALLOW_GAS_DEBT, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
-    DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
+    DEFAULT_INTIAL_GAS_AMOUNT, MONGODB, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
     MEMORY_LIMIT_COST_FACTOR, DOCKER_CLIENT, COST_OF_BUILD, COMPUTE_POWER_RATE, EXECUTION_BENEFIT
 from src.utils.utils import generate_uris_by_peer_id, get_network_name, \
     is_peer_available, to_gas_amount, \
     get_service_hex_main_hash
 
 db = pymongo.MongoClient(
-    "mongodb://localhost:27017/"
+    "mongodb://"+MONGODB+"/"
 )["mongo"]["serviceInstances"]
 
 sc = SystemCache()
@@ -35,12 +35,12 @@ def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> 
     l.LOGGER('Inserting instance on mongo: ' + str(parsed_instance))
 
     result = pymongo.MongoClient(
-        "mongodb://localhost:27017/"
+        "mongodb://"+MONGODB+"/"
     )["mongo"]["peerInstances"].update_one(
         {'_id': ObjectId(id)},
         {'$set': parsed_instance}
     ) if id else pymongo.MongoClient(
-        "mongodb://localhost:27017/"
+        "mongodb://"+MONGODB+"/"
     )["mongo"]["peerInstances"].insert_one(parsed_instance)
 
     if not result.acknowledged:

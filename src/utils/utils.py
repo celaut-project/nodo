@@ -10,7 +10,7 @@ import netifaces as ni
 
 from protos import celaut_pb2, gateway_pb2
 
-from src.utils.env import REGISTRY
+from src.utils.env import MONGODB, REGISTRY
 from src.utils.verify import get_service_hex_main_hash
 
 
@@ -25,7 +25,7 @@ def read_file(filename) -> bytes:
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     for peer in list(pymongo.MongoClient(
-            "mongodb://localhost:27017/"
+            "mongodb://"+MONGODB+"/"
     )["mongo"]["peerInstances"].find()):
 
         if not ignore_network:
@@ -181,7 +181,7 @@ def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes
     str, str]:
     try:
         peer = pymongo.MongoClient(
-            "mongodb://localhost:27017/"
+            "mongodb://"+MONGODB+"/"
         )["mongo"]["peerInstances"].find_one({'_id': ObjectId(peer_id)})
 
         if sha256(base64.b64decode(peer['instance']['api']['contractLedger'][0]['contract'])).digest() == contract_hash:
@@ -193,7 +193,7 @@ def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes
 
 def get_peer_id_by_ip(ip: str) -> str:
     try:
-        return str(pymongo.MongoClient("mongodb://localhost:27017/")["mongo"]["peerInstances"].find_one(
+        return str(pymongo.MongoClient("mongodb://"+MONGODB+"/")["mongo"]["peerInstances"].find_one(
             {'instance.uriSlot.uri.ip': ip})['_id'])
     except Exception:
         raise Exception('No peer found for ip: ' + str(ip))
@@ -213,7 +213,7 @@ def is_open(ip: str, port: int) -> bool:
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
     try:
         peer = pymongo.MongoClient(
-            "mongodb://localhost:27017/"
+            "mongodb://"+MONGODB+"/"
         )["mongo"]["peerInstances"].find_one({'_id': ObjectId(peer_id)})
         for uri in peer['instance']['uriSlot'][0]['uri']:
             if is_open(ip=uri['ip'], port=int(uri['port'])):
