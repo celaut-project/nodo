@@ -23,9 +23,12 @@ from src.utils.utils import generate_uris_by_peer_id, get_network_name, \
     is_peer_available, to_gas_amount, \
     get_service_hex_main_hash
 
-db = pymongo.MongoClient(
-    "mongodb://"+MONGODB+"/"
-)["mongo"]["serviceInstances"]
+try:
+    db = pymongo.MongoClient(
+        "mongodb://"+MONGODB+"/"
+    )["mongo"]["serviceInstances"]
+except pymongo.errors.ServerSelectionTimeoutError:
+    pass
 
 sc = SystemCache()
 
@@ -34,14 +37,18 @@ def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> 
     parsed_instance = json.loads(MessageToJson(instance))
     l.LOGGER('Inserting instance on mongo: ' + str(parsed_instance))
 
-    result = pymongo.MongoClient(
-        "mongodb://"+MONGODB+"/"
-    )["mongo"]["peerInstances"].update_one(
-        {'_id': ObjectId(id)},
-        {'$set': parsed_instance}
-    ) if id else pymongo.MongoClient(
-        "mongodb://"+MONGODB+"/"
-    )["mongo"]["peerInstances"].insert_one(parsed_instance)
+    try:
+        result = pymongo.MongoClient(
+            "mongodb://"+MONGODB+"/"
+        )["mongo"]["peerInstances"].update_one(
+            {'_id': ObjectId(id)},
+            {'$set': parsed_instance}
+        ) if id else pymongo.MongoClient(
+            "mongodb://"+MONGODB+"/"
+        )["mongo"]["peerInstances"].insert_one(parsed_instance)
+    except pymongo.errors.ServerSelectionTimeoutError:
+        l.LOGGER('MongoDB not allowed.')
+        return ''
 
     if not result.acknowledged:
         raise Exception('Could not insert instance on mongo.')

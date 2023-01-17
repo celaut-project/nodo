@@ -16,7 +16,7 @@ GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(defau
 #  -------------------------------------------------
 
 # DIRECTORIES
-MONGODB = GET_ENV(env='MONGODB', default='192.168.43.39:27017')
+MONGODB = GET_ENV(env='MONGODB', default='localhost:27017')
 CACHE = "/node/__cache__/"
 REGISTRY = "/node/__registry__/"
 BLOCKDIR = "/node/__blocks__/"

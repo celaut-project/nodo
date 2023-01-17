@@ -77,6 +77,8 @@ if __name__ == "__main__":
                 break
         except pymongo.errors.DuplicateKeyError:
             continue
+        except pymongo.errors.ServerSelectionTimeoutError:
+            break
 
     print('Get instance for peer -> ', peer_id)
     try:
