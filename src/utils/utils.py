@@ -24,20 +24,23 @@ def read_file(filename) -> bytes:
 
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
-    for peer in list(pymongo.MongoClient(
-            "mongodb://"+MONGODB+"/"
-    )["mongo"]["peerInstances"].find()):
+    try:
+        for peer in list(pymongo.MongoClient(
+                "mongodb://"+MONGODB+"/"
+        )["mongo"]["peerInstances"].find()):
 
-        if not ignore_network:
-            yield str(peer['_id'])
+            if not ignore_network:
+                yield str(peer['_id'])
 
-        elif True not in [address_in_network(
-                ip_or_uri=uri,
-                net=ignore_network
-        ) for uri in generate_uris_by_peer_id(
-            peer_id=str(peer['_id'])
-        )]:
-            yield str(peer['_id'])
+            elif True not in [address_in_network(
+                    ip_or_uri=uri,
+                    net=ignore_network
+            ) for uri in generate_uris_by_peer_id(
+                peer_id=str(peer['_id'])
+            )]:
+                yield str(peer['_id'])
+    except pymongo.errors.ServerSelectionTimeoutError:
+        pass
 
 
 def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
