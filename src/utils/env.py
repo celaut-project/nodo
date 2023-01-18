@@ -1,5 +1,5 @@
 import hashlib
-import os
+import os, subprocess
 
 import docker as docker_lib
 
@@ -17,6 +17,7 @@ GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(defau
 
 # DIRECTORIES
 MONGODB = GET_ENV(env='MONGODB', default='localhost:27017')
+DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
 CACHE = "/node/__cache__/"
 REGISTRY = "/node/__registry__/"
 BLOCKDIR = "/node/__blocks__/"

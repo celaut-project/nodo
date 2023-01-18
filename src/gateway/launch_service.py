@@ -14,7 +14,7 @@ from src.manager.metrics import gas_amount_on_other_peer
 from src.manager.payment_process import increase_deposit_on_peer
 
 from src.utils import utils, logger as l
-from src.utils.env import CACHE, DOCKER_CLIENT, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, DOCKER_NETWORK, \
+from src.utils.env import CACHE, DOCKER_CLIENT, DOCKER_COMMAND, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, DOCKER_NETWORK, \
     DEFAULT_SYSTEM_RESOURCES, GAS_COST_FACTOR
 from src.utils.recursion_guard import RecursionGuard
 from src.utils.verify import completeness
@@ -38,7 +38,7 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
     while 1:
         try:
             subprocess.run(
-                '/usr/bin/docker cp ' + CACHE + container_id + '/__config__ ' + container_id + ':/' + '/'.join(
+                DOCKER_COMMAND+' cp ' + CACHE + container_id + '/__config__ ' + container_id + ':/' + '/'.join(
                     api.path),
                 shell=True
             )

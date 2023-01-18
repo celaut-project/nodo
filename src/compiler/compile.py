@@ -11,7 +11,7 @@ import src.manager.resources_manager as resources_manager
 from grpcbigbuffer import client as grpcbb
 from grpcbigbuffer import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
-from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, SAVE_ALL, \
+from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, DOCKER_COMMAND, SAVE_ALL, \
     REGISTRY, MIN_BUFFER_BLOCK_SIZE
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
@@ -41,14 +41,14 @@ class Hyper:
         # Build container and get compressed layers.
         if not os.path.isfile(self.path + 'Dockerfile'): raise Exception("Error: Dockerfile no encontrado.")
         os.system(
-            '/usr/bin/docker buildx build --platform ' + arch + ' --no-cache -t builder' + self.aux_id + ' ' + self.path)
+            DOCKER_COMMAND+' buildx build --platform ' + arch + ' --no-cache -t builder' + self.aux_id + ' ' + self.path)
         os.system(
-            "/usr/bin/docker save builder" + self.aux_id + " > " + CACHE + self.aux_id + "/building/container.tar")
+            DOCKER_COMMAND+" save builder" + self.aux_id + " > " + CACHE + self.aux_id + "/building/container.tar")
         os.system(
             "tar -xvf " + CACHE + self.aux_id + "/building/container.tar -C " + CACHE + self.aux_id + "/building/")
 
         self.buffer_len = int(
-            subprocess.check_output(["/usr/bin/docker image inspect builder" + aux_id + " --format='{{.Size}}'"],
+            subprocess.check_output([DOCKER_COMMAND+" image inspect builder" + aux_id + " --format='{{.Size}}'"],
                                     shell=True))
 
     def parseContainer(self):
@@ -337,8 +337,8 @@ def ok(path, aux_id) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
 
         identifier, service_with_meta = spec_file.save()
 
-    os.system('/usr/bin/docker tag builder' + aux_id + ' ' + identifier + '.docker')
-    os.system('/usr/bin/docker rmi builder' + aux_id)
+    os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')
+    os.system(DOCKER_COMMAND+' rmi builder' + aux_id)
     os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier, service_with_meta
 

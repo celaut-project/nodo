@@ -3,7 +3,7 @@ import threading
 from protos.gateway_pb2_grpcbf import GetServiceTar_input
 import grpc, os, src.manager.resources_manager as resources_manager
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
-from src.utils.env import SUPPORTED_ARCHITECTURES, BUILD_CONTAINER_MEMORY_SIZE_FACTOR, WAIT_FOR_CONTAINER
+from src.utils.env import DOCKER_COMMAND, SUPPORTED_ARCHITECTURES, BUILD_CONTAINER_MEMORY_SIZE_FACTOR, WAIT_FOR_CONTAINER
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator, service_extended, read_file
 import src.utils.logger as l
 from grpcbigbuffer.client import save_chunks_to_file, serialize_to_buffer, copy_block_if_exists
@@ -202,7 +202,7 @@ def get_container_from_outside(  # TODO could take it from a specific ledger.
     try:
         os.system('docker load < ' + CACHE + id + '.tar')
         os.system('docker tag ' + id + ' ' + id + '.docker')
-        check_output('/usr/bin/docker inspect ' + id, shell=True)
+        check_output(DOCKER_COMMAND+' inspect ' + id, shell=True)
     except:
         l.LOGGER('Exception during load the tar ' + id + '.docker')
         raise Exception('Error building the container.')
@@ -234,7 +234,7 @@ def build(
     if get_it: l.LOGGER('Building ' + service_id)
     try:
         # check if it's locally.
-        check_output('/usr/bin/docker inspect ' + service_id + '.docker', shell=True)
+        check_output(DOCKER_COMMAND+' inspect ' + service_id + '.docker', shell=True)
         return service_id
 
     except CalledProcessError:
