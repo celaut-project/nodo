@@ -20,7 +20,7 @@ MONGODB = GET_ENV(env='MONGODB', default='localhost:27017')
 DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
 CACHE = "/node/__cache__/"
 REGISTRY = "/node/__registry__/"
-BLOCKDIR = "/node/__blocks__/"
+BLOCKDIR = "/node/__block__/"
 
 SAVE_ALL = False
 COMPILER_MEMORY_SIZE_FACTOR = GET_ENV(env='COMPILER_MEMORY_SIZE_FACTOR', default=2.0)
