@@ -323,7 +323,7 @@ class Hyper:
 
             from hashlib import sha3_256
             from grpcbigbuffer import client as grpc_c
-            validate_content = sha3_356()
+            validate_content = sha3_256()
             for i in grpc_c.read_multiblock_directory(service_with_meta):
                 validate_content.update(i)
 
