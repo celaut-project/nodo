@@ -321,7 +321,14 @@ class Hyper:
                 blocks=self.blocks
             )
 
-            print('\n\nCONTENT ID -> ', codecs.encode(bytes_id, 'hex').decode('utf-8'))
+            import haslib import sha3_356
+            from grpcbigbuffer.client as grpc_c
+            validate_content = sha3_356()
+            for i in grpc_c.read_multiblock_directory(service_with_meta):
+                validate_content.update(i)
+
+            print('\n\nCONTENT ID -> ', codecs.encode(content_id, 'hex').decode('utf-8'))
+            print('\n\nCONTENT VALIDATED ID -> ', validate_content.hexdigest())
 
         return service_id, service_with_meta
 
