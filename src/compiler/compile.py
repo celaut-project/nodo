@@ -342,8 +342,8 @@ def ok(path, aux_id) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
     spec_file = Hyper(path=path, aux_id=aux_id)
 
     with resources_manager.mem_manager(len=COMPILER_MEMORY_SIZE_FACTOR * spec_file.buffer_len):
-        spec_file.parseContainer()
-        #spec_file.parseApi()
+        #spec_file.parseContainer()
+        spec_file.parseApi()
         #spec_file.parseLedger()
         #spec_file.parseTensor()
 
