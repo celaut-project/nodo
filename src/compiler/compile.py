@@ -1,22 +1,22 @@
 import codecs
-import json
-import os
-import subprocess
 from typing import Generator, List, Tuple, Union
 
-from grpcbigbuffer import buffer_pb2, block_builder
-from grpcbigbuffer import client as grpcbb
+from protos.celaut_pb2 import Any
 
-import src.manager.resources_manager as resources_manager
-from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
-from protos.gateway_pb2_grpcbf import Compile_output_partitions_v1
 from src.utils import logger as l
-from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, DOCKER_COMMAND, \
-    SAVE_ALL, \
-    MIN_BUFFER_BLOCK_SIZE
+import sys, shutil
+import json
+import os, subprocess
+import src.manager.resources_manager as resources_manager
+from grpcbigbuffer import client as grpcbb
+from grpcbigbuffer import buffer_pb2, block_builder
+from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
+from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, DOCKER_COMMAND, SAVE_ALL, \
+    REGISTRY, MIN_BUFFER_BLOCK_SIZE
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
 
+from protos.gateway_pb2_grpcbf import Compile_output_partitions_v1
 
 class Hyper:
     def __init__(self, path, aux_id):
