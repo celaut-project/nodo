@@ -1,22 +1,22 @@
 import codecs
+import json
+import os
+import subprocess
 from typing import Generator, List, Tuple, Union
 
-from protos.celaut_pb2 import Any
-
-from src.utils import logger as l
-import sys, shutil
-import json
-import os, subprocess
-import src.manager.resources_manager as resources_manager
-from grpcbigbuffer import client as grpcbb
 from grpcbigbuffer import buffer_pb2, block_builder
+from grpcbigbuffer import client as grpcbb
+
+import src.manager.resources_manager as resources_manager
 from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
-from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, DOCKER_COMMAND, SAVE_ALL, \
-    REGISTRY, MIN_BUFFER_BLOCK_SIZE
+from protos.gateway_pb2_grpcbf import Compile_output_partitions_v1
+from src.utils import logger as l
+from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, DOCKER_COMMAND, \
+    SAVE_ALL, \
+    MIN_BUFFER_BLOCK_SIZE
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
 
-from protos.gateway_pb2_grpcbf import Compile_output_partitions_v1
 
 class Hyper:
     def __init__(self, path, aux_id):
@@ -120,6 +120,7 @@ class Hyper:
                 )
             )
 
+        """
         # Envs
         if self.json.get('envs'):
             for env in self.json.get('envs'):
@@ -133,6 +134,7 @@ class Hyper:
         if self.json.get('entrypoint'):
             self.service.container.entrypoint.append(self.json.get('entrypoint'))
 
+
         # Arch
 
         # Config file spec.
@@ -141,6 +143,7 @@ class Hyper:
             celaut.FieldDef()  # celaut.ConfigFile definition.
         )
 
+        
         # Expected Gateway.
 
         # Add container metadata to the global metadata.
@@ -169,6 +172,8 @@ class Hyper:
                 ]
             )
         )
+        """
+        parseFilesys()
 
     def parseApi(self):
         #  App protocol
@@ -338,9 +343,9 @@ def ok(path, aux_id) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
 
     with resources_manager.mem_manager(len=COMPILER_MEMORY_SIZE_FACTOR * spec_file.buffer_len):
         spec_file.parseContainer()
-        spec_file.parseApi()
-        spec_file.parseLedger()
-        spec_file.parseTensor()
+        #spec_file.parseApi()
+        #spec_file.parseLedger()
+        #spec_file.parseTensor()
 
         identifier, service_with_meta = spec_file.save()
 
