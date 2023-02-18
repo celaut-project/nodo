@@ -1,6 +1,8 @@
 import codecs
 from typing import Generator, List, Tuple, Union
 
+from grpcbigbuffer.block_driver import generate_wbp_file
+
 from protos.celaut_pb2 import Any
 
 from src.utils import logger as l
@@ -325,6 +327,11 @@ class Hyper:
                     ),
                 blocks=self.blocks
             )
+
+            print('\n Generate wbp file.')
+            os.system('rm ' + service_with_meta + '/wbp.bin')
+            generate_wbp_file(service_with_meta)
+            print('\n File generated OK.')
 
             from hashlib import sha3_256
             from grpcbigbuffer import client as grpc_c
