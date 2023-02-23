@@ -328,6 +328,7 @@ class Hyper:
                 blocks=self.blocks
             )
 
+            print('\n bloques -> ', self.blocks)
             print('\n Generate wbp file.')
             os.system('rm ' + service_with_meta + '/wbp.bin')
             generate_wbp_file(service_with_meta)
