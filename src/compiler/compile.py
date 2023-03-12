@@ -89,7 +89,10 @@ class Hyper:
                                 branch.file = file.read()
 
                         else:
-                            block_hash, block = block_builder.create_block(file_path=host_dir + directory + b_name)
+                            block_hash, block = block_builder.create_block(
+                                file_path=host_dir + directory + b_name,
+                                copy=True
+                            )
                             branch.file = block.SerializeToString()
                             if block_hash not in self.blocks:
                                 self.blocks.append(block_hash)
