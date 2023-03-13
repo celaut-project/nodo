@@ -1,6 +1,8 @@
 import codecs
 from typing import Generator, List, Tuple, Union
 
+from grpcbigbuffer.block_driver import generate_wbp_file
+
 from protos.celaut_pb2 import Any
 
 from src.utils import logger as l
@@ -87,7 +89,10 @@ class Hyper:
                                 branch.file = file.read()
 
                         else:
-                            block_hash, block = block_builder.create_block(file_path=host_dir + directory + b_name)
+                            block_hash, block = block_builder.create_block(
+                                file_path=host_dir + directory + b_name,
+                                copy=True
+                            )
                             branch.file = block.SerializeToString()
                             if block_hash not in self.blocks:
                                 self.blocks.append(block_hash)

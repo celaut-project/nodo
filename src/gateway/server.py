@@ -228,6 +228,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         registry_hash = h.value.hex()
                         break
                 if not registry_hash:
+                    # TODO if don't have the registry_hash, save the service_with_meta (maybe with config)
+                    #      and compute it.
                     raise Exception
                 save_service(
                     service_with_meta_dir=service_with_meta_dir,

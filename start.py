@@ -4,7 +4,7 @@ import threading
 from concurrent import futures
 
 import grpc
-from grpcbigbuffer import client as grpcbf
+from grpcbigbuffer import utils as grpcbf
 import netifaces as ni
 from psutil import virtual_memory
 

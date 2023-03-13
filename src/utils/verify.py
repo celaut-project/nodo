@@ -88,7 +88,7 @@ def get_service_hex_main_hash(
     elif partitions_model:
         return SHA3_256(
             value=grpcbf.partitions_to_buffer(
-                message_type=Service,
+                message_type=Service,  # TODO fix that.
                 partitions_model=partitions_model,
                 partitions=service_buffer
             )
