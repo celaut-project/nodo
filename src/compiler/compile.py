@@ -125,7 +125,6 @@ class Hyper:
                 )
             )
 
-        """
         # Envs
         if self.json.get('envs'):
             for env in self.json.get('envs'):
@@ -139,7 +138,6 @@ class Hyper:
         if self.json.get('entrypoint'):
             self.service.container.entrypoint.append(self.json.get('entrypoint'))
 
-
         # Arch
 
         # Config file spec.
@@ -148,7 +146,6 @@ class Hyper:
             celaut.FieldDef()  # celaut.ConfigFile definition.
         )
 
-        
         # Expected Gateway.
 
         # Add container metadata to the global metadata.
@@ -177,8 +174,6 @@ class Hyper:
                 ]
             )
         )
-        """
-        parseFilesys()
 
     def parseApi(self):
         #  App protocol
@@ -331,12 +326,6 @@ class Hyper:
                 blocks=self.blocks
             )
 
-            print('\n bloques -> ', self.blocks)
-            print('\n Generate wbp file.')
-            os.system('rm ' + service_with_meta + '/wbp.bin')
-            generate_wbp_file(service_with_meta)
-            print('\n File generated OK.')
-
             from hashlib import sha3_256
             from grpcbigbuffer import client as grpc_c
             validate_content = sha3_256()
@@ -354,9 +343,9 @@ def ok(path, aux_id) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
 
     with resources_manager.mem_manager(len=COMPILER_MEMORY_SIZE_FACTOR * spec_file.buffer_len):
         spec_file.parseContainer()
-        #spec_file.parseApi()
-        #spec_file.parseLedger()
-        #spec_file.parseTensor()
+        spec_file.parseApi()
+        spec_file.parseLedger()
+        spec_file.parseTensor()
 
         identifier, service_with_meta = spec_file.save()
 
