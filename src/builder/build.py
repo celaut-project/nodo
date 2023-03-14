@@ -234,10 +234,7 @@ def build(
     if get_it: l.LOGGER('Building ' + service_id)
     try:
         # check if it's locally.
-        try:
-            check_output(DOCKER_COMMAND+' inspect ' + service_id + '.docker', shell=True)
-        except Exception as e:
-            print('EXCEPCION -> ', str(e))
+        check_output(DOCKER_COMMAND+' inspect ' + service_id + '.docker', shell=True)
         return service_id
 
     except CalledProcessError:

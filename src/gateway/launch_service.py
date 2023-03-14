@@ -235,6 +235,7 @@ def launch_service(
                     try:
                         container.start()
                     except docker_lib.errors.APIError as e:
+                        print(service_id, service)
                         l.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' ' + str(
                             e))  # TODO LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
 
