@@ -223,7 +223,7 @@ def launch_service(
                 if father_id == father_ip:
                     container = create_container(
                         id=service_id,
-                        entrypoint=service.container.entrypoint
+                        entrypoint=[e for e in service.container.entrypoint]
                     )
 
                     set_config(container_id=container.id, config=config, resources=system_requirements,
@@ -257,7 +257,7 @@ def launch_service(
                     container = create_container(
                         use_other_ports=assigment_ports,
                         id=service_id,
-                        entrypoint=service.container.entrypoint
+                        entrypoint=[e for e in service.container.entrypoint]
                     )
                     set_config(container_id=container.id, config=config, resources=system_requirements,
                                api=service.container.config)
