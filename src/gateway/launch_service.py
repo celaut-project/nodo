@@ -265,7 +265,7 @@ def launch_service(
                         container.start()
                     except docker_lib.errors.APIError as e:
                         # TODO LOS ERRORES DEBERÍAN LANZAR UNA EXCEPCION QUE LLEGUE HASTA EL GRPC.
-                        print(service_id, service)
+                        print(service_id, service.container.entrypoint, type(service.container.entrypoint))
                         l.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' ' + str(e))
 
                         # Reload this object from the server again and update attrs with the new data.
