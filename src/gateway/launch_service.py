@@ -51,9 +51,10 @@ def set_config(container_id: str, config: celaut.Configuration, resources: celau
 
 def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
     try:
+        print('ENTRYPONIT ->', '/'.join(entrypoint))
         result = DOCKER_CLIENT().containers.create(
             image=id + '.docker',  # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-            entrypoint=' '.join(entrypoint),
+            entrypoint='/'.join(entrypoint),
             ports=use_other_ports
         )
         return result
@@ -254,11 +255,14 @@ def launch_service(
                 # Si hace la peticion un servicio de otro nodo.
                 else:
                     assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
-                    container = create_container(
-                        use_other_ports=assigment_ports,
-                        id=service_id,
-                        entrypoint=[e for e in service.container.entrypoint]
-                    )
+                    try:
+                        container = create_container(
+                            use_other_ports=assigment_ports,
+                            id=service_id,
+                            entrypoint=[e for e in service.container.entrypoint]
+                        )
+                    except Exception as e:
+                        print(e, )
                     set_config(container_id=container.id, config=config, resources=system_requirements,
                                api=service.container.config)
                     try:
