@@ -93,7 +93,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         raise UnsupportedArquitectureException
 
     l.LOGGER('Build process of ' + service_id + ': wait for unlock the memory.')
-    with resources_manager.mem_manager(len=len(service_buffer) * BUILD_CONTAINER_MEMORY_SIZE_FACTOR): # TODO ??
+    with resources_manager.mem_manager(len=len(service_buffer) * BUILD_CONTAINER_MEMORY_SIZE_FACTOR):
         # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
         l.LOGGER('Build process of ' + service_id + ': go to load all the buffer.')
         service = gateway_pb2.celaut__pb2.Service()
@@ -124,7 +124,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         os.mkdir(fs_dir)
         symlinks = []
         l.LOGGER('Build process of ' + service_id + ': writting filesystem.')
-        write_fs(fs_element=fs, dir_element=fs_dir + '/', symlinks_element=symlinks)  # TODO ??
+        write_fs(fs_element=fs, dir_element=fs_dir + '/', symlinks_element=symlinks)
 
         # Build it.
         l.LOGGER('Build process of ' + service_id + ': docker building it ...')
