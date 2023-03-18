@@ -88,13 +88,12 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
                 symlinks_element=symlinks_element
             )
 
-    second_partition_dir = REGISTRY + service_id + '/p2'
     if not check_supported_architecture(metadata=metadata):
         l.LOGGER('Build process of ' + service_id + ': unsupported architecture.')
         raise UnsupportedArquitectureException
 
     l.LOGGER('Build process of ' + service_id + ': wait for unlock the memory.')
-    with resources_manager.mem_manager(len=len(service_buffer) * BUILD_CONTAINER_MEMORY_SIZE_FACTOR):
+    with resources_manager.mem_manager(len=len(service_buffer) * BUILD_CONTAINER_MEMORY_SIZE_FACTOR): # TODO ??
         # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
         l.LOGGER('Build process of ' + service_id + ': go to load all the buffer.')
         service = gateway_pb2.celaut__pb2.Service()
@@ -125,7 +124,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         os.mkdir(fs_dir)
         symlinks = []
         l.LOGGER('Build process of ' + service_id + ': writting filesystem.')
-        write_fs(fs_element=fs, dir_element=fs_dir + '/', symlinks_element=symlinks)
+        write_fs(fs_element=fs, dir_element=fs_dir + '/', symlinks_element=symlinks)  # TODO ??
 
         # Build it.
         l.LOGGER('Build process of ' + service_id + ': docker building it ...')
@@ -134,7 +133,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         check_output('docker buildx build --platform ' + arch + ' -t ' + cache_id + ' ' + dir + '/.', shell=True)
         l.LOGGER('Build process of ' + service_id + ': docker build it.')
         try:
-            rmtree(dir)
+            pass #rmtree(dir)
         except Exception:
             pass
 
