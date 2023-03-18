@@ -3,7 +3,8 @@ import threading
 from protos.gateway_pb2_grpcbf import GetServiceTar_input
 import grpc, os, src.manager.resources_manager as resources_manager
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
-from src.utils.env import DOCKER_COMMAND, SUPPORTED_ARCHITECTURES, BUILD_CONTAINER_MEMORY_SIZE_FACTOR, WAIT_FOR_CONTAINER
+from src.utils.env import DOCKER_COMMAND, SUPPORTED_ARCHITECTURES, BUILD_CONTAINER_MEMORY_SIZE_FACTOR, \
+    WAIT_FOR_CONTAINER
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator, service_extended, read_file
 import src.utils.logger as l
 from grpcbigbuffer.client import save_chunks_to_file, serialize_to_buffer, copy_block_if_exists
@@ -18,11 +19,14 @@ from subprocess import check_output, CalledProcessError
 
 
 def get_arch_tag(metadata: celaut_pb2.Any.Metadata) -> str:
-    for l in SUPPORTED_ARCHITECTURES:
-        if any(a in l for a in {ah.key: ah.value for ah in
-                                {ah.key: ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][
-            0].tag):
-            return l[0]
+    for _l in SUPPORTED_ARCHITECTURES:
+        if any(a in _l for a in {
+            ah.key: ah.value for ah in {
+                ah.key: ah.value for ah in
+                metadata.hashtag.attr_hashtag
+            }[1][0].attr_hashtag
+        }[1][0].tag):
+            return _l[0]
 
 
 def check_supported_architecture(metadata: celaut_pb2.Any.Metadata) -> bool:
@@ -56,7 +60,8 @@ actual_building_processes_lock = threading.Lock()
 actual_building_processes = []  # list of hexadecimal string sha256 value hashes.
 
 
-def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2.celaut__pb2.Any.Metadata, service_id: str):
+def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2.celaut__pb2.Any.Metadata,
+                                    service_id: str):
     # Build the container from filesystem definition.
     def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir_element: str, symlinks_element):
         if b.HasField('filesystem'):
@@ -65,8 +70,8 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
 
         elif b.HasField('file'):
             if not copy_block_if_exists(
-                buffer=b.file,
-                directory=dir_element + b.name
+                    buffer=b.file,
+                    directory=dir_element + b.name
             ):
                 open(dir_element + b.name, 'wb').write(
                     b.file
@@ -114,7 +119,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
             pass
 
         # Write all on cache.
-        dir = CACHE+'builder' + service_id
+        dir = CACHE + 'builder' + service_id
         os.mkdir(dir)
         fs_dir = dir + '/fs'
         os.mkdir(fs_dir)
@@ -142,12 +147,14 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
                 if check_output('ln -s ' + symlink.src + ' ' + symlink.dst[1:], shell=True, cwd=overlay_dir)[
                    :2] == 'ln': break
             except CalledProcessError:
-                l.LOGGER('Build process of ' + service_id + ': symlink error (CalledProcessError) ' + str(symlink.src) + str(
-                    symlink.dst))
+                l.LOGGER(
+                    'Build process of ' + service_id + ': symlink error (CalledProcessError) ' + str(symlink.src) + str(
+                        symlink.dst))
                 break
             except AttributeError:
-                l.LOGGER('Build process of ' + service_id + ': symlink error (AttributeError) ' + str(symlink.src) + str(
-                    symlink.dst))
+                l.LOGGER(
+                    'Build process of ' + service_id + ': symlink error (AttributeError) ' + str(symlink.src) + str(
+                        symlink.dst))
 
         l.LOGGER('Build process of ' + service_id + ': apply permissions.')
         # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
@@ -202,7 +209,7 @@ def get_container_from_outside(  # TODO could take it from a specific ledger.
     try:
         os.system('docker load < ' + CACHE + id + '.tar')
         os.system('docker tag ' + id + ' ' + id + '.docker')
-        check_output(DOCKER_COMMAND+' inspect ' + id, shell=True)
+        check_output(DOCKER_COMMAND + ' inspect ' + id, shell=True)
     except:
         l.LOGGER('Exception during load the tar ' + id + '.docker')
         raise Exception('Error building the container.')
@@ -234,7 +241,7 @@ def build(
     if get_it: l.LOGGER('Building ' + service_id)
     try:
         # check if it's locally.
-        check_output(DOCKER_COMMAND+' inspect ' + service_id + '.docker', shell=True)
+        check_output(DOCKER_COMMAND + ' inspect ' + service_id + '.docker', shell=True)
         return service_id
 
     except CalledProcessError:
