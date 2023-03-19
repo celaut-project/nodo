@@ -315,7 +315,8 @@ class Hyper:
             )
 
             if service_id != get_service_hex_main_hash(metadata=self.metadata):
-                raise Exception('Compiler error obtaining the service id -> ' + service_id + ' ' + str(self.metadata))
+                raise Exception('Compiler error obtaining the service id -> ' + service_id + ' ' + get_service_hex_main_hash(metadata=self.metadata),
+                                type(service_id), type(get_service_hex_main_hash(metadata=self.metadata)))
 
             # Generate the service with metadata.
             content_id, service_with_meta = block_builder.build_multiblock(
