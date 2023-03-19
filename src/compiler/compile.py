@@ -13,8 +13,9 @@ import src.manager.resources_manager as resources_manager
 from grpcbigbuffer import client as grpcbb
 from grpcbigbuffer import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
-from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, DOCKER_COMMAND, SAVE_ALL, \
-    REGISTRY, MIN_BUFFER_BLOCK_SIZE
+from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, DOCKER_COMMAND, \
+    SAVE_ALL, \
+    REGISTRY, MIN_BUFFER_BLOCK_SIZE, SHA3_256_ID
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
 
@@ -304,6 +305,12 @@ class Hyper:
                 blocks=self.blocks
             )
             service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
+            self.metadata.hashtag.hash.extend(
+                [Any.Metadata.HashTag.Hash(
+                    type=SHA3_256_ID,
+                    value=bytes_id
+                )]
+            )
             """
             self.metadata.hashtag.hash.extend(
                 calculate_hashes_by_stream(
