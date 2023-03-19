@@ -11,9 +11,12 @@ from protos.celaut_pb2 import Any, Service
 def calculate_hashes_by_stream(value: Generator[bytes, None, None]) -> List[Any.Metadata.HashTag.Hash]:
     sha3_256 = hashlib.sha3_256()
     shake_256 = hashlib.shake_256()
+    le = 0
     for chunk in value:
+        le += len(chunk)
         sha3_256.update(chunk)
         shake_256.update(chunk)
+    print('LEN CALCULATE HASHSES BY STREAM -> ', le)
 
     return [
         Any.Metadata.HashTag.Hash(
