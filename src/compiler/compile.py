@@ -308,7 +308,7 @@ class Hyper:
                 calculate_hashes_by_stream(
                     value=grpcbb.read_multiblock_directory(
                         directory=directory,
-                        delete_directory=True,
+                        delete_directory=False,
                         ignore_blocks=True
                     )
                 )
