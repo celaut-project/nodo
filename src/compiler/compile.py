@@ -361,8 +361,8 @@ def ok(path, aux_id) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
         identifier, service_with_meta = spec_file.save()
 
     os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')
-    #os.system(DOCKER_COMMAND+' rmi builder' + aux_id)
-    #os.system('rm -rf ' + CACHE + aux_id + '/')
+    os.system(DOCKER_COMMAND+' rmi builder' + aux_id)
+    os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier, service_with_meta
 
 
