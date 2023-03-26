@@ -11,8 +11,9 @@ from src.utils.env import DOCKER_CLIENT, MIN_SLOTS_OPEN_PER_PEER, MIN_DEPOSIT_PE
 from src.utils.utils import is_peer_available, peers_id_iterator
 from src.utils import logger as l
 
-
 sc = SystemCache()
+
+
 def maintain_containers():
     for i in range(len(sc.system_cache)):
         if i >= len(sc.system_cache): break
