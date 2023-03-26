@@ -88,7 +88,7 @@ def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Contai
     )
 
 
-def __refound_gas(
+def __refund_gas(
         gas: int = None,
         token: str = None,
         cache: dict = None,
@@ -109,7 +109,7 @@ def __refound_gas(
 
 
 # Only can be executed once.
-def __refound_gas_function_factory(
+def __refund_gas_function_factory(
         gas: int = None,
         cache: dict = None,
         token: str = None,
@@ -118,7 +118,7 @@ def __refound_gas_function_factory(
 ) -> lambda: None:
     if container:
         container.append(
-            lambda: __refound_gas(gas=gas, cache=cache, token=token, add_function=add_function)
+            lambda: __refund_gas(gas=gas, cache=cache, token=token, add_function=add_function)
         )
 
 
@@ -126,7 +126,7 @@ def increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     l.LOGGER('Increase local gas for client ' + client_id + ' of ' + str(amount))
     if client_id not in sc.clients:  # TODO no debería de añadir un peer que no existe.
         raise Exception('Client ' + client_id + ' does not exists.')
-    if not __refound_gas(
+    if not __refund_gas(
             gas=amount,
             add_function=lambda gas: sc.clients[client_id].add_gas(gas),
             token=client_id
@@ -136,9 +136,9 @@ def increase_local_gas_for_client(client_id: str, amount: int) -> bool:
 
 
 def spend_gas(
-        token_or_container_ip: str,  # If its peer, the token is the peer id.
-        #  If its a local service, the token could be the token or the container ip,
-        #  on the last case, it take the token with cache service perspective.
+        token_or_container_ip: str,  # If it's peer, the token is the peer id.
+        #  If it's a local service, the token could be the token or the container ip,
+        #  on the last case, it takes the token with cache service perspective.
         gas_to_spend: int,
         refund_gas_function_container: list = None
 ) -> bool:
@@ -150,7 +150,7 @@ def spend_gas(
                 sc.clients[token_or_container_ip].gas >= gas_to_spend or ALLOW_GAS_DEBT):
             with sc.cache_locks.lock(token_or_container_ip):
                 sc.clients[token_or_container_ip].reduce_gas(gas=gas_to_spend)
-            __refound_gas_function_factory(
+            __refund_gas_function_factory(
                 gas=gas_to_spend,
                 token=token_or_container_ip,
                 add_function=lambda gas: sc.clients[token_or_container_ip].add_gas(gas),
@@ -163,7 +163,7 @@ def spend_gas(
                 sc.system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
             with sc.cache_locks.lock(token_or_container_ip):
                 sc.system_cache[token_or_container_ip]['gas'] -= gas_to_spend
-            __refound_gas_function_factory(
+            __refund_gas_function_factory(
                 gas=gas_to_spend,
                 cache=sc.system_cache,
                 token=token_or_container_ip,
@@ -177,7 +177,7 @@ def spend_gas(
                 sc.system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
             with sc.cache_locks.lock(token_or_container_ip): sc.system_cache[token_or_container_ip][
                 'gas'] -= gas_to_spend
-            __refound_gas_function_factory(
+            __refund_gas_function_factory(
                 gas=gas_to_spend,
                 cache=sc.system_cache,
                 token=token_or_container_ip,
