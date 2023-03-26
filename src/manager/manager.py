@@ -184,6 +184,8 @@ def spend_gas(
                 container=refund_gas_function_container
             )
             return True
+
+        print(token_or_container_ip, ' No puede realizar el pago -> ', sc.system_cache[token_or_container_ip])
     except Exception as e:
         l.LOGGER('Manager error spending gas: ' + str(e) + ' ' + str(gas_to_spend) + ' ' + token_or_container_ip + \
                  '\n peer instances -> ' + str(sc.clients) + \
