@@ -25,12 +25,13 @@ from src.utils.utils import generate_uris_by_peer_id, get_network_name, \
 
 try:
     db = pymongo.MongoClient(
-        "mongodb://"+MONGODB+"/"
+        "mongodb://" + MONGODB + "/"
     )["mongo"]["serviceInstances"]
 except pymongo.errors.ServerSelectionTimeoutError:
     pass
 
 sc = SystemCache()
+
 
 # Insert the instance if it does not exists.
 def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> str:
@@ -39,12 +40,12 @@ def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> 
 
     try:
         result = pymongo.MongoClient(
-            "mongodb://"+MONGODB+"/"
+            "mongodb://" + MONGODB + "/"
         )["mongo"]["peerInstances"].update_one(
             {'_id': ObjectId(id)},
             {'$set': parsed_instance}
         ) if id else pymongo.MongoClient(
-            "mongodb://"+MONGODB+"/"
+            "mongodb://" + MONGODB + "/"
         )["mongo"]["peerInstances"].insert_one(parsed_instance)
     except pymongo.errors.ServerSelectionTimeoutError:
         l.LOGGER('MongoDB not allowed.')
@@ -58,6 +59,7 @@ def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> 
 
 def get_token_by_uri(uri: str) -> str:
     return sc.get_token_by_uri(uri=uri)
+
 
 def __push_token(token: str):
     with sc.cache_locks.lock(token): sc.system_cache[token] = {"mem_limit": 0}
@@ -114,10 +116,9 @@ def __refound_gas_function_factory(
         container: list = None,
         add_function=None
 ) -> lambda: None:
-
     if container:
         container.append(
-            lambda:  __refound_gas(gas=gas, cache=cache, token=token, add_function=add_function)
+            lambda: __refound_gas(gas=gas, cache=cache, token=token, add_function=add_function)
         )
 
 
@@ -145,7 +146,8 @@ def spend_gas(
     # l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
     try:
         # En caso de que sea un peer, el token es el peer id.
-        if token_or_container_ip in sc.clients and (sc.clients[token_or_container_ip].gas >= gas_to_spend or ALLOW_GAS_DEBT):
+        if token_or_container_ip in sc.clients and (
+                sc.clients[token_or_container_ip].gas >= gas_to_spend or ALLOW_GAS_DEBT):
             with sc.cache_locks.lock(token_or_container_ip):
                 sc.clients[token_or_container_ip].reduce_gas(gas=gas_to_spend)
             __refound_gas_function_factory(
@@ -173,7 +175,8 @@ def spend_gas(
         token_or_container_ip = sc.cache_service_perspective[token_or_container_ip]
         if token_or_container_ip in sc.system_cache and (
                 sc.system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with sc.cache_locks.lock(token_or_container_ip): sc.system_cache[token_or_container_ip]['gas'] -= gas_to_spend
+            with sc.cache_locks.lock(token_or_container_ip): sc.system_cache[token_or_container_ip][
+                'gas'] -= gas_to_spend
             __refound_gas_function_factory(
                 gas=gas_to_spend,
                 cache=sc.system_cache,
@@ -326,8 +329,8 @@ def get_sysresources(token: str) -> gateway_pb2.ModifyServiceSystemResourcesOutp
 
 def prune_container(token: str) -> int:
     l.LOGGER('Prune container ' + token)
-    if get_network_name(ip_or_uri=token.split('##')[
-        1]) == DOCKER_NETWORK:  # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
+    if get_network_name(ip_or_uri=token.split('##')[1]) == DOCKER_NETWORK:
+        # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
         try:
             refund = sc.purgue_internal(
                 agent_id=token.split('##')[0],
@@ -350,9 +353,9 @@ def prune_container(token: str) -> int:
             l.LOGGER('Error purging ' + token + ' ' + str(e))
             return False
 
-    # __refound_gas() # TODO refound gas to parent. Need to check what cache is. peer_instances or system_cache. Podría usar una variable de entorno para hacerlo o no.
+    # __refound_gas() # TODO refound gas to parent. Need to check what cache is. peer_instances or system_cache.
+    #  Podría usar una variable de entorno para hacerlo o no.
     return refund
-
 
 
 # COST FUNCTIONS
