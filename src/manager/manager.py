@@ -143,7 +143,7 @@ def spend_gas(
         refund_gas_function_container: list = None
 ) -> bool:
     gas_to_spend = int(gas_to_spend)
-    l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
+    # l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
     try:
         # En caso de que sea un peer, el token es el peer id.
         if token_or_container_ip in sc.clients and (
