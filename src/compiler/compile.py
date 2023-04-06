@@ -332,7 +332,7 @@ class Hyper:
             # Generate the service with metadata.
             content_id, service_with_meta = block_builder.build_multiblock(
                 pf_object_with_block_pointers=compile_pb2.ServiceWithMeta(
-                        # metadata=self.metadata,
+                        metadata=self.metadata,
                         service=self.service
                     ),
                 blocks=self.blocks
