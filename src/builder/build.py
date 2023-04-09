@@ -34,7 +34,7 @@ def check_supported_architecture(metadata: celaut_pb2.Any.Metadata) -> bool:
         return any(a in list(itertools.chain.from_iterable(SUPPORTED_ARCHITECTURES)) for a in
                    {ah.key: ah.value for ah in
                     {ah.key: ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag)
-    except:
+    except Exception:
         return False
 
 
@@ -90,7 +90,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
 
     if not check_supported_architecture(metadata=metadata):
         l.LOGGER('Build process of ' + service_id + ': unsupported architecture.')
-        raise UnsupportedArchitectureException
+        raise UnsupportedArchitectureException(arch=str(metadata))
 
     l.LOGGER('Build process of ' + service_id + ': wait for unlock the memory.')
     with resources_manager.mem_manager(len=len(service_buffer) * BUILD_CONTAINER_MEMORY_SIZE_FACTOR):
