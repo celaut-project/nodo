@@ -400,6 +400,7 @@ def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
 
 def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
     l.LOGGER('Get execution cost')
+    print(' \n Print metadata -> ', metadata, type(metadata))
     try:
         return sum([
             len(DOCKER_CLIENT().containers.list()) * COMPUTE_POWER_RATE,
