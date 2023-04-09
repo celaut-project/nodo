@@ -47,13 +47,13 @@ class WaitBuildException(Exception):
         return "Getting the container, the process will've time"
 
 
-class UnsupportedArquitectureException(Exception):
+class UnsupportedArchitectureException(Exception):
 
-    def __init__(self, *args):
-        self.message = None
+    def __init__(self, arch):
+        self.message = f"\n Unsupported architecture {arch} - \n Only these {SUPPORTED_ARCHITECTURES}. \n"
 
     def __str__(self):
-        return 'Unsupported architecture.'
+        return self.message
 
 
 actual_building_processes_lock = threading.Lock()
@@ -90,7 +90,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
 
     if not check_supported_architecture(metadata=metadata):
         l.LOGGER('Build process of ' + service_id + ': unsupported architecture.')
-        raise UnsupportedArquitectureException
+        raise UnsupportedArchitectureException
 
     l.LOGGER('Build process of ' + service_id + ': wait for unlock the memory.')
     with resources_manager.mem_manager(len=len(service_buffer) * BUILD_CONTAINER_MEMORY_SIZE_FACTOR):

@@ -366,10 +366,25 @@ def maintain_cost(sysreq: dict) -> int:
 
 
 def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
+    """
+
+    Parameters
+    ----------
+    service_buffer
+    metadata
+
+    Returns
+    -------
+
+    Raises
+    -------
+    UnsupportedArchitectureException
+
+    """
     is_built = (get_service_hex_main_hash(service_buffer=service_buffer, metadata=metadata)
                 in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()])
-    if not is_built and \
-            not build.check_supported_architecture(metadata=metadata): raise build.UnsupportedArquitectureException
+    if not is_built and not build.check_supported_architecture(metadata=metadata):
+        raise build.UnsupportedArchitectureException
     try:
         # Coste de construcción si no se posee el contenedor del servicio.
         # Debe de tener en cuenta el coste de buscar el conedor por la red.
@@ -391,7 +406,7 @@ def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
             build_cost(service_buffer=service_buffer, metadata=metadata),
             EXECUTION_BENEFIT
         ])
-    except build.UnsupportedArquitectureException as e:
+    except build.UnsupportedArchitectureException as e:
         raise e
     except Exception as e:
         l.LOGGER('Error calculating execution cost ' + str(e))

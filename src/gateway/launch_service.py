@@ -192,7 +192,7 @@ def launch_service(
                         get_it=not getting_container,
                         complete=is_complete
                     )  # If the container is not built, build it.
-                except build.UnsupportedArquitectureException as e:
+                except build.UnsupportedArchitectureException as e:
                     try:
                         refound_gas.pop()()
                     except IndexError:

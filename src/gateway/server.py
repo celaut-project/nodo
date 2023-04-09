@@ -515,7 +515,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             metadata=p1.metadata
                         ) * GAS_COST_FACTOR
                         break
-                    except build.UnsupportedArquitectureException as e:
+                    except build.UnsupportedArchitectureException as e:
                         raise e
                     except Exception as e:
                         yield gateway_pb2.buffer__pb2.Buffer(signal=True)
@@ -555,7 +555,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         ),
                         metadata=service_with_meta.metadata
                     ) * GAS_COST_FACTOR
-                except build.UnsupportedArquitectureException as e:
+                except build.UnsupportedArchitectureException as e:
                     raise e
                 break
 
@@ -576,7 +576,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         ),
                         metadata=service_with_meta.metadata
                     ) * GAS_COST_FACTOR
-                except build.UnsupportedArquitectureException as e:
+                except build.UnsupportedArchitectureException as e:
                     raise e
                 break
 

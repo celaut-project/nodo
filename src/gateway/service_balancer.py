@@ -45,13 +45,16 @@ def service_balancer(
     try:
         peers.add_elem(
             weight=gateway_pb2.EstimatedCost(
-                cost=to_gas_amount(execution_cost(service_buffer=service_buffer,
-                                                        metadata=metadata) * GAS_COST_FACTOR + initial_gas_amount),
+                cost=to_gas_amount(
+                    gas_amount=execution_cost(  service_buffer=service_buffer,
+                                                metadata=metadata
+                                              ) * GAS_COST_FACTOR + initial_gas_amount
+                ),
                 variance=0
             )
         )
-    except build.UnsupportedArquitectureException:
-        l.LOGGER('UNSUPPORTED ARQUITECTURE.')
+    except build.UnsupportedArchitectureException as e:
+        l.LOGGER(e.__str__())
         pass
     except Exception as e:
         l.LOGGER('Error getting the local cost ' + str(e))
