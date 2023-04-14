@@ -1,3 +1,5 @@
+from typing import Optional
+
 from grpcbigbuffer import client as grpcbf
 import docker as docker_lib
 from hashlib import sha256
@@ -23,7 +25,7 @@ from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2
 
 
-def set_config(container_id: str, config: celaut.Configuration, resources: celaut.Sysresources,
+def set_config(container_id: str, config: Optional[celaut.Configuration], resources: celaut.Sysresources,
                api: celaut.Service.Container.Config):
     __config__ = celaut.ConfigurationFile()
     __config__.gateway.CopyFrom(generate_gateway_instance(network=DOCKER_NETWORK).instance)
@@ -74,7 +76,7 @@ def launch_service(
         service_id: str = None,
         system_requirements: celaut.Sysresources = None,
         max_sysreq=None,
-        config: celaut.Configuration = None,
+        config: Optional[celaut.Configuration] = None,
         initial_gas_amount: int = None,
         recursion_guard_token: str = None,
 ) -> gateway_pb2.Instance:

@@ -60,7 +60,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def StartService(self, request_iterator, context, **kwargs):
         l.LOGGER('Starting service by ' + str(context.peer()) + ' ...')
-        configuration = None
+        configuration: Optional[celaut.Configuration] = None
         system_requeriments = None
         initial_gas_amount = None
         max_sysreq = None
@@ -127,18 +127,18 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         if service_hash not in service_with_meta.metadata.hashtag.hash:
                             service_with_meta.metadata.hashtag.hash.append(service_hash)
                         for b in grpcbf.serialize_to_buffer(
-                                indices={},
-                                message_iterator=launch_service(
-                                    service_buffer=service_with_meta.value,
-                                    metadata=service_with_meta.metadata,
-                                    config=configuration,
-                                    system_requirements=system_requeriments,
-                                    max_sysreq=max_sysreq,
-                                    initial_gas_amount=initial_gas_amount,
-                                    father_ip=get_only_the_ip_from_context(context_peer=context.peer()),
-                                    father_id=client_id,
-                                    recursion_guard_token=recursion_guard_token
-                                )
+                            indices={},
+                            message_iterator=launch_service(
+                                service_buffer=service_with_meta.value,
+                                metadata=service_with_meta.metadata,
+                                config=configuration,
+                                system_requirements=system_requeriments,
+                                max_sysreq=max_sysreq,
+                                initial_gas_amount=initial_gas_amount,
+                                father_ip=get_only_the_ip_from_context(context_peer=context.peer()),
+                                father_id=client_id,
+                                recursion_guard_token=recursion_guard_token
+                            )
                         ):
                             yield b
                         return
