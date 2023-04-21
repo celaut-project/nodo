@@ -15,7 +15,8 @@ from hashlib import sha256
 
 from protos import celaut_pb2, gateway_pb2
 from src.utils.logger import LOGGER
-from contracts.eth_main.utils import get_priv_from_ledger, transact, w3_generator_factory, get_ledger_and_contract_addr_from_contract, catch_event
+from contracts.eth_main.utils import get_priv_from_ledger, transact, w3_generator_factory, \
+        get_ledger_and_contract_addr_from_contract, catch_event
 
 DIR = os.getcwd() + '/contracts/vyper_gas_deposit_contract/'
 CONTRACT: bytes = open(DIR+'bytecode', 'rb').read()
@@ -33,7 +34,7 @@ class LedgerContractInterface:
 
         # TODO debe de ir en una clase para el Ledger, sin un contrato concreto.
         self.priv = priv
-        self.pub = self.w3.eth.account.privateKeyToAccount(priv).address
+        self.pub = self.w3.eth.account.from_key(priv).address
         self.transaction_lock = Lock()
         self.last_nonce: int = 0
         self.nonce_count: int = 0
