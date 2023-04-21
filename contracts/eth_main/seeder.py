@@ -26,6 +26,7 @@ def seed(private_key=None):
             ]
         })
 
+    # Deploy contract.
     mongo.insert_one({
             "contract_hash": sha256(open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()).digest(),
             "instances": [
