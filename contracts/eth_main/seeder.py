@@ -1,8 +1,22 @@
+import os.path
 from hashlib import sha256
 import pymongo
 from src.utils.env import MONGODB
+from eth_account import Account
 
 def seed():
+
+    if (os.path.exists('contracts/eth_main/fuji.priv')):
+        with open("contracts/eth_main/fuji.priv", "r") as f:
+            private_key = f.read()
+
+    else:
+        account = Account.create()
+        print("Dirección de la billetera:", account.address)
+        print("Clave privada de la billetera:", account.privateKey.hex())
+        with open("contracts/eth_main/fuji.priv", "w") as f:
+            private_key = account.privateKey.hex()
+            f.write(private_key)
 
     mongo = pymongo.MongoClient(
             "mongodb://"+MONGODB+"/"
@@ -10,7 +24,8 @@ def seed():
 
     mongo.insert_one({
             "ledger": "fuji",
-            "priv": open("contracts/eth_main/fuji.priv", "r").read()[:-1],
+            # "priv": open("contracts/eth_main/fuji.priv", "r").read()[:-1],
+            "priv": private_key,
             "providers": [
                 "https://api.avax-test.network/ext/bc/C/rpc",
             ]
