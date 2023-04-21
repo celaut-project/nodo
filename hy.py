@@ -70,7 +70,7 @@ if __name__ == "__main__":
 
     if id == 'seeder':
         from contracts.eth_main.seeder import seed
-        seed() if len(sys.argv) == 2 else seed(sys.argv[2])
+        seed() if len(sys.argv) == 2 else seed(private_key=sys.argv[2])
         
     else:
         from src.builder.build import build

@@ -4,13 +4,10 @@ import pymongo
 from src.utils.env import MONGODB
 from eth_account import Account
 
-def seed():
 
-    if (os.path.exists('contracts/eth_main/fuji.priv')):
-        with open("contracts/eth_main/fuji.priv", "r") as f:
-            private_key = f.read()[:-1]
+def seed(private_key=None):
 
-    else:
+    if not private_key:
         account = Account.create()
         print("Dirección de la billetera:", account.address)
         print("Clave privada de la billetera:", account.privateKey.hex())
