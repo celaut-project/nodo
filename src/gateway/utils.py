@@ -15,7 +15,7 @@ from protos.gateway_pb2_grpcbf import GetServiceTar_input
 from src.utils import logger as l
 from src.utils import utils as utils
 from src.utils.env import GATEWAY_PORT, REGISTRY
-from src.utils.verify import check_service, get_service_hex_main_hash
+from src.utils.verify import check_service
 
 from contracts.vyper_gas_deposit_contract.interface \
     import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH, CONTRACT as DEFAULT_PROVISIONAL_CONTRACT
