@@ -96,4 +96,4 @@ def connect(peer: str):
     except Exception as e:
         print(e)
         
-    l.LOGGER('\nAdded peer ' + sys.argv[1])
+    l.LOGGER('\nAdded peer ' + peer)
