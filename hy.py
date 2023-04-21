@@ -67,13 +67,19 @@ if __name__ == "__main__":
 
     import sys
     id = sys.argv[1]
-    from src.builder.build import build
-    print('Go to build ', id)
-    service_with_meta = get_from_registry(id)
-    print(
-        build(
-            service_buffer = service_with_meta.value,
-            metadata = service_with_meta.metadata,
-            service_id = id
+
+    if id == 'seeder':
+        from contracts.eth_main.seeder import seed
+        seed()
+        
+    else:
+        from src.builder.build import build
+        print('Go to build ', id)
+        service_with_meta = get_from_registry(id)
+        print(
+            build(
+                service_buffer = service_with_meta.value,
+                metadata = service_with_meta.metadata,
+                service_id = id
+            )
         )
-    )
