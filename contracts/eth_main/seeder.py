@@ -10,12 +10,9 @@ def seed(private_key=None):
     if not private_key:
         account = Account.create()
         print("Dirección de la billetera:", account.address)
-        print("Clave privada de la billetera:", account.privateKey.hex())
-        with open("contracts/eth_main/fuji.priv", "w") as f:
-            private_key = account.privateKey.hex()
-            f.write(private_key)
+        print("Clave privada de la billetera:", account.key.hex())
+        private_key = account.key.hex()
         print(f'Created new address: {account.address} with private key: {private_key}')
-
 
     mongo = pymongo.MongoClient(
             "mongodb://"+MONGODB+"/"
