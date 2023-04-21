@@ -72,6 +72,10 @@ if __name__ == "__main__":
         from contracts.eth_main.seeder import seed
         seed() if len(sys.argv) == 2 else seed(private_key=sys.argv[2])
         
+    if id == 'connect':
+        from src.utils.zeroconf import connect
+        connect(sys.argv[2])
+
     else:
         from src.builder.build import build
         print('Go to build ', id)

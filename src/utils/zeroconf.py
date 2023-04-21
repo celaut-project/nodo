@@ -64,9 +64,8 @@ def Zeroconf(network: str) -> list:
     return peer_instances
 
 
-if __name__ == "__main__":
-    import sys
-    print('Connecting to peer -> ', sys.argv[1])
+def connect(peer: str):
+    print('Connecting to peer -> ', peer)
     
     while True:
         peer_id: ObjectId = ObjectId()
@@ -86,7 +85,7 @@ if __name__ == "__main__":
             instance = next(client_grpc(
                 method = gateway_pb2_grpc.GatewayStub(
                             grpc.insecure_channel(
-                                sys.argv[1]
+                                peer
                             )
                         ).GetInstance,
                 indices_parser = Instance,
