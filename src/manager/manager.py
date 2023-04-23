@@ -383,12 +383,12 @@ def build_cost(metadata: celaut.Any.Metadata) -> int:
     return COST_OF_BUILD
 
 
-def execution_cost(service: celaut.Service, metadata: celaut.Any.Metadata) -> int:
+def execution_cost(metadata: celaut.Any.Metadata) -> int:
     l.LOGGER('Get execution cost')
     try:
         return sum([
             len(DOCKER_CLIENT().containers.list()) * COMPUTE_POWER_RATE,
-            build_cost(service=service, metadata=metadata),
+            build_cost(metadata=metadata),
             EXECUTION_BENEFIT
         ])
     except build.UnsupportedArchitectureException as e:
@@ -404,6 +404,5 @@ def start_service_cost(
         initial_gas_amount: int
 ) -> int:
     return execution_cost(
-        service=service,
         metadata=metadata
     ) + initial_gas_amount

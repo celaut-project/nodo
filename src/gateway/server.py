@@ -497,7 +497,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             service_hash=r.value.hex()
                         )
                         cost = execution_cost(
-                            service=service_with_meta.service,
                             metadata=service_with_meta.metadata
                         ) * GAS_COST_FACTOR
                         break
@@ -526,7 +525,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         service_hash=service_hash
                     )
                     cost: int = execution_cost(
-                        service=service_with_meta__wbp.service,
                         metadata=service_with_meta__wbp.metadata
                     ) * GAS_COST_FACTOR
                 except build.UnsupportedArchitectureException as e:

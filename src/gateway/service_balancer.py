@@ -47,7 +47,6 @@ def service_balancer(
             weight=gateway_pb2.EstimatedCost(
                 cost=to_gas_amount(
                     gas_amount=execution_cost(
-                        service=service,
                         metadata=metadata
                     ) * GAS_COST_FACTOR + initial_gas_amount
                 ),
