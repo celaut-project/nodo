@@ -214,16 +214,19 @@ def is_open(ip: str, port: int) -> bool:
 
 
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
+    any: bool = True
     try:
         peer = pymongo.MongoClient(
             "mongodb://"+MONGODB+"/"
         )["mongo"]["peerInstances"].find_one({'_id': ObjectId(peer_id)})
         for uri in peer['instance']['uriSlot'][0]['uri']:
             if is_open(ip=uri['ip'], port=int(uri['port'])):
+                any = False
                 yield uri['ip'] + ':' + str(uri['port'])
     except Exception:
         pass
-    raise Exception('No uris found for peer: ' + str(peer_id))
+    if any:
+        raise Exception('No uris found for peer: ' + str(peer_id))
 
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
