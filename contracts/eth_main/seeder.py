@@ -8,11 +8,12 @@ from eth_account import Account
 def seed(private_key=None):
 
     if not private_key:
-        account = Account.create()
+        from web3 import Web3
+        w3 = Web3()
+        account = w3.eth.account.create()
+        private_key = w3.toHex(account.privateKey)
         print("Dirección de la billetera:", account.address)
-        print("Clave privada de la billetera:", account.key.hex())
-        private_key = account.key.hex()
-        print(f'Created new address: {account.address} with private key: {private_key}')
+        print("Clave privada de la billetera:", private_key)
 
     mongo = pymongo.MongoClient(
             "mongodb://"+MONGODB+"/"
