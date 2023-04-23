@@ -60,7 +60,8 @@ actual_building_processes_lock = threading.Lock()
 actual_building_processes = []  # list of hexadecimal string sha256 value hashes.
 
 
-def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2.celaut__pb2.Any.Metadata,
+def build_container_from_definition(service: celaut_pb2.Service,
+                                    metadata: gateway_pb2.celaut__pb2.Any.Metadata,
                                     service_id: str):
     # Build the container from filesystem definition.
     def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir_element: str, symlinks_element):
@@ -93,11 +94,9 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         raise UnsupportedArchitectureException(arch=str(metadata))
 
     l.LOGGER('Build process of ' + service_id + ': wait for unlock the memory.')
-    with resources_manager.mem_manager(len=len(service_buffer) * BUILD_CONTAINER_MEMORY_SIZE_FACTOR):
+    with resources_manager.mem_manager(len=len(service.SerializeToString()) * BUILD_CONTAINER_MEMORY_SIZE_FACTOR):
         # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
         l.LOGGER('Build process of ' + service_id + ': go to load all the buffer.')
-        service = gateway_pb2.celaut__pb2.Service()
-        service.ParseFromString(service_buffer)
         l.LOGGER('Build process of ' + service_id + ': filesystem load in memmory.')
 
         # Take filesystem.
@@ -133,7 +132,7 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
         check_output('docker buildx build --platform ' + arch + ' -t ' + cache_id + ' ' + dir + '/.', shell=True)
         l.LOGGER('Build process of ' + service_id + ': docker build it.')
         try:
-            pass #rmtree(dir)
+            rmtree(dir)
         except Exception:
             pass
 
@@ -156,7 +155,8 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
                         symlink.dst))
 
         l.LOGGER('Build process of ' + service_id + ': apply permissions.')
-        # Apply permissions. # TODO check that is only own by the container root. https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
+        # Apply permissions. # TODO check that is only own by the container root.
+        #  https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
         run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
         run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
 
@@ -171,7 +171,6 @@ def build_container_from_definition(service_buffer: bytes, metadata: gateway_pb2
 
 def get_container_from_outside(  # TODO could take it from a specific ledger.
         id: str,
-        service_buffer: bytes,
         metadata: gateway_pb2.celaut__pb2.Any.Metadata
 ):
     # search container in a service. (docker-tar, docker-tar.gz, filesystem, ....)
@@ -221,7 +220,7 @@ def get_container_from_outside(  # TODO could take it from a specific ledger.
 
 
 def build(
-        service_buffer: bytes,
+        service: celaut_pb2.Service,
         metadata: gateway_pb2.celaut__pb2.Any.Metadata,
         get_it: bool = True,
         service_id=None,
@@ -230,7 +229,6 @@ def build(
     if not service_id:
         try:
             service_id = get_service_hex_main_hash(
-                service_buffer=None,
                 metadata=metadata
             )
         except Exception as e:
@@ -254,7 +252,7 @@ def build(
                 threading.Thread(
                     target=build_container_from_definition,
                     args=(
-                        service_buffer,
+                        service,
                         metadata,
                         service_id
                     )
@@ -269,7 +267,7 @@ def build(
                 actual_building_processes_lock.release()
                 threading.Thread(
                     target=get_container_from_outside,
-                    args=(service_id, service_buffer, metadata)
+                    args=(service_id, metadata)
                 ).start() if get_it else sleep(WAIT_FOR_CONTAINER)
                 raise WaitBuildException
 

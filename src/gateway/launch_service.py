@@ -183,6 +183,7 @@ def launch_service(
                 ): raise Exception('Launch service error spending gas for ' + father_id)
                 try:
                     service_id = build.build(
+                        service=service,
                         metadata=metadata,
                         service_id=service_id,
                         get_it=not getting_container,
