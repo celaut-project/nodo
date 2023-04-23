@@ -213,9 +213,6 @@ def launch_service(
                     l.LOGGER(str(e))
                     raise e
 
-                # Now serialize the part of the service that is needed.
-                service = celaut.Service()
-                service.ParseFromString(service_buffer)
                 # If the request is made by a local service.
                 if father_id == father_ip:
                     container = create_container(
