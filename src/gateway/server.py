@@ -487,7 +487,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
             if type(r) is gateway_pb2.HashWithConfig:
                 if r.HasField('initial_gas_amount'):
                     initial_service_cost = from_gas_amount(r.initial_gas_amount)
-                r = service_hash = r.hash
+                service_hash: celaut.Any.Metadata.HashTag.Hash = r.hash
+                r = service_hash
 
             if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
                 if r.value.hex() in [s for s in os.listdir(REGISTRY)]:
@@ -517,7 +518,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
                 save_service(
                     service_with_meta_dir=service_with_meta,  # TODO
-                    service_hash=service_hash
+                    service_hash=service_hash.value.hex()
                 )
 
                 try:
