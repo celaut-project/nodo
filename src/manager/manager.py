@@ -400,7 +400,6 @@ def execution_cost(metadata: celaut.Any.Metadata) -> int:
 
 def start_service_cost(
         metadata: celaut.Any.Metadata,
-        service: celaut.Service,
         initial_gas_amount: int
 ) -> int:
     return execution_cost(

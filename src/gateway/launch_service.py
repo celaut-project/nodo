@@ -178,13 +178,11 @@ def launch_service(
                         token_or_container_ip=father_id,
                         gas_to_spend=start_service_cost(
                             initial_gas_amount=initial_gas_amount if initial_gas_amount else default_initial_cost(),
-                            service_buffer=service_buffer,
                             metadata=metadata
                         ) * GAS_COST_FACTOR,
                 ): raise Exception('Launch service error spending gas for ' + father_id)
                 try:
                     service_id = build.build(
-                        service_buffer=service_buffer,
                         metadata=metadata,
                         service_id=service_id,
                         get_it=not getting_container,
