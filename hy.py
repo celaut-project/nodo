@@ -76,14 +76,16 @@ if __name__ == "__main__":
         from src.utils.zeroconf import connect
         connect(sys.argv[2])
 
-    else:
-        from src.builder.build import build
-        print('Go to build ', id)
-        service_with_meta = get_from_registry(id)
-        print(
-            build(
-                service_buffer = service_with_meta.value,
-                metadata = service_with_meta.metadata,
-                service_id = id
-            )
-        )
+    """
+        else:
+            from src.builder.build import build
+            print('Go to build ', id)
+            service_with_meta = get_from_registry(id)
+            print(
+                build(
+                    service_buffer = service_with_meta.value,
+                    metadata = service_with_meta.metadata,
+                    service_id = id
+                )
+            )    
+    """
