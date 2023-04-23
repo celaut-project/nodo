@@ -8,7 +8,7 @@ from grpcbigbuffer.client import Dir
 import pymongo
 import netifaces as ni
 
-from protos import celaut_pb2, gateway_pb2
+from protos import celaut_pb2 as celaut, gateway_pb2
 
 from src.utils.env import MONGODB, REGISTRY
 from src.utils.verify import get_service_hex_main_hash
@@ -43,7 +43,7 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
         pass
 
 
-def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
+def get_grpc_uri(instance: celaut.Instance) -> celaut.Instance.Uri:
     for slot in instance.api.slot:
         # if 'grpc' in slot.transport_protocol and 'http2' in slot.transport_protocol: # TODO
         # If the protobuf lib. supported map for this message it could be O(n).
@@ -55,17 +55,16 @@ def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
 
 def service_hashes(
         hashes: typing.List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash]
-) -> Generator[celaut_pb2.Any.Metadata.HashTag.Hash, None, None]:
+) -> Generator[celaut.Any.Metadata.HashTag.Hash, None, None]:
     for hash in hashes:
         yield hash
 
 
 def service_extended(
-        service_buffer: bytes,
-        metadata: celaut_pb2.Any.Metadata,
-        config: celaut_pb2.Configuration = None,
-        min_sysreq: celaut_pb2.Sysresources = None,
-        max_sysreq: celaut_pb2.Sysresources = None,
+        metadata: celaut.Any.Metadata,
+        config: celaut.Configuration = None,
+        min_sysreq: celaut.Sysresources = None,
+        max_sysreq: celaut.Sysresources = None,
         send_only_hashes: bool = False,
         initial_gas_amount: int = None,
         client_id: str = None,
@@ -83,42 +82,28 @@ def service_extended(
             token=recursion_guard_token
         )
 
-    for hash in metadata.hashtag.hash:
+    for _hash in metadata.hashtag.hash:
         if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
             set_config = False
             yield gateway_pb2.HashWithConfig(
-                hash=hash,
+                hash=_hash,
                 config=config,
                 min_sysreq=min_sysreq,
                 max_sysreq=max_sysreq,
                 initial_gas_amount=to_gas_amount(initial_gas_amount)
             )
             continue
-        yield hash
+        yield _hash
 
     if not send_only_hashes:
-        any = celaut_pb2.Any(
-            metadata=metadata,
-            value=service_buffer
-        )
-        hash = get_service_hex_main_hash(service_buffer=service_buffer, metadata=metadata)
+        _hash: str = get_service_hex_main_hash(metadata=metadata)
         if set_config:
-            yield (
-                gateway_pb2.ServiceWithConfig,
-                gateway_pb2.ServiceWithConfig(
-                    service=any,
-                    config=config,
-                    min_sysreq=min_sysreq,
-                    max_sysreq=max_sysreq,
-                    initial_gas_amount=to_gas_amount(initial_gas_amount)
-                ),
-                Dir(REGISTRY + hash + '/p2')
-            )
+            print("SERVICE WITH CONFIG NOT SUPPORTED NOW.")
+            raise ("SERVICE WITH CONFIG NOT SUPPORTED NOW.")
         else:
             yield (
                 gateway_pb2.ServiceWithMeta,
-                any,
-                Dir(REGISTRY + hash + '/p2')
+                Dir(REGISTRY + _hash)
             )
 
 

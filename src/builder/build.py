@@ -191,7 +191,7 @@ def get_container_from_outside(  # TODO could take it from a specific ledger.
                     )
                 ).GetServiceTar(
                     serialize_to_buffer(
-                        service_extended(service_buffer=service_buffer, metadata=metadata),
+                        service_extended(metadata=metadata),
                         indices=GetServiceTar_input
                     )
                 )

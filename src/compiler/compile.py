@@ -279,12 +279,10 @@ class Hyper:
             service_buffer = self.service.SerializeToString()  # 2*len
             self.metadata.hashtag.hash.extend(
                 get_service_list_of_hashes(
-                    service_buffer=service_buffer,
-                    metadata=self.metadata
+                    service_buffer=service_buffer
                 )
             )
             service_id: str = get_service_hex_main_hash(
-                service_buffer=service_buffer,
                 metadata=self.metadata
             )
 

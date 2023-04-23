@@ -40,20 +40,8 @@ def calculate_hashes(value: bytes) -> List[Any.Metadata.HashTag.Hash]:
     ]
 
 
-def check_service(service_buffer: bytes, hashes: list) -> bool:
-    for hash in hashes:
-        if hash.type in HASH_FUNCTIONS and \
-                hash.value == HASH_FUNCTIONS[hash.type](
-            value=service_buffer
-        ):
-            return True
-    return False
-
-
 # Return the service's sha3-256 hash on hexadecimal format.
 def get_service_hex_main_hash(
-        service_buffer: Union[bytes, str, Service, tuple, None] = None,
-        partitions_model: tuple = None,
         metadata: Any.Metadata = None,
         other_hashes: list = None
 ) -> str:
@@ -67,46 +55,8 @@ def get_service_hex_main_hash(
         if hash.type == SHA3_256_ID:
             return hash.value.hex()
 
-    # If not but the spec. is complete, calculate the hash pruning it before.
-    # If not and is incomplete, it's going to be impossible calculate any hash.
 
-    if not service_buffer:
-        LOGGER(' sha3-256 hash function is not implemented on this method.')
-        raise Exception(' sha3-256 hash function is not implemented on this method.')
-
-    if type(service_buffer) is not tuple:
-        try:
-            return SHA3_256(
-                value=service_buffer if type(service_buffer) is bytes
-                else open(service_buffer, 'rb').read() if type(service_buffer) is str
-                else Service(service_buffer).SerializeToString()
-            ).hex()
-        except Exception as e:
-            LOGGER('Exception getting a service hash: ' + str(e))
-            pass
-
-    elif partitions_model:
-        return SHA3_256(
-            value=grpcbf.partitions_to_buffer(
-                message_type=Service,  # TODO fix that.
-                partitions_model=partitions_model,
-                partitions=service_buffer
-            )
-        ).hex()
-
-
-def get_service_list_of_hashes(service_buffer: bytes, metadata: Any.Metadata, complete: bool = True) -> list:
-    if complete:
-        return calculate_hashes(
-            value=service_buffer
-        )
-    else:
-        raise Exception("Can't get the hashes if the service is not complete.")
-
-
-def completeness(
-        service_buffer: bytes,
-        metadata: Any.Metadata,
-        id: str,
-) -> bool:
-    return True  # TODO develop when celaut.proto finish.
+def get_service_list_of_hashes(service_buffer: bytes) -> list:
+    return calculate_hashes(
+        value=service_buffer
+    )

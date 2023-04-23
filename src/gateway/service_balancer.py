@@ -4,7 +4,7 @@ import grpc
 
 import protos.celaut_pb2 as celaut
 from protos import gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_grpcbf import GetServiceEstimatedCost_input, StartService_input_partitions_v2
+from protos.gateway_pb2_grpcbf import GetServiceEstimatedCost_input
 
 from src.manager.manager import default_initial_cost, execution_cost, \
     generate_client_id_in_other_peer
@@ -18,7 +18,7 @@ from src.builder import build
 
 
 def service_balancer(
-        service_buffer: bytes,
+        service: celaut.Service,
         metadata: celaut.Any.Metadata,
         ignore_network: str = None,
         initial_gas_amount: int = None,
@@ -46,9 +46,10 @@ def service_balancer(
         peers.add_elem(
             weight=gateway_pb2.EstimatedCost(
                 cost=to_gas_amount(
-                    gas_amount=execution_cost(  service_buffer=service_buffer,
-                                                metadata=metadata
-                                              ) * GAS_COST_FACTOR + initial_gas_amount
+                    gas_amount=execution_cost(
+                        service=service,
+                        metadata=metadata
+                    ) * GAS_COST_FACTOR + initial_gas_amount
                 ),
                 variance=0
             )
@@ -76,9 +77,7 @@ def service_balancer(
                         indices_parser=gateway_pb2.EstimatedCost,
                         partitions_message_mode_parser=True,
                         indices_serializer=GetServiceEstimatedCost_input,
-                        partitions_serializer=StartService_input_partitions_v2,
                         input=service_extended(
-                            service_buffer=service_buffer,
                             metadata=metadata,
                             send_only_hashes=SEND_ONLY_HASHES_ASKING_COST,
                             initial_gas_amount=initial_gas_amount,

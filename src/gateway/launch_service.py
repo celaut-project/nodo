@@ -16,13 +16,13 @@ from src.manager.metrics import gas_amount_on_other_peer
 from src.manager.payment_process import increase_deposit_on_peer
 
 from src.utils import utils, logger as l
-from src.utils.env import CACHE, DOCKER_CLIENT, DOCKER_COMMAND, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, DOCKER_NETWORK, \
+from src.utils.env import CACHE, DOCKER_CLIENT, DOCKER_COMMAND, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
+    DOCKER_NETWORK, \
     DEFAULT_SYSTEM_RESOURCES, GAS_COST_FACTOR
 from src.utils.recursion_guard import RecursionGuard
-from src.utils.verify import completeness
 
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2
+from protos.gateway_pb2_grpcbf import StartService_input
 
 
 def set_config(container_id: str, config: Optional[celaut.Configuration], resources: celaut.Sysresources,
@@ -40,7 +40,7 @@ def set_config(container_id: str, config: Optional[celaut.Configuration], resour
     while 1:
         try:
             subprocess.run(
-                DOCKER_COMMAND+' cp ' + CACHE + container_id + '/__config__ ' + container_id + ':/' + '/'.join(
+                DOCKER_COMMAND + ' cp ' + CACHE + container_id + '/__config__ ' + container_id + ':/' + '/'.join(
                     api.path),
                 shell=True
             )
@@ -69,7 +69,7 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
 
 
 def launch_service(
-        service_buffer: bytes,
+        service: celaut.Service,
         metadata: celaut.Any.Metadata,
         father_ip: str,
         father_id: str = None,
@@ -81,7 +81,8 @@ def launch_service(
         recursion_guard_token: str = None,
 ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
-    if service_buffer is None: raise Exception("Service object can't be None")
+    if service is None:
+        raise Exception("Service object can't be None")
 
     with RecursionGuard(
             token=recursion_guard_token,
@@ -96,16 +97,11 @@ def launch_service(
         initial_gas_amount: int = initial_gas_amount if initial_gas_amount else default_initial_cost(
             father_id=father_id)
         getting_container = False  # Here it asks the balancer if it should assign the job to a peer.
-        is_complete = completeness(
-            service_buffer=service_buffer,
-            metadata=metadata,
-            id=service_id,
-        )
 
         while True:
             abort_it = True
             for peer, cost in service_balancer(
-                    service_buffer=service_buffer,
+                    service=service,
                     metadata=metadata,
                     ignore_network=utils.get_network_name(
                         ip_or_uri=father_ip
@@ -133,8 +129,10 @@ def launch_service(
                         ) <= cost and not increase_deposit_on_peer(
                             peer_id=peer,
                             amount=cost
-                        ):  raise Exception(
-                            'Launch service error increasing deposit on ' + peer + ' when it didn\'t have enough gas.')
+                        ):
+                            raise Exception(
+                                'Launch service error increasing deposit on ' + peer + 'when it didn\'t have enough '
+                                                                                       'gas.')
 
                         l.LOGGER('Spended gas, go to launch the service on ' + str(peer))
                         service_instance = next(grpcbf.client_grpc(
@@ -145,10 +143,8 @@ def launch_service(
                             ).StartService,  # TODO se debe hacer que al pedir un servicio exista un timeout.
                             partitions_message_mode_parser=True,
                             indices_serializer=StartService_input,
-                            partitions_serializer=StartService_input_partitions_v2,
                             indices_parser=gateway_pb2.Instance,
                             input=utils.service_extended(
-                                service_buffer=service_buffer,
                                 metadata=metadata,
                                 config=config,
                                 min_sysreq=system_requirements,
@@ -192,7 +188,7 @@ def launch_service(
                         metadata=metadata,
                         service_id=service_id,
                         get_it=not getting_container,
-                        complete=is_complete
+                        complete=True
                     )  # If the container is not built, build it.
                 except build.UnsupportedArchitectureException as e:
                     try:

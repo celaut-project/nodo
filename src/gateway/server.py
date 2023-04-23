@@ -5,25 +5,23 @@ from typing import List, Optional
 
 from grpcbigbuffer import client as grpcbf
 from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
-from src.manager.resources_manager import mem_manager
-
-from protos import gateway_pb2_grpc, gateway_pb2, gateway_pb2_grpcbf
-from protos import celaut_pb2 as celaut
 from grpcbigbuffer.buffer_pb2 import Buffer
-from protos.gateway_pb2_grpcbf import StartService_input, StartService_input_partitions_v2, GetServiceTar_input, \
-    GetServiceEstimatedCost_input, StartService_input_partitions_v1
 
+from protos import celaut_pb2 as celaut
+from protos import gateway_pb2_grpc, gateway_pb2
+from protos.gateway_pb2_grpcbf import StartService_input, GetServiceTar_input, \
+    GetServiceEstimatedCost_input
+from src.builder import build
 from src.compiler.compile import compile_repo
+from src.gateway.launch_service import launch_service
 from src.gateway.utils import save_service, search_definition, \
     generate_gateway_instance, search_file, search_container
-from src.gateway.launch_service import launch_service
-
 from src.manager.manager import could_ve_this_sysreq, prune_container, generate_client, get_token_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources, \
     execution_cost, default_initial_cost
 from src.manager.metrics import get_metrics
 from src.manager.payment_process import validate_payment_process
-
+from src.manager.resources_manager import mem_manager
 from src.utils import logger as l
 from src.utils.duplicate_grabber import DuplicateGrabber
 from src.utils.env import GENERAL_ATTEMPTS, GENERAL_WAIT_TIME, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, SHA3_256_ID, \
@@ -31,14 +29,8 @@ from src.utils.env import GENERAL_ATTEMPTS, GENERAL_WAIT_TIME, DENEGATE_COST_REQ
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name, read_file
 from src.utils.verify import get_service_hex_main_hash
 
-from src.builder import build
 
-
-def get_service_buffer_from_registry(service_hash: str) -> bytes:
-    return get_from_registry(service_hash=service_hash).value
-
-
-def get_from_registry(service_hash: str) -> celaut.Any:
+def get_from_registry(service_hash: str) -> gateway_pb2.ServiceWithMeta:
     l.LOGGER('Getting ' + service_hash + ' service from the local registry.')
     filename: str = REGISTRY + service_hash
     if not os.path.exists(filename):
@@ -48,9 +40,9 @@ def get_from_registry(service_hash: str) -> celaut.Any:
         filename = filename + '/' + WITHOUT_BLOCK_POINTERS_FILE_NAME
     try:
         with mem_manager(2 * os.path.getsize(filename)) as iolock:
-            any = celaut.Any()
-            any.ParseFromString(read_file(filename=filename))
-            return any
+            service_with_meta = gateway_pb2.ServiceWithMeta()
+            service_with_meta.ParseFromString(read_file(filename=filename))
+            return service_with_meta
     except (IOError, FileNotFoundError):
         l.LOGGER('The service was not on registry.')
         return None
@@ -72,8 +64,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         parser_generator = grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
             indices=StartService_input,
-            partitions_model=StartService_input_partitions_v1,
-            partitions_message_mode={1: True, 2: False, 3: True, 4: [True, False], 5: True, 6: True}
+            partitions_message_mode={1: True, 2: False, 3: True, 4: False, 5: True, 6: True}
         )
         while True:
             try:
@@ -121,24 +112,24 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         service_hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal=True)
                     try:
-                        service_with_meta: celaut.Any = get_from_registry(
+                        service_with_meta: gateway_pb2.ServiceWithMeta = get_from_registry(
                             service_hash=service_hash.value.hex()
                         )
                         if service_hash not in service_with_meta.metadata.hashtag.hash:
                             service_with_meta.metadata.hashtag.hash.append(service_hash)
                         for b in grpcbf.serialize_to_buffer(
-                            indices={},
-                            message_iterator=launch_service(
-                                service_buffer=service_with_meta.value,
-                                metadata=service_with_meta.metadata,
-                                config=configuration,
-                                system_requirements=system_requeriments,
-                                max_sysreq=max_sysreq,
-                                initial_gas_amount=initial_gas_amount,
-                                father_ip=get_only_the_ip_from_context(context_peer=context.peer()),
-                                father_id=client_id,
-                                recursion_guard_token=recursion_guard_token
-                            )
+                                indices={},
+                                message_iterator=launch_service(
+                                    service=service_with_meta.service,
+                                    metadata=service_with_meta.metadata,
+                                    config=configuration,
+                                    system_requirements=system_requeriments,
+                                    max_sysreq=max_sysreq,
+                                    initial_gas_amount=initial_gas_amount,
+                                    father_ip=get_only_the_ip_from_context(context_peer=context.peer()),
+                                    father_id=client_id,
+                                    recursion_guard_token=recursion_guard_token
+                                )
                         ):
                             yield b
                         return
@@ -166,14 +157,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             for i in range(GENERAL_ATTEMPTS):
                                 if registry_hash in [s for s in os.listdir(REGISTRY)]:
                                     try:
-                                        service_with_meta: celaut.Any = get_from_registry(
+                                        service_with_meta: gateway_pb2.ServiceWithMeta = get_from_registry(
                                             service_hash=registry_hash
                                         )
 
                                         for b in grpcbf.serialize_to_buffer(
                                                 indices={},
                                                 message_iterator=launch_service(
-                                                    service_buffer=service_with_meta.value,
+                                                    service=service_with_meta.service,
                                                     metadata=service_with_meta.metadata,
                                                     config=configuration,
                                                     system_requirements=system_requeriments,
@@ -205,19 +196,24 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     raise Exception('Grpcbb error: partition corrupted')
 
                 if type(r) is gateway_pb2.ServiceWithConfig:
-                    configuration = r.config
-                    service_with_meta_dir: str = next(parser_generator)
+                    print('SERVICE WITH CONFIG NOT SUPPORTED')
+                    raise Exception('SERVICE WITH CONFIG NOT SUPPORTED')
 
-                    if r.HasField('max_sysreq') and not could_ve_this_sysreq(sysreq=r.max_sysreq):
-                        raise Exception("The node can't execute the service with this requeriments.")
-                    else:
-                        max_sysreq = r.max_sysreq
-
-                    if r.HasField('min_sysreq'):
-                        system_requeriments = r.min_sysreq
-
-                    if r.HasField('initial_gas_amount'):
-                        initial_gas_amount = from_gas_amount(r.initial_gas_amount)
+                    """
+                        configuration = r.config
+                        service_with_meta_dir: str = next(parser_generator)
+    
+                        if r.HasField('max_sysreq') and not could_ve_this_sysreq(sysreq=r.max_sysreq):
+                            raise Exception("The node can't execute the service with this requeriments.")
+                        else:
+                            max_sysreq = r.max_sysreq
+    
+                        if r.HasField('min_sysreq'):
+                            system_requeriments = r.min_sysreq
+    
+                        if r.HasField('initial_gas_amount'):
+                            initial_gas_amount = from_gas_amount(r.initial_gas_amount)                    
+                    """
                 else:
                     service_with_meta_dir: str = r
 
@@ -236,14 +232,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     service_hash=registry_hash
                 )
 
-                service_with_meta: celaut.Any = get_from_registry(service_hash=registry_hash)
+                service_with_meta: gateway_pb2.ServiceWithMeta = get_from_registry(service_hash=registry_hash)
 
                 if configuration:
                     l.LOGGER('Launch service with configuration')
                     for buffer in grpcbf.serialize_to_buffer(
                             indices={},
                             message_iterator=launch_service(
-                                service_buffer=service_with_meta.value,
+                                service=service_with_meta.service,
                                 metadata=service_with_meta.metadata,
                                 config=configuration,
                                 system_requirements=system_requeriments,
@@ -264,7 +260,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         try:
             for b in grpcbf.serialize_to_buffer(
                     message_iterator=launch_service(
-                        service_buffer=search_definition(
+                        service=search_definition(
                             hashes=hashes
                         ),
                         metadata=celaut.Any.Metadata(
@@ -355,40 +351,33 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def GetFile(self, request_iterator, context, **kwargs):
         l.LOGGER('Request for give a service definition.')
         hashes = []
-        for hash in grpcbf.parse_from_buffer(
+        for _hash in grpcbf.parse_from_buffer(
                 request_iterator=request_iterator,
                 indices=celaut.Any.Metadata.HashTag.Hash,
                 partitions_message_mode=True
         ):
-            try:
-                # Comprueba que sea sha256 y que se encuentre en el registro.
-                hashes.append(hash)
-                if SHA3_256_ID == hash.type and \
-                        hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    yield gateway_pb2.buffer__pb2.Buffer(signal=True)  # Say stop to send more hashes.
-                    for b in grpcbf.serialize_to_buffer(  # TODO check.
-                            message_iterator=(
-                                    celaut.Any,
-                                    get_from_registry(
-                                        service_hash=hash.value.hex()
-                                    ),
-                                    grpcbf.Dir(REGISTRY + '/' + hash.value.hex() + '/p2')
-                            ),
-                            partitions_model=StartService_input_partitions_v2[2]
-                    ): yield b
-            except:
-                pass
+            # Comprueba que sea sha256 y que se encuentre en el registro.
+            hashes.append(_hash)
+            if SHA3_256_ID == _hash.type and \
+                    _hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
+                yield gateway_pb2.buffer__pb2.Buffer(signal=True)  # Say stop to send more hashes.
+                yield from grpcbf.serialize_to_buffer(  # TODO check.
+                    message_iterator=(
+                        celaut.Any,
+                        grpcbf.Dir(REGISTRY + _hash.value.hex())
+                    ),
+                )
 
         try:
-            for b in grpcbf.serialize_to_buffer(
-                    message_iterator=next(search_file(
-                        ignore_network=get_network_name(
-                            ip_or_uri=get_only_the_ip_from_context(context_peer=context.peer())
-                        ),
-                        hashes=hashes
-                    ))
-                    # It's not verifying the content, because we couldn't 've the format for prune metadata in it. The final client will've to check it.
-            ): yield b
+            yield from grpcbf.serialize_to_buffer(
+                message_iterator=next(search_file(
+                    ignore_network=get_network_name(
+                        ip_or_uri=get_only_the_ip_from_context(context_peer=context.peer())
+                    ),
+                    hashes=hashes
+                ))
+                # It's not verifying the content, because we couldn't 've the format for prune metadata in it. The final client will've to check it.
+            )
 
         except:
             raise Exception('Was imposible get the service definition.')
@@ -428,14 +417,13 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             # Si me da servicio.
             if type(r) is celaut.Any:
-                service_hash = get_service_hex_main_hash(service_buffer=r.value)
+                service_hash = get_service_hex_main_hash(metadata=r.metadata)
                 service_partitions_iterator = grpcbf.parse_from_buffer.conversor(
                     iterator=itertools.chain([r.value]),
                     pf_object=gateway_pb2.ServiceWithMeta,
-                    remote_partitions_model=gateway_pb2_grpcbf.StartService_input_partitions_v2[2],
                     mem_manager=mem_manager,
                     yield_remote_partition_dir=False,
-                    partitions_message_mode=[True, False]
+                    partitions_message_mode=True
                 )
                 # save_service() TODO
                 service_buffer = r.value
@@ -473,8 +461,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         parse_iterator = grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
             indices=GetServiceEstimatedCost_input,
-            partitions_model=StartService_input_partitions_v2,
-            partitions_message_mode={1: True, 2: [True, False], 3: True, 4: [True, False], 5: True, 6: True}
+            partitions_message_mode={1: True, 2: False, 3: True, 4: False, 5: True, 6: True}
         )
 
         client_id = None
@@ -483,7 +470,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
         cost = None
         initial_service_cost = None
         service_hash = None
-        second_partition_dir = None
         while True:
             try:
                 r = next(parse_iterator)
@@ -507,12 +493,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if r.value.hex() in [s for s in os.listdir(REGISTRY)]:
                     yield gateway_pb2.buffer__pb2.Buffer(signal=True)
                     try:
-                        p1 = get_from_registry(
+                        service_with_meta: gateway_pb2.ServiceWithMeta = get_from_registry(
                             service_hash=r.value.hex()
                         )
                         cost = execution_cost(
-                            service_buffer=p1.value,
-                            metadata=p1.metadata
+                            service=service_with_meta.service,
+                            metadata=service_with_meta.metadata
                         ) * GAS_COST_FACTOR
                         break
                     except build.UnsupportedArchitectureException as e:
@@ -525,60 +511,52 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             if r is gateway_pb2.ServiceWithMeta:
                 if DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
-                value, is_primary = DuplicateGrabber().next(
+                service_with_meta, is_primary = DuplicateGrabber().next(
                     hashes=[service_hash],
                     generator=parse_iterator
                 )
-                service_with_meta = value
-                if is_primary:
-                    second_partition_dir = next(parse_iterator)
-                elif service_hash.type == SHA3_256_ID:
-                    for i in range(GENERAL_ATTEMPTS):
-                        if service_hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                            second_partition_dir = get_from_registry(
-                                service_hash=r.value.hex()
-                            )
-                        else:
-                            sleep(GENERAL_WAIT_TIME)
-                if not second_partition_dir:
-                    next(parse_iterator)  # Download all the message again.
-                    second_partition_dir = next(parse_iterator)
 
-                if type(second_partition_dir) is not str: raise Exception('Error: fail sending service.')
+                save_service(
+                    service_with_meta_dir=service_with_meta,  # TODO
+                    service_hash=service_hash
+                )
+
                 try:
-                    cost = execution_cost(
-                        service_buffer=get_service_buffer_from_registry(
-                            service_hash=save_service(
-                                service_with_meta_dir=service_with_meta,  # TODO
-                                service_hash=service_hash
-                            )
-                        ),
-                        metadata=service_with_meta.metadata
+                    service_with_meta__wbp: gateway_pb2.ServiceWithMeta = get_from_registry(
+                        service_hash=service_hash
+                    )
+                    cost: int = execution_cost(
+                        service=service_with_meta__wbp.service,
+                        metadata=service_with_meta__wbp.metadata
                     ) * GAS_COST_FACTOR
                 except build.UnsupportedArchitectureException as e:
                     raise e
                 break
 
             if r is gateway_pb2.ServiceWithConfig:
-                if DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
-                service_with_config = next(parse_iterator)
-                initial_service_cost: int = from_gas_amount(service_with_config.initial_gas_amount)
-                service_with_meta = service_with_config.service
-                second_partition_dir = next(parse_iterator)
-                if type(second_partition_dir) is not str: raise Exception('Error: fail sending service.')
-                try:
-                    cost = execution_cost(
-                        service_buffer=get_service_buffer_from_registry(
-                            service_hash=save_service(
-                                service_with_meta_dir=service_with_config.service,  # TODO
-                                service_hash=service_hash
-                            )
-                        ),
-                        metadata=service_with_meta.metadata
-                    ) * GAS_COST_FACTOR
-                except build.UnsupportedArchitectureException as e:
-                    raise e
-                break
+                print('SERVICE WITH CONFIG NOT SUPPORTED')
+                raise Exception('SERVICE WITH CONFIG NOT SUPPORTED')
+                """"
+                    if DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
+                    service_with_config = next(parse_iterator)
+                    initial_service_cost: int = from_gas_amount(service_with_config.initial_gas_amount)
+                    service_with_meta = service_with_config.service
+                    second_partition_dir = next(parse_iterator)
+                    if type(second_partition_dir) is not str: raise Exception('Error: fail sending service.')
+                    try:
+                        cost = execution_cost(
+                            service_buffer=get_service_buffer_from_registry(
+                                service_hash=save_service(
+                                    service_with_meta_dir=service_with_config.service,  # TODO
+                                    service_hash=service_hash
+                                )
+                            ),
+                            metadata=service_with_meta.metadata
+                        ) * GAS_COST_FACTOR
+                    except build.UnsupportedArchitectureException as e:
+                        raise e
+                    break                
+                """
 
         if not initial_service_cost:
             initial_service_cost: int = default_initial_cost(

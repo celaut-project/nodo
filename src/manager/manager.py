@@ -365,23 +365,8 @@ def maintain_cost(sysreq: dict) -> int:
     return MEMORY_LIMIT_COST_FACTOR * sysreq['mem_limit']
 
 
-def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
-    """
-
-    Parameters
-    ----------
-    service_buffer
-    metadata
-
-    Returns
-    -------
-
-    Raises
-    -------
-    UnsupportedArchitectureException
-
-    """
-    is_built = (get_service_hex_main_hash(service_buffer=service_buffer, metadata=metadata)
+def build_cost(metadata: celaut.Any.Metadata) -> int:
+    is_built = (get_service_hex_main_hash(metadata=metadata)
                 in [img.tags[0].split('.')[0] for img in DOCKER_CLIENT().images.list()])
     if not is_built and not build.check_supported_architecture(metadata=metadata):
         raise build.UnsupportedArchitectureException(arch=str(metadata))
@@ -398,12 +383,12 @@ def build_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
     return COST_OF_BUILD
 
 
-def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
+def execution_cost(service: celaut.Service, metadata: celaut.Any.Metadata) -> int:
     l.LOGGER('Get execution cost')
     try:
         return sum([
             len(DOCKER_CLIENT().containers.list()) * COMPUTE_POWER_RATE,
-            build_cost(service_buffer=service_buffer, metadata=metadata),
+            build_cost(service=service, metadata=metadata),
             EXECUTION_BENEFIT
         ])
     except build.UnsupportedArchitectureException as e:
@@ -414,11 +399,11 @@ def execution_cost(service_buffer: bytes, metadata: celaut.Any.Metadata) -> int:
 
 
 def start_service_cost(
-        metadata,
-        service_buffer,
+        metadata: celaut.Any.Metadata,
+        service: celaut.Service,
         initial_gas_amount: int
 ) -> int:
     return execution_cost(
-        service_buffer=service_buffer,
+        service=service,
         metadata=metadata
     ) + initial_gas_amount
