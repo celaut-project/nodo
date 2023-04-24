@@ -511,22 +511,22 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             if r is gateway_pb2.ServiceWithMeta:
                 if DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: raise Exception("I dont've the service.")
-                service_with_meta, is_primary = DuplicateGrabber().next(
+                service_with_meta_dir, is_primary = DuplicateGrabber().next(
                     hashes=[service_hash],
                     generator=parse_iterator
                 )
 
                 save_service(
-                    service_with_meta_dir=service_with_meta,  # TODO
+                    service_with_meta_dir=service_with_meta_dir,
                     service_hash=service_hash.value.hex()
                 )
 
                 try:
-                    service_with_meta__wbp: gateway_pb2.ServiceWithMeta = get_from_registry(
-                        service_hash=service_hash
+                    service_with_meta: gateway_pb2.ServiceWithMeta = get_from_registry(
+                        service_hash=service_hash.value.hex()
                     )
                     cost: int = execution_cost(
-                        metadata=service_with_meta__wbp.metadata
+                        metadata=service_with_meta.metadata
                     ) * GAS_COST_FACTOR
                 except build.UnsupportedArchitectureException as e:
                     raise e
@@ -563,7 +563,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
         cost: int = cost + initial_service_cost if cost else initial_service_cost
         l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost) + ' with benefit ' + str(0))
-        if cost is None: raise Exception("I dont've the service.")
+        if cost is None:
+            raise Exception("I dont've the service.")
         for b in grpcbf.serialize_to_buffer(
                 message_iterator=gateway_pb2.EstimatedCost(
                     cost=to_gas_amount(cost),
