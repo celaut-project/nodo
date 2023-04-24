@@ -1,10 +1,13 @@
+import json
 from time import sleep, time
 import threading
+from typing import Tuple
+
 from protos.gateway_pb2_grpcbf import GetServiceTar_input
 import grpc, os, src.manager.resources_manager as resources_manager
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 from src.utils.env import DOCKER_COMMAND, SUPPORTED_ARCHITECTURES, BUILD_CONTAINER_MEMORY_SIZE_FACTOR, \
-    WAIT_FOR_CONTAINER
+    WAIT_FOR_CONTAINER, BLOCKDIR
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator, service_extended, read_file
 import src.utils.logger as l
 from grpcbigbuffer.client import save_chunks_to_file, serialize_to_buffer, copy_block_if_exists
@@ -94,10 +97,21 @@ def build_container_from_definition(service: celaut_pb2.Service,
         raise UnsupportedArchitectureException(arch=str(metadata))
 
     l.LOGGER('Build process of ' + service_id + ': wait for unlock the memory.')
-    with resources_manager.mem_manager(len=len(service.SerializeToString()) * BUILD_CONTAINER_MEMORY_SIZE_FACTOR):
+
+    # Get the size of the service's biggest block.
+    with open(f"{REGISTRY}{get_service_hex_main_hash(metadata=metadata)}/_.json", 'r') as f:
+        biggest_block_size: int = max([os.path.getsize(BLOCKDIR + c[0])
+                                       for c in json.load(f) if type(c) is Tuple])
+
+    with resources_manager.mem_manager(
+            len=sum([
+                service.ByteSize(),
+                biggest_block_size
+            ]) * BUILD_CONTAINER_MEMORY_SIZE_FACTOR
+    ):
         # TODO si el coste es mayor a la cantidad total se quedará esperando indefinidamente.
         l.LOGGER('Build process of ' + service_id + ': go to load all the buffer.')
-        l.LOGGER('Build process of ' + service_id + ': filesystem load in memmory.')
+        l.LOGGER('Build process of ' + service_id + ': filesystem load in memory.')
 
         # Take filesystem.
         fs = celaut_pb2.Service.Container.Filesystem()
