@@ -5,9 +5,11 @@ import docker as docker_lib
 
 from protos import celaut_pb2
 
-GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(default) != bool \
-                                    else os.environ.get(env) in ['True', 'true', 'T',
-                                                                 't']) if env in os.environ.keys() else default
+MAIN_DIR = f"/node"
+
+GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(default) != bool
+                                else os.environ.get(env) in ['True', 'true', 'T',
+                                                             't']) if env in os.environ.keys() else default
 
 #  -------------------------------------------------
 #  -------------------------------------------------
@@ -18,9 +20,9 @@ GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(defau
 # DIRECTORIES
 MONGODB = GET_ENV(env='MONGODB', default='localhost:27017')
 DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
-CACHE = "/node/__cache__/"
-REGISTRY = "/node/__registry__/"
-BLOCKDIR = "/node/__block__/"
+CACHE = f"{MAIN_DIR}/__cache__/"
+REGISTRY = f"{MAIN_DIR}/__registry__/"
+BLOCKDIR = f"{MAIN_DIR}/__block__/"
 
 SAVE_ALL = False
 COMPILER_MEMORY_SIZE_FACTOR = GET_ENV(env='COMPILER_MEMORY_SIZE_FACTOR', default=2.0)
@@ -66,7 +68,10 @@ LOCAL_NETWORK = 'lo'
 DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = GET_ENV(env='DEFAULT_INITIAL_GAS_AMOUNT_FACTOR',
                                             default=1 / pow(10, 6))  # Percentage of the parent's gas amount.
 USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = GET_ENV(env='USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR',
-                                                default=False)  # Use DEFAULT_INITIAL_GAS_AMOUNT_FACTOR to calculate the initial gas amount.
+                                                default=False)
+# Use DEFAULT_INITIAL_GAS_AMOUNT_FACTOR to calculate
+# the initial gas amount.
+
 DEFAULT_INTIAL_GAS_AMOUNT = GET_ENV(env='DEFAULT_INTIAL_GAS_AMOUNT', default=pow(10, 9))
 COMPUTE_POWER_RATE = GET_ENV(env='COMPUTE_POWER_RATE', default=2)
 COST_OF_BUILD = GET_ENV(env='COST_OF_BUILD', default=5)
