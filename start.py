@@ -34,7 +34,7 @@ if __name__ == '__main__':
 
 
     iobd.IOBigData(
-        ram_pool_method=lambda: virtual_memory().total
+        ram_pool_method=lambda: virtual_memory().available
     ).set_log(
         log=l.LOGGER if MEMORY_LOGS else lambda message: None
     )
