@@ -57,11 +57,11 @@ def transact(
     # Sign the transaction using your private key
     signed = w3.eth.account.signTransaction(transaction, priv)
     tx_hash = w3.eth.sendRawTransaction(signed.rawTransaction).hex()
-    print('Pub -< ', pub)
-    print('Transaction hash: ', tx_hash)
-    print('Waiting for transaction to be mined...')
+    LOGGER('Pub -< ', pub)
+    LOGGER('Transaction hash: ', tx_hash)
+    LOGGER('Waiting for transaction to be mined...')
     if timeout and poll_latency: w3.eth.wait_for_transaction_receipt(tx_hash, timeout, poll_latency)
-    print('Transaction hash: ', tx_hash, ' executed and minted \n')
+    LOGGER('Transaction hash: ', tx_hash, ' executed and minted \n')
     return tx_hash
 
 
