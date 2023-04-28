@@ -35,7 +35,7 @@ def catch_event(contract_address, w3, contract, event_name, opt, init_delay: int
                         poll_interval = poll_interval, event_name = event_name, opt = opt, w3 = w3, contract = contract
                     )))
         except Exception as e:
-            LOGGER('Exception on catch event: '+ str(e))
+            LOGGER(f'Exception on catch event:  {str(e)}')
         finally:
             # close loop to free up system resources
             loop.close()
@@ -57,11 +57,11 @@ def transact(
     # Sign the transaction using your private key
     signed = w3.eth.account.signTransaction(transaction, priv)
     tx_hash = w3.eth.sendRawTransaction(signed.rawTransaction).hex()
-    LOGGER('Pub -< ', pub)
-    LOGGER('Transaction hash: ', tx_hash)
+    LOGGER(f'Pub -> {pub} ')
+    LOGGER(f'Transaction hash: {tx_hash}')
     LOGGER('Waiting for transaction to be mined...')
     if timeout and poll_latency: w3.eth.wait_for_transaction_receipt(tx_hash, timeout, poll_latency)
-    LOGGER('Transaction hash: ', tx_hash, ' executed and minted \n')
+    LOGGER(f'Transaction hash: {tx_hash} executed and minted \n')
     return tx_hash
 
 
