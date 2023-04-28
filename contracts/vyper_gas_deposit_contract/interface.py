@@ -107,10 +107,9 @@ class LedgerContractInterface:
                 return True
             else:
                 sleep(self.poll_interval)
-        LOGGER(f'Session not found {self.sessions} \n {token} {token_encoded} {amount} \n',
-               token_encoded in self.sessions, self.sessions[token_encoded] >= amount, '\n',
-               not validate_token, validate_token(token), '\n'
-               )
+        LOGGER(f'Session not found {self.sessions} \n {token} {token_encoded} {amount} \n '
+               f'{token_encoded in self.sessions} {self.sessions[token_encoded] >= amount} \n'
+               f'{not validate_token} {validate_token(token)} \n' )
         return False
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
