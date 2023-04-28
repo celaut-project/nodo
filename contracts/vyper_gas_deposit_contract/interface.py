@@ -30,7 +30,7 @@ gas_to_contract = lambda amount, parity_factor: int(amount / 10 ** parity_factor
 class LedgerContractInterface:
 
     def __init__(self, w3_generator, contract_addr, priv):
-        LOGGER(int(time()), 'EVM gas deposit contract interface init for ' + str(contract_addr))
+        LOGGER(f"{int(time())} EVM gas deposit contract interface init for { str(contract_addr)}")
         self.w3: Web3 = next(w3_generator)
         self.contract_addr: str = contract_addr
 
@@ -95,7 +95,7 @@ class LedgerContractInterface:
                 self.sessions[token] = amount
             else:
                 self.sessions[token] += amount
-            LOGGER('\n', int(time()), 'New session:', token, amount, '\n')
+            LOGGER(f'\n {int(time())} New session: {token}  {amount} \n')
 
     def validate_session(self, token: str, amount: int, validate_token=None) -> bool:
         token_encoded = sha256(token.encode('utf-8')).digest()
@@ -107,7 +107,7 @@ class LedgerContractInterface:
                 return True
             else:
                 sleep(self.poll_interval)
-        LOGGER('Session not found', self.sessions, '\n', token, token_encoded, amount, '\n',
+        LOGGER(f'Session not found {self.sessions} \n {token} {token_encoded} {amount} \n',
                token_encoded in self.sessions, self.sessions[token_encoded] >= amount, '\n',
                not validate_token, validate_token(token), '\n'
                )
@@ -130,14 +130,14 @@ class LedgerContractInterface:
                     poll_latency=self.wait_mint_poll_latency,
                 )
             except exceptions.TimeExhausted:
-                LOGGER('Timeout while adding gas for token: ', token, '\n')
+                LOGGER(f'Timeout while adding gas for token:  {token} \n')
                 return ''
             except Exception as e:
                 if str(e) == "{'code': -32000, 'message': 'already known'}":
-                    LOGGER('Transaction already known: ', token, '\n')
+                    LOGGER(f'Transaction already known: {token} \n')
                     continue
                 else:
-                    LOGGER('Error ' + str(e) + ' while adding gas for token: ', token, '\n')
+                    LOGGER(f'Error {str(e)} while adding gas for token: {token}\n')
                     return ''
 
 
