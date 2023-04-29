@@ -30,7 +30,7 @@ gas_to_contract = lambda amount, parity_factor: int(amount / 10 ** parity_factor
 class LedgerContractInterface:
 
     def __init__(self, w3_generator, contract_addr, priv):
-        LOGGER(f"{int(time())} EVM gas deposit contract interface init for { str(contract_addr)}")
+        LOGGER(f"{int(time())} EVM gas deposit contract interface init for {str(contract_addr)}")
         self.w3: Web3 = next(w3_generator)
         self.contract_addr: str = contract_addr
 
@@ -107,9 +107,15 @@ class LedgerContractInterface:
                 return True
             else:
                 sleep(self.poll_interval)
-        LOGGER(f'Session not found {self.sessions} \n {token} {token_encoded} {amount} \n '
-               f'{token_encoded in self.sessions} {self.sessions[token_encoded] >= amount} \n'
-               f'{not validate_token} {validate_token(token)} \n' )
+
+        LOGGER(f"Error: El token {token_encoded} no se encuentra en las sesiones existentes ({self.sessions}).\n"
+               if token_encoded not in self.sessions
+               else f"Error: El token {token_encoded} presente en la sesión no tiene suficiente gas "
+                    f"disponible ({self.sessions[token_encoded]}). Se necesitan {amount} gas.\n"
+                  if self.sessions[token_encoded] < amount
+                  else f"Error: El token {token_encoded} no es válido.\n"
+                    if not validate_token(token)
+                    else f"¡Token {token_encoded} validado correctamente!\n")
         return False
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
