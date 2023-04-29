@@ -98,7 +98,7 @@ class LedgerContractInterface:
             LOGGER(f'\n {int(time())} New session: {token}  {amount} \n')
 
     def validate_payment_session(self, token: str, amount: int, validate_token=None) -> bool:
-        token_encoded = sha256(token.encode('utf-8')).digest()
+        token_encoded: bytes = sha256(token.encode('utf-8')).digest()
         for i in range(self.poll_iterations):
             if token_encoded in self.payment_sessions and self.payment_sessions[token_encoded] >= amount and \
                     (not validate_token or validate_token(token)):
@@ -108,14 +108,15 @@ class LedgerContractInterface:
             else:
                 sleep(self.poll_interval)
 
-        LOGGER(f"Error: El token {token_encoded} no se encuentra en las sesiones existentes ({self.payment_sessions}).\n"
+        LOGGER(f"Error: El token {token} no se encuentra en las sesiones existentes ({self.payment_sessions}).\n"
                if token_encoded not in self.payment_sessions
-               else f"Error: El token {token_encoded} presente en la sesión no tiene suficiente gas "
-                    f"disponible ({self.payment_sessions[token_encoded]}). Se necesitan {amount} gas.\n"
+               else f"Error: El token {token} no tiene suficiente gas "
+                    f"disponible ({self.payment_sessions[token_encoded]})."
+                    f" Se necesitan {amount - self.payment_sessions[token_encoded]} de {amount} gas.\n"
                   if self.payment_sessions[token_encoded] < amount
-                  else f"Error: El token {token_encoded} no es válido.\n"
+                  else f"Error: El token {token} no es válido.\n"
                     if not validate_token(token)
-                    else f"¡Token {token_encoded} validado correctamente!\n")
+                    else f"Error: ¡Token {token} validado correctamente! Aunque algo ocurrió.\n")
         return False
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
