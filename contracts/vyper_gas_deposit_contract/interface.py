@@ -48,7 +48,7 @@ class LedgerContractInterface:
         )
         self.contract = self.generate_contract(addr=contract_addr)
 
-        self.sessions: Dict[bytes, int] = {}
+        self.payment_sessions: Dict[bytes, int] = {}
         self.sessions_lock = Lock()
 
         # TODO this variables depends on the ledger, so they should be moved on the mongo.contracts collection OR be dynamically updated.
@@ -91,28 +91,28 @@ class LedgerContractInterface:
     def __new_session(self, token, amount):
         amount = self.contract_to_gas(amount)
         with self.sessions_lock:
-            if token not in self.sessions:
-                self.sessions[token] = amount
+            if token not in self.payment_sessions:
+                self.payment_sessions[token] = amount
             else:
-                self.sessions[token] += amount
+                self.payment_sessions[token] += amount
             LOGGER(f'\n {int(time())} New session: {token}  {amount} \n')
 
-    def validate_session(self, token: str, amount: int, validate_token=None) -> bool:
+    def validate_payment_session(self, token: str, amount: int, validate_token=None) -> bool:
         token_encoded = sha256(token.encode('utf-8')).digest()
         for i in range(self.poll_iterations):
-            if token_encoded in self.sessions and self.sessions[token_encoded] >= amount and \
+            if token_encoded in self.payment_sessions and self.payment_sessions[token_encoded] >= amount and \
                     (not validate_token or validate_token(token)):
                 with self.sessions_lock:
-                    self.sessions[token_encoded] -= amount
+                    self.payment_sessions[token_encoded] -= amount
                 return True
             else:
                 sleep(self.poll_interval)
 
-        LOGGER(f"Error: El token {token_encoded} no se encuentra en las sesiones existentes ({self.sessions}).\n"
-               if token_encoded not in self.sessions
+        LOGGER(f"Error: El token {token_encoded} no se encuentra en las sesiones existentes ({self.payment_sessions}).\n"
+               if token_encoded not in self.payment_sessions
                else f"Error: El token {token_encoded} presente en la sesión no tiene suficiente gas "
-                    f"disponible ({self.sessions[token_encoded]}). Se necesitan {amount} gas.\n"
-                  if self.sessions[token_encoded] < amount
+                    f"disponible ({self.payment_sessions[token_encoded]}). Se necesitan {amount} gas.\n"
+                  if self.payment_sessions[token_encoded] < amount
                   else f"Error: El token {token_encoded} no es válido.\n"
                     if not validate_token(token)
                     else f"¡Token {token_encoded} validado correctamente!\n")
@@ -179,7 +179,7 @@ class VyperDepositContractInterface(metaclass=Singleton):
         LOGGER("Validating payment...")
         ledger_provider = self.ledger_providers[ledger]
         assert contract_addr == ledger_provider.contract_addr
-        return ledger_provider.validate_session(token, amount, validate_token)
+        return ledger_provider.validate_payment_session(token, amount, validate_token)
 
 
 def process_payment(amount: int, token: str, ledger: str,
