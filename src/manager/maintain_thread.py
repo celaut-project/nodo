@@ -56,9 +56,9 @@ def peer_deposits():
                 gas_amount_on_other_peer(
                     peer_id=peer_id,
                 ) < MIN_DEPOSIT_PEER:
-            l.LOGGER('Manager error: the peer ' + str(peer_id) + ' has not enough deposit. ')
+            l.LOGGER(f'The peer {peer_id} has not enough deposit.')
             if not __increase_deposit_on_peer(peer_id=peer_id, amount=MIN_DEPOSIT_PEER):
-                l.LOGGER('Manager error: the peer ' + str(peer_id) + ' could not be increased.')
+                l.LOGGER(f'Manager error: the peer {peer_id} could not be increased.')
 
 
 def load_peer_instances_from_disk():
