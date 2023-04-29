@@ -37,6 +37,9 @@ class DuplicateGrabber(metaclass=Singleton):
             end_time: float = session_obj.end_time
             if end_time and time() - end_time > completion_time:
                 del self.sessions[session]
+                for _hash, value in self.hashes:
+                    if value == session:
+                        del self.hashes[_hash]
 
     def next(self,
              hashes: List[celaut.Any.Metadata.HashTag.Hash],
@@ -53,6 +56,8 @@ class DuplicateGrabber(metaclass=Singleton):
             for hash_element in hashes:
                 if hash_element in self.hashes.keys():
                     session = self.hashes[hash_element]
+                    if session not in self.sessions:
+                        l.LOGGER(f"The session {session} is not in the registry, maybe was once time.")
                     wait = True
                     break
 
