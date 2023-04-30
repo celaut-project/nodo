@@ -37,7 +37,7 @@ class DuplicateGrabber(metaclass=Singleton):
             end_time: float = session_obj.end_time
             if end_time and time() - end_time > completion_time:
                 del self.sessions[session]
-                for _hash, value in self.hashes.items():
+                for _hash, value in list(self.hashes.items()):
                     if value == session:
                         del self.hashes[_hash]
 
