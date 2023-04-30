@@ -82,7 +82,7 @@ class IOBigData(metaclass=Singleton):
                 self.log('\n--------- ' + message + ' -------------')
                 self.log('RAM POOL       -> ' + IOBigData.convert_size(self.ram_pool()))
                 self.log('RAM LOCKED     -> ' + IOBigData.convert_size(self.ram_locked))
-                self.log('RAM AVALIABLE  -> ' + IOBigData.convert_size(self.get_ram_avaliable()))
+                self.log('RAM AVAILABLE  -> ' + IOBigData.convert_size(self.get_ram_avaliable()))
                 self.log('RAM WAITING    -> ' + IOBigData.convert_size(sum(self.wait)))
                 self.log('-----------------------------------------\n')
 
