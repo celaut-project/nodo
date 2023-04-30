@@ -8,7 +8,7 @@ from grpcbigbuffer import client as grpcbf
 from protos import gateway_pb2_grpc, gateway_pb2
 from src.utils import logger as l
 from src.utils.env import CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME, CLIENT_EXPIRATION_TIME, DOCKER_CLIENT, \
-    DOCKER_NETWORK
+    DOCKER_NETWORK, REMOVE_CONTAINERS
 from src.utils.singleton import Singleton
 from src.utils.utils import get_network_name, from_gas_amount, generate_uris_by_peer_id
 
@@ -146,11 +146,12 @@ class SystemCache(metaclass=Singleton):
             raise Exception(
                 'purgue_internal: token is None and (father_ip is None or container_id is None or container_ip is None)')
 
-        try:
-            DOCKER_CLIENT().containers.get(container_id).remove(force=True)
-        except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-            l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
-            return 0
+        if REMOVE_CONTAINERS:
+            try:
+                DOCKER_CLIENT().containers.get(container_id).remove(force=True)
+            except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
+                l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
+                return 0
 
         refund = self.__get_gas_amount_by_ip(
             ip=container_ip
