@@ -1,12 +1,13 @@
 import sqlite3
 
-# Conexión a la base de datos existente
-conn = sqlite3.connect('database.db')
+# Connect to an existing database
+conn = sqlite3.connect('database.sqlite')
+print("Connected to database.")
 
-# Creación del cursor
+# Create a cursor
 cursor = conn.cursor()
 
-# Agregar la tabla "peer"
+# Add the "Peer" table
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS peer (
         id TEXT PRIMARY KEY,
@@ -15,8 +16,9 @@ cursor.execute('''
         app_protocol BLOB
     )
 ''')
+print("Created 'peer' table.")
 
-# Agregar la tabla "Slot"
+# Add the "Slot" table
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS slot (
         id INTEGER PRIMARY KEY,
@@ -26,7 +28,65 @@ cursor.execute('''
         FOREIGN KEY (peer_id) REFERENCES peer (id)
     )
 ''')
+print("Created 'slot' table.")
 
-# Guardar los cambios y cerrar la conexión
+# Add the "Uri" table
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS uri (
+        id INTEGER PRIMARY KEY,
+        ip TEXT,
+        port INTEGER,
+        slot_id INTEGER,
+        FOREIGN KEY (slot_id) REFERENCES slot (id)
+    )
+''')
+print("Created 'uri' table.")
+
+# Add the "Contract" table
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS contract (
+        id INTEGER PRIMARY KEY,
+        contract BLOB
+    )
+''')
+print("Created 'contract' table.")
+
+# Add the "Ledger" table
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS ledger (
+        id TEXT PRIMARY KEY,
+        private_key STRING
+    )
+''')
+print("Created 'ledger' table.")
+
+# Add the "Ledger Provider" table
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS ledger_provider (
+        id INTEGER PRIMARY KEY,
+        uri TEXT,
+        ledger_id TEXT,
+        FOREIGN KEY (ledger_id) REFERENCES peer (id)
+    )
+''')
+print("Created 'ledger' table.")
+
+# Add the "Contract Instance" table
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS contract_instance (
+        id INTEGER PRIMARY KEY,
+        address TEXT,
+        ledger_id TEXT,
+        contract_id INTEGER,
+        peer_id INTEGER,
+        FOREIGN KEY (ledger_id) REFERENCES peer (id),
+        FOREIGN KEY (contract_id) REFERENCES peer (id),
+        FOREIGN KEY (peer_id) REFERENCES peer (id)
+    )
+''')
+print("Created 'contract_instance' table.")
+
+# Save the changes and close the connection
 conn.commit()
 conn.close()
+print("Database connection closed.")
