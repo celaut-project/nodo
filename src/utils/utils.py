@@ -1,4 +1,5 @@
 import base64
+import sqlite3
 from hashlib import sha256
 import socket
 from typing import Generator
@@ -26,7 +27,7 @@ def read_file(filename) -> bytes:
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     try:
         for peer in list(pymongo.MongoClient(
-                "mongodb://"+MONGODB+"/"
+                "mongodb://" + MONGODB + "/"
         )["mongo"]["peerInstances"].find()):
 
             if not ignore_network:
@@ -165,26 +166,82 @@ def get_network_name(ip_or_uri: str) -> str:
         raise Exception('Error getting the network name: ' + str(e))
 
 
-def get_ledger_and_contract_address_from_peer_id_and_ledger(contract_hash: bytes, peer_id: str) -> typing.Tuple[
-    str, str]:
-    try:
-        peer = pymongo.MongoClient(
-            "mongodb://"+MONGODB+"/"
-        )["mongo"]["peerInstances"].find_one({'_id': ObjectId(peer_id)})
+# TODO MYSQLITE -> Debería de retornar un generador de (ledger, contract address) dada un peer_id y un contract_hash.
+"""
+    get_ledger_and_contract_address_from_peer_id_and_contract_hash
+"""
 
-        if sha256(base64.b64decode(peer['instance']['api']['contractLedger'][0]['contract'])).digest() == contract_hash:
-            return peer['instance']['api']['contractLedger'][0]['ledger'], peer['instance']['api']['contractLedger'][0][
-                'contractAddr']
+
+def get_peer_contract_instances(contract_hash: bytes, peer_id: str) \
+        -> Generator[typing.Tuple[str, str], None, None]:
+    try:
+        # Connect to the SQLite database
+        conn = sqlite3.connect('database.db')
+        cursor = conn.cursor()
+
+        # Retrieve the peer instance from the 'peer' table
+        cursor.execute(
+            "SELECT ci.address, l.id "
+            "FROM ledger l "
+            "JOIN contract_instance ci "
+            "ON l.id == ci.ledger_id "
+            "WHERE ci.peer_id = ?"
+            "AND ci.contract_hash IN ("
+            "   SELECT hash FROM contract "
+            "   WHERE hash = ?"
+            ")", (peer_id, contract_hash,)
+        )
+        results = cursor.fetchall()
+
+        # Close the database connection
+        conn.close()
+
+        if len(results) == 0:
+            raise Exception(f"No contract instances for the contract {contract_hash} from peer {peer_id}")
+
+        for result in results:
+            yield result[0], result[1]
+
+        # Close the database connection
+        conn.close()
+
     except Exception:
-        raise Exception('No ledger found for contract: ' + str(contract_hash))
+        pass
+
+    raise Exception('No ledger found for contract: ' + str(contract_hash))
 
 
 def get_peer_id_by_ip(ip: str) -> str:
     try:
-        return str(pymongo.MongoClient("mongodb://"+MONGODB+"/")["mongo"]["peerInstances"].find_one(
-            {'instance.uriSlot.uri.ip': ip})['_id'])
+        # Connect to the SQLite database
+        conn = sqlite3.connect('database.db')
+        cursor = conn.cursor()
+
+        # Retrieve the peer ID from the 'peer' table based on the IP
+        cursor.execute(
+            "SELECT id FROM peer "
+            "WHERE id IN ("
+            "   SELECT peer_id FROM slot "
+            "   WHERE id IN ("
+            "       SELECT slot_id FROM uri "
+            "       WHERE ip = ?"
+            "   )"
+            ")", (ip,)
+        )
+        results = cursor.fetchall()
+
+        # Close the database connection
+        conn.close()
+
+        if len(results) == 1:
+            return str(results[0][0])
+        elif len(results) > 1:
+            raise Exception('Multiple peers found for IP: ' + str(ip))
+        else:
+            raise Exception('No peer found for IP: ' + str(ip))
+
     except Exception:
-        raise Exception('No peer found for ip: ' + str(ip))
+        raise Exception('No peer found for IP: ' + str(ip))
 
 
 def is_open(ip: str, port: int) -> bool:
@@ -199,19 +256,40 @@ def is_open(ip: str, port: int) -> bool:
 
 
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
-    any: bool = True
     try:
-        peer = pymongo.MongoClient(
-            "mongodb://"+MONGODB+"/"
-        )["mongo"]["peerInstances"].find_one({'_id': ObjectId(peer_id)})
-        for uri in peer['instance']['uriSlot'][0]['uri']:
-            if is_open(ip=uri['ip'], port=int(uri['port'])):
-                any = False
-                yield uri['ip'] + ':' + str(uri['port'])
+        # Connect to the SQLite database
+        conn = sqlite3.connect('database.db')
+        cursor = conn.cursor()
+
+        # Retrieve the peer instance from the 'peer' table
+        cursor.execute("SELECT * FROM peer WHERE id = ?", (peer_id,))
+        peer = cursor.fetchone()
+
+        if peer:
+            # Retrieve the corresponding uris from the 'uri' table
+            cursor.execute(
+                "SELECT ip, port FROM uri "
+                "WHERE slot_id IN ("
+                "   SELECT id FROM slot "
+                "   WHERE peer_id = ?"
+                ")", (peer_id,)
+            )
+            uris = cursor.fetchall()
+
+            if len(uris) == 0:
+                raise Exception('No URIs found for peer: ' + str(peer_id))
+
+            for uri in uris:
+                ip, port = uri
+                if is_open(ip=ip, port=port):
+                    _any = False
+                    yield ip + ':' + str(port)
+
+        # Close the database connection
+        conn.close()
+
     except Exception:
         pass
-    if any:
-        raise Exception('No uris found for peer: ' + str(peer_id))
 
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
@@ -223,6 +301,8 @@ def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
 
 
 """
+Gas Amount implementation using float and exponent.  (Currently it's using string)
+
 def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
     if gas_amount is None: return None
     s: str =  "{:e}".format(gas_amount)
