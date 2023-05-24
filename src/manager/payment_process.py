@@ -29,6 +29,8 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         try:
             for ledger, contract_address in get_peer_contract_instances(
                     contract_hash=contract_hash, peer_id=peer_id):
+                # TODO Implementar un ledger balancer para decidir que instancia del
+                #  contrato utilizar. Ademas de filtrar entre los soportados por si mismo (por este nodo).
                 l.LOGGER(
                     'Peer payment process:   Ledger: ' + str(ledger) + ' Contract address: ' + str(contract_address))
                 contract_ledger = process_payment(
