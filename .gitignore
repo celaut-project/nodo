@@ -4,6 +4,7 @@ __pycache__
 __cache__
 __registry__
 __block__
+database.sqlite
 *.log
 app.log
 start.sh
