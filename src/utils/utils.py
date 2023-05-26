@@ -166,14 +166,18 @@ def get_network_name(ip_or_uri: str) -> str:
         raise Exception('Error getting the network name: ' + str(e))
 
 
-# TODO MYSQLITE -> Debería de retornar un generador de (ledger, contract address) dada un peer_id y un contract_hash.
 """
-    get_ledger_and_contract_address_from_peer_id_and_contract_hash
+ DB access methods.
 """
 
 
 def get_peer_contract_instances(contract_hash: bytes, peer_id: str) \
         -> Generator[typing.Tuple[str, str], None, None]:
+    # TODO SQLite -> Debería de retornar un generador de (ledger, contract address) dada un peer_id y un
+    #  contract_hash.
+    """
+        get_ledger_and_contract_address_from_peer_id_and_contract_hash
+    """
     try:
         # Connect to the SQLite database
         conn = sqlite3.connect('database.db')
@@ -290,6 +294,11 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
 
     except Exception:
         pass
+
+
+"""
+ End of: DB access methods.
+"""
 
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:

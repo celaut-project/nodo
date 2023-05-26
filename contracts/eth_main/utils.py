@@ -1,6 +1,7 @@
-import sys, os
-from src.utils.env import MONGODB;
+import os
+import sys
 
+from src.utils.env import MONGODB
 from src.utils.logger import LOGGER
 
 sys.path.append(os.getcwd())
