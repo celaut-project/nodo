@@ -1,5 +1,4 @@
 docker==6.0.*
-pymongo==4.3.*
 psutil==5.9.*
 netifaces==0.10.*
 web3==5.31.0

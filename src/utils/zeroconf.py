@@ -1,14 +1,13 @@
 from protos.gateway_pb2 import Instance
 from protos import gateway_pb2_grpc
 from grpcbigbuffer.client import client_grpc
-from bson.objectid import ObjectId
-import pymongo
+import sqlite3
+import uuid
 import grpc
 
 from src.manager.manager import insert_instance_on_mongo
 from src.utils import logger as l
 from src.gateway.utils import generate_gateway_instance
-from src.utils.env import MONGODB
 
 
 def Zeroconf(network: str) -> list:
@@ -64,36 +63,44 @@ def Zeroconf(network: str) -> list:
     return peer_instances
 
 
-def connect(peer: str):
-    print('Connecting to peer -> ', peer)
-    
-    while True:
-        peer_id: ObjectId = ObjectId()
-        try: 
-            if pymongo.MongoClient(
-                "mongodb://"+MONGODB+"/"
-            )["mongo"]["peerInstances"].insert_one({'_id': peer_id}).acknowledged:
-                break
-        except pymongo.errors.DuplicateKeyError:
-            continue
-        except pymongo.errors.ServerSelectionTimeoutError:
-            break
+"""
+message Instance {
+    optional celaut.Any.Metadata instance_meta = 1;
+    celaut.Instance instance = 2;
+    optional string token = 3;
+}
 
-    print('Get instance for peer -> ', peer_id)
+"""
+
+def connect(peer: str):
+    print('Connecting to peer ->', peer)
+
+    # Connect to the SQLite database
+    conn = sqlite3.connect('database.sqlite')
+    cursor = conn.cursor()
+
+    peer_id = str(uuid.uuid4())
+    # Attempt to insert a new row into the 'peer' table
+    cursor.execute("INSERT INTO peer (id) VALUES (?)", (peer_id,))
+    conn.commit()
+
+    print('Get instance for peer ->', peer_id)
     try:
-        insert_instance_on_mongo(
-            instance = next(client_grpc(
-                method = gateway_pb2_grpc.GatewayStub(
-                            grpc.insecure_channel(
-                                peer
-                            )
-                        ).GetInstance,
-                indices_parser = Instance,
-                partitions_message_mode_parser = True
+        # Call the appropriate function to insert the instance into the SQLite database
+        insert_instance_on_db(
+            next(client_grpc(
+                method=gateway_pb2_grpc.GatewayStub(
+                    grpc.insecure_channel(peer)
+                ).GetInstance,
+                indices_parser=Instance,
+                partitions_message_mode_parser=True
             )),
-            id = str(peer_id)
+            id=peer_id
         )
     except Exception as e:
         print(e)
-        
-    l.LOGGER('\nAdded peer ' + peer)
+
+    print('\nAdded peer', peer)
+
+    # Close the database connection
+    conn.close()
