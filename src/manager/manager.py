@@ -34,7 +34,7 @@ sc = SystemCache()
 
 
 # Insert the instance if it does not exists.
-def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> str:
+def insert_instance_on_db(instance: gateway_pb2.Instance, _id: str = None) -> str:
     parsed_instance = json.loads(MessageToJson(instance))
     l.LOGGER('Inserting instance on mongo: ' + str(parsed_instance))
 
@@ -42,9 +42,9 @@ def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> 
         result = pymongo.MongoClient(
             "mongodb://" + MONGODB + "/"
         )["mongo"]["peerInstances"].update_one(
-            {'_id': ObjectId(id)},
+            {'_id': ObjectId(_id)},
             {'$set': parsed_instance}
-        ) if id else pymongo.MongoClient(
+        ) if _id else pymongo.MongoClient(
             "mongodb://" + MONGODB + "/"
         )["mongo"]["peerInstances"].insert_one(parsed_instance)
     except pymongo.errors.ServerSelectionTimeoutError:
@@ -54,7 +54,7 @@ def insert_instance_on_mongo(instance: gateway_pb2.Instance, id: str = None) -> 
     if not result.acknowledged:
         raise Exception('Could not insert instance on mongo.')
 
-    return id if id else str(result.inserted_id)
+    return _id if _id else str(result.inserted_id)
 
 
 def get_token_by_uri(uri: str) -> str:
