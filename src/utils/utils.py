@@ -180,7 +180,7 @@ def get_peer_contract_instances(contract_hash: bytes, peer_id: str) \
     """
     try:
         # Connect to the SQLite database
-        conn = sqlite3.connect('database.db')
+        conn = sqlite3.connect('database.sqlite')
         cursor = conn.cursor()
 
         # Retrieve the peer instance from the 'peer' table
@@ -218,7 +218,7 @@ def get_peer_contract_instances(contract_hash: bytes, peer_id: str) \
 def get_peer_id_by_ip(ip: str) -> str:
     try:
         # Connect to the SQLite database
-        conn = sqlite3.connect('database.db')
+        conn = sqlite3.connect('database.sqlite')
         cursor = conn.cursor()
 
         # Retrieve the peer ID from the 'peer' table based on the IP
@@ -262,7 +262,7 @@ def is_open(ip: str, port: int) -> bool:
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
     try:
         # Connect to the SQLite database
-        conn = sqlite3.connect('database.db')
+        conn = sqlite3.connect('database.sqlite')
         cursor = conn.cursor()
 
         # Retrieve the peer instance from the 'peer' table
