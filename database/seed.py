@@ -118,4 +118,4 @@ def seed_database(num_rows):
 
 
 if __name__ == '__main__':
-    seed_database(num_rows=int(sys.argv[2]) if len(sys.argv) > 2 else 5)
+    seed_database(num_rows=int(sys.argv[2]) if len(sys.argv) > 2 else 200)
