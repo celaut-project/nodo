@@ -23,7 +23,7 @@ def generate_random_data(n):
     # Generate random data for slot table
     slot_data = []
     for _ in range(n):
-        id = random.randint(1, 100)
+        id = _+1
         internal_port = random.randint(8000, 9000)
         transport_protocol = random.choice(['tcp', 'udp'])
         peer_id = random.choice(peer_data)[0]
@@ -32,7 +32,7 @@ def generate_random_data(n):
     # Generate random data for uri table
     uri_data = []
     for _ in range(n):
-        id = random.randint(1, 100)
+        id = _+1
         ip = f"{random.randint(1, 255)}.{random.randint(1, 255)}.{random.randint(1, 255)}.{random.randint(1, 255)}"
         port = random.randint(1000, 9999)
         slot_id = random.choice(slot_data)[0]
@@ -56,7 +56,7 @@ def generate_random_data(n):
     # Generate random data for ledger_provider table
     ledger_provider_data = []
     for _ in range(n):
-        id = random.randint(1, 100)
+        id = _+1
         uri = f"http://{random_string(10)}.com"
         ledger_id = random.choice(ledger_data)[0]
         ledger_provider_data.append((id, uri, ledger_id))
@@ -64,7 +64,7 @@ def generate_random_data(n):
     # Generate random data for contract_instance table
     contract_instance_data = []
     for _ in range(n):
-        id = random.randint(1, 100)
+        id = _+1
         address = f"0x{random_string(40)}"
         ledger_id = random.choice(ledger_data)[0]
         contract_hash = random.choice(contract_data)[0]
