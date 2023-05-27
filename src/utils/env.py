@@ -18,7 +18,6 @@ GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(defau
 #  -------------------------------------------------
 
 # DIRECTORIES
-MONGODB = GET_ENV(env='MONGODB', default='localhost:27017')
 DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
 CACHE = f"{MAIN_DIR}/__cache__/"
 REGISTRY = f"{MAIN_DIR}/__registry__/"

@@ -1,56 +1,121 @@
 import sqlite3
+import random
+import string
+import sys
+from hashlib import sha3_256
 
-def seed_database():
+
+def generate_random_data(n):
+    # Generate a random string of given length
+    def random_string(length):
+        letters = string.ascii_letters
+        return ''.join(random.choice(letters) for _ in range(length))
+
+    # Generate random data for peer table
+    peer_data = []
+    for _ in range(n):
+        id = random_string(6)
+        token = random_string(10)
+        metadata = random_string(20)
+        app_protocol = random_string(8)
+        peer_data.append((id, token, metadata, app_protocol))
+
+    # Generate random data for slot table
+    slot_data = []
+    for _ in range(n):
+        id = random.randint(1, 100)
+        internal_port = random.randint(8000, 9000)
+        transport_protocol = random.choice(['tcp', 'udp'])
+        peer_id = random.choice(peer_data)[0]
+        slot_data.append((id, internal_port, transport_protocol, peer_id))
+
+    # Generate random data for uri table
+    uri_data = []
+    for _ in range(n):
+        id = random.randint(1, 100)
+        ip = f"{random.randint(1, 255)}.{random.randint(1, 255)}.{random.randint(1, 255)}.{random.randint(1, 255)}"
+        port = random.randint(1000, 9999)
+        slot_id = random.choice(slot_data)[0]
+        uri_data.append((id, ip, port, slot_id))
+
+    # Generate random data for contract table
+    contract_data = []
+    for _ in range(n):
+        hash_type: str = "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a" #SHA3_256
+        contract: bytes = bytes(random_string(1000), "utf-8")
+        hash: str = sha3_256(contract).hexdigest()
+        contract_data.append((hash, hash_type, contract))
+
+    # Generate random data for ledger table
+    ledger_data = []
+    for _ in range(n):
+        id = random_string(6)
+        private_key = random_string(16)
+        ledger_data.append((id, private_key))
+
+    # Generate random data for ledger_provider table
+    ledger_provider_data = []
+    for _ in range(n):
+        id = random.randint(1, 100)
+        uri = f"http://{random_string(10)}.com"
+        ledger_id = random.choice(ledger_data)[0]
+        ledger_provider_data.append((id, uri, ledger_id))
+
+    # Generate random data for contract_instance table
+    contract_instance_data = []
+    for _ in range(n):
+        id = random.randint(1, 100)
+        address = f"0x{random_string(40)}"
+        ledger_id = random.choice(ledger_data)[0]
+        contract_hash = random.choice(contract_data)[0]
+        peer_id = random.choice(peer_data)[0]
+        contract_instance_data.append((id, address, ledger_id, contract_hash, peer_id))
+
+    return peer_data, slot_data, uri_data, contract_data, ledger_data, ledger_provider_data, contract_instance_data
+
+
+def seed_database(num_rows):
     # Connect to the SQLite database
     conn = sqlite3.connect('database.sqlite')
     cursor = conn.cursor()
 
+    # Generate random data
+    peer_data, slot_data, uri_data, contract_data, ledger_data, \
+        ledger_provider_data, contract_instance_data = \
+        generate_random_data(
+            num_rows
+        )
+
     # Seed the "peer" table
-    cursor.execute("INSERT INTO peer (id, token, metadata, app_protocol) VALUES (?, ?, ?, ?)",
-                   ('peer1', 'token1', 'metadata1', 'protocol1'))
-    cursor.execute("INSERT INTO peer (id, token, metadata, app_protocol) VALUES (?, ?, ?, ?)",
-                   ('peer2', 'token2', 'metadata2', 'protocol2'))
+    cursor.executemany("INSERT INTO peer (id, token, metadata, app_protocol) VALUES (?, ?, ?, ?)", peer_data)
 
     # Seed the "slot" table
-    cursor.execute("INSERT INTO slot (id, internal_port, transport_protocol, peer_id) VALUES (?, ?, ?, ?)",
-                   (1, 8080, 'tcp', 'peer1'))
-    cursor.execute("INSERT INTO slot (id, internal_port, transport_protocol, peer_id) VALUES (?, ?, ?, ?)",
-                   (2, 8081, 'udp', 'peer2'))
+    cursor.executemany("INSERT INTO slot (id, internal_port, transport_protocol, peer_id) VALUES (?, ?, ?, ?)",
+                       slot_data)
 
     # Seed the "uri" table
-    cursor.execute("INSERT INTO uri (id, ip, port, slot_id) VALUES (?, ?, ?, ?)",
-                   (1, '192.168.0.1', 5000, 1))
-    cursor.execute("INSERT INTO uri (id, ip, port, slot_id) VALUES (?, ?, ?, ?)",
-                   (2, '192.168.0.2', 6000, 2))
+    cursor.executemany("INSERT INTO uri (id, ip, port, slot_id) VALUES (?, ?, ?, ?)", uri_data)
 
     # Seed the "contract" table
-    cursor.execute("INSERT INTO contract (hash, hash_type, contract) VALUES (?, ?, ?)",
-                   ('contract_hash1', 'sha256', 'contract_data1'))
-    cursor.execute("INSERT INTO contract (hash, hash_type, contract) VALUES (?, ?, ?)",
-                   ('contract_hash2', 'sha256', 'contract_data2'))
+    cursor.executemany("INSERT INTO contract (hash, hash_type, contract) VALUES (?, ?, ?)", contract_data)
 
     # Seed the "ledger" table
-    cursor.execute("INSERT INTO ledger (id, private_key) VALUES (?, ?)",
-                   ('ledger1', 'private_key1'))
-    cursor.execute("INSERT INTO ledger (id, private_key) VALUES (?, ?)",
-                   ('ledger2', 'private_key2'))
+    cursor.executemany("INSERT INTO ledger (id, private_key) VALUES (?, ?)", ledger_data)
 
     # Seed the "ledger_provider" table
-    cursor.execute("INSERT INTO ledger_provider (id, uri, ledger_id) VALUES (?, ?, ?)",
-                   (1, 'ledger_provider_uri1', 'ledger1'))
-    cursor.execute("INSERT INTO ledger_provider (id, uri, ledger_id) VALUES (?, ?, ?)",
-                   (2, 'ledger_provider_uri2', 'ledger2'))
+    cursor.executemany("INSERT INTO ledger_provider (id, uri, ledger_id) VALUES (?, ?, ?)", ledger_provider_data)
 
     # Seed the "contract_instance" table
-    cursor.execute("INSERT INTO contract_instance (id, address, ledger_id, contract_hash, peer_id) VALUES (?, ?, ?, ?, ?)",
-                   (1, 'contract_address1', 'ledger1', 'contract_hash1', 'peer1'))
-    cursor.execute("INSERT INTO contract_instance (id, address, ledger_id, contract_hash, peer_id) VALUES (?, ?, ?, ?, ?)",
-                   (2, 'contract_address2', 'ledger2', 'contract_hash2', 'peer2'))
+    cursor.executemany(
+        "INSERT INTO contract_instance (id, address, ledger_id, contract_hash, peer_id) VALUES (?, ?, ?, ?, ?)",
+        contract_instance_data
+    )
 
     # Commit the changes and close the connection
     conn.commit()
     conn.close()
     print("Database seeding completed.")
 
+
 if __name__ == '__main__':
-    seed_database()
+    seed_database(num_rows=int(sys.argv[2]) if len(sys.argv) > 2 else 5)
