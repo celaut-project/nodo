@@ -4,7 +4,7 @@ from time import sleep
 import grpc
 import pymongo
 from grpcbigbuffer import client as grpcbf
-from ledger_balancer import ledger_balander
+from ledger_balancer import ledger_balancer
 
 from contracts.envs import AVAILABLE_PAYMENT_PROCESS, PAYMENT_PROCESS_VALIDATORS
 from contracts.vyper_gas_deposit_contract import interface as vyper_gdc
@@ -29,8 +29,8 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
     for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():
         # check if the payment process is compatible with this peer.
         try:
-            for ledger, contract_address in ledger_balander(
-                ledgers=get_peer_contract_instances(
+            for ledger, contract_address in ledger_balancer(
+                ledger_generator=get_peer_contract_instances(
                     contract_hash=contract_hash,
                     peer_id=peer_id
                 )
