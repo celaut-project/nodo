@@ -7,8 +7,6 @@ from typing import Optional
 import docker as docker_lib
 import grpc
 from grpcbigbuffer import client as grpcbf
-import pymongo
-from bson.objectid import ObjectId
 from google.protobuf.json_format import MessageToJson
 
 from src.manager.resources_manager import IOBigData
