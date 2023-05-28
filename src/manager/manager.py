@@ -1,6 +1,8 @@
 import json
 import sqlite3
 import uuid
+from hashlib import sha3_256
+from typing import Optional
 
 import docker as docker_lib
 import grpc
@@ -19,7 +21,7 @@ from src.manager.system_cache import Client, SystemCache
 from src.utils import logger as l
 from src.utils.env import ALLOW_GAS_DEBT, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
     DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
-    MEMORY_LIMIT_COST_FACTOR, DOCKER_CLIENT, COST_OF_BUILD, COMPUTE_POWER_RATE, EXECUTION_BENEFIT
+    MEMORY_LIMIT_COST_FACTOR, DOCKER_CLIENT, COST_OF_BUILD, COMPUTE_POWER_RATE, EXECUTION_BENEFIT, SHA3_256_ID
 from src.utils.utils import generate_uris_by_peer_id, get_network_name, \
     is_peer_available, to_gas_amount, \
     get_service_hex_main_hash
@@ -36,11 +38,57 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
     with sqlite3.connect('database.sqlite') as conn:
         cursor: sqlite3.dbapi2.Cursor = conn.cursor()
 
-        peer_id = str(uuid.uuid4())
-        # Attempt to insert a new row into the 'peer' table
-        cursor.execute("INSERT INTO peer (id) VALUES (?)", (peer_id,))
-        conn.commit()
+        try:
 
+            peer_id = str(uuid.uuid4())
+            token: Optional[str] = instance.token if instance.hasField("token") else ""
+            metadata: Optional[bytes] = instance.instance_meta.SerializeToString() \
+                if instance.hasField('instance_meta') else None
+            app_protocol: bytes = instance.instance.api.app_protocol.SerializeToString()
+
+            # Attempt to insert a new row into the 'peer' table
+            cursor.execute("INSERT INTO peer (id, token, metadata, app_protocol) VALUES (?, ?, ?, ?)",
+                           (peer_id, token, metadata, app_protocol))
+
+            # Slots
+            for slot in instance.instance.uri_slot:
+                internal_port: int = slot.internal_port
+                transport_protocol: bytes = bytes("tcp", "utf-8")
+                cursor.execute("INSERT INTO slot (internal_port, transport_protocol) VALUES (?, ?)",
+                               (internal_port, transport_protocol))
+                slot_id: int = cursor.lastrowid
+
+                for uri in slot.uri:
+                    ip: str = uri.ip
+                    port: int = uri.port
+                    cursor.execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
+                                   (ip, port, slot_id))
+
+            # Contracts
+            for contract_ledger in instance.instance.api.contract_ledger:
+                contract: bytes = contract_ledger.contract
+                address: str = contract_ledger.contract_addr
+                ledger: str = contract_ledger.ledger
+
+                contract_hash: str = sha3_256(contract).hexdigest()
+                contract_hash_type: bytes = SHA3_256_ID
+
+                cursor.execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
+                               (contract_hash, contract_hash_type, contract))
+
+                cursor.execute("INSERT OR IGNORE INTO ledger (id) VALUES (?)",
+                               (ledger,))
+
+                cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
+                               "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
+
+        except Exception as e:
+            # Manage the error
+            print("Error on db:", str(e))
+            # Revert all changes
+            conn.rollback()
+
+        conn.commit()
         print('Get instance for peer ->', peer_id)
 
     return peer_id

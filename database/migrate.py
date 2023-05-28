@@ -21,7 +21,7 @@ print("Created 'peer' table.")
 # Add the "Slot" table
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS slot (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT ,
         internal_port INTEGER,
         transport_protocol BLOB,
         peer_id TEXT,
@@ -33,7 +33,7 @@ print("Created 'slot' table.")
 # Add the "Uri" table
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS uri (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT ,
         ip TEXT,
         port INTEGER,
         slot_id INTEGER,
@@ -56,7 +56,7 @@ print("Created 'contract' table.")
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS ledger (
         id TEXT PRIMARY KEY,
-        private_key STRING
+        private_key TEXT NULL
     )
 ''')
 print("Created 'ledger' table.")
@@ -64,7 +64,7 @@ print("Created 'ledger' table.")
 # Add the "Ledger Provider" table
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS ledger_provider (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT ,
         uri TEXT,
         ledger_id TEXT,
         FOREIGN KEY (ledger_id) REFERENCES peer (id)
@@ -75,7 +75,7 @@ print("Created 'ledger' table.")
 # Add the "Contract Instance" table
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS contract_instance (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT ,
         address TEXT,
         ledger_id TEXT,
         contract_hash TEXT,
