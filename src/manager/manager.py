@@ -29,7 +29,7 @@ from src.utils.utils import generate_uris_by_peer_id, get_network_name, \
 sc = SystemCache()
 
 
-# Insert the instance if it does not exists.
+# Insert the instance if it does not exist.
 def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
     parsed_instance = json.loads(MessageToJson(instance))
     l.LOGGER('Inserting instance on db: ' + str(parsed_instance))
