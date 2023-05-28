@@ -64,16 +64,6 @@ def Zeroconf(network: str) -> list:
 def connect(peer: str):
     print('Connecting to peer ->', peer)
 
-    # Connect to the SQLite database
-    conn = sqlite3.connect('database.sqlite')
-    cursor = conn.cursor()
-
-    peer_id = str(uuid.uuid4())
-    # Attempt to insert a new row into the 'peer' table
-    cursor.execute("INSERT INTO peer (id) VALUES (?)", (peer_id,))
-    conn.commit()
-
-    print('Get instance for peer ->', peer_id)
     try:
         # Call the appropriate function to insert the instance into the SQLite database
         insert_instance_on_db(
@@ -83,13 +73,9 @@ def connect(peer: str):
                 ).GetInstance,
                 indices_parser=Instance,
                 partitions_message_mode_parser=True
-            )),
-            _id=peer_id
+            ))
         )
     except Exception as e:
         print(e)
 
     print('\nAdded peer', peer)
-
-    # Close the database connection
-    conn.close()

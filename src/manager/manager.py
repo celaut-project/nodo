@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import uuid
 
 import docker as docker_lib
@@ -17,44 +18,32 @@ from src.manager.system_cache import Client, SystemCache
 
 from src.utils import logger as l
 from src.utils.env import ALLOW_GAS_DEBT, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
-    DEFAULT_INTIAL_GAS_AMOUNT, MONGODB, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
+    DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
     MEMORY_LIMIT_COST_FACTOR, DOCKER_CLIENT, COST_OF_BUILD, COMPUTE_POWER_RATE, EXECUTION_BENEFIT
 from src.utils.utils import generate_uris_by_peer_id, get_network_name, \
     is_peer_available, to_gas_amount, \
     get_service_hex_main_hash
 
-try:
-    db = pymongo.MongoClient(
-        "mongodb://" + MONGODB + "/"
-    )["mongo"]["serviceInstances"]
-except pymongo.errors.ServerSelectionTimeoutError:
-    pass
-
 sc = SystemCache()
 
 
 # Insert the instance if it does not exists.
-def insert_instance_on_db(instance: gateway_pb2.Instance, _id: str = None) -> str:
+def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
     parsed_instance = json.loads(MessageToJson(instance))
-    l.LOGGER('Inserting instance on mongo: ' + str(parsed_instance))
+    l.LOGGER('Inserting instance on db: ' + str(parsed_instance))
 
-    try:
-        result = pymongo.MongoClient(
-            "mongodb://" + MONGODB + "/"
-        )["mongo"]["peerInstances"].update_one(
-            {'_id': ObjectId(_id)},
-            {'$set': parsed_instance}
-        ) if _id else pymongo.MongoClient(
-            "mongodb://" + MONGODB + "/"
-        )["mongo"]["peerInstances"].insert_one(parsed_instance)
-    except pymongo.errors.ServerSelectionTimeoutError:
-        l.LOGGER('MongoDB not allowed.')
-        return ''
+    # Connect to the SQLite database
+    with sqlite3.connect('database.sqlite') as conn:
+        cursor: sqlite3.dbapi2.Cursor = conn.cursor()
 
-    if not result.acknowledged:
-        raise Exception('Could not insert instance on mongo.')
+        peer_id = str(uuid.uuid4())
+        # Attempt to insert a new row into the 'peer' table
+        cursor.execute("INSERT INTO peer (id) VALUES (?)", (peer_id,))
+        conn.commit()
 
-    return _id if _id else str(result.inserted_id)
+        print('Get instance for peer ->', peer_id)
+
+    return peer_id
 
 
 def get_token_by_uri(uri: str) -> str:
