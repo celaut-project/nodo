@@ -2,6 +2,8 @@ import sqlite3
 import socket
 from typing import Generator
 import typing
+
+import pymongo
 from grpcbigbuffer.client import Dir
 import netifaces as ni
 
@@ -180,7 +182,7 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
         pass
 
 
-def get_peer_contract_instances(contract_hash: bytes, peer_id: str) \
+def get_peer_contract_instances(contract_hash: bytes, peer_id: str = None) \
         -> Generator[typing.Tuple[str, str], None, None]:
     """
         get_ledger_and_contract_address_from_peer_id_and_contract_hash
@@ -291,6 +293,50 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
 
     except Exception:
         pass
+
+
+def get_ledger_and_contract_addr_from_contract(contract_hash: bytes) -> Generator[typing.Tuple[str, str], None, None]:
+    yield from get_peer_contract_instances(contract_hash=contract_hash, peer_id=None)
+
+
+def get_ledger_providers(ledger: str) -> Generator[str, None, None]:
+    try:
+        # Connect to the SQLite database
+        with sqlite3.connect('database.sqlite') as conn:
+            cursor = conn.cursor()
+
+            # Execute the query
+            cursor.execute("SELECT uri FROM ledger_provider WHERE ledger_id = ?", (ledger,))
+
+            while True:
+                result = cursor.fetchone()
+                if not result:
+                    break
+                yield result
+
+    except Exception as e:
+        print(f'EXCEPCION NO CONTROLADA {str(e)}')
+        pass
+
+
+class NonUsedLedgerException(Exception):
+    pass
+
+
+def get_private_key_from_ledger(ledger: str) -> str:
+    try:
+        # Connect to the SQLite database
+        with sqlite3.connect('database.sqlite') as conn:
+            cursor = conn.cursor()
+
+            # Execute the query
+            cursor.execute("SELECT private_key FROM ledger WHERE id = ?", (ledger,))
+            result = cursor.fetchone()
+
+        return result
+
+    except Exception as e:
+        raise NonUsedLedgerException()
 
 
 """

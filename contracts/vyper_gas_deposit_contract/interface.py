@@ -1,4 +1,5 @@
-import sys, os;
+import os
+import sys
 
 from src.utils.singleton import Singleton
 
@@ -15,8 +16,10 @@ from hashlib import sha256
 
 from protos import celaut_pb2, gateway_pb2
 from src.utils.logger import LOGGER
-from contracts.eth_main.utils import get_priv_from_ledger, transact, w3_generator_factory, \
-    get_ledger_and_contract_addr_from_contract, catch_event
+from contracts.eth_main.utils import transact, w3_generator_factory, \
+    catch_event
+from src.utils.utils import get_ledger_and_contract_addr_from_contract, get_private_key_from_ledger, \
+    NonUsedLedgerException
 
 DIR = os.getcwd() + '/contracts/vyper_gas_deposit_contract/'
 CONTRACT: bytes = open(DIR + 'bytecode', 'rb').read()
@@ -113,10 +116,10 @@ class LedgerContractInterface:
                else f"Error: El token {token} no tiene suficiente gas "
                     f"disponible ({self.payment_sessions[token_encoded]})."
                     f" Se necesitan {amount - self.payment_sessions[token_encoded]} de {amount} gas.\n"
-                  if self.payment_sessions[token_encoded] < amount
-                  else f"Error: El token {token} no es válido.\n"
-                    if not validate_token(token)
-                    else f"Error: ¡Token {token} validado correctamente! Aunque algo ocurrió.\n")
+        if self.payment_sessions[token_encoded] < amount
+        else f"Error: El token {token} no es válido.\n"
+        if not validate_token(token)
+        else f"Error: ¡Token {token} validado correctamente! Aunque algo ocurrió.\n")
         return False
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
@@ -152,15 +155,18 @@ class VyperDepositContractInterface(metaclass=Singleton):
 
     def __init__(self):
         self.ledger_providers: Dict[str: LedgerContractInterface] = {}
-        for d in get_ledger_and_contract_addr_from_contract(contract_hash=CONTRACT_HASH):
-            ledger, contract_address = d.values()
-            self.ledger_providers[ledger] = LedgerContractInterface(
-                w3_generator=w3_generator_factory(ledger=ledger),
-                contract_addr=contract_address,
-                priv=get_priv_from_ledger(ledger)
-            )
+        for ledger, contract_address in get_ledger_and_contract_addr_from_contract(contract_hash=CONTRACT_HASH):
+            try:
+                self.ledger_providers[ledger] = LedgerContractInterface(
+                    w3_generator=w3_generator_factory(ledger=ledger),
+                    contract_addr=contract_address,
+                    priv=get_private_key_from_ledger(ledger)
+                )
+            except NonUsedLedgerException:
+                pass
 
-    # TODO si necesitas añadir un nuevo ledger, deberás reiniciar el nodo, a no ser que se implemente un método set_ledger_on_interface()
+    # TODO si necesitas añadir un nuevo ledger, deberás reiniciar el nodo, a no ser que se implemente un método
+    #  set_ledger_on_interface()
 
     def process_payment(self, amount: int, token: str, ledger: str,
                         contract_addr: str) -> celaut_pb2.Service.Api.ContractLedger:

@@ -1,15 +1,15 @@
 import os
 import sys
 
-from src.utils.env import MONGODB
 from src.utils.logger import LOGGER
+from src.utils.utils import get_ledger_providers
 
 sys.path.append(os.getcwd())
 
 import typing
 from web3.middleware import geth_poa_middleware
 from web3 import HTTPProvider, Web3
-import asyncio, time, pymongo
+import asyncio, time
 
 
 async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, contract):
@@ -74,43 +74,8 @@ def check_provider_availability(provider) -> bool:
 def w3_generator_factory(ledger: str) -> typing.Generator:
     while True:
         for provider in get_ledger_providers(ledger=ledger):
-            if not check_provider_availability(provider=provider): continue
+            if not check_provider_availability(provider=provider):
+                continue
             w3 = Web3(HTTPProvider(provider))
             w3.middleware_onion.inject(geth_poa_middleware, layer=0)
             yield w3
-
-
-"""
- DB access methods.
-"""
-
-
-def get_ledger_and_contract_addr_from_contract(contract_hash: bytes) -> typing.List[typing.Dict[str, str]]:
-    return \
-    pymongo.MongoClient("mongodb://" + MONGODB + "/")["mongo"]["contracts"].find({"contract_hash": contract_hash})[0][
-        "instances"]
-
-
-def get_ledger_providers(ledger: str) -> typing.List[str]:
-    return pymongo.MongoClient(
-        "mongodb://" + MONGODB + "/"
-    )["mongo"]["contracts"].find({"ledger": ledger})[0]["providers"]
-
-
-def get_priv_from_ledger(ledger: str) -> str:
-    return pymongo.MongoClient(
-        "mongodb://" + MONGODB + "/"
-    )["mongo"]["contracts"].find({"ledger": ledger})[0]["priv"]
-
-
-def set_ledger_on_mongodb(ledger: str):
-    pass
-
-
-def set_provider_on_mongodb(provider: str, ledger: str):
-    pass
-
-
-"""
- End of: DB access methods.
-"""

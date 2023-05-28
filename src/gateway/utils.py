@@ -6,7 +6,7 @@ import grpc
 import netifaces as ni
 from grpcbigbuffer import client as grpcbf
 
-from contracts.eth_main.utils import get_ledger_and_contract_addr_from_contract
+from src.utils.utils import get_ledger_and_contract_addr_from_contract
 from contracts.vyper_gas_deposit_contract.interface \
     import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH, CONTRACT as DEFAULT_PROVISIONAL_CONTRACT
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
@@ -16,12 +16,12 @@ from src.utils import utils as utils
 from src.utils.env import GATEWAY_PORT, REGISTRY
 
 
-def generate_contract_ledger() -> celaut.Service.Api.ContractLedger:  # TODO generate_contract_ledger tambien es un método auxiliar.
-    contract_ledger = celaut.Service.Api.ContractLedger()
-    contract_ledger.contract = DEFAULT_PROVISIONAL_CONTRACT
-    contract_ledger.ledger, contract_ledger.contract_addr = \
-        get_ledger_and_contract_addr_from_contract(DEFAULT_PROVISIONAL_CONTRACT_HASH)[0].values()
-    return contract_ledger
+def __generate_contract_ledger() -> Generator[celaut.Service.Api.ContractLedger, None, None]:
+    for ledger, address in get_ledger_and_contract_addr_from_contract(DEFAULT_PROVISIONAL_CONTRACT_HASH):
+        contract_ledger = celaut.Service.Api.ContractLedger()
+        contract_ledger.contract = DEFAULT_PROVISIONAL_CONTRACT
+        contract_ledger.ledger, contract_ledger.contract_addr = ledger, address
+        yield contract_ledger
 
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
@@ -43,7 +43,9 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     slot.port = GATEWAY_PORT
     instance.api.slot.append(slot)
 
-    instance.api.contract_ledger.append(generate_contract_ledger())
+    instance.api.contract_ledger.extend(
+        [e for e in __generate_contract_ledger()]
+    )
     return gateway_pb2.Instance(
         instance=instance
     )
