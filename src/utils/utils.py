@@ -1,17 +1,13 @@
-import base64
 import sqlite3
-from hashlib import sha256
 import socket
 from typing import Generator
 import typing
-from bson.objectid import ObjectId
 from grpcbigbuffer.client import Dir
-import pymongo
 import netifaces as ni
 
 from protos import celaut_pb2 as celaut, gateway_pb2
 
-from src.utils.env import MONGODB, REGISTRY
+from src.utils.env import REGISTRY
 from src.utils.verify import get_service_hex_main_hash
 
 
@@ -22,26 +18,6 @@ def read_file(filename) -> bytes:
                 yield chunk
 
     return b''.join([b for b in generator(file=filename)])
-
-
-def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
-    try:
-        for peer in list(pymongo.MongoClient(
-                "mongodb://" + MONGODB + "/"
-        )["mongo"]["peerInstances"].find()):
-
-            if not ignore_network:
-                yield str(peer['_id'])
-
-            elif True not in [address_in_network(
-                    ip_or_uri=uri,
-                    net=ignore_network
-            ) for uri in generate_uris_by_peer_id(
-                peer_id=str(peer['_id'])
-            )]:
-                yield str(peer['_id'])
-    except pymongo.errors.ServerSelectionTimeoutError:
-        pass
 
 
 def get_grpc_uri(instance: celaut.Instance) -> celaut.Instance.Uri:
@@ -57,8 +33,8 @@ def get_grpc_uri(instance: celaut.Instance) -> celaut.Instance.Uri:
 def service_hashes(
         hashes: typing.List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash]
 ) -> Generator[celaut.Any.Metadata.HashTag.Hash, None, None]:
-    for hash in hashes:
-        yield hash
+    for _hash in hashes:
+        yield _hash
 
 
 def service_extended(
@@ -171,10 +147,41 @@ def get_network_name(ip_or_uri: str) -> str:
 """
 
 
+def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
+    try:
+        # Connect to the SQLite database
+        conn = sqlite3.connect('database.sqlite')
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT id FROM peer")
+
+        while True:
+            result = cursor.fetchone()
+            if not result:
+                break
+            peer_id = result[0]
+
+            if not ignore_network:
+                yield str(peer_id)
+
+            elif True not in [address_in_network(
+                    ip_or_uri=uri,
+                    net=ignore_network
+            ) for uri in generate_uris_by_peer_id(
+                peer_id=str(peer_id)
+            )]:
+                yield str(peer_id)
+
+        # Close the database connection
+        conn.close()
+
+    except Exception as e:
+        print(f'EXCEPCION NO CONTROLADA {str(e)}')
+        pass
+
+
 def get_peer_contract_instances(contract_hash: bytes, peer_id: str) \
         -> Generator[typing.Tuple[str, str], None, None]:
-    # TODO SQLite -> Debería de retornar un generador de (ledger, contract address) dada un peer_id y un
-    #  contract_hash.
     """
         get_ledger_and_contract_address_from_peer_id_and_contract_hash
     """
@@ -185,7 +192,7 @@ def get_peer_contract_instances(contract_hash: bytes, peer_id: str) \
 
         # Retrieve the peer instance from the 'peer' table
         cursor.execute(
-            "SELECT ci.address, l.id "
+            "SELECT l.id, ci.address "
             "FROM ledger l "
             "JOIN contract_instance ci "
             "ON l.id == ci.ledger_id "
@@ -195,24 +202,19 @@ def get_peer_contract_instances(contract_hash: bytes, peer_id: str) \
             "   WHERE hash = ?"
             ")", (peer_id, contract_hash,)
         )
-        results = cursor.fetchall()
 
-        # Close the database connection
-        conn.close()
-
-        if len(results) == 0:
-            raise Exception(f"No contract instances for the contract {contract_hash} from peer {peer_id}")
-
-        for result in results:
+        while True:
+            result = cursor.fetchone()
+            if not result:
+                break
             yield result[0], result[1]
 
         # Close the database connection
         conn.close()
 
-    except Exception:
+    except Exception as e:
+        print(f'EXCEPCION NO CONTROLADA {str(e)}')
         pass
-
-    raise Exception('No ledger found for contract: ' + str(contract_hash))
 
 
 def get_peer_id_by_ip(ip: str) -> str:
@@ -265,29 +267,24 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
         conn = sqlite3.connect('database.sqlite')
         cursor = conn.cursor()
 
-        # Retrieve the peer instance from the 'peer' table
-        cursor.execute("SELECT * FROM peer WHERE id = ?", (peer_id,))
-        peer = cursor.fetchone()
+        # Retrieve the corresponding uris from the 'uri' table
+        cursor.execute(
+            "SELECT ip, port FROM uri "
+            "WHERE slot_id IN ("
+            "   SELECT id FROM slot "
+            "   WHERE peer_id = ?"
+            ")", (peer_id,)
+        )
 
-        if peer:
-            # Retrieve the corresponding uris from the 'uri' table
-            cursor.execute(
-                "SELECT ip, port FROM uri "
-                "WHERE slot_id IN ("
-                "   SELECT id FROM slot "
-                "   WHERE peer_id = ?"
-                ")", (peer_id,)
-            )
-            uris = cursor.fetchall()
+        while True:
+            result = cursor.fetchone()
+            if not result:
+                break
 
-            if len(uris) == 0:
-                raise Exception('No URIs found for peer: ' + str(peer_id))
-
-            for uri in uris:
-                ip, port = uri
-                if is_open(ip=ip, port=port):
-                    _any = False
-                    yield ip + ':' + str(port)
+            ip, port = result
+            if is_open(ip=ip, port=port):
+                _any = False
+                yield ip + ':' + str(port)
 
         # Close the database connection
         conn.close()
