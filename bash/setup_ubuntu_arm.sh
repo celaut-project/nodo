@@ -15,12 +15,4 @@ echo \
 apt-get update
 apt-get -y install docker-ce docker-ce-cli containerd.io
 
-curl -fsSL https://www.mongodb.org/static/pgp/server-4.4.asc | sudo apt-key add -
-echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/4.4 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-4.4.list
-apt -y update
-apt -y install mongodb-org
-systemctl start mongod.service
-systemctl status mongod
-systemctl enable mongod
-
 sh ./init_arm.sh

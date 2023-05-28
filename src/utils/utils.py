@@ -3,7 +3,6 @@ import socket
 from typing import Generator
 import typing
 
-import pymongo
 from grpcbigbuffer.client import Dir
 import netifaces as ni
 

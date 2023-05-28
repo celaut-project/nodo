@@ -2,7 +2,6 @@ import string
 from hashlib import sha256
 from time import sleep
 import grpc
-import pymongo
 from grpcbigbuffer import client as grpcbf
 from ledger_balancer import ledger_balancer
 
@@ -117,7 +116,4 @@ def __check_payment_process(amount: int, ledger: str, token: str, contract: byte
 
 
 def init_contract_interfaces():
-    try:
-        vyper_gdc.VyperDepositContractInterface()
-    except pymongo.errors.ServerSelectionTimeoutError:
-        pass
+    vyper_gdc.VyperDepositContractInterface()

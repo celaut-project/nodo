@@ -54,7 +54,7 @@ class LedgerContractInterface:
         self.payment_sessions: Dict[bytes, int] = {}
         self.sessions_lock = Lock()
 
-        # TODO this variables depends on the ledger, so they should be moved on the mongo.contracts collection OR be dynamically updated.
+        # TODO this variables depends on the ledger, so they should be moved on the contracts table OR be dynamically updated.
         self.poll_interval: int = 2
         self.poll_iterations: int = 60
         self.poll_init_delay: int = 20
