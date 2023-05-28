@@ -57,35 +57,3 @@ def images_list():
 def instances_list():
     import os
     os.system('sudo docker ps')
-
-if __name__ == "__main__":
-    """
-    import os
-    os.chdir( os.getcwd() )
-    os.system('python3')    
-    """
-
-    import sys
-    id = sys.argv[1]
-
-    if id == 'seeder':
-        from contracts.eth_main.seeder import seed
-        seed() if len(sys.argv) == 2 else seed(private_key=sys.argv[2])
-        
-    if id == 'connect':
-        from src.utils.zeroconf import connect
-        connect(sys.argv[2])
-
-    """
-        else:
-            from src.builder.build import build
-            print('Go to build ', id)
-            service_with_meta = get_from_registry(id)
-            print(
-                build(
-                    service_buffer = service_with_meta.value,
-                    metadata = service_with_meta.metadata,
-                    service_id = id
-                )
-            )    
-    """

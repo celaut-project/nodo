@@ -1,6 +1,3 @@
-import os, sys
-sys.path.append(os.getcwd())
-
 from protos.gateway_pb2 import Instance
 from protos import gateway_pb2_grpc
 from grpcbigbuffer.client import client_grpc
