@@ -2,7 +2,7 @@ import os.path
 import sqlite3
 from hashlib import sha256
 
-from src.utils.env import SHA3_256_ID
+from contracts.envs import SHA3_256_ID
 
 
 def seed(private_key=None):
