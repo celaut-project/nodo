@@ -80,6 +80,11 @@ def w3_generator_factory(ledger: str) -> typing.Generator:
             yield w3
 
 
+"""
+ DB access methods.
+"""
+
+
 def get_ledger_and_contract_addr_from_contract(contract_hash: bytes) -> typing.List[typing.Dict[str, str]]:
     return \
     pymongo.MongoClient("mongodb://" + MONGODB + "/")["mongo"]["contracts"].find({"contract_hash": contract_hash})[0][
@@ -104,3 +109,8 @@ def set_ledger_on_mongodb(ledger: str):
 
 def set_provider_on_mongodb(provider: str, ledger: str):
     pass
+
+
+"""
+ End of: DB access methods.
+"""
