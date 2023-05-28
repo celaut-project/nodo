@@ -1,9 +1,7 @@
 import os
-import sys
 
 from src.utils.singleton import Singleton
 
-sys.path.append(os.getcwd())
 from threading import Thread
 
 import json

@@ -1,8 +1,9 @@
-import os.path
+import os, sys
 import sqlite3
 from hashlib import sha256
 
-from contracts.envs import SHA3_256_ID
+sys.path.append(os.getcwd())
+from src.utils.env import SHA3_256_ID
 
 
 def seed(private_key=None):

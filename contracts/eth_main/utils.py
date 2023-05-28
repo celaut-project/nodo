@@ -1,15 +1,10 @@
-import os
-import sys
-
-from src.utils.logger import LOGGER
-from src.utils.utils import get_ledger_providers
-
-sys.path.append(os.getcwd())
-
 import typing
 from web3.middleware import geth_poa_middleware
 from web3 import HTTPProvider, Web3
 import asyncio, time
+
+from src.utils.logger import LOGGER
+from src.utils.utils import get_ledger_providers
 
 
 async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, contract):
