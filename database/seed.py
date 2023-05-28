@@ -4,6 +4,8 @@ import string
 import sys
 from hashlib import sha3_256
 
+from src.utils.env import SHA3_256_ID
+
 
 def generate_random_data(n):
     # Generate a random string of given length
@@ -41,10 +43,10 @@ def generate_random_data(n):
     # Generate random data for contract table
     contract_data = []
     for _ in range(n):
-        hash_type: str = "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a" #SHA3_256
+        hash_type: bytes = SHA3_256_ID
         contract: bytes = bytes(random_string(1000), "utf-8")
-        hash: str = sha3_256(contract).hexdigest()
-        contract_data.append((hash, hash_type, contract))
+        _hash: bytes = sha3_256(contract).digest()
+        contract_data.append((_hash, hash_type, contract))
 
     # Generate random data for ledger table
     ledger_data = []

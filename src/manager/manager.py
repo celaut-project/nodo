@@ -68,7 +68,7 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
                 address: str = contract_ledger.contract_addr
                 ledger: str = contract_ledger.ledger
 
-                contract_hash: str = sha3_256(contract).hexdigest()
+                contract_hash: bytes = sha3_256(contract).digest()
                 contract_hash_type: bytes = SHA3_256_ID
 
                 cursor.execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",

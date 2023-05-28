@@ -1,8 +1,8 @@
 import os.path
+import sqlite3
 from hashlib import sha256
-import pymongo
-from src.utils.env import MONGODB
-from eth_account import Account
+
+from src.utils.env import SHA3_256_ID
 
 
 def seed(private_key=None):
@@ -15,25 +15,26 @@ def seed(private_key=None):
         print("Dirección de la billetera:", account.address)
         print("Clave privada de la billetera:", private_key)
 
-    mongo = pymongo.MongoClient(
-            "mongodb://"+MONGODB+"/"
-        )["mongo"]["contracts"]
+    # Connect to the SQLite database
+    conn = sqlite3.connect('database.sqlite')
+    cursor = conn.cursor()
 
-    mongo.insert_one({
-            "ledger": "fuji",
-            "priv": private_key,
-            "providers": [
-                "https://api.avax-test.network/ext/bc/C/rpc",
-            ]
-        })
+    # LEDGER
+    ledger: str = "fuji"
+    cursor.execute("INSERT OR IGNORE INTO ledger (id, private_key) VALUES (?,?)",
+                   (ledger, private_key))
 
-    # Deploy contract.
-    mongo.insert_one({
-            "contract_hash": sha256(open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()).digest(),
-            "instances": [
-                {
-                    "ledger": "fuji",
-                    "contract_addr": "0x6639fdB1eb6f0D42577c73fB6807ee15B1cc1784",
-                },
-            ]
-        })
+    cursor.execute("INSERT INTO ledger_provider (uri, ledger_id) VALUES (?,?)",
+                   ("https://api.avax-test.network/ext/bc/C/rpc", "ledger"))
+
+    # CONTRACT
+    contract: bytes = open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()
+    contract_hash: bytes = sha256(contract).digest()
+    hash_type: bytes = SHA3_256_ID
+    cursor.execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
+                   (contract_hash, hash_type, contract))
+
+    # CONTRACT DEPLOYED
+    address: str = "0x6639fdB1eb6f0D42577c73fB6807ee15B1cc1784"
+    cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash) VALUES (?,?,?)",
+                   (address, ledger, contract_hash))
