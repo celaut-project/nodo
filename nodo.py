@@ -22,8 +22,8 @@ if __name__ == '__main__':
         containers()
 
     elif sys.argv[1] == 'command:peers':
-        from commands.containers import containers
-        containers()
+        from commands.peers import peers
+        peers()
 
     else:
         print('Unknown command.')

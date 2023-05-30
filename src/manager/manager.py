@@ -47,8 +47,6 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
             # Attempt to insert a new row into the 'peer' table
             cursor.execute("INSERT INTO peer (id, token, metadata, app_protocol) VALUES (?, ?, ?, ?)",
                            (peer_id, token, metadata, app_protocol))
-            print('Added data app protocol', peer_id, token, metadata, app_protocol)
-            conn.commit()
 
             # Slots
             for slot in instance.instance.uri_slot:
@@ -90,9 +88,6 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
             conn.rollback()
 
         print('Get instance for peer ->', peer_id)
-
-        from src.utils.utils import peers_id_iterator
-        print([i for i in peers_id_iterator()])
 
     return peer_id
 
