@@ -349,8 +349,8 @@ def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     try:
         return any(list(generate_uris_by_peer_id(peer_id))) if min_slots_open == 1 else \
             len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open
-    except Exception:
-        print(f'Peer {peer_id} not available.')
+    except Exception as e:
+        print(f'Peer {peer_id} not available.',  e)
         return False
 
 
