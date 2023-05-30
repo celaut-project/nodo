@@ -1,15 +1,11 @@
-import os, sys
 import sqlite3
 from hashlib import sha256
-
-sys.path.append(os.getcwd())
+from web3 import Web3
 from src.utils.env import SHA3_256_ID
-
 
 def seed(private_key=None):
 
     if not private_key:
-        from web3 import Web3
         w3 = Web3()
         account = w3.eth.account.create()
         private_key = w3.toHex(account.privateKey)

@@ -17,8 +17,17 @@ if __name__ == '__main__':
         from src.serve import serve
         serve()
 
+    elif sys.argv[1] == 'command:containers':
+        from commands.containers import containers
+        containers()
+
+    elif sys.argv[1] == 'command:peers':
+        from commands.containers import containers
+        containers()
+
     else:
         print('Unknown command.')
+
 
 """ > python3.10
     match sys.argv[1]:
