@@ -39,9 +39,9 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
         try:
 
             peer_id = str(uuid.uuid4())
-            token: Optional[str] = instance.token if instance.hasField("token") else ""
+            token: Optional[str] = instance.token if instance.HasField("token") else ""
             metadata: Optional[bytes] = instance.instance_meta.SerializeToString() \
-                if instance.hasField('instance_meta') else None
+                if instance.HasField('instance_meta') else None
             app_protocol: bytes = instance.instance.api.app_protocol.SerializeToString()
 
             # Attempt to insert a new row into the 'peer' table
