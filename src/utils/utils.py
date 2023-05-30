@@ -290,7 +290,8 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
         # Close the database connection
         conn.close()
 
-    except Exception:
+    except Exception as e:
+        print(f'Exception en generate uris by peer id: {str(e)}')
         pass
 
 
@@ -314,7 +315,7 @@ def get_ledger_providers(ledger: str) -> Generator[str, None, None]:
                 yield result
 
     except Exception as e:
-        print(f'EXCEPCION NO CONTROLADA {str(e)}')
+        print(f'Excepcion en get ledger providers {str(e)}')
         pass
 
 
@@ -335,6 +336,7 @@ def get_private_key_from_ledger(ledger: str) -> str:
         return result
 
     except Exception as e:
+        print(f"Excepcion en get private key from ledger {str(e)}")
         raise NonUsedLedgerException()
 
 
@@ -348,6 +350,7 @@ def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
         return any(generate_uris_by_peer_id(peer_id)) if min_slots_open == 1 else \
             len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open
     except Exception:
+        print(f'Peer {peer_id} not available.')
         return False
 
 
