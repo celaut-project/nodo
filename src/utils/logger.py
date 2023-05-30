@@ -1,8 +1,7 @@
 import logging
 
-from src.utils.env import GET_ENV
+from src.utils.env import GET_ENV, MAIN_DIR
 
-MAIN_DIR = '/node'
 USE_PRINT = GET_ENV(env = 'USE_PRINT', default = False)
 
 logging.basicConfig(filename=f'{MAIN_DIR}/app.log', level=logging.INFO, format='%(asctime)s %(levelname)-8s %(message)s')
