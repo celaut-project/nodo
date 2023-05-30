@@ -347,10 +347,10 @@ def get_private_key_from_ledger(ledger: str) -> str:
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     try:
+        print("Lista de uris de la peer", peer_id, list(generate_uris_by_peer_id(peer_id)))
         return any(list(generate_uris_by_peer_id(peer_id))) if min_slots_open == 1 else \
             len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open
-    except Exception as e:
-        print(f'Peer {peer_id} not available.',  e)
+    except Exception:
         return False
 
 
