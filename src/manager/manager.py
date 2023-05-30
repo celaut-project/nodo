@@ -89,6 +89,9 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
         conn.commit()
         print('Get instance for peer ->', peer_id)
 
+        from src.utils.utils import peers_id_iterator
+        print([i for i in peers_id_iterator()])
+
     return peer_id
 
 
