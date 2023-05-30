@@ -275,8 +275,8 @@ def add_peer(
                  generate_client_id_in_other_peer(peer_id=peer_id)
                  )
         return True
-    except:
-        print('Error en add_peer')
+    except Exception as e:
+        print('Error en add_peer', e)
         return False
 
 
