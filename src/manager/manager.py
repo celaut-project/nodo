@@ -47,6 +47,8 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
             # Attempt to insert a new row into the 'peer' table
             cursor.execute("INSERT INTO peer (id, token, metadata, app_protocol) VALUES (?, ?, ?, ?)",
                            (peer_id, token, metadata, app_protocol))
+            print('Added data app protocol', peer_id, token, metadata, app_protocol)
+            conn.commit()
 
             # Slots
             for slot in instance.instance.uri_slot:
@@ -80,13 +82,13 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
                 cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
                                "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
 
+            conn.commit()
         except Exception as e:
             # Manage the error
             print("Error on db:", str(e))
             # Revert all changes
             conn.rollback()
 
-        conn.commit()
         print('Get instance for peer ->', peer_id)
 
         from src.utils.utils import peers_id_iterator
