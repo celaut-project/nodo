@@ -52,8 +52,8 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
             for slot in instance.instance.uri_slot:
                 internal_port: int = slot.internal_port
                 transport_protocol: bytes = bytes("tcp", "utf-8")
-                cursor.execute("INSERT INTO slot (internal_port, transport_protocol) VALUES (?, ?)",
-                               (internal_port, transport_protocol))
+                cursor.execute("INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
+                               (internal_port, transport_protocol, peer_id))
                 slot_id: int = cursor.lastrowid
 
                 for uri in slot.uri:
