@@ -280,7 +280,6 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
         while True:
             result = cursor.fetchone()
             if not result:
-                print('ANy result with peer_id ', peer_id)
                 break
 
             ip, port = result
@@ -289,8 +288,6 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
                 # TODO BON DIA => SIGUE POR AQUI, AL PARECER NO HACE NINGUN YIELD DE LAS URIS.
                 print('URi -> ', ip + ':' + str(port))
                 yield ip + ':' + str(port)
-            else:
-                print(f"Parece que el puerto {ip}:{str(port)} no se encuentra disponible.")
 
         # Close the database connection
         conn.close()
@@ -352,7 +349,6 @@ def get_private_key_from_ledger(ledger: str) -> str:
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     try:
-        print("Lista de uris de la peer", peer_id, list(generate_uris_by_peer_id(peer_id)))
         return any(list(generate_uris_by_peer_id(peer_id))) if min_slots_open == 1 else \
             len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open
     except Exception:

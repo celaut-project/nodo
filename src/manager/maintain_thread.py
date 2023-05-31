@@ -63,7 +63,6 @@ def peer_deposits():
 
 def load_peer_instances_from_disk():
     for peer in peers_id_iterator():
-        print('Add peer ', peer)
         add_peer(peer_id=peer)
 
 
