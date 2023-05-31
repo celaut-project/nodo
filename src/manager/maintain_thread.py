@@ -47,7 +47,8 @@ def maintain_clients():
 
 def peer_deposits():
     for i in range(len(sc.total_deposited_on_other_peers)):
-        if i >= len(sc.total_deposited_on_other_peers): break
+        if i >= len(sc.total_deposited_on_other_peers):
+            break
         peer_id, estimated_deposit = list(sc.total_deposited_on_other_peers.items())[i]
         if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             # l.LOGGER('Peer '+peer_id+' is not available .')
