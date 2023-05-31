@@ -266,9 +266,7 @@ def add_peer(
 ) -> bool:
     try:
         if peer_id not in sc.total_deposited_on_other_peers:
-            print('get lock')
             with sc.cache_locks.lock(peer_id):
-                print('have the lock')
                 sc.total_deposited_on_other_peers[peer_id] = 0
 
         l.LOGGER('Add peer ' + peer_id + ' with client ' +

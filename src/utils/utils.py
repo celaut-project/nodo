@@ -280,6 +280,7 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
         while True:
             result = cursor.fetchone()
             if not result:
+                print('ANy result.')
                 break
 
             ip, port = result
