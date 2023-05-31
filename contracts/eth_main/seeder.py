@@ -3,6 +3,7 @@ from hashlib import sha256
 from web3 import Web3
 from src.utils.env import SHA3_256_ID
 
+
 def seed(private_key=None):
 
     if not private_key:
@@ -35,3 +36,6 @@ def seed(private_key=None):
     address: str = "0x6639fdB1eb6f0D42577c73fB6807ee15B1cc1784"
     cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash) VALUES (?,?,?)",
                    (address, ledger, contract_hash))
+
+    conn.commit()
+    conn.close()
