@@ -285,8 +285,11 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
             ip, port = result
             if is_open(ip=ip, port=port):
                 _any = False
+                # TODO BON DIA => SIGUE POR AQUI, AL PARECER NO HACE NINGUN YIELD DE LAS URIS.
                 print('URi -> ', ip + ':' + str(port))
                 yield ip + ':' + str(port)
+            else:
+                print(f"Parece que el puerto {ip}:{str(port)} no se encuentra disponible.")
 
         # Close the database connection
         conn.close()
