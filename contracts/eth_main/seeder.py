@@ -1,5 +1,5 @@
 import sqlite3
-from hashlib import sha256
+from hashlib import sha3_256
 from web3 import Web3
 from src.utils.env import SHA3_256_ID
 
@@ -27,7 +27,7 @@ def seed(private_key=None):
 
     # CONTRACT
     contract: bytes = open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()
-    contract_hash: bytes = sha256(contract).digest()
+    contract_hash: bytes = sha3_256(contract).digest()
     hash_type: bytes = SHA3_256_ID
     cursor.execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
                    (contract_hash, hash_type, contract))

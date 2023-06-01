@@ -10,7 +10,7 @@ from multiprocessing import Lock
 from time import sleep, time
 from typing import Dict
 from web3 import Web3, exceptions
-from hashlib import sha256
+from hashlib import sha3_256
 
 from protos import celaut_pb2, gateway_pb2
 from src.utils.logger import LOGGER
@@ -21,7 +21,7 @@ from src.utils.utils import get_ledger_and_contract_addr_from_contract, get_priv
 
 DIR = os.getcwd() + '/contracts/vyper_gas_deposit_contract/'
 CONTRACT: bytes = open(DIR + 'bytecode', 'rb').read()
-CONTRACT_HASH: bytes = sha256(CONTRACT).digest()
+CONTRACT_HASH: bytes = sha3_256(CONTRACT).digest()
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
 

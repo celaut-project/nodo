@@ -208,6 +208,7 @@ def get_peer_contract_instances(contract_hash: bytes, peer_id: str = None) \
             result = cursor.fetchone()
             if not result:
                 break
+            print('get peer contract instances -> ', result)  # TODO check if it works.
             yield result[0], result[1]
 
         # Close the database connection
