@@ -62,7 +62,7 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
                     cursor.execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
                                    (ip, port, slot_id))
 
-            print('Contracts on ledger -> ', instance.instance.api.contract_ledger)
+            print('Contracts on ledger -> ', instance.instance)
             # Contracts
             for contract_ledger in instance.instance.api.contract_ledger:
                 contract: bytes = contract_ledger.contract
