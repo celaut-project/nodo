@@ -62,6 +62,7 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
                     cursor.execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
                                    (ip, port, slot_id))
 
+            print('Contracts on ledger -> ', instance.instance.api.contract_ledger)
             # Contracts
             for contract_ledger in instance.instance.api.contract_ledger:
                 contract: bytes = contract_ledger.contract
@@ -79,6 +80,10 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
 
                 cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
                                "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
+                #  Esto no va.
+                # TODO siguiente cosa que hacer => Al parecer no se está añadiendo esta fila, lo se, estará duplicada
+                #  pero debería de ser otra con el siquiente id apuntando al mismo ledger y contrato que la que tiene
+                #  peer_id en null.
 
             conn.commit()
         except Exception as e:

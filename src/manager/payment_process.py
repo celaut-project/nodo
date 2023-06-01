@@ -71,6 +71,8 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                         sleep(COMMUNICATION_ATTEMPTS_DELAY)
 
             l.LOGGER('Peer payment process to ' + peer_id + ' of ' + str(amount) + ' communicated.')
+            # TODO, aqui hay que controlar el caso en que no tengamos ningun contrato disponible para ese par.
+            #  porque ahora estamos diciendo que está ok. Pero en realidad no hemos hecho nada y va a entrar en loop todo el tiempo o reducirá su reputación ....
         except Exception as e:
             l.LOGGER('Peer payment process error: ' + str(e))
             return False
