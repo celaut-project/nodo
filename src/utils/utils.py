@@ -186,7 +186,7 @@ def get_peer_contract_instances(contract_hash: bytes, peer_id: str = None) \
     """
         get_ledger_and_contract_address_from_peer_id_and_contract_hash
     """
-    print('start get peer contract instances')
+    print('start get peer contract instances', peer_id, contract_hash)
     try:
         # Connect to the SQLite database
         conn = sqlite3.connect('database.sqlite')
@@ -199,10 +199,8 @@ def get_peer_contract_instances(contract_hash: bytes, peer_id: str = None) \
             "JOIN contract_instance ci "
             "ON l.id == ci.ledger_id "
             "WHERE ci.peer_id = ?"
-            "AND ci.contract_hash IN ("
-            "   SELECT hash FROM contract "
-            "   WHERE hash = ?"
-            ")", (peer_id, contract_hash,)
+            "AND ci.contract_hash ?",
+            (peer_id, contract_hash,)
         )
 
         while True:
