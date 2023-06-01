@@ -198,8 +198,8 @@ def get_peer_contract_instances(contract_hash: bytes, peer_id: str = None) \
             "FROM ledger l "
             "JOIN contract_instance ci "
             "ON l.id == ci.ledger_id "
-            "WHERE ci.peer_id = ?"
-            "AND ci.contract_hash ?",
+            "WHERE ci.peer_id = ? "
+            "AND ci.contract_hash ? ",
             (peer_id, contract_hash,)
         )
 
