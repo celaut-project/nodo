@@ -27,8 +27,8 @@ def seed(private_key=None):
 
     # CONTRACT
     contract: bytes = open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()
-    contract_hash: bytes = sha3_256(contract).digest()
-    hash_type: bytes = SHA3_256_ID
+    contract_hash: str = sha3_256(contract).hexdigest()
+    hash_type: str = SHA3_256_ID.hex()
     cursor.execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
                    (contract_hash, hash_type, contract))
 

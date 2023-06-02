@@ -43,9 +43,9 @@ def generate_random_data(n):
     # Generate random data for contract table
     contract_data = []
     for _ in range(n):
-        hash_type: bytes = SHA3_256_ID
+        hash_type: str = SHA3_256_ID.hex()
         contract: bytes = bytes(random_string(1000), "utf-8")
-        _hash: bytes = sha3_256(contract).digest()
+        _hash: str = sha3_256(contract).hexdigest()
         contract_data.append((_hash, hash_type, contract))
 
     # Generate random data for ledger table

@@ -46,7 +46,7 @@ print("Created 'uri' table.")
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS contract (
         hash TEXT PRIMARY KEY,
-        hash_type BLOB,
+        hash_type TEXT,
         contract BLOB
     )
 ''')
