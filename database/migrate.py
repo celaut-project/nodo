@@ -45,7 +45,7 @@ print("Created 'uri' table.")
 # Add the "Contract" table
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS contract (
-        hash BLOB PRIMARY KEY,
+        hash TEXT PRIMARY KEY,
         hash_type BLOB,
         contract BLOB
     )
@@ -78,7 +78,7 @@ cursor.execute('''
         id INTEGER PRIMARY KEY AUTOINCREMENT ,
         address TEXT,
         ledger_id TEXT,
-        contract_hash BLOB,
+        contract_hash TEXT,
         peer_id INTEGER NULL,
         FOREIGN KEY (ledger_id) REFERENCES ledger (id),
         FOREIGN KEY (contract_hash) REFERENCES contract (hash),
