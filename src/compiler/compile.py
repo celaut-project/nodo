@@ -1,12 +1,9 @@
 import codecs
 from typing import Generator, List, Tuple, Union
 
-from grpcbigbuffer.block_driver import generate_wbp_file
-
 from protos.celaut_pb2 import Any
 
 from src.utils import logger as l
-import sys, shutil
 import json
 import os, subprocess
 import src.manager.resources_manager as resources_manager
@@ -15,7 +12,7 @@ from grpcbigbuffer import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
 from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, DOCKER_COMMAND, \
     SAVE_ALL, \
-    REGISTRY, MIN_BUFFER_BLOCK_SIZE, SHA3_256_ID
+    MIN_BUFFER_BLOCK_SIZE, SHA3_256_ID
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
 
