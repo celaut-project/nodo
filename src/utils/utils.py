@@ -208,7 +208,7 @@ def get_peer_contract_instances(contract_hash: bytes, peer_id: str = None) \
         cursor.execute(
             "SELECT address "
             "FROM contract_instance "
-            "AND contract_hash = ? ",
+            "WHERE contract_hash = ? ",
             (contract_hash,)
         )
 
