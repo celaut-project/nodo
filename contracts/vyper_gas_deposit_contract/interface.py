@@ -21,7 +21,7 @@ from src.utils.utils import get_ledger_and_contract_addr_from_contract, get_priv
 
 DIR = os.getcwd() + '/contracts/vyper_gas_deposit_contract/'
 CONTRACT: bytes = open(DIR + 'bytecode', 'rb').read()
-CONTRACT_HASH: bytes = sha3_256(CONTRACT).digest()
+CONTRACT_HASH: str = sha3_256(CONTRACT).hexdigest()
 
 # Vyper gas deposit contract, used to deposit gas to the contract. Inherent from the ledger and contract id.
 

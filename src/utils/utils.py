@@ -181,7 +181,7 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
         pass
 
 
-def get_peer_contract_instances(contract_hash: bytes, peer_id: str = None) \
+def get_peer_contract_instances(contract_hash: str, peer_id: str = None) \
         -> Generator[typing.Tuple[str, str], None, None]:
     """
         get_ledger_and_contract_address_from_peer_id_and_contract_hash
@@ -295,7 +295,7 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
         pass
 
 
-def get_ledger_and_contract_addr_from_contract(contract_hash: bytes) -> Generator[typing.Tuple[str, str], None, None]:
+def get_ledger_and_contract_addr_from_contract(contract_hash: str) -> Generator[typing.Tuple[str, str], None, None]:
     yield from get_peer_contract_instances(contract_hash=contract_hash, peer_id=None)
 
 
