@@ -208,8 +208,8 @@ def get_peer_contract_instances(contract_hash: bytes, peer_id: str = None) \
         cursor.execute(
             "SELECT address "
             "FROM contract_instance "
-            "WHERE contract_hash = ? ",
-            (contract_hash,)
+            "WHERE ledger_id = ? ",
+            ("fuji",)
         )
 
         while True:
