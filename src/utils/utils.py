@@ -193,13 +193,22 @@ def get_peer_contract_instances(contract_hash: str, peer_id: str = None) \
         cursor = conn.cursor()
 
         # Retrieve the peer instance from the 'peer' table
-        cursor.execute(
-            "SELECT address, ledger_id "
-            "FROM contract_instance "
-            "WHERE contract_hash = ? "
-            f"AND {'peer_id = ?' if peer_id else 'peer_id IS NULL'}",
-            (contract_hash, peer_id,)
-        )
+        if peer_id:
+            cursor.execute(
+                "SELECT address, ledger_id "
+                "FROM contract_instance "
+                "WHERE contract_hash = ? "
+                "AND peer_id = ?",
+                (contract_hash, peer_id)
+            )
+        else:
+            cursor.execute(
+                "SELECT address, ledger_id "
+                "FROM contract_instance "
+                "WHERE contract_hash = ? "
+                "AND peer_id IS NULL",
+                (contract_hash,)
+            )
 
         while True:
             result = cursor.fetchone()

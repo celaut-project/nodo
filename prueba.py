@@ -7,13 +7,23 @@ conn = sqlite3.connect('database.sqlite')
 cursor = conn.cursor()
 
 # Retrieve the peer instance from the 'peer' table
-cursor.execute(
-    "SELECT address, ledger_id "
-    "FROM contract_instance "
-    "WHERE contract_hash = ? "
-    "AND peer_id IS NULL ",
-    (contract_hash, )
-)
+if peer_id:
+    cursor.execute(
+        "SELECT address, ledger_id "
+        "FROM contract_instance "
+        "WHERE contract_hash = ? "
+        "AND peer_id = ?",
+        (contract_hash, peer_id)
+    )
+else:
+    cursor.execute(
+        "SELECT address, ledger_id "
+        "FROM contract_instance "
+        "WHERE contract_hash = ? "
+        "AND peer_id IS NULL",
+        (contract_hash,)
+    )
+
 
 result = cursor.fetchone()
 print(result)
