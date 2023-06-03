@@ -186,7 +186,6 @@ def get_peer_contract_instances(contract_hash: str, peer_id: str = None) \
     """
         get_ledger_and_contract_address_from_peer_id_and_contract_hash
     """
-    print('start get peer contract instances', peer_id, contract_hash)
     try:
         # Connect to the SQLite database
         conn = sqlite3.connect('database.sqlite')
@@ -212,7 +211,6 @@ def get_peer_contract_instances(contract_hash: str, peer_id: str = None) \
 
         while True:
             result = cursor.fetchone()
-            print('get peer contract instances -> ', result)  # TODO MASTER check if it works.
             if not result:
                 break
             yield result[0], result[1]
