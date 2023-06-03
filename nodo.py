@@ -17,6 +17,14 @@ if __name__ == '__main__':
         from src.serve import serve
         serve()
 
+    elif sys.argv[1] == 'migrate':
+        import os
+        from database.migrate import migrate
+        from contracts.eth_main.seeder import seed
+        os.system("rm database.sqlite")
+        migrate()
+        seed()
+
     elif sys.argv[1] == 'command:containers':
         from commands.containers import containers
         containers()
