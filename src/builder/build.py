@@ -7,11 +7,10 @@ from protos.gateway_pb2_grpcbf import GetServiceTar_input
 import grpc, os, src.manager.resources_manager as resources_manager
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 from src.utils.env import DOCKER_COMMAND, SUPPORTED_ARCHITECTURES, BUILD_CONTAINER_MEMORY_SIZE_FACTOR, \
-    WAIT_FOR_CONTAINER, BLOCKDIR
+    WAIT_FOR_CONTAINER, BLOCKDIR, CACHE, REGISTRY
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator, service_extended, read_file
 import src.utils.logger as l
 from grpcbigbuffer.client import save_chunks_to_file, serialize_to_buffer, copy_block_if_exists
-from src.compiler.compile import CACHE, REGISTRY
 
 from shutil import rmtree
 from subprocess import run
