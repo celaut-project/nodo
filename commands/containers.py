@@ -4,7 +4,7 @@ from typing import Generator, List
 
 import docker
 from tabulate import tabulate
-from interface import command
+from commands.interface import command
 
 def old_containers():
     # Crear una instancia del cliente de Docker
