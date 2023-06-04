@@ -31,7 +31,7 @@ gas_to_contract = lambda amount, parity_factor: int(amount / 10 ** parity_factor
 class LedgerContractInterface:
 
     def __init__(self, w3_generator, contract_addr, priv):
-        LOGGER(f"{int(time())} EVM gas deposit contract interface init for {str(contract_addr)}")
+        print(f"{int(time())} EVM gas deposit contract interface init for {str(contract_addr)}")
         self.w3: Web3 = next(w3_generator)
         self.contract_addr: str = contract_addr
 
