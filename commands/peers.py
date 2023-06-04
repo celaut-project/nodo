@@ -1,27 +1,14 @@
 import os
 import time
-from tabulate import tabulate
-
+from typing import Generator, List
+from commands.__interface import command
 from src.utils.utils import peers_id_iterator
 
 
+def generator() -> Generator[List[str]]:
+    for peer in peers_id_iterator():
+        yield [peer]
+
+
 def peers():
-    while True:
-        # Borrar la consola
-        os.system('clear')
-
-        # Crear una lista para almacenar los datos de cada peer
-        datos_peeres = []
-
-        # Recorrer los peeres y obtener los datos relevantes
-        for peer in peers_id_iterator():
-
-            # Agregar los datos a la lista
-            datos_peeres.append([peer])
-
-        # Mostrar la tabla de datos
-        headers = ['PAR']
-        print(tabulate(datos_peeres, headers=headers, tablefmt="plain"))
-
-        # Esperar dos segundos antes de refrescar
-        time.sleep(2)
+    command(f=generator, headers=['PAR'])

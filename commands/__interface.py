@@ -1,7 +1,6 @@
 import os
 import time
 from typing import Callable, List
-
 from tabulate import tabulate
 
 
