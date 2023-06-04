@@ -1,5 +1,5 @@
 import string
-from hashlib import sha256
+from hashlib import sha256, sha3_256
 from time import sleep
 import grpc
 from grpcbigbuffer import client as grpcbf
@@ -114,7 +114,7 @@ def __check_payment_process(amount: int, ledger: str, token: str, contract: byte
     if token not in sc.clients:
         _l.LOGGER('Client ' + token + ' is not in ' + str(sc.clients))
         return False
-    return PAYMENT_PROCESS_VALIDATORS[sha256(contract).hexdigest()](amount, token, ledger, contract_addr,
+    return PAYMENT_PROCESS_VALIDATORS[sha3_256(contract).hexdigest()](amount, token, ledger, contract_addr,
                                                                     validate_token=lambda t: t in sc.clients)
 
 
