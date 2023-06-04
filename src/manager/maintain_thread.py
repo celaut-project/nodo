@@ -67,7 +67,6 @@ def load_peer_instances_from_disk():
         add_peer(peer_id=peer)
 
 
-# TODO MASTER comprobar porque no realiza el pago inicial. (La instancia del contrato la tiene.)
 def manager_thread():
     init_contract_interfaces()
     load_peer_instances_from_disk()
