@@ -149,6 +149,7 @@ def get_network_name(ip_or_uri: str) -> str:
 
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
+    print(f"peers id iterator, ignoring network {ignore_network}")
     try:
         # Connect to the SQLite database
         conn = sqlite3.connect('database.sqlite')
