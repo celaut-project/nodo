@@ -10,8 +10,8 @@ def seed(private_key=None):
         w3 = Web3()
         account = w3.eth.account.create()
         private_key = w3.toHex(account.privateKey)
-        print("Dirección de la billetera:", account.address)
-        print("Clave privada de la billetera:", private_key)
+    print("Dirección de la billetera:", account.address)
+    print("Clave privada de la billetera:", private_key)
 
     # Connect to the SQLite database
     conn = sqlite3.connect('database.sqlite')
