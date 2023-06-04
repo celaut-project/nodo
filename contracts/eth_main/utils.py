@@ -18,6 +18,7 @@ async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, c
 
 def catch_event(contract_address, w3, contract, event_name, opt, init_delay: int = 1, poll_interval: int = 1):
     while True:
+        print(f"catch event of {contract_address, event_name}")
         block: int = w3.eth.get_block('latest')['number'] - init_delay
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
