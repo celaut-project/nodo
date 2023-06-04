@@ -74,4 +74,5 @@ def w3_generator_factory(ledger: str) -> typing.Generator:
                 continue
             w3 = Web3(HTTPProvider(provider))
             w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+            print(f"yield {w3}")
             yield w3
