@@ -10,7 +10,7 @@ from multiprocessing import Lock
 from time import sleep, time
 from typing import Dict
 from web3 import Web3, exceptions
-from hashlib import sha3_256
+from hashlib import sha3_256, sha256
 
 from protos import celaut_pb2, gateway_pb2
 from src.utils.logger import LOGGER
