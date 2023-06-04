@@ -171,6 +171,7 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
             ) for uri in generate_uris_by_peer_id(
                 peer_id=str(peer_id)
             )]:
+                print(f"yield {peer_id}")
                 yield str(peer_id)
 
         # Close the database connection
