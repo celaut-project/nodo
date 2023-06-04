@@ -67,6 +67,7 @@ def check_provider_availability(provider) -> bool:
 
 
 def w3_generator_factory(ledger: str) -> typing.Generator:
+    print(f"generator w3 factory {ledger}")
     while True:
         for provider in get_ledger_providers(ledger=ledger):
             if not check_provider_availability(provider=provider):

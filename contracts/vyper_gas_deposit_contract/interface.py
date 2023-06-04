@@ -31,12 +31,10 @@ gas_to_contract = lambda amount, parity_factor: int(amount / 10 ** parity_factor
 class LedgerContractInterface:
 
     def __init__(self, w3_generator, contract_addr, priv):
-        print(f"{int(time())} EVM gas deposit contract interface init for {str(contract_addr)}. The w3gen {w3_generator}")
+        print(f"{int(time())} EVM gas deposit contract interface init for {str(contract_addr)}.")
         self.w3: Web3 = next(w3_generator)
-        print(f"The generated w3 instance {self.w3}")
         self.contract_addr: str = contract_addr
 
-        print(f" contract interface info: {self.w3} and {self.contract_addr} .")
 
         # TODO debe de ir en una clase para el Ledger, sin un contrato concreto.
         self.priv = priv
@@ -45,16 +43,13 @@ class LedgerContractInterface:
         self.last_nonce: int = 0
         self.nonce_count: int = 0
 
-        print(f'prev generated contract {priv}')
         self.generate_contract = lambda addr: self.w3.eth.contract(
             address=Web3.toChecksumAddress(addr),
             abi=json.load(open(DIR + 'abi.json')),
             bytecode=open(DIR + 'bytecode', 'rb').read()
         )
-        print(f"generate contract funciton {self.generate_contract}")
         self.contract = self.generate_contract(addr=contract_addr)
 
-        print(f"contract {self.contract}")
         self.payment_sessions: Dict[bytes, int] = {}
         self.sessions_lock = Lock()
 
