@@ -331,6 +331,7 @@ class NonUsedLedgerException(Exception):
 
 
 def get_private_key_from_ledger(ledger: str) -> str:
+    print(f"Get private key from {ledger}")
     try:
         # Connect to the SQLite database
         with sqlite3.connect('database.sqlite') as conn:
@@ -340,6 +341,7 @@ def get_private_key_from_ledger(ledger: str) -> str:
             cursor.execute("SELECT private_key FROM ledger WHERE id = ?", (ledger,))
             result = cursor.fetchone()
 
+        print(f"result .> {result}")
         return result
 
     except Exception as e:

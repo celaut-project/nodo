@@ -152,10 +152,8 @@ class LedgerContractInterface:
 class VyperDepositContractInterface(metaclass=Singleton):
 
     def __init__(self):
-        print('Init vyper deposit contract interface.')
         self.ledger_providers: Dict[str: LedgerContractInterface] = {}
         for contract_address, ledger in get_ledger_and_contract_addr_from_contract(contract_hash=CONTRACT_HASH):
-            print(f"contract .> {contract_address} on ledger {ledger}")
             try:
                 self.ledger_providers[ledger] = LedgerContractInterface(
                     w3_generator=w3_generator_factory(ledger=ledger),

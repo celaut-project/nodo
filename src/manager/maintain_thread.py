@@ -63,16 +63,13 @@ def peer_deposits():
 
 
 def load_peer_instances_from_disk():
-    print(f"load peer instances from disk")
     for peer in peers_id_iterator():
         add_peer(peer_id=peer)
 
 
 # TODO MASTER comprobar porque no realiza el pago inicial. (La instancia del contrato la tiene.)
 def manager_thread():
-    print(f"Iniciando manager thread")
     init_contract_interfaces()
-    print(f" executed init contract inter.")
     load_peer_instances_from_disk()
     while True:
         maintain_containers()
