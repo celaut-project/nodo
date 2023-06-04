@@ -35,6 +35,8 @@ class LedgerContractInterface:
         self.w3: Web3 = next(w3_generator)
         self.contract_addr: str = contract_addr
 
+        print(f" contract interface info: {self.w3} and {self.contract_addr} .")
+
         # TODO debe de ir en una clase para el Ledger, sin un contrato concreto.
         self.priv = priv
         self.pub = self.w3.eth.account.from_key(priv).address
@@ -42,7 +44,7 @@ class LedgerContractInterface:
         self.last_nonce: int = 0
         self.nonce_count: int = 0
 
-        print('prev generated contract')
+        print(f'prev generated contract {priv}')
         self.generate_contract = lambda addr: self.w3.eth.contract(
             address=Web3.toChecksumAddress(addr),
             abi=json.load(open(DIR + 'abi.json')),
