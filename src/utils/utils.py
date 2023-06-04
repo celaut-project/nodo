@@ -340,7 +340,7 @@ def get_private_key_from_ledger(ledger: str) -> str:
             cursor.execute("SELECT private_key FROM ledger WHERE id = ?", (ledger,))
             result = cursor.fetchone()
 
-        return result
+        return result[0]
 
     except Exception as e:
         print(f"Excepcion en get private key from ledger {str(e)}")
