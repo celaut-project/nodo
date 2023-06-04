@@ -318,9 +318,9 @@ def get_ledger_providers(ledger: str) -> Generator[str, None, None]:
 
             while True:
                 result = cursor.fetchone()
+                print(f"result -> {result}")
                 if not result:
                     break
-                print(f"result -> {result}")
                 yield result
 
     except Exception as e:
