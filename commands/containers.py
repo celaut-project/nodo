@@ -1,11 +1,12 @@
 import os
 import time
+from typing import Generator, List
 
 import docker
 from tabulate import tabulate
+from interface import command
 
-
-def containers():
+def old_containers():
     # Crear una instancia del cliente de Docker
     client = docker.from_env()
 
@@ -35,3 +36,17 @@ def containers():
 
         # Esperar dos segundos antes de refrescar
         time.sleep(2)
+
+
+def generator() -> Generator[List[str], None, None]:
+    for contenedor in docker.from_env().containers.list():
+        servicio = contenedor.image.tags[0]
+        creado = contenedor.attrs['Created']
+        puertos = contenedor.attrs['HostConfig']['PortBindings']
+        nombre = contenedor.name
+
+        yield [servicio, creado, puertos, nombre]
+
+
+def containers():
+    command(f=generator, headers=['SERVICE', 'CREATED', 'PORTS', 'NAMES'])
