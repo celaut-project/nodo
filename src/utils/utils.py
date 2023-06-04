@@ -6,6 +6,7 @@ import typing
 from grpcbigbuffer.client import Dir
 import netifaces as ni
 
+from database.query_interface import query_interface
 from protos import celaut_pb2 as celaut, gateway_pb2
 
 from src.utils.env import REGISTRY
@@ -148,60 +149,22 @@ def get_network_name(ip_or_uri: str) -> str:
 """
 
 
-def get_ledgers():
-    try:
-        # Connect to the database
-        conn = sqlite3.connect('database.sqlite')
-        cursor = conn.cursor()
-
-        # Execute the query
-        cursor.execute("SELECT id, private_key FROM ledger")
-
-        while True:
-            result = cursor.fetchone()
-            if not result:
-                break
-            yield result[0], result[1]
-        conn.close()
-
-    except Exception as e:
-        print(f'EXCEPCION NO CONTROLADA {str(e)}')
-        pass
-
+def get_ledgers() -> Generator[typing.Tuple[str, str]]:
+    yield from query_interface(query="SELECT id, private_key FROM ledger")
 
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
-    try:
-        # Connect to the SQLite database
-        conn = sqlite3.connect('database.sqlite')
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT id FROM peer")
-
-        while True:
-            result = cursor.fetchone()
-            if not result:
-                break
-            peer_id = result[0]
-
-            if not ignore_network:
-                yield str(peer_id)
-
-            elif True not in [address_in_network(
-                    ip_or_uri=uri,
-                    net=ignore_network
+    yield from (
+        str(peer_id) for (peer_id,) in query_interface(query="SELECT id FROM peer")
+        if not ignore_network or True not in [
+            address_in_network(
+                ip_or_uri=uri,
+                net=ignore_network
             ) for uri in generate_uris_by_peer_id(
                 peer_id=str(peer_id)
-            )]:
-                print(f"yield {peer_id}")
-                yield str(peer_id)
-
-        # Close the database connection
-        conn.close()
-
-    except Exception as e:
-        print(f'EXCEPCION NO CONTROLADA {str(e)}')
-        pass
+            )
+        ]
+    )
 
 
 def get_peer_contract_instances(contract_hash: str, peer_id: str = None) \
@@ -209,74 +172,34 @@ def get_peer_contract_instances(contract_hash: str, peer_id: str = None) \
     """
         get_ledger_and_contract_address_from_peer_id_and_contract_hash
     """
-    try:
-        # Connect to the SQLite database
-        conn = sqlite3.connect('database.sqlite')
-        cursor = conn.cursor()
+    yield from query_interface(
+        query="SELECT address, ledger_id "
+              "FROM contract_instance "
+              "WHERE contract_hash = ? "
+              "AND peer_id = ?",
+        params=(contract_hash, peer_id)
 
-        # Retrieve the peer instance from the 'peer' table
-        if peer_id:
-            cursor.execute(
-                "SELECT address, ledger_id "
-                "FROM contract_instance "
-                "WHERE contract_hash = ? "
-                "AND peer_id = ?",
-                (contract_hash, peer_id)
-            )
-        else:
-            cursor.execute(
-                "SELECT address, ledger_id "
-                "FROM contract_instance "
-                "WHERE contract_hash = ? "
-                "AND peer_id IS NULL",
-                (contract_hash,)
-            )
-
-        while True:
-            result = cursor.fetchone()
-            if not result:
-                break
-            yield result[0], result[1]
-
-        # Close the database connection
-        conn.close()
-
-    except Exception as e:
-        print(f'EXCEPCION NO CONTROLADA {str(e)}')
-        pass
+    ) if peer_id else query_interface(
+        query="SELECT address, ledger_id "
+              "FROM contract_instance "
+              "WHERE contract_hash = ? "
+              "AND peer_id IS NULL",
+        params=(contract_hash,)
+    )
 
 
 def get_peer_id_by_ip(ip: str) -> str:
-    try:
-        # Connect to the SQLite database
-        conn = sqlite3.connect('database.sqlite')
-        cursor = conn.cursor()
-
-        # Retrieve the peer ID from the 'peer' table based on the IP
-        cursor.execute(
-            "SELECT id FROM peer "
-            "WHERE id IN ("
-            "   SELECT peer_id FROM slot "
-            "   WHERE id IN ("
-            "       SELECT slot_id FROM uri "
-            "       WHERE ip = ?"
-            "   )"
-            ")", (ip,)
-        )
-        results = cursor.fetchall()
-
-        # Close the database connection
-        conn.close()
-
-        if len(results) == 1:
-            return str(results[0][0])
-        elif len(results) > 1:
-            raise Exception('Multiple peers found for IP: ' + str(ip))
-        else:
-            raise Exception('No peer found for IP: ' + str(ip))
-
-    except Exception:
-        raise Exception('No peer found for IP: ' + str(ip))
+    return next(query_interface(
+        query="SELECT id FROM peer "
+              "WHERE id IN ("
+              "   SELECT peer_id FROM slot "
+              "   WHERE id IN ("
+              "       SELECT slot_id FROM uri "
+              "       WHERE ip = ?"
+              "   )"
+              ")",
+        params=(ip,)
+    ))[0]
 
 
 def is_open(ip: str, port: int) -> bool:
@@ -291,36 +214,16 @@ def is_open(ip: str, port: int) -> bool:
 
 
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
-    try:
-        # Connect to the SQLite database
-        conn = sqlite3.connect('database.sqlite')
-        cursor = conn.cursor()
-
-        # Retrieve the corresponding uris from the 'uri' table
-        cursor.execute(
-            "SELECT ip, port FROM uri "
-            "WHERE slot_id IN ("
-            "   SELECT id FROM slot "
-            "   WHERE peer_id = ?"
-            ")", (peer_id,)
-        )
-
-        while True:
-            result = cursor.fetchone()
-            if not result:
-                break
-
-            ip, port = result
-            if is_open(ip=ip, port=port):
-                _any = False
-                yield ip + ':' + str(port)
-
-        # Close the database connection
-        conn.close()
-
-    except Exception as e:
-        print(f'Exception en generate uris by peer id: {str(e)}')
-        pass
+    yield from (
+        ip + ':' + str(port) for ip, port in query_interface(
+            query="SELECT ip, port FROM uri "
+                  "WHERE slot_id IN ("
+                  "   SELECT id FROM slot "
+                  "   WHERE peer_id = ?"
+                  ")",
+            params=(peer_id,)
+        ) if is_open(ip=ip, port=port)
+    )
 
 
 def get_ledger_and_contract_addr_from_contract(contract_hash: str) -> Generator[typing.Tuple[str, str], None, None]:
@@ -328,23 +231,10 @@ def get_ledger_and_contract_addr_from_contract(contract_hash: str) -> Generator[
 
 
 def get_ledger_providers(ledger: str) -> Generator[str, None, None]:
-    try:
-        # Connect to the SQLite database
-        with sqlite3.connect('database.sqlite') as conn:
-            cursor = conn.cursor()
-
-            # Execute the query
-            cursor.execute("SELECT uri FROM ledger_provider WHERE ledger_id = ?", (ledger,))
-
-            while True:
-                result = cursor.fetchone()
-                if not result:
-                    break
-                yield result[0]
-
-    except Exception as e:
-        print(f'Excepcion en get ledger providers {str(e)}')
-        pass
+    yield from (r[0] for r in query_interface(
+        query="SELECT uri FROM ledger_provider WHERE ledger_id = ?",
+        params=(ledger,)
+    ))
 
 
 class NonUsedLedgerException(Exception):
@@ -353,18 +243,12 @@ class NonUsedLedgerException(Exception):
 
 def get_private_key_from_ledger(ledger: str) -> str:
     try:
-        # Connect to the SQLite database
-        with sqlite3.connect('database.sqlite') as conn:
-            cursor = conn.cursor()
+        return next(query_interface(
+            query="SELECT private_key FROM ledger WHERE id = ?",
+            params=(ledger,)
+        ))[0]
 
-            # Execute the query
-            cursor.execute("SELECT private_key FROM ledger WHERE id = ?", (ledger,))
-            result = cursor.fetchone()
-
-        return result[0]
-
-    except Exception as e:
-        print(f"Excepcion en get private key from ledger {str(e)}")
+    except Exception:
         raise NonUsedLedgerException()
 
 
