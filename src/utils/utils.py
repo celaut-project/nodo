@@ -319,7 +319,7 @@ def get_ledger_providers(ledger: str) -> Generator[str, None, None]:
                 result = cursor.fetchone()
                 if not result:
                     break
-                yield result
+                yield result[0]
 
     except Exception as e:
         print(f'Excepcion en get ledger providers {str(e)}')
