@@ -5,7 +5,7 @@ from commands.__interface import command
 from src.utils.utils import peers_id_iterator
 
 
-def generator() -> Generator[List[str]]:
+def generator() -> Generator[List[str], None, None]:
     for peer in peers_id_iterator():
         yield [peer]
 
