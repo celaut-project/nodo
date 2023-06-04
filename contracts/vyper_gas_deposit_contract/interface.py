@@ -76,6 +76,7 @@ class LedgerContractInterface:
 
     # Update Session Event.
     def catch_event_thread(self, contract_addr):
+        print(f"catch event thread {self.contract}")
         catch_event(
             contract_address=Web3.toChecksumAddress(contract_addr),
             w3=self.w3,
