@@ -148,8 +148,29 @@ def get_network_name(ip_or_uri: str) -> str:
 """
 
 
+def get_ledgers():
+    try:
+        # Connect to the database
+        conn = sqlite3.connect('database.sqlite')
+        cursor = conn.cursor()
+
+        # Execute the query
+        cursor.execute("SELECT id, private_key FROM ledger")
+
+        while True:
+            result = cursor.fetchone()
+            if not result:
+                break
+            yield result[0], result[1]
+        conn.close()
+
+    except Exception as e:
+        print(f'EXCEPCION NO CONTROLADA {str(e)}')
+        pass
+
+
+
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
-    print(f"peers id iterator, ignoring network {ignore_network}")
     try:
         # Connect to the SQLite database
         conn = sqlite3.connect('database.sqlite')

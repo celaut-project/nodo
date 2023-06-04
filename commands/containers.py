@@ -4,6 +4,7 @@ import time
 import docker
 from tabulate import tabulate
 
+
 def containers():
     # Crear una instancia del cliente de Docker
     client = docker.from_env()
