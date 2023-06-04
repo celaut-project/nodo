@@ -72,6 +72,7 @@ def load_peer_instances_from_disk():
 def manager_thread():
     print(f"Iniciando manager thread")
     init_contract_interfaces()
+    print(f" executed init contract inter.")
     load_peer_instances_from_disk()
     while True:
         maintain_containers()
