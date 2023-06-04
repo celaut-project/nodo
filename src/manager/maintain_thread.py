@@ -69,6 +69,7 @@ def load_peer_instances_from_disk():
 
 # TODO MASTER comprobar porque no realiza el pago inicial. (La instancia del contrato la tiene.)
 def manager_thread():
+    print(f"Iniciando manager thread")
     init_contract_interfaces()
     load_peer_instances_from_disk()
     while True:
