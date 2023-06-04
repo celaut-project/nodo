@@ -42,13 +42,16 @@ class LedgerContractInterface:
         self.last_nonce: int = 0
         self.nonce_count: int = 0
 
+        print('prev generated contract')
         self.generate_contract = lambda addr: self.w3.eth.contract(
             address=Web3.toChecksumAddress(addr),
             abi=json.load(open(DIR + 'abi.json')),
             bytecode=open(DIR + 'bytecode', 'rb').read()
         )
+        print(f"generate contract funciton {self.generate_contract}")
         self.contract = self.generate_contract(addr=contract_addr)
 
+        print(f"contract {self.contract}")
         self.payment_sessions: Dict[bytes, int] = {}
         self.sessions_lock = Lock()
 
@@ -76,7 +79,6 @@ class LedgerContractInterface:
 
     # Update Session Event.
     def catch_event_thread(self, contract_addr):
-        print(f"catch event thread {self.contract}")
         catch_event(
             contract_address=Web3.toChecksumAddress(contract_addr),
             w3=self.w3,
