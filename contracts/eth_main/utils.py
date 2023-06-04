@@ -41,7 +41,8 @@ def catch_event(contract_address, w3, contract, event_name, opt, init_delay: int
 def transact(
         w3, method, priv, nonce, value=0, gas=2000000, pub=None, timeout=None, poll_latency=None,
 ) -> str:
-    pub = w3.eth.account.privateKeyToAccount(priv).address if not pub else pub  # Not verify the correctness, 
+    pub = w3.eth.account.privateKeyToAccount(priv).address if not pub else pub  # Not verify the correctness,
+    print(f"Send transaction from {pub} of {value} coins.")
     #     pub param is only for skip that step.
     transaction = method.buildTransaction({'gasPrice': w3.eth.gasPrice})
     transaction.update({
