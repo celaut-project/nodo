@@ -23,7 +23,7 @@ def seed(private_key=None):
                    (ledger, private_key))
 
     cursor.execute("INSERT INTO ledger_provider (uri, ledger_id) VALUES (?,?)",
-                   ("https://api.avax-test.network/ext/bc/C/rpc", "ledger"))
+                   ("https://api.avax-test.network/ext/bc/C/rpc", ledger))
 
     # CONTRACT
     contract: bytes = open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()
