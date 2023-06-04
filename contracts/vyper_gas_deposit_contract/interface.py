@@ -33,6 +33,7 @@ class LedgerContractInterface:
     def __init__(self, w3_generator, contract_addr, priv):
         print(f"{int(time())} EVM gas deposit contract interface init for {str(contract_addr)}. The w3gen {w3_generator}")
         self.w3: Web3 = next(w3_generator)
+        print(f"The generated w3 instance {self.w3}")
         self.contract_addr: str = contract_addr
 
         print(f" contract interface info: {self.w3} and {self.contract_addr} .")
