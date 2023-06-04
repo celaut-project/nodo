@@ -307,7 +307,6 @@ def get_ledger_and_contract_addr_from_contract(contract_hash: str) -> Generator[
 
 
 def get_ledger_providers(ledger: str) -> Generator[str, None, None]:
-    print(f"get ledger providers {ledger}")
     try:
         # Connect to the SQLite database
         with sqlite3.connect('database.sqlite') as conn:
@@ -318,7 +317,6 @@ def get_ledger_providers(ledger: str) -> Generator[str, None, None]:
 
             while True:
                 result = cursor.fetchone()
-                print(f"result -> {result}")
                 if not result:
                     break
                 yield result
