@@ -17,10 +17,10 @@ from src.utils.env import GATEWAY_PORT, REGISTRY
 
 
 def __generate_contract_ledger() -> Generator[celaut.Service.Api.ContractLedger, None, None]:
-    for ledger, address in get_ledger_and_contract_addr_from_contract(DEFAULT_PROVISIONAL_CONTRACT_HASH):
+    for address, ledger in get_ledger_and_contract_addr_from_contract(DEFAULT_PROVISIONAL_CONTRACT_HASH):
         contract_ledger = celaut.Service.Api.ContractLedger()
         contract_ledger.contract = DEFAULT_PROVISIONAL_CONTRACT
-        contract_ledger.ledger, contract_ledger.contract_addr = ledger, address
+        contract_ledger.contract_addr, contract_ledger.ledger = address, ledger
         yield contract_ledger
 
 

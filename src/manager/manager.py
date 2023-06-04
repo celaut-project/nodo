@@ -78,7 +78,6 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
                 cursor.execute("INSERT OR IGNORE INTO ledger (id) VALUES (?)",
                                (ledger,))
 
-                print(f"Agregando address {address}  y ledger {ledger}  .")
                 cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
                                "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
 
