@@ -126,7 +126,6 @@ class LedgerContractInterface:
         while True:
             nonce = self.get_nonce()
             try:
-                print('-- TRANSACT --')
                 return transact(
                     w3=self.w3,
                     method=contract.functions.add_gas(
