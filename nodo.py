@@ -33,6 +33,10 @@ if __name__ == '__main__':
         from commands.peers import peers
         peers()
 
+    elif sys.argv[1] == 'command:contracts':
+        from commands.contracts import contracts
+        contracts()
+
     else:
         print('Unknown command.')
 
