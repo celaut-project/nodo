@@ -23,7 +23,7 @@ if __name__ == '__main__':
         from contracts.eth_main.seeder import seed
         os.system("rm database.sqlite")
         migrate()
-        seed()
+        seed() if len(sys.argv) == 2 else seed(private_key=sys.argv[2])
 
     elif sys.argv[1] == 'command:containers':
         from commands.containers import containers
