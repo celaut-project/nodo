@@ -8,8 +8,8 @@ def generator() -> Generator[List[str], None, None]:
         yield [peer]
 
 
-def peers():
-    table_command(f=generator, headers=['PAR'])
+def peers(stream: bool = True):
+    table_command(f=generator, headers=['PAR'], stream=stream)
 
 
 def delete(peer_id):

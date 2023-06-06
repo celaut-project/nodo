@@ -16,12 +16,13 @@ def generator() -> Generator[List[str], None, None]:
         ]
 
 
-def contracts():
+def contracts(stream: bool = True):
     table_command(
         f=generator,
         headers=[
             'LEDGER',
             # 'PUBLIC KEY',
             'PRIVATE KEY'
-        ]
+        ],
+        stream=stream
     )

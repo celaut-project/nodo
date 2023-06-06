@@ -31,7 +31,7 @@ if __name__ == '__main__':
 
     elif sys.argv[1] == 'command:peers':
         from commands.peers import peers
-        peers()
+        peers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
     elif sys.argv[1] == 'prune:peer':
         from commands.peers import delete

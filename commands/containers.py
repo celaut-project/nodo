@@ -14,5 +14,5 @@ def generator() -> Generator[List[str], None, None]:
         yield [servicio, creado, puertos, nombre]
 
 
-def containers():
-    table_command(f=generator, headers=['SERVICE', 'CREATED', 'PORTS', 'NAMES'])
+def containers(stream: bool = True):
+    table_command(f=generator, headers=['SERVICE', 'CREATED', 'PORTS', 'NAMES'], stream=stream)
