@@ -1,10 +1,10 @@
 import sqlite3
-from typing import Generator, Tuple, Any
+from typing import Generator, Tuple, Union
 
 
 def query_interface(query: str, params: tuple = ()) \
         -> Generator[
-            Tuple[str | bytes | bytearray | memoryview | int | float | None],
+            Tuple[Union[str | bytes | bytearray | memoryview | int | float | None]],
             None, None
         ]:
     try:
