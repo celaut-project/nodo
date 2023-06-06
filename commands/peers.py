@@ -13,12 +13,12 @@ def peers():
 
 
 def delete(peer_id):
-    from database.query_interface import query_interface
+    from database.query_interface import commit_query
 
-    query_interface(query='''
+    commit_query(query='''
                             DELETE FROM peer
                             WHERE id = ?
                     ''', params=(peer_id,)
-                    )
+                 )
 
     print(f"Deleted {peer_id} peer")

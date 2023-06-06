@@ -6,7 +6,7 @@ import typing
 from grpcbigbuffer.client import Dir
 import netifaces as ni
 
-from database.query_interface import query_interface
+from database.query_interface import fetch_query
 from protos import celaut_pb2 as celaut, gateway_pb2
 
 from src.utils.env import REGISTRY
@@ -150,12 +150,12 @@ def get_network_name(ip_or_uri: str) -> str:
 
 
 def get_ledgers() -> Generator[typing.Tuple[str, str], None, None]:
-    yield from query_interface(query="SELECT id, private_key FROM ledger")
+    yield from fetch_query(query="SELECT id, private_key FROM ledger")
 
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     yield from (
-        str(peer_id) for (peer_id,) in query_interface(query="SELECT id FROM peer")
+        str(peer_id) for (peer_id,) in fetch_query(query="SELECT id FROM peer")
         if not ignore_network or True not in [
             address_in_network(
                 ip_or_uri=uri,
@@ -172,14 +172,14 @@ def get_peer_contract_instances(contract_hash: str, peer_id: str = None) \
     """
         get_ledger_and_contract_address_from_peer_id_and_contract_hash
     """
-    yield from query_interface(
+    yield from fetch_query(
         query="SELECT address, ledger_id "
               "FROM contract_instance "
               "WHERE contract_hash = ? "
               "AND peer_id = ?",
         params=(contract_hash, peer_id)
 
-    ) if peer_id else query_interface(
+    ) if peer_id else fetch_query(
         query="SELECT address, ledger_id "
               "FROM contract_instance "
               "WHERE contract_hash = ? "
@@ -189,7 +189,7 @@ def get_peer_contract_instances(contract_hash: str, peer_id: str = None) \
 
 
 def get_peer_id_by_ip(ip: str) -> str:
-    return next(query_interface(
+    return next(fetch_query(
         query="SELECT id FROM peer "
               "WHERE id IN ("
               "   SELECT peer_id FROM slot "
@@ -215,7 +215,7 @@ def is_open(ip: str, port: int) -> bool:
 
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
     yield from (
-        ip + ':' + str(port) for ip, port in query_interface(
+        ip + ':' + str(port) for ip, port in fetch_query(
             query="SELECT ip, port FROM uri "
                   "WHERE slot_id IN ("
                   "   SELECT id FROM slot "
@@ -231,7 +231,7 @@ def get_ledger_and_contract_addr_from_contract(contract_hash: str) -> Generator[
 
 
 def get_ledger_providers(ledger: str) -> Generator[str, None, None]:
-    yield from (r[0] for r in query_interface(
+    yield from (r[0] for r in fetch_query(
         query="SELECT uri FROM ledger_provider WHERE ledger_id = ?",
         params=(ledger,)
     ))
@@ -243,7 +243,7 @@ class NonUsedLedgerException(Exception):
 
 def get_private_key_from_ledger(ledger: str) -> str:
     try:
-        return next(query_interface(
+        return next(fetch_query(
             query="SELECT private_key FROM ledger WHERE id = ?",
             params=(ledger,)
         ))[0]
