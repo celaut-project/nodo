@@ -15,6 +15,7 @@ def peers():
 def delete(peer_id):
     from database.query_interface import commit_query
 
+    # TODO delete all the related data.
     commit_query(query='''
                             DELETE FROM peer
                             WHERE id = ?
