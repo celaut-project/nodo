@@ -4,7 +4,7 @@ from typing import Generator, Tuple, Union
 
 def query_interface(query: str, params: tuple = ()) \
         -> Generator[
-            Tuple[Union[str | bytes | bytearray | memoryview | int | float | None]],
+            Tuple[Union[str, bytes, bytearray, memoryview, int, float, None]],
             None, None
         ]:
     try:
