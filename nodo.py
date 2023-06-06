@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
     elif sys.argv[1] == 'command:containers':
         from commands.containers import containers
-        containers()
+        containers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
     elif sys.argv[1] == 'command:peers':
         from commands.peers import peers
@@ -39,7 +39,7 @@ if __name__ == '__main__':
 
     elif sys.argv[1] == 'command:contracts':
         from commands.contracts import contracts
-        contracts()
+        contracts(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
     else:
         print('Unknown command.')
