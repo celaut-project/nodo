@@ -44,7 +44,7 @@ def view(ledger: str):
     private_key: str = next(fetch_query(
         query="SELECT private_key FROM ledger WHERE id = ?",
         params=(ledger,)
-    ))
+    ))[0]
     print(f"LEDGER -> {ledger}")
     print(f"PUBLIC KEY -> {private_key_to_public_key(private_key)}")
     print(f"PRIVATE KEY -> {private_key}")
