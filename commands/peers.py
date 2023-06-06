@@ -1,5 +1,5 @@
 from typing import Generator, List
-from commands.__interface import command
+from commands.__interface import table_command
 from src.utils.utils import peers_id_iterator
 
 
@@ -9,7 +9,7 @@ def generator() -> Generator[List[str], None, None]:
 
 
 def peers():
-    command(f=generator, headers=['PAR'])
+    table_command(f=generator, headers=['PAR'])
 
 
 def delete(peer_id):

@@ -1,5 +1,5 @@
 from typing import Generator, List
-from commands.__interface import command
+from commands.__interface import table_command
 from src.utils.utils import get_ledgers
 from web3.auto import w3
 import binascii
@@ -17,7 +17,7 @@ def generator() -> Generator[List[str], None, None]:
 
 
 def contracts():
-    command(
+    table_command(
         f=generator,
         headers=[
             'LEDGER',

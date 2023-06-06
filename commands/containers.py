@@ -1,7 +1,7 @@
 from typing import Generator, List
 
 import docker
-from commands.__interface import command
+from commands.__interface import table_command
 
 
 def generator() -> Generator[List[str], None, None]:
@@ -15,4 +15,4 @@ def generator() -> Generator[List[str], None, None]:
 
 
 def containers():
-    command(f=generator, headers=['SERVICE', 'CREATED', 'PORTS', 'NAMES'])
+    table_command(f=generator, headers=['SERVICE', 'CREATED', 'PORTS', 'NAMES'])

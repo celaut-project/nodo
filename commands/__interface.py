@@ -4,7 +4,7 @@ from typing import Callable, List
 from tabulate import tabulate
 
 
-def command(f: Callable, headers: List[str], sleep_time: int = 2):
+def table_command(f: Callable, headers: List[str], sleep_time: int = 2):
     while True:
         # Clear the console
         os.system('clear')
