@@ -1,17 +1,28 @@
 from typing import Generator, List
 from commands.__interface import table_command
 from src.utils.utils import get_ledgers
-from web3.auto import w3
+import ecdsa
 import binascii
+
+
+def private_key_to_public_key(private_key: str) -> str:
+    # Decodificar la clave privada hexadecimal
+    private_key_bytes = binascii.unhexlify(private_key)
+
+    # Obtener la clave pública correspondiente a partir de la clave privada
+    signing_key = ecdsa.SigningKey.from_string(private_key_bytes, curve=ecdsa.SECP256k1)
+    public_key = signing_key.verifying_key.to_string()
+
+    # Codificar la clave pública como una cadena hexadecimal
+    public_key_hex = binascii.hexlify(public_key).decode('utf-8')
+    return public_key_hex
 
 
 def generator() -> Generator[List[str], None, None]:
     for ledger_id, private_key in get_ledgers():
         yield [
             ledger_id,
-            binascii.hexlify(
-                w3.eth.account.privateKeyToAccount(private_key).public_key.to_bytes()
-            ).decode('utf-8'),
+            private_key_to_public_key(private_key),
             private_key
         ]
 
