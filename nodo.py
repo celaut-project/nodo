@@ -33,6 +33,10 @@ if __name__ == '__main__':
         from commands.peers import peers
         peers()
 
+    elif sys.argv[1] == 'prune:peer':
+        from commands.peers import delete
+        delete(sys.argv[2])
+
     elif sys.argv[1] == 'command:contracts':
         from commands.contracts import contracts
         contracts()
