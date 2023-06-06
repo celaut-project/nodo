@@ -41,6 +41,10 @@ if __name__ == '__main__':
         from commands.contracts import contracts
         contracts(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
+    elif sys.argv[1] == 'view:contract':
+        from commands.contracts import view
+        view(sys.argv[2])
+
     else:
         print('Unknown command.')
 

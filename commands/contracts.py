@@ -37,3 +37,14 @@ def contracts(stream: bool = True):
         ],
         stream=stream
     )
+
+
+def view(ledger: str):
+    from database.query_interface import fetch_query
+    private_key: str = next(fetch_query(
+        query="SELECT private_key FROM ledger WHERE id = ?",
+        params=(ledger,)
+    ))
+    print(f"LEDGER -> {ledger}")
+    print(f"PUBLIC KEY -> {private_key_to_public_key(private_key)}")
+    print(f"PRIVATE KEY -> {private_key}")
