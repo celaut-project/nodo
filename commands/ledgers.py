@@ -29,7 +29,7 @@ def generator(char_length: int = 12) -> Generator[List[str], None, None]:
         ]
 
 
-def contracts(stream: bool = True):
+def ledgers(stream: bool = True):
     table_command(
         f=generator,
         headers=[
