@@ -9,9 +9,9 @@ def generator() -> Generator[List[str], None, None]:
     for ledger_id, private_key in get_ledgers():
         yield [
             ledger_id,
-            #binascii.hexlify(
-            #    w3.eth.account.privateKeyToAccount(private_key).public_key.to_bytes()
-            #).decode('utf-8'),
+            binascii.hexlify(
+                w3.eth.account.privateKeyToAccount(private_key).public_key.to_bytes()
+            ).decode('utf-8'),
             private_key
         ]
 
@@ -21,7 +21,7 @@ def contracts(stream: bool = True):
         f=generator,
         headers=[
             'LEDGER',
-            # 'PUBLIC KEY',
+            'PUBLIC KEY',
             'PRIVATE KEY'
         ],
         stream=stream
