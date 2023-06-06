@@ -2,11 +2,11 @@ import sqlite3
 from typing import Generator, Tuple, Any
 
 
-def query_interface(query: str, params: tuple = ()) \
-        -> Generator[
-             Any, # TODO python3.10 Tuple[str | bytes | bytearray | memoryview | int | float | None],
-            None, None
-        ]:
+def query_interface(query: str, params: tuple = ()):
+        #-> Generator[
+        #    # TODO python3.10 Tuple[str | bytes | bytearray | memoryview | int | float | None],
+        #    None, None
+        #]:
     try:
         # Connect to the database
         conn = sqlite3.connect('database.sqlite')
