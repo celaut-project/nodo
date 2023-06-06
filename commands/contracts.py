@@ -6,6 +6,8 @@ import binascii
 
 
 def private_key_to_public_key(private_key: str) -> str:
+    # TODO change the algorithm between ledgers
+
     # Decodificar la clave privada hexadecimal
     private_key_bytes = binascii.unhexlify(private_key)
 
