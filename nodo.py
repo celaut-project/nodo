@@ -1,4 +1,4 @@
-import sys
+import sys, os
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:
@@ -15,6 +15,9 @@ if __name__ == '__main__':
 
     elif sys.argv[1] == 'serve':
         from src.serve import serve
+
+        if len(sys.argv) > 2 and sys.argv[2] == '--dev':
+            os.environ['USE_PRINT'] = 'True'
         serve()
 
     elif sys.argv[1] == 'migrate':
