@@ -149,7 +149,7 @@ def get_network_name(ip_or_uri: str) -> str:
 """
 
 
-def get_ledgers() -> Generator[typing.Tuple[str, str]]:
+def get_ledgers() -> Generator[typing.Tuple[str, str], None, None]:
     yield from query_interface(query="SELECT id, private_key FROM ledger")
 
 
