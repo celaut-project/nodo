@@ -8,5 +8,3 @@ logging.basicConfig(filename=f'{MAIN_DIR}/app.log', level=logging.INFO,
                     format='%(asctime)s %(levelname)-8s %(message)s')
 LOGGER = (lambda message: print(message + '\n')) if USE_PRINT \
     else (lambda message: logging.getLogger(__name__).info(message + '\n'))
-LOGGER('USE PRINT -> ' + str(USE_PRINT))
-print('USE PRINT -> ' + str(USE_PRINT))
