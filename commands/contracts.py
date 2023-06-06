@@ -18,12 +18,12 @@ def private_key_to_public_key(private_key: str) -> str:
     return public_key_hex
 
 
-def generator() -> Generator[List[str], None, None]:
+def generator(char_length: int = 12) -> Generator[List[str], None, None]:
     for ledger_id, private_key in get_ledgers():
         yield [
             ledger_id,
-            private_key_to_public_key(private_key),
-            private_key
+            private_key_to_public_key(private_key)[:char_length],
+            private_key[:char_length]
         ]
 
 
