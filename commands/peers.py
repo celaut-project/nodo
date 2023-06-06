@@ -20,3 +20,5 @@ def delete(peer_id):
                             WHERE id = ?
                     ''', params=(peer_id,)
                     )
+
+    print(f"Deleted {peer_id} peer")
