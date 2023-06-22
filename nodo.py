@@ -2,8 +2,17 @@ import sys
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:
-        print("Command needed: seeder, connect or serve")
-        exit()
+        print("Command needed: "
+              "\n- seeder"
+              "\n- connect"
+              "\n- serve"
+              "\n- migrate"
+              "\n- command:containers --stream"
+              "\n- command:peers --stream"
+              "\n- prune:peer <peer_id>"
+              "\n- command:ledgers --stream"
+              "\n- view:contract"
+              )
 
     elif sys.argv[1] == "seeder":
         from contracts.eth_main.seeder import seed
