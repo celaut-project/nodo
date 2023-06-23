@@ -7,4 +7,4 @@ __block__
 database.sqlite
 *.log
 app.log
-start.sh
+myenv
