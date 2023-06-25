@@ -9,7 +9,7 @@ def seed(private_key=None):
     if not private_key:
         w3 = Web3()
         account = w3.eth.account.create()
-        private_key = w3.toHex(account.privateKey)
+        private_key = w3.to_hex(account._private_key)
         print("Dirección de la billetera:", account.address)
     print("Clave privada de la billetera:", private_key)
 
