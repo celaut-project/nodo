@@ -1,8 +1,8 @@
 syntax = "proto3";
 package gateway;
-import "celaut.proto";
-import "grpcbigbuffer/buffer.proto";
-import "compile.proto";
+import "protos/celaut.proto";
+import "protos/compile.proto";
+import "protos/buffer.proto";
 
 message GasAmount {
     string n = 1;

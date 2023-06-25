@@ -18,7 +18,7 @@ message Buffer  {
             bytes value = 2;
         }
         repeated Hash hashes = 1;
-        // If server sends a Block means that client needs generate the next from it.
+        repeated uint64 previous_lengths_position = 2;
     }
     optional bytes chunk = 1;
     optional bool separator = 2;
