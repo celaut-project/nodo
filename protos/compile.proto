@@ -1,6 +1,6 @@
 syntax = "proto3";
 package compile;
-import "protos/celaut.proto";
+import "celaut.proto";
 
 message Service {
     message Container {
