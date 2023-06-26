@@ -5,11 +5,15 @@ import docker as docker_lib
 
 from protos import celaut_pb2
 
-MAIN_DIR = "/node"
+if os.path.exists(".env"):
+    from dotenv import load_dotenv
+    load_dotenv(".env")
 
 GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(default) != bool
-                                else os.environ.get(env) in ['True', 'true', 'T',
-                                                             't']) if env in os.environ.keys() else default
+                                else os.environ.get(env) in ['True', 'true', 'T', 't'])\
+                                    if env in os.environ.keys() else default
+
+MAIN_DIR = GET_ENV(env="MAIN_DIR", default="/node")
 
 #  -------------------------------------------------
 #  -------------------------------------------------

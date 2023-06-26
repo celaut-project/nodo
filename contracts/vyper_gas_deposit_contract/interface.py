@@ -44,7 +44,7 @@ class LedgerContractInterface:
         self.nonce_count: int = 0
 
         self.generate_contract = lambda addr: self.w3.eth.contract(
-            address=Web3.toChecksumAddress(addr),
+            address=Web3.to_checksum_address(addr),
             abi=json.load(open(DIR + 'abi.json')),
             bytecode=open(DIR + 'bytecode', 'rb').read()
         )
@@ -66,7 +66,7 @@ class LedgerContractInterface:
 
     def get_nonce(self) -> int:
         with self.transaction_lock:
-            last_nonce = self.w3.eth.getTransactionCount(self.pub)
+            last_nonce = self.w3.eth.get_transaction_count(self.pub)
             if last_nonce == self.last_nonce:
                 self.nonce_count += 1
             else:
@@ -78,7 +78,7 @@ class LedgerContractInterface:
     # Update Session Event.
     def catch_event_thread(self, contract_addr):
         catch_event(
-            contract_address=Web3.toChecksumAddress(contract_addr),
+            contract_address=Web3.to_checksum_address(contract_addr),
             w3=self.w3,
             contract=self.contract,
             event_name='NewSession',

@@ -4,4 +4,5 @@ psutil==5.9.5
 netifaces2==0.0.16
 web3==6.5.0
 ecdsa==0.18.0
+python-dotenv==1.0.0
 git+https://github.com/jossemii/GRPCBigBuffer
