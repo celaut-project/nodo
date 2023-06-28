@@ -9,9 +9,9 @@ if __name__ == '__main__':
               "\n- migrate"
               "\n- containers --stream"
               "\n- peers --stream"
-              "\n- prune peer <peer_id>"
+              "\n- prune:peer <peer_id>"
               "\n- ledgers --stream"
-              "\n- view contract"
+              "\n- view:contract"
               )
     else:
         match sys.argv[1]:
@@ -44,7 +44,7 @@ if __name__ == '__main__':
                 from commands.peers import peers
                 peers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
-            case 'prune peer':
+            case 'prune:peer':
                 from commands.peers import delete
                 delete(sys.argv[2])
 
@@ -52,7 +52,7 @@ if __name__ == '__main__':
                 from commands.ledgers import ledgers
                 ledgers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
-            case 'view contract':
+            case 'view:contract':
                 from commands.ledgers import view
                 view(sys.argv[2])
 
