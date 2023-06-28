@@ -29,7 +29,7 @@ def generator(char_length: int = 12) -> Generator[List[str], None, None]:
             ledger_id,
             private_key_to_public_key(private_key)[:char_length],
             private_key[:char_length],
-            str(True in [check_eth_provider_available(i) for i in get_ledger_providers(ledger=ledger_id)])
+            str(any(check_eth_provider_available(i) for i in get_ledger_providers(ledger=ledger_id)))
         ]
 
 
