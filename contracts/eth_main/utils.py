@@ -1,6 +1,7 @@
 import typing
 from web3.middleware import geth_poa_middleware
 from web3 import HTTPProvider, Web3
+from eth_account import Account
 import asyncio, time
 
 from src.utils.logger import LOGGER
@@ -10,8 +11,8 @@ from src.utils.utils import get_ledger_providers
 async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, contract):
     while True:
         for event in event_filter.get_new_entries():
-            receipt = w3.eth.waitForTransactionReceipt(event['transactionHash'])
-            result = getattr(contract.events, event_name)().processReceipt(receipt)
+            receipt = w3.eth.wait_for_transaction_receipt(event['transactionHash'])
+            result = getattr(contract.events, event_name)().process_receipt(receipt)
             opt(args=result[0]['args'])
         time.sleep(poll_interval)
 
@@ -41,20 +42,20 @@ def catch_event(contract_address, w3, contract, event_name, opt, init_delay: int
 def transact(
         w3, method, priv, nonce, value=0, gas=2000000, pub=None, timeout=None, poll_latency=None,
 ) -> str:
-    pub = w3.eth.account.private_key_to_account(priv).address if not pub else pub  # Not verify the correctness,
+    pub = Account.from_key(priv).address if not pub else pub  # Not verify the correctness,
     LOGGER(f"Send transaction from {pub} of {value} coins.")
     #     pub param is only for skip that step.
-    transaction = method.buildTransaction({'gasPrice': w3.eth.gasPrice})
+    transaction = method.build_transaction({'gasPrice': w3.eth.gas_price})
     transaction.update({
         'from': pub,  # Only 'from' address, don't insert 'to' address
         'value': value,  # Add how many ethers you'll transfer during the deploy
         'gas': gas,  # Trying to make it dynamic ..
         'nonce': nonce,  # Get Nonce
-        'chainId': w3.eth.chainId,
+        'chainId': w3.eth.chain_id,
     })
     # Sign the transaction using your private key
-    signed = w3.eth.account.signTransaction(transaction, priv)
-    tx_hash = w3.eth.sendRawTransaction(signed.rawTransaction).hex()
+    signed = w3.eth.account.sign_transaction(transaction, priv)
+    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction).hex()
     LOGGER(f'Pub -> {pub} ')
     LOGGER(f'Transaction hash: {tx_hash}')
     LOGGER('Waiting for transaction to be mined...')
