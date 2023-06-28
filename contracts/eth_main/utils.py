@@ -76,3 +76,18 @@ def w3_generator_factory(ledger: str) -> typing.Generator:
             w3 = Web3(HTTPProvider(provider))
             w3.middleware_onion.inject(geth_poa_middleware, layer=0)
             yield w3
+
+
+def check_eth_provider_available(provider: str) -> bool:
+    try:
+        w3 = Web3(Web3.HTTPProvider(provider))
+        if w3.is_connected():
+            print("Proveedor de Ethereum disponible")
+            return True
+        else:
+            print("No se pudo conectar al proveedor de Ethereum")
+            return False
+    except Exception as e:
+        print("Error al comprobar el proveedor de Ethereum:", str(e))
+        return False
+

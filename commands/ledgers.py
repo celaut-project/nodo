@@ -1,6 +1,7 @@
 from typing import Generator, List
 from commands.__interface import table_command
-from src.utils.utils import get_ledgers
+from contracts.eth_main.utils import check_eth_provider_available
+from src.utils.utils import get_ledgers, get_ledger_providers
 import ecdsa
 import binascii
 
@@ -27,7 +28,8 @@ def generator(char_length: int = 12) -> Generator[List[str], None, None]:
         yield [
             ledger_id,
             private_key_to_public_key(private_key)[:char_length],
-            private_key[:char_length]
+            private_key[:char_length],
+            str(True in [check_eth_provider_available(i) for i in get_ledger_providers(ledger=ledger_id)])
         ]
 
 
@@ -37,7 +39,8 @@ def ledgers(stream: bool = True):
         headers=[
             'LEDGER',
             'PUBLIC KEY',
-            'PRIVATE KEY'
+            'PRIVATE KEY',
+            'AVALIABLE'
         ],
         stream=stream
     )
