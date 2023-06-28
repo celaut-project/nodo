@@ -82,12 +82,10 @@ def check_eth_provider_available(provider: str) -> bool:
     try:
         w3 = Web3(Web3.HTTPProvider(provider))
         if w3.is_connected():
-            print("Proveedor de Ethereum disponible")
             return True
         else:
-            print("No se pudo conectar al proveedor de Ethereum")
             return False
     except Exception as e:
-        print("Error al comprobar el proveedor de Ethereum:", str(e))
+        print(f"\nError al comprobar el proveedor de Ethereum: {str(e)} \n")
         return False
 
