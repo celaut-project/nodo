@@ -123,9 +123,9 @@ class LedgerContractInterface:
 
     def add_gas(self, token: str, amount: int, contract_addr: str) -> str:
         contract = self.generate_contract(addr=contract_addr)
+        gas = 2000000
         while True:
             nonce = self.get_nonce()
-            gas = 2000000
             try:
                 return transact(
                     w3=self.w3,
@@ -140,7 +140,7 @@ class LedgerContractInterface:
                     poll_latency=self.wait_mint_poll_latency,
                 )
             except exceptions.TimeExhausted:
-                LOGGER(f'Timeout while adding gas for token:  {token} \n')
+                LOGGER(f'Timeout while adding gas for token:  {token} with {gas} gas.\n')
                 gas += gas
                 continue
                 # return ''
