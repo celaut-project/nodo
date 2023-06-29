@@ -48,15 +48,14 @@ def transact(
     transaction = method.build_transaction({'gasPrice': w3.eth.gas_price})
     transaction.update({
         'from': pub,  # Only 'from' address, don't insert 'to' address
-        'value': value,  # Add how many ethers you'll transfer during the deploy
-        'gas': gas,  # Trying to make it dynamic ..
+        'value': value,  # Add how many ethers you'll transfer during the deployment
+        'gas': gas,  # Trying to make it dynamic ...
         'nonce': nonce,  # Get Nonce
         'chainId': w3.eth.chain_id,
     })
     # Sign the transaction using your private key
     signed = w3.eth.account.sign_transaction(transaction, priv)
     tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction).hex()
-    LOGGER(f'Pub -> {pub} ')
     LOGGER(f'Transaction hash: {tx_hash}')
     LOGGER('Waiting for transaction to be mined...')
     if timeout and poll_latency: w3.eth.wait_for_transaction_receipt(tx_hash, timeout, poll_latency)

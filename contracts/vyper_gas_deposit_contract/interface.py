@@ -125,6 +125,7 @@ class LedgerContractInterface:
         contract = self.generate_contract(addr=contract_addr)
         while True:
             nonce = self.get_nonce()
+            gas = 2000000
             try:
                 return transact(
                     w3=self.w3,
@@ -134,12 +135,15 @@ class LedgerContractInterface:
                     priv=self.priv,
                     nonce=nonce,
                     value=gas_to_contract(amount, contract.functions.get_parity_factor().call()),
+                    gas=gas,
                     timeout=self.wait_mint_timeout,
                     poll_latency=self.wait_mint_poll_latency,
                 )
             except exceptions.TimeExhausted:
                 LOGGER(f'Timeout while adding gas for token:  {token} \n')
-                return ''
+                gas += gas
+                continue
+                # return ''
             except Exception as e:
                 if str(e) == "{'code': -32000, 'message': 'already known'}":
                     LOGGER(f'Transaction already known: {token} \n')
