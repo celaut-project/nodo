@@ -64,21 +64,7 @@ def transact(
     return tx_hash
 
 
-def check_provider_availability(provider) -> bool:
-    return True  # TODO check if the provider is avialable.  ¿ping?
-
-
-def w3_generator_factory(ledger: str) -> typing.Generator:
-    while True:
-        for provider in get_ledger_providers(ledger=ledger):
-            if not check_provider_availability(provider=provider):
-                continue
-            w3 = Web3(HTTPProvider(provider))
-            w3.middleware_onion.inject(geth_poa_middleware, layer=0)
-            yield w3
-
-
-def check_eth_provider_available(provider: str) -> bool:
+def check_provider_availability(provider: str) -> bool:
     try:
         w3 = Web3(Web3.HTTPProvider(provider))
         if w3.is_connected():
@@ -89,3 +75,12 @@ def check_eth_provider_available(provider: str) -> bool:
         print(f"\nError al comprobar el proveedor de Ethereum: {str(e)} \n")
         return False
 
+
+def w3_generator_factory(ledger: str) -> typing.Generator:
+    while True:
+        for provider in get_ledger_providers(ledger=ledger):
+            if not check_provider_availability(provider=provider):
+                continue
+            w3 = Web3(HTTPProvider(provider))
+            w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+            yield w3
