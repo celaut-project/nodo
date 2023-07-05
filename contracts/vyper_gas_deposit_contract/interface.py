@@ -72,7 +72,7 @@ class LedgerContractInterface:
             else:
                 self.nonce_count = 0
                 self.last_nonce = last_nonce
-            LOGGER('             nonce:' + str(self.nonce_count + last_nonce))
+            LOGGER(f"          {self.pub} 's   nonce of {str(self.nonce_count + last_nonce)}")
             return self.nonce_count + last_nonce
 
     # Update Session Event.
