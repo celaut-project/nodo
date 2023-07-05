@@ -2,25 +2,11 @@ from typing import Generator, List
 from commands.__interface import table_command
 from contracts.eth_main.utils import check_provider_availability
 from src.utils.utils import get_ledgers, get_ledger_providers
-import ecdsa
-import binascii
+from eth_account import Account
 
 
 def private_key_to_public_key(private_key: str) -> str:
-
-    private_key = private_key[2:]  # Remove the '0x' prefix
-    # TODO change the algorithm between ledgers
-
-    # Decodificar la clave privada hexadecimal
-    private_key_bytes = binascii.unhexlify(private_key)
-
-    # Obtener la clave pública correspondiente a partir de la clave privada
-    signing_key = ecdsa.SigningKey.from_string(private_key_bytes, curve=ecdsa.SECP256k1)
-    public_key = signing_key.verifying_key.to_string()
-
-    # Codificar la clave pública como una cadena hexadecimal
-    public_key_hex = binascii.hexlify(public_key).decode('utf-8')
-    return public_key_hex
+    return Account.from_key(private_key).address
 
 
 def generator() -> Generator[List[str], None, None]:
