@@ -66,7 +66,7 @@ class LedgerContractInterface:
 
     def get_nonce(self) -> int:
         with self.transaction_lock:
-            last_nonce = self.w3.eth.get_transaction_count(self.pub, "latest")
+            last_nonce =  1561532  # self.w3.eth.get_transaction_count(self.pub, "latest")
             if last_nonce == self.last_nonce:
                 self.nonce_count += 1
             else:
