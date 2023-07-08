@@ -2,8 +2,10 @@ import sqlite3
 from hashlib import sha3_256
 
 from web3 import Web3
+from eth_account import Account
 
 from contracts.eth_main.envs import ETH_LEDGER, ETH_PROVIDER
+from src.utils.utils import get_private_key_from_ledger
 
 
 def __deploy_contract(provider_url: str, bytecode: bytes) -> str:
@@ -11,7 +13,10 @@ def __deploy_contract(provider_url: str, bytecode: bytes) -> str:
     web3 = Web3(Web3.HTTPProvider(provider_url))
 
     # Obtener la cuenta de despliegue
-    account = web3.eth.accounts[0]  # Utiliza tu propia cuenta o lógica para seleccionar la cuenta de despliegue
+    account = Account.from_key(
+        get_private_key_from_ledger(ETH_LEDGER)
+    ).address
+    print(f"Desplegando contrato por parte de la cuenta {account} en {ETH_LEDGER}")
 
     # Crear objeto de contrato
     contract = web3.eth.contract(abi='', bytecode=bytecode)
