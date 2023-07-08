@@ -34,7 +34,7 @@ def seed(private_key=None):
     cursor.execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
                    (contract_hash, hash_type, contract))
 
-    print(f"Contrato {contract_hash}. Todavía se debe desplegar en la red especificada en eth/env.py")
+    print(f"Contrato {contract_hash}. \nTodavía se debe desplegar el contrato en la red especificada en eth/env.py")
 
     conn.commit()
     conn.close()
