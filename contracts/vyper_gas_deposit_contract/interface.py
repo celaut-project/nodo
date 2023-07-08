@@ -39,7 +39,7 @@ class LedgerContractInterface:
         # TODO debe de ir en una clase para el Ledger, sin un contrato concreto.
         self.priv = priv
         self.pub = self.w3.eth.account.from_key(priv).address
-        self.transaction_lock = Lock()
+        self.transaction_lock = Lock()  # TODO debería de ser un Lock global para esa cuenta, no para esa cuenta en un contrato concreto.
         self.last_nonce: int = 0
         self.nonce_count: int = 0
 
@@ -64,7 +64,7 @@ class LedgerContractInterface:
 
         Thread(target=self.catch_event_thread, args=(contract_addr,)).start()
 
-    def get_nonce(self) -> int:
+    def get_nonce(self) -> int:  # TODO get_nonce debería de estar eth_main/utils ???
         with self.transaction_lock:
             last_nonce = self.w3.eth.get_transaction_count(self.pub)
             if last_nonce == self.last_nonce:
