@@ -8,7 +8,7 @@ from contracts.eth_main.envs import ETH_LEDGER, ETH_PROVIDER
 from src.utils.utils import get_private_key_from_ledger
 
 
-def __deploy_contract(provider_url: str, bytecode: bytes) -> str:
+def __deploy_contract(provider_url: str, bytecode: bytes, abi: str) -> str:
     # Conectarse al proveedor
     web3 = Web3(Web3.HTTPProvider(provider_url))
 
@@ -19,7 +19,7 @@ def __deploy_contract(provider_url: str, bytecode: bytes) -> str:
     print(f"Desplegando contrato por parte de la cuenta {account} en {ETH_LEDGER}")
 
     # Crear objeto de contrato
-    contract = web3.eth.contract(abi='', bytecode=bytecode)
+    contract = web3.eth.contract(abi=abi, bytecode=bytecode)
 
     # Estimar gas
     gas_estimate = contract.constructor().estimate_gas()
@@ -42,10 +42,11 @@ def deploy():
 
     # READ CONTRACT BYTECODE
     contract: bytes = open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()
+    abi: str = open('contracts/vyper_gas_deposit_contract/abi.json', 'r').read()
     contract_hash: str = sha3_256(contract).hexdigest()
 
     # CONTRACT DEPLOYED
-    address: str = __deploy_contract(provider_url=ETH_PROVIDER, bytecode=contract)
+    address: str = __deploy_contract(provider_url=ETH_PROVIDER, bytecode=contract, abi=abi)
     cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash) VALUES (?,?,?)",
                    (address, ETH_LEDGER, contract_hash))
 
