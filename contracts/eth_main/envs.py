@@ -1,2 +1,2 @@
-ETH_PROVIDER = "https://goerli.infura.io/v3/197fd20680784ab3bd632cda61beb995"
-ETH_LEDGER = "goreli"
+ETH_PROVIDER = "https://bsc-dataseed1.binance.org:443"
+ETH_LEDGER = "binance"
