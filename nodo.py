@@ -12,6 +12,7 @@ if __name__ == '__main__':
               "\n- prune:peer <peer_id>"
               "\n- ledgers --stream"
               "\n- view:contract"
+              "\n- deploy:contract"
               )
     else:
         match sys.argv[1]:
@@ -55,6 +56,10 @@ if __name__ == '__main__':
             case 'view:contract':
                 from commands.ledgers import view
                 view(sys.argv[2])
+
+            case 'deploy:contract':
+                from contracts.eth_main.deploy import deploy
+                deploy()
 
             case other:
                 print('Unknown command.')

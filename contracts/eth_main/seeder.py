@@ -2,10 +2,8 @@ import sqlite3
 from hashlib import sha3_256
 from web3 import Web3
 
-from contracts.eth_main.deploy import deploy_contract
+from contracts.eth_main.envs import ETH_LEDGER, ETH_PROVIDER
 from src.utils.env import SHA3_256_ID
-
-ETH_PROVIDER = "https://goerli.infura.io/v3/197fd20680784ab3bd632cda61beb995"
 
 
 def seed(private_key=None):
@@ -22,7 +20,7 @@ def seed(private_key=None):
     cursor = conn.cursor()
 
     # LEDGER
-    ledger: str = "fuji"
+    ledger: str = ETH_LEDGER
     cursor.execute("INSERT OR IGNORE INTO ledger (id, private_key) VALUES (?,?)",
                    (ledger, private_key))
 
@@ -36,10 +34,7 @@ def seed(private_key=None):
     cursor.execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
                    (contract_hash, hash_type, contract))
 
-    # CONTRACT DEPLOYED
-    address: str = deploy_contract(provider_url=ETH_PROVIDER, bytecode=contract)
-    cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash) VALUES (?,?,?)",
-                   (address, ledger, contract_hash))
+    print(f"Contrato {contract_hash}. Todavía se debe desplegar en la red especificada en eth/env.py")
 
     conn.commit()
     conn.close()
