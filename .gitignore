@@ -8,3 +8,4 @@ database.sqlite
 *.log
 app.log
 .env
+venv
