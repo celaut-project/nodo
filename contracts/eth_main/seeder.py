@@ -1,7 +1,11 @@
 import sqlite3
 from hashlib import sha3_256
 from web3 import Web3
+
+from contracts.eth_main.deploy import deploy_contract
 from src.utils.env import SHA3_256_ID
+
+ETH_PROVIDER = "https://goerli.infura.io/v3/197fd20680784ab3bd632cda61beb995"
 
 
 def seed(private_key=None):
@@ -23,7 +27,7 @@ def seed(private_key=None):
                    (ledger, private_key))
 
     cursor.execute("INSERT INTO ledger_provider (uri, ledger_id) VALUES (?,?)",
-                   ("https://api.avax-test.network/ext/bc/C/rpc", ledger))
+                   (ETH_PROVIDER, ledger))
 
     # CONTRACT
     contract: bytes = open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()
@@ -33,7 +37,7 @@ def seed(private_key=None):
                    (contract_hash, hash_type, contract))
 
     # CONTRACT DEPLOYED
-    address: str = "0x6639fdB1eb6f0D42577c73fB6807ee15B1cc1784"
+    address: str = deploy_contract(provider_url=ETH_PROVIDER, bytecode=contract)
     cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash) VALUES (?,?,?)",
                    (address, ledger, contract_hash))
 
