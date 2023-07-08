@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from hashlib import sha3_256
 
@@ -8,7 +9,7 @@ from contracts.eth_main.envs import ETH_LEDGER, ETH_PROVIDER
 from src.utils.utils import get_private_key_from_ledger
 
 
-def __deploy_contract(provider_url: str, bytecode: bytes, abi: str) -> str:
+def __deploy_contract(provider_url: str, bytecode: bytes, abi) -> str:
     # Conectarse al proveedor
     web3 = Web3(Web3.HTTPProvider(provider_url))
 
@@ -42,7 +43,7 @@ def deploy():
 
     # READ CONTRACT BYTECODE
     contract: bytes = open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()
-    abi: str = open('contracts/vyper_gas_deposit_contract/abi.json', 'r').read()
+    abi: str = json.load(open('contracts/vyper_gas_deposit_contract/abi.json', 'r'))
     contract_hash: str = sha3_256(contract).hexdigest()
 
     # CONTRACT DEPLOYED
