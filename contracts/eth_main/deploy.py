@@ -29,7 +29,7 @@ def __deploy_contract(provider_url: str, bytecode: bytes, abi: str) -> str:
 
     print(f"Objeto del contrato {contract}")
 
-    constructor = contract.constructor()
+    constructor = contract.constructor(PARITY_FACTOR)
 
     print(f'constructor ejecutado. {constructor}')
 
