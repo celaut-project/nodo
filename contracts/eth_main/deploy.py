@@ -22,15 +22,23 @@ def __deploy_contract(provider_url: str, bytecode: bytes, abi) -> str:
     # Crear objeto de contrato
     contract = web3.eth.contract(abi=abi, bytecode=bytecode)
 
+    print(f"Objeto del contrato {contract}")
+
     # Estimar gas
     gas_estimate = contract.constructor().estimate_gas()
 
+    print(f"Gas estimado para el despliegue  {gas_estimate}")
+
     # Desplegar el contrato
     tx_hash = contract.constructor().transact({'from': account, 'gas': gas_estimate})
+    print(f"Hash de la transaccion {tx_hash}")
     tx_receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
 
+    print(f"Receipt tx {tx_receipt}")
     # Obtener la dirección del contrato desplegado
     contract_address = tx_receipt['contractAddress']
+
+    print(f"Direccion del contrato {contract_address}")
 
     return contract_address
 
