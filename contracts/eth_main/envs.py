@@ -1,6 +1,6 @@
-ETH_PROVIDER = "https://data-seed-prebsc-1-s1.bnbchain.org:8545"
+ETH_PROVIDER = ""
 
-ETH_LEDGER = "fuji"
+ETH_LEDGER = "mainnet"
 
 PARITY_FACTOR = 100
 # Factor de paridad entre el valor de gas (representación de los recursos del nodo)

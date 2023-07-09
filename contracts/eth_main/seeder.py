@@ -36,5 +36,9 @@ def seed(private_key=None):
 
     print(f"Contrato {contract_hash}. \nTodavía se debe desplegar el contrato en la red especificada en eth/env.py")
 
+    # DESPLIEGUE DE UN CONTRATO FANTASMA, PARA SIMULAR EL PROCESO DE PAGOS.
+    cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash) VALUES (?,?,?)",
+                   ("0xaddress", ETH_LEDGER, contract_hash))
+
     conn.commit()
     conn.close()
