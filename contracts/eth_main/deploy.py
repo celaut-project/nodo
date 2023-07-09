@@ -3,6 +3,7 @@ import sqlite3
 from hashlib import sha3_256
 
 from web3 import Web3
+from web3.middleware import geth_poa_middleware
 from eth_account import Account
 
 from contracts.eth_main.envs import ETH_LEDGER, ETH_PROVIDER, PARITY_FACTOR
@@ -12,6 +13,9 @@ from src.utils.utils import get_private_key_from_ledger
 def __deploy_contract(provider_url: str, bytecode: bytes, abi: str) -> str:
     # Conectarse al proveedor
     web3 = Web3(Web3.HTTPProvider(provider_url))
+
+    # En caso de conectar con una red Proof of Authority
+    web3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
     # Obtener la cuenta de despliegue
     account = Account.from_key(
