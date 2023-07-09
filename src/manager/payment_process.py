@@ -119,4 +119,5 @@ def __check_payment_process(amount: int, ledger: str, token: str, contract: byte
 
 
 def init_contract_interfaces():
-    vyper_gdc.VyperDepositContractInterface()
+    pass
+    # vyper_gdc.VyperDepositContractInterface()
