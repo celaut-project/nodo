@@ -1,4 +1,4 @@
-ETH_PROVIDER = "https://bsc-dataseed1.binance.org:443"
+ETH_PROVIDER = "https://data-seed-prebsc-1-s1.bnbchain.org:8545"
 ETH_LEDGER = "binance"
 PARITY_FACTOR = 100
 # Factor de paridad entre el valor de gas (representación de los recursos del nodo)
