@@ -20,6 +20,7 @@ def __deploy_contract(provider_url: str, bytecode: bytes, abi) -> str:
     print(f"Desplegando contrato por parte de la cuenta {account} en {ETH_LEDGER}")
 
     # Crear objeto de contrato
+    print('abi del contrato ', abi)
     contract = web3.eth.contract(abi=abi, bytecode=bytecode)
 
     print(f"Objeto del contrato {contract}")
