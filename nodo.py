@@ -18,7 +18,7 @@ if __name__ == '__main__':
         match sys.argv[1]:
 
             case "seeder":
-                from contracts.eth_main.seeder import seed
+                from src.payment_system.contracts.ethereum.seeder import seed
                 seed() if len(sys.argv) == 2 else seed(private_key=sys.argv[2])
 
             case 'connect':
@@ -31,34 +31,34 @@ if __name__ == '__main__':
 
             case 'migrate':
                 import os
-                from database.migrate import migrate
-                from contracts.eth_main.seeder import seed
+                from src.database.migrate import migrate
+                from src.payment_system.contracts.ethereum.seeder import seed
                 os.system("rm database.sqlite")
                 migrate()
                 seed() if len(sys.argv) == 2 else seed(private_key=sys.argv[2])
 
             case 'containers':
-                from commands.containers import containers
+                from src.commands.containers import containers
                 containers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
             case 'peers':
-                from commands.peers import peers
+                from src.commands.peers import peers
                 peers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
             case 'prune:peer':
-                from commands.peers import delete
+                from src.commands.peers import delete
                 delete(sys.argv[2])
 
             case 'ledgers':
-                from commands.ledgers import ledgers
+                from src.commands.ledgers import ledgers
                 ledgers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
             case 'view:contract':
-                from commands.ledgers import view
+                from src.commands.ledgers import view
                 view(sys.argv[2])
 
             case 'deploy:contract':
-                from contracts.eth_main.deploy import deploy
+                from src.payment_system.contracts.ethereum.deploy import deploy
                 deploy()
 
             case other:

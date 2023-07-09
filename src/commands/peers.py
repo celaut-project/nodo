@@ -1,5 +1,5 @@
 from typing import Generator, List
-from commands.__interface import table_command
+from src.commands.__interface import table_command
 from src.utils.utils import peers_id_iterator
 
 
@@ -13,7 +13,7 @@ def peers(stream: bool = True):
 
 
 def delete(peer_id):
-    from database.query_interface import commit_query
+    from src.database.query_interface import commit_query
 
     # TODO delete all the related data.
     commit_query(query='''

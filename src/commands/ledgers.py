@@ -1,6 +1,6 @@
 from typing import Generator, List
-from commands.__interface import table_command
-from contracts.eth_main.utils import check_provider_availability
+from src.commands.__interface import table_command
+from src.payment_system.contracts.ethereum.utils import check_provider_availability
 from src.utils.utils import get_ledgers, get_ledger_providers
 from eth_account import Account
 
@@ -33,7 +33,7 @@ def ledgers(stream: bool = True):
 
 
 def view(ledger: str):
-    from database.query_interface import fetch_query
+    from src.database.query_interface import fetch_query
     private_key: str = next(fetch_query(
         query="SELECT private_key FROM ledger WHERE id = ?",
         params=(ledger,)

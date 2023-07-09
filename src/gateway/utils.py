@@ -7,8 +7,8 @@ import netifaces as ni
 from grpcbigbuffer import client as grpcbf
 
 from src.utils.utils import get_ledger_and_contract_addr_from_contract
-from contracts.vyper_gas_deposit_contract.interface \
-    import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH, CONTRACT as DEFAULT_PROVISIONAL_CONTRACT
+from src.payment_system.contracts.ethereum.deposit_contract.simulator.interface \
+    import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH, CONTRACT as DEFAULT_PROVISIONAL_CONTRACT # TODO se mantiene el contrato provisional
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import GetServiceTar_input
 from src.utils import logger as l

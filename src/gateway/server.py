@@ -20,10 +20,10 @@ from src.manager.manager import could_ve_this_sysreq, prune_container, generate_
     container_modify_system_params, get_sysresources, \
     execution_cost, default_initial_cost
 from src.manager.metrics import get_metrics
-from src.manager.payment_process import validate_payment_process
+from src.payment_system.payment_process import validate_payment_process
 from src.manager.resources_manager import mem_manager
 from src.utils import logger as l
-from src.utils.duplicate_grabber import DuplicateGrabber
+from src.utils.tools.duplicate_grabber import DuplicateGrabber
 from src.utils.env import GENERAL_ATTEMPTS, GENERAL_WAIT_TIME, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, SHA3_256_ID, \
     MODIFY_SERVICE_SYSTEM_RESOURCES_COST, GAS_COST_FACTOR, REGISTRY, CACHE
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name, read_file

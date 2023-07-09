@@ -3,10 +3,10 @@ import docker as docker_lib
 
 from src.manager.manager import add_peer, prune_container, maintain_cost, spend_gas
 from src.manager.metrics import gas_amount_on_other_peer
-from src.manager.payment_process import __increase_deposit_on_peer, init_contract_interfaces
+from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
 from src.manager.system_cache import SystemCache
 
-from src.utils.duplicate_grabber import DuplicateGrabber
+from src.utils.tools.duplicate_grabber import DuplicateGrabber
 from src.utils.env import DOCKER_CLIENT, MIN_SLOTS_OPEN_PER_PEER, MIN_DEPOSIT_PEER, MANAGER_ITERATION_TIME
 from src.utils.utils import is_peer_available, peers_id_iterator
 from src.utils import logger as l

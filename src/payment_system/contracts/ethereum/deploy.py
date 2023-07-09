@@ -1,11 +1,13 @@
+import os.path
 import sqlite3
 from hashlib import sha3_256
 
+from src.payment_system.contracts.ethereum.deposit_contract.interface import DIR
 from web3 import Web3
 from web3.middleware import geth_poa_middleware
 from eth_account import Account
 
-from contracts.eth_main.envs import ETH_LEDGER, ETH_PROVIDER, PARITY_FACTOR
+from src.payment_system.contracts.ethereum.envs import ETH_LEDGER, ETH_PROVIDER, PARITY_FACTOR
 from src.utils.utils import get_private_key_from_ledger
 
 
@@ -53,8 +55,8 @@ def deploy():
     cursor = conn.cursor()
 
     # READ CONTRACT BYTECODE
-    contract: bytes = open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()
-    abi: str = open('contracts/vyper_gas_deposit_contract/abi.json', 'r').read()
+    contract: bytes = open(os.path.join(DIR, 'bytecode'), 'rb').read()
+    abi: str = open(os.path.join(DIR, 'abi.json'), 'r').read()
     contract_hash: str = sha3_256(contract).hexdigest()
 
     # CONTRACT DEPLOYED

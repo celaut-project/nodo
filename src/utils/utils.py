@@ -1,4 +1,3 @@
-import sqlite3
 import socket
 from typing import Generator
 import typing
@@ -6,7 +5,7 @@ import typing
 from grpcbigbuffer.client import Dir
 import netifaces as ni
 
-from database.query_interface import fetch_query
+from src.database.query_interface import fetch_query
 from protos import celaut_pb2 as celaut, gateway_pb2
 
 from src.utils.env import REGISTRY

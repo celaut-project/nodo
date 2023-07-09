@@ -13,13 +13,13 @@ from src.manager.manager import default_initial_cost, spend_gas, \
     generate_client_id_in_other_peer, start_service_cost, add_container
 from src.manager.system_cache import SystemCache
 from src.manager.metrics import gas_amount_on_other_peer
-from src.manager.payment_process import increase_deposit_on_peer
+from src.payment_system.payment_process import increase_deposit_on_peer
 
 from src.utils import utils, logger as l
 from src.utils.env import CACHE, DOCKER_CLIENT, DOCKER_COMMAND, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
     DOCKER_NETWORK, \
     DEFAULT_SYSTEM_RESOURCES, GAS_COST_FACTOR
-from src.utils.recursion_guard import RecursionGuard
+from src.utils.tools.recursion_guard import RecursionGuard
 
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input

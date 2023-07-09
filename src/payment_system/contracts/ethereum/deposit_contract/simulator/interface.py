@@ -1,4 +1,4 @@
-from contracts.vyper_gas_deposit_contract.interface import CONTRACT, CONTRACT_HASH
+from src.payment_system.contracts.ethereum.deposit_contract.interface import CONTRACT, CONTRACT_HASH
 from protos import celaut_pb2, gateway_pb2
 
 CONTRACT_HASH = CONTRACT_HASH
