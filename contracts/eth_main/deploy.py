@@ -17,6 +17,12 @@ def __deploy_contract(provider_url: str, bytecode: bytes, abi: str) -> str:
     # En caso de conectar con una red Proof of Authority
     web3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
+    # Configura el Chain ID en la instancia de Web3
+    web3.middleware_onion.inject(
+        Web3.geth.chain_id_validator(97),
+        layer=0
+    )
+
     # Obtener la cuenta de despliegue
     account = Account.from_key(
         get_private_key_from_ledger(ETH_LEDGER)
