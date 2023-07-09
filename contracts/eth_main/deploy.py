@@ -33,12 +33,12 @@ def __deploy_contract(provider_url: str, bytecode: bytes, abi: str) -> str:
 
     print(f'constructor ejecutado. {constructor}')
 
-    estimate_gas = constructor.estimate_gas()
+    estimate_gas = constructor.estimate_gas({'from': account})
 
     print(f"Gas estimado {estimate_gas}")
 
     # Desplegar el contrato
-    tx_hash = contract.constructor(PARITY_FACTOR).transact({'from': account})
+    tx_hash = contract.constructor(PARITY_FACTOR).transact({'from': account, 'gas': estimate_gas})
     print(f"Hash de la transaccion {tx_hash}")
     tx_receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
 
