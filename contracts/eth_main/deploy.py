@@ -5,11 +5,11 @@ from hashlib import sha3_256
 from web3 import Web3
 from eth_account import Account
 
-from contracts.eth_main.envs import ETH_LEDGER, ETH_PROVIDER
+from contracts.eth_main.envs import ETH_LEDGER, ETH_PROVIDER, PARITY_FACTOR
 from src.utils.utils import get_private_key_from_ledger
 
 
-def __deploy_contract(provider_url: str, bytecode: bytes, abi) -> str:
+def __deploy_contract(provider_url: str, bytecode: bytes, abi: str) -> str:
     # Conectarse al proveedor
     web3 = Web3(Web3.HTTPProvider(provider_url))
 
@@ -31,7 +31,7 @@ def __deploy_contract(provider_url: str, bytecode: bytes, abi) -> str:
     # print(f"Gas estimado para el despliegue  {gas_estimate}")
 
     # Desplegar el contrato
-    tx_hash = contract.constructor().transact({'from': account})
+    tx_hash = contract.constructor(PARITY_FACTOR).transact({'from': account})
     print(f"Hash de la transaccion {tx_hash}")
     tx_receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
 
