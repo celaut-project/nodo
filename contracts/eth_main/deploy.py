@@ -1,4 +1,3 @@
-import json
 import sqlite3
 from hashlib import sha3_256
 
@@ -18,28 +17,24 @@ def __deploy_contract(provider_url: str, bytecode: bytes, abi: str) -> str:
     web3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
     # Obtener la cuenta de despliegue
-    account = Account.from_key(
-        get_private_key_from_ledger(ETH_LEDGER)
-    ).address
-    print(f"Desplegando contrato por parte de la cuenta {account} en {ETH_LEDGER}")
+    priv = get_private_key_from_ledger(ETH_LEDGER)
+    account = Account.from_key(priv).address
+    print(f"Desplegando contrato por parte de la cuenta {account} en {ETH_LEDGER} - {web3.eth.chain_id}")
 
     # Crear objeto de contrato
-    print('abi del contrato ', abi)
     contract = web3.eth.contract(abi=abi, bytecode=bytecode)
 
-    print(f"Objeto del contrato {contract}")
-
-    constructor = contract.constructor(PARITY_FACTOR)
-
-    print(f'constructor ejecutado. {constructor}')
-
-    estimate_gas = constructor.estimate_gas({'from': account})
-
-    print(f"Gas estimado {estimate_gas}")
-
     # Desplegar el contrato
-    tx_hash = contract.constructor(PARITY_FACTOR).transact({'from': account, 'gas': estimate_gas})
-    print(f"Hash de la transaccion {tx_hash}")
+    print(f"gas price -> {web3.eth.gas_price}")
+    transaction = contract.constructor(PARITY_FACTOR).build_transaction({'gas': 2000000, 'gasPrice': web3.eth.gas_price})
+    transaction.update({'from': account,
+                        'nonce': web3.eth.get_transaction_count(account),
+                        'chainId': web3.eth.chain_id
+                        })
+    signed = web3.eth.account.sign_transaction(transaction, priv)
+    tx_hash = web3.eth.send_raw_transaction(signed.rawTransaction).hex()
+    print(f'Transaction hash: {tx_hash}')
+
     tx_receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
 
     print(f"Receipt tx {tx_receipt}")
