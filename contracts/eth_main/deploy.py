@@ -30,9 +30,9 @@ def __deploy_contract(provider_url: str, bytecode: bytes, abi: str) -> str:
     print(f"Objeto del contrato {contract}")
 
     # Estimar gas
-    gas_estimate = contract.constructor(PARITY_FACTOR).estimate_gas()
+    contract.constructor(PARITY_FACTOR)
 
-    print(f"Gas estimado para el despliegue  {gas_estimate}")
+    print('constructor ejecutado. por prueba')
 
     # Desplegar el contrato
     tx_hash = contract.constructor(PARITY_FACTOR).transact({'from': account})
