@@ -1,5 +1,7 @@
-from contracts.vyper_gas_deposit_contract.interface import CONTRACT
+from contracts.vyper_gas_deposit_contract.interface import CONTRACT, CONTRACT_HASH
 from protos import celaut_pb2, gateway_pb2
+
+CONTRACT_HASH = CONTRACT_HASH
 
 
 def process_payment(amount: int, token: str, ledger: str,
