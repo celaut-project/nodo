@@ -52,7 +52,7 @@ def deploy():
 
     # READ CONTRACT BYTECODE
     contract: bytes = open('contracts/vyper_gas_deposit_contract/bytecode', 'rb').read()
-    abi: str = json.load(open('contracts/vyper_gas_deposit_contract/abi.json', 'r'))
+    abi: str = open('contracts/vyper_gas_deposit_contract/abi.json', 'r').read()
     contract_hash: str = sha3_256(contract).hexdigest()
 
     # CONTRACT DEPLOYED
