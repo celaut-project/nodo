@@ -8,7 +8,7 @@ from web3.middleware import geth_poa_middleware
 from eth_account import Account
 
 from src.payment_system.contracts.ethereum.envs import ETH_LEDGER, ETH_PROVIDER, PARITY_FACTOR
-from src.utils.utils import get_private_key_from_ledger
+from src.database.access_functions.ledgers import get_private_key_from_ledger
 
 
 def __deploy_contract(provider_url: str, bytecode: bytes, abi: str) -> str:

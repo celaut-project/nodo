@@ -15,8 +15,8 @@ from src.manager.system_cache import SystemCache
 from src.utils import logger as _l
 from src.utils.env import COMMUNICATION_ATTEMPTS, COMMUNICATION_ATTEMPTS_DELAY, \
     MIN_DEPOSIT_PEER
-from src.utils.utils import generate_uris_by_peer_id, to_gas_amount, \
-    get_peer_contract_instances
+from src.utils.utils import to_gas_amount, generate_uris_by_peer_id
+from src.database.access_functions.ledgers import get_peer_contract_instances
 
 sc = SystemCache()
 

@@ -6,7 +6,8 @@ import grpc
 import netifaces as ni
 from grpcbigbuffer import client as grpcbf
 
-from src.utils.utils import get_ledger_and_contract_addr_from_contract
+import src.utils.utils
+from src.database.access_functions.ledgers import get_ledger_and_contract_addr_from_contract
 from src.payment_system.contracts.ethereum.deposit_contract.simulator.interface \
     import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH, CONTRACT as DEFAULT_PROVISIONAL_CONTRACT # TODO se mantiene el contrato provisional
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
@@ -70,12 +71,12 @@ def search_container(
         ignore_network: str = None
 ) -> Generator[gateway_pb2.buffer__pb2.Buffer, None, None]:
     # Search a service tar container.
-    for peer in utils.peers_id_iterator(ignore_network=ignore_network):
+    for peer in src.utils.utils.peers_id_iterator(ignore_network=ignore_network):
         try:
             yield next(grpcbf.client_grpc(
                 method=gateway_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(
-                        next(utils.generate_uris_by_peer_id(peer)),
+                        next(src.utils.utils.generate_uris_by_peer_id(peer)),
                     )
                 ).GetServiceTar,
                 input=utils.service_extended(

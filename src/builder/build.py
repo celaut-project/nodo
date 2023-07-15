@@ -8,7 +8,7 @@ import grpc, os, src.manager.resources_manager as resources_manager
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 from src.utils.env import DOCKER_COMMAND, SUPPORTED_ARCHITECTURES, BUILD_CONTAINER_MEMORY_SIZE_FACTOR, \
     WAIT_FOR_CONTAINER, BLOCKDIR, CACHE, REGISTRY
-from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator, service_extended, read_file
+from src.utils.utils import service_extended, peers_id_iterator, generate_uris_by_peer_id
 import src.utils.logger as l
 from grpcbigbuffer.client import save_chunks_to_file, serialize_to_buffer, copy_block_if_exists
 

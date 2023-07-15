@@ -20,9 +20,9 @@ from src.utils import logger as l
 from src.utils.env import ALLOW_GAS_DEBT, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
     DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
     MEMORY_LIMIT_COST_FACTOR, DOCKER_CLIENT, COST_OF_BUILD, COMPUTE_POWER_RATE, EXECUTION_BENEFIT, SHA3_256_ID
-from src.utils.utils import generate_uris_by_peer_id, get_network_name, \
+from src.utils.utils import get_network_name, \
     is_peer_available, to_gas_amount, \
-    get_service_hex_main_hash
+    get_service_hex_main_hash, generate_uris_by_peer_id
 
 sc = SystemCache()
 

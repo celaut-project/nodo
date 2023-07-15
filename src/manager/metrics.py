@@ -7,8 +7,8 @@ from src.manager.manager import generate_client_id_in_other_peer
 from src.manager.system_cache import SystemCache
 
 from src.utils.env import DOCKER_NETWORK
-from src.utils.utils import from_gas_amount, is_peer_available, get_network_name, generate_uris_by_peer_id, \
-    to_gas_amount
+from src.utils.utils import from_gas_amount, is_peer_available, get_network_name, to_gas_amount, \
+    generate_uris_by_peer_id
 from src.utils import logger as l
 
 

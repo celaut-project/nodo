@@ -3,6 +3,8 @@ from typing import Optional
 from grpcbigbuffer import client as grpcbf
 import docker as docker_lib
 from hashlib import sha256
+
+import src.utils.utils
 from src.builder import build
 import grpc, os, subprocess
 
@@ -138,7 +140,7 @@ def launch_service(
                         service_instance = next(grpcbf.client_grpc(
                             method=gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(
-                                    next(utils.generate_uris_by_peer_id(peer))
+                                    next(src.utils.utils.generate_uris_by_peer_id(peer))
                                 )
                             ).StartService,  # TODO se debe hacer que al pedir un servicio exista un timeout.
                             partitions_message_mode_parser=True,

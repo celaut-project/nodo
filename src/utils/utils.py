@@ -5,7 +5,7 @@ import typing
 from grpcbigbuffer.client import Dir
 import netifaces as ni
 
-from src.database.query_interface import fetch_query
+from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from protos import celaut_pb2 as celaut, gateway_pb2
 
 from src.utils.env import REGISTRY
@@ -143,119 +143,6 @@ def get_network_name(ip_or_uri: str) -> str:
         raise Exception('Error getting the network name: ' + str(e))
 
 
-"""
- DB access methods.
-"""
-
-
-def get_ledgers() -> Generator[typing.Tuple[str, str], None, None]:
-    yield from fetch_query(query="SELECT id, private_key FROM ledger")
-
-
-def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
-    yield from (
-        str(peer_id) for (peer_id,) in fetch_query(query="SELECT id FROM peer")
-        if not ignore_network or True not in [
-            address_in_network(
-                ip_or_uri=uri,
-                net=ignore_network
-            ) for uri in generate_uris_by_peer_id(
-                peer_id=str(peer_id)
-            )
-        ]
-    )
-
-
-def get_peer_contract_instances(contract_hash: str, peer_id: str = None) \
-        -> Generator[typing.Tuple[str, str], None, None]:
-    """
-        get_ledger_and_contract_address_from_peer_id_and_contract_hash
-    """
-    yield from fetch_query(
-        query="SELECT address, ledger_id "
-              "FROM contract_instance "
-              "WHERE contract_hash = ? "
-              "AND peer_id = ?",
-        params=(contract_hash, peer_id)
-
-    ) if peer_id else fetch_query(
-        query="SELECT address, ledger_id "
-              "FROM contract_instance "
-              "WHERE contract_hash = ? "
-              "AND peer_id IS NULL",
-        params=(contract_hash,)
-    )
-
-
-def get_peer_id_by_ip(ip: str) -> str:
-    return next(fetch_query(
-        query="SELECT id FROM peer "
-              "WHERE id IN ("
-              "   SELECT peer_id FROM slot "
-              "   WHERE id IN ("
-              "       SELECT slot_id FROM uri "
-              "       WHERE ip = ?"
-              "   )"
-              ")",
-        params=(ip,)
-    ))[0]
-
-
-def is_open(ip: str, port: int) -> bool:
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(1)
-        sock.connect((ip, port))
-        sock.close()
-        return True
-    except Exception:
-        return False
-
-
-def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
-    yield from (
-        ip + ':' + str(port) for ip, port in fetch_query(
-            query="SELECT ip, port FROM uri "
-                  "WHERE slot_id IN ("
-                  "   SELECT id FROM slot "
-                  "   WHERE peer_id = ?"
-                  ")",
-            params=(peer_id,)
-        ) if is_open(ip=ip, port=port)
-    )
-
-
-def get_ledger_and_contract_addr_from_contract(contract_hash: str) -> Generator[typing.Tuple[str, str], None, None]:
-    yield from get_peer_contract_instances(contract_hash=contract_hash, peer_id=None)
-
-
-def get_ledger_providers(ledger: str) -> Generator[str, None, None]:
-    yield from (r[0] for r in fetch_query(
-        query="SELECT uri FROM ledger_provider WHERE ledger_id = ?",
-        params=(ledger,)
-    ))
-
-
-class NonUsedLedgerException(Exception):
-    pass
-
-
-def get_private_key_from_ledger(ledger: str) -> str:
-    try:
-        return next(fetch_query(
-            query="SELECT private_key FROM ledger WHERE id = ?",
-            params=(ledger,)
-        ))[0]
-
-    except Exception:
-        raise NonUsedLedgerException()
-
-
-"""
- End of: DB access methods.
-"""
-
-
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     try:
         return any(list(generate_uris_by_peer_id(peer_id))) if min_slots_open == 1 else \
@@ -287,3 +174,36 @@ def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
 
 def from_gas_amount(gas_amount: gateway_pb2.GasAmount) -> int:
     return int(gas_amount.n)
+
+
+def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
+    yield from (
+        peer_id for peer_id in get_peer_ids()
+        if not ignore_network or True not in [
+            address_in_network(
+                ip_or_uri=uri,
+                net=ignore_network
+            ) for uri in generate_uris_by_peer_id(
+                peer_id=peer_id
+            )
+        ]
+    )
+
+
+def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
+    yield from (
+        ip + ':' + str(port) for ip, port in get_peer_directions(
+            peer_id=peer_id
+        ) if is_open(ip=ip, port=port)
+    )
+
+
+def is_open(ip: str, port: int) -> bool:
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        sock.connect((ip, port))
+        sock.close()
+        return True
+    except Exception:
+        return False

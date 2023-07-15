@@ -5,7 +5,7 @@ from eth_account import Account
 import asyncio, time
 
 from src.utils.logger import LOGGER
-from src.utils.utils import get_ledger_providers
+from src.database.access_functions.ledgers import get_ledger_providers
 
 
 async def log_loop(event_filter, poll_interval: int, event_name: str, opt, w3, contract):
