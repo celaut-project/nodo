@@ -105,7 +105,8 @@ def get_only_the_ip_from_context_method(context_peer: str) -> str:
         raise Exception('Error getting the ip from the context: ' + str(e))
 
 
-get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
+get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr'] \
+    if network != "localhost" else network
 
 longestSublistFinder = lambda string1, string2, split: split.join(
     [a for a in string1.split(split) for b in string2.split(split) if a == b]) + split
@@ -131,6 +132,10 @@ def address_in_network(ip_or_uri, net) -> bool:
 
 
 def get_network_name(ip_or_uri: str) -> str:
+    # If is localhost
+    if "::1" in ip_or_uri or '0.0.0.0' == ip_or_uri:
+        return "localhost"
+
     #  https://stackoverflow.com/questions/819355/how-can-i-check-if-an-ip-is-in-a-network-in-python
     try:
         for network in ni.interfaces():
@@ -180,21 +185,21 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     yield from (
         peer_id for peer_id in get_peer_ids()
         if not ignore_network or True not in [
-            address_in_network(
-                ip_or_uri=uri,
-                net=ignore_network
-            ) for uri in generate_uris_by_peer_id(
-                peer_id=peer_id
-            )
-        ]
+        address_in_network(
+            ip_or_uri=uri,
+            net=ignore_network
+        ) for uri in generate_uris_by_peer_id(
+            peer_id=peer_id
+        )
+    ]
     )
 
 
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
     yield from (
         ip + ':' + str(port) for ip, port in get_peer_directions(
-            peer_id=peer_id
-        ) if is_open(ip=ip, port=port)
+        peer_id=peer_id
+    ) if is_open(ip=ip, port=port)
     )
 
 

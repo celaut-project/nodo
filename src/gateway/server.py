@@ -7,12 +7,12 @@ from grpcbigbuffer import client as grpcbf
 from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
 from grpcbigbuffer.buffer_pb2 import Buffer
 
-from protos import celaut_pb2 as celaut
+from protos import celaut_pb2 as celaut, compile_pb2
 from protos import gateway_pb2_grpc, gateway_pb2
 from protos.gateway_pb2_grpcbf import StartService_input, GetServiceTar_input, \
     GetServiceEstimatedCost_input
 from src.builder import build
-from src.compiler.compile import compile_repo
+from src.compiler.compile import compile_zip
 from src.gateway.launch_service import launch_service
 from src.gateway.utils import save_service, search_definition, \
     generate_gateway_instance, search_file, search_container
@@ -384,17 +384,16 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def Compile(self, request_iterator, context, **kwargs):
         l.LOGGER('Go to compile a proyect.')
-        input = grpcbf.parse_from_buffer(
-            request_iterator=request_iterator,
-            indices=gateway_pb2.CompileInput,
-            partitions_model=[Buffer.Head.Partition(index={1: Buffer.Head.Partition()}),
-                              Buffer.Head.Partition(index={2: Buffer.Head.Partition()})],
-            partitions_message_mode=[False, True]
-        )
-        if next(input) != gateway_pb2.CompileInput:
-            raise Exception('Compile Input wrong.')
-        for b in compile_repo(
-                repo=next(input)
+        generator = grpcbf.parse_from_buffer(
+                        request_iterator=request_iterator,
+                        indices={0: bytes},
+                        partitions_message_mode={0: False}
+                    )
+        next(generator)
+        for b in compile_zip(
+                zip=next(
+                    generator
+                )
         ):
             yield b
 

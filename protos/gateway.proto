@@ -1,7 +1,6 @@
 syntax = "proto3";
 package gateway;
 import "celaut.proto";
-import "compile.proto";
 import "buffer.proto";
 
 message GasAmount {
@@ -66,16 +65,6 @@ message ServiceWithConfig { // S^C
     optional GasAmount initial_gas_amount = 6;
 }
 
-message CompileInput {
-    bytes repo = 1;  // zip proyect file with .service on root directory.
-    repeated buffer.Buffer.Head.Partition partitions_model = 2;
-}
-
-message CompileOutput {
-    bytes id = 1;
-    compile.ServiceWithMeta service = 2;
-}
-
 message ModifyServiceSystemResourcesOutput {
     celaut.Sysresources sysreq = 1;
     GasAmount gas = 2;
@@ -98,7 +87,7 @@ service Gateway {
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput -> 
 
     rpc GetFile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // celaut.Any.Metadata.HashTag.Hash -> celaut.Any
-    rpc Compile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // CompileInput -> CompileOutput
+    rpc Compile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // CompileInput -> CompileOutputServiceId || compile.ServiceWithMeta
     rpc GetServiceTar(stream buffer.Buffer) returns (stream buffer.Buffer) {}// ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> buffer.Buffer (parse not needed.)
     
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> EstimatedCost

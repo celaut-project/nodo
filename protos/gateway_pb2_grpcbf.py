@@ -1,5 +1,4 @@
-from protos import gateway_pb2
-from grpcbigbuffer import buffer_pb2
+from protos import gateway_pb2, compile_pb2
 
 StartService_input = {
     5: gateway_pb2.Client,
@@ -45,35 +44,7 @@ GetServiceTar_input = {
     2: gateway_pb2.ServiceWithMeta,
 }
 
-Compile_output_partitions_v1 = [
-    buffer_pb2.Buffer.Head.Partition(index={1: buffer_pb2.Buffer.Head.Partition()}),
-    buffer_pb2.Buffer.Head.Partition(index={2: buffer_pb2.Buffer.Head.Partition()})
-]
-
-Compile_output_partitions_v2 = [
-    buffer_pb2.Buffer.Head.Partition(index={1: buffer_pb2.Buffer.Head.Partition()}),
-    buffer_pb2.Buffer.Head.Partition(index={
-        2: buffer_pb2.Buffer.Head.Partition(index={
-            1: buffer_pb2.Buffer.Head.Partition(),
-            2: buffer_pb2.Buffer.Head.Partition(index={
-                1: buffer_pb2.Buffer.Head.Partition(index={
-                    3: buffer_pb2.Buffer.Head.Partition(),
-                    4: buffer_pb2.Buffer.Head.Partition(),
-                }),
-                2: buffer_pb2.Buffer.Head.Partition(),
-                3: buffer_pb2.Buffer.Head.Partition(),
-                4: buffer_pb2.Buffer.Head.Partition(),
-            })
-        })
-    }),
-    buffer_pb2.Buffer.Head.Partition(index={
-        2: buffer_pb2.Buffer.Head.Partition(index={
-            2: buffer_pb2.Buffer.Head.Partition(index={
-                1: buffer_pb2.Buffer.Head.Partition(index={
-                    1: buffer_pb2.Buffer.Head.Partition(),
-                    2: buffer_pb2.Buffer.Head.Partition()
-                }),
-            })
-        })
-    })
-]
+CompileOutput_indices = {
+    1: compile_pb2.CompileOutputServiceId,
+    2: compile_pb2.ServiceWithMeta
+}

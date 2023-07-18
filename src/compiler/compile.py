@@ -9,14 +9,13 @@ import os, subprocess
 import src.manager.resources_manager as resources_manager
 from grpcbigbuffer import client as grpcbb
 from grpcbigbuffer import buffer_pb2, block_builder
-from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2
+from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2_grpcbf
 from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, DOCKER_COMMAND, \
     SAVE_ALL, \
     MIN_BUFFER_BLOCK_SIZE, SHA3_256_ID
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
 
-from protos.gateway_pb2_grpcbf import Compile_output_partitions_v1
 
 class Hyper:
     def __init__(self, path, aux_id):
@@ -41,14 +40,14 @@ class Hyper:
         # Build container and get compressed layers.
         if not os.path.isfile(self.path + 'Dockerfile'): raise Exception("Error: Dockerfile no encontrado.")
         os.system(
-            DOCKER_COMMAND+' buildx build --platform ' + arch + ' --no-cache -t builder' + self.aux_id + ' ' + self.path)
+            DOCKER_COMMAND + ' buildx build --platform ' + arch + ' --no-cache -t builder' + self.aux_id + ' ' + self.path)
         os.system(
-            DOCKER_COMMAND+" save builder" + self.aux_id + " > " + CACHE + self.aux_id + "/building/container.tar")
+            DOCKER_COMMAND + " save builder" + self.aux_id + " > " + CACHE + self.aux_id + "/building/container.tar")
         os.system(
             "tar -xvf " + CACHE + self.aux_id + "/building/container.tar -C " + CACHE + self.aux_id + "/building/")
 
         self.buffer_len = int(
-            subprocess.check_output([DOCKER_COMMAND+" image inspect builder" + aux_id + " --format='{{.Size}}'"],
+            subprocess.check_output([DOCKER_COMMAND + " image inspect builder" + aux_id + " --format='{{.Size}}'"],
                                     shell=True))
 
     def parseContainer(self):
@@ -289,9 +288,9 @@ class Hyper:
             del service_buffer  # -len
 
             service_with_meta: compile_pb2.ServiceWithMeta = compile_pb2.ServiceWithMeta(
-                        metadata=self.metadata,
-                        service=self.service
-                    )
+                metadata=self.metadata,
+                service=self.service
+            )
 
         else:
             # Generate the hashes.
@@ -327,9 +326,9 @@ class Hyper:
             # Generate the service with metadata.
             content_id, service_with_meta = block_builder.build_multiblock(
                 pf_object_with_block_pointers=compile_pb2.ServiceWithMeta(
-                        metadata=self.metadata,
-                        service=self.service
-                    ),
+                    metadata=self.metadata,
+                    service=self.service
+                ),
                 blocks=self.blocks
             )
 
@@ -356,7 +355,7 @@ def ok(path, aux_id) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
         identifier, service_with_meta = spec_file.save()
 
     # os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')
-    os.system(DOCKER_COMMAND+' rmi builder' + aux_id)
+    os.system(DOCKER_COMMAND + ' rmi builder' + aux_id)
     os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier, service_with_meta
 
@@ -382,32 +381,32 @@ def repo_ok(
 
 
 def zipfile_ok(
-        repo: str
+        zip: str
 ) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
     import random
     aux_id = str(random.random())
     os.system('mkdir ' + CACHE + aux_id)
     os.system('mkdir ' + CACHE + aux_id + '/for_build')
-    os.system('unzip ' + repo + ' -d ' + CACHE + aux_id + '/for_build')
-    os.system('rm ' + repo)
+    os.system('unzip ' + zip + ' -d ' + CACHE + aux_id + '/for_build')
+    os.system('rm ' + zip)
     return ok(
         path=CACHE + aux_id + '/for_build/',
         aux_id=aux_id,
-    )  # Hyperfile
+    )  # Specification file
 
 
-def compile_repo(repo, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
-    l.LOGGER('Compiling zip ' + str(repo))
-    service_id, service_with_meta = zipfile_ok(repo=repo)
-    if type(service_with_meta) is str:
-        service_with_meta = grpcbb.Dir(service_with_meta)
+def compile_zip( zip, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
+    l.LOGGER('Compiling zip ' + str(zip))
+    service_id, service_with_meta = zipfile_ok(zip=zip)
     for b in grpcbb.serialize_to_buffer(
-            message_iterator=tuple([gateway_pb2.CompileOutput,
-                                    bytes.fromhex(service_id),
-                                    service_with_meta
-                                    ]),
-            partitions_model=Compile_output_partitions_v1,
-            indices=gateway_pb2.CompileOutput
+            message_iterator=[
+                compile_pb2.CompileOutputServiceId(
+                    id=bytes.fromhex(service_id)
+                ),
+                tuple([compile_pb2.ServiceWithMeta, grpcbb.Dir(service_with_meta)])
+                if type(service_with_meta) is str else service_with_meta
+            ],
+            indices=gateway_pb2_grpcbf.CompileOutput_indices
     ):
         yield b
 
