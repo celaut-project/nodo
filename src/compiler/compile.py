@@ -403,7 +403,7 @@ def compile_zip( zip, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, N
                 compile_pb2.CompileOutputServiceId(
                     id=bytes.fromhex(service_id)
                 ),
-                tuple([compile_pb2.ServiceWithMeta, grpcbb.Dir(service_with_meta)])
+                grpcbb.Dir(dir=service_with_meta, _type=compile_pb2.ServiceWithMeta)
                 if type(service_with_meta) is str else service_with_meta
             ],
             indices=gateway_pb2_grpcbf.CompileOutput_indices

@@ -384,16 +384,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def Compile(self, request_iterator, context, **kwargs):
         l.LOGGER('Go to compile a proyect.')
-        generator = grpcbf.parse_from_buffer(
+        _d = grpcbf.parse_from_buffer(
                         request_iterator=request_iterator,
                         indices={0: bytes},
                         partitions_message_mode={0: False}
                     )
-        next(generator)
+        if _d.type != bytes:
+            raise Exception("Incorrect input on Compile gRPC-bb method. Should be bytes")
         for b in compile_zip(
-                zip=next(
-                    generator
-                )
+                zip=next(_d.dir)
         ):
             yield b
 
