@@ -189,7 +189,6 @@ def launch_service(
                         metadata=metadata,
                         service_id=service_id,
                         get_it=not getting_container,
-                        complete=True
                     )  # If the container is not built, build it.
                 except build.UnsupportedArchitectureException as e:
                     try:

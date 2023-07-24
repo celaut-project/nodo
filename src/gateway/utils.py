@@ -2,18 +2,14 @@ import os
 import shutil
 from typing import Generator, List
 
-import grpc
 import netifaces as ni
-from grpcbigbuffer import client as grpcbf
 
 import src.utils.utils
 from src.database.access_functions.ledgers import get_ledger_and_contract_addr_from_contract
 from src.payment_system.contracts.ethereum.deposit_contract.simulator.interface \
     import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH, CONTRACT as DEFAULT_PROVISIONAL_CONTRACT # TODO se mantiene el contrato provisional
-from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_grpcbf import GetServiceTar_input
+from protos import celaut_pb2 as celaut, gateway_pb2
 from src.utils import logger as l
-from src.utils import utils as utils
 from src.utils.env import GATEWAY_PORT, REGISTRY
 
 
@@ -73,17 +69,7 @@ def search_container(
     # Search a service tar container.
     for peer in src.utils.utils.peers_id_iterator(ignore_network=ignore_network):
         try:
-            yield next(grpcbf.client_grpc(
-                method=gateway_pb2_grpc.GatewayStub(
-                    grpc.insecure_channel(
-                        next(src.utils.utils.generate_uris_by_peer_id(peer)),
-                    )
-                ).GetServiceTar,
-                input=utils.service_extended(
-                    metadata=metadata
-                ),
-                indices_serializer=GetServiceTar_input
-            ))
+            print('SEARCH CONTAINER NOT IMPLEMENTED')
             break
         except Exception as e:
             l.LOGGER('Exception during search container process: ' + str(e))
@@ -94,26 +80,6 @@ def search_file(hashes: List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash],
 Generator[celaut.Any, None, None]:
     print('SEARCH FILE METHOD NOT IMPLEMENTED.')
     raise Exception('SEARCH FILE METHOD NOT IMPLEMENTED.')
-    """
-        # TODO: It can search for other 'Service ledger' or 'ANY ledger' instances that could've this type of files.
-        for peer in utils.peers_id_iterator(ignore_network=ignore_network):
-            try:
-                for buffer in grpcbf.client_grpc(
-                        method=gateway_pb2_grpc.GatewayStub(
-                            grpc.insecure_channel(
-                                next(utils.generate_uris_by_peer_id(peer)),
-                            )
-                        ).GetFile,
-                        output_field=celaut.Any,
-                        input=utils.service_hashes(
-                            hashes=hashes
-                        )
-                ):
-                    yield buffer
-            except Exception as e:
-                l.LOGGER('Exception during search file process: ' + str(e))
-                pass    
-    """
 
 
 
@@ -122,40 +88,4 @@ def search_definition(hashes: List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.
     l.LOGGER('SEARCH DEFINITION NOT IMPLEMENTED.')
     raise Exception('SEARCH DEFINITION NOT IMPLEMENTED.')
 
-    """
-        #  Search a service description.
-        for any in search_file(
-                hashes=hashes,
-                ignore_network=ignore_network
-        ):
-            if check_service(
-                    service_buffer=any.value,
-                    hashes=hashes
-            ):
-                service_partitions_iterator = grpcbf.parse_from_buffer.conversor(
-                    iterator=itertools.chain([any.value]),
-                    pf_object=gateway_pb2.ServiceWithMeta,
-                    remote_partitions_model=gateway_pb2_grpcbf.StartService_input_partitions_v2[2],
-                    mem_manager=iobd.mem_manager,
-                    yield_remote_partition_dir=False,
-                    partitions_message_mode=[True, False]
-                )
-                #  Save the service on the registry.
-                # save_service(
-                #    service_p1=next(service_partitions_iterator),
-                #    service_p2=next(service_partitions_iterator),
-                #    metadata=any.metadata
-                # )
-                service = celaut.Service()
-                service.ParseFromString(any.value)
-                return service
-    
-        try:
-            identifier = hashes[0].value.hex()
-        except Exception:
-            identifier = '__not_provided__'
-    
-        l.LOGGER('The service ' + identifier + ' was not found.')
-        raise Exception('The service ' + identifier + ' was not found.')    
-    """
 

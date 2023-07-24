@@ -348,40 +348,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 )
         ): yield b
 
-    def GetFile(self, request_iterator, context, **kwargs):
-        l.LOGGER('Request for give a service definition.')
-        hashes = []
-        for _hash in grpcbf.parse_from_buffer(
-                request_iterator=request_iterator,
-                indices=celaut.Any.Metadata.HashTag.Hash,
-                partitions_message_mode=True
-        ):
-            # Comprueba que sea sha256 y que se encuentre en el registro.
-            hashes.append(_hash)
-            if SHA3_256_ID == _hash.type and \
-                    _hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                yield gateway_pb2.buffer__pb2.Buffer(signal=True)  # Say stop to send more hashes.
-                yield from grpcbf.serialize_to_buffer(  # TODO check.
-                    message_iterator=(
-                        celaut.Any,
-                        grpcbf.Dir(REGISTRY + _hash.value.hex())
-                    ),
-                )
-
-        try:
-            yield from grpcbf.serialize_to_buffer(
-                message_iterator=next(search_file(
-                    ignore_network=get_network_name(
-                        ip_or_uri=get_only_the_ip_from_context(context_peer=context.peer())
-                    ),
-                    hashes=hashes
-                ))
-                # It's not verifying the content, because we couldn't 've the format for prune metadata in it. The final client will've to check it.
-            )
-
-        except:
-            raise Exception('Was imposible get the service definition.')
-
     def Compile(self, request_iterator, context, **kwargs):
         l.LOGGER('Go to compile a proyect.')
         _d: grpcbf.Dir = next(grpcbf.parse_from_buffer(
@@ -395,61 +361,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 zip=_d.dir
         ):
             yield b
-
-    def GetServiceTar(self, request_iterator, context, **kwargs):
-        # TODO se debe de hacer que gestione mejor tomar todo el servicio, como hace GetServiceEstimatedCost.
-
-        service_hash = None
-        service_buffer = None
-        l.LOGGER('Request for give a service container.')
-        for r in grpcbf.parse_from_buffer(
-                request_iterator=request_iterator,
-                indices=GetServiceTar_input,
-                partitions_message_mode=True
-        ):
-
-            # Si me da hash, comprueba que sea sha256 y que se encuentre en el registro.
-            if type(r) is celaut.Any.Metadata.HashTag.Hash and SHA3_256_ID == r.type:
-                service_hash = r.value.hex()
-                break
-
-            # Si me da servicio.
-            if type(r) is celaut.Any:
-                service_hash = get_service_hex_main_hash(metadata=r.metadata)
-                service_partitions_iterator = grpcbf.parse_from_buffer.conversor(
-                    iterator=itertools.chain([r.value]),
-                    pf_object=gateway_pb2.ServiceWithMeta,
-                    mem_manager=mem_manager,
-                    yield_remote_partition_dir=False,
-                    partitions_message_mode=True
-                )
-                # save_service() TODO
-                service_buffer = r.value
-                break
-
-        l.LOGGER('Getting the container of service ' + service_hash)
-        if service_hash and service_hash in [s for s in os.listdir(REGISTRY)]:
-            try:
-                os.system('docker save ' + service_hash + '.service > ' + CACHE + service_hash + '.tar')
-                l.LOGGER('Returned the tar container buffer.')
-                yield grpcbf.get_file_chunks(filename=CACHE + service_hash + '.tar')
-            except:
-                l.LOGGER('Error saving the container ' + service_hash)
-        elif service_buffer:
-            # Puede buscar el contenedor en otra red distinta a la del solicitante.
-            try:
-                yield search_container(
-                    ignore_network=get_network_name(
-                        ip_or_uri=get_only_the_ip_from_context(context_peer=context.peer())
-                    ),
-                    service_buffer=service_buffer,
-                    metadata=celaut.Any.Metadata()
-                )
-            except:
-                l.LOGGER('The service ' + service_hash + ' was not found.')
-
-        yield gateway_pb2.buffer__pb2.Buffer(separator=True)
-        raise Exception('Was imposible get the service container.')
 
     # Estimacion de coste de ejecución de un servicio con la cantidad de gas por defecto.
     def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):

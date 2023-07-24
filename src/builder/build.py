@@ -185,62 +185,11 @@ def build_container_from_definition(service: celaut_pb2.Service,
         actual_building_processes_lock.release()
 
 
-def get_container_from_outside(  # TODO could take it from a specific ledger.
-        id: str,
-        metadata: gateway_pb2.celaut__pb2.Any.Metadata
-):
-    # search container in a service. (docker-tar, docker-tar.gz, filesystem, ....)
-
-    l.LOGGER('\nIt is not locally, ' + id + ' go to search the container in other node.')
-    for peer in peers_id_iterator():
-        try:
-            l.LOGGER('\nUsing the peer ' + peer + ' for get the container of ' + id)
-
-            #  Write the buffer to a file.
-            save_chunks_to_file(
-                filename=CACHE + id + '.tar',
-                # chunks = search_container(service = service) TODO ??
-                buffer_iterator=gateway_pb2_grpc.GatewayStub(  # Parse_from_buffer is not necesary because chunks're it.
-                    grpc.insecure_channel(
-                        next(generate_uris_by_peer_id(peer)),
-                    )
-                ).GetServiceTar(
-                    serialize_to_buffer(
-                        service_extended(metadata=metadata),
-                        indices=GetServiceTar_input
-                    )
-                )
-            )
-
-            l.LOGGER('    Buffer on file.')
-            break
-        except grpc.RpcError:  # Other exception is raised.
-            l.LOGGER('\nThe container with hash ' + id + ' is not in peer ' + peer)
-            continue
-    l.LOGGER('Finded the container, go to build it.')
-
-    #  Load the tar file to a docker container.
-    try:
-        os.system('docker load < ' + CACHE + id + '.tar')
-        os.system('docker tag ' + id + ' ' + id + '.docker')
-        check_output(DOCKER_COMMAND + ' inspect ' + id, shell=True)
-    except:
-        l.LOGGER('Exception during load the tar ' + id + '.docker')
-        raise Exception('Error building the container.')
-
-    l.LOGGER('Outside load container process finished ' + id)
-
-    actual_building_processes_lock.acquire()
-    actual_building_processes.remove(id)
-    actual_building_processes_lock.release()
-
-
 def build(
         service: celaut_pb2.Service,
         metadata: gateway_pb2.celaut__pb2.Any.Metadata,
         get_it: bool = True,
         service_id=None,
-        complete=False
 ) -> str:
     if not service_id:
         try:
@@ -258,33 +207,22 @@ def build(
         return service_id
 
     except CalledProcessError:
-        if complete:
-            sleep(1)  # TODO -> TMB(typical multithread bug).
-            if get_it and service_id not in actual_building_processes:
-                actual_building_processes_lock.acquire()
-                actual_building_processes.append(service_id)
-                actual_building_processes_lock.release()
+        sleep(1)  # TODO -> TMB(typical multithread bug).
+        if get_it and service_id not in actual_building_processes:
+            actual_building_processes_lock.acquire()
+            actual_building_processes.append(service_id)
+            actual_building_processes_lock.release()
 
-                threading.Thread(
-                    target=build_container_from_definition,
-                    args=(
-                        service,
-                        metadata,
-                        service_id
-                    )
-                ).start()
-            else:
-                sleep(WAIT_FOR_CONTAINER)
-            raise WaitBuildException
+            threading.Thread(
+                target=build_container_from_definition,
+                args=(
+                    service,
+                    metadata,
+                    service_id
+                )
+            ).start()
         else:
-            if service_id not in actual_building_processes:
-                actual_building_processes_lock.acquire()
-                actual_building_processes.append(service_id)
-                actual_building_processes_lock.release()
-                threading.Thread(
-                    target=get_container_from_outside,
-                    args=(service_id, metadata)
-                ).start() if get_it else sleep(WAIT_FOR_CONTAINER)
-                raise WaitBuildException
+            sleep(WAIT_FOR_CONTAINER)
+        raise WaitBuildException
 
     # verify() TODO ??

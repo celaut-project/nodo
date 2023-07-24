@@ -39,10 +39,6 @@ GetServiceEstimatedCost_input = {
     4: gateway_pb2.ServiceWithConfig,
 }
 
-GetServiceTar_input = {
-    1: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash,
-    2: gateway_pb2.ServiceWithMeta,
-}
 
 CompileOutput_indices = {
     1: compile_pb2.CompileOutputServiceId,
