@@ -79,10 +79,10 @@ def service_extended(
             print("SERVICE WITH CONFIG NOT SUPPORTED NOW.")
             raise ("SERVICE WITH CONFIG NOT SUPPORTED NOW.")
         else:
-            yield (
-                gateway_pb2.ServiceWithMeta,
-                Dir(REGISTRY + _hash)
-            )
+            yield Dir(
+                    dir=REGISTRY + _hash,
+                    _type=gateway_pb2.ServiceWithMeta
+                )
 
 
 def get_free_port() -> int:
