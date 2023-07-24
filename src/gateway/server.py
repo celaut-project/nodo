@@ -136,8 +136,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         yield gateway_pb2.buffer__pb2.Buffer(signal=True)
                         continue
 
-            elif r is gateway_pb2.ServiceWithConfig or r is gateway_pb2.ServiceWithMeta:
-                if configuration or r is gateway_pb2.ServiceWithMeta:
+            elif isinstance(r, grpcbf.Dir) and (
+                    r.type is gateway_pb2.ServiceWithConfig or r.type is gateway_pb2.ServiceWithMeta
+            ):
+                if configuration or r.type is gateway_pb2.ServiceWithMeta:
                     value, is_primary = DuplicateGrabber().next(
                         hashes=hashes,
                         generator=parser_generator
@@ -183,36 +185,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 else:
                                     sleep(GENERAL_WAIT_TIME)
 
-                try:
-                    # Iterate the first partition.
-                    r = next(parser_generator)
-
-                    if type(r) not in [gateway_pb2.ServiceWithConfig, str]:
-                        raise Exception
-                except Exception:
-                    raise Exception('Grpcbb error: partition corrupted')
-
-                if type(r) is gateway_pb2.ServiceWithConfig:
-                    print('SERVICE WITH CONFIG NOT SUPPORTED')
-                    raise Exception('SERVICE WITH CONFIG NOT SUPPORTED')
-
-                    """
-                        configuration = r.config
-                        service_with_meta_dir: str = next(parser_generator)
-    
-                        if r.HasField('max_sysreq') and not could_ve_this_sysreq(sysreq=r.max_sysreq):
-                            raise Exception("The node can't execute the service with this requeriments.")
-                        else:
-                            max_sysreq = r.max_sysreq
-    
-                        if r.HasField('min_sysreq'):
-                            system_requeriments = r.min_sysreq
-    
-                        if r.HasField('initial_gas_amount'):
-                            initial_gas_amount = from_gas_amount(r.initial_gas_amount)                    
-                    """
-                else:
-                    service_with_meta_dir: str = r
+                service_with_meta_dir: str = r.dir
 
                 l.LOGGER('Save service on disk')
                 registry_hash: Optional[str] = None
@@ -223,7 +196,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 if not registry_hash:
                     # TODO if don't have the registry_hash, save the service_with_meta (maybe with config)
                     #      and compute it.
-                    raise Exception
+                    raise Exception("Not registry hash.")
                 save_service(
                     service_with_meta_dir=service_with_meta_dir,
                     service_hash=registry_hash
@@ -348,10 +321,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def Compile(self, request_iterator, context, **kwargs):
         l.LOGGER('Go to compile a proyect.')
         _d: grpcbf.Dir = next(grpcbf.parse_from_buffer(
-                        request_iterator=request_iterator,
-                        indices={0: bytes},
-                        partitions_message_mode={0: False}
-                    ))
+            request_iterator=request_iterator,
+            indices={0: bytes},
+            partitions_message_mode={0: False}
+        ))
         if _d.type != bytes:
             raise Exception("Incorrect input on Compile gRPC-bb method. Should be bytes")
         for b in compile_zip(
