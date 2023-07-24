@@ -5,29 +5,26 @@ from typing import List, Optional
 
 from grpcbigbuffer import client as grpcbf
 from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
-from grpcbigbuffer.buffer_pb2 import Buffer
 
-from protos import celaut_pb2 as celaut, compile_pb2
+from protos import celaut_pb2 as celaut
 from protos import gateway_pb2_grpc, gateway_pb2
-from protos.gateway_pb2_grpcbf import StartService_input, GetServiceTar_input, \
-    GetServiceEstimatedCost_input
+from protos.gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input
 from src.builder import build
 from src.compiler.compile import compile_zip
 from src.gateway.launch_service import launch_service
 from src.gateway.utils import save_service, search_definition, \
-    generate_gateway_instance, search_file, search_container
+    generate_gateway_instance
 from src.manager.manager import could_ve_this_sysreq, prune_container, generate_client, get_token_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources, \
     execution_cost, default_initial_cost
 from src.manager.metrics import get_metrics
-from src.payment_system.payment_process import validate_payment_process
 from src.manager.resources_manager import mem_manager
+from src.payment_system.payment_process import validate_payment_process
 from src.utils import logger as l
-from src.utils.tools.duplicate_grabber import DuplicateGrabber
 from src.utils.env import GENERAL_ATTEMPTS, GENERAL_WAIT_TIME, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, SHA3_256_ID, \
-    MODIFY_SERVICE_SYSTEM_RESOURCES_COST, GAS_COST_FACTOR, REGISTRY, CACHE
+    MODIFY_SERVICE_SYSTEM_RESOURCES_COST, GAS_COST_FACTOR, REGISTRY
+from src.utils.tools.duplicate_grabber import DuplicateGrabber
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name, read_file
-from src.utils.verify import get_service_hex_main_hash
 
 
 def get_from_registry(service_hash: str) -> gateway_pb2.ServiceWithMeta:
