@@ -1,23 +1,21 @@
+import itertools
 import json
-from time import sleep, time
+import os
+import src.manager.resources_manager as resources_manager
 import threading
+from shutil import rmtree
+from subprocess import check_output, CalledProcessError
+from subprocess import run
+from time import sleep, time
 from typing import Tuple
 
-from protos.gateway_pb2_grpcbf import GetServiceTar_input
-import grpc, os, src.manager.resources_manager as resources_manager
-from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
+from grpcbigbuffer.client import copy_block_if_exists
+
+import src.utils.logger as l
+from protos import celaut_pb2, gateway_pb2
 from src.utils.env import DOCKER_COMMAND, SUPPORTED_ARCHITECTURES, BUILD_CONTAINER_MEMORY_SIZE_FACTOR, \
     WAIT_FOR_CONTAINER, BLOCKDIR, CACHE, REGISTRY
-from src.utils.utils import service_extended, peers_id_iterator, generate_uris_by_peer_id
-import src.utils.logger as l
-from grpcbigbuffer.client import save_chunks_to_file, serialize_to_buffer, copy_block_if_exists
-
-from shutil import rmtree
-from subprocess import run
-import itertools
-
 from src.utils.verify import get_service_hex_main_hash
-from subprocess import check_output, CalledProcessError
 
 
 def get_arch_tag(metadata: celaut_pb2.Any.Metadata) -> str:
