@@ -139,53 +139,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
             elif isinstance(r, grpcbf.Dir) and (
                     r.type is gateway_pb2.ServiceWithConfig or r.type is gateway_pb2.ServiceWithMeta
             ):
-                if configuration or r.type is gateway_pb2.ServiceWithMeta:
-                    value, is_primary = DuplicateGrabber().next(
-                        hashes=hashes,
-                        generator=parser_generator
-                    )
-                    if is_primary:
-                        parser_generator = itertools.chain([value], parser_generator)
-                    else:
-                        registry_hash: Optional[str] = None
-                        for h in hashes:
-                            if SHA3_256_ID == h.type:
-                                registry_hash = h.value.hex()
-                                break
-                        if registry_hash:
-                            for i in range(GENERAL_ATTEMPTS):
-                                if registry_hash in [s for s in os.listdir(REGISTRY)]:
-                                    try:
-                                        service_with_meta: gateway_pb2.ServiceWithMeta = get_from_registry(
-                                            service_hash=registry_hash
-                                        )
-
-                                        for b in grpcbf.serialize_to_buffer(
-                                                indices={},
-                                                message_iterator=launch_service(
-                                                    service=service_with_meta.service,
-                                                    metadata=service_with_meta.metadata,
-                                                    config=configuration,
-                                                    system_requirements=system_requeriments,
-                                                    max_sysreq=max_sysreq,
-                                                    initial_gas_amount=initial_gas_amount,
-                                                    father_ip=get_only_the_ip_from_context(
-                                                        context_peer=context.peer()),
-                                                    father_id=client_id,
-                                                    recursion_guard_token=recursion_guard_token
-                                                )
-                                        ):
-                                            yield b
-                                        return
-
-                                    except Exception as e:
-                                        l.LOGGER('Exception launching a service ' + str(e))
-                                        pass
-
-                                else:
-                                    sleep(GENERAL_WAIT_TIME)
-
-                service_with_meta_dir: str = r.dir
+                # NO TIENE SENTIDO USAR AQUI EL DUPLICATE GRABBER YA QUE AHORA NO RETORNAMOS PRIMERO EL TIPO, SI NO QUE
+                #  RETORNAMOS EL TIPO JUNTO CON EL DIRECTORIO DEL SERVICIO YA DESCARGADO. EL DUPLICATE GRABBER DEBERIA
+                #  USARSE ANTES.
 
                 l.LOGGER('Save service on disk')
                 registry_hash: Optional[str] = None
@@ -198,7 +154,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     #      and compute it.
                     raise Exception("Not registry hash.")
                 save_service(
-                    service_with_meta_dir=service_with_meta_dir,
+                    service_with_meta_dir=r.dir,
                     service_hash=registry_hash
                 )
 
@@ -228,6 +184,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                  + str([(h.type.hex(), h.value.hex()) for h in hashes]))
 
         try:
+            # SEARCH DEFINITION - NOT IMPLEMENTED.
             for b in grpcbf.serialize_to_buffer(
                     message_iterator=launch_service(
                         service=search_definition(
