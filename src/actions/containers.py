@@ -1,7 +1,7 @@
 from typing import Generator, List
 
 import docker
-from src.commands.__interface import table_command
+from src.actions.__interface import table_command
 
 
 def generator() -> Generator[List[str], None, None]:

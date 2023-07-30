@@ -1,5 +1,5 @@
 from typing import Generator, List
-from src.commands.__interface import table_command
+from src.actions.__interface import table_command
 from src.payment_system.contracts.ethereum.utils import check_provider_availability
 from src.database.access_functions.ledgers import get_ledgers, get_ledger_providers
 from eth_account import Account
