@@ -61,5 +61,9 @@ if __name__ == '__main__':
                 from src.payment_system.contracts.ethereum.deploy import deploy
                 deploy()
 
+            case 'storage:prune_blocks':
+                from src.commands.storage import prune_blocks
+                prune_blocks()
+
             case other:
                 print('Unknown command.')
