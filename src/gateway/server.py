@@ -8,7 +8,7 @@ from protos.gateway_pb2_grpcbf import StartService_input_indices, \
     StartService_input_message_mode
 from src.builder import build
 from src.compiler.compile import compile_zip
-from src.gateway.start_service import start_service, get_from_registry
+from src.gateway.start_service import start_service, get_from_registry, StartServiceIterable
 from src.gateway.utils import save_service, generate_gateway_instance
 from src.manager.manager import prune_container, generate_client, get_token_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources, \
@@ -25,7 +25,7 @@ from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_ga
 class Gateway(gateway_pb2_grpc.Gateway):
 
     def StartService(self, request_iterator, context, **kwargs):
-        yield from start_service(request_iterator, context)
+        yield from StartServiceIterable(request_iterator, context)
 
     def StopService(self, request_iterator, context, **kwargs):
         try:
