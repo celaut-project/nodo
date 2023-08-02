@@ -25,6 +25,7 @@ MAIN_DIR = GET_ENV(env="MAIN_DIR", default="/node")
 DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
 CACHE = f"{MAIN_DIR}/__cache__/"
 REGISTRY = f"{MAIN_DIR}/__registry__/"
+METADATA_REGISTRY = f"{MAIN_DIR}/__metadata__/"
 BLOCKDIR = f"{MAIN_DIR}/__block__/"
 
 SAVE_ALL = False

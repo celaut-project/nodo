@@ -15,20 +15,25 @@ from src.utils import logger as l
 from src.utils.env import GATEWAY_PORT, MEMORY_LOGS, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
     SEND_ONLY_HASHES_ASKING_COST, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, REGISTRY, CACHE, LOCAL_NETWORK, \
     DOCKER_NETWORK, COMPUTE_POWER_RATE, COST_OF_BUILD, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
-    COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, BLOCKDIR, EXTERNAL_COST_TIMEOUT
+    COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, BLOCKDIR, EXTERNAL_COST_TIMEOUT, \
+    METADATA_REGISTRY
 from src.utils.zeroconf import Zeroconf
 
 
 def serve():
-    # Create __cache__ if it does not exists.
+    # Create __cache__ if it does not exist.
     if not os.path.exists(CACHE):
         os.makedirs(CACHE)
 
-    # Create __registry__ if it does not exists.
+    # Create __registry__ if it does not exist.
     if not os.path.exists(REGISTRY):
         os.makedirs(REGISTRY)
 
-    # Create __block__ if it does not exists.
+    # Create __metadata__ if it does not exist.
+    if not os.path.exists(METADATA_REGISTRY):
+        os.makedirs(METADATA_REGISTRY)
+
+    # Create __block__ if it does not exist.
     if not os.path.exists(BLOCKDIR):
         os.makedirs(BLOCKDIR)
 

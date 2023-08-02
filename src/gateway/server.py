@@ -171,7 +171,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 )
 
                 save_service(
-                    service_with_meta_dir=service_with_meta_dir,
+                    service_dir=service_with_meta_dir,
                     service_hash=service_hash.value.hex()
                 )
 

@@ -1,6 +1,6 @@
 import os
 import shutil
-from typing import Generator, List
+from typing import Generator, List, Optional
 
 import netifaces as ni
 
@@ -10,7 +10,7 @@ from src.payment_system.contracts.ethereum.deposit_contract.simulator.interface 
     import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH, CONTRACT as DEFAULT_PROVISIONAL_CONTRACT # TODO se mantiene el contrato provisional
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.utils import logger as l
-from src.utils.env import GATEWAY_PORT, REGISTRY
+from src.utils.env import GATEWAY_PORT, REGISTRY, METADATA_REGISTRY
 
 
 def __generate_contract_ledger() -> Generator[celaut.Service.Api.ContractLedger, None, None]:
@@ -50,16 +50,26 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
 
 # If the service is not on the registry, save it.
 def save_service(
-        service_with_meta_dir: str,
+        metadata: Optional[celaut.Any.Metadata],
+        service_dir: str,
         service_hash: str
 ) -> bool:
-    if not os.path.isdir(REGISTRY + service_hash):
+    def __save():
         try:
-            shutil.move(service_with_meta_dir, REGISTRY + service_hash)
+            shutil.move(service_dir, REGISTRY + service_hash)
             return True
         except Exception as e:
-            l.LOGGER('Exception saving a service: ' + str(e))
-    return False
+            l.LOGGER(f'Exception saving a service {service_hash}: ' + str(e))
+            return False
+        finally:
+            if metadata:
+                try:
+                    with open(METADATA_REGISTRY + service_hash, "wb") as f:
+                        f.write(metadata.SerializeToString())
+                except Exception as e:
+                    l.LOGGER(f'Exception writing metadata of {service_hash}: ' + str(e))
+
+    return os.path.isdir(REGISTRY + service_hash) or __save()
 
 
 def search_container(

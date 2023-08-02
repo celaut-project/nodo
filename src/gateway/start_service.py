@@ -20,7 +20,7 @@ from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, read_
 CONFIGURATION_REQUIRED = False  # TODO añadir como variable de entorno. Por si el nodo debe de ser mas estricto.
 
 
-def get_from_registry(service_hash: str) -> gateway_pb2.ServiceWithMeta:
+def get_from_registry(service_hash: str) -> celaut.Service:
     l.LOGGER('Getting ' + service_hash + ' service from the local registry.')
     filename: str = REGISTRY + service_hash
     if not os.path.exists(filename):
@@ -30,9 +30,9 @@ def get_from_registry(service_hash: str) -> gateway_pb2.ServiceWithMeta:
         filename = filename + '/' + WITHOUT_BLOCK_POINTERS_FILE_NAME
     try:
         with mem_manager(2 * os.path.getsize(filename)) as iolock:
-            service_with_meta = gateway_pb2.ServiceWithMeta()
-            service_with_meta.ParseFromString(read_file(filename=filename))
-            return service_with_meta
+            service = celaut.Service()
+            service.ParseFromString(read_file(filename=filename))
+            return service
     except (IOError, FileNotFoundError):
         l.LOGGER('The service was not on registry.')
         return None
@@ -146,7 +146,8 @@ def start_service(request_iterator, context) -> Generator[buffer_pb2.Buffer, Non
                     raise Exception("Not registry hash.")
 
                 service_saved = save_service(
-                    service_with_meta_dir=r.dir,
+                    metadata=metadata,
+                    service_dir=r.dir,
                     service_hash=service_hash
                 )
 
