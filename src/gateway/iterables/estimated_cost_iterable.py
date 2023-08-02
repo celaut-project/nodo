@@ -4,7 +4,7 @@ from grpcbigbuffer import client as grpcbf, buffer_pb2
 
 from protos import gateway_pb2
 from src.builder import build
-from src.gateway.service_iterable import ServiceIterable
+from src.gateway.iterables.service_iterable import ServiceIterable
 from src.manager.manager import execution_cost, default_initial_cost
 from src.utils import logger as l
 from src.utils.env import GAS_COST_FACTOR
