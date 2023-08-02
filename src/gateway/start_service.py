@@ -135,7 +135,8 @@ def start_service(request_iterator, context) -> Generator[buffer_pb2.Buffer, Non
                 if r.type != gateway_pb2.celaut__pb2.Service:
                     raise Exception('Incorrect service message.')
 
-                # NO TIENE SENTIDO USAR AQUI EL DUPLICATE GRABBER YA QUE AHORA NO RETORNAMOS PRIMERO EL TIPO, SI NO QUE
+                #  -- TODO --
+                #  NO TIENE SENTIDO USAR AQUI EL DUPLICATE GRABBER YA QUE AHORA NO RETORNAMOS PRIMERO EL TIPO, SI NO QUE
                 #  RETORNAMOS EL TIPO JUNTO CON EL DIRECTORIO DEL SERVICIO YA DESCARGADO. EL DUPLICATE GRABBER DEBERIA
                 #  USARSE ANTES.
 
@@ -152,6 +153,7 @@ def start_service(request_iterator, context) -> Generator[buffer_pb2.Buffer, Non
                 )
 
         if service_saved:
+            yield buffer_pb2.Buffer(signal=True)
             if CONFIGURATION_REQUIRED and not configuration:
                 raise Exception("Client or configuration ")
 
