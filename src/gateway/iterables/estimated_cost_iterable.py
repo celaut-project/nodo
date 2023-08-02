@@ -4,7 +4,7 @@ from grpcbigbuffer import client as grpcbf, buffer_pb2
 
 from protos import gateway_pb2
 from src.builder import build
-from src.gateway.iterables.service_iterable import ServiceIterable
+from src.gateway.iterables.service_iterable import ServiceIterable, BreakIteration
 from src.manager.manager import execution_cost, default_initial_cost
 from src.utils import logger as l
 from src.utils.env import GAS_COST_FACTOR
@@ -24,12 +24,11 @@ class GetServiceEstimatedCostIterable(ServiceIterable):
             self.cost = execution_cost(
                 metadata=self.metadata
             ) * GAS_COST_FACTOR
-            # break
+            raise BreakIteration
         except build.UnsupportedArchitectureException as e:
             raise e
         except Exception as e:
-            yield gateway_pb2.buffer__pb2.Buffer(signal=True)
-            # continue
+            yield buffer_pb2.Buffer(signal=True)
 
     def final(self):
         initial_service_cost = from_gas_amount(self.initial_gas_amount)

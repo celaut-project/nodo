@@ -15,6 +15,10 @@ from src.utils.env import SHA3_256_ID, \
 from src.utils.utils import from_gas_amount
 
 
+class BreakIteration(Exception):
+    pass
+
+
 def find_service_hash(_hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash) \
         -> Tuple[Optional[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash], bool]:
     return _hash, _hash.value.hex() in [s for s in os.listdir(REGISTRY)] if SHA3_256_ID == _hash.type else (None, False)
@@ -54,22 +58,17 @@ class ServiceIterable:
     metadata: Optional[gateway_pb2.celaut__pb2.Any.Metadata] = None
 
     def __init__(self, request_iterator, context):
-        self.request_iterator = request_iterator
-        self.context = context
-
-    def __iter__(self):
-        yield from self.start()
-        parser_generator = grpcbf.parse_from_buffer(
-            request_iterator=self.request_iterator,
+        self.parser_iterator = grpcbf.parse_from_buffer(
+            request_iterator=request_iterator,
             indices=StartService_input_indices,
             partitions_message_mode=StartService_input_message_mode
         )
+        self.context = context
+
+    def __pattern_matching(self) -> Generator[buffer_pb2.Buffer, None, None]:
         while True:
-            try:
-                r = next(parser_generator)
-                l.LOGGER('parse generator next -> ' + str(type(r)) + ': ' + str(r))
-            except StopIteration:
-                break
+            r = next(self.parser_iterator)
+            l.LOGGER('parse generator next -> ' + str(type(r)) + ': ' + str(r))
 
             match type(r):
                 case gateway_pb2.Client:
@@ -136,8 +135,14 @@ class ServiceIterable:
 
             if self.service_saved:
                 yield buffer_pb2.Buffer(signal=True)
-                yield from self.generate()
+                try:
+                    yield from self.generate()
+                except BreakIteration:
+                    break
 
+    def __iter__(self):
+        yield from self.start()
+        yield from self.__pattern_matching()
         yield from self.final()
 
     def start(self):
