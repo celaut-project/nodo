@@ -42,7 +42,7 @@ class Hash:
         )
 
 
-class ServiceIterable:
+class AbstractServiceIterable:
     configuration: Optional[celaut.Configuration] = None
     system_requeriments = None
     initial_gas_amount = None

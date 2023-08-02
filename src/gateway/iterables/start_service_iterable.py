@@ -6,7 +6,7 @@ from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
 
 from protos import celaut_pb2 as celaut
 from src.gateway.launch_service import launch_service
-from src.gateway.iterables.service_iterable import ServiceIterable
+from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable
 from src.manager.resources_manager import mem_manager
 from src.utils import logger as l
 from src.utils.env import REGISTRY
@@ -33,7 +33,7 @@ def get_from_registry(service_hash: str) -> celaut.Service:
         return None
 
 
-class StartServiceIterable(ServiceIterable):
+class StartServiceIterable(AbstractServiceIterable):
 
     def start(self):
         l.LOGGER('Starting service by ' + str(self.context.peer()) + ' ...')

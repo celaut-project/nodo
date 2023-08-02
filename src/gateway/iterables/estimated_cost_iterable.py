@@ -4,14 +4,14 @@ from grpcbigbuffer import client as grpcbf, buffer_pb2
 
 from protos import gateway_pb2
 from src.builder import build
-from src.gateway.iterables.service_iterable import ServiceIterable, BreakIteration
+from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable, BreakIteration
 from src.manager.manager import execution_cost, default_initial_cost
 from src.utils import logger as l
 from src.utils.env import GAS_COST_FACTOR
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount
 
 
-class GetServiceEstimatedCostIterable(ServiceIterable):
+class GetServiceEstimatedCostIterable(AbstractServiceIterable):
     # TODO check cost in other peers (use RecursionGuard to prevent infinite loops).
 
     cost: Optional[int] = None
