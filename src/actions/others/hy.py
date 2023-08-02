@@ -1,4 +1,4 @@
-from src.gateway.server import get_from_registry
+from src.gateway.gateway import get_from_registry
 
 GATEWAY_HOST = '127.0.0.1:8080'
 

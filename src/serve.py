@@ -9,7 +9,7 @@ from psutil import virtual_memory
 
 import src.manager.resources_manager as iobd
 from protos import gateway_pb2, gateway_pb2_grpc
-from src.gateway.server import Gateway
+from src.gateway.gateway import Gateway
 from src.manager.maintain_thread import manager_thread
 from src.utils import logger as l
 from src.utils.env import GATEWAY_PORT, MEMORY_LOGS, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
