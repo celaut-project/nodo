@@ -24,7 +24,7 @@ from src.utils.env import CACHE, DOCKER_CLIENT, DOCKER_COMMAND, IGNORE_FATHER_NE
 from src.utils.tools.recursion_guard import RecursionGuard
 
 from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_grpcbf import StartService_input
+from protos.gateway_pb2_grpcbf import StartService_input_indices
 
 
 def set_config(container_id: str, config: Optional[celaut.Configuration], resources: celaut.Sysresources,
@@ -144,7 +144,7 @@ def launch_service(
                                 )
                             ).StartService,  # TODO se debe hacer que al pedir un servicio exista un timeout.
                             partitions_message_mode_parser=True,
-                            indices_serializer=StartService_input,
+                            indices_serializer=StartService_input_indices,
                             indices_parser=gateway_pb2.Instance,
                             input=utils.service_extended(
                                 metadata=metadata,

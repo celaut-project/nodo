@@ -4,7 +4,7 @@ import grpc
 
 import protos.celaut_pb2 as celaut
 from protos import gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_grpcbf import GetServiceEstimatedCost_input
+from protos.gateway_pb2_grpcbf import GetServiceEstimatedCost_input, StartService_input_indices
 
 from src.manager.manager import default_initial_cost, execution_cost, \
     generate_client_id_in_other_peer
@@ -76,7 +76,7 @@ def service_balancer(
                         indices_parser=gateway_pb2.EstimatedCost,
                         timeout=EXTERNAL_COST_TIMEOUT,
                         partitions_message_mode_parser=True,
-                        indices_serializer=GetServiceEstimatedCost_input,
+                        indices_serializer=StartService_input_indices,
                         input=service_extended(
                             metadata=metadata,
                             send_only_hashes=SEND_ONLY_HASHES_ASKING_COST,

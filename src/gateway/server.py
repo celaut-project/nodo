@@ -1,213 +1,31 @@
-import itertools
 import os
-from time import sleep
-from typing import List, Optional
 
 from grpcbigbuffer import client as grpcbf
-from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
 
 from protos import celaut_pb2 as celaut
 from protos import gateway_pb2_grpc, gateway_pb2
-from protos.gateway_pb2_grpcbf import StartService_input, GetServiceEstimatedCost_input
+from protos.gateway_pb2_grpcbf import StartService_input_indices, \
+    StartService_input_message_mode
 from src.builder import build
 from src.compiler.compile import compile_zip
-from src.gateway.launch_service import launch_service
-from src.gateway.utils import save_service, search_definition, \
-    generate_gateway_instance
-from src.manager.manager import could_ve_this_sysreq, prune_container, generate_client, get_token_by_uri, spend_gas, \
+from src.gateway.start_service import start_service, get_from_registry
+from src.gateway.utils import save_service, generate_gateway_instance
+from src.manager.manager import prune_container, generate_client, get_token_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources, \
     execution_cost, default_initial_cost
 from src.manager.metrics import get_metrics
-from src.manager.resources_manager import mem_manager
 from src.payment_system.payment_process import validate_payment_process
 from src.utils import logger as l
-from src.utils.env import GENERAL_ATTEMPTS, GENERAL_WAIT_TIME, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, SHA3_256_ID, \
+from src.utils.env import DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, SHA3_256_ID, \
     MODIFY_SERVICE_SYSTEM_RESOURCES_COST, GAS_COST_FACTOR, REGISTRY
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
-from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name, read_file
-
-
-def get_from_registry(service_hash: str) -> gateway_pb2.ServiceWithMeta:
-    l.LOGGER('Getting ' + service_hash + ' service from the local registry.')
-    filename: str = REGISTRY + service_hash
-    if not os.path.exists(filename):
-        return None
-
-    if os.path.isdir(filename):
-        filename = filename + '/' + WITHOUT_BLOCK_POINTERS_FILE_NAME
-    try:
-        with mem_manager(2 * os.path.getsize(filename)) as iolock:
-            service_with_meta = gateway_pb2.ServiceWithMeta()
-            service_with_meta.ParseFromString(read_file(filename=filename))
-            return service_with_meta
-    except (IOError, FileNotFoundError):
-        l.LOGGER('The service was not on registry.')
-        return None
+from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name
 
 
 class Gateway(gateway_pb2_grpc.Gateway):
 
     def StartService(self, request_iterator, context, **kwargs):
-        l.LOGGER('Starting service by ' + str(context.peer()) + ' ...')
-        configuration: Optional[celaut.Configuration] = None
-        system_requeriments = None
-        initial_gas_amount = None
-        max_sysreq = None
-
-        client_id = None
-        recursion_guard_token = None
-
-        hashes: List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash] = []
-        parser_generator = grpcbf.parse_from_buffer(
-            request_iterator=request_iterator,
-            indices=StartService_input,
-            partitions_message_mode={1: True, 2: False, 3: True, 4: False, 5: True, 6: True}
-        )
-        while True:
-            try:
-                r = next(parser_generator)
-                l.LOGGER('parse generator next -> ' + str(type(r)) + ': ' + str(r))
-            except StopIteration:
-                break
-            service_hash: Optional[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash] = None
-
-            if type(r) is gateway_pb2.Client:
-                client_id = r.client_id
-                continue
-
-            if type(r) is gateway_pb2.RecursionGuard:
-                recursion_guard_token = r.token
-                continue
-
-            if type(r) is gateway_pb2.HashWithConfig:
-                configuration = r.config
-                service_hash = r.hash
-
-                if r.HasField('max_sysreq') and not could_ve_this_sysreq(sysreq=r.max_sysreq):
-                    raise Exception("The node can't execute the service with this requeriments.")
-                else:
-                    max_sysreq = r.max_sysreq
-
-                if r.HasField('min_sysreq'):
-                    system_requeriments = r.min_sysreq
-
-                if r.HasField('initial_gas_amount'):
-                    initial_gas_amount = from_gas_amount(r.initial_gas_amount)
-
-
-            # Captura la configuracion si puede.
-            elif type(r) is celaut.Configuration:
-                configuration = r
-
-            elif type(r) is celaut.Any.Metadata.HashTag.Hash:
-                service_hash = r
-
-            # Si me da hash, comprueba que sea sha3-256 y que se encuentre en el registro.
-            if service_hash:
-                hashes.append(service_hash)
-                if configuration and SHA3_256_ID == service_hash.type and \
-                        service_hash.value.hex() in [s for s in os.listdir(REGISTRY)]:
-                    yield gateway_pb2.buffer__pb2.Buffer(signal=True)
-                    try:
-                        service_with_meta: gateway_pb2.ServiceWithMeta = get_from_registry(
-                            service_hash=service_hash.value.hex()
-                        )
-                        if service_hash not in service_with_meta.metadata.hashtag.hash:
-                            service_with_meta.metadata.hashtag.hash.append(service_hash)
-                        for b in grpcbf.serialize_to_buffer(
-                                indices={},
-                                message_iterator=launch_service(
-                                    service=service_with_meta.service,
-                                    metadata=service_with_meta.metadata,
-                                    config=configuration,
-                                    system_requirements=system_requeriments,
-                                    max_sysreq=max_sysreq,
-                                    initial_gas_amount=initial_gas_amount,
-                                    father_ip=get_only_the_ip_from_context(context_peer=context.peer()),
-                                    father_id=client_id,
-                                    recursion_guard_token=recursion_guard_token
-                                )
-                        ):
-                            yield b
-                        return
-
-                    except Exception as e:
-                        l.LOGGER('Exception launching a service ' + str(e))
-                        yield gateway_pb2.buffer__pb2.Buffer(signal=True)
-                        continue
-
-            elif isinstance(r, grpcbf.Dir) and (
-                    r.type is gateway_pb2.ServiceWithConfig or r.type is gateway_pb2.ServiceWithMeta
-            ):
-                # NO TIENE SENTIDO USAR AQUI EL DUPLICATE GRABBER YA QUE AHORA NO RETORNAMOS PRIMERO EL TIPO, SI NO QUE
-                #  RETORNAMOS EL TIPO JUNTO CON EL DIRECTORIO DEL SERVICIO YA DESCARGADO. EL DUPLICATE GRABBER DEBERIA
-                #  USARSE ANTES.
-
-                l.LOGGER('Save service on disk')
-                registry_hash: Optional[str] = None
-                for h in hashes:
-                    if SHA3_256_ID == h.type:
-                        registry_hash = h.value.hex()
-                        break
-                if not registry_hash:
-                    # TODO if don't have the registry_hash, save the service_with_meta (maybe with config)
-                    #      and compute it.
-                    raise Exception("Not registry hash.")
-                save_service(
-                    service_with_meta_dir=r.dir,
-                    service_hash=registry_hash
-                )
-
-                service_with_meta: gateway_pb2.ServiceWithMeta = get_from_registry(service_hash=registry_hash)
-
-                if configuration:
-                    l.LOGGER('Launch service with configuration')
-                    for buffer in grpcbf.serialize_to_buffer(
-                            indices={},
-                            message_iterator=launch_service(
-                                service=service_with_meta.service,
-                                metadata=service_with_meta.metadata,
-                                config=configuration,
-                                system_requirements=system_requeriments,
-                                max_sysreq=max_sysreq,
-                                initial_gas_amount=initial_gas_amount,
-                                service_id=registry_hash,
-                                father_ip=get_only_the_ip_from_context(context_peer=context.peer()),
-                                father_id=client_id,
-                                recursion_guard_token=recursion_guard_token
-                            )
-                    ):
-                        yield buffer
-                    return
-
-        l.LOGGER('The service is not in the registry and the request does not have the definition.' \
-                 + str([(h.type.hex(), h.value.hex()) for h in hashes]))
-
-        try:
-            # SEARCH DEFINITION - NOT IMPLEMENTED.
-            for b in grpcbf.serialize_to_buffer(
-                    message_iterator=launch_service(
-                        service=search_definition(
-                            hashes=hashes
-                        ),
-                        metadata=celaut.Any.Metadata(
-                            hashtag=celaut.Any.Metadata.HashTag(
-                                hash=hashes
-                            )
-                        ),
-                        config=configuration,
-                        system_requirements=system_requeriments,
-                        max_sysreq=max_sysreq,
-                        initial_gas_amount=initial_gas_amount,
-                        father_ip=get_only_the_ip_from_context(context_peer=context.peer()),
-                        father_id=client_id,
-                        recursion_guard_token=recursion_guard_token
-                    )
-            ):
-                yield b
-
-        except Exception as e:
-            raise Exception('Was imposible start the service. ' + str(e))
+        yield from start_service(request_iterator, context)
 
     def StopService(self, request_iterator, context, **kwargs):
         try:
@@ -296,8 +114,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
         l.LOGGER('Request for the cost of a service.')
         parse_iterator = grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
-            indices=GetServiceEstimatedCost_input,
-            partitions_message_mode={1: True, 2: False, 3: True, 4: False, 5: True, 6: True}
+            indices=StartService_input_indices,
+            partitions_message_mode=StartService_input_message_mode
         )
 
         client_id = None

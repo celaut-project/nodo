@@ -48,41 +48,41 @@ def service_extended(
         client_id: str = None,
         recursion_guard_token: str = None
 ) -> Generator[object, None, None]:
-    set_config = True if config or initial_gas_amount else False
 
+    # 1
     if client_id:
         yield gateway_pb2.Client(
             client_id=client_id
         )
 
+    # 2
     if recursion_guard_token:
         yield gateway_pb2.RecursionGuard(
             token=recursion_guard_token
         )
 
-    for _hash in metadata.hashtag.hash:
-        if set_config:  # Solo hace falta enviar la configuracion en el primer paquete.
-            set_config = False
-            yield gateway_pb2.HashWithConfig(
-                hash=_hash,
-                config=config,
-                min_sysreq=min_sysreq,
-                max_sysreq=max_sysreq,
-                initial_gas_amount=to_gas_amount(initial_gas_amount)
-            )
-            continue
-        yield _hash
+    # 3
+    if config or initial_gas_amount:
+        yield gateway_pb2.Configuration(
+            config=config if config else celaut.Configuration(),
+            min_sysreq=min_sysreq,
+            max_sysreq=max_sysreq,
+            initial_gas_amount=to_gas_amount(initial_gas_amount)
+        )
+
+    # 4
+    yield from metadata.hashtag.hash
 
     if not send_only_hashes:
-        _hash: str = get_service_hex_main_hash(metadata=metadata)
-        if set_config:
-            print("SERVICE WITH CONFIG NOT SUPPORTED NOW.")
-            raise ("SERVICE WITH CONFIG NOT SUPPORTED NOW.")
-        else:
-            yield Dir(
-                    dir=REGISTRY + _hash,
-                    _type=gateway_pb2.ServiceWithMeta
-                )
+        # 5
+        yield metadata
+
+        # 6
+        yield Dir(
+            dir=REGISTRY + get_service_hex_main_hash(metadata=metadata),
+            _type=celaut.Service
+        )
+
 
 
 def get_free_port() -> int:
