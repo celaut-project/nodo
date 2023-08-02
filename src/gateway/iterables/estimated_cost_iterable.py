@@ -24,11 +24,12 @@ class GetServiceEstimatedCostIterable(ServiceIterable):
             self.cost = execution_cost(
                 metadata=self.metadata
             ) * GAS_COST_FACTOR
-            raise BreakIteration
         except build.UnsupportedArchitectureException as e:
             raise e
-        except Exception as e:
+        except Exception:
             yield buffer_pb2.Buffer(signal=True)
+        else:
+            raise BreakIteration
 
     def final(self):
         initial_service_cost = from_gas_amount(self.initial_gas_amount)
