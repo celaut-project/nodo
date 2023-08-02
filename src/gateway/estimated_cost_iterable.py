@@ -48,6 +48,7 @@ class GetServiceEstimatedCostIterable(ServiceIterable):
                     variance=0  # TODO dynamic variance.
                 ),
                 indices=gateway_pb2.EstimatedCost
-        ): yield b
+        ):
+            yield b
 
 

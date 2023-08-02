@@ -2,20 +2,17 @@ import os
 from typing import Optional, Generator, Set, Tuple
 
 from grpcbigbuffer import client as grpcbf, buffer_pb2
-from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
 
 from protos import celaut_pb2 as celaut
 from protos import gateway_pb2
 from protos.gateway_pb2_grpcbf import StartService_input_indices, \
     StartService_input_message_mode
-from src.gateway.launch_service import launch_service
 from src.gateway.utils import save_service
 from src.manager.manager import could_ve_this_sysreq
-from src.manager.resources_manager import mem_manager
 from src.utils import logger as l
 from src.utils.env import SHA3_256_ID, \
     REGISTRY
-from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, read_file
+from src.utils.utils import from_gas_amount
 
 
 def find_service_hash(_hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash) \
@@ -61,7 +58,7 @@ class ServiceIterable:
         self.context = context
 
     def __iter__(self):
-        self.start()
+        yield from self.start()
         parser_generator = grpcbf.parse_from_buffer(
             request_iterator=self.request_iterator,
             indices=StartService_input_indices,
@@ -141,7 +138,7 @@ class ServiceIterable:
                 yield buffer_pb2.Buffer(signal=True)
                 yield from self.generate()
 
-        self.final()
+        yield from self.final()
 
     def start(self):
         pass

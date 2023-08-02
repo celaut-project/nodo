@@ -1,22 +1,16 @@
 import os
-from typing import Optional, Generator, Set, Tuple
+from typing import Generator
 
 from grpcbigbuffer import client as grpcbf, buffer_pb2
 from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
 
 from protos import celaut_pb2 as celaut
-from protos import gateway_pb2
-from protos.gateway_pb2_grpcbf import StartService_input_indices, \
-    StartService_input_message_mode
 from src.gateway.launch_service import launch_service
 from src.gateway.service_iterable import ServiceIterable
-from src.gateway.utils import save_service
-from src.manager.manager import could_ve_this_sysreq
 from src.manager.resources_manager import mem_manager
 from src.utils import logger as l
-from src.utils.env import SHA3_256_ID, \
-    REGISTRY
-from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, read_file
+from src.utils.env import REGISTRY
+from src.utils.utils import get_only_the_ip_from_context, read_file
 
 CONFIGURATION_REQUIRED = False  # TODO añadir como variable de entorno. Por si el nodo debe de ser mas estricto.
 
