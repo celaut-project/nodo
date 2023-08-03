@@ -103,7 +103,6 @@ def launch_service(
         while True:
             abort_it = True
             for peer, cost in service_balancer(
-                    service=service,
                     metadata=metadata,
                     ignore_network=utils.get_network_name(
                         ip_or_uri=father_ip

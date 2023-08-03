@@ -18,7 +18,6 @@ from src.builder import build
 
 
 def service_balancer(
-        service: celaut.Service,
         metadata: celaut.Any.Metadata,
         ignore_network: str = None,
         initial_gas_amount: int = None,
