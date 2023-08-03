@@ -4,7 +4,7 @@ import grpc
 
 import protos.celaut_pb2 as celaut
 from protos import gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_grpcbf import GetServiceEstimatedCost_input, StartService_input_indices
+from protos.gateway_pb2_grpcbf import StartService_input_indices
 
 from src.manager.manager import default_initial_cost, execution_cost, \
     generate_client_id_in_other_peer
