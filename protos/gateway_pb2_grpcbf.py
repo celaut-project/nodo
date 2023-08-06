@@ -12,5 +12,6 @@ StartService_input_message_mode = {1: True, 2: True, 3: True, 4: True, 5: True, 
 
 CompileOutput_indices = {
     1: compile_pb2.CompileOutputServiceId,
-    2: compile_pb2.ServiceWithMeta
+    2: gateway_pb2.celaut__pb2.Any.Metadata,
+    3: compile_pb2.Service,
 }

@@ -270,7 +270,8 @@ class Hyper:
                     )
                 )
 
-    def save(self) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
+    def save(self) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
+        service: Union[str, compile_pb2.Service]
         if not self.blocks:
             service_buffer = self.service.SerializeToString()  # 2*len
             self.metadata.hashtag.hash.extend(
@@ -287,18 +288,16 @@ class Hyper:
             # https://github.com/moby/moby/issues/20972#issuecomment-193381422
             del service_buffer  # -len
 
-            service_with_meta: compile_pb2.ServiceWithMeta = compile_pb2.ServiceWithMeta(
-                metadata=self.metadata,
-                service=self.service
-            )
+            service = self.service
 
         else:
             # Generate the hashes.
-            bytes_id, directory = block_builder.build_multiblock(
+            bytes_id, service_directory = block_builder.build_multiblock(
                 pf_object_with_block_pointers=self.service,
                 blocks=self.blocks
             )
             service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
+
             self.metadata.hashtag.hash.extend(
                 [Any.Metadata.HashTag.Hash(
                     type=SHA3_256_ID,
@@ -323,27 +322,20 @@ class Hyper:
                                 type(service_id), type(get_service_hex_main_hash(metadata=self.metadata)))
             """
 
-            # Generate the service with metadata.
-            content_id, service_with_meta = block_builder.build_multiblock(
-                pf_object_with_block_pointers=compile_pb2.ServiceWithMeta(
-                    metadata=self.metadata,
-                    service=self.service
-                ),
-                blocks=self.blocks
-            )
-
             from hashlib import sha3_256
             validate_content = sha3_256()
-            for i in grpcbb.read_multiblock_directory(service_with_meta):
+            for i in grpcbb.read_multiblock_directory(directory=service_directory):
                 validate_content.update(i)
 
-            print('\n\nCONTENT ID -> ', codecs.encode(content_id, 'hex').decode('utf-8'))
-            print('\n\nCONTENT VALIDATED ID -> ', validate_content.hexdigest())
+            print(f'\n\nCONTENT ID -> {service_id}')
+            print(f'\n\nCONTENT VALIDATED ID -> {validate_content.hexdigest()}')
 
-        return service_id, service_with_meta
+            service = service_directory
+
+        return service_id, self.metadata, service
 
 
-def ok(path, aux_id) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
+def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
     spec_file = Hyper(path=path, aux_id=aux_id)
 
     with resources_manager.mem_manager(len=COMPILER_MEMORY_SIZE_FACTOR * spec_file.buffer_len):
@@ -352,12 +344,12 @@ def ok(path, aux_id) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
         spec_file.parseLedger()
         spec_file.parseTensor()
 
-        identifier, service_with_meta = spec_file.save()
+        identifier, metadata, service = spec_file.save()
 
     # os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')
     os.system(DOCKER_COMMAND + ' rmi builder' + aux_id)
     os.system('rm -rf ' + CACHE + aux_id + '/')
-    return identifier, service_with_meta
+    return identifier, metadata, service
 
 
 """
@@ -382,7 +374,7 @@ def repo_ok(
 
 def zipfile_ok(
         zip: str
-) -> Tuple[str, Union[str, compile_pb2.ServiceWithMeta]]:
+) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
     import random
     aux_id = str(random.random())
     os.system('mkdir ' + CACHE + aux_id)
@@ -397,14 +389,15 @@ def zipfile_ok(
 
 def compile_zip( zip, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
     l.LOGGER('Compiling zip ' + str(zip))
-    service_id, service_with_meta = zipfile_ok(zip=zip)
+    service_id, metadata, service = zipfile_ok(zip=zip)
     for b in grpcbb.serialize_to_buffer(
             message_iterator=[
                 compile_pb2.CompileOutputServiceId(
                     id=bytes.fromhex(service_id)
                 ),
-                grpcbb.Dir(dir=service_with_meta, _type=compile_pb2.ServiceWithMeta)
-                if type(service_with_meta) is str else service_with_meta
+                metadata,
+                grpcbb.Dir(dir=service, _type=compile_pb2.Service)
+                if type(service) is str else service
             ],
             indices=gateway_pb2_grpcbf.CompileOutput_indices
     ):

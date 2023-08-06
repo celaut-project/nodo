@@ -28,11 +28,6 @@ message Service {
     celaut.Service.Ledger ledger = 4;
 }
 
-message ServiceWithMeta {
-    celaut.Any.Metadata metadata = 1;
-    Service service = 2;
-}
-
 message CompileOutputServiceId {
     bytes id = 1;
 }
