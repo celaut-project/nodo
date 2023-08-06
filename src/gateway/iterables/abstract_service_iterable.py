@@ -139,9 +139,9 @@ class AbstractServiceIterable:
                 raise StopIteration
 
     def __iter__(self):
-        yield from self.start()
-        yield from (self.__pattern_matching(r) for r in self.parser_iterator)
-        yield from self.final()
+        self.start()  # TODO, si es un generador no funcionará
+        yield from (t for r in self.parser_iterator for t in self.__pattern_matching(r))
+        self.final()  # TODO, si es un generador no funcionará
 
     def start(self):
         pass
