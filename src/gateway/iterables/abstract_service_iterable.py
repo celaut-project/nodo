@@ -20,8 +20,9 @@ class BreakIteration(Exception):
 
 
 def find_service_hash(_hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash) \
-        -> Tuple[Optional[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash], bool]:
-    return _hash, _hash.value.hex() in [s for s in os.listdir(REGISTRY)] if SHA3_256_ID == _hash.type else (None, False)
+        -> Tuple[Optional[str], bool]:
+    return _hash.value.hex(), _hash.value.hex() in [s for s in os.listdir(REGISTRY)] if SHA3_256_ID == _hash.type \
+        else (None, False)
 
 
 class Hash:
@@ -51,7 +52,7 @@ class AbstractServiceIterable:
     client_id = None
     recursion_guard_token = None
 
-    service_hash: Optional[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash] = None
+    service_hash: Optional[str] = None
     service_saved = False
 
     hashes: Set[Hash] = set()
