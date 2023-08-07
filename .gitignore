@@ -2,6 +2,7 @@
 __pycache__
 .idea
 __cache__
+__metadata__
 __registry__
 __block__
 database.sqlite
