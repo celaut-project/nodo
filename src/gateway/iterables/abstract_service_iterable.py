@@ -107,7 +107,7 @@ class AbstractServiceIterable:
                 self.hashes: Set[Hash] = self.hashes.union({
                     Hash(_e) for _e in self.metadata.Any.HashTag.Hash
                 })
-                del self.metadata.Any.HashTag.Hash
+                self.metadata.Any.HashTag.ClearField("hash")
                 self.metadata.Any.HashTag.Hash.extend([_e.proto() for _e in self.hashes])
                 self.hashes.clear()
 
