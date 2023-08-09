@@ -277,8 +277,6 @@ def launch_service(
                         uri_slot.uri.append(uri)
 
                 l.LOGGER('Thrown out a new instance by ' + father_id + ' of the container_id ' + container.id)
-                os.system("docker ps")
-                os.system("docker ps -a")
                 return gateway_pb2.Instance(
                     token=add_container(
                         father_id=father_id,
