@@ -108,7 +108,7 @@ class AbstractServiceIterable:
                     Hash(_e) for _e in self.metadata.hastag.hash
                 })
                 self.metadata.hashtag.ClearField("hash")
-                self.metadata.hastag.hash.extend([_e.proto() for _e in self.hashes])
+                self.metadata.hashtag.hash.extend([_e.proto() for _e in self.hashes])
                 self.hashes.clear()
 
             case grpcbf.Dir:
