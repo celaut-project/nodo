@@ -1,5 +1,5 @@
 import os
-from typing import Generator
+from typing import Generator, Optional
 
 from grpcbigbuffer import client as grpcbf, buffer_pb2
 from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
@@ -9,15 +9,15 @@ from src.gateway.launch_service import launch_service
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable
 from src.manager.resources_manager import mem_manager
 from src.utils import logger as l
-from src.utils.env import REGISTRY
+from src.utils.env import REGISTRY, METADATA_REGISTRY
 from src.utils.utils import get_only_the_ip_from_context, read_file
 
 CONFIGURATION_REQUIRED = False  # TODO añadir como variable de entorno. Por si el nodo debe de ser mas estricto.
 
 
-def get_from_registry(service_hash: str) -> celaut.Service:
+def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
     l.LOGGER('Getting ' + service_hash + ' service from the local registry.')
-    filename: str = REGISTRY + service_hash
+    filename: str = os.path.join(REGISTRY, service_hash)
     if not os.path.exists(filename):
         return None
 
@@ -30,6 +30,20 @@ def get_from_registry(service_hash: str) -> celaut.Service:
             return service
     except (IOError, FileNotFoundError):
         l.LOGGER('The service was not on registry.')
+        return None
+
+
+def read_metadata_from_disk(service_hash: str) -> Optional[celaut.Any.Metadata]:
+    filename: str = os.path.join(METADATA_REGISTRY, service_hash)
+    if not os.path.exists(filename):
+        return None
+
+    try:
+        metadata = celaut.Any.Metadata()
+        metadata.ParseFromString(read_file(filename=filename))
+        return metadata
+    except (IOError, FileNotFoundError):
+        l.LOGGER('The metadata was not on registry.')
         return None
 
 
@@ -46,8 +60,8 @@ class StartServiceIterable(AbstractServiceIterable):
         yield from grpcbf.serialize_to_buffer(
             indices={},
             message_iterator=launch_service(
-                service=get_from_registry(service_hash=self.service_hash),
-                metadata=self.metadata,
+                service=read_service_from_disk(service_hash=self.service_hash),
+                metadata=self.metadata if self.metadata else read_metadata_from_disk(service_hash=self.service_hash),
                 config=self.configuration,
                 system_requirements=self.system_requeriments,
                 max_sysreq=self.max_sysreq,
