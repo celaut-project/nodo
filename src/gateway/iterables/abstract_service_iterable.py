@@ -67,7 +67,7 @@ class AbstractServiceIterable:
         self.context = context
 
     def __pattern_matching(self, r) -> Generator[buffer_pb2.Buffer, None, None]:
-        l.LOGGER('parse generator next -> ' + str(type(r)) + ': ' + str(r))
+        l.LOGGER('parse generator next -> ' + str(type(r)))
 
         match type(r):
             case gateway_pb2.Client:
