@@ -20,8 +20,7 @@ def maintain_containers():
         token, sysreq = list(sc.system_cache.items())[i]
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
-                print(f"\n\n ELIMINA EL CONTENEDOR POR STATUS EXITED {DOCKER_CLIENT().containers.get(token.split('##')[-1]).status}")
-                # prune_container(token=token)
+                prune_container(token=token)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
             l.LOGGER('Exception on maintain container process: ' + str(e))
             continue
@@ -31,7 +30,6 @@ def maintain_containers():
                 gas_to_spend=maintain_cost(sysreq)
         ):
             try:
-                print("\n \n ELIMINA EL CONTENEDOR POR NO TENER SUFICIENTE GAS.")
                 prune_container(token=token)
             except Exception as e:
                 l.LOGGER('Error purging ' + token + ' ' + str(e))
