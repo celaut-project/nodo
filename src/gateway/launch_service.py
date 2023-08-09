@@ -55,14 +55,11 @@ def set_config(container_id: str, config: Optional[celaut.Configuration], resour
 
 def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
     try:
-        print(f"create container {id}, {entrypoint}, {use_other_ports}")
-        result = DOCKER_CLIENT().containers.create(
+        return DOCKER_CLIENT().containers.create(
             image=id + '.docker',  # https://github.com/moby/moby/issues/20972#issuecomment-193381422
             entrypoint=' '.join(entrypoint),
             ports=use_other_ports
         )
-        print(f"container id -> {result}")
-        return result
     except docker_lib.errors.ImageNotFound as e:
         l.LOGGER('CONTAINER IMAGE NOT FOUND')
         # TODO build(id) using agents model.
@@ -255,7 +252,6 @@ def launch_service(
                         id=service_id,
                         entrypoint=service.container.entrypoint
                     )
-                    print(f"container ->  {container}")
                     set_config(container_id=container.id, config=config, resources=system_requirements,
                                api=service.container.config)
                     try:
