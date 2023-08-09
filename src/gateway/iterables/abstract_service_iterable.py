@@ -96,14 +96,13 @@ class AbstractServiceIterable:
                     self.service_hash, self.service_saved = find_service_hash(_hash=r)
 
             case celaut.Any.Metadata:
-
+                self.metadata = r
                 if self.service_hash:
                     for _hash in self.metadata.hashtag.hash:  # TODO nos podríamos ahorrar esta iteración
                         if not self.service_hash:
                             self.service_hash, self.service_saved = find_service_hash(_hash=_hash)
                         # TODO se podría realizar junto con la iteració siguiente:
 
-                self.metadata = r
                 self.hashes: Set[Hash] = self.hashes.union({
                     Hash(_e) for _e in self.metadata.hashtag.hash
                 })
