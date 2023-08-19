@@ -47,6 +47,10 @@ def read_metadata_from_disk(service_hash: str) -> Optional[celaut.Any.Metadata]:
         return None
 
 
+class BreakIterator:
+    pass
+
+
 class StartServiceIterable(AbstractServiceIterable):
 
     def start(self):
@@ -72,7 +76,7 @@ class StartServiceIterable(AbstractServiceIterable):
                 recursion_guard_token=self.recursion_guard_token
             )
         )
-        return
+        raise BreakIterator  # return
 
     def final(self):
         if not self.service_saved:
