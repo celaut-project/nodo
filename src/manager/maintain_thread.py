@@ -57,10 +57,11 @@ def peer_deposits():
                 gas_amount_on_other_peer(
                     peer_id=peer_id
                 ) < MIN_DEPOSIT_PEER:
-            l.LOGGER(f'The peer {peer_id} has not enough deposit.   '
-                     f'\n estimated deposit -> {estimated_deposit} '
-                     f'\n min deposit per peer -> {MIN_DEPOSIT_PEER}' 
-                     f'\n  actual deposit -> {gas_amount_on_other_peer(peer_id=peer_id)}')
+            l.LOGGER(f'\n\n The peer {peer_id} has not enough deposit.   '
+                     f'\n   estimated deposit -> {estimated_deposit} '
+                     f'\n   min deposit per peer -> {MIN_DEPOSIT_PEER}' 
+                     f'\n   actual deposit -> {gas_amount_on_other_peer(peer_id=peer_id)}'
+                     f'\n\n')
             if not __increase_deposit_on_peer(peer_id=peer_id, amount=MIN_DEPOSIT_PEER):
                 l.LOGGER(f'Manager error: the peer {peer_id} could not be increased.')
 
