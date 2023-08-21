@@ -32,6 +32,8 @@ def combine_metadata(service_hash: str, request_metadata: Optional[celaut.Any.Me
 
     if request_metadata:
         combined_metadata = celaut.Any.Metadata()
+        print(f"disk metadata -> {disk_metadata}")
+        print(f"request metadta -> {request_metadata}")
         combined_metadata.MergeFrom(disk_metadata)
         combined_metadata.MergeFrom(request_metadata)
         return combined_metadata
