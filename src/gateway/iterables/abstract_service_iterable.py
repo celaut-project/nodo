@@ -25,15 +25,19 @@ def find_service_hash(_hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash) 
         else (None, False)
 
 
-def combine_metadata(service_hash: str, request_metadata: celaut.Any.Metadata) -> celaut.Any.Metadata:
+def combine_metadata(service_hash: str, request_metadata: Optional[celaut.Any.Metadata]) -> celaut.Any.Metadata:
     disk_metadata = celaut.Any.Metadata()
     with open(METADATA_REGISTRY+service_hash, 'rb') as f:
         disk_metadata.ParseFromString(f.read())
 
-    combined_metadata = celaut.Any.Metadata()
-    combined_metadata.MergeFrom(disk_metadata)
-    combined_metadata.MergeFrom(request_metadata)
-    return combined_metadata
+    if request_metadata:
+        combined_metadata = celaut.Any.Metadata()
+        combined_metadata.MergeFrom(disk_metadata)
+        combined_metadata.MergeFrom(request_metadata)
+        return combined_metadata
+    else:
+        return disk_metadata
+
 
 class Hash:
     def __init__(self, _hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash):
