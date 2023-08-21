@@ -200,8 +200,8 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
     yield from (
         ip + ':' + str(port) for ip, port in get_peer_directions(
-        peer_id=peer_id
-    ) if is_open(ip=ip, port=port)
+            peer_id=peer_id
+        ) if is_open(ip=ip, port=port)
     )
 
 
