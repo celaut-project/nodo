@@ -121,7 +121,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         for b in grpcbf.serialize_to_buffer(): yield b
 
     def GetMetrics(self, request_iterator, context, **kwargs):
-        for b in grpcbf.serialize_to_buffer(
+        yield from grpcbf.serialize_to_buffer(
                 message_iterator=get_metrics(
                     token=next(grpcbf.parse_from_buffer(
                         request_iterator=request_iterator,
@@ -130,4 +130,4 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     )).token
                 ),
                 indices=gateway_pb2.Metrics,
-        ): yield b
+        )
