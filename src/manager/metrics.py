@@ -51,14 +51,16 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
                     token=generate_client_id_in_other_peer(peer_id=peer_id)
                 ).gas_amount
             )
-        except Exception as e:
+        finally:
             l.LOGGER('Error getting gas amount from ' + peer_id + '.')
             if is_peer_available(peer_id=peer_id):
                 l.LOGGER('It is assumed that the client was invalid on peer ' + peer_id)
-                sc.cache_locks.delete(peer_id)
-                del sc.clients_on_other_peers[peer_id]
-            else:
-                break
+                try:
+                    sc.cache_locks.delete(peer_id)
+                    del sc.clients_on_other_peers[peer_id]
+                finally:
+                    pass
+            return 0
 
 
 def get_metrics(token: str) -> gateway_pb2.Metrics:
