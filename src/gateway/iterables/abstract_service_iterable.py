@@ -60,7 +60,7 @@ class Hash:
 class AbstractServiceIterable:
     configuration: Optional[celaut.Configuration] = None
     system_requeriments = None
-    initial_gas_amount = None
+    initial_gas_amount: Optional[int] = None
     max_sysreq = None
 
     client_id = None
@@ -157,9 +157,9 @@ class AbstractServiceIterable:
                 raise StopIteration
 
     def __iter__(self):
-        self.start()  # TODO, si es un generador no funcionará
+        self.start()
         yield from (t for r in self.parser_iterator for t in self.__pattern_matching(r))
-        self.final()  # TODO, si es un generador no funcionará
+        self.final()
 
     def start(self):
         pass
