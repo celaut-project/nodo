@@ -182,16 +182,18 @@ def from_gas_amount(gas_amount: gateway_pb2.GasAmount) -> int:
 
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
+    if ignore_network == "localhost":
+        ignore_network = None
     yield from (
         peer_id for peer_id in get_peer_ids()
-        if not ignore_network or True not in [
-        address_in_network(
-            ip_or_uri=uri,
-            net=ignore_network
-        ) for uri in generate_uris_by_peer_id(
-            peer_id=peer_id
+        if not ignore_network or all(
+            not address_in_network(
+                ip_or_uri=uri,
+                net=ignore_network
+            ) for uri in generate_uris_by_peer_id(
+                peer_id=peer_id
+            )
         )
-    ]
     )
 
 
