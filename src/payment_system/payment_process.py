@@ -81,15 +81,17 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 
 def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     _l.LOGGER('Increase deposit on peer ' + peer_id + ' by ' + str(amount))
-    if __peer_payment_process(peer_id=peer_id, amount=amount):  # process the payment on the peer.
-        with sc.cache_locks.lock(peer_id):
-            sc.total_deposited_on_other_peers[peer_id] = sc.total_deposited_on_other_peers[peer_id] + amount \
-                if peer_id in sc.total_deposited_on_other_peers else amount
-        return True
-    else:
-        if peer_id not in sc.total_deposited_on_other_peers:
+    try:
+        if __peer_payment_process(peer_id=peer_id, amount=amount):  # process the payment on the peer.
             with sc.cache_locks.lock(peer_id):
-                sc.total_deposited_on_other_peers[peer_id] = 0
+                sc.total_deposited_on_other_peers[peer_id] = sc.total_deposited_on_other_peers[peer_id] + amount \
+                    if peer_id in sc.total_deposited_on_other_peers else amount
+            return True
+        else:
+            if peer_id not in sc.total_deposited_on_other_peers:
+                with sc.cache_locks.lock(peer_id):
+                    sc.total_deposited_on_other_peers[peer_id] = 0
+    finally:
         return False
 
 
