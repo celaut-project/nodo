@@ -11,7 +11,7 @@ from src.gateway.utils import save_service
 from src.manager.manager import could_ve_this_sysreq
 from src.utils import logger as l
 from src.utils.env import SHA3_256_ID, \
-    REGISTRY
+    REGISTRY, METADATA_REGISTRY
 from src.utils.utils import from_gas_amount
 
 
@@ -24,6 +24,16 @@ def find_service_hash(_hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash) 
     return _hash.value.hex(), _hash.value.hex() in [s for s in os.listdir(REGISTRY)] if SHA3_256_ID == _hash.type \
         else (None, False)
 
+
+def combine_metadata(service_hash: str, request_metadata: celaut.Any.Metadata) -> celaut.Any.Metadata:
+    disk_metadata = celaut.Any.Metadata()
+    with open(METADATA_REGISTRY+service_hash, 'rb') as f:
+        disk_metadata.ParseFromString(f.read())
+
+    combined_metadata = celaut.Any.Metadata()
+    combined_metadata.MergeFrom(disk_metadata)
+    combined_metadata.MergeFrom(request_metadata)
+    return combined_metadata
 
 class Hash:
     def __init__(self, _hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash):
@@ -97,12 +107,12 @@ class AbstractServiceIterable:
 
             case celaut.Any.Metadata:
                 self.metadata = r
-                if self.service_hash:
-                    for _hash in self.metadata.hashtag.hash:  # TODO nos podríamos ahorrar esta iteración
-                        if not self.service_hash:
-                            self.service_hash, self.service_saved = find_service_hash(_hash=_hash)
-                        # TODO se podría realizar junto con la iteració siguiente:
+                for _hash in self.metadata.hashtag.hash:  # TODO nos podríamos ahorrar esta iteración
+                    if not self.service_hash:
+                        self.service_hash, self.service_saved = find_service_hash(_hash=_hash)
+                    # TODO se podría realizar junto con la iteració siguiente:
 
+                # Combine the hash list with the metadata hashes.
                 self.hashes: Set[Hash] = self.hashes.union({
                     Hash(_e) for _e in self.metadata.hashtag.hash
                 })
@@ -133,6 +143,10 @@ class AbstractServiceIterable:
 
         if self.service_saved:
             yield buffer_pb2.Buffer(signal=True)
+            self.metadata = combine_metadata(
+                service_hash=self.service_hash, request_metadata=self.metadata
+            )
+
             try:
                 yield from self.generate()
             except BreakIteration:
