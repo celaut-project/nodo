@@ -184,7 +184,7 @@ def from_gas_amount(gas_amount: gateway_pb2.GasAmount) -> int:
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     if ignore_network == "localhost":
         ignore_network = None
-    yield from (
+    for i in (
         peer_id for peer_id in get_peer_ids()
         if not ignore_network or all(
             not address_in_network(
@@ -194,7 +194,9 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
                 peer_id=peer_id
             )
         )
-    )
+    ):
+        print(f"    peer i {i}")
+        yield i
 
 
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
