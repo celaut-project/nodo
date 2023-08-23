@@ -22,7 +22,8 @@ class GetServiceEstimatedCostIterable(AbstractServiceIterable):
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
         try:
             selected_clause = next((_i for _i, clause in self.configuration.resources.clause.items()
-                                    if could_ve_this_sysreq(clause.max_sysreq)), None)  # TODO Analyze all the clauses
+                                    if clause.max_sysreq and could_ve_this_sysreq(clause.max_sysreq)), None)
+            # TODO Analyze all the clauses
 
             initial_gas_amount: int = from_gas_amount(self.configuration.initial_gas_amount) \
                 if self.configuration.initial_gas_amount \
