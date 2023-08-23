@@ -14,6 +14,7 @@ message TokenMessage {
 message EstimatedCost {
     GasAmount cost = 1;
     float variance = 2;
+    int32 comb_resource_selected = 3;
 }
 
 message Refund {
@@ -44,11 +45,38 @@ message RecursionGuard {
     string token = 1;
 }
 
+message CombinationResources {
+    message Clause {
+        message Priority {
+            enum Attribute {
+              START_SERVICE_TIME = 0;
+              COST_BLKIO_WEIGHT = 1;
+              COST_CPU_PERIOD = 2;
+              COST_CPU_QUOTA = 3;
+              COST_MEM_LIMIT = 4;
+              COST_DISK_SPACE = 5;
+              VARIANCE_BLKIO_WEIGHT = 6;
+              VARIANCE_CPU_PERIOD = 7;
+              VARIANCE_CPU_QUOTA = 8;
+              VARIANCE_MEM_LIMIT = 9;
+              VARIANCE_DISK_SPACE = 10;
+            }
+            Attribute attribute = 1;
+            int32 weight = 2;
+        }
+        int32 cost_weight = 1; //    Service balancer will compute score = weight / cost * RELATION_FACTOR
+        optional celaut.Sysresources min_sysreq = 2;  // init system specs.
+        optional celaut.Sysresources max_sysreq = 3;  // minimum system specs that the node needs to 've for it sometime.
+        optional int32 start_service_time = 4;
+        repeated Priority priorities = 5;
+    }
+    map<int32, Clause> clause = 1; // OR
+}
+
 message Configuration {
     celaut.Configuration config = 1;
-    optional celaut.Sysresources min_sysreq = 2;  // init system specs.
-    optional celaut.Sysresources max_sysreq = 3;  // minimun system specs that the node needs to 've for it sometime.
-    optional GasAmount initial_gas_amount = 4;
+    optional CombinationResources req_combo = 2;
+    optional GasAmount initial_gas_amount = 3;
 }
 
 message ModifyServiceSystemResourcesOutput {

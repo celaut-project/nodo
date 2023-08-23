@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-from grpcbigbuffer import buffer_pb2 as buffer__pb2
+import buffer_pb2 as buffer__pb2
 
 
 class GatewayStub(object):

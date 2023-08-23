@@ -11,11 +11,11 @@ from google.protobuf.internal import builder as _builder
 _sym_db = _symbol_database.Default()
 
 
-from protos import celaut_pb2 as celaut__pb2
-from grpcbigbuffer import buffer_pb2 as buffer__pb2
+import celaut_pb2 as celaut__pb2
+import buffer_pb2 as buffer__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\x1a\x0c\x62uffer.proto\"\x16\n\tGasAmount\x12\t\n\x01n\x18\x01 \x01(\t\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"C\n\rEstimatedCost\x12 \n\x04\x63ost\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\x12\x10\n\x08variance\x18\x02 \x01(\x02\",\n\x06Refund\x12\"\n\x06\x61mount\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\"\x85\x01\n\x07Payment\x12\x15\n\rdeposit_token\x18\x01 \x01(\t\x12;\n\x0f\x63ontract_ledger\x18\x03 \x01(\x0b\x32\".celaut.Service.Api.ContractLedger\x12&\n\ngas_amount\x18\x04 \x01(\x0b\x32\x12.gateway.GasAmount\"1\n\x07Metrics\x12&\n\ngas_amount\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\"\x90\x01\n\x08Instance\x12\x30\n\rinstance_meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.MetadataH\x00\x88\x01\x01\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\x12\x12\n\x05token\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x10\n\x0e_instance_metaB\x08\n\x06_token\"\x1b\n\x06\x43lient\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\x1f\n\x0eRecursionGuard\x12\r\n\x05token\x18\x01 \x01(\t\"\xfe\x01\n\rConfiguration\x12%\n\x06\x63onfig\x18\x01 \x01(\x0b\x32\x15.celaut.Configuration\x12-\n\nmin_sysreq\x18\x02 \x01(\x0b\x32\x14.celaut.SysresourcesH\x00\x88\x01\x01\x12-\n\nmax_sysreq\x18\x03 \x01(\x0b\x32\x14.celaut.SysresourcesH\x01\x88\x01\x01\x12\x33\n\x12initial_gas_amount\x18\x04 \x01(\x0b\x32\x12.gateway.GasAmountH\x02\x88\x01\x01\x42\r\n\x0b_min_sysreqB\r\n\x0b_max_sysreqB\x15\n\x13_initial_gas_amount\"k\n\"ModifyServiceSystemResourcesOutput\x12$\n\x06sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12\x1f\n\x03gas\x18\x02 \x01(\x0b\x32\x12.gateway.GasAmount\"w\n!ModifyServiceSystemResourcesInput\x12(\n\nmin_sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12(\n\nmax_sysreq\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources2\xfe\x03\n\x07Gateway\x12\x34\n\x0cStartService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bStopService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bGetInstance\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x36\n\x0eGenerateClient\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x44\n\x1cModifyServiceSystemResources\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07\x43ompile\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12?\n\x17GetServiceEstimatedCost\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07Payable\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x32\n\nGetMetrics\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rgateway.proto\x12\x07gateway\x1a\x0c\x63\x65laut.proto\x1a\x0c\x62uffer.proto\"\x16\n\tGasAmount\x12\t\n\x01n\x18\x01 \x01(\t\"\x1d\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\"c\n\rEstimatedCost\x12 \n\x04\x63ost\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\x12\x10\n\x08variance\x18\x02 \x01(\x02\x12\x1e\n\x16\x63omb_resource_selected\x18\x03 \x01(\x05\",\n\x06Refund\x12\"\n\x06\x61mount\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\"\x85\x01\n\x07Payment\x12\x15\n\rdeposit_token\x18\x01 \x01(\t\x12;\n\x0f\x63ontract_ledger\x18\x03 \x01(\x0b\x32\".celaut.Service.Api.ContractLedger\x12&\n\ngas_amount\x18\x04 \x01(\x0b\x32\x12.gateway.GasAmount\"1\n\x07Metrics\x12&\n\ngas_amount\x18\x01 \x01(\x0b\x32\x12.gateway.GasAmount\"\x90\x01\n\x08Instance\x12\x30\n\rinstance_meta\x18\x01 \x01(\x0b\x32\x14.celaut.Any.MetadataH\x00\x88\x01\x01\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\x12\x12\n\x05token\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x10\n\x0e_instance_metaB\x08\n\x06_token\"\x1b\n\x06\x43lient\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\x1f\n\x0eRecursionGuard\x12\r\n\x05token\x18\x01 \x01(\t\"\xb2\x06\n\x14\x43ombinationResources\x12\x39\n\x06\x63lause\x18\x01 \x03(\x0b\x32).gateway.CombinationResources.ClauseEntry\x1a\x89\x05\n\x06\x43lause\x12\x13\n\x0b\x63ost_weight\x18\x01 \x01(\x05\x12-\n\nmin_sysreq\x18\x02 \x01(\x0b\x32\x14.celaut.SysresourcesH\x00\x88\x01\x01\x12-\n\nmax_sysreq\x18\x03 \x01(\x0b\x32\x14.celaut.SysresourcesH\x01\x88\x01\x01\x12\x1f\n\x12start_service_time\x18\x04 \x01(\x05H\x02\x88\x01\x01\x12\x41\n\npriorities\x18\x05 \x03(\x0b\x32-.gateway.CombinationResources.Clause.Priority\x1a\xf2\x02\n\x08Priority\x12J\n\tattribute\x18\x01 \x01(\x0e\x32\x37.gateway.CombinationResources.Clause.Priority.Attribute\x12\x0e\n\x06weight\x18\x02 \x01(\x05\"\x89\x02\n\tAttribute\x12\x16\n\x12START_SERVICE_TIME\x10\x00\x12\x15\n\x11\x43OST_BLKIO_WEIGHT\x10\x01\x12\x13\n\x0f\x43OST_CPU_PERIOD\x10\x02\x12\x12\n\x0e\x43OST_CPU_QUOTA\x10\x03\x12\x12\n\x0e\x43OST_MEM_LIMIT\x10\x04\x12\x13\n\x0f\x43OST_DISK_SPACE\x10\x05\x12\x19\n\x15VARIANCE_BLKIO_WEIGHT\x10\x06\x12\x17\n\x13VARIANCE_CPU_PERIOD\x10\x07\x12\x16\n\x12VARIANCE_CPU_QUOTA\x10\x08\x12\x16\n\x12VARIANCE_MEM_LIMIT\x10\t\x12\x17\n\x13VARIANCE_DISK_SPACE\x10\nB\r\n\x0b_min_sysreqB\r\n\x0b_max_sysreqB\x15\n\x13_start_service_time\x1aS\n\x0b\x43lauseEntry\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12\x33\n\x05value\x18\x02 \x01(\x0b\x32$.gateway.CombinationResources.Clause:\x02\x38\x01\"\xc7\x01\n\rConfiguration\x12%\n\x06\x63onfig\x18\x01 \x01(\x0b\x32\x15.celaut.Configuration\x12\x35\n\treq_combo\x18\x02 \x01(\x0b\x32\x1d.gateway.CombinationResourcesH\x00\x88\x01\x01\x12\x33\n\x12initial_gas_amount\x18\x03 \x01(\x0b\x32\x12.gateway.GasAmountH\x01\x88\x01\x01\x42\x0c\n\n_req_comboB\x15\n\x13_initial_gas_amount\"k\n\"ModifyServiceSystemResourcesOutput\x12$\n\x06sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12\x1f\n\x03gas\x18\x02 \x01(\x0b\x32\x12.gateway.GasAmount\"w\n!ModifyServiceSystemResourcesInput\x12(\n\nmin_sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12(\n\nmax_sysreq\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources2\xfe\x03\n\x07Gateway\x12\x34\n\x0cStartService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bStopService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bGetInstance\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x36\n\x0eGenerateClient\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x44\n\x1cModifyServiceSystemResources\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07\x43ompile\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12?\n\x17GetServiceEstimatedCost\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07Payable\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x32\n\nGetMetrics\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -23,30 +23,42 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'gateway_pb2', _globals)
 if _descriptor._USE_C_DESCRIPTORS == False:
 
   DESCRIPTOR._options = None
+  _COMBINATIONRESOURCES_CLAUSEENTRY._options = None
+  _COMBINATIONRESOURCES_CLAUSEENTRY._serialized_options = b'8\001'
   _globals['_GASAMOUNT']._serialized_start=54
   _globals['_GASAMOUNT']._serialized_end=76
   _globals['_TOKENMESSAGE']._serialized_start=78
   _globals['_TOKENMESSAGE']._serialized_end=107
   _globals['_ESTIMATEDCOST']._serialized_start=109
-  _globals['_ESTIMATEDCOST']._serialized_end=176
-  _globals['_REFUND']._serialized_start=178
-  _globals['_REFUND']._serialized_end=222
-  _globals['_PAYMENT']._serialized_start=225
-  _globals['_PAYMENT']._serialized_end=358
-  _globals['_METRICS']._serialized_start=360
-  _globals['_METRICS']._serialized_end=409
-  _globals['_INSTANCE']._serialized_start=412
-  _globals['_INSTANCE']._serialized_end=556
-  _globals['_CLIENT']._serialized_start=558
-  _globals['_CLIENT']._serialized_end=585
-  _globals['_RECURSIONGUARD']._serialized_start=587
-  _globals['_RECURSIONGUARD']._serialized_end=618
-  _globals['_CONFIGURATION']._serialized_start=621
-  _globals['_CONFIGURATION']._serialized_end=875
-  _globals['_MODIFYSERVICESYSTEMRESOURCESOUTPUT']._serialized_start=877
-  _globals['_MODIFYSERVICESYSTEMRESOURCESOUTPUT']._serialized_end=984
-  _globals['_MODIFYSERVICESYSTEMRESOURCESINPUT']._serialized_start=986
-  _globals['_MODIFYSERVICESYSTEMRESOURCESINPUT']._serialized_end=1105
-  _globals['_GATEWAY']._serialized_start=1108
-  _globals['_GATEWAY']._serialized_end=1618
+  _globals['_ESTIMATEDCOST']._serialized_end=208
+  _globals['_REFUND']._serialized_start=210
+  _globals['_REFUND']._serialized_end=254
+  _globals['_PAYMENT']._serialized_start=257
+  _globals['_PAYMENT']._serialized_end=390
+  _globals['_METRICS']._serialized_start=392
+  _globals['_METRICS']._serialized_end=441
+  _globals['_INSTANCE']._serialized_start=444
+  _globals['_INSTANCE']._serialized_end=588
+  _globals['_CLIENT']._serialized_start=590
+  _globals['_CLIENT']._serialized_end=617
+  _globals['_RECURSIONGUARD']._serialized_start=619
+  _globals['_RECURSIONGUARD']._serialized_end=650
+  _globals['_COMBINATIONRESOURCES']._serialized_start=653
+  _globals['_COMBINATIONRESOURCES']._serialized_end=1471
+  _globals['_COMBINATIONRESOURCES_CLAUSE']._serialized_start=737
+  _globals['_COMBINATIONRESOURCES_CLAUSE']._serialized_end=1386
+  _globals['_COMBINATIONRESOURCES_CLAUSE_PRIORITY']._serialized_start=963
+  _globals['_COMBINATIONRESOURCES_CLAUSE_PRIORITY']._serialized_end=1333
+  _globals['_COMBINATIONRESOURCES_CLAUSE_PRIORITY_ATTRIBUTE']._serialized_start=1068
+  _globals['_COMBINATIONRESOURCES_CLAUSE_PRIORITY_ATTRIBUTE']._serialized_end=1333
+  _globals['_COMBINATIONRESOURCES_CLAUSEENTRY']._serialized_start=1388
+  _globals['_COMBINATIONRESOURCES_CLAUSEENTRY']._serialized_end=1471
+  _globals['_CONFIGURATION']._serialized_start=1474
+  _globals['_CONFIGURATION']._serialized_end=1673
+  _globals['_MODIFYSERVICESYSTEMRESOURCESOUTPUT']._serialized_start=1675
+  _globals['_MODIFYSERVICESYSTEMRESOURCESOUTPUT']._serialized_end=1782
+  _globals['_MODIFYSERVICESYSTEMRESOURCESINPUT']._serialized_start=1784
+  _globals['_MODIFYSERVICESYSTEMRESOURCESINPUT']._serialized_end=1903
+  _globals['_GATEWAY']._serialized_start=1906
+  _globals['_GATEWAY']._serialized_end=2416
 # @@protoc_insertion_point(module_scope)

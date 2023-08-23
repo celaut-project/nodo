@@ -190,4 +190,8 @@ message Sysresources {                           //  https://docker-py.readthedo
     optional uint64 cpu_quota = 3;  // https://wbhegedus.me/understanding-kubernetes-cpu-limits/
     optional uint64 mem_limit = 4;
     optional uint64 disk_space = 5;
+
+    // optional double disk_failure_tolerance = 10;
+    // optional double process_failure_tolerance = 11;
+    // optional double network_failure_tolerance = 12;
 }
