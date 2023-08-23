@@ -67,7 +67,7 @@ class StartServiceIterable(AbstractServiceIterable):
                 service=read_service_from_disk(service_hash=self.service_hash),
                 metadata=self.metadata if self.metadata else read_metadata_from_disk(service_hash=self.service_hash),
                 config=self.configuration,
-                system_requirements=self.system_requeriments,
+                min_sysreq=self.min_sysreq,
                 max_sysreq=self.max_sysreq,
                 initial_gas_amount=self.initial_gas_amount,
                 service_id=self.service_hash,

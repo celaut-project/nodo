@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 from grpcbigbuffer import client as grpcbf
 import grpc
 
@@ -21,6 +21,8 @@ def service_balancer(
         metadata: celaut.Any.Metadata,
         ignore_network: str = None,
         initial_gas_amount: int = None,
+        min_sysreq: Optional[celaut.Sysresources] = None,
+        max_sysreq: Optional[celaut.Sysresources] = None,
         recursion_guard_token: str = None,
 ) -> Dict[str, int]:  # sorted by cost, dict of celaut.Instances or 'local'  and cost.
     class PeerCostList:
@@ -77,9 +79,11 @@ def service_balancer(
                         partitions_message_mode_parser=True,
                         indices_serializer=StartService_input_indices,
                         input=service_extended(
+                            min_sysreq=min_sysreq,
+                            max_sysreq=max_sysreq,
+                            initial_gas_amount=initial_gas_amount,
                             metadata=metadata,
                             send_only_hashes=SEND_ONLY_HASHES_ASKING_COST,
-                            initial_gas_amount=initial_gas_amount,
                             client_id=generate_client_id_in_other_peer(peer_id=peer),
                             recursion_guard_token=recursion_guard_token
                         ),

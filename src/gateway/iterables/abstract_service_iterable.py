@@ -59,9 +59,9 @@ class Hash:
 
 class AbstractServiceIterable:
     configuration: Optional[celaut.Configuration] = None
-    system_requeriments = None
     initial_gas_amount: Optional[int] = None
-    max_sysreq = None
+    min_sysreq: Optional[celaut.Sysresources] = None,
+    max_sysreq: Optional[celaut.Sysresources] = None,
 
     client_id = None
     recursion_guard_token = None
@@ -97,7 +97,7 @@ class AbstractServiceIterable:
                     self.max_sysreq = r.max_sysreq
 
                 if r.HasField('min_sysreq'):
-                    self.system_requeriments = r.min_sysreq
+                    self.min_sysreq = r.min_sysreq
 
                 if r.HasField('initial_gas_amount'):
                     self.initial_gas_amount = from_gas_amount(r.initial_gas_amount)
