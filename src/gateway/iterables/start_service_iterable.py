@@ -57,7 +57,7 @@ class StartServiceIterable(AbstractServiceIterable):
         l.LOGGER('Starting service by ' + str(self.context.peer()) + ' ...')
 
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
-        if CONFIGURATION_REQUIRED and not self.configuration:
+        if CONFIGURATION_REQUIRED and not self.configuration.config:
             raise Exception("Client or configuration ")
 
         l.LOGGER('Launch service with configuration')
@@ -67,9 +67,6 @@ class StartServiceIterable(AbstractServiceIterable):
                 service=read_service_from_disk(service_hash=self.service_hash),
                 metadata=self.metadata if self.metadata else read_metadata_from_disk(service_hash=self.service_hash),
                 config=self.configuration,
-                min_sysreq=self.min_sysreq,
-                max_sysreq=self.max_sysreq,
-                initial_gas_amount=self.initial_gas_amount,
                 service_id=self.service_hash,
                 father_ip=get_only_the_ip_from_context(context_peer=self.context.peer()),
                 father_id=self.client_id,

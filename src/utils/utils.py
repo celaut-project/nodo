@@ -40,13 +40,10 @@ def service_hashes(
 
 def service_extended(
         metadata: celaut.Any.Metadata,
-        config: celaut.Configuration = None,
-        min_sysreq: celaut.Sysresources = None,
-        max_sysreq: celaut.Sysresources = None,
-        send_only_hashes: bool = False,
-        initial_gas_amount: int = None,
-        client_id: str = None,
-        recursion_guard_token: str = None
+        config: typing.Optional[gateway_pb2.Configuration] = None,
+        send_only_hashes: typing.Optional[bool] = False,
+        client_id: typing.Optional[str] = None,
+        recursion_guard_token: typing.Optional[str] = None
 ) -> Generator[object, None, None]:
 
     # 1
@@ -62,13 +59,8 @@ def service_extended(
         )
 
     # 3
-    if config or initial_gas_amount:
-        yield gateway_pb2.Configuration(
-            config=config if config else celaut.Configuration(),
-            min_sysreq=min_sysreq,
-            max_sysreq=max_sysreq,
-            initial_gas_amount=to_gas_amount(initial_gas_amount)
-        )
+    if config:
+        yield config
 
     # 4
     yield from metadata.hashtag.hash

@@ -1,30 +1,29 @@
+from hashlib import sha256
 from typing import Optional
 
-from grpcbigbuffer import client as grpcbf
 import docker as docker_lib
-from hashlib import sha256
+import grpc
+import os
+import subprocess
+from grpcbigbuffer import client as grpcbf
 
 import src.utils.utils
+from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
+from protos.gateway_pb2_grpcbf import StartService_input_indices
 from src.builder import build
-import grpc, os, subprocess
-
-from src.gateway.utils import generate_gateway_instance
 from src.gateway.service_balancer import service_balancer
-
+from src.gateway.utils import generate_gateway_instance
 from src.manager.manager import default_initial_cost, spend_gas, \
     generate_client_id_in_other_peer, start_service_cost, add_container
-from src.manager.system_cache import SystemCache
 from src.manager.metrics import gas_amount_on_other_peer
+from src.manager.system_cache import SystemCache
 from src.payment_system.payment_process import increase_deposit_on_peer
-
 from src.utils import utils, logger as l
 from src.utils.env import CACHE, DOCKER_CLIENT, DOCKER_COMMAND, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
     DOCKER_NETWORK, \
     DEFAULT_SYSTEM_RESOURCES, GAS_COST_FACTOR
 from src.utils.tools.recursion_guard import RecursionGuard
-
-from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_grpcbf import StartService_input_indices
+from src.utils.utils import from_gas_amount
 
 
 def set_config(container_id: str, config: Optional[celaut.Configuration], resources: celaut.Sysresources,
@@ -75,10 +74,7 @@ def launch_service(
         father_ip: str,
         father_id: str = None,
         service_id: str = None,
-        min_sysreq: Optional[celaut.Sysresources] = None,
-        max_sysreq: Optional[celaut.Sysresources] = None,
-        config: Optional[celaut.Configuration] = None,
-        initial_gas_amount: int = None,
+        config: Optional[gateway_pb2.Configuration] = None,
         recursion_guard_token: str = None,
 ) -> gateway_pb2.Instance:
     l.LOGGER('Go to launch a service. ')
@@ -95,8 +91,6 @@ def launch_service(
         if father_ip == father_id and utils.get_network_name(father_ip) != DOCKER_NETWORK:
             raise Exception('Client id not provided.')
 
-        initial_gas_amount: int = initial_gas_amount if initial_gas_amount else default_initial_cost(
-            father_id=father_id)
         getting_container = False  # Here it asks the balancer if it should assign the job to a peer.
 
         while True:
@@ -106,24 +100,23 @@ def launch_service(
                     ignore_network=utils.get_network_name(
                         ip_or_uri=father_ip
                     ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None,
-                    initial_gas_amount=initial_gas_amount,
-                    min_sysreq=min_sysreq,
-                    max_sysreq=max_sysreq,
+                    config=config,
                     recursion_guard_token=recursion_guard_token
             ).items():
-                if abort_it: abort_it = False
-                l.LOGGER('Balancer select peer ' + str(peer) + ' with cost ' + str(cost))
+                if abort_it:
+                    abort_it = False
+                l.LOGGER('Service balancer select peer ' + str(peer) + ' with cost ' + str(cost))
 
                 # Delegate the service instance execution.
                 if peer != 'local':
                     try:
                         l.LOGGER('El servicio se lanza en el nodo ' + str(peer))
-                        refound_gas = []
+                        refund_gas = []
 
                         if not spend_gas(
                                 token_or_container_ip=father_id,
                                 gas_to_spend=cost,
-                                refund_gas_function_container=refound_gas
+                                refund_gas_function_container=refund_gas
                         ): raise Exception('Launch service error spending gas for ' + father_id)
 
                         if gas_amount_on_other_peer(
@@ -149,9 +142,6 @@ def launch_service(
                             input=utils.service_extended(
                                 metadata=metadata,
                                 config=config,
-                                min_sysreq=min_sysreq,
-                                max_sysreq=max_sysreq,
-                                initial_gas_amount=initial_gas_amount,
                                 client_id=generate_client_id_in_other_peer(peer_id=peer),
                                 recursion_guard_token=recursion_guard_token
                             )
@@ -168,21 +158,32 @@ def launch_service(
                     except Exception as e:
                         l.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
                         try:
-                            refound_gas.pop()()
+                            refund_gas.pop()()
                         except IndexError:
                             pass
 
                 #  The node launches the service locally.
-                if getting_container: l.LOGGER('El nodo lanza el servicio localmente.')
-                if not min_sysreq: min_sysreq = DEFAULT_SYSTEM_RESOURCES
-                refound_gas = []
+                if getting_container:
+                    l.LOGGER('Nodo launches the service locally.')
+
+                initial_gas_amount: int = from_gas_amount(config.initial_gas_amount) if config.initial_gas_amount \
+                    else default_initial_cost(
+                    father_id=father_id
+                )
+
+                initial_system_resources: celaut.Sysresources = config.resources.min_sysreq \
+                    if config.resources.min_sysreq else DEFAULT_SYSTEM_RESOURCES
+
+                refund_gas = []
                 if not spend_gas(
                         token_or_container_ip=father_id,
                         gas_to_spend=start_service_cost(
-                            initial_gas_amount=initial_gas_amount if initial_gas_amount else default_initial_cost(),
+                            initial_gas_amount=initial_gas_amount,
                             metadata=metadata
                         ) * GAS_COST_FACTOR,
-                ): raise Exception('Launch service error spending gas for ' + father_id)
+                ):
+                    raise Exception('Launch service error spending gas for ' + father_id)
+
                 try:
                     service_id = build.build(
                         service=service,
@@ -192,7 +193,7 @@ def launch_service(
                     )  # If the container is not built, build it.
                 except build.UnsupportedArchitectureException as e:
                     try:
-                        refound_gas.pop()()
+                        refund_gas.pop()()
                     except IndexError:
                         pass
                     raise e
@@ -200,7 +201,7 @@ def launch_service(
                     # If it does not have the container, it takes it from another node in the background and requests
                     #  the instance from another node as well.
                     try:
-                        refound_gas.pop()()  # Refund the gas.
+                        refund_gas.pop()()  # Refund the gas.
                     except IndexError:
                         pass
                     getting_container = True
@@ -208,7 +209,7 @@ def launch_service(
                 except Exception as e:
                     l.LOGGER('Error building the container: ' + str(e))
                     try:
-                        refound_gas.pop()()  # Refund the gas.
+                        refund_gas.pop()()  # Refund the gas.
                     except IndexError:
                         l.LOGGER('Error refunding the gas.')
                     l.LOGGER(str(e))
@@ -221,7 +222,7 @@ def launch_service(
                         entrypoint=service.container.entrypoint
                     )
 
-                    set_config(container_id=container.id, config=config, resources=min_sysreq,
+                    set_config(container_id=container.id, config=config.config, resources=initial_system_resources,
                                api=service.container.config)
 
                     # The container must be started after adding the configuration file and
@@ -254,7 +255,7 @@ def launch_service(
                         id=service_id,
                         entrypoint=service.container.entrypoint
                     )
-                    set_config(container_id=container.id, config=config, resources=min_sysreq,
+                    set_config(container_id=container.id, config=config.config, resources=initial_system_resources,
                                api=service.container.config)
                     try:
                         container.start()
@@ -283,10 +284,9 @@ def launch_service(
                     token=add_container(
                         father_id=father_id,
                         container=container,
-                        initial_gas_amount=initial_gas_amount if initial_gas_amount else default_initial_cost(
-                            father_id=father_id),
+                        initial_gas_amount=initial_gas_amount,
                         system_requeriments_range=gateway_pb2.ModifyServiceSystemResourcesInput(
-                            min_sysreq=min_sysreq, max_sysreq=min_sysreq)
+                            min_sysreq=initial_system_resources, max_sysreq=initial_system_resources)  # TODO ??
                     ),
                     instance=celaut.Instance(
                         api=service.api,

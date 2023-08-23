@@ -63,7 +63,7 @@ CONCURRENT_CONTAINER_CREATIONS = GET_ENV(env='CONCURRENT_CONTAINER_CREATIONS', d
 
 # Manager
 
-DEFAULT_SYSTEM_RESOURCES = celaut_pb2.Sysresources(
+DEFAULT_SYSTEM_RESOURCES: celaut_pb2.Sysresources = celaut_pb2.Sysresources(
     mem_limit=50 * pow(10, 6),
 )
 

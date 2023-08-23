@@ -12,7 +12,6 @@ from src.manager.manager import could_ve_this_sysreq
 from src.utils import logger as l
 from src.utils.env import SHA3_256_ID, \
     REGISTRY, METADATA_REGISTRY
-from src.utils.utils import from_gas_amount
 
 
 class BreakIteration(Exception):
@@ -27,7 +26,7 @@ def find_service_hash(_hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash) 
 
 def combine_metadata(service_hash: str, request_metadata: Optional[celaut.Any.Metadata]) -> celaut.Any.Metadata:
     disk_metadata = celaut.Any.Metadata()
-    with open(METADATA_REGISTRY+service_hash, 'rb') as f:
+    with open(METADATA_REGISTRY + service_hash, 'rb') as f:
         disk_metadata.ParseFromString(f.read())
 
     if request_metadata:
@@ -58,10 +57,7 @@ class Hash:
 
 
 class AbstractServiceIterable:
-    configuration: Optional[celaut.Configuration] = None
-    initial_gas_amount: Optional[int] = None
-    min_sysreq: Optional[celaut.Sysresources] = None,
-    max_sysreq: Optional[celaut.Sysresources] = None,
+    configuration: Optional[gateway_pb2.Configuration] = None
 
     client_id = None
     recursion_guard_token = None
@@ -89,18 +85,10 @@ class AbstractServiceIterable:
                 self.recursion_guard_token = r.token
 
             case gateway_pb2.Configuration:
-                self.configuration = r.config
-
                 if r.HasField('max_sysreq') and not could_ve_this_sysreq(sysreq=r.max_sysreq):
                     raise Exception("The node can't execute the service with this requeriments.")
-                else:
-                    self.max_sysreq = r.max_sysreq
 
-                if r.HasField('min_sysreq'):
-                    self.min_sysreq = r.min_sysreq
-
-                if r.HasField('initial_gas_amount'):
-                    self.initial_gas_amount = from_gas_amount(r.initial_gas_amount)
+                self.configuration = r
 
             case celaut.Any.Metadata.HashTag.Hash:
                 self.hashes.add(Hash(r))

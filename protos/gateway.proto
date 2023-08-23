@@ -75,7 +75,7 @@ message CombinationResources {
 
 message Configuration {
     celaut.Configuration config = 1;
-    optional CombinationResources req_combo = 2;
+    optional CombinationResources resources = 2;
     optional GasAmount initial_gas_amount = 3;
 }
 
