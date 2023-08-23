@@ -8,7 +8,6 @@ from protos import gateway_pb2
 from protos.gateway_pb2_grpcbf import StartService_input_indices, \
     StartService_input_message_mode
 from src.gateway.utils import save_service
-from src.manager.manager import could_ve_this_sysreq
 from src.utils import logger as l
 from src.utils.env import SHA3_256_ID, \
     REGISTRY, METADATA_REGISTRY
@@ -85,9 +84,6 @@ class AbstractServiceIterable:
                 self.recursion_guard_token = r.token
 
             case gateway_pb2.Configuration:
-                if r.HasField('max_sysreq') and not could_ve_this_sysreq(sysreq=r.max_sysreq):
-                    raise Exception("The node can't execute the service with this requeriments.")
-
                 self.configuration = r
 
             case celaut.Any.Metadata.HashTag.Hash:
