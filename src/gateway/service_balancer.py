@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, List
 from grpcbigbuffer import client as grpcbf
 import grpc
 
@@ -7,7 +7,7 @@ from protos import gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input_indices
 
 from src.manager.manager import default_initial_cost, execution_cost, \
-    generate_client_id_in_other_peer
+    generate_client_id_in_other_peer, could_ve_this_sysreq
 
 from src.utils.env import SEND_ONLY_HASHES_ASKING_COST, COST_AVERAGE_VARIATION, GAS_COST_FACTOR, EXTERNAL_COST_TIMEOUT
 from src.utils.utils import from_gas_amount, to_gas_amount, service_extended, peers_id_iterator, \
@@ -16,27 +16,39 @@ from src.utils import logger as l
 
 from src.builder import build
 
+ClauseResource = gateway_pb2.CombinationResources.Clause
+
+
+#  TODO make from protos.gateway_pb2.CombinationResource.Clause as ClauseResource
+
 
 def service_balancer(
         metadata: celaut.Any.Metadata,
         ignore_network: str = None,
         config: Optional[gateway_pb2.Configuration] = None,
         recursion_guard_token: str = None,
-) -> Dict[str, int]:  # sorted by cost, dict of celaut.Instances or 'local'  and cost.
+) -> List[Tuple[str, int, int]]:
+    # sorted by cost, tuple of celaut.Instances or 'local' , cost and clause of combination resources selected
     class PeerCostList:
         # Sorts the list from the element with the smallest weight to the element with the largest weight.
 
         def __init__(self) -> None:
-            self.dict: dict = {}  # elem : weight
+            self.elem_weights: Dict[str, int] = {}  # elem : weight
+            self.elem_resources: Dict[str, int] = {}
+            self.clauses = config
 
         def add_elem(self, weight: gateway_pb2.EstimatedCost, elem: str = 'local') -> None:
             l.LOGGER('    adding elem ' + elem + ' with weight ' + str(weight.cost))
-            self.dict.update({
+
+            self.elem_weights.update({
                 elem: int(from_gas_amount(weight.cost) * (1 + weight.variance * COST_AVERAGE_VARIATION))
             })
 
-        def get(self) -> Dict[str, int]:
-            return {k: v for k, v in sorted(self.dict.items(), key=lambda item: item[1])}
+            self.elem_resources.update({elem: weight.comb_resource_selected})
+
+        def get(self) -> List[Tuple[str, int, int]]:
+            return [(k, v, self.elem_resources[k]) for k, v in
+                    sorted(self.elem_weights.items(), key=lambda item: item[1])]   #  TODO: sort by score, where score is weight / cost (inverted sort needed).
 
     peers: PeerCostList = PeerCostList()
     initial_gas_amount: int = from_gas_amount(config.initial_gas_amount) \
@@ -50,7 +62,9 @@ def service_balancer(
                         metadata=metadata
                     ) * GAS_COST_FACTOR + initial_gas_amount
                 ),
-                variance=0
+                variance=0,
+                comb_resource_selected=next((_i for _i, clause in config.resources.clause.items()
+                                             if clause.max_sysreq and could_ve_this_sysreq(clause.max_sysreq)), None)  # TODO refactor with the GetServiceCost gateway logic
             )
         )
     except build.UnsupportedArchitectureException as e:
@@ -84,7 +98,8 @@ def service_balancer(
                             client_id=generate_client_id_in_other_peer(peer_id=peer),
                             recursion_guard_token=recursion_guard_token
                         ),
-                        # TODO añadir initial_gas_amount y el resto de la configuracion inicial, si es que se especifica.
+                        # TODO añadir initial_gas_amount y el resto de la configuracion inicial,
+                        #  si es que se especifica.
                     ))
                 )
             except Exception as e:
@@ -96,4 +111,4 @@ def service_balancer(
         return peers.get()
     except Exception as e:
         l.LOGGER('Error during balancer, ' + str(e))
-        return {}
+        return []

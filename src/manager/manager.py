@@ -283,9 +283,9 @@ def default_initial_cost(
         father_id: str = None,
 ) -> int:
     l.LOGGER('Default cost for ' + (father_id if father_id else 'local'))
-    return (int(sc.get_gas_amount_by_id(
-        id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(
-        DEFAULT_INTIAL_GAS_AMOUNT)
+    return (int(
+        sc.get_gas_amount_by_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
+    ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
 
 def add_container(

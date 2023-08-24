@@ -37,7 +37,7 @@ def seed(private_key=None):
     cursor.execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
                    (contract_hash, hash_type, contract))
 
-    print(f"Contrato {contract_hash}. \nTodavía se debe desplegar el contrato en la red especificada en eth/env.py")
+    print(f"Contrato {contract_hash}. \nYou still need to deploy the contract on the network specified in eth/env.py")
 
     # DESPLIEGUE DE UN CONTRATO FANTASMA, PARA SIMULAR EL PROCESO DE PAGOS.
     cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash) VALUES (?,?,?)",

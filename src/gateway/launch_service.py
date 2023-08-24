@@ -95,14 +95,15 @@ def launch_service(
 
         while True:
             abort_it = True
-            for peer, cost in service_balancer(
+            for peer, cost, resource_clause_id in service_balancer(
                     metadata=metadata,
                     ignore_network=utils.get_network_name(
                         ip_or_uri=father_ip
                     ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None,
                     config=config,
                     recursion_guard_token=recursion_guard_token
-            ).items():
+            ):
+                resources: gateway_pb2.CombinationResources.Clause = config.resources.clause[resource_clause_id]
                 if abort_it:
                     abort_it = False
                 l.LOGGER('Service balancer select peer ' + str(peer) + ' with cost ' + str(cost))
@@ -117,7 +118,8 @@ def launch_service(
                                 token_or_container_ip=father_id,
                                 gas_to_spend=cost,
                                 refund_gas_function_container=refund_gas
-                        ): raise Exception('Launch service error spending gas for ' + father_id)
+                        ):
+                            raise Exception('Launch service error spending gas for ' + father_id)
 
                         if gas_amount_on_other_peer(
                                 peer_id=peer,
@@ -129,19 +131,21 @@ def launch_service(
                                 'Launch service error increasing deposit on ' + peer + 'when it didn\'t have enough '
                                                                                        'gas.')
 
-                        l.LOGGER('Spended gas, go to launch the service on ' + str(peer))
+                        l.LOGGER('Spent gas, go to launch the service on ' + str(peer))
                         service_instance = next(grpcbf.client_grpc(
                             method=gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(
                                     next(src.utils.utils.generate_uris_by_peer_id(peer))
                                 )
-                            ).StartService,  # TODO se debe hacer que al pedir un servicio exista un timeout.
+                            ).StartService,  # TODO An timeout should be implemented when requesting a service.
                             partitions_message_mode_parser=True,
                             indices_serializer=StartService_input_indices,
                             indices_parser=gateway_pb2.Instance,
                             input=utils.service_extended(
                                 metadata=metadata,
                                 config=config,
+                                # TODO: Could pass only the previously selected configuration with the estimate cost
+                                #  request, now is allowing to select another (that could be reasonable).
                                 client_id=generate_client_id_in_other_peer(peer_id=peer),
                                 recursion_guard_token=recursion_guard_token
                             )
@@ -153,7 +157,8 @@ def launch_service(
                             encrypted_external_token=encrypted_external_token,  # Add token.
                             external_token=service_instance.token
                         )
-                        service_instance.token = father_id + '##' + peer + '##' + encrypted_external_token  # TODO adapt for ipv6 too.
+                        service_instance.token = father_id + '##' + peer + '##' + encrypted_external_token
+                        # TODO adapt for ipv6 too.
                         return service_instance
                     except Exception as e:
                         l.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
@@ -166,13 +171,11 @@ def launch_service(
                 if getting_container:
                     l.LOGGER('Nodo launches the service locally.')
 
-                initial_gas_amount: int = from_gas_amount(config.initial_gas_amount) if config.initial_gas_amount \
-                    else default_initial_cost(
-                    father_id=father_id
-                )
+                initial_gas_amount: int = from_gas_amount(config.initial_gas_amount) \
+                    if config.HasField("initial_gas_amount") else default_initial_cost(father_id=father_id)
 
-                initial_system_resources: celaut.Sysresources = config.resources.min_sysreq \
-                    if config.resources.min_sysreq else DEFAULT_SYSTEM_RESOURCES
+                initial_system_resources: celaut.Sysresources = resources.min_sysreq \
+                    if resources.HasField('min_sysreq') and resources.min_sysreq else DEFAULT_SYSTEM_RESOURCES
 
                 refund_gas = []
                 if not spend_gas(
@@ -196,7 +199,8 @@ def launch_service(
                         refund_gas.pop()()
                     except IndexError:
                         pass
-                    raise e
+                    finally:
+                        raise e
                 except build.WaitBuildException:
                     # If it does not have the container, it takes it from another node in the background and requests
                     #  the instance from another node as well.
@@ -204,8 +208,9 @@ def launch_service(
                         refund_gas.pop()()  # Refund the gas.
                     except IndexError:
                         pass
-                    getting_container = True
-                    continue
+                    finally:
+                        getting_container = True
+                        continue
                 except Exception as e:
                     l.LOGGER('Error building the container: ' + str(e))
                     try:
