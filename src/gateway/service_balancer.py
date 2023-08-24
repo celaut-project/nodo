@@ -39,7 +39,8 @@ def service_balancer(
             return {k: v for k, v in sorted(self.dict.items(), key=lambda item: item[1])}
 
     peers: PeerCostList = PeerCostList()
-    initial_gas_amount: int = config.initial_gas_amount if config.initial_gas_amount else default_initial_cost()
+    initial_gas_amount: int = from_gas_amount(config.initial_gas_amount) \
+        if config.HasField("initial_gas_amount") else default_initial_cost()
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
     try:
         peers.add_elem(
