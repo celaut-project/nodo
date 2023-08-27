@@ -30,7 +30,7 @@ def service_balancer(
         def __init__(self) -> None:
             self.elem_costs: Dict[str, int] = {}  # elem : cost
             self.elem_resources: Dict[str, int] = {}  # elem : clause id
-            self.clauses: Dict[int, ClauseResource] = config.resources.clause.items()
+            self.clauses: Dict[int, ClauseResource] = dict(config.resources.clause)
 
         def add_elem(self, estim_cost: gateway_pb2.EstimatedCost, elem: str = 'local') -> None:
             l.LOGGER('    adding elem ' + elem + ' with weight ' + str(estim_cost.cost))
@@ -60,7 +60,7 @@ def service_balancer(
                     gas_amount=start_service_cost(metadata=metadata, initial_gas_amount=initial_gas_amount)
                 ),
                 variance=0,
-                comb_resource_selected=resource_configuration_balancer(config.resources.clause.items())
+                comb_resource_selected=resource_configuration_balancer(dict(config.resources.clause))
             )
         )
     except build.UnsupportedArchitectureException as e:

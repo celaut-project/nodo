@@ -22,7 +22,7 @@ class GetServiceEstimatedCostIterable(AbstractServiceIterable):
 
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
         try:
-            selected_clause: int = resource_configuration_balancer(clauses=self.configuration.resources.clause.items())
+            selected_clause: int = resource_configuration_balancer(clauses=dict(self.configuration.resources.clause))
 
             initial_gas_amount: int = from_gas_amount(self.configuration.initial_gas_amount) \
                 if self.configuration.HasField('initial_gas_amount') \
