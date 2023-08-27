@@ -25,4 +25,4 @@ def resource_configuration_balancer(clauses: Dict[int, ClauseResource]) -> int:
 
     return _best_clause if _best_clause \
         else next((_i for _i, clause in clauses
-                   if clause.max_sysreq and could_ve_this_sysreq(clause.max_sysreq)), None)
+                   if clause.HasField('max_sysreq') and could_ve_this_sysreq(clause.max_sysreq)), None)

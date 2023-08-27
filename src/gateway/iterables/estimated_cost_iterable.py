@@ -25,11 +25,11 @@ class GetServiceEstimatedCostIterable(AbstractServiceIterable):
             selected_clause: int = resource_configuration_balancer(clauses=self.configuration.resources.clause.items())
 
             initial_gas_amount: int = from_gas_amount(self.configuration.initial_gas_amount) \
-                if self.configuration.initial_gas_amount \
+                if self.configuration.HasField('initial_gas_amount') \
                 else default_initial_cost(
-                father_id=self.client_id if self.client_id
-                else get_only_the_ip_from_context(context_peer=self.context.peer())
-            )
+                    father_id=self.client_id if self.client_id
+                        else get_only_the_ip_from_context(context_peer=self.context.peer())
+                    )
             cost: int = start_service_cost(metadata=self.metadata, initial_gas_amount=initial_gas_amount)
 
             l.LOGGER(f'Execution cost for a service is requested: '
