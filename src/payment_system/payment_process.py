@@ -91,7 +91,7 @@ def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
             if peer_id not in sc.total_deposited_on_other_peers:
                 with sc.cache_locks.lock(peer_id):
                     sc.total_deposited_on_other_peers[peer_id] = 0
-    finally:
+    except:
         return False
 
 

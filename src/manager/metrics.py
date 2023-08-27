@@ -94,7 +94,7 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
                 token=generate_client_id_in_other_peer(peer_id=peer_id)
             ).gas_amount
         )
-    finally:
+    except:
         log('Error getting gas amount from ' + peer_id + '.')
         if is_peer_available(peer_id=peer_id):
             log('It is assumed that the client was invalid on peer ' + peer_id)
