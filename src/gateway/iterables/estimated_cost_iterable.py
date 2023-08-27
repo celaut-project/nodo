@@ -3,11 +3,12 @@ from typing import Optional, Generator
 from grpcbigbuffer import client as grpcbf, buffer_pb2
 
 from protos import gateway_pb2
+from src.balancers.resource_balancer.resource_balancer \
+    import resource_configuration_balancer
 from src.builder import build
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable, BreakIteration
-from src.manager.manager import execution_cost, default_initial_cost, could_ve_this_sysreq
+from src.manager.manager import default_initial_cost, start_service_cost
 from src.utils import logger as l
-from src.utils.env import GAS_COST_FACTOR
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount
 
 
@@ -21,21 +22,19 @@ class GetServiceEstimatedCostIterable(AbstractServiceIterable):
 
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
         try:
-            selected_clause = next((_i for _i, clause in self.configuration.resources.clause.items()
-                                    if clause.max_sysreq and could_ve_this_sysreq(clause.max_sysreq)), None)
-            # TODO Analyze all the clauses
+            selected_clause: int = resource_configuration_balancer(clauses=self.configuration.resources.clause.items())
 
             initial_gas_amount: int = from_gas_amount(self.configuration.initial_gas_amount) \
                 if self.configuration.initial_gas_amount \
                 else default_initial_cost(
-                    father_id=self.client_id if self.client_id
-                    else get_only_the_ip_from_context(context_peer=self.context.peer())
-                )
-            cost: int = initial_gas_amount + execution_cost(
-                metadata=self.metadata
-            ) * GAS_COST_FACTOR
+                father_id=self.client_id if self.client_id
+                else get_only_the_ip_from_context(context_peer=self.context.peer())
+            )
+            cost: int = start_service_cost(metadata=self.metadata, initial_gas_amount=initial_gas_amount)
 
-            l.LOGGER('Execution cost for a service is requested, cost -> ' + str(cost) + ' with benefit ' + str(0))
+            l.LOGGER(f'Execution cost for a service is requested: '
+                     f'resource -> {selected_clause}. cost -> {cost} with benefit  {0}')
+
             yield from grpcbf.serialize_to_buffer(
                 message_iterator=gateway_pb2.EstimatedCost(
                     cost=to_gas_amount(cost),

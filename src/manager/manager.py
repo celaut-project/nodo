@@ -19,7 +19,8 @@ from src.manager.system_cache import Client, SystemCache
 from src.utils import logger as l
 from src.utils.env import ALLOW_GAS_DEBT, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
     DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
-    MEMORY_LIMIT_COST_FACTOR, DOCKER_CLIENT, COST_OF_BUILD, COMPUTE_POWER_RATE, EXECUTION_BENEFIT, SHA3_256_ID
+    MEMORY_LIMIT_COST_FACTOR, DOCKER_CLIENT, COST_OF_BUILD, COMPUTE_POWER_RATE, EXECUTION_BENEFIT, SHA3_256_ID, \
+    GAS_COST_FACTOR
 from src.utils.utils import get_network_name, \
     is_peer_available, to_gas_amount, \
     get_service_hex_main_hash, generate_uris_by_peer_id
@@ -441,4 +442,4 @@ def start_service_cost(
 ) -> int:
     return execution_cost(
         metadata=metadata
-    ) + initial_gas_amount
+    ) * GAS_COST_FACTOR + initial_gas_amount  # TODO add resources cost to the execution cost.
