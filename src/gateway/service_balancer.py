@@ -35,6 +35,9 @@ def service_balancer(
         def add_elem(self, estim_cost: gateway_pb2.EstimatedCost, elem: str = 'local') -> None:
             l.LOGGER('    adding elem ' + elem + ' with weight ' + str(estim_cost.cost))
 
+            if estim_cost.comb_resource_selected not in self.clauses:
+                raise Exception(f"Invalid selected clause {estim_cost.comb_resource_selected}.")
+
             self.peer_costs.update({
                 elem: variance_cost_normalization(cost=from_gas_amount(estim_cost.cost), variance=estim_cost.variance)
             })
@@ -42,14 +45,6 @@ def service_balancer(
             self.peer_resources.update({elem: estim_cost.comb_resource_selected})
 
         def get(self) -> List[Tuple[str, int, int]]:
-            sor = sorted(self.peer_costs,
-                         key=lambda item: self.clauses[self.peer_resources[item[0]]].cost_weight / item[1],
-                         reverse=True
-                         )
-            print(f"sorted -> {sor}")
-            for k, v in sor:
-                print("element ", self.peer_resources[k])
-                print("tuple ", (k, v, self.peer_resources[k]))
             return [(k, v, self.peer_resources[k]) for k, v in
                     sorted(self.peer_costs.items(),
                            key=lambda item: self.clauses[self.peer_resources[item[0]]].cost_weight / item[1],

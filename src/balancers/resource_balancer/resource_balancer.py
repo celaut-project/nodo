@@ -14,15 +14,15 @@ def compute_score_resource_clause(clause: ClauseResource) -> int:
 
 def resource_configuration_balancer(clauses: Dict[int, ClauseResource]) -> int:
     _max_score: int = 0
-    _best_clause: Optional[ClauseResource] = None
+    _best_clause: Optional[int] = None
     for _i, clause in clauses.items():
         if not could_ve_this_sysreq(clause.max_sysreq):
             continue
         __local_score: int = compute_score_resource_clause(clause)
         if _max_score < __local_score:
             _max_score = __local_score
-            _best_clause = clause
+            _best_clause = _i
 
     return _best_clause if _best_clause \
         else next((_i for _i, clause in clauses.items()
-                   if clause.HasField('max_sysreq') and could_ve_this_sysreq(clause.max_sysreq)), None)
+                   if not clause.HasField('max_sysreq') or could_ve_this_sysreq(clause.max_sysreq)), None)
