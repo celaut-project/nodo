@@ -28,23 +28,31 @@ def service_balancer(
         # Sorts the list from the element with the smallest weight to the element with the largest weight.
 
         def __init__(self) -> None:
-            self.elem_costs: Dict[str, int] = {}  # elem : cost
-            self.elem_resources: Dict[str, int] = {}  # elem : clause id
+            self.peer_costs: Dict[str, int] = {}  # peer_id : cost
+            self.peer_resources: Dict[str, int] = {}  # peer_id : clause id
             self.clauses: Dict[int, ClauseResource] = dict(config.resources.clause)
 
         def add_elem(self, estim_cost: gateway_pb2.EstimatedCost, elem: str = 'local') -> None:
             l.LOGGER('    adding elem ' + elem + ' with weight ' + str(estim_cost.cost))
 
-            self.elem_costs.update({
+            self.peer_costs.update({
                 elem: variance_cost_normalization(cost=from_gas_amount(estim_cost.cost), variance=estim_cost.variance)
             })
 
-            self.elem_resources.update({elem: estim_cost.comb_resource_selected})
+            self.peer_resources.update({elem: estim_cost.comb_resource_selected})
 
         def get(self) -> List[Tuple[str, int, int]]:
-            return [(k, v, self.elem_resources[k]) for k, v in
-                    sorted(self.elem_costs.items(),
-                           key=lambda item: self.clauses[self.elem_resources[item[0]]].cost_weight / item[1],
+            sor = sorted(self.peer_costs,
+                         key=lambda item: self.clauses[self.peer_resources[item[0]]].cost_weight / item[1],
+                         reverse=True
+                         )
+            print(f"sorted -> {sor}")
+            for k, v in sor:
+                print("element ", self.peer_resources[k])
+                print("tuple ", (k, v, self.peer_resources[k]))
+            return [(k, v, self.peer_resources[k]) for k, v in
+                    sorted(self.peer_costs.items(),
+                           key=lambda item: self.clauses[self.peer_resources[item[0]]].cost_weight / item[1],
                            reverse=True
                            )
                     ]
