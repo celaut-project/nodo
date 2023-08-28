@@ -1,6 +1,8 @@
 import itertools
 import json
 import os
+from pathlib import Path
+
 import src.manager.resources_manager as resources_manager
 import threading
 from shutil import rmtree
@@ -131,22 +133,22 @@ def build_container_from_definition(service: celaut_pb2.Service,
             pass
 
         # Write all on cache.
-        dir = CACHE + 'builder' + service_id
-        os.mkdir(dir)
-        fs_dir = dir + '/fs'
-        os.mkdir(fs_dir)
+        _dir = CACHE + 'builder' + service_id
+        Path(_dir).mkdir(exist_ok=True, parents=True)
+        fs_dir = _dir + '/fs'
+        Path(fs_dir).mkdir(exist_ok=True, parents=True)
         symlinks = []
         l.LOGGER('Build process of ' + service_id + ': writting filesystem.')
         write_fs(fs_element=fs, dir_element=fs_dir + '/', symlinks_element=symlinks)
 
         # Build it.
         l.LOGGER('Build process of ' + service_id + ': docker building it ...')
-        open(dir + '/Dockerfile', 'w').write('FROM scratch\nCOPY fs .')
+        open(_dir + '/Dockerfile', 'w').write('FROM scratch\nCOPY fs .')
         cache_id = service_id + str(time()) + '.cache'
-        check_output('docker buildx build --platform ' + arch + ' -t ' + cache_id + ' ' + dir + '/.', shell=True)
+        check_output('docker buildx build --platform ' + arch + ' -t ' + cache_id + ' ' + _dir + '/.', shell=True)
         l.LOGGER('Build process of ' + service_id + ': docker build it.')
         try:
-            rmtree(dir)
+            rmtree(_dir)
         except Exception:
             pass
 
