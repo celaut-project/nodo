@@ -27,3 +27,4 @@ def delete(peer_id: str):
 
 def delete_all():
     [delete(_peer) for _peer in peers_id_iterator()]
+    print("All peers deleted.")
