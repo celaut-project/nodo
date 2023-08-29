@@ -10,6 +10,7 @@ if __name__ == '__main__':
               "\n- containers --stream"
               "\n- peers --stream"
               "\n- prune:peer <peer_id>"
+              "\n- prune:peer --all"
               "\n- ledgers --stream"
               "\n- view:contract"
               "\n- deploy:contract"
@@ -48,6 +49,10 @@ if __name__ == '__main__':
             case 'prune:peer':
                 from src.actions.peers import delete
                 delete(sys.argv[2])
+
+            case 'prune:peer --all':
+                from src.actions.peers import delete_all
+                delete_all()
 
             case 'ledgers':
                 from src.actions.ledgers import ledgers

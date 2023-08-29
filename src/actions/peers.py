@@ -12,7 +12,7 @@ def peers(stream: bool = True):
     table_command(f=generator, headers=['PAR'], stream=stream)
 
 
-def delete(peer_id):
+def delete(peer_id: str):
     from src.database.query_interface import commit_query
 
     # TODO delete all the related data.
@@ -23,3 +23,7 @@ def delete(peer_id):
                  )
 
     print(f"Deleted {peer_id} peer")
+
+
+def delete_all():
+    [delete(_peer) for _peer in peers_id_iterator()]
