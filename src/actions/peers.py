@@ -26,5 +26,12 @@ def delete(peer_id: str):
 
 
 def delete_all():
-    [delete(_peer) for _peer in peers_id_iterator()]
+    from src.database.query_interface import commit_query
+
+    # TODO delete all the related data.
+    commit_query(query='''
+                            DELETE FROM peer
+                    ''', params=()
+                 )
+
     print("All peers deleted.")
