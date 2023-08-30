@@ -4,7 +4,7 @@ from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc, gateway_pb2_grpcbf
 import grpc
 from grpcbigbuffer.client import Dir, client_grpc
 
-from main import SORTER, FRONTIER, WALL, WALK, REGRESION, RANDOM, GATEWAY, SHA3_256
+from tests.main import SORTER, FRONTIER, WALL, WALK, REGRESION, RANDOM, GATEWAY, SHA3_256
 
 
 def service_extended(hash):

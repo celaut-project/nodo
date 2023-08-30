@@ -70,5 +70,9 @@ if __name__ == '__main__':
                 from src.actions.storage import prune_blocks
                 prune_blocks()
 
+            case 'test':
+                import sys; _t = sys.argv[2]
+                getattr(__import__(f"tests.{_t}", fromlist=[_t]), _t)()  # Import the test passed on param.
+
             case other:
                 print('Unknown command.')

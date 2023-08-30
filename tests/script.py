@@ -9,7 +9,7 @@ from grpcbigbuffer.client import Dir, client_grpc
 from tests.protos import api_pb2, api_pb2_grpc
 from protos import gateway_pb2, celaut_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input_indices
-from main import RANDOM, SORTER, FRONTIER, GATEWAY, to_gas_amount, SHA3_256
+from tests.main import RANDOM, SORTER, FRONTIER, GATEWAY, to_gas_amount, SHA3_256
 
 LIST_OF_SOLVERS = [FRONTIER]
 

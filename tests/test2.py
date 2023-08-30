@@ -1,6 +1,6 @@
 import threading
 
-from main import RANDOM
+from tests.main import RANDOM
 from protos import celaut_pb2
 
 

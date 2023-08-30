@@ -1,6 +1,6 @@
 from grpcbigbuffer.client import serialize_to_buffer, Dir, parse_from_buffer
 
-from main import SORTER
+from tests.main import SORTER
 from protos import gateway_pb2
 
 buffer = serialize_to_buffer(
