@@ -5,7 +5,7 @@ from grpcbigbuffer import client as grpcbf, buffer_pb2
 from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
 
 from protos import celaut_pb2 as celaut
-from src.gateway.launch_service import launch_service
+from src.gateway.launcher.launch_service import launch_service
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable
 from src.manager.resources_manager import mem_manager
 from src.utils import logger as l
