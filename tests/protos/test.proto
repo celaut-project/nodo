@@ -1,0 +1,9 @@
+package test;
+
+message Test2{
+  optional string b = 2;
+}
+
+message Container{
+  required Test2 t = 1;
+}
