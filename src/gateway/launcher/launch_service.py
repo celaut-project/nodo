@@ -1,71 +1,21 @@
-from hashlib import sha256
 from typing import Optional
 
 import docker as docker_lib
-import grpc
-import os
-import subprocess
-from grpcbigbuffer import client as grpcbf
 
-import src.utils.utils
-from protos import celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_grpcbf import StartService_input_indices
-from src.builder import build
+from protos import celaut_pb2 as celaut, gateway_pb2
 from src.balancers.service_balancer.service_balancer import service_balancer
-from src.gateway.utils import generate_gateway_instance
+from src.builder import build
+from src.gateway.launcher.create_container import create_container
+from src.gateway.launcher.delegate_execution import delegate_execution
+from src.gateway.launcher.set_config import set_config
 from src.manager.manager import default_initial_cost, spend_gas, \
-    generate_client_id_in_other_peer, start_service_cost, add_container
-from src.manager.metrics import gas_amount_on_other_peer
-from src.manager.system_cache import SystemCache
-from src.payment_system.payment_process import increase_deposit_on_peer
+    start_service_cost, add_container
 from src.utils import utils, logger as l
-from src.utils.env import CACHE, DOCKER_CLIENT, DOCKER_COMMAND, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
+from src.utils.env import IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
     DOCKER_NETWORK, \
     DEFAULT_SYSTEM_RESOURCES, GAS_COST_FACTOR
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_gas_amount
-
-
-def set_config(container_id: str, config: Optional[celaut.Configuration], resources: celaut.Sysresources,
-               api: celaut.Service.Container.Config):
-    __config__ = celaut.ConfigurationFile()
-    __config__.gateway.CopyFrom(generate_gateway_instance(network=DOCKER_NETWORK).instance)
-    if config: __config__.config.CopyFrom(config)
-    if resources: __config__.initial_sysresources.CopyFrom(resources)
-
-    os.mkdir(CACHE + container_id)
-    # TODO: Check if api.format is valid or make the serializer for it.
-
-    with open(CACHE + container_id + '/__config__', 'wb') as file:
-        file.write(__config__.SerializeToString())
-    while 1:
-        try:
-            subprocess.run(
-                DOCKER_COMMAND + ' cp ' + CACHE + container_id + '/__config__ ' + container_id + ':/' + '/'.join(
-                    api.path),
-                shell=True
-            )
-            break
-        except subprocess.CalledProcessError as e:
-            l.LOGGER(e.output)
-    os.remove(CACHE + container_id + '/__config__')
-    os.rmdir(CACHE + container_id)
-
-
-def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
-    try:
-        return DOCKER_CLIENT().containers.create(
-            image=id + '.docker',  # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-            entrypoint=' '.join(entrypoint),
-            ports=use_other_ports
-        )
-    except docker_lib.errors.ImageNotFound as e:
-        l.LOGGER('CONTAINER IMAGE NOT FOUND')
-        # TODO build(id) using agents model.
-        raise e
-    except Exception as e:
-        l.LOGGER('DOCKER RUN ERROR -> ' + str(e))
-        raise e
 
 
 def launch_service(
@@ -110,62 +60,11 @@ def launch_service(
 
                 # Delegate the service instance execution.
                 if peer != 'local':
-                    try:
-                        l.LOGGER('El servicio se lanza en el nodo ' + str(peer))
-                        refund_gas = []
-
-                        if not spend_gas(
-                                token_or_container_ip=father_id,
-                                gas_to_spend=cost,
-                                refund_gas_function_container=refund_gas
-                        ):
-                            raise Exception('Launch service error spending gas for ' + father_id)
-
-                        if gas_amount_on_other_peer(
-                                peer_id=peer,
-                        ) <= cost and not increase_deposit_on_peer(
-                            peer_id=peer,
-                            amount=cost
-                        ):
-                            raise Exception(
-                                'Launch service error increasing deposit on ' + peer + 'when it didn\'t have enough '
-                                                                                       'gas.')
-
-                        l.LOGGER('Spent gas, go to launch the service on ' + str(peer))
-                        service_instance = next(grpcbf.client_grpc(
-                            method=gateway_pb2_grpc.GatewayStub(
-                                grpc.insecure_channel(
-                                    next(src.utils.utils.generate_uris_by_peer_id(peer))
-                                )
-                            ).StartService,  # TODO An timeout should be implemented when requesting a service.
-                            partitions_message_mode_parser=True,
-                            indices_serializer=StartService_input_indices,
-                            indices_parser=gateway_pb2.Instance,
-                            input=utils.service_extended(
-                                metadata=metadata,
-                                config=config,
-                                # TODO: Could pass only the previously selected configuration with the estimate cost
-                                #  request, now is allowing to select another (that could be reasonable).
-                                client_id=generate_client_id_in_other_peer(peer_id=peer),
-                                recursion_guard_token=recursion_guard_token
-                            )
-                        ))
-                        encrypted_external_token: str = sha256(service_instance.token.encode('utf-8')).hexdigest()
-                        SystemCache().set_external_on_cache(
-                            agent_id=father_id,
-                            peer_id=peer,  # Add node_uri.
-                            encrypted_external_token=encrypted_external_token,  # Add token.
-                            external_token=service_instance.token
-                        )
-                        service_instance.token = father_id + '##' + peer + '##' + encrypted_external_token
-                        # TODO adapt for ipv6 too.
-                        return service_instance
-                    except Exception as e:
-                        l.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
-                        try:
-                            refund_gas.pop()()
-                        except IndexError:
-                            pass
+                    return delegate_execution(
+                        peer=peer, father_id=father_id,
+                        cost=cost, metadata=metadata, config=config,
+                        recursion_guard_token=recursion_guard_token
+                    )
 
                 #  The node launches the service locally.
                 if getting_container:
