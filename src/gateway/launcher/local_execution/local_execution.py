@@ -70,7 +70,7 @@ def local_execution(
     # Reload this object from the server again and update attrs with the new data.
     container.reload()
 
-    for internal, external in assigment_ports:
+    for internal, external in assigment_ports.items():
         uri_slot = celaut.Instance.Uri_Slot()
         uri_slot.internal_port = internal
 
