@@ -1,11 +1,11 @@
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, Dict
 
 import docker as docker_lib
 
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.builder import build
-from src.gateway.launcher.create_container import create_container
-from src.gateway.launcher.set_config import set_config
+from src.gateway.launcher.local_execution.create_container import create_container
+from src.gateway.launcher.local_execution.set_config import set_config
 from src.manager.manager import default_initial_cost, add_container
 from src.utils import utils, logger as l
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
@@ -46,68 +46,41 @@ def local_execution(
             raise e
 
     # If the request is made by a local service.
-    if father_id == father_ip:
-        container = create_container(
-            id=service_id,
-            entrypoint=service.container.entrypoint
-        )
+    by_local: bool = father_id == father_ip
+    assigment_ports: Optional[Dict[int, int]] = {slot.port: utils.get_free_port() for slot in service.api.slot} \
+        if not by_local else {slot.port: slot.port for slot in service.api.slot}
 
-        set_config(container_id=container.id, config=config.config, resources=initial_system_resources,
-                   api=service.container.config)
+    container = create_container(
+        use_other_ports=assigment_ports if not by_local else None,
+        id=service_id,
+        entrypoint=service.container.entrypoint
+    )
 
-        # The container must be started after adding the configuration file and
-        #  before requiring its IP address, since docker assigns it at startup.
+    set_config(container_id=container.id, config=config.config, resources=initial_system_resources,
+               api=service.container.config)
 
-        try:
-            container.start()
-        except docker_lib.errors.APIError as e:
-            l.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' ' + str(
-                e))  # TODO LOS ERRORES DEBERIAN LANZAR ALGUN TIPO DE EXCEPCION QUE LLEGUE HASTA EL GRPC.
+    # The container must be started after adding the configuration file and
+    #  before requiring its IP address, since docker assigns it at startup.
 
-        # Reload this object from the server again and update attrs with the new data.
-        container.reload()
+    try:
+        container.start()
+    except docker_lib.errors.APIError as e:
+        l.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' ' + str(e))
 
-        for slot in service.api.slot:
-            uri_slot = celaut.Instance.Uri_Slot()
-            uri_slot.internal_port = slot.port
+    # Reload this object from the server again and update attrs with the new data.
+    container.reload()
 
-            # Since it is internal, we know that it will only have one possible address per slot.
-            uri = celaut.Instance.Uri()
-            uri.ip = container.attrs['NetworkSettings']['IPAddress']
-            uri.port = slot.port
-            uri_slot.uri.append(uri)
+    for internal, external in assigment_ports:
+        uri_slot = celaut.Instance.Uri_Slot()
+        uri_slot.internal_port = internal
 
-    # Si hace la peticion un servicio de otro nodo.
-    else:
-        assigment_ports = {slot.port: utils.get_free_port() for slot in service.api.slot}
-        container = create_container(
-            use_other_ports=assigment_ports,
-            id=service_id,
-            entrypoint=service.container.entrypoint
-        )
-        set_config(container_id=container.id, config=config.config, resources=initial_system_resources,
-                   api=service.container.config)
-        try:
-            container.start()
-        except docker_lib.errors.APIError as e:
-            # TODO LOS ERRORES DEBERÍAN LANZAR UNA EXCEPCION QUE LLEGUE HASTA EL GRPC.
-            print(service_id, service.container.entrypoint, type(service.container.entrypoint))
-            l.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' ' + str(e))
-
-            # Reload this object from the server again and update attrs with the new data.
-        container.reload()
-
-        for port in assigment_ports:
-            uri_slot = celaut.Instance.Uri_Slot()
-            uri_slot.internal_port = port
-
-            # for host_ip in host_ip_list:
-            uri = celaut.Instance.Uri()
-            uri.ip = utils.get_local_ip_from_network(
-                network=utils.get_network_name(ip_or_uri=father_ip)
-            )
-            uri.port = assigment_ports[port]
-            uri_slot.uri.append(uri)
+        # for host_ip in host_ip_list:
+        uri = celaut.Instance.Uri()
+        uri.ip = utils.get_local_ip_from_network(
+            network=utils.get_network_name(ip_or_uri=father_ip)
+        ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
+        uri.port = external
+        uri_slot.uri.append(uri)
 
     l.LOGGER('Thrown out a new instance by ' + father_id + ' of the container_id ' + container.id)
     return gateway_pb2.Instance(

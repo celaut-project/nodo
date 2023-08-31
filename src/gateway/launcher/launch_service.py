@@ -1,22 +1,14 @@
 from typing import Optional
 
-import docker as docker_lib
-
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.balancers.service_balancer.service_balancer import service_balancer
-from src.builder import build
-from src.gateway.launcher.create_container import create_container
-from src.gateway.launcher.delegate_execution import delegate_execution
+from src.gateway.launcher.delegate_execution.delegate_execution import delegate_execution
 from src.gateway.launcher.local_execution.local_execution import local_execution
-from src.gateway.launcher.set_config import set_config
-from src.manager.manager import default_initial_cost, spend_gas, \
-    start_service_cost, add_container
+from src.manager.manager import spend_gas
 from src.utils import utils, logger as l
 from src.utils.env import IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
-    DOCKER_NETWORK, \
-    DEFAULT_SYSTEM_RESOURCES, GAS_COST_FACTOR
+    DOCKER_NETWORK
 from src.utils.tools.recursion_guard import RecursionGuard
-from src.utils.utils import from_gas_amount
 
 
 def launch_service(
