@@ -4,6 +4,7 @@ from protos import gateway_pb2
 from src.balancers.resource_balancer.resource_balancer import ClauseResource
 from src.balancers.resource_balancer.variance_cost_normalization import variance_cost_normalization
 from src.utils.utils import from_gas_amount
+from src.utils.logger import LOGGER
 
 
 class PeerCostList:
@@ -15,7 +16,7 @@ class PeerCostList:
         self.clauses: Dict[int, ClauseResource] = dict(config.resources.clause)
 
     def add_elem(self, estim_cost: gateway_pb2.EstimatedCost, elem: str = 'local') -> None:
-        l.LOGGER('    adding elem ' + elem + ' with weight ' + str(estim_cost.cost))
+        LOGGER('    adding elem ' + elem + ' with weight ' + str(estim_cost.cost))
 
         if estim_cost.comb_resource_selected not in self.clauses:
             raise Exception(f"Invalid selected clause {estim_cost.comb_resource_selected}.")

@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple, List
+from typing import Optional, Tuple, List
 
 import grpc
 from grpcbigbuffer import client as grpcbf
@@ -7,15 +7,14 @@ import protos.celaut_pb2 as celaut
 from protos import gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input_indices
 from src.balancers.resource_balancer.resource_balancer \
-    import ClauseResource, resource_configuration_balancer
-from src.balancers.resource_balancer.variance_cost_normalization import variance_cost_normalization
+    import resource_configuration_balancer
+from src.balancers.service_balancer.peer_cost_list import PeerCostList
 from src.builder import build
 from src.manager.manager import default_initial_cost, generate_client_id_in_other_peer, start_service_cost
 from src.utils import logger as l
 from src.utils.env import SEND_ONLY_HASHES_ASKING_COST, EXTERNAL_COST_TIMEOUT
 from src.utils.utils import from_gas_amount, to_gas_amount, service_extended, peers_id_iterator, \
     generate_uris_by_peer_id
-from src.balancers.service_balancer.peer_cost_list import PeerCostList
 
 
 def service_balancer(
