@@ -9,7 +9,7 @@ from shutil import rmtree
 from subprocess import check_output, CalledProcessError
 from subprocess import run
 from time import sleep, time
-from typing import Tuple
+from typing import Tuple, Optional
 
 from grpcbigbuffer.client import copy_block_if_exists
 
@@ -188,8 +188,7 @@ def build_container_from_definition(service: celaut_pb2.Service,
 def build(
         service: celaut_pb2.Service,
         metadata: gateway_pb2.celaut__pb2.Any.Metadata,
-        get_it: bool = True,
-        service_id=None,
+        service_id: Optional[str] = None,
 ) -> str:
     if not service_id:
         try:
@@ -200,29 +199,24 @@ def build(
             l.LOGGER("Builder exception: can't obtain the service identifier")
             raise e
 
-    if get_it: l.LOGGER('Building ' + service_id)
-    try:
-        # check if it's locally.
-        check_output(DOCKER_COMMAND + ' inspect ' + service_id + '.docker', shell=True)
-        return service_id
+    l.LOGGER('Building ' + service_id)
+    while True:
+        try:
+            # check if it's locally.
+            check_output(DOCKER_COMMAND + ' inspect ' + service_id + '.docker', shell=True)
+            return service_id
 
-    except CalledProcessError:
-        sleep(1)  # TODO -> TMB(typical multithread bug).
-        if get_it and service_id not in actual_building_processes:
+        except CalledProcessError:
+            if service_id in actual_building_processes:
+                sleep(WAIT_FOR_CONTAINER)
+                continue
+
             actual_building_processes_lock.acquire()
             actual_building_processes.append(service_id)
             actual_building_processes_lock.release()
 
-            threading.Thread(
-                target=build_container_from_definition,
-                args=(
-                    service,
-                    metadata,
-                    service_id
-                )
-            ).start()
-        else:
-            sleep(WAIT_FOR_CONTAINER)
-        raise WaitBuildException
-
-    # verify() TODO ??
+            build_container_from_definition(
+                service=service,
+                metadata=metadata,
+                service_id=service_id
+            )

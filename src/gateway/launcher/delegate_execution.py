@@ -1,4 +1,5 @@
 from hashlib import sha256
+from typing import Callable, List
 
 import grpc
 from grpcbigbuffer import client as grpcbf
@@ -17,18 +18,11 @@ from src.utils import utils, logger as l
 def delegate_execution(
                         peer: str, father_id: str,
                         cost: int, metadata, config,
-                        recursion_guard_token
+                        recursion_guard_token,
+                        refund_gas: List[Callable]
                    ) -> gateway_pb2.Instance:
     try:
         l.LOGGER('El servicio se lanza en el nodo ' + str(peer))
-        refund_gas = []
-
-        if not spend_gas(
-                token_or_container_ip=father_id,
-                gas_to_spend=cost,
-                refund_gas_function_container=refund_gas
-        ):
-            raise Exception('Launch service error spending gas for ' + father_id)
 
         if gas_amount_on_other_peer(
                 peer_id=peer,
