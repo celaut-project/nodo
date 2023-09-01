@@ -9,7 +9,7 @@ from shutil import rmtree
 from subprocess import check_output, CalledProcessError
 from subprocess import run
 from time import sleep, time
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Set
 
 from grpcbigbuffer.client import copy_block_if_exists
 
@@ -59,7 +59,7 @@ class UnsupportedArchitectureException(Exception):
 
 
 actual_building_processes_lock = threading.Lock()
-actual_building_processes = []  # list of hexadecimal string sha256 value hashes.
+actual_building_processes: Set[str] = set()  # list of hexadecimal string sha256 value hashes.
 
 
 def build_container_from_definition(service: celaut_pb2.Service,
@@ -180,9 +180,8 @@ def build_container_from_definition(service: celaut_pb2.Service,
         check_output('docker rmi ' + cache_id, shell=True)
         l.LOGGER('Build process of ' + service_id + ': finished.')
 
-        actual_building_processes_lock.acquire()
-        actual_building_processes.remove(service_id)
-        actual_building_processes_lock.release()
+        with actual_building_processes_lock:
+            actual_building_processes.remove(service_id)
 
 
 def build(
@@ -211,9 +210,8 @@ def build(
                 sleep(WAIT_FOR_CONTAINER)
                 continue
 
-            actual_building_processes_lock.acquire()
-            actual_building_processes.append(service_id)
-            actual_building_processes_lock.release()
+            with actual_building_processes_lock:
+                actual_building_processes.add(service_id)
 
             build_container_from_definition(
                 service=service,
