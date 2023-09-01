@@ -50,9 +50,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GenerateClient(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?
-        for b in grpcbf.serialize_to_buffer(
+        yield from grpcbf.serialize_to_buffer(
                 message_iterator=generate_client()
-        ): yield b
+        )
 
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
         l.LOGGER('Request for modify service system resources.')
@@ -79,11 +79,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 pass
             raise Exception('Exception on service modify method.')
 
-        for b in grpcbf.serialize_to_buffer(
+        yield from grpcbf.serialize_to_buffer(
                 message_iterator=get_sysresources(
                     token=token
                 )
-        ): yield b
+        )
 
     def Compile(self, request_iterator, context, **kwargs):
         l.LOGGER('Go to compile a proyect.')
@@ -94,10 +94,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ))
         if _d.type != bytes:
             raise Exception("Incorrect input on Compile gRPC-bb method. Should be bytes")
-        for b in compile_zip(
-                zip=_d.dir
-        ):
-            yield b
+        yield from compile_zip(zip=_d.dir)
 
     # Estimacion de coste de ejecución de un servicio con la cantidad de gas por defecto.
     def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
@@ -116,7 +113,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 contract=payment.contract_ledger.contract,
                 contract_addr=payment.contract_ledger.contract_addr,
                 token=payment.deposit_token,
-        ): raise Exception('Error: payment not valid.')
+        ):
+            raise Exception('Error: payment not valid.')
         l.LOGGER('Payment is valid.')
         for b in grpcbf.serialize_to_buffer(): yield b
 
