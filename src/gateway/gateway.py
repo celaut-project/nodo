@@ -38,7 +38,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetInstance(self, request_iterator, context, **kwargs):
         l.LOGGER('Request for instance by ' + str(context.peer()))
-        for b in grpcbf.serialize_to_buffer(
+        yield from grpcbf.serialize_to_buffer(
                 generate_gateway_instance(
                     network=get_network_name(
                         ip_or_uri=get_only_the_ip_from_context(
@@ -46,7 +46,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         )
                     )
                 )
-        ): yield b
+        )
 
     def GenerateClient(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?
