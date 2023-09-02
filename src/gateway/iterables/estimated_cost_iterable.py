@@ -7,9 +7,10 @@ from src.balancers.resource_balancer.resource_balancer \
     import resource_configuration_balancer
 from src.builder import build
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable, BreakIteration
-from src.manager.manager import default_initial_cost, start_service_cost
-from src.utils import logger as l
+from src.manager.manager import default_initial_cost, compute_start_service_cost, compute_maintenance_cost
+from src.utils.logger import LOGGER as log
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount
+from src.utils.env import MANAGER_ITERATION_TIME
 
 
 class GetServiceEstimatedCostIterable(AbstractServiceIterable):
@@ -18,7 +19,7 @@ class GetServiceEstimatedCostIterable(AbstractServiceIterable):
     cost: Optional[int] = None
 
     def start(self):
-        l.LOGGER('Request for the cost of a service.')
+        log('Request for the cost of a service.')
 
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
         try:
@@ -30,14 +31,28 @@ class GetServiceEstimatedCostIterable(AbstractServiceIterable):
                     father_id=self.client_id if self.client_id
                         else get_only_the_ip_from_context(context_peer=self.context.peer())
                     )
-            cost: int = start_service_cost(metadata=self.metadata, initial_gas_amount=initial_gas_amount)
+            cost: int = compute_start_service_cost(metadata=self.metadata, initial_gas_amount=initial_gas_amount)
+            maintenance_cost: int = compute_maintenance_cost(
+                resources=self.configuration.resources.clause[selected_clause]
+            )
 
-            l.LOGGER(f'Execution cost for a service is requested: '
-                     f'resource -> {selected_clause}. cost -> {cost} with benefit  {0}')
+            log(f'Execution cost for a service is requested: '
+                     f'resource -> {selected_clause}. cost -> {cost} with benefit  {0}'
+                     f'and maintenance cost -> {maintenance_cost} with benefit {0}.')
 
             yield from grpcbf.serialize_to_buffer(
+                # message_iterator=generate_estimated_cost(  # TODO implementar y utilizar este método
+                #              metadata=metadata,
+                #              initial_gas_amount=initial_gas_amount,
+                #              config=config,
+                #              log=lambda selected_clause, cost, maintenance_cost: f'Execution cost for a service is requested: '
+                #                      f'resource -> {selected_clause}. cost -> {cost} with benefit  {0}'
+                #                      f'and maintenance cost -> {maintenance_cost} with benefit {0}.'
+                #          )
                 message_iterator=gateway_pb2.EstimatedCost(
                     cost=to_gas_amount(cost),
+                    maintenance_cost=to_gas_amount(maintenance_cost),
+                    maintance_seconds_loop=MANAGER_ITERATION_TIME,
                     variance=0,  # TODO dynamic variance.
                     comb_resource_selected=selected_clause
                 ),

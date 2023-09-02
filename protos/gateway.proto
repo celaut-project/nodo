@@ -13,8 +13,10 @@ message TokenMessage {
 
 message EstimatedCost {
     GasAmount cost = 1;
-    float variance = 2;
-    int32 comb_resource_selected = 3;
+    GasAmount maintenance_cost = 2;
+    int32 maintenance_seconds_loop = 3;
+    float variance = 4;
+    int32 comb_resource_selected = 5;
 }
 
 message Refund {

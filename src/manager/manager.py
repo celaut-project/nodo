@@ -2,13 +2,14 @@ import json
 import sqlite3
 import uuid
 from hashlib import sha3_256
-from typing import Optional
+from typing import Optional, Callable
 
 import docker as docker_lib
 import grpc
 from grpcbigbuffer import client as grpcbf
 from google.protobuf.json_format import MessageToJson
 
+from src.balancers.resource_balancer.resource_balancer import ClauseResource
 from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 
@@ -436,10 +437,30 @@ def execution_cost(metadata: celaut.Any.Metadata) -> int:
         raise e
 
 
-def start_service_cost(
+def compute_start_service_cost(
         metadata: celaut.Any.Metadata,
-        initial_gas_amount: int
+        initial_gas_amount: int,
+        resource: ClauseResource
 ) -> int:
-    return execution_cost(
-        metadata=metadata
-    ) * GAS_COST_FACTOR + initial_gas_amount  # TODO add resources cost to the execution cost.
+    return sum([
+        execution_cost(
+            metadata=metadata
+        ) * GAS_COST_FACTOR,
+        initial_gas_amount,
+        compute_maintenance_cost(resource=resource)
+    ])
+
+
+def compute_maintenance_cost(
+        resource: ClauseResource
+) -> int:
+    return 0   # TODO compute maintenance cost using resources.
+
+
+def generate_estimated_cost(
+        metadata: celaut.Any.Metadata,
+        initial_gas_amount: int,
+        config: Optional[gateway_pb2.Configuration],
+        log: Callable
+) -> gateway_pb2.EstimatedCost:
+    return gateway_pb2.EstimatedCost()
