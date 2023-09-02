@@ -22,7 +22,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def StopService(self, request_iterator, context, **kwargs):
         try:
             l.LOGGER('Stopping service.')
-            for b in grpcbf.serialize_to_buffer(
+            yield from grpcbf.serialize_to_buffer(
                     message_iterator=gateway_pb2.Refund(
                         amount=to_gas_amount(prune_container(
                             token=next(grpcbf.parse_from_buffer(
@@ -32,7 +32,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             )).token
                         ))
                     )
-            ): yield b
+            )
         except Exception as e:
             raise Exception('Was imposible stop the service. ' + str(e))
 
