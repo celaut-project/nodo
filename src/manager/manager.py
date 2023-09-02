@@ -9,7 +9,7 @@ import grpc
 from grpcbigbuffer import client as grpcbf
 from google.protobuf.json_format import MessageToJson
 
-from src.balancers.resource_balancer.resource_balancer import ClauseResource
+from src.balancers.resource_balancer.resource_balancer import ClauseResource, resource_configuration_balancer
 from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, celaut_pb2 as celaut, gateway_pb2, gateway_pb2_grpc
 
@@ -21,7 +21,7 @@ from src.utils import logger as l
 from src.utils.env import ALLOW_GAS_DEBT, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
     DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
     MEMORY_LIMIT_COST_FACTOR, DOCKER_CLIENT, COST_OF_BUILD, COMPUTE_POWER_RATE, EXECUTION_BENEFIT, SHA3_256_ID, \
-    GAS_COST_FACTOR
+    GAS_COST_FACTOR, MANAGER_ITERATION_TIME
 from src.utils.utils import get_network_name, \
     is_peer_available, to_gas_amount, \
     get_service_hex_main_hash, generate_uris_by_peer_id
@@ -454,13 +454,28 @@ def compute_start_service_cost(
 def compute_maintenance_cost(
         resource: ClauseResource
 ) -> int:
-    return 0   # TODO compute maintenance cost using resources.
+    return 0  # TODO compute maintenance cost using resources.
 
 
 def generate_estimated_cost(
         metadata: celaut.Any.Metadata,
         initial_gas_amount: int,
         config: Optional[gateway_pb2.Configuration],
-        log: Callable
+        log: Optional[Callable]
 ) -> gateway_pb2.EstimatedCost:
-    return gateway_pb2.EstimatedCost()
+    selected_clause: int = resource_configuration_balancer(clauses=dict(config.resources.clause))
+
+    cost: int = compute_start_service_cost(metadata=metadata, initial_gas_amount=initial_gas_amount)
+    maintenance_cost: int = compute_maintenance_cost(
+        resource=config.resources.clause[selected_clause]
+    )
+
+    if log: log()
+
+    return gateway_pb2.EstimatedCost(
+        cost=to_gas_amount(cost),
+        maintenance_cost=to_gas_amount(maintenance_cost),
+        maintance_seconds_loop=MANAGER_ITERATION_TIME,
+        variance=0,  # TODO dynamic variance.
+        comb_resource_selected=selected_clause
+    )
