@@ -7,4 +7,5 @@ web3==6.5.0
 ergpy==0.1.9.0
 ecdsa==0.18.0
 python-dotenv==1.0.0
+numba==0.57.1
 git+https://github.com/jossemii/GRPCBigBuffer
