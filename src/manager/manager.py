@@ -470,7 +470,8 @@ def generate_estimated_cost(
         resource=config.resources.clause[selected_clause]
     )
 
-    if log: log()
+    if log:
+        log()
 
     return gateway_pb2.EstimatedCost(
         cost=to_gas_amount(cost),
