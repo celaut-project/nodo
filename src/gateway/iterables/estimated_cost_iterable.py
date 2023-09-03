@@ -7,7 +7,8 @@ from src.balancers.resource_balancer.resource_balancer \
     import resource_configuration_balancer
 from src.builder import build
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable, BreakIteration
-from src.manager.manager import default_initial_cost, compute_start_service_cost, compute_maintenance_cost
+from src.manager.manager import default_initial_cost
+from src.manager.cost_functions import compute_start_service_cost, compute_maintenance_cost
 from src.utils.logger import LOGGER as log
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount
 from src.utils.env import MANAGER_ITERATION_TIME

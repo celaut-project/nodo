@@ -10,8 +10,8 @@ from src.balancers.resource_balancer.resource_balancer \
     import resource_configuration_balancer
 from src.balancers.service_balancer.peer_cost_list import PeerCostList
 from src.builder import build
-from src.manager.manager import default_initial_cost, generate_client_id_in_other_peer, compute_start_service_cost, \
-    compute_maintenance_cost, generate_estimated_cost
+from src.manager.manager import default_initial_cost, generate_client_id_in_other_peer
+from src.manager.cost_functions import compute_start_service_cost, compute_maintenance_cost, generate_estimated_cost
 from src.utils import logger as l
 from src.utils.env import SEND_ONLY_HASHES_ASKING_COST, EXTERNAL_COST_TIMEOUT
 from src.utils.utils import from_gas_amount, to_gas_amount, service_extended, peers_id_iterator, \

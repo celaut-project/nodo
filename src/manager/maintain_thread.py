@@ -1,7 +1,8 @@
 from time import sleep
 import docker as docker_lib
 
-from src.manager.manager import add_peer, prune_container, maintain_cost, spend_gas
+from src.manager.manager import add_peer, prune_container, spend_gas
+from src.manager.cost_functions import maintain_cost
 from src.manager.metrics import gas_amount_on_other_peer
 from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
 from src.manager.system_cache import SystemCache
