@@ -1,8 +1,9 @@
 from time import sleep
 import docker as docker_lib
 
+from protos import celaut_pb2 as celaut
 from src.manager.manager import add_peer, prune_container, spend_gas
-from src.manager.cost_functions import maintain_cost
+from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.manager.metrics import gas_amount_on_other_peer
 from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
 from src.manager.system_cache import SystemCache
@@ -28,7 +29,11 @@ def maintain_containers():
 
         if not spend_gas(
                 token_or_container_ip=token,
-                gas_to_spend=maintain_cost(sysreq)
+                gas_to_spend=compute_maintenance_cost(
+                    system_resources=celaut.Sysresources(
+                        mem_limit=sysreq['mem_limit']
+                    )
+                )
         ):
             try:
                 prune_container(token=token)

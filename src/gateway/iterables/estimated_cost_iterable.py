@@ -3,15 +3,12 @@ from typing import Optional, Generator
 from grpcbigbuffer import client as grpcbf, buffer_pb2
 
 from protos import gateway_pb2
-from src.balancers.resource_balancer.resource_balancer \
-    import resource_configuration_balancer
 from src.builder import build
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable, BreakIteration
 from src.manager.manager import default_initial_cost
-from src.manager.cost_functions import compute_start_service_cost, compute_maintenance_cost
+from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.logger import LOGGER as log
-from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount
-from src.utils.env import MANAGER_ITERATION_TIME
+from src.utils.utils import from_gas_amount, get_only_the_ip_from_context
 
 
 class GetServiceEstimatedCostIterable(AbstractServiceIterable):
@@ -32,13 +29,10 @@ class GetServiceEstimatedCostIterable(AbstractServiceIterable):
                     )
 
             yield from grpcbf.serialize_to_buffer(
-                message_iterator=generate_estimated_cost(  # TODO implementar y utilizar este método
+                message_iterator=generate_estimated_cost(
                     metadata=metadata,
                     initial_gas_amount=initial_gas_amount,
-                    config=config,
-                    log=lambda selected_clause, cost, maintenance_cost: f'Execution cost for a service is requested: '
-                         f'resource -> {selected_clause}. cost -> {cost} with benefit  {0}'
-                         f'and maintenance cost -> {maintenance_cost} with benefit {0}.'
+                    config=config
                 ),
                 indices=gateway_pb2.EstimatedCost
             )
