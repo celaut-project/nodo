@@ -30,8 +30,11 @@ def configuration_balancer(
                 initial_gas_amount=initial_gas_amount,
                 resource=clause
             )),
-            maintenance_cost=to_gas_amount(compute_maintenance_cost(
+            min_maintenance_cost=to_gas_amount(compute_maintenance_cost(
                 system_resources=clause.min_sysreq
+            )),
+            max_maintenance_cost=to_gas_amount(compute_maintenance_cost(
+                system_resources=clause.max_sysreq  # TODO make optional
             )),
             maintenance_seconds_loop=MANAGER_ITERATION_TIME,
             variance=0,  # TODO compute_variance

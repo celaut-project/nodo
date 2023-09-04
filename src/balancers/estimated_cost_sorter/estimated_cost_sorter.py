@@ -17,12 +17,23 @@ def estimated_cost_sorter(
                 from_gas_amount(estimated_cost.cost),
                 estimated_cost.variance
             ),
-            variance_cost_normalization(
-                normalized_maintain_cost(
-                    from_gas_amount(estimated_cost.maintenance_cost),
-                    estimated_cost.maintenance_seconds_loop
-                ),
-                estimated_cost.variance
+            int(
+                sum([
+                    variance_cost_normalization(
+                        normalized_maintain_cost(
+                            from_gas_amount(estimated_cost.min_maintenance_cost),
+                            estimated_cost.maintenance_seconds_loop
+                        ),
+                        estimated_cost.variance
+                    ),
+                    variance_cost_normalization(
+                        normalized_maintain_cost(
+                            from_gas_amount(estimated_cost.max_maintenance_cost),
+                            estimated_cost.maintenance_seconds_loop
+                        ),
+                        estimated_cost.variance
+                    )
+                ]) / 2
             )
         ])
 
