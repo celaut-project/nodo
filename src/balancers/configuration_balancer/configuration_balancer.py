@@ -32,10 +32,10 @@ def configuration_balancer(
             )),
             min_maintenance_cost=to_gas_amount(compute_maintenance_cost(
                 system_resources=clause.min_sysreq
-            )),
+            )) if clause.HasField('min_sysreq') else to_gas_amount(gas_amount=0),
             max_maintenance_cost=to_gas_amount(compute_maintenance_cost(
-                system_resources=clause.max_sysreq  # TODO make optional
-            )),
+                system_resources=clause.max_sysreq
+            )) if clause.HasField('max_sysreq') else to_gas_amount(gas_amount=0),
             maintenance_seconds_loop=MANAGER_ITERATION_TIME,
             variance=0,  # TODO compute_variance
             comb_resource_selected=_i
