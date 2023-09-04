@@ -3,7 +3,8 @@ from typing import Dict, Tuple, Generator
 from protos import gateway_pb2
 from src.utils.cost_functions.general_cost_functions import normalized_maintain_cost
 from src.utils.cost_functions.variance_cost_normalization import variance_cost_normalization
-from src.utils.env import WEIGHT_CONFIGURATION_FACTOR
+from src.utils.env import WEIGHT_CONFIGURATION_FACTOR, INIT_COST_CONFIGURATION_FACTOR, \
+    MAINTENANCE_COST_CONFIGURATION_FACTOR
 from src.utils.utils import from_gas_amount
 
 
@@ -16,7 +17,7 @@ def estimated_cost_sorter(
             variance_cost_normalization(
                 from_gas_amount(estimated_cost.cost),
                 estimated_cost.variance
-            ),
+            ) * INIT_COST_CONFIGURATION_FACTOR,
             int(
                 sum([
                     variance_cost_normalization(
@@ -34,7 +35,7 @@ def estimated_cost_sorter(
                         estimated_cost.variance
                     )
                 ]) / 2
-            )
+            ) * MAINTENANCE_COST_CONFIGURATION_FACTOR
         ])
 
     return ((_id, estimated_cost) for _id, estimated_cost in
