@@ -31,7 +31,7 @@ class GetServiceEstimatedCostIterable(AbstractServiceIterable):
             yield from grpcbf.serialize_to_buffer(
                 message_iterator=generate_estimated_cost(
                     metadata=self.metadata,
-                    initial_gas_amount=self.initial_gas_amount,
+                    initial_gas_amount=initial_gas_amount,
                     config=self.configuration
                 ),
                 indices=gateway_pb2.EstimatedCost
