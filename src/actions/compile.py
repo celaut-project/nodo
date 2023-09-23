@@ -81,6 +81,7 @@ def generate_service_zip(project_directory: str) -> str:
         compile_config = json.load(config_file)
 
     # Copia los archivos del proyecto a complete_source_directory
+    # TODO   Bug: don't work for hidden directories' files.
     os.system(f"cp -r {' '.join([os.path.join(project_directory, item) for item in compile_config['include']])} "
               f"{complete_source_directory}")
 
