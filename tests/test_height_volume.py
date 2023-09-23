@@ -56,7 +56,7 @@ def get_grpc_uri(instance: celaut_pb2.Instance) -> celaut_pb2.Instance.Uri:
 
 g_stub = gateway_pb2_grpc.GatewayStub(
 
-    grpc.insecure_channel(GATEWAY + ':8090'),
+    grpc.insecure_channel(GATEWAY),
 )
 
 

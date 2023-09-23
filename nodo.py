@@ -14,6 +14,7 @@ if __name__ == '__main__':
               "\n- ledgers --stream"
               "\n- view:contract"
               "\n- deploy:contract"
+              "\n- test:<test name>"
               )
     else:
         match sys.argv[1]:

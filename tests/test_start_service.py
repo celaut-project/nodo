@@ -1,15 +1,20 @@
 # Test combine method.
-import grpc
+from typing import Final
+
+import grpc, sys
 from grpcbigbuffer.client import Dir, client_grpc
 
+from src.utils.logger import LOGGER
 from tests.main import GATEWAY, SHA3_256, SORTER, FRONTIER
 from protos import gateway_pb2, celaut_pb2, gateway_pb2_grpc, gateway_pb2_grpcbf
 
 
 def test_start_service():
 
-    SERVICE = SORTER
-
+    try:
+        SERVICE: Final[str] = eval(sys.argv[3])
+    except IndexError:
+        LOGGER('Provide the name of a service (from .services) as the third parameter.')
 
     def service_extended():
         # Send partition model.
@@ -37,7 +42,7 @@ def test_start_service():
 
 
     g_stub = gateway_pb2_grpc.GatewayStub(
-        grpc.insecure_channel(GATEWAY + ':8090'),
+        grpc.insecure_channel(GATEWAY),
     )
 
     service = next(client_grpc(

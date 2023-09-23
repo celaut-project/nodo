@@ -3,7 +3,7 @@ import os
 import sys
 from hashlib import sha3_256
 
-from typing import Optional, Dict, Generator
+from typing import Optional, Dict
 
 import grpc
 from grpcbigbuffer import client as grpcbb
@@ -11,12 +11,9 @@ from grpcbigbuffer import client as grpcbb
 from protos import celaut_pb2, compile_pb2, gateway_pb2_grpcbf, gateway_pb2_grpc
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 
-ZIP_SOURCE_DIRECTORY = 'src'
+from src.utils.env import METADATA_REGISTRY as METADATA, REGISTRY as SERVICES, BLOCKDIR as BLOCKS
 
-# Local storage directories
-SERVICES = '__registry__'
-METADATA = '__metadata__'
-BLOCKS = '__block__'
+ZIP_SOURCE_DIRECTORY = 'src'
 
 # Pre-compile json keys of service storage directories.
 SERVICE_DEPENDENCIES_DIRECTORY = "service_dependencies_directory"
