@@ -23,7 +23,8 @@ BLOCKS_DIRECTORY = "blocks_directory"
 
 def export_registry(directory: str, compile_config: Dict):
     list(map(
-        lambda _reg: os.makedirs(f"{directory}/{compile_config[_reg]}"),
+        lambda _reg: os.makedirs(f"{directory}/{compile_config[_reg]}")
+            if _reg in compile_config and type(compile_config[_reg]) is str else 1,
         [
             SERVICE_DEPENDENCIES_DIRECTORY,
             METADATA_DEPENDENCIES_DIRECTORY,
@@ -121,7 +122,7 @@ def generate_service_zip(project_directory: str) -> str:
 def _compile(zip, node: str):
     yield from grpcbb.client_grpc(
         method=gateway_pb2_grpc.GatewayStub(
-            grpc.insecure_channel(node + ':8090')
+            grpc.insecure_channel(node)
         ).Compile,
         input=grpcbb.Dir(dir=zip, _type=bytes),
         indices_serializer={0: bytes},
@@ -130,12 +131,12 @@ def _compile(zip, node: str):
     )
 
 
-def on_peer(peer):
+def on_peer(peer: str, service_zip_dir: str):
     _id: Optional[str] = None
-    print(f'Start compile.')
+    print(f'Start compile on {peer}')
     for b in _compile(
             zip=service_zip_dir,
-            node=peer if len(sys.argv) == 2 else sys.argv[2]
+            node=peer
     ):
         print('b -> ', b, type(b), b.type if type(b) is grpcbb.Dir else None)
         print(f"_id -> {_id}")
@@ -164,24 +165,19 @@ def on_peer(peer):
         for i in grpcbb.read_multiblock_directory('__registry__/' + _id + '/'):
             validate_id.update(i)
     except Exception as e:
-        print(f"¿Tal vez no tiene bloques? {str(e)}")
+        print(f"Maybe it doesn't have blocks? {str(e)}")
 
     print("validated service id -> ", validate_id.hexdigest())
 
 
-if __name__ == '__main__':
-    if not os.path.exists('__cache__'):
-        os.mkdir('__cache__')
-
-    if not os.path.exists('__registry__'):
-        os.mkdir('__registry__')
-
+def compile_directory(directory: str):
     service_zip_dir: str = generate_service_zip(
-        project_directory=sys.argv[1]
+        project_directory=directory
     )
 
-    [
-        on_peer(peer=f"{ip}:{port}")
+    # TODO check if dependencies has directories, and compile them before.
+    next((
+        on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
         for peer_id in get_peer_ids()
         for ip, port in get_peer_directions(peer_id=peer_id)
-    ]
+    ))

@@ -15,6 +15,7 @@ if __name__ == '__main__':
               "\n- view:contract"
               "\n- deploy:contract"
               "\n- test:<test name>"
+              "\n- compile <project directory>"
               )
     else:
         match sys.argv[1]:
@@ -72,8 +73,12 @@ if __name__ == '__main__':
                 prune_blocks()
 
             case 'test':
-                import sys; _t = sys.argv[2]
+                _t = sys.argv[2]
                 getattr(__import__(f"tests.{_t}", fromlist=[_t]), _t)()  # Import the test passed on param.
+
+            case 'compile':
+                from src.actions.compile import compile_directory
+                compile_directory(directory=sys.argv[2])
 
             case other:
                 print('Unknown command.')
