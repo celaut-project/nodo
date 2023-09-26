@@ -1,14 +1,15 @@
 import os
 import shutil
+import sys
 from time import sleep, time
-from typing import Final
+from typing import Final, Optional
 
 import grpc
 import json
 import threading
 from grpcbigbuffer.client import Dir, client_grpc
 
-from src.utils.env import REGISTRY
+from src.utils.env import REGISTRY, METADATA_REGISTRY
 from tests.protos import api_pb2, api_pb2_grpc
 from protos import gateway_pb2, celaut_pb2, gateway_pb2_grpc
 from tests.protos import solvers_dataset_pb2
@@ -19,7 +20,7 @@ LIST_OF_SOLVERS = [FRONTIER]
 SESSION_SERVICES_JSON: Final[str] = 'tests/script_data.json'
 
 
-def test_sorter_service():
+def test_sorter_service(sorter_endpoint: Optional[str] = sys.argv[3] if len(sys.argv) == 4 else None):
     def is_good(cnf, interpretation):
         def good_clause(clause, interpretation):
             for var in clause.literal:
@@ -54,28 +55,31 @@ def test_sorter_service():
 
         print('Get new services....')
 
-        if not os.path.exists(os.path.join(REGISTRY, SORTER)):
-            raise Exception(f"{SORTER} service not exists.")
-        print(f"Get the sorter {SORTER}")
-        try:
-            # Get a classifier.
-            classifier = next(client_grpc(
-                method=g_stub.StartService,
-                input=generator(
-                    _hash=SORTER,
-                    mem_limit=105 * pow(10, 6),
-                    initial_gas_amount=pow(10, 64)
-                ),
-                indices_parser=gateway_pb2.Instance,
-                partitions_message_mode_parser=True,
-                indices_serializer=StartService_input_indices
-            ))
-        except Exception as e:
-            print(f"Exception getting the sorter service -> {e}")
-            raise e
-        print(classifier)
-        uri = classifier.instance.uri_slot[0].uri[0]
-        c_uri = uri.ip + ':' + str(uri.port)
+        if not sorter_endpoint:
+            if not os.path.exists(os.path.join(REGISTRY, SORTER)):
+                raise Exception(f"{SORTER} service not exists.")
+            print(f"Get the sorter {SORTER}")
+            try:
+                # Get a classifier.
+                classifier = next(client_grpc(
+                    method=g_stub.StartService,
+                    input=generator(
+                        _hash=SORTER,
+                        mem_limit=105 * pow(10, 6),
+                        initial_gas_amount=pow(10, 64)
+                    ),
+                    indices_parser=gateway_pb2.Instance,
+                    partitions_message_mode_parser=True,
+                    indices_serializer=StartService_input_indices
+                ))
+            except Exception as e:
+                print(f"Exception getting the sorter service -> {e}")
+                raise e
+            print(classifier)
+            uri = classifier.instance.uri_slot[0].uri[0]
+            c_uri = uri.ip + ':' + str(uri.port)
+        else:
+            c_uri = sorter_endpoint
         c_stub = api_pb2_grpc.SolverStub(
             grpc.insecure_channel(c_uri)
         )
@@ -154,8 +158,8 @@ def test_sorter_service():
                         2: celaut_pb2.Service,
                     },
                     input=(
-                        Dir(dir='__metadata__/' + s, _type=celaut_pb2.Any.Metadata),
-                        Dir(dir='__registry__/' + s, _type=celaut_pb2.Service)
+                        Dir(dir=os.path.join(METADATA_REGISTRY, s), _type=celaut_pb2.Any.Metadata),
+                        Dir(dir=os.path.join(REGISTRY, s), _type=celaut_pb2.Service)
                     )
                 ))
                 break
