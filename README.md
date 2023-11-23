@@ -1,4 +1,4 @@
-# Nodo: Seamless Service Orchestration for Distributed Networks
+# Nodo: Service Orchestration for Distributed Networks
 
 Nodo is a powerful framework designed to streamline communication, management, and orchestration of services 
 across a network of computers. 
