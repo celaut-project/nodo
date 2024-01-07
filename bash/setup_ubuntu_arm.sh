@@ -16,3 +16,4 @@ apt-get update
 apt-get -y install docker-ce docker-ce-cli containerd.io
 
 sh ./init_arm.sh
+python3 nodo.py migrate
