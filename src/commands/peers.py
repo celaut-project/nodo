@@ -1,5 +1,5 @@
 from typing import Generator, List
-from src.actions.__interface import table_command
+from src.commands.__interface import table_command
 from src.utils.utils import peers_id_iterator
 
 

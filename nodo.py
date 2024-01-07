@@ -41,27 +41,27 @@ if __name__ == '__main__':
                 seed() if len(sys.argv) == 2 else seed(private_key=sys.argv[2])
 
             case 'containers':
-                from src.actions.containers import containers
+                from src.commands.containers import containers
                 containers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
             case 'peers':
-                from src.actions.peers import peers
+                from src.commands.peers import peers
                 peers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
             case 'prune:peer':
-                from src.actions.peers import delete
+                from src.commands.peers import delete
                 delete(sys.argv[2])
 
             case 'prune:peers':
-                from src.actions.peers import delete_all
+                from src.commands.peers import delete_all
                 delete_all()
 
             case 'ledgers':
-                from src.actions.ledgers import ledgers
+                from src.commands.ledgers import ledgers
                 ledgers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
 
             case 'view:contract':
-                from src.actions.ledgers import view
+                from src.commands.ledgers import view
                 view(sys.argv[2])
 
             case 'deploy:contract':
@@ -69,7 +69,7 @@ if __name__ == '__main__':
                 deploy()
 
             case 'storage:prune_blocks':
-                from src.actions.storage import prune_blocks
+                from src.commands.storage import prune_blocks
                 prune_blocks()
 
             case 'test':
@@ -77,7 +77,7 @@ if __name__ == '__main__':
                 getattr(__import__(f"tests.{_t}", fromlist=[_t]), _t)()  # Import the test passed on param.
 
             case 'compile':
-                from src.actions.compile import compile_directory
+                from src.commands.compile import compile_directory
                 compile_directory(directory=sys.argv[2])
 
             case other:
