@@ -3,6 +3,7 @@ import docker as docker_lib
 
 from protos import celaut_pb2 as celaut
 from src.manager.manager import add_peer, prune_container, spend_gas
+from src.reputation_system.simple_reputation_feedback import assign_good_reputation
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.manager.metrics import gas_amount_on_other_peer
 from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
@@ -40,6 +41,8 @@ def maintain_containers():
             except Exception as e:
                 l.LOGGER('Error purging ' + token + ' ' + str(e))
                 raise Exception('Error purging ' + token + ' ' + str(e))
+        else:
+            assign_good_reputation(pointer=token.split('##')[0])
 
 
 def maintain_clients():

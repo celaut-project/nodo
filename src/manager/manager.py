@@ -13,6 +13,7 @@ from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 
 from src.manager.system_cache import Client, SystemCache
+from src.reputation_system.simple_reputation_feedback import assign_bad_reputation
 
 from src.utils import logger as logger
 from src.utils.env import ALLOW_GAS_DEBT, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
@@ -365,11 +366,13 @@ def get_sysresources(token: str) -> gateway_pb2.ModifyServiceSystemResourcesOutp
 
 def prune_container(token: str) -> int:
     logger.LOGGER('Prune container ' + token)
+    agent_id = token.split('##')[0]
+    assign_bad_reputation(pointer=agent_id, amount=100)
     if get_network_name(ip_or_uri=token.split('##')[1]) == DOCKER_NETWORK:
         # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
         try:
             refund = sc.purgue_internal(
-                agent_id=token.split('##')[0],
+                agent_id=agent_id,
                 container_id=token.split('##')[2],
                 container_ip=token.split('##')[1],
                 token=token
@@ -381,7 +384,7 @@ def prune_container(token: str) -> int:
     else:
         try:
             refund = sc.purgue_external(
-                agent_id=token.split('##')[0],
+                agent_id=agent_id,
                 peer_id=token.split('##')[1],
                 his_token=token.split('##')[2],
             )
