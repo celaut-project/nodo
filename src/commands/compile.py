@@ -21,7 +21,7 @@ METADATA_DEPENDENCIES_DIRECTORY = "metadata_dependencies_directory"
 BLOCKS_DIRECTORY = "blocks_directory"
 
 
-def export_registry(directory: str, compile_config: Dict):
+def __export_registry(directory: str, compile_config: Dict):
     list(map(
         lambda _reg: os.makedirs(f"{directory}/{compile_config[_reg]}")
             if _reg in compile_config and type(compile_config[_reg]) is str else 1,
@@ -60,7 +60,7 @@ def export_registry(directory: str, compile_config: Dict):
                                       f"{directory}/{compile_config[BLOCKS_DIRECTORY]}")
 
 
-def generate_service_zip(project_directory: str) -> str:
+def __generate_service_zip(project_directory: str) -> str:
     # Remove the last character '/' from the path if it exists
     if project_directory[-1] == '/':
         project_directory = project_directory[:-1]
@@ -93,7 +93,7 @@ def generate_service_zip(project_directory: str) -> str:
             os.system(f"cd {complete_source_directory} && rm -rf {file}")
 
     # Add the dependencies
-    export_registry(directory=complete_source_directory, compile_config=compile_config)
+    __export_registry(directory=complete_source_directory, compile_config=compile_config)
 
     if compile_config['zip']:
         os.system(f'cd {complete_source_directory} && '
@@ -119,7 +119,7 @@ def generate_service_zip(project_directory: str) -> str:
     return project_directory + '/.service/.service.zip'
 
 
-def _compile(zip, node: str):
+def __compile(zip, node: str):
     yield from grpcbb.client_grpc(
         method=gateway_pb2_grpc.GatewayStub(
             grpc.insecure_channel(node)
@@ -131,10 +131,10 @@ def _compile(zip, node: str):
     )
 
 
-def on_peer(peer: str, service_zip_dir: str):
+def __on_peer(peer: str, service_zip_dir: str):
     _id: Optional[str] = None
     print(f'Start compile on {peer}')
-    for b in _compile(
+    for b in __compile(
             zip=service_zip_dir,
             node=peer
     ):
@@ -171,13 +171,13 @@ def on_peer(peer: str, service_zip_dir: str):
 
 
 def compile_directory(directory: str):
-    service_zip_dir: str = generate_service_zip(
+    service_zip_dir: str = __generate_service_zip(
         project_directory=directory
     )
 
     # TODO check if dependencies has directories, and compile them before.
     next((
-        on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
+        __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
         for peer_id in get_peer_ids()
         for ip, port in get_peer_directions(peer_id=peer_id)
     ))
