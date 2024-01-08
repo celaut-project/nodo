@@ -80,6 +80,7 @@ class SystemCache(metaclass=Singleton):
     # Lock not needed.
     external_token_hash_map = {}  # sha256( token ) : token
 
+    # TODO -> Is correct ?
     # internal token -> str( peer_ip##container_ip##container_id )   peer_ip se refiere a la direccion del servicio padre (que puede ser interno o no).
     # external token -> str( peer_ip##node_ip:node_port##his_token )
 

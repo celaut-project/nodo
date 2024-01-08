@@ -3,7 +3,7 @@ import docker as docker_lib
 
 from protos import celaut_pb2 as celaut
 from src.manager.manager import add_peer, prune_container, spend_gas
-from src.reputation_system.simple_reputation_feedback import assign_good_reputation
+from src.reputation_system.simple_reputation_feedback import assign_good_reputation, assign_bad_reputation
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.manager.metrics import gas_amount_on_other_peer
 from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
@@ -19,10 +19,12 @@ sc = SystemCache()
 
 def maintain_containers():
     for i in range(len(sc.system_cache)):
-        if i >= len(sc.system_cache): break
+        if i >= len(sc.system_cache):
+            break
         token, sysreq = list(sc.system_cache.items())[i]
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
+                assign_bad_reputation(pointer=token.split('##')[1], amount=100)  # Should be only for externals.
                 prune_container(token=token)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
             l.LOGGER('Exception on maintain container process: ' + str(e))
@@ -37,12 +39,13 @@ def maintain_containers():
                 )
         ):
             try:
+                assign_bad_reputation(pointer=token.split('##')[1], amount=20)  # Should be only for externals.
                 prune_container(token=token)
             except Exception as e:
                 l.LOGGER('Error purging ' + token + ' ' + str(e))
                 raise Exception('Error purging ' + token + ' ' + str(e))
         else:
-            assign_good_reputation(pointer=token.split('##')[0])
+            assign_good_reputation(pointer=token.split('##')[1])  # Should be only for externals.
 
 
 def maintain_clients():
