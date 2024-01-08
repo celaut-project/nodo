@@ -294,7 +294,8 @@ def add_container(
 ) -> str:
     logger.LOGGER('Add container for ' + father_id)
     token = father_id + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
-    if token in sc.system_cache.keys(): raise Exception('Manager error: ' + token + ' exists.')
+    if token in sc.system_cache.keys():
+        raise Exception('Manager error: ' + token + ' exists.')
 
     __push_token(token=token)
     sc.set_on_cache(
@@ -309,7 +310,8 @@ def add_container(
     if not container_modify_system_params(
             token=token,
             system_requeriments_range=system_requeriments_range
-    ): raise Exception('Manager error adding ' + token + '.')
+    ):
+        raise Exception('Manager error adding ' + token + '.')
     return token
 
 
