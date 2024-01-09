@@ -14,6 +14,7 @@ if __name__ == '__main__':
               "\n- ledgers --stream"
               "\n- view:contract"
               "\n- deploy:contract"
+              "\n- storage:prune_blocks"
               "\n- test <test name>"
               "\n- compile <project directory>"
               )
