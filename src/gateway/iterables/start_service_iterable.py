@@ -78,4 +78,4 @@ class StartServiceIterable(AbstractServiceIterable):
     def final(self):
         if not self.service_saved:
             l.LOGGER('The service is not in the registry and the request does not have the definition.' \
-                     + str([(h.type.hex(), h.value.hex()) for h in self.hashes]))
+                     + str([h.value.hex() for h in self.hashes]))
