@@ -6,6 +6,7 @@ __metadata__
 __registry__
 __block__
 database.sqlite
+dataset.bin
 *.log
 app.log
 .env
