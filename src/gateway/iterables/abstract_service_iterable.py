@@ -19,9 +19,10 @@ class BreakIteration(Exception):
 
 def find_service_hash(_hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash) \
         -> Tuple[Optional[str], bool]:
-    print(f"    Hash type {_hash.type.hex()} and value {_hash.value.hex()}")
-    return _hash.value.hex(), _hash.value.hex() in [s for s in os.listdir(REGISTRY)] if SHA3_256_ID == _hash.type \
+    response = _hash.value.hex(), _hash.value.hex() in [s for s in os.listdir(REGISTRY)] if SHA3_256_ID == _hash.type \
         else (None, False)
+    print(f"    Hash type {_hash.type.hex()} and value {_hash.value.hex()} \n {response}")
+    return response
 
 
 def combine_metadata(service_hash: str, request_metadata: Optional[celaut.Any.Metadata]) -> celaut.Any.Metadata:
