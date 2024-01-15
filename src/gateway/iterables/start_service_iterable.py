@@ -79,7 +79,7 @@ class StartServiceIterable(AbstractServiceIterable):
         if not self.service_saved:
             l.LOGGER(
                 f"\n"
-                f"The service is not in the registry and the request does not have the definition\n. "
+                f"The service is not in the registry and the request does not have the definition.\n "
                 f"Only has the service hash -> {self.service_hash} \n"
                 f"And the metadata -> {self.metadata} \n"
                 f"This is on registry -> {str([h.value.hex() for h in self.hashes])} \n"
