@@ -82,6 +82,6 @@ class StartServiceIterable(AbstractServiceIterable):
                 f"The service is not in the registry and the request does not have the definition.\n "
                 f"Only has the service hash -> {self.service_hash} \n"
                 f"And the metadata -> {self.metadata} \n"
-                f"This is on registry -> {str([h.value.hex() for h in os.listdir(REGISTRY)])} \n"
+                f"This is on registry -> {[h for h in os.listdir(REGISTRY)]} \n"
                 f"\n"
             )
