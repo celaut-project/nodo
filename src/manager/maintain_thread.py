@@ -25,7 +25,7 @@ def maintain_containers():
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
                 submit_reputation_feedback(token=token, amount=-100)
-                l("Prunning container from the registry because the docker container does not exists.")
+                l.LOGGER("Prunning container from the registry because the docker container does not exists.")
                 prune_container(token=token)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
             l.LOGGER('Exception on maintain container process: ' + str(e))
@@ -41,7 +41,7 @@ def maintain_containers():
         ):
             try:
                 submit_reputation_feedback(token=token, amount=-10)
-                l("Pruning container due to insufficient gas.")
+                l.LOGGER("Pruning container due to insufficient gas.")
                 prune_container(token=token)
             except Exception as e:
                 l.LOGGER('Error purging ' + token + ' ' + str(e))
