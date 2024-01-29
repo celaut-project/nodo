@@ -6,7 +6,11 @@ from src.utils.singleton import Singleton
 class SimpleReputationFeedback(metaclass=Singleton):
 
     def __init__(self):
-        self.root_proof: str = SimpleReputationFeedback.__static_submit_reputation_feedback("##", 1)
+        proof = SimpleReputationFeedback.__static_submit_reputation_feedback("##", 1)
+        print(f"Root proof: {proof}")
+        if not proof:
+            raise Exception("Invalid root proof")
+        self.proof: str = proof if proof else ""
 
     @staticmethod
     def __static_submit_reputation_feedback(token: str, amount: int, root_proof: str = "") -> Optional[str]:
