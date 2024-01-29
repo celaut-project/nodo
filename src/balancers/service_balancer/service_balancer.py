@@ -43,14 +43,14 @@ def service_balancer(
         raise e
 
     try:
-        for peer in peers_id_iterator(ignore_network=ignore_network):
-            l.LOGGER('Check cost on peer ' + peer)
+        for peer_id in peers_id_iterator(ignore_network=ignore_network):
+            l.LOGGER('Check cost on peer ' + peer_id)
             # TODO could use async or concurrency
             try:
-                peers[peer] = next(grpcbf.client_grpc(
+                peers[peer_id] = next(grpcbf.client_grpc(
                         method=gateway_pb2_grpc.GatewayStub(
                             grpc.insecure_channel(
-                                next(generate_uris_by_peer_id(peer))
+                                next(generate_uris_by_peer_id(peer_id))
                             )
                         ).GetServiceEstimatedCost,
                         indices_parser=gateway_pb2.EstimatedCost,
@@ -61,14 +61,14 @@ def service_balancer(
                             config=config,
                             metadata=metadata,
                             send_only_hashes=SEND_ONLY_HASHES_ASKING_COST,
-                            client_id=generate_client_id_in_other_peer(peer_id=peer),
+                            client_id=generate_client_id_in_other_peer(peer_id=peer_id),
                             recursion_guard_token=recursion_guard_token
                         ),
                         # TODO añadir initial_gas_amount y el resto de la configuracion inicial,
                         #  si es que se especifica.
                     ))
             except Exception as e:
-                l.LOGGER('Error taking the cost on ' + peer + ' : ' + str(e))
+                l.LOGGER('Error taking the cost on ' + peer_id + ' : ' + str(e))
     except Exception as e:
         l.LOGGER('Error iterating peers on service balancer ->>' + str(e))
 
