@@ -6,20 +6,21 @@ from src.utils.singleton import Singleton
 class SimpleReputationFeedback(metaclass=Singleton):
 
     def __init__(self):
-        self.counter = 0
+        self.root_proof: str = SimpleReputationFeedback.__static_submit_reputation_feedback("##", 1)
 
-    def submit_reputation_feedback(self, token: str, amount: int) -> Optional[str]:
-        self.counter += 1
-        print(self.counter)
+    @staticmethod
+    def __static_submit_reputation_feedback(token: str, amount: int, root_proof: str = "") -> Optional[str]:
         # Take the peer_id when the token it's external. Do nothing if it's an external service.
         if get_network_name(ip_or_uri=token.split('##')[1]) == DOCKER_NETWORK:
-            pointer = token.split('##')[1]
-            return lib_spend("", amount, pointer)
+            pointer: str = token.split('##')[1]
+            return lib_spend(root_proof, amount, pointer)
+
+    def submit_reputation_feedback(self, token: str, amount: int) -> Optional[str]:
+        return SimpleReputationFeedback.__static_submit_reputation_feedback(token=token, amount=amount,
+                                                                            root_proof=self.root_proof)
 
     def compute_reputation_feedback(self, pointer: str) -> float:
-        self.counter += 1
-        print(self.counter)
-        return lib_compute(pointer, pointer)  # TODO The first param needs to be the root proof of the computation.
+        return lib_compute(self.root_proof, pointer)
 
 
 try:
@@ -27,6 +28,7 @@ try:
 
     from src.utils.env import DOCKER_NETWORK
     from src.utils.utils import get_network_name
+
 
     def submit_reputation_feedback(token: str, amount: int):
         return SimpleReputationFeedback().submit_reputation_feedback(token, amount)
