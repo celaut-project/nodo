@@ -24,7 +24,9 @@ class SimpleReputationFeedback(metaclass=Singleton):
                                                                             root_proof=self.root_proof)
 
     def compute_reputation_feedback(self, pointer: str) -> float:
-        return lib_compute(self.root_proof, pointer)
+        _result = lib_compute(self.root_proof, pointer)
+        print(f"Computed reputation: {_result}")
+        return _result
 
 
 try:
