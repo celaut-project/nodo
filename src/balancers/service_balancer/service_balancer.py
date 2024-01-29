@@ -45,7 +45,7 @@ def service_balancer(
     try:
         for peer in peers_id_iterator(ignore_network=ignore_network):
             l.LOGGER('Check cost on peer ' + peer)
-            # TODO could use async or concurrency ¿numba?. And use timeout.
+            # TODO could use async or concurrency
             try:
                 peers[peer] = next(grpcbf.client_grpc(
                         method=gateway_pb2_grpc.GatewayStub(
