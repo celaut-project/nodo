@@ -13,7 +13,7 @@ try:
             lib_spend("", amount, pointer)
 
 
-    def compute_reputation_feedback(pointer):  # TODO use it on balancers/service_balancer/service_balancer.py
+    def compute_reputation_feedback(pointer):  # TODO use it on balancers/estimated_cost_sorter
         return lib_compute(pointer, pointer)
 
 except ModuleNotFoundError:
