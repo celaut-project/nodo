@@ -15,7 +15,7 @@ class SimpleReputationFeedback(metaclass=Singleton):
     @staticmethod
     def __static_submit_reputation_feedback(token: str, amount: int, root_proof: str = "") -> Optional[str]:
         # Take the peer_id when the token it's external. Do nothing if it's an external service.
-        if get_network_name(ip_or_uri=token.split('##')[1]) == DOCKER_NETWORK:
+        if get_network_name(ip_or_uri=token.split('##')[1]) != DOCKER_NETWORK:
             pointer: str = token.split('##')[1]
             return lib_spend(root_proof, amount, pointer)
 
