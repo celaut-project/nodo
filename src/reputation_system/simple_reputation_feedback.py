@@ -10,7 +10,7 @@ class SimpleReputationFeedback(metaclass=Singleton):
         print(f"Root proof: {proof}")
         if not proof:
             raise Exception("Invalid root proof")
-        self.proof: str = proof if proof else ""
+        self.root_proof: str = proof if proof else ""
 
     @staticmethod
     def __static_submit_reputation_feedback(token: str, amount: int, root_proof: str = "") -> Optional[str]:
