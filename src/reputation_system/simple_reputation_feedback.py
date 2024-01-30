@@ -43,11 +43,11 @@ try:
         return SimpleReputationFeedback().compute_reputation_feedback(pointer)
 
 except ModuleNotFoundError:
-    def submit_reputation_feedback(token: str, amount: int):
+    def submit_reputation_feedback(token: str, amount: int) -> str:
         print("Not implemented")
-        pass
+        return ""
 
 
-    def compute_reputation_feedback(pointer):
+    def compute_reputation_feedback(pointer) -> float:
         print("Not implemented")
-        pass
+        return 0
