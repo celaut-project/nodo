@@ -30,7 +30,7 @@ class SimpleReputationFeedback(metaclass=Singleton):
 
 
 try:
-    from simga_reputation_graph import compute as lib_compute, spend as lib_spend
+    from sigma_reputation_graph import compute as lib_compute, spend as lib_spend
 
     from src.utils.env import DOCKER_NETWORK
     from src.utils.utils import get_network_name
