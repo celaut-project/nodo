@@ -5,6 +5,7 @@ __cache__
 __metadata__
 __registry__
 __block__
+reputation.db
 database.sqlite
 dataset.bin
 *.log
