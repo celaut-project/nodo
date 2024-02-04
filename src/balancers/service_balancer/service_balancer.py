@@ -72,6 +72,10 @@ def service_balancer(
     except Exception as e:
         l.LOGGER('Error iterating peers on service balancer ->>' + str(e))
 
+    l.LOGGER("All the costs:\n")
+    for id, cost in peers.items():
+        l.LOGGER(f"     {id} - {cost}")
+
     try:
         return estimated_cost_sorter(
                 estimated_costs=peers,
