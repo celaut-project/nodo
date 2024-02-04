@@ -24,7 +24,7 @@ def configuration_balancer(
         if not could_ve_this_sysreq(clause.max_sysreq):
             continue
 
-        posible_clauses[str(_i)] = gateway_pb2.EstimatedCost(
+        posible_clauses['local'] = gateway_pb2.EstimatedCost(
             cost=to_gas_amount(compute_start_service_cost(
                 metadata=metadata,
                 initial_gas_amount=initial_gas_amount,

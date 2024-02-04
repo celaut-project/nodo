@@ -39,7 +39,7 @@ def estimated_cost_sorter(
                 ]) / 2
             ) * MAINTENANCE_COST_CONFIGURATION_FACTOR
         ])
-        reputation: float = 1+ compute_reputation_feedback(pointer=peer_id)
+        reputation: float = 1+ 1 if peer_id == 'local' else compute_reputation_feedback(pointer=peer_id)
 
         return priority * reputation / cost
 
