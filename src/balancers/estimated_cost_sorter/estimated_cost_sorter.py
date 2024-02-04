@@ -14,7 +14,7 @@ def estimated_cost_sorter(
         weight_clauses: Dict[int, int]
 ) -> Generator[Tuple[str, gateway_pb2.EstimatedCost], None, None]:
     def __compute_score(peer_id: str, estimated_cost: gateway_pb2.EstimatedCost) -> float:
-        priority: int = WEIGHT_CONFIGURATION_FACTOR * weight_clauses[estimated_cost.comb_resource_selected]
+        priority: int = WEIGHT_CONFIGURATION_FACTOR * max(1, weight_clauses[estimated_cost.comb_resource_selected])  # If the combinational resource clause don't have a cost_weight, it's like equal to 1 cost weight.
         cost: int = sum([
             variance_cost_normalization(
                 from_gas_amount(estimated_cost.cost),
