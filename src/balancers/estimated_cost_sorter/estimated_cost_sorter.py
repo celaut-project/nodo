@@ -41,6 +41,8 @@ def estimated_cost_sorter(
         ])
         reputation: float = 1+ 1 if peer_id == 'local' else compute_reputation_feedback(pointer=peer_id)
 
+        print(f"\nDebug: For peer {peer_id}: priority {priority}, reputation {reputation}, cost {cost} => score {priority * reputation / cost}\n")
+
         return priority * reputation / cost
 
     return (
