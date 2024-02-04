@@ -4,7 +4,7 @@ from protos import gateway_pb2
 from src.reputation_system.simple_reputation_feedback import compute_reputation_feedback
 from src.utils.cost_functions.general_cost_functions import normalized_maintain_cost
 from src.utils.cost_functions.variance_cost_normalization import variance_cost_normalization
-from src.utils.env import WEIGHT_CONFIGURATION_FACTOR, INIT_COST_CONFIGURATION_FACTOR, \
+from src.utils.env import SOCIALIZATION_FACTOR, WEIGHT_CONFIGURATION_FACTOR, INIT_COST_CONFIGURATION_FACTOR, \
     MAINTENANCE_COST_CONFIGURATION_FACTOR
 from src.utils.utils import from_gas_amount
 
@@ -39,7 +39,7 @@ def estimated_cost_sorter(
                 ]) / 2
             ) * MAINTENANCE_COST_CONFIGURATION_FACTOR
         ])
-        reputation: float = 1+ 1 if peer_id == 'local' else compute_reputation_feedback(pointer=peer_id)
+        reputation: float = 1 if peer_id == 'local' else SOCIALIZATION_FACTOR + compute_reputation_feedback(pointer=peer_id)
 
         print(f"\nDebug: For peer {peer_id}: priority {priority}, reputation {reputation}, cost {cost} => score {priority * reputation / cost}\n")
 
