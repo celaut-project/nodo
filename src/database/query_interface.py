@@ -1,7 +1,8 @@
 import sqlite3
-from typing import Generator, Tuple, Any
 
-DATABASE_FILE = 'database.sqlite'
+from src.utils.env import STORAGE
+
+DATABASE_FILE = f'{STORAGE}/database.sqlite'
 
 
 def fetch_query(query: str, params: tuple = ()):

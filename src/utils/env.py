@@ -24,10 +24,11 @@ MAIN_DIR = GET_ENV(env="MAIN_DIR", default="/node")
 
 # DIRECTORIES
 DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
-CACHE = f"{MAIN_DIR}/__cache__/"
-REGISTRY = f"{MAIN_DIR}/__registry__/"
-METADATA_REGISTRY = f"{MAIN_DIR}/__metadata__/"
-BLOCKDIR = f"{MAIN_DIR}/__block__/"
+STORAGE = f"{MAIN_DIR}/storage"
+CACHE = f"{STORAGE}/__cache__/"
+REGISTRY = f"{STORAGE}/__registry__/"
+METADATA_REGISTRY = f"{STORAGE}/__metadata__/"
+BLOCKDIR = f"{STORAGE}/__block__/"
 
 SAVE_ALL = False
 COMPILER_MEMORY_SIZE_FACTOR = GET_ENV(env='COMPILER_MEMORY_SIZE_FACTOR', default=2.0)
