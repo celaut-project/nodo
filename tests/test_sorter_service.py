@@ -9,7 +9,7 @@ import json
 import threading
 from grpcbigbuffer.client import Dir, client_grpc
 
-from src.utils.env import REGISTRY, METADATA_REGISTRY
+from src.utils.env import REGISTRY, METADATA_REGISTRY, STORAGE
 from tests.protos import api_pb2, api_pb2_grpc
 from protos import gateway_pb2, celaut_pb2, gateway_pb2_grpc
 from tests.protos import solvers_dataset_pb2
@@ -17,8 +17,9 @@ from protos.gateway_pb2_grpcbf import StartService_input_indices
 from tests.main import RANDOM, SORTER, FRONTIER, GATEWAY, generator as gen
 
 LIST_OF_SOLVERS = [FRONTIER]
-SESSION_SERVICES_JSON: Final[str] = 'tests/script_data.json'
-
+TEST_DATA_STORAGE = f'{STORAGE}/tests'
+os.makedirs(TEST_DATA_STORAGE, exist_ok=True)
+SESSION_SERVICES_JSON: Final[str] = f'{TEST_DATA_STORAGE}/script_data.json'
 
 def test_sorter_service(sorter_endpoint: Optional[str] = sys.argv[3] if len(sys.argv) == 4 else None):
     def is_good(cnf, interpretation):

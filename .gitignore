@@ -13,3 +13,4 @@ app.log
 .env
 venv
 tests/script_data.json
+storage/*
