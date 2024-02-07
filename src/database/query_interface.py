@@ -1,8 +1,6 @@
 import sqlite3
 
-from src.utils.env import STORAGE
-
-DATABASE_FILE = f'{STORAGE}/database.sqlite'
+from src.utils.env import DATABASE_FILE
 
 
 def fetch_query(query: str, params: tuple = ()):

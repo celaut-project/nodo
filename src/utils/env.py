@@ -29,6 +29,8 @@ CACHE = f"{STORAGE}/__cache__/"
 REGISTRY = f"{STORAGE}/__registry__/"
 METADATA_REGISTRY = f"{STORAGE}/__metadata__/"
 BLOCKDIR = f"{STORAGE}/__block__/"
+DATABASE_FILE = f'{STORAGE}/database.sqlite'
+REPUTATION_DB = f"{STORAGE}/reputation.db"
 
 SAVE_ALL = False
 COMPILER_MEMORY_SIZE_FACTOR = GET_ENV(env='COMPILER_MEMORY_SIZE_FACTOR', default=2.0)
@@ -88,8 +90,7 @@ MEMORY_LIMIT_COST_FACTOR = GET_ENV(env='MEMORY_LIMIT_COST_FACTOR', default=1 / p
 MIN_DEPOSIT_PEER = GET_ENV(env='MIN_PEER_DEPOSIT', default=pow(10, 64))
 INITIAL_PEER_DEPOSIT_FACTOR = GET_ENV(env='INITIAL_PEER_DEPOSIT_FACTOR', default=0.5)
 COST_AVERAGE_VARIATION = GET_ENV(env='COST_AVERAGE_VARIATION', default=1)
-GAS_COST_FACTOR = GET_ENV(env='GAS_COST_FACTOR',
-                          default=1)  # Applied only outside the manager. (not in maintain_cost)
+GAS_COST_FACTOR = GET_ENV(env='GAS_COST_FACTOR', default=1)  # Applied only outside the manager. (not in maintain_cost)
 WEIGHT_CONFIGURATION_FACTOR = int(GET_ENV(env='WEIGHT_CONFIGURATION_FACTOR', default=pow(10, 9)))
 SOCIALIZATION_FACTOR = int(GET_ENV('SOCIALIZATION_FACTOR', default=2))
 INIT_COST_CONFIGURATION_FACTOR = GET_ENV(env="INIT_COST_CONFIGURATION_FACTOR", default=1)
