@@ -3,6 +3,7 @@ from typing import Final
 
 import grpc, sys
 from grpcbigbuffer.client import Dir, client_grpc
+from src.utils.env import METADATA_REGISTRY, REGISTRY
 
 from src.utils.logger import LOGGER
 from tests.main import GATEWAY, SHA3_256, SORTER, FRONTIER
@@ -37,8 +38,8 @@ def test_start_service():
                 type=bytes.fromhex(SHA3_256),
                 value=bytes.fromhex(SERVICE)
             )
-        yield Dir(dir='__metadata__/' + SERVICE, _type=celaut_pb2.Any.Metadata)
-        yield Dir(dir='__registry__/' + SERVICE, _type=celaut_pb2.Service)
+        yield Dir(dir=METADATA_REGISTRY + SERVICE, _type=celaut_pb2.Any.Metadata)
+        yield Dir(dir=REGISTRY + SERVICE, _type=celaut_pb2.Service)
 
 
     g_stub = gateway_pb2_grpc.GatewayStub(
