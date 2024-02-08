@@ -15,7 +15,7 @@ from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 from src.manager.system_cache import Client, SystemCache
 
 from src.utils import logger as logger
-from src.utils.env import ALLOW_GAS_DEBT, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
+from src.utils.env import ALLOW_GAS_DEBT, DATABASE_FILE, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
     DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
     SHA3_256_ID
 from src.utils.utils import get_network_name, \
@@ -31,7 +31,7 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
     logger.LOGGER('Inserting instance on db: ' + str(parsed_instance))
 
     # Connect to the SQLite database
-    with sqlite3.connect('database.sqlite') as conn:
+    with sqlite3.connect(database=DATABASE_FILE) as conn:
         cursor: sqlite3.dbapi2.Cursor = conn.cursor()
 
         try:
