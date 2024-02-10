@@ -1,55 +1,21 @@
-import os
 import threading
 from concurrent import futures
 
 import grpc
-from grpcbigbuffer import utils as grpcbf
 import netifaces as ni
-from psutil import virtual_memory
 
-import src.manager.resources_manager as iobd
 from protos import gateway_pb2, gateway_pb2_grpc
 from src.gateway.gateway import Gateway
 from src.manager.maintain_thread import manager_thread
 from src.utils import logger as l
-from src.utils.env import GATEWAY_PORT, MEMORY_LOGS, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
-    SEND_ONLY_HASHES_ASKING_COST, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, REGISTRY, CACHE, LOCAL_NETWORK, \
-    DOCKER_NETWORK, COMPUTE_POWER_RATE, COST_OF_BUILD, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
-    COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, BLOCKDIR, EXTERNAL_COST_TIMEOUT, \
-    METADATA_REGISTRY
 from src.utils.zeroconf import Zeroconf
+from src.utils.env import GATEWAY_PORT, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
+    SEND_ONLY_HASHES_ASKING_COST, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, LOCAL_NETWORK, \
+    DOCKER_NETWORK, COMPUTE_POWER_RATE, COST_OF_BUILD, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
+    COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, EXTERNAL_COST_TIMEOUT
 
 
 def serve():
-    # Create __cache__ if it does not exist.
-    if not os.path.exists(CACHE):
-        os.makedirs(CACHE)
-
-    # Create __registry__ if it does not exist.
-    if not os.path.exists(REGISTRY):
-        os.makedirs(REGISTRY)
-
-    # Create __metadata__ if it does not exist.
-    if not os.path.exists(METADATA_REGISTRY):
-        os.makedirs(METADATA_REGISTRY)
-
-    # Create __block__ if it does not exist.
-    if not os.path.exists(BLOCKDIR):
-        os.makedirs(BLOCKDIR)
-
-    iobd.IOBigData(
-        ram_pool_method=lambda: virtual_memory().available
-    ).set_log(
-        log=l.LOGGER if MEMORY_LOGS else lambda message: None
-    )
-
-    grpcbf.modify_env(
-        cache_dir=CACHE,
-        mem_manager=iobd.mem_manager,
-        block_dir=BLOCKDIR,
-        block_depth=1
-    )
-
     # Zeroconf for connect to the network (one per network).
     for network in ni.interfaces():
         if network != DOCKER_NETWORK and network != LOCAL_NETWORK:

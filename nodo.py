@@ -1,6 +1,41 @@
-import sys
+import sys, os
+from grpcbigbuffer import utils as grpcbf
+from psutil import virtual_memory
+from src.utils import logger as l
+import src.manager.resources_manager as iobd
+from src.utils.env import MEMORY_LOGS, REGISTRY, CACHE, BLOCKDIR, METADATA_REGISTRY
 
 if __name__ == '__main__':
+
+    # Create __cache__ if it does not exist.
+    if not os.path.exists(CACHE):
+        os.makedirs(CACHE)
+
+    # Create __registry__ if it does not exist.
+    if not os.path.exists(REGISTRY):
+        os.makedirs(REGISTRY)
+
+    # Create __metadata__ if it does not exist.
+    if not os.path.exists(METADATA_REGISTRY):
+        os.makedirs(METADATA_REGISTRY)
+
+    # Create __block__ if it does not exist.
+    if not os.path.exists(BLOCKDIR):
+        os.makedirs(BLOCKDIR)
+
+    iobd.IOBigData(
+        ram_pool_method=lambda: virtual_memory().available
+    ).set_log(
+        log=l.LOGGER if MEMORY_LOGS else lambda message: None
+    )
+
+    grpcbf.modify_env(
+        cache_dir=CACHE,
+        mem_manager=iobd.mem_manager,
+        block_dir=BLOCKDIR,
+        block_depth=1
+    )
+
     if len(sys.argv) == 1:
         print("Command needed: "
               "\n- seeder"
