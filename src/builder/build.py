@@ -98,7 +98,8 @@ def build_container_from_definition(service: celaut_pb2.Service,
     l.LOGGER('Build process of ' + service_id + ': wait for unlock the memory.')
 
     # Get the size of the service's biggest block.
-    with open(f"{REGISTRY}{get_service_hex_main_hash(metadata=metadata)}/_.json", 'r') as f:
+    # with open(f"{REGISTRY}{get_service_hex_main_hash(metadata=metadata)}/_.json", 'r') as f:  # TODO verify: why was not using the service_id?
+    with open(f"{REGISTRY}{service_id}/_.json", 'r') as f:
         try:
             biggest_block_size: int = max([os.path.getsize(BLOCKDIR + c[0])
                                            for c in json.load(f) if type(c) is Tuple])
