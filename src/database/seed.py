@@ -4,7 +4,7 @@ import string
 import sys
 from hashlib import sha3_256
 
-from src.utils.env import SHA3_256_ID
+from src.utils.env import SHA3_256_ID, DATABASE_FILE
 
 
 def generate_random_data(n):
@@ -78,7 +78,7 @@ def generate_random_data(n):
 
 def seed_database(num_rows):
     # Connect to the SQLite database
-    conn = sqlite3.connect('database.sqlite')
+    conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
 
     # Generate random data

@@ -6,7 +6,6 @@ __metadata__
 __registry__
 __block__
 reputation.db
-database.sqlite
 dataset.bin
 *.log
 app.log

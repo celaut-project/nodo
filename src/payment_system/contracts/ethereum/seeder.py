@@ -6,7 +6,7 @@ from src.payment_system.contracts.ethereum.deposit_contract.interface import DIR
 from web3 import Web3
 
 from src.payment_system.contracts.ethereum.envs import ETH_LEDGER, ETH_PROVIDER
-from src.utils.env import SHA3_256_ID
+from src.utils.env import SHA3_256_ID, DATABASE_FILE
 
 
 def seed(private_key=None):
@@ -15,11 +15,11 @@ def seed(private_key=None):
         w3 = Web3()
         account = w3.eth.account.create()
         private_key = w3.to_hex(account._private_key)
-        print("Dirección de la billetera:", account.address)
-    print("Clave privada de la billetera:", private_key)
+        print("Wallet public key:", account.address)
+    print("Wallet private key:", private_key)
 
     # Connect to the SQLite database
-    conn = sqlite3.connect('database.sqlite')
+    conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
 
     # LEDGER

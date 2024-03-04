@@ -24,7 +24,7 @@ def fetch_query(query: str, params: tuple = ()):
         conn.close()
 
     except Exception as e:
-        print(f'EXCEPCION NO CONTROLADA {str(e)}')
+        print(f'EXCEPCION NO CONTROLADA {str(e)} en fetch_query')
         pass
 
 
@@ -41,5 +41,5 @@ def commit_query(query: str, params: tuple = ()):
         conn.close()
 
     except Exception as e:
-        print(f'EXCEPCION NO CONTROLADA {str(e)}')
+        print(f'EXCEPCION NO CONTROLADA {str(e)} en commit_query')
         pass

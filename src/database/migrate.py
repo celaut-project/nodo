@@ -1,9 +1,11 @@
 import sqlite3
 
+from src.utils.env import DATABASE_FILE
+
 
 def migrate():
     # Connect to an existing database
-    conn = sqlite3.connect('database.sqlite')
+    conn = sqlite3.connect(DATABASE_FILE)
     print("Connected to database.")
 
     # Create a cursor

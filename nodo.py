@@ -3,7 +3,7 @@ from grpcbigbuffer import utils as grpcbf
 from psutil import virtual_memory
 from src.utils import logger as l
 import src.manager.resources_manager as iobd
-from src.utils.env import MEMORY_LOGS, REGISTRY, CACHE, BLOCKDIR, METADATA_REGISTRY
+from src.utils.env import MEMORY_LOGS, REGISTRY, CACHE, BLOCKDIR, METADATA_REGISTRY, DATABASE_FILE
 
 if __name__ == '__main__':
 
@@ -72,7 +72,7 @@ if __name__ == '__main__':
                 import os
                 from src.database.migrate import migrate
                 from src.payment_system.contracts.ethereum.seeder import seed
-                os.system("rm database.sqlite")
+                os.system(f"rm {DATABASE_FILE}")
                 migrate()
                 seed() if len(sys.argv) == 2 else seed(private_key=sys.argv[2])
 
