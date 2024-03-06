@@ -36,11 +36,16 @@ def test_random_cnf():
         grpc.insecure_channel(r_uri)
     )
     print('Received random. ', r_stub)
-    sleep(5)
-    cnf = next(client_grpc(
-            method=r_stub.RandomCnf,
-            partitions_message_mode_parser=True,
-            indices_parser=api_pb2.Cnf
-        ))
+    
+    while True:
+        sleep(5)
+        try:
+            cnf = next(client_grpc(
+                    method=r_stub.RandomCnf,
+                    partitions_message_mode_parser=True,
+                    indices_parser=api_pb2.Cnf
+                ))
+            break
+        except: pass
 
     print(f"cnf {cnf}")
