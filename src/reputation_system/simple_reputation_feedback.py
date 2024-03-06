@@ -25,10 +25,10 @@ try:
 
 except ModuleNotFoundError:
     def submit_reputation_feedback(token: str, amount: int) -> str:
-        LOGGER("Not implemented")
+        # LOGGER("Not implemented")
         return ""
 
 
     def compute_reputation_feedback(pointer) -> float:
-        LOGGER("Not implemented")
+        # LOGGER("Not implemented")
         return 0
