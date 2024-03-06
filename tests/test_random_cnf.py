@@ -13,33 +13,34 @@ from tests.main import RANDOM, SORTER, FRONTIER, GATEWAY, generator as gen
 def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: int = pow(10, 16)):
     yield from gen(_hash=_hash, mem_limit=mem_limit, initial_gas_amount=initial_gas_amount)
 
-g_stub = gateway_pb2_grpc.GatewayStub(
-        grpc.insecure_channel(GATEWAY)
-    )
+def test_random_cnf():
+    g_stub = gateway_pb2_grpc.GatewayStub(
+            grpc.insecure_channel(GATEWAY)
+        )
 
-# Get random cnf
+    # Get random cnf
 
-random_cnf_service = next(client_grpc(
-    method=g_stub.StartService,
-    input=generator(_hash=RANDOM),
-    indices_parser=gateway_pb2.Instance,
-    partitions_message_mode_parser=True,
-    indices_serializer=StartService_input_indices
-))
-
-print(f"Random cnf service {random_cnf_service}")
-uri = random_cnf_service.instance.uri_slot[0].uri[0]
-r_uri = uri.ip + ':' + str(uri.port)
-
-r_stub = api_pb2_grpc.RandomStub(
-    grpc.insecure_channel(r_uri)
-)
-print('Received random. ', r_stub)
-sleep(5)
-cnf = next(client_grpc(
-        method=r_stub.RandomCnf,
+    random_cnf_service = next(client_grpc(
+        method=g_stub.StartService,
+        input=generator(_hash=RANDOM),
+        indices_parser=gateway_pb2.Instance,
         partitions_message_mode_parser=True,
-        indices_parser=api_pb2.Cnf
+        indices_serializer=StartService_input_indices
     ))
 
-print(f"cnf {cnf}")
+    print(f"Random cnf service {random_cnf_service}")
+    uri = random_cnf_service.instance.uri_slot[0].uri[0]
+    r_uri = uri.ip + ':' + str(uri.port)
+
+    r_stub = api_pb2_grpc.RandomStub(
+        grpc.insecure_channel(r_uri)
+    )
+    print('Received random. ', r_stub)
+    sleep(5)
+    cnf = next(client_grpc(
+            method=r_stub.RandomCnf,
+            partitions_message_mode_parser=True,
+            indices_parser=api_pb2.Cnf
+        ))
+
+    print(f"cnf {cnf}")
