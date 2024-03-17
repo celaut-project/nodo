@@ -17,7 +17,7 @@ from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
 
 
-class Hyper:
+class Compiler:
     def __init__(self, path, aux_id):
         super().__init__()
         self.blocks: List[bytes] = []
@@ -298,13 +298,14 @@ class Hyper:
             )
             service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
 
-            self.metadata.hashtag.hash.extend(
+            self.metadata.hashtag.hash.extend(  # AQUI AGREGA UNA HASH.
                 [Any.Metadata.HashTag.Hash(
                     type=SHA3_256_ID,
                     value=bytes_id
                 )]
             )
             """
+            ** TODO Validation **
             self.metadata.hashtag.hash.extend(
                 calculate_hashes_by_stream(
                     value=grpcbb.read_multiblock_directory(
@@ -336,7 +337,7 @@ class Hyper:
 
 
 def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
-    spec_file = Hyper(path=path, aux_id=aux_id)
+    spec_file = Compiler(path=path, aux_id=aux_id)
 
     with resources_manager.mem_manager(len=COMPILER_MEMORY_SIZE_FACTOR * spec_file.buffer_len):
         spec_file.parseContainer()
@@ -350,26 +351,6 @@ def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.S
     os.system(DOCKER_COMMAND + ' rmi builder' + aux_id)
     os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier, metadata, service
-
-
-"""
-def repo_ok(
-        repo: str,
-        partitions_model: list
-) -> str:
-    import random
-    aux_id = str(random.random())
-    git = str(repo)
-    git_repo = git.split('::')[0]
-    branch = git.split('::')[1]
-    os.system('git clone --branch ' + branch + ' ' + git_repo + ' ' + CACHE + aux_id + '/for_build/git')
-    return ok(
-        path=CACHE + aux_id + '/for_build/git/.service/',
-        aux_id=aux_id,
-        partitions_model=partitions_model
-    )  # Hyperfile
-
-"""
 
 
 def zipfile_ok(

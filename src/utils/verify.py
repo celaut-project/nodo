@@ -56,7 +56,7 @@ def get_service_hex_main_hash(
             return hash.value.hex()
 
 
-def get_service_list_of_hashes(service_buffer: bytes) -> list:
+def get_service_list_of_hashes(service_buffer: bytes) -> List[Any.Metadata.HashTag.Hash]:
     return calculate_hashes(
         value=service_buffer
     )
