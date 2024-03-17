@@ -8,5 +8,5 @@ ergpy==0.1.9.0
 ecdsa==0.18.0
 python-dotenv==1.0.0
 numba==0.57.1
-git+https://github.com/jossemii/grpcbb
+git+https://github.com/pee-rpc-protocol/pee-rpc
 https://github.com/celaut-project/sigma-reputation-graph/raw/master/target/wheels/sigma_reputation_graph-0.0.0-cp311-cp311-manylinux_2_35_x86_64.whl
