@@ -298,30 +298,12 @@ class Compiler:
             )
             service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
 
-            self.metadata.hashtag.hash.extend(  # AQUI AGREGA UNA HASH.
+            self.metadata.hashtag.hash.extend(
                 [Any.Metadata.HashTag.Hash(
                     type=SHA3_256_ID,
                     value=bytes_id
                 )]
             )
-            """
-            ** TODO Validation **
-            self.metadata.hashtag.hash.extend(
-                calculate_hashes_by_stream(
-                    value=grpcbb.read_multiblock_directory(
-                        directory=directory,
-                        delete_directory=True,
-                        ignore_blocks=True
-                    )
-                )
-            )
-            
-
-            if service_id != get_service_hex_main_hash(metadata=self.metadata):
-                raise Exception('Compiler error obtaining the service id -> ' + service_id +
-                                ' ' + get_service_hex_main_hash(metadata=self.metadata),
-                                type(service_id), type(get_service_hex_main_hash(metadata=self.metadata)))
-            """
 
             from hashlib import sha3_256
             validate_content = sha3_256()
