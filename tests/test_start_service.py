@@ -6,7 +6,7 @@ from grpcbigbuffer.client import Dir, client_grpc
 from src.utils.env import METADATA_REGISTRY, REGISTRY
 
 from src.utils.logger import LOGGER
-from tests.main import GATEWAY, SHA3_256, SORTER, FRONTIER
+from tests.main import *
 from protos import gateway_pb2, celaut_pb2, gateway_pb2_grpc, gateway_pb2_grpcbf
 
 
