@@ -184,10 +184,9 @@ def test_sorter_service(sorter_endpoint: Optional[str] = sys.argv[3] if len(sys.
         next(client_grpc(method=c_stub.StartTrain))
 
         print('Wait to train the model ...')
-        for i in range(50):
-            for j in range(5):
-                print(f'\n{i}-{j}')
-                sleep(200)
+        for i in range(200):
+
+            sleep(5)
 
             cnf = next(client_grpc(
                 method=r_stub.RandomCnf,
@@ -261,6 +260,8 @@ def test_sorter_service(sorter_endpoint: Optional[str] = sys.argv[3] if len(sys.
                 dataset_obj.dir,
                 'dataset.bin'
             )
+
+            sleep(5)
 
         sleep(100)
 
