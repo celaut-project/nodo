@@ -66,7 +66,7 @@ def test_sorter_service(sorter_endpoint: Optional[str] = sys.argv[3] if len(sys.
                     method=g_stub.StartService,
                     input=generator(
                         _hash=SORTER,
-                        mem_limit=105 * pow(10, 6),
+                        mem_limit= 630 * pow(10, 6),
                         initial_gas_amount=pow(10, 64)
                     ),
                     indices_parser=gateway_pb2.Instance,
