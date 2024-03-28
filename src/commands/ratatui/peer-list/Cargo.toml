@@ -1,0 +1,12 @@
+[package]
+name = "peer-list"
+version = "0.1.0"
+authors = ["jse07 <jse07@anon.erg>"]
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+crossterm = { version = "0.27.0", features = ["event-stream"] }
+futures = "0.3.30"
+ratatui = "0.26.0"
+tokio = { version = "1.35.1", features = ["full"] }
