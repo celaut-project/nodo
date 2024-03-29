@@ -42,7 +42,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
                 .border_type(BorderType::Thick),
         )
         .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
-        Rect::new(0, 0, frame.size().width, frame.size().height/2),
+        Rect::new(0, 0, frame.size().width, frame.size().height*3/4),
         &mut table_state
     );
 
@@ -69,6 +69,6 @@ pub fn render(app: &mut App, frame: &mut Frame) {
                 .border_type(BorderType::Thick),
         )
         .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
-        Rect::new(0, frame.size().height/2, frame.size().width, frame.size().height/2)
+        Rect::new(0, frame.size().height*3/4, frame.size().width, frame.size().height/4)
     );
 }
