@@ -22,6 +22,7 @@ async fn main() -> AppResult<()> {
     while app.running {
         // Render the user interface.
         tui.draw(&mut app)?;
+        app.refresh();
         // Handle events.
         match tui.events.next().await? {
             Event::Tick => app.tick(),

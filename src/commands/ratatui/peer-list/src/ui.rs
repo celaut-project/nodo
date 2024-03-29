@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 use ratatui::{
     layout::{Alignment, Constraint},
     style::{Color, Style},
@@ -8,37 +6,6 @@ use ratatui::{
 };
 
 use crate::app::App;
-
-use rusqlite::{Connection, Result};
-
-const DATABASE_FILE: &str = "../../../../storage/database.sqlite";
-
-struct Peer {
-    id: String,
-    uri: String,
-    gas: u8
-}
-
-fn get_peer() -> Result<Vec<Peer>> {
-    Ok(
-        Connection::open(DATABASE_FILE)?.prepare(
-            "SELECT p.id, u.ip, u.port
-            FROM peer p
-            JOIN slot s ON p.id = s.peer_id
-            JOIN uri u ON s.id = u.slot_id",
-        )?.query_map([], |row| {
-            let id: String = row.get(0)?;
-            let ip: String = row.get(1)?;
-            let port: u16 = row.get(2)?;
-            Ok(Peer {
-                id: id,
-                uri: format!("{}:{}", ip, port),
-                gas: 0
-            })
-        })?
-        .collect::<Result<Vec<Peer>>>()?
-    )
-}
 
 /// Renders the user interface widgets.
 pub fn render(app: &mut App, frame: &mut Frame) {
@@ -49,14 +16,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     frame.render_widget(
         Table::new(
-            match get_peer() {
-                Ok(peer_ids) => {
-                    peer_ids.iter().map(|peer| {
-                        Row::new(vec![peer.id.clone(), peer.uri.clone(), peer.gas.to_string()])
-                    }).collect()
-                },
-                Err(e) => Vec::new(),
-            },
+            app.peers.iter().map(|peer| {
+                Row::new(vec![peer.id.clone(), peer.uri.clone(), peer.gas.to_string()])
+            }).collect::<Vec<Row>>(),
             [
                 Constraint::Length(30),
                 Constraint::Length(30),
