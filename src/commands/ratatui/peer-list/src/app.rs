@@ -1,4 +1,5 @@
-use std::error;
+use std::{error, fs, io, path::Path, vec};
+use ratatui::widgets::{List, ListState};
 use rusqlite::{Connection, Result};
 use sysinfo::System;
 
@@ -6,6 +7,8 @@ use sysinfo::System;
 pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
 
 const DATABASE_FILE: &str = "../../../../storage/database.sqlite";
+const SERVICES_ROOT: &str = "../../../../storage/__registry__";
+const METADATA_ROOT: &str = "../../../../storage/__registry__";
 pub const RAM_TIMES: usize = 500;
 
 #[derive(Debug)]
@@ -13,6 +16,11 @@ pub struct Peer {
     pub id: String,
     pub uri: String,
     pub gas: u8
+}
+
+#[derive(Debug)]
+pub struct Service {
+    pub id: String
 }
 
 fn get_peers() -> Result<Vec<Peer>> {
@@ -34,6 +42,25 @@ fn get_peers() -> Result<Vec<Peer>> {
         })?
         .collect::<Result<Vec<Peer>>>()?
     )
+}
+
+fn get_services() -> Result<Vec<Service>, io::Error> {
+    let entries = fs::read_dir(Path::new(SERVICES_ROOT))?;
+    let mut services = Vec::new();
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.file_name();
+
+        // Convierte el path a String, puede que necesites ajustar esto según tu estructura Service
+        let service_id = path.to_string_lossy().into_owned();
+
+        services.push(Service {
+            id: service_id,
+        });
+    }
+
+    Ok(services)
 }
 
 fn get_ram_usage() -> u64 {
@@ -62,6 +89,7 @@ impl<'a> TabsState<'a> {
     pub fn new(titles: Vec<&'a str>) -> TabsState {
         TabsState { titles, index: 0 }
     }
+
     pub fn next(&mut self) {
         self.index = (self.index + 1) % self.titles.len();
     }
@@ -75,13 +103,57 @@ impl<'a> TabsState<'a> {
     }
 }
 
+#[derive(Debug)]
+pub struct StatefulList<T> {
+    pub state: ListState,
+    pub items: Vec<T>,
+}
+
+impl<T> StatefulList<T> {
+    pub fn with_items(items: Vec<T>) -> Self {
+        Self {
+            state: ListState::default(),
+            items,
+        }
+    }
+
+    pub fn next(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i >= self.items.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
+    }
+
+    pub fn previous(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.items.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
+    }
+}
+
 /// Application.
 #[derive(Debug)]
 pub struct App<'a> {
     pub title: &'a str,
     pub tabs: TabsState<'a>,
     pub running: bool,
-    pub peers: Vec<Peer>,
+    pub peers: StatefulList<Peer>,
+    pub services: StatefulList<Service>,
     pub ram_usage: Vec<u64>
 }
 
@@ -89,9 +161,10 @@ impl<'a> Default for App<'a> {
     fn default() -> Self {
         Self {
             title: "NODO",
-            tabs: TabsState::new(vec!["PEERS", "CLIENTS", "CONTAINERS"]),
+            tabs: TabsState::new(vec!["PEERS", "CLIENTS", "CONTAINERS", "SERVICES"]),
             running: true,
-            peers: get_peers().unwrap_or_default(),
+            peers: StatefulList::with_items(get_peers().unwrap_or_default()),
+            services: StatefulList::with_items(get_services().unwrap_or_default()),
             ram_usage: [0; RAM_TIMES].to_vec()
         }
     }
@@ -103,6 +176,30 @@ impl<'a> App<'a> {
         Self::default()
     }
 
+    pub fn on_right(&mut self) {
+        self.tabs.next();
+    }
+
+    pub fn on_left(&mut self) {
+        self.tabs.previous();
+    }
+
+    pub fn on_up(&mut self) {
+        match self.tabs.index {
+            1 => self.peers.previous(),
+            2 => self.services.previous(),
+            _ => {}
+        }
+    }
+
+    pub fn on_down(&mut self) {
+        match self.tabs.index {
+            1 => self.peers.next(),
+            2 => self.services.next(),
+            _ => {}
+        }
+    }
+
     /// Handles the tick event of the terminal.
     pub fn tick(&self) {}
 
@@ -112,7 +209,8 @@ impl<'a> App<'a> {
     }
 
     pub fn refresh(&mut self) {
-        self.peers = get_peers().unwrap_or_default();
-        //self.ram_usage.push(get_ram_usage());
+        self.peers = StatefulList::with_items(get_peers().unwrap_or_default());
+        self.services = StatefulList::with_items(get_services().unwrap_or_default());
+        // self.ram_usage.push(get_ram_usage());
     }
 }

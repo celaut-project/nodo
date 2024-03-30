@@ -11,7 +11,30 @@ use crate::app::App;
 
 /// Renders the user interface widgets.
 pub fn render(app: &mut App, frame: &mut Frame) {
-    let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(frame.size());
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(vec![
+            Constraint::Percentage(50),
+            Constraint::Percentage(23),
+            Constraint::Percentage(23),
+            Constraint::Percentage(4)
+        ])
+        .split(frame.size());
+
+    draw_tabs(frame, app, layout[0]);
+    draw_ram_usage(frame, app, layout[1]);
+    draw_ram_usage(frame, app, layout[2]);
+}
+
+fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(vec![
+            Constraint::Percentage(15),
+            Constraint::Percentage(95),
+        ])
+        .split(area);
+
     let tabs = app
         .tabs
         .titles
@@ -21,35 +44,22 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .block(Block::default().borders(Borders::ALL).title(app.title))
         .highlight_style(Style::default().fg(Color::Yellow))
         .select(app.tabs.index);
-    frame.render_widget(tabs, chunks[0]);
+
+    frame.render_widget(tabs, layout[0]);
     match app.tabs.index {
-        0 => draw_first_tab(frame, app, chunks[1]),
-        1 => draw_second_tab(frame, app, chunks[1]),
-        2 => draw_third_tab(frame, app, chunks[1]),
+        0 => draw_peer_list(frame, app, layout[1]),
+        1 => draw_peer_list(frame, app, layout[1]),
+        2 => draw_peer_list(frame, app, layout[1]),
+        3 => draw_service_list(frame, app, layout[1]),
         _ => {}
     };
-}
-
-fn draw_first_tab(frame: &mut Frame, app: &mut App, area: Rect) {
-    draw_peer_list(frame, app, Rect::new(0, 0, frame.size().width, frame.size().height*3/4));
-    // draw_ram_usage(frame, app, Rect::new(0, frame.size().height*3/4, frame.size().width, frame.size().height/4));
-}
-
-fn draw_second_tab(frame: &mut Frame, app: &mut App, area: Rect) {
-    draw_peer_list(frame, app, Rect::new(0, 0, frame.size().width, frame.size().height*3/4));
-    // draw_ram_usage(frame, app, Rect::new(0, frame.size().height*3/4, frame.size().width, frame.size().height/4));
-}
-
-fn draw_third_tab(frame: &mut Frame, app: &mut App, area: Rect) {
-    draw_peer_list(frame, app, Rect::new(0, 0, frame.size().width, frame.size().height*3/4));
-    // draw_ram_usage(frame, app, Rect::new(0, frame.size().height*3/4, frame.size().width, frame.size().height/4));
 }
 
 fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut table_state = TableState::default();
     frame.render_stateful_widget(
         Table::new(
-            app.peers.iter().map(|peer| {
+            app.peers.items.iter().map(|peer| {
                 Row::new(vec![peer.id.clone(), peer.uri.clone(), peer.gas.to_string()])
             }).collect::<Vec<Row>>(),
             [
@@ -68,10 +78,38 @@ fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .block(
             Block::bordered()
                 .title("PEERS")
-                .title_alignment(Alignment::Center)
+                .title_alignment(Alignment::Left)
                 .border_type(BorderType::Thick),
         )
         .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
+        area,
+        &mut table_state
+    );
+}
+
+fn draw_service_list(frame: &mut Frame, app: &mut App, area: Rect) {
+    let mut table_state = TableState::default();
+    frame.render_stateful_widget(
+        Table::new(
+            app.services.items.iter().map(|peer| {
+                Row::new(vec![peer.id.clone()])
+            }).collect::<Vec<Row>>(),
+            [
+                Constraint::Length(70),
+            ]
+        )
+        .header(
+            Row::new(vec![
+                Cell::from("Id"),
+            ])
+        )
+        .block(
+            Block::bordered()
+                .title("SERVICES")
+                .title_alignment(Alignment::Left)
+                .border_type(BorderType::Thick),
+        )
+        .style(Style::default().fg(Color::LightMagenta).bg(Color::Black)),
         area,
         &mut table_state
     );
