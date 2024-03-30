@@ -1,5 +1,5 @@
 use std::{error, fs, io, path::Path, vec};
-use ratatui::widgets::{List, ListState};
+use ratatui::widgets::{List, ListState, TableState};
 use rusqlite::{Connection, Result};
 use sysinfo::System;
 
@@ -105,14 +105,14 @@ impl<'a> TabsState<'a> {
 
 #[derive(Debug)]
 pub struct StatefulList<T> {
-    pub state: ListState,
+    pub state: TableState,
     pub items: Vec<T>,
 }
 
 impl<T> StatefulList<T> {
     pub fn with_items(items: Vec<T>) -> Self {
         Self {
-            state: ListState::default(),
+            state: TableState::default(),
             items,
         }
     }
@@ -186,16 +186,16 @@ impl<'a> App<'a> {
 
     pub fn on_up(&mut self) {
         match self.tabs.index {
-            1 => self.peers.previous(),
-            2 => self.services.previous(),
+            0 => self.peers.previous(),
+            3 => self.services.previous(),
             _ => {}
         }
     }
 
     pub fn on_down(&mut self) {
         match self.tabs.index {
-            1 => self.peers.next(),
-            2 => self.services.next(),
+            0 => self.peers.next(),
+            3 => self.services.next(),
             _ => {}
         }
     }

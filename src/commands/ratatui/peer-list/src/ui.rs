@@ -56,7 +56,6 @@ fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let mut table_state = TableState::default();
     frame.render_stateful_widget(
         Table::new(
             app.peers.items.iter().map(|peer| {
@@ -81,14 +80,15 @@ fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 .title_alignment(Alignment::Left)
                 .border_type(BorderType::Thick),
         )
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+        .highlight_symbol("> ")
         .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
         area,
-        &mut table_state
+        &mut app.peers.state
     );
 }
 
 fn draw_service_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let mut table_state = TableState::default();
     frame.render_stateful_widget(
         Table::new(
             app.services.items.iter().map(|peer| {
@@ -109,9 +109,11 @@ fn draw_service_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 .title_alignment(Alignment::Left)
                 .border_type(BorderType::Thick),
         )
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+        .highlight_symbol("> ")
         .style(Style::default().fg(Color::LightMagenta).bg(Color::Black)),
         area,
-        &mut table_state
+        &mut app.services.state
     );
 }
 
