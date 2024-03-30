@@ -95,6 +95,6 @@ impl App {
 
     pub fn refresh(&mut self) {
         self.peers = get_peers().unwrap_or_default();
-        self.ram_usage.push(get_ram_usage());
+        //self.ram_usage.push(get_ram_usage());
     }
 }

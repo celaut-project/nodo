@@ -37,7 +37,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         )
         .block(
             Block::bordered()
-                .title("Available peer list")
+                .title("PEERS")
                 .title_alignment(Alignment::Center)
                 .border_type(BorderType::Thick),
         )
@@ -46,7 +46,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         &mut table_state
     );
 
-    let ram_usage_arr: [u64; RAM_TIMES]  = {
+    /*let ram_usage_arr: [u64; RAM_TIMES]  = {
         if app.ram_usage.len() > RAM_TIMES {
             let ram_usage_vector = app.ram_usage.clone()[(app.ram_usage.len() - RAM_TIMES)..].to_vec();
             let ram_usage_arr: [u64; RAM_TIMES]  = vec_to_array!(ram_usage_vector, u64, RAM_TIMES);
@@ -70,5 +70,5 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         )
         .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
         Rect::new(0, frame.size().height*3/4, frame.size().width, frame.size().height/4)
-    );
+    );*/
 }
