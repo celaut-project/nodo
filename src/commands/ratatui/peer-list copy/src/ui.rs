@@ -1,9 +1,9 @@
-#[allow(clippy::wildcard_imports)]
 use ratatui::{
-    prelude::*,
-    widgets::{*},
+    layout::{Alignment, Constraint, Rect},
+    style::{Color, Style, Stylize},
+    widgets::{Block, BorderType, Borders, Cell, RenderDirection, Row, Sparkline, Table, TableState},
+    Frame,
 };
-
 use vec_to_array::vec_to_array;
 use crate::app::RAM_TIMES;
 
@@ -11,41 +11,11 @@ use crate::app::App;
 
 /// Renders the user interface widgets.
 pub fn render(app: &mut App, frame: &mut Frame) {
-    let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(frame.size());
-    let tabs = app
-        .tabs
-        .titles
-        .iter()
-        .map(|t| text::Line::from(Span::styled(*t, Style::default().fg(Color::Green))))
-        .collect::<Tabs>()
-        .block(Block::default().borders(Borders::ALL).title(app.title))
-        .highlight_style(Style::default().fg(Color::Yellow))
-        .select(app.tabs.index);
-    frame.render_widget(tabs, chunks[0]);
-    match app.tabs.index {
-        0 => draw_first_tab(frame, app, chunks[1]),
-        1 => draw_second_tab(frame, app, chunks[1]),
-        2 => draw_third_tab(frame, app, chunks[1]),
-        _ => {}
-    };
-}
+    // This is where you add new widgets.
+    // See the following resources:
+    // - https://docs.rs/ratatui/latest/ratatui/widgets/index.html
+    // - https://github.com/ratatui-org/ratatui/tree/master/
 
-fn draw_first_tab(frame: &mut Frame, app: &mut App, area: Rect) {
-    draw_peer_list(frame, app, Rect::new(0, 0, frame.size().width, frame.size().height*3/4));
-    // draw_ram_usage(frame, app, Rect::new(0, frame.size().height*3/4, frame.size().width, frame.size().height/4));
-}
-
-fn draw_second_tab(frame: &mut Frame, app: &mut App, area: Rect) {
-    draw_peer_list(frame, app, Rect::new(0, 0, frame.size().width, frame.size().height*3/4));
-    // draw_ram_usage(frame, app, Rect::new(0, frame.size().height*3/4, frame.size().width, frame.size().height/4));
-}
-
-fn draw_third_tab(frame: &mut Frame, app: &mut App, area: Rect) {
-    draw_peer_list(frame, app, Rect::new(0, 0, frame.size().width, frame.size().height*3/4));
-    // draw_ram_usage(frame, app, Rect::new(0, frame.size().height*3/4, frame.size().width, frame.size().height/4));
-}
-
-fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut table_state = TableState::default();
     frame.render_stateful_widget(
         Table::new(
@@ -72,13 +42,11 @@ fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 .border_type(BorderType::Thick),
         )
         .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
-        area,
+        Rect::new(0, 0, frame.size().width, frame.size().height*3/4),
         &mut table_state
     );
-}
 
-fn draw_ram_usage(frame: &mut Frame, app: &mut App, area: Rect) {
-    let ram_usage_arr: [u64; RAM_TIMES]  = {
+    /*let ram_usage_arr: [u64; RAM_TIMES]  = {
         if app.ram_usage.len() > RAM_TIMES {
             let ram_usage_vector = app.ram_usage.clone()[(app.ram_usage.len() - RAM_TIMES)..].to_vec();
             let ram_usage_arr: [u64; RAM_TIMES]  = vec_to_array!(ram_usage_vector, u64, RAM_TIMES);
@@ -101,6 +69,6 @@ fn draw_ram_usage(frame: &mut Frame, app: &mut App, area: Rect) {
                 .border_type(BorderType::Thick),
         )
         .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
-        area
-    );
+        Rect::new(0, frame.size().height*3/4, frame.size().width, frame.size().height/4)
+    );*/
 }

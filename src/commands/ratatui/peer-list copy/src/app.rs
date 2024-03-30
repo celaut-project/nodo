@@ -53,51 +53,33 @@ fn get_ram_usage() -> u64 {
 }
 
 #[derive(Debug)]
-pub struct TabsState<'a> {
-    pub titles: Vec<&'a str>,
-    pub index: usize,
-}
-
-impl<'a> TabsState<'a> {
-    pub fn new(titles: Vec<&'a str>) -> TabsState {
-        TabsState { titles, index: 0 }
-    }
-    pub fn next(&mut self) {
-        self.index = (self.index + 1) % self.titles.len();
-    }
-
-    pub fn previous(&mut self) {
-        if self.index > 0 {
-            self.index -= 1;
-        } else {
-            self.index = self.titles.len() - 1;
-        }
-    }
+pub enum Tabs {
+    Peers,
+    Containers
 }
 
 /// Application.
 #[derive(Debug)]
-pub struct App<'a> {
-    pub title: &'a str,
-    pub tabs: TabsState<'a>,
+pub struct App {
+    /// Is the application running?
     pub running: bool,
+    pub tab: Tabs,
     pub peers: Vec<Peer>,
     pub ram_usage: Vec<u64>
 }
 
-impl<'a> Default for App<'a> {
+impl Default for App {
     fn default() -> Self {
         Self {
-            title: "NODO",
-            tabs: TabsState::new(vec!["PEERS", "CLIENTS", "CONTAINERS"]),
             running: true,
+            tab: Tabs::Peers,
             peers: get_peers().unwrap_or_default(),
             ram_usage: [0; RAM_TIMES].to_vec()
         }
     }
 }
 
-impl<'a> App<'a> {
+impl App {
     /// Constructs a new instance of [`App`].
     pub fn new() -> Self {
         Self::default()
