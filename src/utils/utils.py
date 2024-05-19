@@ -90,8 +90,7 @@ def get_only_the_ip_from_context_method(context_peer: str) -> str:
     try:
         ipv = context_peer.split(':')[0]
         if ipv in ('ipv4', 'ipv6'):
-            ip = context_peer[5:-1 * (len(context_peer.split(':')[
-                                              -1]) + 1)]  # Lleva el formato 'ipv4:49.123.106.100:4442', no queremos 'ipv4:' ni el puerto.
+            ip = context_peer[5:-1 * (len(context_peer.split(':')[-1]) + 1)]  # The format is 'ipv4:49.123.106.100:4442', we don't want 'ipv4:' nor the port.
             return ip[1:-1] if ipv == 'ipv6' else ip
     except Exception as e:
         raise Exception('Error getting the ip from the context: ' + str(e))

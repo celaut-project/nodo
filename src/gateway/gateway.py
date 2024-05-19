@@ -4,6 +4,7 @@ from protos import gateway_pb2_grpc, gateway_pb2
 from src.compiler.compile import compile_zip
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
+from src.gateway.launcher.tunnels import from_tunnel, get_gateway_tunnel
 from src.gateway.utils import generate_gateway_instance
 from src.manager.manager import prune_container, generate_client, get_token_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources
@@ -38,15 +39,15 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GetInstance(self, request_iterator, context, **kwargs):
         l.LOGGER('Request for instance by ' + str(context.peer()))
-        yield from grpcbf.serialize_to_buffer(
-                generate_gateway_instance(
-                    network=get_network_name(
-                        ip_or_uri=get_only_the_ip_from_context(
-                            context_peer=context.peer()
-                        )
-                    )
+        require_tunnel = from_tunnel(context.peer())
+        gateway_instance = generate_gateway_instance(
+            network=get_network_name(
+                ip_or_uri=get_only_the_ip_from_context(
+                    context_peer=context.peer()
                 )
-        )
+            )
+        ) if not require_tunnel else get_gateway_tunnel()
+        yield from grpcbf.serialize_to_buffer(gateway_instance)
 
     def GenerateClient(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?

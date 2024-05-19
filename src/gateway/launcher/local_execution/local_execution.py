@@ -6,6 +6,7 @@ from protos import celaut_pb2 as celaut, gateway_pb2
 from src.builder import build
 from src.gateway.launcher.local_execution.create_container import create_container
 from src.gateway.launcher.local_execution.set_config import set_config
+from src.gateway.launcher.tunnels import from_tunnel, generate_tunnel
 from src.manager.manager import default_initial_cost, add_container
 from src.utils import utils, logger as l
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
@@ -46,7 +47,7 @@ def local_execution(
             raise e
 
     # If the request is made by a local service.
-    require_tunnel = True
+    require_tunnel = from_tunnel(ip=father_ip, id=father_id)
     by_local: bool = father_id == father_ip and not require_tunnel
     assigment_ports: Optional[Dict[int, int]] = \
         {slot.port: utils.get_free_port() for slot in service.api.slot} if not by_local \
@@ -82,16 +83,7 @@ def local_execution(
         ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
         _port: int = external
 
-        if require_tunnel:
-            try:
-                import ngrok
-                listener = ngrok.forward(f"{_ip}:{_port}", authtoken_from_env=True, proto="tcp")
-                print(f"Ingress established at: {listener.url()} for the service slot at uri: {_ip}:{_port}")
-                _ip = listener.url().split("://")[1].split(":")[0]
-                _port = int(listener.url().split("://")[1].split(":")[1])
-            except Exception as e:
-                print(f"Excepción en módulo de ngrok {str(e)}.")
-
+        if require_tunnel: _ip, _port = generate_tunnel(ip=_ip, port=_port)
         uri_slot.uri.append(
             celaut.Instance.Uri(
                 ip=_ip,
