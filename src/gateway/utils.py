@@ -25,11 +25,15 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance = celaut.Instance()
 
     uri = celaut.Instance.Uri()
-    try:
-        uri.ip = ni.ifaddresses(network)[ni.AF_INET][0]['addr']
-    except ValueError as e:
-        l.LOGGER('You must specify a valid interface name ' + network)
-        raise Exception('Error generating gateway instance --> ' + str(e))
+    if network == "localhost":
+        uri.ip = "127.0.0.1"
+    else:
+        try:
+            uri.ip = ni.ifaddresses(network)[ni.AF_INET][0]['addr']
+        except ValueError as e:
+            l.LOGGER('You must specify a valid interface name ' + network)
+            raise Exception('Error generating gateway instance --> ' + str(e))
+        
     uri.port = GATEWAY_PORT
     uri_slot = celaut.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT

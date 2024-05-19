@@ -6,6 +6,7 @@ import netifaces as ni
 
 from protos import gateway_pb2, gateway_pb2_grpc
 from src.gateway.gateway import Gateway
+from src.gateway.launcher.tunnels import TunnelSystem
 from src.manager.maintain_thread import manager_thread
 from src.utils import logger as l
 from src.utils.zeroconf import Zeroconf
@@ -52,6 +53,7 @@ def serve():
     l.LOGGER('EXTERNAL_COST_TIMEOUT -> ' + str(EXTERNAL_COST_TIMEOUT))
 
     l.LOGGER('Starting gateway at port' + str(GATEWAY_PORT))
+    l.LOGGER(f'Tunnel available at {TunnelSystem().get_url()}')
 
     server.start()
     server.wait_for_termination()
