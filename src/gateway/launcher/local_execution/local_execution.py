@@ -6,7 +6,7 @@ from protos import celaut_pb2 as celaut, gateway_pb2
 from src.builder import build
 from src.gateway.launcher.local_execution.create_container import create_container
 from src.gateway.launcher.local_execution.set_config import set_config
-from src.gateway.launcher.tunnels import from_tunnel, generate_tunnel
+from src.gateway.launcher.tunnels import TunnelSystem
 from src.manager.manager import default_initial_cost, add_container
 from src.utils import utils, logger as l
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
@@ -47,7 +47,7 @@ def local_execution(
             raise e
 
     # If the request is made by a local service.
-    require_tunnel = from_tunnel(ip=father_ip, id=father_id)
+    require_tunnel = TunnelSystem().from_tunnel(ip=father_ip)
     by_local: bool = father_id == father_ip and not require_tunnel
     assigment_ports: Optional[Dict[int, int]] = \
         {slot.port: utils.get_free_port() for slot in service.api.slot} if not by_local \
@@ -83,7 +83,7 @@ def local_execution(
         ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
         _port: int = external
 
-        if require_tunnel: _ip, _port = generate_tunnel(ip=_ip, port=_port)
+        if require_tunnel: _ip, _port = TunnelSystem().generate_tunnel(ip=_ip, port=_port)
         uri_slot.uri.append(
             celaut.Instance.Uri(
                 ip=_ip,
