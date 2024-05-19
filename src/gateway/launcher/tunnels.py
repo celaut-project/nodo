@@ -1,5 +1,6 @@
 from typing import Any, Tuple
 from pyngrok import ngrok
+import ipaddress
 
 from src.gateway.utils import generate_gateway_instance
 from src.utils.env import GATEWAY_PORT
@@ -14,8 +15,9 @@ class TunnelSystem(metaclass=Singleton):
         ngrok.set_auth_token(NGROK_AUTHTOKEN)
 
     def from_tunnel(self, ip: str) -> bool:
-        print(f"IS FROM TUNNEL {ip}")
-        return True
+        print(f" From tunnel {ip} { ip == ipaddress.IPv4Address('127.0.0.1') or ip == ipaddress.IPv6Address('::1')}")
+        # If it's localhost, it's from the ngrok service. If are from docker network or outside, are self executed services and clients from internal networks without tunneling.
+        return ip == ipaddress.IPv4Address('127.0.0.1') or ip == ipaddress.IPv6Address('::1')
 
     def generate_tunnel(self, ip: str, port: int) -> Tuple[str, int]:
         _ip, _port = ip, port
