@@ -46,9 +46,11 @@ def local_execution(
             raise e
 
     # If the request is made by a local service.
-    by_local: bool = father_id == father_ip
-    assigment_ports: Optional[Dict[int, int]] = {slot.port: utils.get_free_port() for slot in service.api.slot} \
-        if not by_local else {slot.port: slot.port for slot in service.api.slot}
+    require_tunnel = True
+    by_local: bool = father_id == father_ip and not require_tunnel
+    assigment_ports: Optional[Dict[int, int]] = \
+        {slot.port: utils.get_free_port() for slot in service.api.slot} if not by_local \
+        else {slot.port: slot.port for slot in service.api.slot}
 
     container = create_container(
         use_other_ports=assigment_ports if not by_local else None,
@@ -75,12 +77,27 @@ def local_execution(
         uri_slot.internal_port = internal
 
         # for host_ip in host_ip_list:
-        uri = celaut.Instance.Uri()
-        uri.ip = utils.get_local_ip_from_network(
+        _ip: str = utils.get_local_ip_from_network(
             network=utils.get_network_name(ip_or_uri=father_ip)
         ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
-        uri.port = external
-        uri_slot.uri.append(uri)
+        _port: int = external
+
+        if require_tunnel:
+            try:
+                import ngrok
+                listener = ngrok.forward(f"{_ip}:{_port}", authtoken_from_env=True, proto="tcp")
+                print(f"Ingress established at: {listener.url()} for the service slot at uri: {_ip}:{_port}")
+                _ip = listener.url().split("://")[1].split(":")[0]
+                _port = int(listener.url().split("://")[1].split(":")[1])
+            except Exception as e:
+                print(f"Excepción en módulo de ngrok {str(e)}.")
+
+        uri_slot.uri.append(
+            celaut.Instance.Uri(
+                ip=_ip,
+                port=_port
+            )
+        )
 
     l.LOGGER('Thrown out a new instance by ' + father_id + ' of the container_id ' + container.id)
     return gateway_pb2.Instance(
