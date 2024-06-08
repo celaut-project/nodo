@@ -178,7 +178,7 @@ def spend_gas(
 ) -> bool:
     gas_to_spend = int(gas_to_spend)
     logger.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
-    if token_or_container_ip in sc.system_cache: logger.LOGGER(f"Actual deposit -> {sc.system_cache[token_or_container_ip]["gas"]}")
+    if token_or_container_ip in sc.system_cache: logger.LOGGER(f"Actual deposit -> {sc.system_cache[token_or_container_ip]['gas']}")
     try:
         # En caso de que sea un peer, el token es el peer id.
         if token_or_container_ip in sc.clients and (
