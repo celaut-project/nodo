@@ -22,7 +22,7 @@ def test_start_service():
     def service_extended():
         # Send partition model.
         yield gateway_pb2.Client(client_id='dev')
-        config = gateway_pb2.Configuration(
+        yield gateway_pb2.Configuration(
             config=celaut_pb2.Configuration(),
             resources=gateway_pb2.CombinationResources(
                 clause={
@@ -35,7 +35,6 @@ def test_start_service():
                 }
             )
         )
-        yield config
         yield celaut_pb2.Any.Metadata.HashTag.Hash(
                 type=bytes.fromhex(SHA3_256),
                 value=bytes.fromhex(SERVICE)
