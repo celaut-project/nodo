@@ -45,6 +45,24 @@ def __export_registry(directory: str, compile_config: Dict):
                                 os.system(f"cp -r {BLOCKS}/{block} "
                                           f"{directory}/{compile_config[BLOCKS_DIRECTORY]}")
 
+def update_dockerfile(project_directory, zip_source_directory, compile_config):
+    dockerfile_path = os.path.join(project_directory, '.service', 'Dockerfile')
+    new_copy_line = f'COPY {zip_source_directory} /{compile_config["workdir"]}/\n'
+    copy_found = False
+
+    if os.path.exists(dockerfile_path):
+        with open(dockerfile_path, 'r') as dockerfile:
+            lines = dockerfile.readlines()
+
+        with open(dockerfile_path, 'w') as dockerfile:
+            for line in lines:
+                if line.strip().startswith('COPY SRC'):
+                    dockerfile.write(new_copy_line)
+                    copy_found = True
+                else:
+                    dockerfile.write(line)
+            if not copy_found:
+                dockerfile.write(new_copy_line)
 
 def __generate_service_zip(project_directory: str) -> str:
     # Remove the last character '/' from the path if it exists
@@ -69,9 +87,7 @@ def __generate_service_zip(project_directory: str) -> str:
     os.system(f"cp -r {' '.join([os.path.join(project_directory, item) for item in compile_config['include']])} "
               f"{complete_source_directory}")
 
-    # Add a line to the Dockerfile to copy the source files to the working directory
-    with open(f'{project_directory}/.service/Dockerfile', 'a') as dockerfile:
-        dockerfile.write(f'COPY {ZIP_SOURCE_DIRECTORY} /{compile_config["workdir"]}/')
+    update_dockerfile(project_directory=project_directory, zip_source_directory=ZIP_SOURCE_DIRECTORY, compile_config=compile_config)
 
     # Remove the files and directories specified in the "ignore" list from the configuration
     if 'ignore' in compile_config:
