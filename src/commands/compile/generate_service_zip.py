@@ -58,11 +58,13 @@ def update_dockerfile(project_directory, zip_source_directory, compile_config):
             for line in lines:
                 if line.strip().startswith('COPY SRC'):
                     dockerfile.write(new_copy_line)
+                    dockerfile.write(f"WORKDIR {compile_config['workdir']}")
                     copy_found = True
                 else:
                     dockerfile.write(line)
             if not copy_found:
                 dockerfile.write(new_copy_line)
+                dockerfile.write(f"WORKDIR {compile_config['workdir']}")
 
 def __generate_service_zip(project_directory: str) -> str:
     # Remove the last character '/' from the path if it exists
