@@ -45,37 +45,16 @@ def __export_registry(directory: str, compile_config: Dict):
                                 os.system(f"cp -r {BLOCKS}/{block} "
                                           f"{directory}/{compile_config[BLOCKS_DIRECTORY]}")
 
-def update_dockerfile(project_directory, zip_source_directory, compile_config):
-    dockerfile_path = os.path.join(project_directory, '.service', 'Dockerfile')
-    new_copy_line = f'COPY {zip_source_directory} /{compile_config["workdir"]}/\n'
-    copy_found = False
-
-    if os.path.exists(dockerfile_path):
-        with open(dockerfile_path, 'r') as dockerfile:
-            lines = dockerfile.readlines()
-
-        with open(dockerfile_path, 'w') as dockerfile:
-            for line in lines:
-                if line.strip().startswith('COPY SRC'):
-                    dockerfile.write(new_copy_line)
-                    dockerfile.write(f"WORKDIR {compile_config['workdir']}")
-                    copy_found = True
-                else:
-                    dockerfile.write(line)
-            if not copy_found:
-                dockerfile.write(new_copy_line)
-                dockerfile.write(f"WORKDIR {compile_config['workdir']}")
-
 def __generate_service_zip(project_directory: str) -> str:
     # Remove the last character '/' from the path if it exists
     if project_directory[-1] == '/':
         project_directory = project_directory[:-1]
 
     # Remove the ZIP file and the destination source directory if they already exist
-    os.system(f"cd {project_directory}/.service && rm .service.zip && rm -rf {ZIP_SOURCE_DIRECTORY}")
+    os.system(f"cd {project_directory}/.service && rm .service.zip && rm -rf service")
 
     # Define the complete path for the destination source directory
-    complete_source_directory = f"{project_directory}/.service/{ZIP_SOURCE_DIRECTORY}"
+    complete_source_directory = f"{project_directory}/.service/service"
 
     # Create the destination source directory and copy all files and folders from the project there
     os.system(f"mkdir {complete_source_directory}")
@@ -88,8 +67,6 @@ def __generate_service_zip(project_directory: str) -> str:
     # TODO   Bug: don't work for hidden directories' files.
     os.system(f"cp -r {' '.join([os.path.join(project_directory, item) for item in compile_config['include']])} "
               f"{complete_source_directory}")
-
-    update_dockerfile(project_directory=project_directory, zip_source_directory=ZIP_SOURCE_DIRECTORY, compile_config=compile_config)
 
     # Remove the files and directories specified in the "ignore" list from the configuration
     if 'ignore' in compile_config:
