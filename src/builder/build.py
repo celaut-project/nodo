@@ -99,12 +99,15 @@ def build_container_from_definition(service: celaut_pb2.Service,
 
     # Get the size of the service's biggest block.
     # with open(f"{REGISTRY}{get_service_hex_main_hash(metadata=metadata)}/_.json", 'r') as f:  # TODO verify: why was not using the service_id?
-    with open(f"{REGISTRY}{service_id}/_.json", 'r') as f:
-        try:
-            biggest_block_size: int = max([os.path.getsize(BLOCKDIR + c[0])
-                                           for c in json.load(f) if type(c) is Tuple])
-        except ValueError:
-            biggest_block_size: int = 0
+    if os.path.isdir(f"{REGISTRY}{service_id}"):
+        with open(f"{REGISTRY}{service_id}/_.json", 'r') as f:
+            try:
+                biggest_block_size: int = max([os.path.getsize(BLOCKDIR + c[0])
+                                            for c in json.load(f) if type(c) is Tuple])
+            except ValueError:
+                biggest_block_size: int = 0
+    else:
+        biggest_block_size: int = os.path.getsize(f"{REGISTRY}{service_id}")
 
     with resources_manager.mem_manager(
             len=sum([
