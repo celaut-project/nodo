@@ -90,9 +90,6 @@ def __generate_service_zip(project_directory: str) -> str:
     # Create a ZIP file of the destination source directory
     os.system(f"cd {project_directory}/.service && zip -r .service.zip .")
 
-    # Delete the last line to the Dockerfile to copy the source files to the working directory
-    os.system('sed -i "$ d" {0}'.format(f"{project_directory}/.service/Dockerfile"))
-
     # Remove the destination source directory
     os.system(f"rm -rf {complete_source_directory}")
 
