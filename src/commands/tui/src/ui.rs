@@ -5,7 +5,7 @@ use ratatui::{
 };
 
 use vec_to_array::vec_to_array;
-use crate::app::RAM_TIMES;
+use crate::app::{CPU_TIMES, RAM_TIMES};
 
 use crate::app::App;
 
@@ -23,7 +23,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     draw_tabs(frame, app, layout[0]);
     draw_ram_usage(frame, app, layout[1]);
-    draw_ram_usage(frame, app, layout[2]);
+    draw_cpu_usage(frame, app, layout[2]);
 }
 
 fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -195,6 +195,32 @@ fn draw_ram_usage(frame: &mut Frame, app: &mut App, area: Rect) {
                 .border_type(BorderType::Thick),
         )
         .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
+        area
+    );
+}
+
+fn draw_cpu_usage(frame: &mut Frame, app: &mut App, area: Rect) {
+    let cpu_usage_arr: [u64; CPU_TIMES] = {
+        if app.cpu_usage.len() > CPU_TIMES {
+            let cpu_usage_vector = app.cpu_usage.clone()[(app.cpu_usage.len() - CPU_TIMES)..].to_vec();
+            let cpu_usage_arr: [u64; CPU_TIMES] = vec_to_array!(cpu_usage_vector, u64, CPU_TIMES);
+            cpu_usage_arr
+        } else {
+            [0; CPU_TIMES]
+        }
+    };
+    frame.render_widget(
+        Sparkline::default()
+            .block(
+                Block::bordered()
+                .title("CPU usage")
+                .title_alignment(Alignment::Center)
+                .border_type(BorderType::Thick),
+            )
+            .data(&cpu_usage_arr)
+            .max(100)
+            .direction(RenderDirection::LeftToRight)
+            .style(Style::default().fg(Color::Yellow).bg(Color::Black)),
         area
     );
 }

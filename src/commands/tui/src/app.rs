@@ -10,6 +10,7 @@ const DATABASE_FILE: &str = "../../../../storage/database.sqlite";
 const SERVICES_ROOT: &str = "../../../../storage/__registry__";
 const METADATA_ROOT: &str = "../../../../storage/__metadata__";
 pub const RAM_TIMES: usize = 500;
+pub const CPU_TIMES: usize = 500;
 
 #[derive(Debug)]
 pub struct Peer {
@@ -83,12 +84,10 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
     Ok(services)
 }
 
-fn get_ram_usage() -> u64 {
-    // Create a System object
-    let mut sys = System::new_all();
+fn get_ram_usage(sys: &mut System) -> u64 {
 
     // First we update all information of our system struct.
-    sys.refresh_all();
+    sys.refresh_memory();
 
     // Get total and used memory
     let total_memory = sys.total_memory();
@@ -98,6 +97,18 @@ fn get_ram_usage() -> u64 {
     let ram_usage_percentage = (used_memory as f64 / total_memory as f64) * 100.0;
     ram_usage_percentage as u64 
 }
+
+fn get_cpu_usage(sys: &mut System) -> u64 {
+
+    // Refresh CPU information
+    sys.refresh_cpu();
+
+    // Retrieve CPU usage as a percentage for all CPUs combined
+    let cpu_usage_percentage = sys.global_cpu_info().cpu_usage();
+
+    cpu_usage_percentage as u64
+}
+
 
 #[derive(Debug)]
 pub struct TabsState<'a> {
@@ -176,7 +187,9 @@ pub struct App<'a> {
     pub clients: StatefulList<String>,
     pub containers: StatefulList<String>,
     pub services: StatefulList<Service>,
-    pub ram_usage: Vec<u64>
+    pub ram_usage: Vec<u64>,
+    pub cpu_usage: Vec<u64>,
+    pub sys: System
 }
 
 impl<'a> Default for App<'a> {
@@ -189,7 +202,9 @@ impl<'a> Default for App<'a> {
             clients: StatefulList::with_items(get_clients().unwrap_or_default()),
             containers: StatefulList::with_items(get_containers().unwrap_or_default()),
             services: StatefulList::with_items(get_services().unwrap_or_default()),
-            ram_usage: [0; RAM_TIMES].to_vec()
+            ram_usage: [0; RAM_TIMES].to_vec(),
+            cpu_usage: [0; CPU_TIMES].to_vec(),
+            sys: System::new_all()
         }
     }
 }
@@ -235,6 +250,7 @@ impl<'a> App<'a> {
     pub fn refresh(&mut self) {
         self.peers = StatefulList::with_items(get_peers().unwrap_or_default());
         self.services = StatefulList::with_items(get_services().unwrap_or_default());
-        self.ram_usage.push(get_ram_usage());
+        self.ram_usage.push(get_ram_usage(&mut self.sys));
+        self.cpu_usage.push(get_cpu_usage(&mut self.sys));
     }
 }
