@@ -48,8 +48,8 @@ fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(tabs, layout[0]);
     match app.tabs.index {
         0 => draw_peer_list(frame, app, layout[1]),
-        1 => draw_client_list(frame, app, layout[1]),  // New
-        2 => draw_container_list(frame, app, layout[1]),  // New
+        1 => draw_client_list(frame, app, layout[1]),
+        2 => draw_container_list(frame, app, layout[1]),
         3 => draw_service_list(frame, app, layout[1]),
         _ => {}
     };
