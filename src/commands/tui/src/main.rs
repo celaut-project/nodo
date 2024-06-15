@@ -1,7 +1,7 @@
-use peer_list::app::{App, AppResult};
-use peer_list::event::{Event, EventHandler};
-use peer_list::handler::handle_key_events;
-use peer_list::tui::Tui;
+use tui::app::{App, AppResult};
+use tui::event::{Event, EventHandler};
+use tui::handler::handle_key_events;
+use tui::tui::Tui;
 use std::io;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;

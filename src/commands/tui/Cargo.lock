@@ -472,19 +472,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 
 [[package]]
-name = "peer-list"
-version = "0.1.0"
-dependencies = [
- "crossterm",
- "futures",
- "ratatui",
- "rusqlite",
- "sysinfo",
- "tokio",
- "vec_to_array",
-]
-
-[[package]]
 name = "pin-project-lite"
 version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -765,6 +752,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.48",
+]
+
+[[package]]
+name = "tui"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "futures",
+ "ratatui",
+ "rusqlite",
+ "sysinfo",
+ "tokio",
+ "vec_to_array",
 ]
 
 [[package]]
