@@ -6,9 +6,9 @@ use sysinfo::System;
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
 
-const DATABASE_FILE: &str = "../../../../storage/database.sqlite";
-const SERVICES_ROOT: &str = "../../../../storage/__registry__";
-const METADATA_ROOT: &str = "../../../../storage/__metadata__";
+const DATABASE_FILE: &str = "../../../storage/database.sqlite";
+const SERVICES_ROOT: &str = "../../../storage/__registry__";
+const METADATA_ROOT: &str = "../../../storage/__metadata__";
 pub const RAM_TIMES: usize = 500;
 pub const CPU_TIMES: usize = 500;
 
