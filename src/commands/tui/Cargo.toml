@@ -1,5 +1,5 @@
 [package]
-name = "peer-list"
+name = "tui"
 version = "0.1.0"
 authors = ["jse07 <jse07@anon.erg>"]
 license = "MIT"
