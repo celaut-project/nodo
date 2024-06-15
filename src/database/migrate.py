@@ -23,6 +23,22 @@ def migrate():
     ''')
     print("Created 'peer' table.")
 
+    # Add the "Client" table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS clients (
+            id TEXT PRIMARY KEY
+        )
+    ''')
+    print("Created 'clients' table.")
+
+    # Add the "Container" table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS containers (
+            id TEXT PRIMARY KEY
+        )
+    ''')
+    print("Created 'containers' table.")
+
     # Add the "Slot" table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS slot (
