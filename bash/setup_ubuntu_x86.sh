@@ -11,7 +11,7 @@ python3.11 -m venv venv
 source venv/bin/activate
 
 # Install Python dependencies from requirements.txt
-pip3 install -r ../requirements.txt
+pip3 install -r requirements.txt
 
 # Install required system packages for Docker
 apt-get -y install \
