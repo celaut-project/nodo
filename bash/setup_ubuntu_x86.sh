@@ -10,9 +10,6 @@ apt-get -y install python3.11 python3.11-venv python3-pip
 python3.11 -m venv venv
 source venv/bin/activate
 
-# Change directory to 'node' (assuming it's relative to the script)
-cd node
-
 # Install Python dependencies from requirements.txt
 pip3 install -r requirements.txt
 
