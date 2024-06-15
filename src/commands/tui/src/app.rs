@@ -44,6 +44,26 @@ fn get_peers() -> Result<Vec<Peer>> {
     )
 }
 
+fn get_clients() -> Result<Vec<String>> {
+    Ok(Connection::open(DATABASE_FILE)?.prepare(
+        "SELECT id FROM clients",
+    )?.query_map([], |row| {
+        let id: String = row.get(0)?;
+        Ok(id)
+    })?
+    .collect::<Result<Vec<String>>>()?)
+}
+
+fn get_containers() -> Result<Vec<String>> {
+    Ok(Connection::open(DATABASE_FILE)?.prepare(
+        "SELECT id FROM containers",
+    )?.query_map([], |row| {
+        let id: String = row.get(0)?;
+        Ok(id)
+    })?
+    .collect::<Result<Vec<String>>>()?)
+}
+
 fn get_services() -> Result<Vec<Service>, io::Error> {
     let entries = fs::read_dir(Path::new(SERVICES_ROOT))?;
     let mut services = Vec::new();
@@ -153,6 +173,8 @@ pub struct App<'a> {
     pub tabs: TabsState<'a>,
     pub running: bool,
     pub peers: StatefulList<Peer>,
+    pub clients: StatefulList<String>,
+    pub containers: StatefulList<String>,
     pub services: StatefulList<Service>,
     pub ram_usage: Vec<u64>
 }
@@ -160,10 +182,12 @@ pub struct App<'a> {
 impl<'a> Default for App<'a> {
     fn default() -> Self {
         Self {
-            title: "NODO",
+            title: "NODO TUI",
             tabs: TabsState::new(vec!["PEERS", "CLIENTS", "CONTAINERS", "SERVICES"]),
             running: true,
             peers: StatefulList::with_items(get_peers().unwrap_or_default()),
+            clients: StatefulList::with_items(get_clients().unwrap_or_default()),
+            containers: StatefulList::with_items(get_containers().unwrap_or_default()),
             services: StatefulList::with_items(get_services().unwrap_or_default()),
             ram_usage: [0; RAM_TIMES].to_vec()
         }
@@ -211,6 +235,6 @@ impl<'a> App<'a> {
     pub fn refresh(&mut self) {
         self.peers = StatefulList::with_items(get_peers().unwrap_or_default());
         self.services = StatefulList::with_items(get_services().unwrap_or_default());
-        // self.ram_usage.push(get_ram_usage());
+        self.ram_usage.push(get_ram_usage());
     }
 }

@@ -48,8 +48,8 @@ fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(tabs, layout[0]);
     match app.tabs.index {
         0 => draw_peer_list(frame, app, layout[1]),
-        1 => draw_peer_list(frame, app, layout[1]),
-        2 => draw_peer_list(frame, app, layout[1]),
+        1 => draw_client_list(frame, app, layout[1]),  // New
+        2 => draw_container_list(frame, app, layout[1]),  // New
         3 => draw_service_list(frame, app, layout[1]),
         _ => {}
     };
@@ -85,6 +85,60 @@ fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
         area,
         &mut app.peers.state
+    );
+}
+
+fn draw_client_list(frame: &mut Frame, app: &mut App, area: Rect) {
+    frame.render_stateful_widget(
+        Table::new(
+            app.clients.items.iter().map(|client| {
+                Row::new(vec![client.clone()])
+            }).collect::<Vec<Row>>(),
+            [
+                Constraint::Length(70),
+            ]
+        )
+        .header(
+            Row::new(vec![Cell::from("Client Id")])
+        )
+        .block(
+            Block::bordered()
+                .title("CLIENTS")
+                .title_alignment(Alignment::Left)
+                .border_type(BorderType::Thick),
+        )
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+        .highlight_symbol("> ")
+        .style(Style::default().fg(Color::LightGreen).bg(Color::Black)),
+        area,
+        &mut app.clients.state
+    );
+}
+
+fn draw_container_list(frame: &mut Frame, app: &mut App, area: Rect) {
+    frame.render_stateful_widget(
+        Table::new(
+            app.containers.items.iter().map(|container| {
+                Row::new(vec![container.clone()])
+            }).collect::<Vec<Row>>(),
+            [
+                Constraint::Length(70),
+            ]
+        )
+        .header(
+            Row::new(vec![Cell::from("Container Id")])
+        )
+        .block(
+            Block::bordered()
+                .title("CONTAINERS")
+                .title_alignment(Alignment::Left)
+                .border_type(BorderType::Thick),
+        )
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+        .highlight_symbol("> ")
+        .style(Style::default().fg(Color::LightBlue).bg(Color::Black)),
+        area,
+        &mut app.containers.state
     );
 }
 
