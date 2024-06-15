@@ -52,6 +52,7 @@ if __name__ == '__main__':
               "\n- storage:prune_blocks"
               "\n- test <test name>"
               "\n- compile <project directory>"
+              "\n- text user interface"
               )
     else:
         match sys.argv[1]:
@@ -115,6 +116,9 @@ if __name__ == '__main__':
             case 'compile':
                 from src.commands.compile.compile import compile_directory
                 compile_directory(directory=sys.argv[2])
+
+            case "tui":
+                os.system("cd src/commands/tui && cargo run")
 
             case other:
                 print('Unknown command.')
