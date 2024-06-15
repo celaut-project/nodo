@@ -1,9 +1,10 @@
-import sqlite3
-
-from src.utils.env import DATABASE_FILE
+import sqlite3, os
+from src.utils.env import DATABASE_FILE, STORAGE
 
 
 def migrate():
+    if not os.path.exists(STORAGE): os.makedirs(STORAGE)
+
     # Connect to an existing database
     conn = sqlite3.connect(DATABASE_FILE)
     print("Connected to database.")
