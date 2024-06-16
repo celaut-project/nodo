@@ -1,5 +1,13 @@
 #!/bin/bash
 
+# Check if the script is running with root privileges
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Error: This script needs to be run with sudo."
+  echo "Please run the following command to run this script with sudo:"
+  echo "  sudo $0"
+  exit 1
+fi
+
 # Function to install git if it's not already installed
 install_git_if_needed() {
   if ! command -v git >/dev/null 2>&1; then
@@ -8,35 +16,13 @@ install_git_if_needed() {
     # Detect the operating system and install git
     if [ -x "$(command -v apt)" ]; then
       # Debian/Ubuntu-based
-      if [ "$(id -u)" -ne 0 ]; then
-        echo "Error: This script needs to be run with sudo to install git using apt."
-        echo "Please run the following commands to install git manually:"
-        echo "  sudo apt update"
-        echo "  sudo apt install -y git"
-        exit 1
-      else
-        sudo apt update && sudo apt install -y git
-      fi
+      apt update && apt install -y git
     elif [ -x "$(command -v yum)" ]; then
       # Red Hat/CentOS-based
-      if [ "$(id -u)" -ne 0 ]; then
-        echo "Error: This script needs to be run with sudo to install git using yum."
-        echo "Please run the following commands to install git manually:"
-        echo "  sudo yum install -y git"
-        exit 1
-      else
-        sudo yum install -y git
-      fi
+      yum install -y git
     elif [ -x "$(command -v dnf)" ]; then
       # Fedora-based
-      if [ "$(id -u)" -ne 0 ]; then
-        echo "Error: This script needs to be run with sudo to install git using dnf."
-        echo "Please run the following commands to install git manually:"
-        echo "  sudo dnf install -y git"
-        exit 1
-      else
-        sudo dnf install -y git
-      fi
+      dnf install -y git
     elif [ -x "$(command -v brew)" ]; then
       # macOS
       brew install git
@@ -52,7 +38,7 @@ install_git_if_needed
 
 # Define the repository URL and the setup script
 REPO_URL="https://github.com/celaut-project/nodo.git"
-TARGET_DIR="$HOME/nodo"
+TARGET_DIR="/nodo"
 
 # Check if the target directory already exists
 if [ -d "$TARGET_DIR" ]; then
