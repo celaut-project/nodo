@@ -2,6 +2,11 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status.
 
+echo "Disabling problematic repository..."
+if [ -f /etc/apt/sources.list.d/bitcoin-bitcoin-jammy.list ]; then
+    sudo mv /etc/apt/sources.list.d/bitcoin-bitcoin-jammy.list /etc/apt/sources.list.d/bitcoin-bitcoin-jammy.list.disabled
+fi
+
 echo "Updating package lists..."
 apt-get -y update > /dev/null
 
