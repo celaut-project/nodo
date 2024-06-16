@@ -39,7 +39,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source $HOME/.cargo/env
 
 # Execute initialization script (assuming it's in the current directory)
-sh ./init_arm.sh
+sh ./bash/init_arm.sh
 
 # Run migrations for Python application
 python3 nodo.py migrate
