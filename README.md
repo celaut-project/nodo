@@ -30,3 +30,16 @@ a Dockerfile along with a configuration file and a zip file and get a specificat
 
 *Nodo is the glue that holds your distributed network of services together, making complex interactions 
 simple and efficient.*
+
+
+## Installation
+
+```bash
+curl -sSf https://raw.githubusercontent.com/celaut-project/nodo/master/install.sh | sh
+```
+
+### Note on Installation
+
+- **sudo Usage**: The installation script requires `sudo` privileges to install various apt packages and Docker. Use it responsibly under your own discretion.
+
+- **Docker Containers**: The system will create and remove Docker containers as part of its operations.
