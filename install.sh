@@ -2,7 +2,7 @@
 
 # Function to install git if it's not already installed
 install_git_if_needed() {
-  if ! command -v git &> /dev/null; then
+  if ! command -v git >/dev/null 2>&1; then
     echo "Git is not installed. Attempting to install git..."
 
     # Detect the operating system and install git
