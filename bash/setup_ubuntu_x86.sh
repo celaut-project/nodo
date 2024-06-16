@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e  # Exit immediately if a command exits with a non-zero status.
+set -e
 
 handle_update_errors() {
     exit_code=$?
@@ -22,7 +22,7 @@ handle_update_errors() {
 }
 
 echo "Updating package lists..."
-sudo apt-get -y update || handle_update_errors
+sudo apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false update > /dev/null 2>&1 || handle_update_errors
 
 echo "Installing required build dependencies..."
 sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
@@ -36,7 +36,7 @@ echo "Installing Python 3.11 and pip..."
 sudo apt-get -y install python3.11 python3.11-venv python3.11-distutils > /dev/null
 
 echo "Installing pip for Python 3.11..."
-wget https://bootstrap.pypa.io/get-pip.py -O get-pip.py > /dev/null
+wget -q https://bootstrap.pypa.io/get-pip.py -O get-pip.py
 sudo python3.11 get-pip.py > /dev/null
 rm get-pip.py
 
