@@ -1,24 +1,35 @@
 #!/bin/bash
 
+set -e  # Exit immediately if a command exits with a non-zero status.
+
 echo "Updating package lists..."
 apt-get -y update > /dev/null
 
+echo "Installing required build dependencies..."
+apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
+                   libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null
+
+echo "Adding Python 3.11 repository..."
+add-apt-repository ppa:deadsnakes/ppa -y > /dev/null
+apt-get -y update > /dev/null
+
 echo "Installing Python 3.11 and pip..."
-apt-get -y install python3.11 python3.11-venv python3-pip > /dev/null
+apt-get -y install python3.11 python3.11-venv python3.11-distutils > /dev/null
+
+echo "Installing pip for Python 3.11..."
+wget https://bootstrap.pypa.io/get-pip.py -O get-pip.py > /dev/null
+python3.11 get-pip.py > /dev/null
+rm get-pip.py
 
 echo "Creating and activating Python virtual environment..."
 python3.11 -m venv venv
 source venv/bin/activate
 
 echo "Installing Python dependencies from requirements.txt..."
-pip3 install -r requirements.txt > /dev/null
+pip install -r requirements.txt > /dev/null
 
 echo "Installing required system packages for Docker..."
-apt-get -y install \
-    ca-certificates \
-    curl \
-    gnupg \
-    lsb-release > /dev/null
+apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
 
 echo "Adding Docker GPG key and repository..."
 if [ ! -f /usr/share/keyrings/docker-archive-keyring.gpg ]; then
@@ -46,6 +57,6 @@ echo "Executing initialization script for x86..."
 sh ./bash/init_x86.sh > /dev/null
 
 echo "Running migrations for Python application..."
-python3 nodo.py migrate > /dev/null
+python3.11 nodo.py migrate > /dev/null
 
 echo "All steps completed."
