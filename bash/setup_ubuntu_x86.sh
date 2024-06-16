@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Update package lists
-apt-get update
+apt-get -y update
 
 # Install Python 3.11 and pip
 apt-get -y install python3.11 python3.11-venv python3-pip
@@ -25,7 +25,7 @@ curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o 
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 # Update package lists again
-apt-get update
+apt-get -y update
 
 # Install Docker
 apt-get -y install docker-ce docker-ce-cli containerd.io
