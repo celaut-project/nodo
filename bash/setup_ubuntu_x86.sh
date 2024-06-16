@@ -42,8 +42,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 # Source the Rust environment
 source $HOME/.cargo/env
 
-# Execute initialization script (assuming it's in the current directory)
-sh ./init_x86.sh
+# Execute initialization script
+sh ./bash/init_x86.sh
 
 # Run migrations for Python application
 python3 nodo.py migrate
