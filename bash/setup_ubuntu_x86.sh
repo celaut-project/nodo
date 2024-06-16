@@ -2,23 +2,42 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status.
 
+handle_update_errors() {
+    exit_code=$?
+    echo "Failed to update package lists. Exit code: $exit_code"
+
+    case $exit_code in
+        100)
+            echo "Lock file exists, maybe another package manager is running. Retrying..."
+            sudo rm /var/lib/apt/lists/lock
+            sudo apt-get update || handle_update_errors
+            ;;
+        200)
+            echo "Authentication error. Verify if GPG keys are properly added."
+            ;;
+        *)
+            echo "Unknown error occurred during package update."
+            ;;
+    esac
+}
+
 echo "Updating package lists..."
-apt-get -y -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false update -m > /dev/null
+sudo apt-get -y update || handle_update_errors
 
 echo "Installing required build dependencies..."
-apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
-                   libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null
+sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
+                        libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null
 
 echo "Adding Python 3.11 repository..."
-add-apt-repository ppa:deadsnakes/ppa -y > /dev/null
-apt-get -y update > /dev/null
+sudo add-apt-repository ppa:deadsnakes/ppa -y > /dev/null
+sudo apt-get -y update > /dev/null
 
 echo "Installing Python 3.11 and pip..."
-apt-get -y install python3.11 python3.11-venv python3.11-distutils > /dev/null
+sudo apt-get -y install python3.11 python3.11-venv python3.11-distutils > /dev/null
 
 echo "Installing pip for Python 3.11..."
 wget https://bootstrap.pypa.io/get-pip.py -O get-pip.py > /dev/null
-python3.11 get-pip.py > /dev/null
+sudo python3.11 get-pip.py > /dev/null
 rm get-pip.py
 
 echo "Creating and activating Python virtual environment..."
@@ -29,7 +48,7 @@ echo "Installing Python dependencies from requirements.txt..."
 pip install -r requirements.txt > /dev/null
 
 echo "Installing required system packages for Docker..."
-apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
+sudo apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
 
 echo "Adding Docker GPG key and repository..."
 if [ ! -f /usr/share/keyrings/docker-archive-keyring.gpg ]; then
@@ -38,13 +57,13 @@ fi
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 echo "Updating package lists again..."
-apt-get -y update > /dev/null
+sudo apt-get -y update > /dev/null
 
 echo "Installing Docker..."
-apt-get -y install docker-ce docker-ce-cli containerd.io > /dev/null
+sudo apt-get -y install docker-ce docker-ce-cli containerd.io > /dev/null
 
 echo "Installing QEMU and binfmt-support for multi-architecture support..."
-apt-get -y install qemu binfmt-support qemu-user-static > /dev/null
+sudo apt-get -y install qemu binfmt-support qemu-user-static > /dev/null
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
 
 echo "Installing Rust (Cargo)..."
