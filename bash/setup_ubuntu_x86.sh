@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e 
+set -e  # Salir inmediatamente si un comando falla.
 
 handle_update_errors() {
     exit_code=$1
@@ -31,7 +31,11 @@ sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev l
 
 echo "Adding Python 3.11 repository..."
 sudo add-apt-repository ppa:deadsnakes/ppa -y > /dev/null
-sudo apt-get -y update > /dev/null
+
+echo "Updating package lists after adding Python repository..."
+sudo apt-get -y update > /dev/null 2>&1 || {
+    handle_update_errors $?
+}
 
 echo "Installing Python 3.11 and pip..."
 sudo apt-get -y install python3.11 python3.11-venv python3.11-distutils > /dev/null
