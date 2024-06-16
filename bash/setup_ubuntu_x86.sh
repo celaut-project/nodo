@@ -68,7 +68,7 @@ echo "Installing Docker..."
 sudo apt-get -y install docker-ce docker-ce-cli containerd.io > /dev/null
 
 echo "Installing QEMU and binfmt-support for multi-architecture support..."
-sudo apt-get -y install qemu binfmt-support qemu-user-static > /dev/null
+sudo apt-get -y install qemu-system binfmt-support qemu-user-static > /dev/null
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
 
 echo "Installing Rust (Cargo)..."
