@@ -35,7 +35,7 @@ simple and efficient.*
 ## Installation
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/celaut-project/nodo/master/install.sh | sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/master/install.sh | sudo sh
 ```
 
 ### Note on Installation
