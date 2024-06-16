@@ -3,7 +3,7 @@
 set -e  # Exit immediately if a command exits with a non-zero status.
 
 echo "Updating package lists..."
-apt-get -y update > /dev/null
+apt-get -y -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false update -m > /dev/null
 
 echo "Installing required build dependencies..."
 apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
