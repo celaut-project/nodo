@@ -14,7 +14,7 @@ GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(defau
                                 else os.environ.get(env) in ['True', 'true', 'T', 't'])\
                                     if env in os.environ.keys() else default
 
-MAIN_DIR = GET_ENV(env="MAIN_DIR", default="/node")
+MAIN_DIR = GET_ENV(env="MAIN_DIR", default="/nodo")
 
 #  -------------------------------------------------
 #  -------------------------------------------------
