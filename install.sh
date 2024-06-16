@@ -52,7 +52,6 @@ install_git_if_needed
 
 # Define the repository URL and the setup script
 REPO_URL="https://github.com/celaut-project/nodo.git"
-SETUP_SCRIPT="bash/setup_ubuntu_x86.sh"
 TARGET_DIR="$HOME/nodo"
 
 # Check if the target directory already exists
@@ -70,6 +69,13 @@ fi
 
 # Navigate to the cloned repository directory
 cd $TARGET_DIR || { echo "Error: Failed to change directory to $TARGET_DIR."; exit 1; }
+
+# Check the platform architecture and set the setup script accordingly
+if [ "$(uname -m)" = "armv7l" ]; then
+  SETUP_SCRIPT="bash/setup_ubuntu_arm.sh"
+else
+  SETUP_SCRIPT="bash/setup_ubuntu_x86.sh"
+fi
 
 # Make sure the setup script is executable
 chmod +x $SETUP_SCRIPT
