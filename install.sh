@@ -36,14 +36,23 @@ install_git_if_needed() {
 # Install git if needed
 install_git_if_needed
 
-# Define the repository URL and the target directory
+# Define the repository URL
 REPO_URL="https://github.com/celaut-project/nodo.git"
-TARGET_DIR="/nodo"
 
-# Check if the target directory already exists
+# Ask for the target directory with a default value
+read -p "Enter the target directory [default: /nodo]: " TARGET_DIR
+TARGET_DIR=${TARGET_DIR:-/nodo}
+
+# Check if the target directory already exists and ask for confirmation before deleting
 if [ -d "$TARGET_DIR" ]; then
-  echo "Error: Target directory $TARGET_DIR already exists. Please remove it or choose another location."
-  exit 1
+  read -p "Target directory $TARGET_DIR already exists. Do you want to delete it? [y/N]: " confirm
+  if [[ $confirm =~ ^[Yy]$ ]]; then
+    echo "Removing existing directory $TARGET_DIR..."
+    rm -rf "$TARGET_DIR"
+  else
+    echo "Installation aborted. Please specify a different target directory."
+    exit 1
+  fi
 fi
 
 # Clone the repository into the target directory
@@ -77,10 +86,18 @@ fi
 create_service_file() {
   SERVICE_FILE="/etc/systemd/system/nodo.service"
   
-  # Check if a similar service already exists
-  if systemctl list-units --full --all | grep -q "nodo.service"; then
-    echo "Error: A service with the name nodo.service already exists."
-    exit 1
+  # Check if the service file already exists and ask for confirmation before deleting
+  if [ -f "$SERVICE_FILE" ]; then
+    read -p "Service file $SERVICE_FILE already exists. Do you want to delete it? [y/N]: " confirm
+    if [[ $confirm =~ ^[Yy]$ ]]; then
+      echo "Stopping and removing existing service $SERVICE_FILE..."
+      systemctl stop nodo.service
+      systemctl disable nodo.service
+      rm -f "$SERVICE_FILE"
+    else
+      echo "Service setup aborted. Please manually handle the existing service file."
+      exit 1
+    fi
   fi
 
   # Get the user who executed the script
@@ -100,6 +117,8 @@ Group=sudo
 WorkingDirectory=$TARGET_DIR
 ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py serve'
 Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
