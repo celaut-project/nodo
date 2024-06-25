@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Check if the script is running with root privileges
 if [ "$(id -u)" -ne 0 ]; then
@@ -40,19 +40,24 @@ install_git_if_needed
 REPO_URL="https://github.com/celaut-project/nodo.git"
 
 # Ask for the target directory with a default value
-read -p "Enter the target directory [default: /nodo]: " TARGET_DIR
+echo "Enter the target directory [default: /nodo]: "
+read TARGET_DIR
 TARGET_DIR=${TARGET_DIR:-/nodo}
 
 # Check if the target directory already exists and ask for confirmation before deleting
 if [ -d "$TARGET_DIR" ]; then
-  read -p "Target directory $TARGET_DIR already exists. Do you want to delete it? [y/N]: " confirm
-  if [[ $confirm =~ ^[Yy]$ ]]; then
-    echo "Removing existing directory $TARGET_DIR..."
-    rm -rf "$TARGET_DIR"
-  else
-    echo "Installation aborted. Please specify a different target directory."
-    exit 1
-  fi
+  echo "Target directory $TARGET_DIR already exists. Do you want to delete it? [y/N]: "
+  read confirm
+  case "$confirm" in
+    [Yy]*)
+      echo "Removing existing directory $TARGET_DIR..."
+      rm -rf "$TARGET_DIR"
+      ;;
+    *)
+      echo "Installation aborted. Please specify a different target directory."
+      exit 1
+      ;;
+  esac
 fi
 
 # Clone the repository into the target directory
@@ -88,16 +93,20 @@ create_service_file() {
   
   # Check if the service file already exists and ask for confirmation before deleting
   if [ -f "$SERVICE_FILE" ]; then
-    read -p "Service file $SERVICE_FILE already exists. Do you want to delete it? [y/N]: " confirm
-    if [[ $confirm =~ ^[Yy]$ ]]; then
-      echo "Stopping and removing existing service $SERVICE_FILE..."
-      systemctl stop nodo.service
-      systemctl disable nodo.service
-      rm -f "$SERVICE_FILE"
-    else
-      echo "Service setup aborted. Please manually handle the existing service file."
-      exit 1
-    fi
+    echo "Service file $SERVICE_FILE already exists. Do you want to delete it? [y/N]: "
+    read confirm
+    case "$confirm" in
+      [Yy]*)
+        echo "Stopping and removing existing service $SERVICE_FILE..."
+        systemctl stop nodo.service
+        systemctl disable nodo.service
+        rm -f "$SERVICE_FILE"
+        ;;
+      *)
+        echo "Service setup aborted. Please manually handle the existing service file."
+        exit 1
+        ;;
+    esac
   fi
 
   # Get the user who executed the script
