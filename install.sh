@@ -36,7 +36,7 @@ install_git_if_needed() {
 # Install git if needed
 install_git_if_needed
 
-# Define the repository URL and the setup script
+# Define the repository URL and the target directory
 REPO_URL="https://github.com/celaut-project/nodo.git"
 TARGET_DIR="/nodo"
 
@@ -73,4 +73,49 @@ if ! ./$SETUP_SCRIPT; then
   exit 1
 fi
 
-echo "Installation completed successfully. The repository is located at $TARGET_DIR."
+# Function to create nodo.service if it doesn't exist
+create_service_file() {
+  SERVICE_FILE="/etc/systemd/system/nodo.service"
+  
+  # Check if a similar service already exists
+  if systemctl list-units --full --all | grep -q "nodo.service"; then
+    echo "Error: A service with the name nodo.service already exists."
+    exit 1
+  fi
+
+  # Get the user who executed the script
+  SCRIPT_USER=$(logname)
+
+  # Create the service file
+  echo "Creating $SERVICE_FILE..."
+  cat <<EOF > $SERVICE_FILE
+[Unit]
+Description=Nodo Serve
+After=network.target
+
+[Service]
+Type=simple
+User=$SCRIPT_USER
+Group=$SCRIPT_USER
+WorkingDirectory=$TARGET_DIR
+ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py serve'
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # Set the permissions for the service file
+  chmod 644 $SERVICE_FILE
+
+  # Reload systemd, enable and start the service
+  echo "Reloading systemd, enabling, and starting the nodo service..."
+  systemctl daemon-reload
+  systemctl enable nodo.service
+  systemctl start nodo.service
+}
+
+# Create nodo.service
+create_service_file
+
+echo "Installation and service setup completed successfully. The repository is located at $TARGET_DIR."
