@@ -20,7 +20,7 @@ from src.database.access_functions.ledgers import get_ledger_and_contract_addr_f
     get_private_key_from_ledger
 from src.utils.env import MAIN_DIR
 
-DIR = os.path.join(MAIN_DIR, '/src/payment_system/contracts/ethereum/deposit_contract')
+DIR = f"{MAIN_DIR}/src/payment_system/contracts/ethereum/deposit_contract"
 CONTRACT: bytes = open(os.path.join(DIR, 'bytecode'), 'rb').read()
 CONTRACT_HASH: str = sha3_256(CONTRACT).hexdigest()
 
