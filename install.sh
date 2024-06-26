@@ -73,6 +73,9 @@ if ! ./$SETUP_SCRIPT; then
   exit 1
 fi
 
+# Get the user who executed the script
+SCRIPT_USER=$(logname)
+
 # Function to create nodo.service if it doesn't exist
 create_service_file() {
   SERVICE_FILE="/etc/systemd/system/nodo.service"
@@ -85,9 +88,6 @@ create_service_file() {
     rm -f "$SERVICE_FILE"
   fi
 
-  # Get the user who executed the script
-  SCRIPT_USER=$(logname)
-
   # Create the service file
   echo "Creating $SERVICE_FILE..."
   cat <<EOF > $SERVICE_FILE
@@ -97,7 +97,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User=$SCRIPT_USER
 Group=sudo
 WorkingDirectory=$TARGET_DIR
 ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py serve'
@@ -122,4 +122,35 @@ EOF
 # Create nodo.service
 create_service_file
 
+# Function to create a wrapper script for nodo
+create_wrapper_script() {
+  WRAPPER_SCRIPT="/usr/local/bin/nodo"
+
+  # Remove existing wrapper script if it already exists
+  if [ -f "$WRAPPER_SCRIPT" ]; then
+    echo "Wrapper script $WRAPPER_SCRIPT already exists. Removing it..."
+    rm -f "$WRAPPER_SCRIPT"
+  fi
+
+  # Create the wrapper script
+  echo "Creating $WRAPPER_SCRIPT..."
+  cat <<EOF > $WRAPPER_SCRIPT
+#!/bin/bash
+chown -R $SCRIPT_USER:sudo $TARGET_DIR/storage
+chown $SCRIPT_USER:sudo $TARGET_DIR/storage/app.log
+chmod 664 $TARGET_DIR/storage/app.log
+cd $TARGET_DIR || exit
+source $TARGET_DIR/venv/bin/activate
+python3 $TARGET_DIR/nodo.py "\$@"
+EOF
+
+  # Set the permissions for the wrapper script
+  chmod +x $WRAPPER_SCRIPT
+}
+
+# Create wrapper script
+create_wrapper_script
+
 echo "Installation and service setup completed successfully. The repository is located at $TARGET_DIR."
+echo "You can now use the 'nodo' command from any directory to execute 'nodo.py'."
+
