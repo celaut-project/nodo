@@ -74,7 +74,7 @@ if ! ./$SETUP_SCRIPT; then
 fi
 
 # Get the user who executed the script
-SCRIPT_USER=root  # $(logname)
+SCRIPT_USER=$(logname)
 
 # Function to create nodo.service if it doesn't exist
 create_service_file() {
@@ -97,7 +97,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=$$SCRIPT_USER
+User=root
 Group=sudo
 WorkingDirectory=$TARGET_DIR
 ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py serve'
@@ -136,9 +136,6 @@ create_wrapper_script() {
   echo "Creating $WRAPPER_SCRIPT..."
   cat <<EOF > $WRAPPER_SCRIPT
 #!/bin/bash
-chown -R $SCRIPT_USER:sudo $TARGET_DIR/storage
-chown $SCRIPT_USER:sudo $TARGET_DIR/storage/app.log
-chmod 664 $TARGET_DIR/storage/app.log
 cd $TARGET_DIR || exit
 source $TARGET_DIR/venv/bin/activate
 python3 $TARGET_DIR/nodo.py "\$@"
