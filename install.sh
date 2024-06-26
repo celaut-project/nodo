@@ -97,7 +97,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=$SCRIPT_USER
+User=root
 Group=sudo
 WorkingDirectory=$TARGET_DIR
 ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py serve'
