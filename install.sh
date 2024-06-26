@@ -74,7 +74,7 @@ if ! ./$SETUP_SCRIPT; then
 fi
 
 # Get the user who executed the script
-SCRIPT_USER=$(logname)
+SCRIPT_USER=root  # $(logname)
 
 # Function to create nodo.service if it doesn't exist
 create_service_file() {
@@ -97,7 +97,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User=$$SCRIPT_USER
 Group=sudo
 WorkingDirectory=$TARGET_DIR
 ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py serve'
