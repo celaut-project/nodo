@@ -50,7 +50,12 @@ python3.11 -m venv venv
 source venv/bin/activate
 
 echo "Installing Python dependencies from requirements.txt..."
-pip install -r requirements.txt > /dev/null
+if ! python3 -m pip install -r bash/requirements.txt > /dev/null; then
+    echo "Error: Failed to install Python packages from requirements.txt."
+fi
+if ! python3 -m pip install https://github.com/reputation-systems/reputation-graph-service/raw/master/target/wheels/reputation_graph-0.0.0-cp311-cp311-manylinux_2_35_x86_64.whl > /dev/null; then
+    echo "System not compatible with the reputation library; only basic reputation functionality is supported."
+fi
 
 echo "Installing required system packages for Docker..."
 sudo apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
