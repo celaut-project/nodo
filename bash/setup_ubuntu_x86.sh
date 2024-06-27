@@ -2,6 +2,13 @@
 
 set -e  # Salir inmediatamente si un comando falla.
 
+if [ -z "$1" ]; then
+  echo "Error: TARGET_DIR is not provided."
+  exit 1
+fi
+
+TARGET_DIR="$1"
+
 handle_update_errors() {
     exit_code=$1
     echo "Failed to update package lists. Exit code: $exit_code"
@@ -49,10 +56,22 @@ echo "Creating and activating Python virtual environment..."
 python3.11 -m venv venv
 source venv/bin/activate
 
-echo "Installing Python dependencies from requirements.txt..."
-if ! python3 -m pip install -r bash/requirements.txt > /dev/null; then
-    echo "Error: Failed to install Python packages from requirements.txt."
+REQUIREMENTS_FILE="$TARGET_DIR/bash/requirements.txt"
+
+# Check if requirements.txt exists
+if [ ! -f "$REQUIREMENTS_FILE" ]; then
+  echo "Error: requirements.txt not found at $REQUIREMENTS_FILE"
+  deactivate
+  exit 1
 fi
+
+echo "Installing Python dependencies from $REQUIREMENTS_FILE..."
+if ! python3 -m pip install -r "$REQUIREMENTS_FILE" > /dev/null; then
+    echo "Error: Failed to install Python packages from requirements.txt."
+    deactivate
+    exit 1
+fi
+
 if ! python3 -m pip install https://github.com/reputation-systems/reputation-graph-service/raw/master/target/wheels/reputation_graph-0.0.0-cp311-cp311-manylinux_2_35_x86_64.whl > /dev/null; then
     echo "System not compatible with the reputation library; only basic reputation functionality is supported."
 fi
