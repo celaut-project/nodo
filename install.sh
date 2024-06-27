@@ -68,7 +68,7 @@ chmod +x $SETUP_SCRIPT
 
 # Execute the setup script
 echo "Running setup script $SETUP_SCRIPT..."
-if ! ./$SETUP_SCRIPT; then
+if ! ./$SETUP_SCRIPT "$TARGET_DIR"; then
   echo "Error: The setup script $SETUP_SCRIPT failed to execute."
   exit 1
 fi
