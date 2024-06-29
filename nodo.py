@@ -3,7 +3,7 @@ from grpcbigbuffer import utils as grpcbf
 from psutil import virtual_memory
 from src.utils import logger as l
 import src.manager.resources_manager as iobd
-from src.utils.env import MEMORY_LOGS, REGISTRY, CACHE, BLOCKDIR, METADATA_REGISTRY, DATABASE_FILE
+from src.utils.env import MEMORY_LOGS, REGISTRY, CACHE, BLOCKDIR, METADATA_REGISTRY, DATABASE_FILE, MAIN_DIR
 
 if __name__ == '__main__':
 
@@ -118,7 +118,7 @@ if __name__ == '__main__':
                 compile_directory(directory=sys.argv[2])
 
             case "tui":
-                os.system("cd src/commands/tui && cargo run")
+                os.system(f"cd {MAIN_DIR}/src/commands/tui && sudo cargo run")
 
             case other:
                 print('Unknown command.')
