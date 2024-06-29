@@ -1,9 +1,20 @@
-import sys, os
+import sys, os, subprocess
 from grpcbigbuffer import utils as grpcbf
 from psutil import virtual_memory
 from src.utils import logger as l
 import src.manager.resources_manager as iobd
 from src.utils.env import MEMORY_LOGS, REGISTRY, CACHE, BLOCKDIR, METADATA_REGISTRY, DATABASE_FILE, MAIN_DIR
+
+# Function to check if nodo.service is running
+def is_nodo_service_running():
+    try:
+        # Run systemctl status nodo.service and capture output
+        result = subprocess.run(['systemctl', 'status', 'nodo.service'], capture_output=True, text=True)
+        # Check if systemctl command indicates that nodo.service is active (running)
+        return "Active: active" in result.stdout
+    except Exception as e:
+        print(f"Error checking nodo.service status: {e}")
+        return False  # Return False to be safe if there's an error
 
 if __name__ == '__main__':
 
@@ -66,8 +77,9 @@ if __name__ == '__main__':
                 connect(sys.argv[2])
 
             case 'serve':
-                from src.serve import serve
-                serve()
+                if not is_nodo_service_running():
+                    from src.serve import serve
+                    serve()
 
             case 'migrate':
                 import os
