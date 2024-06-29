@@ -52,7 +52,7 @@ if __name__ == '__main__':
               "\n- storage:prune_blocks"
               "\n- test <test name>"
               "\n- compile <project directory>"
-              "\n- text user interface"
+              "\n- tui"
               )
     else:
         match sys.argv[1]:
