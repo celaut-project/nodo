@@ -80,6 +80,8 @@ if __name__ == '__main__':
                 if not is_nodo_service_running():
                     from src.serve import serve
                     serve()
+                else:
+                    print("Nodo service is already running in the background. Cannot start serve.")
 
             case 'migrate':
                 import os
