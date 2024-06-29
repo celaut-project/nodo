@@ -86,20 +86,47 @@ fi
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 echo "Updating package lists again..."
-sudo apt-get -y update > /dev/null
 
-echo "Installing Docker..."
-sudo apt-get -y install docker-ce docker-ce-cli containerd.io > /dev/null
+# Try to execute the update command, redirecting both stdout and stderr to /dev/null
+# Capture the exit code of the command in the variable $?
+sudo apt-get -y update > /dev/null 2>&1
+exit_code=$?
 
-echo "Installing QEMU and binfmt-support for multi-architecture support..."
-sudo apt-get -y install qemu-system binfmt-support qemu-user-static > /dev/null
-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
+# Check the exit code
+if [ $exit_code -ne 0 ]; then
+    echo "Error: Failed to update package lists. Exit code: $exit_code"
+    # You can add additional actions here if needed upon error
+else
+    echo "Package lists updated successfully."
+fi
 
-echo "Installing Rust (Cargo)..."
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y > /dev/null
+# Check if Docker is already installed
+if command -v docker > /dev/null 2>&1; then
+    echo "Docker is already installed."
+    docker --version
+else
+    echo "Installing Docker..."
+    sudo apt-get update > /dev/null
+    sudo apt-get -y install docker-ce docker-ce-cli containerd.io > /dev/null
 
-echo "Sourcing the Rust environment..."
-source $HOME/.cargo/env
+    echo "Installing QEMU and binfmt-support for multi-architecture support..."
+    sudo apt-get -y install qemu-system binfmt-support qemu-user-static > /dev/null
+
+    # Configure QEMU for multi-architecture support
+    docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
+fi
+
+# Check if rustc is already installed
+if command -v rustc > /dev/null 2>&1; then
+    echo "Rust is already installed."
+    rustc --version
+else
+    echo "Installing Rust (Cargo)..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y > /dev/null
+
+    echo "Sourcing the Rust environment..."
+    source $HOME/.cargo/env
+fi
 
 echo "Executing initialization script for x86..."
 sh ./bash/init_x86.sh > /dev/null
