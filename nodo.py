@@ -118,7 +118,7 @@ if __name__ == '__main__':
                 compile_directory(directory=sys.argv[2])
 
             case "tui":
-                os.system(f"cd {MAIN_DIR}/src/commands/tui && sudo cargo run")
+                os.system(f"cd {MAIN_DIR}/src/commands/tui && cargo run")
 
             case other:
                 print('Unknown command.')
