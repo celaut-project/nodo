@@ -72,9 +72,9 @@ if ! python3 -m pip install -r "$REQUIREMENTS_FILE" > /dev/null; then
     exit 1
 fi
 
-if ! python3 -m pip install https://github.com/reputation-systems/reputation-graph-service/raw/master/target/wheels/reputation_graph-0.0.0-cp311-cp311-manylinux_2_35_x86_64.whl > /dev/null; then
+python3 -m pip install https://github.com/reputation-systems/reputation-graph-service/raw/master/target/wheels/reputation_graph-0.0.0-cp311-cp311-manylinux_2_35_x86_64.whl || {
     echo "System not compatible with the reputation library; only basic reputation functionality is supported."
-fi
+}
 
 echo "Installing required system packages for Docker..."
 sudo apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
