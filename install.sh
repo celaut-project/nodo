@@ -149,5 +149,5 @@ EOF
 create_wrapper_script
 
 echo "Installation and service setup completed successfully. The repository is located at $TARGET_DIR."
-echo "You can now use the 'nodo' command from any directory to execute 'nodo.py'."
+echo "********** You can now use the 'nodo' command. **********"
 
