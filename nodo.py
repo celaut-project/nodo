@@ -65,6 +65,14 @@ if __name__ == '__main__':
               "\n- compile <project directory>"
               "\n- tui"
               )
+        try:
+            if is_nodo_service_running():
+                print("\nNote: Nodo service is currently running in the background.")
+            else:
+                print("\nNote: Nodo service is not running.")
+        except Exception as e:
+            print(f"Error checking nodo.service status: {e}")
+    
     else:
         match sys.argv[1]:
 
