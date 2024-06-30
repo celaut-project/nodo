@@ -39,6 +39,41 @@ def get_git_commit():
     except Exception as e:
         return f"Error getting git commit: {e}"
 
+def check_rust_installation():
+    try:
+        # Try to run 'rustc --version' to check if Rust is installed
+        subprocess.run(['rustc', '--version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        print("Rust is already installed.")
+    except subprocess.CalledProcessError:
+        print("Installing Rust (Cargo)...")
+        try:
+            # Run the command to install Rust
+            subprocess.run(
+                'curl --proto \'=https\' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y',
+                check=True,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            print("Sourcing the Rust environment...")
+            # Source $HOME/.cargo/env in the current environment
+            os.system("source $HOME/.cargo/env")
+        except subprocess.CalledProcessError as e:
+            print("Error installing Rust:", e)
+
+def run_cargo():
+    try:
+        # Change to the directory and run 'cargo run'
+        subprocess.run(
+            ['cargo', 'run'],
+            check=True,
+            cwd=f'{MAIN_DIR}/src/commands/tui',
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+    except subprocess.CalledProcessError as e:
+        print("Error running cargo run:", e)
+
 if __name__ == '__main__':
 
     # Create __cache__ if it does not exist.
@@ -170,19 +205,8 @@ if __name__ == '__main__':
                 compile_directory(directory=sys.argv[2])
 
             case "tui":
-                # Check if rustc is already installed
-                echo "Check if rustc is already installed"
-                if command -v rustc > /dev/null 2>&1; then
-                    echo "Rust is already installed."
-                    rustc --version
-                else
-                    echo "Installing Rust (Cargo)..."
-                    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y > /dev/null
-                
-                    echo "Sourcing the Rust environment..."
-                    source $HOME/.cargo/env
-                fi
-                os.system(f"cd {MAIN_DIR}/src/commands/tui && cargo run")
+                check_rust_installation()
+                run_cargo()
 
             case other:
                 print('Unknown command.')
