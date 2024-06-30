@@ -31,6 +31,14 @@ def stop_service():
         print(f"Error stopping nodo.service: {e}")
         return False
 
+def get_git_commit():
+    try:
+        # Get the latest commit hash
+        commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('utf-8').strip()
+        return commit_hash
+    except Exception as e:
+        return f"Error getting git commit: {e}"
+
 if __name__ == '__main__':
 
     # Create __cache__ if it does not exist.
@@ -87,6 +95,8 @@ if __name__ == '__main__':
                 print("\nNote: Nodo service is not running.")
         except Exception as e:
             print(f"Error checking nodo.service status: {e}")
+
+        print(f"Nodo version (Git commit): {get_git_commit()}")
     
     else:
         match sys.argv[1]:
