@@ -151,20 +151,12 @@ EOF
 # Create wrapper script
 create_wrapper_script
 
-# Check .env file
-ENV_FILE="$TARGET_DIR/.env"
-ENV_EXAMPLE_FILE="$TARGET_DIR/.env.example"
-if [ ! -f "$ENV_FILE" ]; then
-    echo ".env file does not exist. Copying .env.example to .env..."
-    if [ -f "$ENV_EXAMPLE_FILE" ]; then
-        cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"
-        echo ".env.example has been copied to .env."
-    else
-        echo "Error: .env.example file does not exist in $TARGET_DIR."
-        exit 1
-    fi
-else
-    echo ".env file already exists."
+UPDATE_ENV_SCRIPT="bash/update_env.sh"
+chmod +x $UPDATE_ENV_SCRIPT
+echo "Updating envs $UPDATE_ENV_SCRIPT..."
+if ! ./$UPDATE_ENV_SCRIPT "$TARGET_DIR"; then
+  echo "Error: The script $UPDATE_ENV_SCRIPT failed to execute."
+  exit 1
 fi
 
 chown -R $SCRIPT_USER:$SCRIPT_USER $TARGET_DIR
