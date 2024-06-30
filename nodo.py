@@ -68,7 +68,6 @@ def run_cargo():
             ['cargo', 'run'],
             check=True,
             cwd=f'{MAIN_DIR}/src/commands/tui',
-            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
     except subprocess.CalledProcessError as e:
