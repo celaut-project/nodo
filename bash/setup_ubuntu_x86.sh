@@ -118,17 +118,17 @@ else
 fi
 
 # Check if rustc is already installed
-echo "Check if rustc is already installed"
-if command -v rustc > /dev/null 2>&1; then
-    echo "Rust is already installed."
-    rustc --version
-else
-    echo "Installing Rust (Cargo)..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y > /dev/null
+# echo "Check if rustc is already installed"
+# if command -v rustc > /dev/null 2>&1; then
+#     echo "Rust is already installed."
+#     rustc --version
+# else
+#     echo "Installing Rust (Cargo)..."
+#     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y > /dev/null
 
-    echo "Sourcing the Rust environment..."
-    source $HOME/.cargo/env
-fi
+#     echo "Sourcing the Rust environment..."
+#     source $HOME/.cargo/env
+# fi
 
 echo "Executing initialization script for x86..."
 sh ./bash/init_x86.sh > /dev/null
