@@ -131,6 +131,10 @@ if __name__ == '__main__':
                 from src.utils.zeroconf import connect
                 connect(sys.argv[2])
 
+            case 'envs':
+                os.system(f"nano {MAIN_DIR}/.env")
+                os.system(f"nano {MAIN_DIR}/bash/update_env.sh {MAIN_DIR}")
+        
             case 'serve':
                 if not is_nodo_service_running():
                     from src.serve import serve
