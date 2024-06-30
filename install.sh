@@ -40,21 +40,24 @@ install_git_if_needed
 REPO_URL="https://github.com/celaut-project/nodo.git"
 TARGET_DIR="/nodo"
 
-# Remove the target directory if it already exists
+# Check if the target directory already exists
 if [ -d "$TARGET_DIR" ]; then
-  echo "Target directory $TARGET_DIR already exists. Removing it..."
-  rm -rf "$TARGET_DIR"
+  echo "Target directory $TARGET_DIR already exists. Performing git pull..."
+  cd "$TARGET_DIR" || { echo "Error: Failed to change directory to $TARGET_DIR."; exit 1; }
+  if ! git pull; then
+    echo "Error: Failed to perform git pull."
+    exit 1
+  fi
+else
+  # Clone the repository into the target directory
+  echo "Cloning repository from $REPO_URL into $TARGET_DIR..."
+  if ! git clone $REPO_URL $TARGET_DIR; then
+    echo "Error: Failed to clone the repository."
+    exit 1
+  fi
+  # Navigate to the cloned repository directory
+  cd $TARGET_DIR || { echo "Error: Failed to change directory to $TARGET_DIR."; exit 1; }
 fi
-
-# Clone the repository into the target directory
-echo "Cloning repository from $REPO_URL into $TARGET_DIR..."
-if ! git clone $REPO_URL $TARGET_DIR; then
-  echo "Error: Failed to clone the repository."
-  exit 1
-fi
-
-# Navigate to the cloned repository directory
-cd $TARGET_DIR || { echo "Error: Failed to change directory to $TARGET_DIR."; exit 1; }
 
 # Check the platform architecture and set the setup script accordingly
 if [ "$(uname -m)" = "armv7l" ]; then
