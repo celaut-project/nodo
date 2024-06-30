@@ -96,6 +96,7 @@ if __name__ == '__main__':
         print("Command needed: "
               "\n- seeder"
               "\n- connect"
+              "\n- envs"
               "\n- serve"
               "\n- migrate"
               "\n- containers --stream"
