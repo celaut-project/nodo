@@ -61,18 +61,6 @@ def check_rust_installation():
         except subprocess.CalledProcessError as e:
             print("Error installing Rust:", e)
 
-def run_cargo():
-    try:
-        # Change to the directory and run 'cargo run'
-        subprocess.run(
-            ['cargo', 'run'],
-            check=True,
-            cwd=f'{MAIN_DIR}/src/commands/tui',
-            stderr=subprocess.PIPE
-        )
-    except subprocess.CalledProcessError as e:
-        print("Error running cargo run:", e)
-
 if __name__ == '__main__':
 
     # Create __cache__ if it does not exist.
@@ -205,7 +193,7 @@ if __name__ == '__main__':
 
             case "tui":
                 check_rust_installation()
-                run_cargo()
+                os.system(f"cd {MAIN_DIR}/src/commands/tui && cargo run")
 
             case other:
                 print('Unknown command.')
