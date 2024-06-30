@@ -170,6 +170,18 @@ if __name__ == '__main__':
                 compile_directory(directory=sys.argv[2])
 
             case "tui":
+                # Check if rustc is already installed
+                echo "Check if rustc is already installed"
+                if command -v rustc > /dev/null 2>&1; then
+                    echo "Rust is already installed."
+                    rustc --version
+                else
+                    echo "Installing Rust (Cargo)..."
+                    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y > /dev/null
+                
+                    echo "Sourcing the Rust environment..."
+                    source $HOME/.cargo/env
+                fi
                 os.system(f"cd {MAIN_DIR}/src/commands/tui && cargo run")
 
             case other:
