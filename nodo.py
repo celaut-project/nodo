@@ -107,7 +107,7 @@ if __name__ == '__main__':
                     print("Nodo service is already running in the background. Cannot start serve.")
 
             case 'service':
-                if is_nodo_service_running(): stop_service()
+                # if is_nodo_service_running(): stop_service()
                 from src.serve import serve
                 serve()
 
