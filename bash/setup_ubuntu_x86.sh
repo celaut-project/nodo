@@ -101,6 +101,7 @@ else
 fi
 
 # Check if Docker is already installed
+echo "Check if Docker is already installed"
 if command -v docker > /dev/null 2>&1; then
     echo "Docker is already installed."
     docker --version
@@ -117,6 +118,7 @@ else
 fi
 
 # Check if rustc is already installed
+echo "Check if rustc is already installed"
 if command -v rustc > /dev/null 2>&1; then
     echo "Rust is already installed."
     rustc --version
