@@ -16,6 +16,21 @@ def is_nodo_service_running():
         print(f"Error checking nodo.service status: {e}")
         return False  # Return False to be safe if there's an error
 
+def stop_service():
+    try:
+        # Run systemctl stop nodo.service
+        result = subprocess.run(['systemctl', 'stop', 'nodo.service'], capture_output=True, text=True)
+        # Check if the command was successful
+        if result.returncode == 0:
+            print("nodo.service stopped successfully.")
+            return True
+        else:
+            print(f"Failed to stop nodo.service: {result.stderr}")
+            return False
+    except Exception as e:
+        print(f"Error stopping nodo.service: {e}")
+        return False
+
 if __name__ == '__main__':
 
     # Create __cache__ if it does not exist.
@@ -90,6 +105,11 @@ if __name__ == '__main__':
                     serve()
                 else:
                     print("Nodo service is already running in the background. Cannot start serve.")
+
+            case 'service':
+                if is_nodo_service_running(): stop_service()
+                from src.serve import serve
+                serve()
 
             case 'migrate':
                 import os
