@@ -1,114 +1,137 @@
-import sqlite3, os
+import sqlite3
+import os
 from src.utils.env import DATABASE_FILE, STORAGE
 
+def create_directory(path):
+    """Ensure the storage directory exists."""
+    if not os.path.exists(path):
+        os.makedirs(path)
+        print(f"Directory created at: {path}")
+    else:
+        print(f"Directory already exists at: {path}")
+
+def connect_to_database(db_file):
+    """Connect to the SQLite database."""
+    try:
+        conn = sqlite3.connect(db_file)
+        print("Connected to database.")
+        return conn
+    except sqlite3.Error as e:
+        print(f"Error connecting to database: {e}")
+        return None
+
+def create_tables(cursor):
+    """Create tables in the SQLite database."""
+    tables = {
+        "peer": '''
+            CREATE TABLE IF NOT EXISTS peer (
+                id TEXT PRIMARY KEY,
+                token TEXT,
+                metadata BLOB,
+                app_protocol BLOB,
+                client_id TEXT,
+                gas INTEGER
+            )
+        ''',
+        "clients": '''
+            CREATE TABLE IF NOT EXISTS clients (
+                id TEXT PRIMARY KEY,
+                gas INTEGER,
+                last_usage FLOAT
+            )
+        ''',
+        "slot": '''
+            CREATE TABLE IF NOT EXISTS slot (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                internal_port INTEGER,
+                transport_protocol BLOB,
+                peer_id TEXT,
+                FOREIGN KEY (peer_id) REFERENCES peer (id)
+            )
+        ''',
+        "uri": '''
+            CREATE TABLE IF NOT EXISTS uri (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip TEXT,
+                port INTEGER,
+                slot_id INTEGER,
+                FOREIGN KEY (slot_id) REFERENCES slot (id)
+            )
+        ''',
+        "contract": '''
+            CREATE TABLE IF NOT EXISTS contract (
+                hash TEXT PRIMARY KEY,
+                hash_type TEXT,
+                contract BLOB
+            )
+        ''',
+        "ledger": '''
+            CREATE TABLE IF NOT EXISTS ledger (
+                id TEXT PRIMARY KEY,
+                private_key TEXT NULL
+            )
+        ''',
+        "ledger_provider": '''
+            CREATE TABLE IF NOT EXISTS ledger_provider (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uri TEXT,
+                ledger_id TEXT,
+                FOREIGN KEY (ledger_id) REFERENCES peer (id)
+            )
+        ''',
+        "contract_instance": '''
+            CREATE TABLE IF NOT EXISTS contract_instance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                address TEXT,
+                ledger_id TEXT,
+                contract_hash TEXT,
+                peer_id TEXT NULL,
+                FOREIGN KEY (ledger_id) REFERENCES ledger (id),
+                FOREIGN KEY (contract_hash) REFERENCES contract (hash),
+                FOREIGN KEY (peer_id) REFERENCES peer (id)
+            )
+        ''',
+        "internal_services": '''
+            CREATE TABLE IF NOT EXISTS internal_services (
+                id TEXT PRIMARY KEY,
+                ip TEXT,
+                token TEXT,
+                father_id TEXT
+            )
+        ''',
+        "external_services": '''
+            CREATE TABLE IF NOT EXISTS external_services (
+                id TEXT PRIMARY KEY,
+                ip TEXT,
+                token TEXT,
+                token_hash TEXT
+            )
+        '''
+    }
+
+    for table_name, table_sql in tables.items():
+        try:
+            cursor.execute(table_sql)
+            print(f"Created or updated '{table_name}' table.")
+        except sqlite3.Error as e:
+            print(f"Error creating '{table_name}' table: {e}")
 
 def migrate():
-    if not os.path.exists(STORAGE): os.makedirs(STORAGE)
-
-    # Connect to an existing database
-    conn = sqlite3.connect(DATABASE_FILE)
-    print("Connected to database.")
-
-    # Create a cursor
-    cursor = conn.cursor()
-
-    # Add the "Peer" table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS peer (
-            id TEXT PRIMARY KEY,
-            token TEXT,
-            metadata BLOB,
-            app_protocol BLOB
-        )
-    ''')
-    print("Created 'peer' table.")
-
-    # Add the "Client" table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS clients (
-            id TEXT PRIMARY KEY
-        )
-    ''')
-    print("Created 'clients' table.")
-
-    # Add the "Container" table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS containers (
-            id TEXT PRIMARY KEY
-        )
-    ''')
-    print("Created 'containers' table.")
-
-    # Add the "Slot" table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS slot (
-            id INTEGER PRIMARY KEY AUTOINCREMENT ,
-            internal_port INTEGER,
-            transport_protocol BLOB,
-            peer_id TEXT,
-            FOREIGN KEY (peer_id) REFERENCES peer (id)
-        )
-    ''')
-    print("Created 'slot' table.")
-
-    # Add the "Uri" table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS uri (
-            id INTEGER PRIMARY KEY AUTOINCREMENT ,
-            ip TEXT,
-            port INTEGER,
-            slot_id INTEGER,
-            FOREIGN KEY (slot_id) REFERENCES slot (id)
-        )
-    ''')
-    print("Created 'uri' table.")
-
-    # Add the "Contract" table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS contract (
-            hash TEXT PRIMARY KEY,
-            hash_type TEXT,
-            contract BLOB
-        )
-    ''')
-    print("Created 'contract' table.")
-
-    # Add the "Ledger" table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS ledger (
-            id TEXT PRIMARY KEY,
-            private_key TEXT NULL
-        )
-    ''')
-    print("Created 'ledger' table.")
-
-    # Add the "Ledger Provider" table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS ledger_provider (
-            id INTEGER PRIMARY KEY AUTOINCREMENT ,
-            uri TEXT,
-            ledger_id TEXT,
-            FOREIGN KEY (ledger_id) REFERENCES peer (id)
-        )
-    ''')
-    print("Created 'ledger' table.")
-
-    # Add the "Contract Instance" table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS contract_instance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT ,
-            address TEXT,
-            ledger_id TEXT,
-            contract_hash TEXT,
-            peer_id TEXT NULL,
-            FOREIGN KEY (ledger_id) REFERENCES ledger (id),
-            FOREIGN KEY (contract_hash) REFERENCES contract (hash),
-            FOREIGN KEY (peer_id) REFERENCES peer (id)
-        )
-    ''')
-    print("Created 'contract_instance' table.")
-
-    # Save the changes and close the connection
-    conn.commit()
+    """Run the migration script."""
+    create_directory(STORAGE)
+    
+    conn = connect_to_database(DATABASE_FILE)
+    if conn is None:
+        return
+    
+    with conn:
+        cursor = conn.cursor()
+        create_tables(cursor)
+        conn.commit()
+        print("Database schema created and saved.")
+    
     conn.close()
     print("Database connection closed.")
+
+if __name__ == "__main__":
+    migrate()

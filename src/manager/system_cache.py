@@ -95,7 +95,7 @@ class SystemCache(metaclass=Singleton):
                      container_id____his_token: str
                      ):
         # En caso de ser un nodo externo:
-        if not agent_id in self.container_cache:
+        if not agent_id in self.container_cache:                # <-- NO SE HACE NADA?
             self.container_cache_lock.acquire()
             self.container_cache.update({agent_id: []})
             self.container_cache_lock.release()
@@ -103,7 +103,7 @@ class SystemCache(metaclass=Singleton):
             # debería estar en el registro.
 
         # Añade el nuevo servicio como dependencia.
-        self.container_cache[agent_id].append(container_ip___peer_id + '##' + container_id___his_token_encrypt)
+        self.container_cache[agent_id].append(container_ip___peer_id + '##' + container_id___his_token_encrypt)  # <-- SE AGREGA UN NUEVO SERVICIO.
         self.cache_service_perspective[container_ip___peer_id] = container_id____his_token
         l.LOGGER(
             'Set on cache ' + container_ip___peer_id + '##' + container_id___his_token_encrypt + ' as dependency of ' + agent_id)
