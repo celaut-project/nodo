@@ -239,15 +239,14 @@ def generate_client() -> gateway_pb2.Client:
     )
 
 
-def generate_client_id_in_other_peer(peer_id: str) -> str:
+def generate_client_id_in_other_peer(peer_id: str) -> Optional[str]:
     if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
         logger.LOGGER('Peer ' + peer_id + ' is not available.')
         raise Exception('Peer not available.')
 
-    if peer_id not in sc.clients_on_other_peers:
+    if peer_id not in SystemCache().get_peers_id():
         logger.LOGGER('Generate new client for peer ' + peer_id)
-        with sc.cache_locks.lock(peer_id):
-            sc.clients_on_other_peers[peer_id] = str(next(grpcbf.client_grpc(
+        new_client_id = str(next(grpcbf.client_grpc(
                 method=gateway_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(
                         next(generate_uris_by_peer_id(peer_id=peer_id))
@@ -256,22 +255,17 @@ def generate_client_id_in_other_peer(peer_id: str) -> str:
                 indices_parser=gateway_pb2.Client,
                 partitions_message_mode_parser=True
             )).client_id)
+        if not SystemCache().add_external_client(peer_id=peer_id, client_id=new_client_id):
+            return  # If fails return None.
 
-    return sc.clients_on_other_peers[peer_id]
+        return new_client_id
 
 
 def add_peer(
         peer_id: str
 ) -> bool:
     try:
-        if peer_id not in sc.total_deposited_on_other_peers:
-            with sc.cache_locks.lock(peer_id):
-                sc.total_deposited_on_other_peers[peer_id] = 0
-
-        logger.LOGGER('Add peer ' + peer_id + ' with client ' +
-                      generate_client_id_in_other_peer(peer_id=peer_id)
-                      )
-        return True
+        return SystemCache().add_peer(peer_id=peer_id)
     except Exception as e:
         print('Error en add_peer', e)
         return False

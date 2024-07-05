@@ -101,10 +101,10 @@ def create_tables(cursor):
         ''',
         "external_services": '''
             CREATE TABLE IF NOT EXISTS external_services (
-                id TEXT PRIMARY KEY,
-                ip TEXT,
-                token TEXT,
-                token_hash TEXT
+                token TEXT PRIMARY KEY,
+                token_hash TEXT,
+                peer_id TEXT,
+                client_id TEXT
             )
         '''
     }

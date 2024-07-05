@@ -5,7 +5,7 @@ import docker as docker_lib
 from protos import celaut_pb2 as celaut
 from src.manager.manager import add_peer, prune_container, spend_gas
 from src.manager.metrics import gas_amount_on_other_peer
-from src.manager.system_cache import SystemCache
+from src.manager.system_cache import SystemCache, client_expired, delete_delete, get_clients, get_peers
 from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
 from src.reputation_system.simple_reputation_feedback import submit_reputation_feedback
 from src.utils import logger as l
@@ -51,33 +51,31 @@ def maintain_containers():
 
 
 def maintain_clients():
-    for client_id, client in sc.clients.items():
-        if client.is_expired():
+    for client_id in SystemCache().get_clients_id():
+        if SystemCache().client_expired(client_id=client_id):
             l.LOGGER('Delete client ' + client_id)
-            with sc.cache_locks.lock(client_id):
-                del sc.clients[client_id]
-            sc.cache_locks.delete(client_id)
-
+            SystemCache().delete_client(client_id)
 
 def peer_deposits():
-    for i in range(len(sc.total_deposited_on_other_peers)):
-        if i >= len(sc.total_deposited_on_other_peers):
-            break
-        peer_id, estimated_deposit = list(sc.total_deposited_on_other_peers.items())[i]
-        if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
+
+    # Controla el gas que tiene en cada uno de los pares.
+
+    # Vamos a presuponer que tenemos un struct Peer.
+    for peer in SystemCache().get_peers():
+        if not is_peer_available(peer_id=peer['id'], min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             # l.LOGGER('Peer '+peer_id+' is not available .')
             continue
-        if estimated_deposit < MIN_DEPOSIT_PEER or \
+        if peer["gas"] < MIN_DEPOSIT_PEER or \
                 gas_amount_on_other_peer(
-                    peer_id=peer_id
+                    peer_id=peer["id"]
                 ) < MIN_DEPOSIT_PEER:
-            l.LOGGER(f'\n\n The peer {peer_id} has not enough deposit.   ')
-            # f'\n   estimated deposit -> {estimated_deposit} '
+            l.LOGGER(f'\n\n The peer {peer["id"]} has not enough deposit.   ')
+            # f'\n   estimated gas deposit -> {peer["gas"]]} '
             # f'\n   min deposit per peer -> {MIN_DEPOSIT_PEER}'
-            # f'\n   actual deposit -> {gas_amount_on_other_peer(peer_id=peer_id)}'
+            # f'\n   actual gas deposit -> {gas_amount_on_other_peer(peer_id=peer_id)}'
             # f'\n\n')
-            if not __increase_deposit_on_peer(peer_id=peer_id, amount=MIN_DEPOSIT_PEER):
-                l.LOGGER(f'Manager error: the peer {peer_id} could not be increased.')
+            if not __increase_deposit_on_peer(peer_id=peer["id"], amount=MIN_DEPOSIT_PEER):
+                l.LOGGER(f'Manager error: the peer {peer["id"]} could not be increased.')
 
 
 def load_peer_instances_from_disk():

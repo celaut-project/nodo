@@ -1,92 +1,328 @@
+import os
+import sqlite3
 import time
 from threading import Lock
+from typing import List, Tuple, TypedDict
 
 import docker as docker_lib
 import grpc
 from grpcbigbuffer import client as grpcbf
 
 from protos import gateway_pb2_grpc, gateway_pb2
-from src.utils import logger as l
+from src.manager.manager import generate_client_id_in_other_peer
+from src.utils import logger as l, logger
 from src.utils.env import CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME, CLIENT_EXPIRATION_TIME, DOCKER_CLIENT, \
-    DOCKER_NETWORK, REMOVE_CONTAINERS
+    DOCKER_NETWORK, REMOVE_CONTAINERS, STORAGE, DATABASE_FILE
 from src.utils.singleton import Singleton
 from src.utils.utils import get_network_name, from_gas_amount, generate_uris_by_peer_id
 
 
-class LockCaches:
-    def __init__(self):
-        self.d = {}  # key, token
-
-    def lock(self, token: str):
-        if token not in self.d:
-            self.d[token] = CacheLock()
-
-        return self.d[token]
-
-    def delete(self, token: str):
-        del self.d[token]
 
 
-class CacheLock:
-    def __init__(self):
-        self.lock = Lock()
-
-    def __enter__(self):
-        self.lock.__enter__()
-
-    def __exit__(self, exception_type, exception_value, traceback):
-        self.lock.__exit__()
 
 
-class Client:
 
-    def __init__(self, gas: int = 0):
-        self.gas: int = gas
-        self.last_usage: float = None
-
-    def add_gas(self, gas: int):
-        self.gas += gas
-        if self.last_usage and self.gas >= CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME: self.last_usage = None
-
-    def reduce_gas(self, gas: int):
-        self.gas -= gas
-        if self.gas == 0 and self.last_usage: self.last_usage = time.time()
-
-    def is_expired(self) -> bool:
-        return self.last_usage and ((time.time() - self.last_usage) >= CLIENT_EXPIRATION_TIME)
 
 
 class SystemCache(metaclass=Singleton):
-    cache_locks = LockCaches()
+    _connection = None
+    _lock = Lock()
 
-    system_cache = {}  # token : { mem_limit: 0, gas: 0 }
+    def __init__(self):
+        if not os.path.exists(STORAGE):
+            os.makedirs(STORAGE)
+        if SystemCache._connection is None:
+            SystemCache._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
+            SystemCache._connection.row_factory = sqlite3.Row
+            self.cursor = SystemCache._connection.cursor()
 
-    clients = {
-        'dev': Client(
-            gas=pow(10, 128)
-        )
-    }  # client_id: amount_of_gas -> deposits on this node.
+    # Método para asegurar la conexión persistente
+    def _execute(self, query, params=()):
+        with SystemCache._lock:
+            try:
+                self.cursor.execute(query, params)
+                SystemCache._connection.commit()
+            except sqlite3.Error as e:
+                SystemCache._connection.rollback()
+                raise e
+            return self.cursor
 
-    total_deposited_on_other_peers = {}  # client_id: amount of gas -> the deposits in other peers.
+    # Clientes
 
-    clients_on_other_peers = {}  # peer_id : client_id
+    def get_clients(self) -> List[dict]:
+        """
+        Fetches all clients from the database.
 
-    container_cache_lock = Lock()
-    container_cache = {}  # ip_father:[dependencies]
+        Returns:
+            List[dict]: A list of dictionaries containing client details.
+        """
+        try:
+            result = self._execute("SELECT id, gas, last_usage FROM clients")
+            clients = [{'id': row[0], 'gas': row[1], 'last_usage': row[2]} for row in result.fetchall()]
+            logger.LOGGER(f'Found clients: {clients}')
+            return clients
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Error fetching clients: {e}')
+            return []
 
-    # Lock not needed.
-    cache_service_perspective = {}  # service_ip:(local_token or external_service_token)
+    def get_clients_id(self) -> List[str]:
+        """
+        Fetches all client IDs from the database.
 
-    # Lock not needed.
-    external_token_hash_map = {}  # sha256( token ) : token
+        Returns:
+            List[str]: A list of client IDs.
+        """
+        result = self._execute('SELECT id FROM clients')
+        return [row['id'] for row in result.fetchall()]
 
-    # internal token -> str( peer_ip##container_ip##container_id )   peer_ip se refiere a la direccion del servicio padre (que puede ser interno o no).
-    # external token -> str( peer_ip##peer_id##his_token )
+    def __get_client_gas(self, client_id: str) -> Tuple[int, float]:
+        result = self._execute('''
+            SELECT gas, last_usage FROM clients WHERE id = ?
+        ''', (client_id,))
+        row = result.fetchone()
+        if row:
+            return row['gas'], row['last_usage']
+        raise Exception(f'Client not found: {client_id}')
 
-    # En caso de mandarle la tarea a otro nodo:
-    #   En cache se añadirá el servicio como dependencia del nodo elegido,
-    #   en vez de usar la ip del servicio se pone el token que nos dió ese servicio,
-    #   nosotros a nuestro servicio solicitante le daremos un token con el formato node_ip##his_token.
+    def __update_client(self, client_id: str, gas: int, last_usage: float):
+        self._execute('''
+            UPDATE clients SET gas = ?, last_usage = ? WHERE id = ?
+        ''', (gas, last_usage, client_id))
+
+    def delete_client(self, client_id: str):
+        self._execute('''
+            DELETE FROM clients WHERE id = ?
+        ''', (client_id,))
+
+    def add_gas(self, client_id: str, gas: int = 0):
+        _gas, _last_usage = self.__get_client_gas(client_id)
+        gas += _gas
+        if _last_usage and gas >= CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME:
+            _last_usage = None
+        self.__update_client(client_id, gas, _last_usage)
+
+    def reduce_gas(self, client_id: str, gas: int):
+        _gas, _last_usage = self.__get_client_gas(client_id)
+        _gas -= gas
+        if _gas == 0 and _last_usage is None:
+            _last_usage = time.time()
+        self.__update_client(client_id, _gas, _last_usage)
+
+    def client_expired(self, client_id: str) -> bool:
+        _gas, _last_usage = self.__get_client_gas(client_id)
+        return _last_usage is not None and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)
+
+    # Peers
+
+    def get_peers(self) -> List[dict]:
+        result = self._execute('''
+            SELECT id, token, client_id, gas FROM peer
+        ''')
+        return [dict(row) for row in result.fetchall()]
+
+    def get_peers_id(self) -> List[str]:
+        """
+        Fetches all peer IDs from the database.
+
+        Returns:
+            List[str]: A list of peer IDs.
+        """
+
+        # Query to select all peer IDs
+        query = "SELECT id FROM peer"
+
+        try:
+            result = self._execute(query)
+            peer_ids = [row[0] for row in result.fetchall()]
+            logger.LOGGER(f'Found peer IDs: {peer_ids}')
+            return peer_ids
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Error fetching peer IDs: {e}')
+            return []
+
+    def add_peer(self, peer_id: str) -> bool:
+        """
+        Adds a peer to the database. Checks if the peer already exists, and if not,
+        inserts a new record with the peer_id. The client_id is added separately
+        once it is generated.
+
+        Args:
+            peer_id (str): The ID of the peer to add.
+
+        Returns:
+            bool: True if the peer was successfully added, False otherwise.
+        """
+        logger.LOGGER(f'Attempting to add peer {peer_id}')
+
+        # Check if the peer already exists in the database
+        result = self._execute('''
+            SELECT COUNT(*)
+            FROM peer
+            WHERE id = ?
+        ''', (peer_id,))
+        exists = result.fetchone()[0]
+
+        # If the peer does not exist, insert it
+        if not exists:
+            try:
+                self._execute('''
+                    INSERT INTO peer (id, token, metadata, app_protocol, client_id, gas)
+                    VALUES (?, '', NULL, NULL, '', 0)  -- Initialize with empty client_id and 0 gas
+                ''', (peer_id,))
+                logger.LOGGER(f'Peer {peer_id} added without client_id')
+                return True
+            except sqlite3.Error as e:
+                logger.LOGGER(f'Failed to add peer {peer_id}: {e}')
+                return False
+        else:
+            logger.LOGGER(f'Peer {peer_id} already exists')
+            return False
+
+    def add_external_client(self, peer_id: str, client_id: str) -> bool:
+        """
+        Associates an external client ID with an existing peer.
+
+        Args:
+            peer_id (str): The ID of the peer to associate with the client.
+            client_id (str): The external client ID to associate with the peer.
+
+        Returns:
+            bool: True if the association was successful, False otherwise.
+        """
+        logger.LOGGER(f'Attempting to add external client {client_id} for peer {peer_id}')
+
+        # Check if the peer exists in the database
+        result = self._execute('''
+            SELECT COUNT(*)
+            FROM peer
+            WHERE id = ?
+        ''', (peer_id,))
+        peer_exists = result.fetchone()[0]
+
+        if not peer_exists:
+            logger.LOGGER(f'Peer {peer_id} does not exist in the database')
+            return False
+
+        # Update the peer to associate with the new client
+        try:
+            self._execute('''
+                UPDATE peer
+                SET client_id = ?
+                WHERE id = ?
+            ''', (client_id, peer_id))
+            logger.LOGGER(f'Associated external client {client_id} with peer {peer_id}')
+            return True
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
+            return False
+
+    # Método para agregar datos a internal_services
+    def add_internal_service(self, id: str, ip: str, token: str, father_id: str):
+        self._execute('''
+            INSERT INTO internal_services (id, ip, token, father_id)
+            VALUES (?, ?, ?, ?)
+        ''', (id, ip, token, father_id))
+
+    # Método para agregar datos a external_services
+    def add_external_service(self, id: str, ip: str, token: str, token_hash: str):
+        self._execute('''
+            INSERT INTO external_services (id, ip, token, token_hash)
+            VALUES (?, ?, ?, ?)
+        ''', (id, ip, token, token_hash))
+
+    # Método para agregar datos a system_cache
+    def add_system_cache(self, token: str, mem_limit: int, gas: int):
+        self._execute('''
+            INSERT INTO peer (id, token, gas)
+            VALUES (?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET token=excluded.token, gas=excluded.gas
+        ''', (token, mem_limit, gas))
+
+    # Método para agregar datos a clients
+    def add_client(self, client_id: str, gas: int, last_usage: float):
+        self._execute('''
+            INSERT INTO clients (id, gas, last_usage)
+            VALUES (?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET gas=excluded.gas, last_usage=excluded.last_usage
+        ''', (client_id, gas, last_usage))
+
+    # Método para actualizar el gas de un cliente en clients
+    def update_client_gas(self, client_id: str, gas: int):
+        self._execute('''
+            UPDATE clients
+            SET gas = ?
+            WHERE id = ?
+        ''', (gas, client_id))
+
+    # Método para obtener el token por uri
+    def get_token_by_uri(self, uri: str) -> str:
+        result = self._execute('''
+            SELECT token
+            FROM internal_services
+            WHERE ip = ?
+        ''', (uri,))
+        row = result.fetchone()
+        if row:
+            return row['token']
+        raise Exception(f'Token not found for URI: {uri}')
+
+    # Método para obtener la cantidad de gas por id
+    def get_gas_amount_by_id(self, id: str) -> int:
+        result = self._execute('''
+            SELECT gas
+            FROM clients
+            WHERE id = ?
+        ''', (id,))
+        row = result.fetchone()
+        if row:
+            return row['gas']
+        raise Exception(f'Gas amount not found for ID: {id}')
+
+    # Método para purgar un servicio interno
+    def purge_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
+        if token is None and (agent_id is None or container_id is None or container_ip is None):
+            raise Exception(
+                'purge_internal: token is None and (agent_id is None or container_id is None or container_ip is None)'
+            )
+
+        refund = self.get_gas_amount_by_id(container_ip)
+
+        self._execute('''
+            DELETE FROM internal_services
+            WHERE id = ? AND father_id = ?
+        ''', (container_id, agent_id))
+
+        self._execute('''
+            DELETE FROM peer
+            WHERE token = ?
+        ''', (token,))
+
+        return refund
+
+    # Método para purgar un servicio externo
+    def purge_external(self, agent_id, peer_id, his_token) -> int:
+        refund = 0
+
+        self._execute('''
+            DELETE FROM external_services
+            WHERE id = ? AND token = ?
+        ''', (peer_id, his_token))
+
+        return refund
+
+    # Método para eliminar dependencias de contenedores en la tabla internal_services
+    def remove_container_dependency(self, agent_id: str, dependency: str):
+        self._execute('''
+            DELETE FROM internal_services
+            WHERE id = ? AND father_id = ?
+        ''', (dependency, agent_id))
+
+    # Método para eliminar dependencias de contenedores en la tabla external_services
+    def remove_external_dependency(self, agent_id: str, dependency: str):
+        self._execute('''
+            DELETE FROM external_services
+            WHERE id = ? AND token = ?
+        ''', (dependency, agent_id))
 
     def set_on_cache(self,
                      agent_id: str,
@@ -94,6 +330,9 @@ class SystemCache(metaclass=Singleton):
                      container_id___his_token_encrypt: str,
                      container_id____his_token: str
                      ):
+
+
+
         # En caso de ser un nodo externo:
         if not agent_id in self.container_cache:                # <-- NO SE HACE NADA?
             self.container_cache_lock.acquire()
@@ -108,36 +347,11 @@ class SystemCache(metaclass=Singleton):
         l.LOGGER(
             'Set on cache ' + container_ip___peer_id + '##' + container_id___his_token_encrypt + ' as dependency of ' + agent_id)
 
-    def set_external_on_cache(self, agent_id: str, encrypted_external_token: str, external_token: str, peer_id: str):
-        self.external_token_hash_map[encrypted_external_token] = external_token
-        self.set_on_cache(
-            agent_id=agent_id,
-            container_id___his_token_encrypt=encrypted_external_token,
-            container_id____his_token=external_token,
-            container_ip___peer_id=peer_id
-        )
-
-    def get_token_by_uri(self, uri: str) -> str:
-        try:
-            return self.cache_service_perspective[uri]
-        except Exception as e:
-            l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO ' + str(e) + ' ' + str(
-                self.cache_service_perspective) + ' ' + str(uri))  # TODO. Study the imposibility of that.
-            raise e
-
-
-    def get_gas_amount_by_id(self, id: str) -> int:
-        l.LOGGER('Get gas amount for ' + id)
-
-        if id in self.cache_service_perspective:
-            return self.system_cache[
-                self.get_token_by_uri(uri=id)
-            ]['gas']
-
-        if id in self.clients:
-            return self.clients[id].gas
-
-        raise Exception('Manager error: ' + id + ' not found.')
+    def set_external_on_cache(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str):
+        self._execute('''
+            INSERT INTO external_services (token, token_hash, peer_id, client_id)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (external_token, encrypted_external_token, peer_id, client_id))
 
     def __get_gas_amount_by_ip(self, ip: str) -> int:
         return self.get_gas_amount_by_id(id=ip)
