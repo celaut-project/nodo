@@ -96,7 +96,8 @@ def create_tables(cursor):
                 id TEXT PRIMARY KEY,
                 ip TEXT,
                 token TEXT,
-                father_id TEXT
+                father_id TEXT,
+                gas: int
             )
         ''',
         "external_services": '''

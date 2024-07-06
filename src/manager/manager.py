@@ -94,11 +94,6 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
 def get_token_by_uri(uri: str) -> str:
     return sc.get_token_by_uri(uri=uri)
 
-
-def __push_token(token: str):
-    with sc.cache_locks.lock(token): sc.system_cache[token] = {"mem_limit": 0}
-
-
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
     if token not in sc.system_cache.keys(): raise Exception('Manager error: token ' + token + ' does not exists.')
     if sys_req.HasField('mem_limit'):
@@ -287,15 +282,11 @@ def add_container(
 ) -> str:
     logger.LOGGER('Add container for ' + father_id)
     token = father_id + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
-    if token in sc.system_cache.keys():
-        raise Exception('Manager error: ' + token + ' exists.')
-
-    __push_token(token=token)
-    sc.set_on_cache(
-        agent_id=father_id,
-        container_id___his_token_encrypt=container.id,
-        container_ip___peer_id=container.attrs['NetworkSettings']['IPAddress'],
-        container_id____his_token=token,
+    sc.add_internal_service(
+        father_id=father_id,
+        container_id=container.id,
+        container_ip=container.attrs['NetworkSettings']['IPAddress'],
+        token=token,
     )
     with sc.cache_locks.lock(token):
         sc.system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(

@@ -211,20 +211,6 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
             return False
 
-    # Método para agregar datos a internal_services
-    def add_internal_service(self, id: str, ip: str, token: str, father_id: str):
-        self._execute('''
-            INSERT INTO internal_services (id, ip, token, father_id)
-            VALUES (?, ?, ?, ?)
-        ''', (id, ip, token, father_id))
-
-    # Método para agregar datos a external_services
-    def add_external_service(self, id: str, ip: str, token: str, token_hash: str):
-        self._execute('''
-            INSERT INTO external_services (id, ip, token, token_hash)
-            VALUES (?, ?, ?, ?)
-        ''', (id, ip, token, token_hash))
-
     # Método para agregar datos a system_cache
     def add_system_cache(self, token: str, mem_limit: int, gas: int):
         self._execute('''
@@ -319,28 +305,17 @@ class SQLConnection(metaclass=Singleton):
             WHERE id = ? AND token = ?
         ''', (dependency, agent_id))
 
-    def set_on_cache(self,
-                     agent_id: str,
-                     container_ip___peer_id: str,
-                     container_id___his_token_encrypt: str,
-                     container_id____his_token: str
-                     ):
-
-
-
-        # En caso de ser un nodo externo:
-        if not agent_id in self.container_cache:                # <-- NO SE HACE NADA?
-            self.container_cache_lock.acquire()
-            self.container_cache.update({agent_id: []})
-            self.container_cache_lock.release()
-            # Si peer_ip es un servicio del nodo ya
-            # debería estar en el registro.
-
-        # Añade el nuevo servicio como dependencia.
-        self.container_cache[agent_id].append(container_ip___peer_id + '##' + container_id___his_token_encrypt)  # <-- SE AGREGA UN NUEVO SERVICIO.
-        self.cache_service_perspective[container_ip___peer_id] = container_id____his_token
-        l.LOGGER(
-            'Set on cache ' + container_ip___peer_id + '##' + container_id___his_token_encrypt + ' as dependency of ' + agent_id)
+    def add_internal_service(self,
+                             father_id: str,
+                             container_ip: str,
+                             container_id: str,
+                             token: str
+                             ):
+        self._execute('''
+            INSERT INTO internal_services (id, ip, token, father_id)
+            VALUES (?, ?, ?, ?)
+        ''', (container_id, container_ip, token, father_id))
+        l.LOGGER(f'Set on cache {token} as dependency of {father_id}')
 
     def set_external_on_cache(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str):
         self._execute('''
