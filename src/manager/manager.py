@@ -316,12 +316,13 @@ def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
 
 
 def get_sysresources(token: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
+    sys_req = sc.get_sys_req(token=token)
     return gateway_pb2.ModifyServiceSystemResourcesOutput(
         sysreq=celaut_pb2.Sysresources(
-            mem_limit=sc.system_cache[token]["mem_limit"],
+            mem_limit=sys_req["mem_limit"],
         ),
         gas=to_gas_amount(
-            gas_amount=sc.system_cache[token]["gas"]
+            gas_amount=sc.get_internal_service_gas(token=token)["gas"]
         )
     )
 
