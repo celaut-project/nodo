@@ -211,14 +211,6 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
             return False
 
-    # Método para agregar datos a system_cache
-    def add_system_cache(self, token: str, mem_limit: int, gas: int):
-        self._execute('''
-            INSERT INTO peer (id, token, gas)
-            VALUES (?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET token=excluded.token, gas=excluded.gas
-        ''', (token, mem_limit, gas))
-
     # Método para agregar datos a clients
     def add_client(self, client_id: str, gas: int, last_usage: float):
         self._execute('''
@@ -226,14 +218,6 @@ class SQLConnection(metaclass=Singleton):
             VALUES (?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET gas=excluded.gas, last_usage=excluded.last_usage
         ''', (client_id, gas, last_usage))
-
-    # Método para actualizar el gas de un cliente en clients
-    def update_client_gas(self, client_id: str, gas: int):
-        self._execute('''
-            UPDATE clients
-            SET gas = ?
-            WHERE id = ?
-        ''', (gas, client_id))
 
     # Método para obtener el token por uri
     def get_token_by_uri(self, uri: str) -> str:
@@ -317,6 +301,15 @@ class SQLConnection(metaclass=Singleton):
             VALUES (?, ?, ?, ?, ?)
         ''', (container_id, container_ip, token, father_id, gas))
         l.LOGGER(f'Set on cache {token} as dependency of {father_id}')
+
+    def container_exists(self, token: str) -> bool:
+        # Check if the peer exists in the database
+        result = self._execute('''
+            SELECT COUNT(*)
+            FROM internal_services
+            WHERE token = ?
+        ''', (token,))
+        return result.fetchone()[0]
 
     def add_external_service(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str):
         self._execute('''

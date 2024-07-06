@@ -95,8 +95,10 @@ def get_token_by_uri(uri: str) -> str:
     return sc.get_token_by_uri(uri=uri)
 
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
-    if token not in sc.system_cache.keys(): raise Exception('Manager error: token ' + token + ' does not exists.')
+    if sc.container_exists(token=token):
+        raise Exception('Manager error: token ' + token + ' does not exists.')
     if sys_req.HasField('mem_limit'):
+        # TODO HAY QUE AGREGAR SYSRESOURCES EN LA TABLA DE CONTAINERS.
         variation = sc.system_cache[token]['mem_limit'] - sys_req.mem_limit
 
         if variation < 0:
