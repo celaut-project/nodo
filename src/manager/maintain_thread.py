@@ -32,7 +32,7 @@ def maintain_containers():
             continue
 
         if not spend_gas(
-                token_or_container_ip=token,
+                id=token,
                 gas_to_spend=compute_maintenance_cost(
                     system_resources=celaut.Sysresources(
                         mem_limit=sysreq['mem_limit']

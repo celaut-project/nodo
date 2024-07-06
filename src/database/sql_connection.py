@@ -67,7 +67,16 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('SELECT id FROM clients')
         return [row['id'] for row in result.fetchall()]
 
-    def __get_client_gas(self, client_id: str) -> Tuple[int, float]:
+    def client_exists(self, client_id: str) -> bool:
+        # Check if the peer exists in the database
+        result = self._execute('''
+            SELECT COUNT(*)
+            FROM clients
+            WHERE id = ?
+        ''', (client_id,))
+        return result.fetchone()[0]
+
+    def get_client_gas(self, client_id: str) -> Tuple[int, float]:
         result = self._execute('''
             SELECT gas, last_usage FROM clients WHERE id = ?
         ''', (client_id,))
@@ -87,14 +96,14 @@ class SQLConnection(metaclass=Singleton):
         ''', (client_id,))
 
     def add_gas(self, client_id: str, gas: int = 0):
-        _gas, _last_usage = self.__get_client_gas(client_id)
+        _gas, _last_usage = self.get_client_gas(client_id)
         gas += _gas
         if _last_usage and gas >= CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME:
             _last_usage = None
         self.__update_client(client_id, gas, _last_usage)
 
     def reduce_gas(self, client_id: str, gas: int):
-        _gas, _last_usage = self.__get_client_gas(client_id)
+        _gas, _last_usage = self.get_client_gas(client_id)
         _gas -= gas
         if _gas == 0 and _last_usage is None:
             _last_usage = time.time()
@@ -118,8 +127,17 @@ class SQLConnection(metaclass=Singleton):
             return row
         raise Exception(f'Internal service {token}')
 
+    def get_internal_service_gas(self, token: str) -> int:
+        result = self._execute('''
+            SELECT gas FROM internal_services WHERE token = ?
+        ''', (token,))
+        row = result.fetchone()
+        if row:
+            return row['gas']
+        raise Exception(f'Internal service {token}')
+
     def client_expired(self, client_id: str) -> bool:
-        _gas, _last_usage = self.__get_client_gas(client_id)
+        _gas, _last_usage = self.get_client_gas(client_id)
         return _last_usage is not None and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)
 
     # Peers
@@ -164,16 +182,8 @@ class SQLConnection(metaclass=Singleton):
         """
         logger.LOGGER(f'Attempting to add peer {peer_id}')
 
-        # Check if the peer already exists in the database
-        result = self._execute('''
-            SELECT COUNT(*)
-            FROM peer
-            WHERE id = ?
-        ''', (peer_id,))
-        exists = result.fetchone()[0]
-
         # If the peer does not exist, insert it
-        if not exists:
+        if not self.peer_exists(peer_id=peer_id):
             try:
                 self._execute('''
                     INSERT INTO peer (id, token, metadata, app_protocol, client_id, gas)
@@ -250,7 +260,7 @@ class SQLConnection(metaclass=Singleton):
         raise Exception(f'Token not found for URI: {uri}')
 
     # Método para obtener la cantidad de gas por id
-    def get_gas_amount_by_id(self, id: str) -> int:
+    def get_gas_amount_by_client_id(self, id: str) -> int:
         result = self._execute('''
             SELECT gas
             FROM clients
@@ -268,7 +278,7 @@ class SQLConnection(metaclass=Singleton):
                 'purge_internal: token is None and (agent_id is None or container_id is None or container_ip is None)'
             )
 
-        refund = self.get_gas_amount_by_id(container_ip)
+        refund = self.get_gas_amount_by_client_id(container_ip)
 
         self._execute('''
             DELETE FROM internal_services
@@ -320,6 +330,11 @@ class SQLConnection(metaclass=Singleton):
         ''', (container_id, container_ip, token, father_id, gas))
         l.LOGGER(f'Set on cache {token} as dependency of {father_id}')
 
+    def update_gas_to_container(self, token: str, gas: int):
+        self._execute('''
+            UPDATE internal_services SET gas = ? WHERE token = ?
+        ''', (gas, gas, token))
+
     def container_exists(self, token: str) -> bool:
         # Check if the peer exists in the database
         result = self._execute('''
@@ -336,7 +351,7 @@ class SQLConnection(metaclass=Singleton):
         ''', (external_token, encrypted_external_token, peer_id, client_id))
 
     def __get_gas_amount_by_ip(self, ip: str) -> int:
-        return self.get_gas_amount_by_id(id=ip)
+        return self.get_gas_amount_by_client_id(id=ip)
 
     def purgue_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
         if token is None and (agent_id is None or container_id is None or container_ip is None):

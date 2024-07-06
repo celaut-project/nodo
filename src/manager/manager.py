@@ -118,17 +118,10 @@ def __get_container_by_token(token: str) -> docker_lib.models.containers.Contain
 def __refund_gas(
         gas: int = None,
         token: str = None,
-        cache: dict = None,
         add_function=None,  # Lambda function if cache is not a dict of token:gas
 ) -> bool:
     try:
-        with sc.cache_locks.lock(token):
-            if add_function:
-                add_function(gas)
-            elif cache:
-                cache[token] += gas
-            else:
-                raise Exception('Function usage error: Not add_function or cache provided.')
+        add_function(gas)
     except Exception as e:
         logger.LOGGER('Manager error: ' + str(e))
         return False
@@ -138,14 +131,13 @@ def __refund_gas(
 # Only can be executed once.
 def __refund_gas_function_factory(
         gas: int = None,
-        cache: dict = None,
         token: str = None,
         container: list = None,
         add_function=None
 ) -> lambda: None:
     if container:
         container.append(
-            lambda: __refund_gas(gas=gas, cache=cache, token=token, add_function=add_function)
+            lambda: __refund_gas(gas=gas, token=token, add_function=add_function)
         )
 
 
@@ -163,7 +155,7 @@ def increase_local_gas_for_client(client_id: str, amount: int) -> bool:
 
 
 def spend_gas(
-        token_or_container_ip: str,  # If it's peer, the token is the peer id.
+        id: str,  # If it's peer, the token is the peer id.
         #  If it's a local service, the token could be the token or the container ip,
         #  on the last case, it takes the token with cache service perspective.
         gas_to_spend: int,
@@ -172,53 +164,42 @@ def spend_gas(
     gas_to_spend = int(gas_to_spend)
     # logger.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
     try:
-        # En caso de que sea un peer, el token es el peer id.
-        if token_or_container_ip in sc.clients and (
-                sc.clients[token_or_container_ip].gas >= gas_to_spend or ALLOW_GAS_DEBT):
-            with sc.cache_locks.lock(token_or_container_ip):
-                sc.clients[token_or_container_ip].reduce_gas(gas=gas_to_spend)
+        # En caso de que sea un peer, el token es el client id.
+        if sc.client_exists(client_id=id) and (
+                sc.get_client_gas(client_id=id)[0] >= gas_to_spend or ALLOW_GAS_DEBT):
+            sc.reduce_gas(client_id=id, gas=gas_to_spend)
             __refund_gas_function_factory(
                 gas=gas_to_spend,
-                token=token_or_container_ip,
-                add_function=lambda gas: sc.clients[token_or_container_ip].add_gas(gas),
+                token=id,
+                add_function=lambda gas: sc.add_gas(client_id=id, gas=gas),
                 container=refund_gas_function_container
             )
             return True
 
         # En caso de que token_or_container_ip sea el token del contenedor.
-        elif token_or_container_ip in sc.system_cache and (
-                sc.system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with sc.cache_locks.lock(token_or_container_ip):
-                sc.system_cache[token_or_container_ip]['gas'] -= gas_to_spend
-            __refund_gas_function_factory(
-                gas=gas_to_spend,
-                cache=sc.system_cache,
-                token=token_or_container_ip,
-                container=refund_gas_function_container
-            )
-            return True
-
-        # En caso de que token_or_container_ip sea la ip del contenedor.
-        token_or_container_ip = sc.cache_service_perspective[token_or_container_ip]
-        if token_or_container_ip in sc.system_cache and (
-                sc.system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with sc.cache_locks.lock(token_or_container_ip):
-                sc.system_cache[token_or_container_ip]['gas'] -= gas_to_spend
-            __refund_gas_function_factory(
-                gas=gas_to_spend,
-                cache=sc.system_cache,
-                token=token_or_container_ip,
-                container=refund_gas_function_container
-            )
-            return True
+        else:
+            # id could be the container id or container ip. So check first if it's an id. If not, check if it's an ip.
+            is_id = sc.container_exists(token=id)
+            if not is_id:
+                try:
+                    id = sc.get_token_by_uri(uri=id)
+                    is_id = sc.container_exists(token=id)
+                except:
+                    is_id = False
+            if is_id:
+                current_gas = sc.get_internal_service_gas(token=id)
+                if current_gas >= gas_to_spend or ALLOW_GAS_DEBT:
+                    sc.update_gas_to_container(token=id, gas=current_gas - gas_to_spend)
+                    __refund_gas_function_factory(
+                        gas=current_gas,
+                        add_function=lambda gas: sc.update_gas_to_container(token=id, gas=gas),  # TODO control race conditions.
+                        token=id,
+                        container=refund_gas_function_container
+                    )
+                    return True
 
     except Exception as e:
-        logger.LOGGER('Manager error spending gas: ' + str(e) + ' ' + str(gas_to_spend) + ' ' + token_or_container_ip +
-                      '\n peer instances -> ' + str(sc.clients) +
-                      '\n system cache -> ' + str(sc.system_cache) +
-                      '\n cache service perspective -> ' + str(sc.cache_service_perspective) +
-                      '\n        ----------------------\n\n\n')
-
+        logger.LOGGER('Manager error spending gas: ' + str(e) + ' ' + str(gas_to_spend) + '\n        ----------------------\n\n\n')
     return False
 
 
@@ -268,7 +249,7 @@ def default_initial_cost(
 ) -> int:
     logger.LOGGER('Default cost for ' + (father_id if father_id else 'local'))
     return (int(
-        sc.get_gas_amount_by_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
+        sc.get_gas_amount_by_client_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
     ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
 
