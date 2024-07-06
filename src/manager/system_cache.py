@@ -16,33 +16,26 @@ from src.utils.singleton import Singleton
 from src.utils.utils import get_network_name, from_gas_amount, generate_uris_by_peer_id
 
 
-
-
-
-
-
-
-
-class SystemCache(metaclass=Singleton):
+class SQLConnection(metaclass=Singleton):
     _connection = None
     _lock = Lock()
 
     def __init__(self):
         if not os.path.exists(STORAGE):
             os.makedirs(STORAGE)
-        if SystemCache._connection is None:
-            SystemCache._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
-            SystemCache._connection.row_factory = sqlite3.Row
-            self.cursor = SystemCache._connection.cursor()
+        if SQLConnection._connection is None:
+            SQLConnection._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
+            SQLConnection._connection.row_factory = sqlite3.Row
+            self.cursor = SQLConnection._connection.cursor()
 
     # Método para asegurar la conexión persistente
     def _execute(self, query, params=()):
-        with SystemCache._lock:
+        with SQLConnection._lock:
             try:
                 self.cursor.execute(query, params)
-                SystemCache._connection.commit()
+                SQLConnection._connection.commit()
             except sqlite3.Error as e:
-                SystemCache._connection.rollback()
+                SQLConnection._connection.rollback()
                 raise e
             return self.cursor
 
@@ -454,7 +447,7 @@ class SystemCache(metaclass=Singleton):
 
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
-    SystemCache().peer_exists(peer_id=peer_id)
+    SQLConnection().peer_exists(peer_id=peer_id)
     try:
         return any(list(generate_uris_by_peer_id(peer_id))) if min_slots_open == 1 else \
             len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open

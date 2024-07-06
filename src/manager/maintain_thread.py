@@ -5,7 +5,7 @@ import docker as docker_lib
 from protos import celaut_pb2 as celaut
 from src.manager.manager import add_peer, prune_container, spend_gas
 from src.manager.metrics import gas_amount_on_other_peer
-from src.manager.system_cache import SystemCache, client_expired, delete_delete, get_clients, get_peers, \
+from src.manager.system_cache import SQLConnection, client_expired, delete_delete, get_clients, get_peers, \
     is_peer_available
 from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
 from src.reputation_system.simple_reputation_feedback import submit_reputation_feedback
@@ -15,7 +15,7 @@ from src.utils.env import DOCKER_CLIENT, MIN_SLOTS_OPEN_PER_PEER, MIN_DEPOSIT_PE
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
 from src.utils.utils import peers_id_iterator
 
-sc = SystemCache()
+sc = SQLConnection()
 
 
 def maintain_containers():
@@ -52,17 +52,17 @@ def maintain_containers():
 
 
 def maintain_clients():
-    for client_id in SystemCache().get_clients_id():
-        if SystemCache().client_expired(client_id=client_id):
+    for client_id in SQLConnection().get_clients_id():
+        if SQLConnection().client_expired(client_id=client_id):
             l.LOGGER('Delete client ' + client_id)
-            SystemCache().delete_client(client_id)
+            SQLConnection().delete_client(client_id)
 
 def peer_deposits():
 
     # Controla el gas que tiene en cada uno de los pares.
 
     # Vamos a presuponer que tenemos un struct Peer.
-    for peer in SystemCache().get_peers():
+    for peer in SQLConnection().get_peers():
         if not is_peer_available(peer_id=peer['id'], min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             # l.LOGGER('Peer '+peer_id+' is not available .')
             continue

@@ -9,7 +9,7 @@ from protos import gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input_indices
 from src.manager.manager import generate_client_id_in_other_peer
 from src.manager.metrics import gas_amount_on_other_peer
-from src.manager.system_cache import SystemCache
+from src.manager.system_cache import SQLConnection
 from src.payment_system.payment_process import increase_deposit_on_peer
 from src.utils import utils, logger as l
 
@@ -53,7 +53,7 @@ def delegate_execution(
             )
         ))
         encrypted_external_token: str = sha256(service_instance.token.encode('utf-8')).hexdigest()
-        SystemCache().set_external_on_cache(
+        SQLConnection().set_external_on_cache(
             client_id=father_id,  # Client_id
             peer_id=peer,  # Add node_uri.
             encrypted_external_token=encrypted_external_token,  # Add token.

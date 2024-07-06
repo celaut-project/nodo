@@ -12,7 +12,7 @@ from google.protobuf.json_format import MessageToJson
 from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 
-from src.manager.system_cache import Client, SystemCache, is_peer_available
+from src.manager.system_cache import Client, SQLConnection, is_peer_available
 
 from src.utils import logger as logger
 from src.utils.env import ALLOW_GAS_DEBT, DATABASE_FILE, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
@@ -22,7 +22,7 @@ from src.utils.utils import get_network_name, \
     to_gas_amount, \
     generate_uris_by_peer_id
 
-sc = SystemCache()
+sc = SQLConnection()
 
 
 # Insert the instance if it does not exist.
@@ -254,7 +254,7 @@ def generate_client_id_in_other_peer(peer_id: str) -> Optional[str]:
             indices_parser=gateway_pb2.Client,
             partitions_message_mode_parser=True
         )).client_id)
-    if not SystemCache().add_external_client(peer_id=peer_id, client_id=new_client_id):
+    if not SQLConnection().add_external_client(peer_id=peer_id, client_id=new_client_id):
         return  # If fails return None.
 
     return new_client_id
@@ -264,7 +264,7 @@ def add_peer(
         peer_id: str
 ) -> bool:
     try:
-        return SystemCache().add_peer(peer_id=peer_id)
+        return SQLConnection().add_peer(peer_id=peer_id)
     except Exception as e:
         print('Error en add_peer', e)
         return False
