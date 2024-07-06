@@ -53,7 +53,7 @@ def delegate_execution(
             )
         ))
         encrypted_external_token: str = sha256(service_instance.token.encode('utf-8')).hexdigest()
-        SQLConnection().set_external_on_cache(
+        SQLConnection().add_external_service(
             client_id=father_id,  # Client_id
             peer_id=peer,  # Add node_uri.
             encrypted_external_token=encrypted_external_token,  # Add token.
