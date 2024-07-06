@@ -12,7 +12,7 @@ from google.protobuf.json_format import MessageToJson
 from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 
-from src.database.sql_connection import Client, SQLConnection, is_peer_available
+from src.database.sql_connection import SQLConnection, is_peer_available
 
 from src.utils import logger as logger
 from src.utils.env import ALLOW_GAS_DEBT, DATABASE_FILE, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
@@ -206,7 +206,7 @@ def spend_gas(
 def generate_client() -> gateway_pb2.Client:
     # No collisions expected.
     client_id = uuid.uuid4().hex
-    sc.clients[client_id] = Client()
+    sc.add_client(client_id=client_id, gas=0, last_usage=None)
     logger.LOGGER('New client created ' + client_id)
     return gateway_pb2.Client(
         client_id=client_id,

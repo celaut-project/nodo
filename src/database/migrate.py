@@ -37,7 +37,7 @@ def create_tables(cursor):
             CREATE TABLE IF NOT EXISTS clients (
                 id TEXT PRIMARY KEY,
                 gas INTEGER,
-                last_usage FLOAT
+                last_usage FLOAT NULL
             )
         ''',
         "slot": '''

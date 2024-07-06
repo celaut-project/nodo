@@ -240,7 +240,7 @@ class SQLConnection(metaclass=Singleton):
             return False
 
     # Método para agregar datos a clients
-    def add_client(self, client_id: str, gas: int, last_usage: float):
+    def add_client(self, client_id: str, gas: int, last_usage: Optional[float]):
         self._execute('''
             INSERT INTO clients (id, gas, last_usage)
             VALUES (?, ?, ?)
