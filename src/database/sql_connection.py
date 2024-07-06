@@ -11,7 +11,7 @@ from grpcbigbuffer import client as grpcbf
 from protos import gateway_pb2_grpc, gateway_pb2
 from src.utils import logger as l, logger
 from src.utils.env import CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME, CLIENT_EXPIRATION_TIME, DOCKER_CLIENT, \
-    DOCKER_NETWORK, REMOVE_CONTAINERS, STORAGE, DATABASE_FILE
+    DOCKER_NETWORK, REMOVE_CONTAINERS, STORAGE, DATABASE_FILE, DEFAULT_INTIAL_GAS_AMOUNT
 from src.utils.singleton import Singleton
 from src.utils.utils import get_network_name, from_gas_amount, generate_uris_by_peer_id
 
@@ -270,6 +270,14 @@ class SQLConnection(metaclass=Singleton):
         if row:
             return row['gas']
         raise Exception(f'Gas amount not found for ID: {id}')
+
+    def get_gas_amount_by_father_id(self, id: str) -> int:
+        if self.client_exists(client_id=id):
+            return self.get_gas_amount_by_client_id(id=id)
+        elif self.container_exists(token=id):
+            return self.get_internal_service_gas(token=id)
+        else:
+            return int(DEFAULT_INTIAL_GAS_AMOUNT)
 
     # Método para purgar un servicio interno
     def purge_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
