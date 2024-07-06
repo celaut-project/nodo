@@ -140,14 +140,6 @@ def get_network_name(ip_or_uri: str) -> str:
         raise Exception('Error getting the network name: ' + str(e))
 
 
-def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
-    try:
-        return any(list(generate_uris_by_peer_id(peer_id))) if min_slots_open == 1 else \
-            len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open
-    except Exception:
-        return False
-
-
 """
 Gas Amount implementation using float and exponent.  (Currently it's using string)
 

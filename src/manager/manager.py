@@ -12,14 +12,14 @@ from google.protobuf.json_format import MessageToJson
 from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 
-from src.manager.system_cache import Client, SystemCache
+from src.manager.system_cache import Client, SystemCache, is_peer_available
 
 from src.utils import logger as logger
 from src.utils.env import ALLOW_GAS_DEBT, DATABASE_FILE, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
     DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
     SHA3_256_ID
 from src.utils.utils import get_network_name, \
-    is_peer_available, to_gas_amount, \
+    to_gas_amount, \
     generate_uris_by_peer_id
 
 sc = SystemCache()
@@ -244,21 +244,20 @@ def generate_client_id_in_other_peer(peer_id: str) -> Optional[str]:
         logger.LOGGER('Peer ' + peer_id + ' is not available.')
         raise Exception('Peer not available.')
 
-    if peer_id not in SystemCache().get_peers_id():
-        logger.LOGGER('Generate new client for peer ' + peer_id)
-        new_client_id = str(next(grpcbf.client_grpc(
-                method=gateway_pb2_grpc.GatewayStub(
-                    grpc.insecure_channel(
-                        next(generate_uris_by_peer_id(peer_id=peer_id))
-                    )
-                ).GenerateClient,
-                indices_parser=gateway_pb2.Client,
-                partitions_message_mode_parser=True
-            )).client_id)
-        if not SystemCache().add_external_client(peer_id=peer_id, client_id=new_client_id):
-            return  # If fails return None.
+    logger.LOGGER('Generate new client for peer ' + peer_id)
+    new_client_id = str(next(grpcbf.client_grpc(
+            method=gateway_pb2_grpc.GatewayStub(
+                grpc.insecure_channel(
+                    next(generate_uris_by_peer_id(peer_id=peer_id))
+                )
+            ).GenerateClient,
+            indices_parser=gateway_pb2.Client,
+            partitions_message_mode_parser=True
+        )).client_id)
+    if not SystemCache().add_external_client(peer_id=peer_id, client_id=new_client_id):
+        return  # If fails return None.
 
-        return new_client_id
+    return new_client_id
 
 
 def add_peer(

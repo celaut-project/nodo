@@ -9,7 +9,6 @@ import grpc
 from grpcbigbuffer import client as grpcbf
 
 from protos import gateway_pb2_grpc, gateway_pb2
-from src.manager.manager import generate_client_id_in_other_peer
 from src.utils import logger as l, logger
 from src.utils.env import CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME, CLIENT_EXPIRATION_TIME, DOCKER_CLIENT, \
     DOCKER_NETWORK, REMOVE_CONTAINERS, STORAGE, DATABASE_FILE
@@ -178,6 +177,15 @@ class SystemCache(metaclass=Singleton):
             logger.LOGGER(f'Peer {peer_id} already exists')
             return False
 
+    def peer_exists(self, peer_id: str) -> bool:
+        # Check if the peer exists in the database
+        result = self._execute('''
+            SELECT COUNT(*)
+            FROM peer
+            WHERE id = ?
+        ''', (peer_id,))
+        return result.fetchone()[0]
+
     def add_external_client(self, peer_id: str, client_id: str) -> bool:
         """
         Associates an external client ID with an existing peer.
@@ -191,13 +199,7 @@ class SystemCache(metaclass=Singleton):
         """
         logger.LOGGER(f'Attempting to add external client {client_id} for peer {peer_id}')
 
-        # Check if the peer exists in the database
-        result = self._execute('''
-            SELECT COUNT(*)
-            FROM peer
-            WHERE id = ?
-        ''', (peer_id,))
-        peer_exists = result.fetchone()[0]
+        peer_exists = self.peer_exists(peer_id=peer_id)
 
         if not peer_exists:
             logger.LOGGER(f'Peer {peer_id} does not exist in the database')
@@ -449,3 +451,12 @@ class SystemCache(metaclass=Singleton):
 
         self.container_cache_lock.release()
         return refund
+
+
+def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
+    SystemCache().peer_exists(peer_id=peer_id)
+    try:
+        return any(list(generate_uris_by_peer_id(peer_id))) if min_slots_open == 1 else \
+            len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open
+    except Exception:
+        return False
