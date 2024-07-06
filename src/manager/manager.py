@@ -94,26 +94,22 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
 def get_token_by_uri(uri: str) -> str:
     return sc.get_token_by_uri(uri=uri)
 
+
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
     if sc.container_exists(token=token):
         raise Exception('Manager error: token ' + token + ' does not exists.')
     if sys_req.HasField('mem_limit'):
-        # TODO HAY QUE AGREGAR SYSRESOURCES EN LA TABLA DE CONTAINERS.
-        variation = sc.system_cache[token]['mem_limit'] - sys_req.mem_limit
-
+        variation = sc.get_sys_req(token=token)['mem_limit'] - sys_req.mem_limit
         if variation < 0:
             IOBigData().lock_ram(ram_amount=abs(variation))
-
         elif variation > 0:
             IOBigData().unlock_ram(ram_amount=variation)
-
         if variation != 0:
-            with sc.cache_locks.lock(token): sc.system_cache[token]['mem_limit'] = sys_req.mem_limit
-
+            sc.update_sys_req(token=token, mem_limit=sys_req.mem_limit)
     return True
 
 
-def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Container:
+def __get_container_by_token(token: str) -> docker_lib.models.containers.Container:
     return docker_lib.from_env().containers.get(
         container_id=token.split('##')[-1]
     )
@@ -218,10 +214,10 @@ def spend_gas(
 
     except Exception as e:
         logger.LOGGER('Manager error spending gas: ' + str(e) + ' ' + str(gas_to_spend) + ' ' + token_or_container_ip +
-                 '\n peer instances -> ' + str(sc.clients) +
-                 '\n system cache -> ' + str(sc.system_cache) +
-                 '\n cache service perspective -> ' + str(sc.cache_service_perspective) +
-                 '\n        ----------------------\n\n\n')
+                      '\n peer instances -> ' + str(sc.clients) +
+                      '\n system cache -> ' + str(sc.system_cache) +
+                      '\n cache service perspective -> ' + str(sc.cache_service_perspective) +
+                      '\n        ----------------------\n\n\n')
 
     return False
 
@@ -243,14 +239,14 @@ def generate_client_id_in_other_peer(peer_id: str) -> Optional[str]:
 
     logger.LOGGER('Generate new client for peer ' + peer_id)
     new_client_id = str(next(grpcbf.client_grpc(
-            method=gateway_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(
-                    next(generate_uris_by_peer_id(peer_id=peer_id))
-                )
-            ).GenerateClient,
-            indices_parser=gateway_pb2.Client,
-            partitions_message_mode_parser=True
-        )).client_id)
+        method=gateway_pb2_grpc.GatewayStub(
+            grpc.insecure_channel(
+                next(generate_uris_by_peer_id(peer_id=peer_id))
+            )
+        ).GenerateClient,
+        indices_parser=gateway_pb2.Client,
+        partitions_message_mode_parser=True
+    )).client_id)
     if not SQLConnection().add_external_client(peer_id=peer_id, client_id=new_client_id):
         return  # If fails return None.
 
@@ -319,7 +315,7 @@ def container_modify_system_params(
     ):
         try:
             # Memory limit should be smaller than already set memoryswap limit, update the memoryswap at the same time
-            __get_cointainer_by_token(
+            __get_container_by_token(
                 token=token
             ).update(
                 mem_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR == 0 \

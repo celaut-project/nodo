@@ -2,7 +2,7 @@ import os
 import sqlite3
 import time
 from threading import Lock
-from typing import List, Tuple, TypedDict
+from typing import List, Tuple, TypedDict, Optional
 
 import docker as docker_lib
 import grpc
@@ -99,6 +99,24 @@ class SQLConnection(metaclass=Singleton):
         if _gas == 0 and _last_usage is None:
             _last_usage = time.time()
         self.__update_client(client_id, _gas, _last_usage)
+
+    def update_sys_req(self, token: str, mem_limit: Optional[int]) -> bool:
+        try:
+            self._execute('''
+                UPDATE internal_services SET mem_limit = ? WHERE token = ?
+            ''', (mem_limit, token))
+            return True
+        except:
+            return False
+
+    def get_sys_req(self, token: str) -> dict:
+        result = self._execute('''
+            SELECT mem_limit FROM internal_services WHERE token = ?
+        ''', (token,))
+        row = result.fetchone()
+        if row:
+            return row
+        raise Exception(f'Internal service {token}')
 
     def client_expired(self, client_id: str) -> bool:
         _gas, _last_usage = self.__get_client_gas(client_id)
