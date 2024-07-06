@@ -5,8 +5,7 @@ import docker as docker_lib
 from protos import celaut_pb2 as celaut
 from src.manager.manager import add_peer, prune_container, spend_gas
 from src.manager.metrics import gas_amount_on_other_peer
-from src.manager.system_cache import SQLConnection, client_expired, delete_delete, get_clients, get_peers, \
-    is_peer_available
+from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
 from src.reputation_system.simple_reputation_feedback import submit_reputation_feedback
 from src.utils import logger as l

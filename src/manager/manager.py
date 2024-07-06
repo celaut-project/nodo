@@ -12,7 +12,7 @@ from google.protobuf.json_format import MessageToJson
 from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 
-from src.manager.system_cache import Client, SQLConnection, is_peer_available
+from src.database.sql_connection import Client, SQLConnection, is_peer_available
 
 from src.utils import logger as logger
 from src.utils.env import ALLOW_GAS_DEBT, DATABASE_FILE, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \

@@ -9,7 +9,7 @@ from protos import gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input_indices
 from src.manager.manager import generate_client_id_in_other_peer
 from src.manager.metrics import gas_amount_on_other_peer
-from src.manager.system_cache import SQLConnection
+from src.database.sql_connection import SQLConnection
 from src.payment_system.payment_process import increase_deposit_on_peer
 from src.utils import utils, logger as l
 

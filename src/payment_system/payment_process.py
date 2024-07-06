@@ -10,7 +10,7 @@ from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, PAYMENT
 from protos import gateway_pb2_grpc, gateway_pb2
 
 from src.manager.manager import generate_client_id_in_other_peer, increase_local_gas_for_client
-from src.manager.system_cache import SQLConnection
+from src.database.sql_connection import SQLConnection
 
 from src.utils import logger as _l
 from src.utils.env import COMMUNICATION_ATTEMPTS, COMMUNICATION_ATTEMPTS_DELAY, \

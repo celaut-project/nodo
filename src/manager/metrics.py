@@ -4,7 +4,7 @@ from grpcbigbuffer import client as grpcbf
 from protos import gateway_pb2, gateway_pb2_grpc
 
 from src.manager.manager import generate_client_id_in_other_peer
-from src.manager.system_cache import SQLConnection, is_peer_available
+from src.database.sql_connection import SQLConnection, is_peer_available
 
 from src.utils.env import DOCKER_NETWORK
 from src.utils.utils import from_gas_amount, get_network_name, to_gas_amount, \
