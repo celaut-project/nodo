@@ -228,7 +228,7 @@ def generate_client_id_in_other_peer(peer_id: str) -> Optional[str]:
         indices_parser=gateway_pb2.Client,
         partitions_message_mode_parser=True
     )).client_id)
-    if not SQLConnection().add_external_client(peer_id=peer_id, client_id=new_client_id):
+    if not sc.add_external_client(peer_id=peer_id, client_id=new_client_id):
         return  # If fails return None.
 
     return new_client_id
