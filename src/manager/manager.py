@@ -238,7 +238,7 @@ def add_peer(
         peer_id: str
 ) -> bool:
     try:
-        return SQLConnection().add_peer(peer_id=peer_id)
+        return sc.add_peer(peer_id=peer_id)
     except Exception as e:
         print('Error en add_peer', e)
         return False
