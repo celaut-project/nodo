@@ -277,23 +277,23 @@ def default_initial_cost(
 def add_container(
         father_id: str,
         container: docker_lib.models.containers.Container,
-        initial_gas_amount: int,
-        system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
+        initial_gas_amount: Optional[int],
+        system_requirements_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> str:
     logger.LOGGER('Add container for ' + father_id)
     token = father_id + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
+    initial_gas_amount = initial_gas_amount if initial_gas_amount else default_initial_cost(
+        father_id=father_id)
     sc.add_internal_service(
         father_id=father_id,
         container_id=container.id,
         container_ip=container.attrs['NetworkSettings']['IPAddress'],
         token=token,
+        gas=initial_gas_amount
     )
-    with sc.cache_locks.lock(token):
-        sc.system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(
-            father_id=father_id)
     if not container_modify_system_params(
             token=token,
-            system_requeriments_range=system_requeriments_range
+            system_requeriments_range=system_requirements_range
     ):
         raise Exception('Manager error adding ' + token + '.')
     return token

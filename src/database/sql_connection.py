@@ -309,12 +309,13 @@ class SQLConnection(metaclass=Singleton):
                              father_id: str,
                              container_ip: str,
                              container_id: str,
-                             token: str
+                             token: str,
+                             gas: int
                              ):
         self._execute('''
             INSERT INTO internal_services (id, ip, token, father_id)
-            VALUES (?, ?, ?, ?)
-        ''', (container_id, container_ip, token, father_id))
+            VALUES (?, ?, ?, ?, ?)
+        ''', (container_id, container_ip, token, father_id, gas))
         l.LOGGER(f'Set on cache {token} as dependency of {father_id}')
 
     def add_external_service(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str):
