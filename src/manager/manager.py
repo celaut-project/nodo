@@ -334,7 +334,7 @@ def prune_container(token: str) -> int:
     if get_network_name(ip_or_uri=token.split('##')[1]) == DOCKER_NETWORK:
         # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
         try:
-            refund = sc.purgue_internal(
+            refund = sc.purge_internal(
                 agent_id=token.split('##')[0],
                 container_id=token.split('##')[2],
                 container_ip=token.split('##')[1],

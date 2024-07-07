@@ -279,52 +279,6 @@ class SQLConnection(metaclass=Singleton):
         else:
             return int(DEFAULT_INTIAL_GAS_AMOUNT)
 
-    # Método para purgar un servicio interno
-    def purge_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
-        if token is None and (agent_id is None or container_id is None or container_ip is None):
-            raise Exception(
-                'purge_internal: token is None and (agent_id is None or container_id is None or container_ip is None)'
-            )
-
-        refund = self.get_gas_amount_by_client_id(container_ip)
-
-        self._execute('''
-            DELETE FROM internal_services
-            WHERE id = ? AND father_id = ?
-        ''', (container_id, agent_id))
-
-        self._execute('''
-            DELETE FROM peer
-            WHERE token = ?
-        ''', (token,))
-
-        return refund
-
-    # Método para purgar un servicio externo
-    def purge_external(self, agent_id, peer_id, his_token) -> int:
-        refund = 0
-
-        self._execute('''
-            DELETE FROM external_services
-            WHERE id = ? AND token = ?
-        ''', (peer_id, his_token))
-
-        return refund
-
-    # Método para eliminar dependencias de contenedores en la tabla internal_services
-    def remove_container_dependency(self, agent_id: str, dependency: str):
-        self._execute('''
-            DELETE FROM internal_services
-            WHERE id = ? AND father_id = ?
-        ''', (dependency, agent_id))
-
-    # Método para eliminar dependencias de contenedores en la tabla external_services
-    def remove_external_dependency(self, agent_id: str, dependency: str):
-        self._execute('''
-            DELETE FROM external_services
-            WHERE id = ? AND token = ?
-        ''', (dependency, agent_id))
-
     def add_internal_service(self,
                              father_id: str,
                              container_ip: str,
@@ -361,10 +315,11 @@ class SQLConnection(metaclass=Singleton):
     def __get_gas_amount_by_ip(self, ip: str) -> int:
         return self.get_gas_amount_by_client_id(id=ip)
 
-    def purgue_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
+    def purge_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
         if token is None and (agent_id is None or container_id is None or container_ip is None):
             raise Exception(
-                'purgue_internal: token is None and (father_ip is None or container_id is None or container_ip is None)')
+                'purge_internal: token is None and (agent_id is None or container_id is None or container_ip is None)'
+            )
 
         if REMOVE_CONTAINERS:
             try:
@@ -373,69 +328,29 @@ class SQLConnection(metaclass=Singleton):
                 l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
                 return 0
 
-        refund = self.__get_gas_amount_by_ip(
-            ip=container_ip
-        )
+        refund = self.get_gas_amount_by_client_id(container_ip) # TODO
 
-        with self.container_cache_lock:
-            try:
-                self.container_cache[agent_id].remove(container_ip + '##' + container_id)
-            except ValueError as e:
-                l.LOGGER(
-                    str(e) + str(self.container_cache[agent_id]) + ' trying to remove ' + container_ip + '##' + container_id)
-            except KeyError as e:
-                l.LOGGER(str(e) + agent_id + ' not in ' + str(self.container_cache.keys()))
-
-            try:
-                del self.cache_service_perspective[container_ip]
-            except Exception as e:
-                l.LOGGER('EXCEPTION NO CONTROLADA. ESTO NO DEBERÍA HABER OCURRIDO ' + str(e) + ' ' + str(
-                    self.cache_service_perspective) + ' ' + str(container_id))  # TODO. Study the imposibility of that.
-                raise e
-
-            del self.system_cache[token]
-            self.cache_locks.delete(token)
-
-            if container_ip in self.container_cache:
-                for dependency in self.container_cache[container_ip]:
-                    # Si la dependencia esta en local.
-                    if get_network_name(ip_or_uri=dependency.split('##')[0]) == DOCKER_NETWORK:
-                        refund += self.purgue_internal(
-                            agent_id=container_ip,
-                            container_id=dependency.split('##')[1],
-                            container_ip=dependency.split('##')[0]
-                        )
-                    # Si la dependencia se encuentra en otro nodo.
-                    else:
-                        refund += self.purgue_external(
-                            agent_id=agent_id,
-                            peer_id=dependency.split('##')[0],
-                            his_token=dependency[len(dependency.split('##')[0]) + 1:]
-                            # Por si el token comienza en # ...
-                        )
-
-                try:
-                    l.LOGGER('Deleting the instance ' + container_id + ' from cache with ' + str(
-                        self.container_cache[container_ip]) + ' dependencies.')
-                    del self.container_cache[container_ip]
-                except KeyError as e:
-                    l.LOGGER(str(e) + container_ip + ' not in ' + str(self.container_cache.keys()))
+        self._execute('''
+            DELETE FROM internal_services
+            WHERE id = ? AND father_id = ?
+        ''', (container_id, agent_id))
 
         return refund
 
-    def purgue_external(self, agent_id, peer_id, his_token) -> int:
+    def purge_external(self, agent_id, peer_id, his_token) -> int:
         refund = 0
-        self.container_cache_lock.acquire()
 
-        try:
-            self.container_cache[agent_id].remove(peer_id + '##' + his_token)
-        except ValueError as e:
-            l.LOGGER(str(e) + '. Container cache of ' + agent_id + str(
-                self.container_cache[agent_id]) + ' trying to remove ' + peer_id + '##' + his_token)
-        except KeyError as e:
-            l.LOGGER(str(e) + agent_id + ' not in ' + str(self.container_cache.keys()))
+        hashed_token = self._execute('''
+            SELECT token_hash
+            FROM external_services
+            WHERE token = ?
+        ''', (his_token,)).fetchone()["token_hash"]
 
-        # Le manda al otro nodo que elimine esa instancia.
+        self._execute('''
+            DELETE FROM external_services
+            WHERE token = ?
+        ''', (his_token,))
+
         try:
             refund = from_gas_amount(next(grpcbf.client_grpc(
                 method=gateway_pb2_grpc.GatewayStub(
@@ -444,7 +359,7 @@ class SQLConnection(metaclass=Singleton):
                     )
                 ).StopService,
                 input=gateway_pb2.TokenMessage(
-                    token=self.external_token_hash_map[his_token]
+                    token=hashed_token
                 ),
                 indices_parser=gateway_pb2.Refund,
                 partitions_message_mode_parser=True
@@ -452,9 +367,7 @@ class SQLConnection(metaclass=Singleton):
         except grpc.RpcError as e:
             l.LOGGER('Error during remove a container on ' + peer_id + ' ' + str(e))
 
-        self.container_cache_lock.release()
         return refund
-
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     SQLConnection().peer_exists(peer_id=peer_id)
