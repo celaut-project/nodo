@@ -16,6 +16,9 @@ from src.utils.singleton import Singleton
 from src.utils.utils import get_network_name, from_gas_amount, generate_uris_by_peer_id
 
 
+def get_internal_service_id_by_token(token: str) -> str:
+    return token.split("##")[2]
+
 class SQLConnection(metaclass=Singleton):
     _connection = None
     _lock = Lock()
@@ -112,16 +115,16 @@ class SQLConnection(metaclass=Singleton):
     def update_sys_req(self, token: str, mem_limit: Optional[int]) -> bool:
         try:
             self._execute('''
-                UPDATE internal_services SET mem_limit = ? WHERE token = ?
-            ''', (mem_limit, token))
+                UPDATE internal_services SET mem_limit = ? WHERE id = ?
+            ''', (mem_limit, get_internal_service_id_by_token(token=token)))
             return True
         except:
             return False
 
     def get_sys_req(self, token: str) -> dict:
         result = self._execute('''
-            SELECT mem_limit FROM internal_services WHERE token = ?
-        ''', (token,))
+            SELECT mem_limit FROM internal_services WHERE id = ?
+        ''', (get_internal_service_id_by_token(token=token),))
         row = result.fetchone()
         if row:
             return row
@@ -129,8 +132,8 @@ class SQLConnection(metaclass=Singleton):
 
     def get_internal_service_gas(self, token: str) -> int:
         result = self._execute('''
-            SELECT gas FROM internal_services WHERE token = ?
-        ''', (token,))
+            SELECT gas FROM internal_services WHERE id = ?
+        ''', (get_internal_service_id_by_token(token=token),))
         row = result.fetchone()
         if row:
             return row['gas']
@@ -287,23 +290,23 @@ class SQLConnection(metaclass=Singleton):
                              gas: int
                              ):
         self._execute('''
-            INSERT INTO internal_services (id, ip, token, father_id)
+            INSERT INTO internal_services (id, ip, father_id, gas, mem_limit)
             VALUES (?, ?, ?, ?, ?)
-        ''', (container_id, container_ip, token, father_id, gas))
+        ''', (container_id, container_ip, father_id, gas, 0))
         l.LOGGER(f'Set on cache {token} as dependency of {father_id}')
 
     def update_gas_to_container(self, token: str, gas: int):
         self._execute('''
-            UPDATE internal_services SET gas = ? WHERE token = ?
-        ''', (gas, gas, token))
+            UPDATE internal_services SET gas = ? WHERE id = ?
+        ''', (gas, get_internal_service_id_by_token(token=token)))
 
     def container_exists(self, token: str) -> bool:
         # Check if the peer exists in the database
         result = self._execute('''
             SELECT COUNT(*)
             FROM internal_services
-            WHERE token = ?
-        ''', (token,))
+            WHERE id = ?
+        ''', (get_internal_service_id_by_token(token=token),))
         return result.fetchone()[0]
 
     def add_external_service(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str):
