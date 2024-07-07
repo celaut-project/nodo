@@ -139,6 +139,18 @@ class SQLConnection(metaclass=Singleton):
             return row['gas']
         raise Exception(f'Internal service {token}')
 
+    def get_all_internal_service_tokens(self) -> List[str]:
+        """
+        Fetches all tokens of the internal services in the format `father_id##ip##id`.
+
+        Returns:
+            List[str]: A list of tokens.
+        """
+        result = self._execute('''
+            SELECT father_id, ip, id FROM internal_services
+        ''')
+        return [f"{row['father_id']}##{row['ip']}##{row['id']}" for row in result.fetchall()]
+
     def client_expired(self, client_id: str) -> bool:
         _gas, _last_usage = self.get_client_gas(client_id)
         return _last_usage is not None and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)

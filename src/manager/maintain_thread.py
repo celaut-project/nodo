@@ -18,10 +18,7 @@ sc = SQLConnection()
 
 
 def maintain_containers():
-    for i in range(len(sc.system_cache)):
-        if i >= len(sc.system_cache):
-            break
-        token, sysreq = list(sc.system_cache.items())[i]
+    for token in sc.get_all_internal_service_tokens():
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
                 submit_reputation_feedback(token=token, amount=-100)
@@ -35,7 +32,7 @@ def maintain_containers():
                 id=token,
                 gas_to_spend=compute_maintenance_cost(
                     system_resources=celaut.Sysresources(
-                        mem_limit=sysreq['mem_limit']
+                        mem_limit=sc.get_sys_req(token=token)['mem_limit']
                     )
                 )
         ):
