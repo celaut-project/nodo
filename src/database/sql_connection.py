@@ -312,9 +312,6 @@ class SQLConnection(metaclass=Singleton):
             VALUES (?, ?, ?, ?, ?)
         ''', (external_token, encrypted_external_token, peer_id, client_id))
 
-    def __get_gas_amount_by_ip(self, ip: str) -> int:
-        return self.get_gas_amount_by_client_id(id=ip)
-
     def purge_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
         if token is None and (agent_id is None or container_id is None or container_ip is None):
             raise Exception(
@@ -328,7 +325,7 @@ class SQLConnection(metaclass=Singleton):
                 l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
                 return 0
 
-        refund = self.get_gas_amount_by_client_id(container_ip) # TODO
+        refund = self.get_internal_service_gas(token=token)
 
         self._execute('''
             DELETE FROM internal_services
