@@ -26,9 +26,20 @@ sc = SQLConnection()
 
 
 # Insert the instance if it does not exist.
-def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
+def add_peer_instance(instance: gateway_pb2.Instance) -> str:
     parsed_instance = json.loads(MessageToJson(instance))
     logger.LOGGER('Inserting instance on db: ' + str(parsed_instance))
+
+    peer_id = str(uuid.uuid4())
+    token: Optional[str] = instance.token if instance.HasField("token") else ""
+    metadata: Optional[bytes] = instance.instance_meta.SerializeToString() \
+        if instance.HasField('instance_meta') else None
+    app_protocol: bytes = instance.instance.api.app_protocol.SerializeToString()
+
+    sc.add_peer(
+        peer_id=peer_id, token=token, 
+        metadata=metadata, app_protocol=app_protocol
+        )
 
     # Connect to the SQLite database
     with sqlite3.connect(database=DATABASE_FILE) as conn:
@@ -36,15 +47,7 @@ def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
 
         try:
 
-            peer_id = str(uuid.uuid4())
-            token: Optional[str] = instance.token if instance.HasField("token") else ""
-            metadata: Optional[bytes] = instance.instance_meta.SerializeToString() \
-                if instance.HasField('instance_meta') else None
-            app_protocol: bytes = instance.instance.api.app_protocol.SerializeToString()
-
-            # Attempt to insert a new row into the 'peer' table
-            cursor.execute("INSERT INTO peer (id, token, metadata, app_protocol) VALUES (?, ?, ?, ?)",
-                           (peer_id, token, metadata, app_protocol))
+            # TODO ESTOS DOS DBEN DE SER TAMBIEN FUNCIONES EN SQL CONNECTION.
 
             # Slots
             for slot in instance.instance.uri_slot:
@@ -232,16 +235,6 @@ def generate_client_id_in_other_peer(peer_id: str) -> Optional[str]:
         return  # If fails return None.
 
     return new_client_id
-
-
-def add_peer(
-        peer_id: str
-) -> bool:
-    try:
-        return sc.add_peer(peer_id=peer_id)
-    except Exception as e:
-        print('Error en add_peer', e)
-        return False
 
 
 def default_initial_cost(

@@ -273,7 +273,7 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error fetching peer IDs: {e}')
             return []
 
-    def add_peer(self, peer_id: str) -> bool:
+    def add_peer(self, peer_id: str, token: Optional[str], metadata: Optional[bytes], app_protocol: bytes) -> bool:
         """
         Adds a peer to the database.
 
@@ -289,8 +289,8 @@ class SQLConnection(metaclass=Singleton):
             try:
                 self._execute('''
                     INSERT INTO peer (id, token, metadata, app_protocol, client_id, gas)
-                    VALUES (?, '', NULL, NULL, '', 0)  -- Initialize with empty client_id and 0 gas
-                ''', (peer_id,))
+                    VALUES (?, ?, ?, ?, '', 0)  -- Initialize with empty client_id and 0 gas
+                ''', (peer_id, token, metadata, app_protocol))
                 logger.LOGGER(f'Peer {peer_id} added without client_id')
                 return True
             except sqlite3.Error as e:

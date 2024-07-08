@@ -27,7 +27,7 @@ def create_tables(cursor):
             CREATE TABLE IF NOT EXISTS peer (
                 id TEXT PRIMARY KEY,
                 token TEXT,
-                metadata BLOB,
+                metadata BLOB NULL,
                 app_protocol BLOB,
                 client_id TEXT,
                 gas INTEGER
