@@ -41,56 +41,15 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> str:
         metadata=metadata, app_protocol=app_protocol
         )
 
-    # Connect to the SQLite database
-    with sqlite3.connect(database=DATABASE_FILE) as conn:
-        cursor: sqlite3.dbapi2.Cursor = conn.cursor()
+    # Slots
+    for slot in instance.instance.uri_slot:
+        sc.add_slot(slot=slot, peer_id=peer_id)
 
-        try:
+    # Contracts
+    for contract_ledger in instance.instance.api.contract_ledger:
+        sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
-            # TODO ESTOS DOS DBEN DE SER TAMBIEN FUNCIONES EN SQL CONNECTION.
-
-            # Slots
-            for slot in instance.instance.uri_slot:
-                internal_port: int = slot.internal_port
-                transport_protocol: bytes = bytes("tcp", "utf-8")
-                cursor.execute("INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
-                               (internal_port, transport_protocol, peer_id))
-                slot_id: int = cursor.lastrowid
-
-                for uri in slot.uri:
-                    ip: str = uri.ip
-                    port: int = uri.port
-                    cursor.execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
-                                   (ip, port, slot_id))
-
-            print('Contracts on ledger -> ', instance.instance)
-            # Contracts
-            for contract_ledger in instance.instance.api.contract_ledger:
-                contract: bytes = contract_ledger.contract
-                address: str = contract_ledger.contract_addr
-                ledger: str = contract_ledger.ledger
-
-                contract_hash: str = sha3_256(contract).hexdigest()
-                contract_hash_type: str = SHA3_256_ID.hex()
-
-                cursor.execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
-                               (contract_hash, contract_hash_type, contract))
-
-                cursor.execute("INSERT OR IGNORE INTO ledger (id) VALUES (?)",
-                               (ledger,))
-
-                cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
-                               "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
-
-            conn.commit()
-        except Exception as e:
-            # Manage the error
-            print("Error on db:", str(e))
-            # Revert all changes
-            conn.rollback()
-
-        print('Get instance for peer ->', peer_id)
-
+    print('Get instance for peer ->', peer_id)
     return peer_id
 
 

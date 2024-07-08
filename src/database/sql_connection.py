@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import time
+from hashlib import sha3_256
 from threading import Lock
 from typing import List, Tuple, Optional
 
@@ -8,7 +9,7 @@ import docker as docker_lib
 import grpc
 from grpcbigbuffer import client as grpcbf
 
-from protos import gateway_pb2_grpc, gateway_pb2
+from protos import gateway_pb2_grpc, gateway_pb2, celaut_pb2
 from src.utils import logger as l, logger
 from src.utils.env import (
     CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME,
@@ -17,7 +18,7 @@ from src.utils.env import (
     REMOVE_CONTAINERS,
     STORAGE,
     DATABASE_FILE,
-    DEFAULT_INTIAL_GAS_AMOUNT
+    DEFAULT_INTIAL_GAS_AMOUNT, SHA3_256_ID
 )
 from src.utils.singleton import Singleton
 from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
@@ -26,6 +27,7 @@ from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
 def get_internal_service_id_by_token(token: str) -> str:
     """Extracts the internal service ID from a token."""
     return token.split("##")[2]
+
 
 class SQLConnection(metaclass=Singleton):
     _connection = None
@@ -300,6 +302,40 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Peer {peer_id} already exists')
             return False
 
+    def add_uri(self, uri: celaut_pb2.Instance.Uri, slot_id: str):
+        ip: str = uri.ip
+        port: int = uri.port
+        self._execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
+                      (ip, port, slot_id))
+
+    def add_slot(self, slot: celaut_pb2.Instance.Uri_Slot, peer_id: str):
+        internal_port: int = slot.internal_port
+        transport_protocol: bytes = bytes("tcp", "utf-8")
+        cursor = self._execute("INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
+                               (internal_port, transport_protocol, peer_id))
+        slot_id = cursor.lastrowid
+        if slot_id:
+            slot_id = str(slot_id)
+            for uri in slot.uri:
+                self.add_uri(uri, slot_id=slot_id)
+
+    def add_contract(self, contract: celaut_pb2.Service.Api.ContractLedger, peer_id: str):
+        contract_content: bytes = contract.contract
+        address: str = contract.contract_addr
+        ledger: str = contract.ledger
+
+        contract_hash: str = sha3_256(contract_content).hexdigest()
+        contract_hash_type: str = SHA3_256_ID.hex()
+
+        self._execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
+                      (contract_hash, contract_hash_type, contract_content))
+
+        self._execute("INSERT OR IGNORE INTO ledger (id) VALUES (?)",
+                      (ledger,))
+
+        self._execute("INSERT INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
+                      "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
+
     def peer_exists(self, peer_id: str) -> bool:
         """
         Checks if a peer exists in the database.
@@ -545,6 +581,7 @@ class SQLConnection(metaclass=Singleton):
             l.LOGGER('Error during remove a container on ' + peer_id + ' ' + str(e))
 
         return refund
+
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     SQLConnection().peer_exists(peer_id=peer_id)
