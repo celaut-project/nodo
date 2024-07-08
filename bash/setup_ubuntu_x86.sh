@@ -33,8 +33,25 @@ sudo apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-
 }
 
 echo "Installing required build dependencies..."
-sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
-                        libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null
+if sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
+                           libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null 2>&1; then
+    echo "Dependencies installed successfully."
+else
+    echo "Error installing dependencies. Attempting to fix broken dependencies..."
+    if sudo apt --fix-broken install -y > /dev/null 2>&1; then
+        echo "Fixed broken dependencies. Retrying to install required build dependencies..."
+        if sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
+                                   libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null 2>&1; then
+            echo "Dependencies installed successfully after fixing broken dependencies."
+        else
+            echo "Failed to install dependencies after fixing broken dependencies. Please check manually."
+            exit 1
+        fi
+    else
+        echo "Failed to fix broken dependencies. Please check manually."
+        exit 1
+    fi
+fi
 
 echo "Adding Python 3.11 repository..."
 sudo add-apt-repository ppa:deadsnakes/ppa -y > /dev/null
