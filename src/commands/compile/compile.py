@@ -67,10 +67,12 @@ def compile_directory(directory: str):
 
     # TODO check if dependencies has directories, and compile them before.
     try:
-        next((
-            __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
-            for peer_id in list(get_peer_ids())+[f"localhost:{GATEWAY_PORT}"]
-            for ip, port in get_peer_directions(peer_id=peer_id)
-        ))
+        ip, port = None, None
+        for peer_id in list(get_peer_ids()):
+            for _ip, _port in get_peer_directions(peer_id=peer_id):
+                ip, port = _ip, _port
+        if not ip or not port:
+            ip, port = 'localhost', GATEWAY_PORT
+        next((__on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)))
     finally:
         os.remove(service_zip_dir)
