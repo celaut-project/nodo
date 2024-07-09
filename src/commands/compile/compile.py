@@ -9,7 +9,7 @@ from grpcbigbuffer import client as grpcbb
 from protos import celaut_pb2, compile_pb2, gateway_pb2_grpcbf, gateway_pb2_grpc
 from src.commands.compile.generate_service_zip import __generate_service_zip
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
-from src.utils.env import METADATA_REGISTRY, REGISTRY
+from src.utils.env import GATEWAY_PORT, METADATA_REGISTRY, REGISTRY
 
 
 def __compile(zip, node: str):
@@ -69,7 +69,7 @@ def compile_directory(directory: str):
     try:
         next((
             __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
-            for peer_id in get_peer_ids()
+            for peer_id in list(get_peer_ids())+[f"localhost:{GATEWAY_PORT}"]
             for ip, port in get_peer_directions(peer_id=peer_id)
         ))
     finally:
