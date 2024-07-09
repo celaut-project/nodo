@@ -29,7 +29,7 @@ def get_internal_service_id_by_token(token: str) -> str:
     return token.split("##")[2]
 
 
-class SQLConnection(metatclass=Singleton):
+class SQLConnection(metaclass=Singleton):
     _connection = None
     _lock = Lock()
 
