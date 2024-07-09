@@ -141,5 +141,5 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
     else:
         return __get_metrics_external(
             peer_id=token.split('##')[1],  # peer_id
-            token=token.split('##')[2]  # If the token starts with ## ...
+            token=sc.get_token_by_hashed_token(hashed_token=token.split('##')[2])  # If the token starts with ## ...
         )

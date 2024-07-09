@@ -591,6 +591,28 @@ class SQLConnection(metaclass=Singleton):
             VALUES (?, ?, ?, ?)
         ''', (external_token, encrypted_external_token, peer_id, client_id))
 
+    def get_token_by_hashed_token(self, hashed_token: str) -> Optional[str]:
+        """
+        Retrieves the token associated with a given hashed token for an external service.
+
+        Args:
+            hashed_token (str): The hashed token of the external service.
+
+        Returns:
+            Optional[str]: The token if it exists, or None if not found.
+        """
+        try:
+            result = self._execute('''
+                SELECT token FROM external_services WHERE token_hash = ?
+            ''', (hashed_token,))
+            row = result.fetchone()
+            if row:
+                return row['token']
+            return None
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to retrieve token for hashed token {hashed_token}: {e}')
+            return None
+
     def purge_external(self, agent_id: str, peer_id: str, his_token: str) -> int:
         """
         Purges an external service and refunds gas.
