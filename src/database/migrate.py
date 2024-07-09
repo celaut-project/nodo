@@ -30,13 +30,15 @@ def create_tables(cursor):
                 metadata BLOB NULL,
                 app_protocol BLOB,
                 client_id TEXT,
-                gas INTEGER
+                gas_mantissa INTEGER,
+                gas_exponent INTEGER
             )
         ''',
         "clients": '''
             CREATE TABLE IF NOT EXISTS clients (
                 id TEXT PRIMARY KEY,
-                gas INTEGER,
+                gas_mantissa INTEGER,
+                gas_exponent INTEGER,
                 last_usage FLOAT NULL
             )
         ''',
@@ -96,7 +98,8 @@ def create_tables(cursor):
                 id TEXT PRIMARY KEY,
                 ip TEXT,
                 father_id TEXT,
-                gas INTEGER,
+                gas_mantissa INTEGER,
+                gas_exponent INTEGER,
                 mem_limit INTEGER
             )
         ''',
