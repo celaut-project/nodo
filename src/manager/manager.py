@@ -105,11 +105,11 @@ def __refund_gas_function_factory(
 
 def increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     logger.LOGGER('Increase local gas for client ' + client_id + ' of ' + str(amount))
-    if client_id not in sc.clients:  # TODO no debería de añadir un peer que no existe.
+    if not sc.client_exists(client_id=client_id):
         raise Exception('Client ' + client_id + ' does not exists.')
     if not __refund_gas(
             gas=amount,
-            add_function=lambda gas: sc.clients[client_id].add_gas(gas),
+            add_function=lambda gas: sc.add_gas(client_id=client_id, gas=gas),
             token=client_id
     ):
         raise Exception('Manager error: cannot increase local gas for client ' + client_id + ' by ' + str(amount))
