@@ -89,15 +89,15 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
     """
 
     
-    client_id, token = sc.get_peer_client(peer_id=peer_id)
-    if not token or not client_id:
+    client_id = sc.get_peer_client(peer_id=peer_id)
+    if not client_id:
         client_id = generate_client_id_in_other_peer(peer_id=peer_id)
 
     try:
         return from_gas_amount(
             __get_metrics_external(
                 peer_id=peer_id,
-                token=token
+                token=client_id
             ).gas_amount
         )
     except:
