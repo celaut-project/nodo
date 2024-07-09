@@ -29,7 +29,7 @@ def get_internal_service_id_by_token(token: str) -> str:
     return token.split("##")[2]
 
 
-class SQLConnection(metaclass=Singleton):
+class SQLConnection(metatclass=Singleton):
     _connection = None
     _lock = Lock()
 
@@ -63,6 +63,21 @@ class SQLConnection(metaclass=Singleton):
             return self.cursor
 
     # Client Methods
+
+    def add_client(self, client_id: str, gas: int, last_usage: Optional[float]):
+        """
+        Adds a client to the database, updating if a conflict occurs.
+
+        Args:
+            client_id (str): The ID of the client.
+            gas (int): The gas amount.
+            last_usage (Optional[float]): The last usage time.
+        """
+        self._execute('''
+            INSERT INTO clients (id, gas, last_usage)
+            VALUES (?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET gas=excluded.gas, last_usage=excluded.last_usage
+        ''', (client_id, gas, last_usage))
 
     def get_clients(self) -> List[dict]:
         """
@@ -125,12 +140,6 @@ class SQLConnection(metaclass=Singleton):
             return row['gas'], row['last_usage']
         raise Exception(f'Client not found: {client_id}')
 
-    def __update_client(self, client_id: str, gas: int, last_usage: float):
-        """Updates the gas and last usage time for a client."""
-        self._execute('''
-            UPDATE clients SET gas = ?, last_usage = ? WHERE id = ?
-        ''', (gas, last_usage, client_id))
-
     def delete_client(self, client_id: str):
         """Deletes a client from the database."""
         self._execute('''
@@ -164,6 +173,62 @@ class SQLConnection(metaclass=Singleton):
         if _gas == 0 and _last_usage is None:
             _last_usage = time.time()
         self.__update_client(client_id, _gas, _last_usage)
+
+    def client_expired(self, client_id: str) -> bool:
+        """
+        Checks if a client has expired.
+
+        Args:
+            client_id (str): The ID of the client.
+
+        Returns:
+            bool: True if the client has expired, False otherwise.
+        """
+        _gas, _last_usage = self.get_client_gas(client_id)
+        return _last_usage is not None and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)
+
+    def __update_client(self, client_id: str, gas: int, last_usage: float):
+        """Updates the gas and last usage time for a client."""
+        self._execute('''
+            UPDATE clients SET gas = ?, last_usage = ? WHERE id = ?
+        ''', (gas, last_usage, client_id))
+
+    def get_gas_amount_by_client_id(self, id: str) -> int:
+        """
+        Retrieves the gas amount for a client ID.
+
+        Args:
+            id (str): The client ID.
+
+        Returns:
+            int: The gas amount.
+        """
+        result = self._execute('''
+            SELECT gas FROM clients WHERE id = ?
+        ''', (id,))
+        row = result.fetchone()
+        if row:
+            return row['gas']
+        raise Exception(f'Gas amount not found for ID: {id}')
+
+    # Internal Service Methods
+
+    def add_internal_service(self, father_id: str, container_ip: str, container_id: str, token: str, gas: int):
+        """
+        Adds an internal service to the database.
+
+        Args:
+            father_id (str): The father ID.
+            container_ip (str): The IP address of the container.
+            container_id (str): The container ID.
+            token (str): The token.
+            gas (int): The gas amount.
+        """
+        self._execute('''
+            INSERT INTO internal_services (id, ip, father_id, gas, mem_limit)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (container_id, container_ip, father_id, gas, 0))
+        l.LOGGER(f'Set on cache {token} as dependency of {father_id}')
 
     def update_sys_req(self, token: str, mem_limit: Optional[int]) -> bool:
         """
@@ -232,18 +297,67 @@ class SQLConnection(metaclass=Singleton):
         ''')
         return [f"{row['father_id']}##{row['ip']}##{row['id']}" for row in result.fetchall()]
 
-    def client_expired(self, client_id: str) -> bool:
+    def update_gas_to_container(self, token: str, gas: int):
         """
-        Checks if a client has expired.
+        Updates the gas amount for a container.
 
         Args:
-            client_id (str): The ID of the client.
+            token (str): The token of the container.
+            gas (int): The new gas amount.
+        """
+        self._execute('''
+            UPDATE internal_services SET gas = ? WHERE id = ?
+        ''', (gas, get_internal_service_id_by_token(token=token)))
+
+    def container_exists(self, token: str) -> bool:
+        """
+        Checks if a container exists in the database.
+
+        Args:
+            token (str): The token of the container.
 
         Returns:
-            bool: True if the client has expired, False otherwise.
+            bool: True if the container exists, False otherwise.
         """
-        _gas, _last_usage = self.get_client_gas(client_id)
-        return _last_usage is not None and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)
+        result = self._execute('''
+            SELECT COUNT(*)
+            FROM internal_services
+            WHERE id = ?
+        ''', (get_internal_service_id_by_token(token=token),))
+        return result.fetchone()[0] > 0
+
+    def purge_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
+        """
+        Purges an internal service and optionally removes its Docker container.
+
+        Args:
+            agent_id (str, optional): The agent ID.
+            container_id (str, optional): The container ID.
+            container_ip (str, optional): The container IP.
+            token (str, optional): The token of the internal service.
+
+        Returns:
+            int: The gas amount refunded.
+        """
+        if token is None and (agent_id is None or container_id is None or container_ip is None):
+            raise Exception(
+                'purge_internal: token is None and (agent_id is None or container_id is None or container_ip is None)'
+            )
+
+        if REMOVE_CONTAINERS:
+            try:
+                DOCKER_CLIENT().containers.get(container_id).remove(force=True)
+            except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
+                l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
+                return 0
+
+        refund = self.get_internal_service_gas(token=token)
+
+        self._execute('''
+            DELETE FROM internal_services WHERE id = ? AND father_id = ?
+        ''', (container_id, agent_id))
+
+        return refund
 
     # Peer Methods
 
@@ -302,13 +416,14 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Peer {peer_id} already exists')
             return False
 
-    def add_uri(self, uri: celaut_pb2.Instance.Uri, slot_id: str):
-        ip: str = uri.ip
-        port: int = uri.port
-        self._execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
-                      (ip, port, slot_id))
-
     def add_slot(self, slot: celaut_pb2.Instance.Uri_Slot, peer_id: str):
+        """
+        Adds a slot to the database.
+
+        Args:
+            slot (celaut_pb2.Instance.Uri_Slot): The slot to add.
+            peer_id (str): The ID of the peer.
+        """
         internal_port: int = slot.internal_port
         transport_protocol: bytes = bytes("tcp", "utf-8")
         cursor = self._execute("INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
@@ -320,6 +435,13 @@ class SQLConnection(metaclass=Singleton):
                 self.add_uri(uri, slot_id=slot_id)
 
     def add_contract(self, contract: celaut_pb2.Service.Api.ContractLedger, peer_id: str):
+        """
+        Adds a contract to the database.
+
+        Args:
+            contract (celaut_pb2.Service.Api.ContractLedger): The contract to add.
+            peer_id (str): The ID of the peer.
+        """
         contract_content: bytes = contract.contract
         address: str = contract.contract_addr
         ledger: str = contract.ledger
@@ -380,119 +502,18 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
             return False
 
-    def add_client(self, client_id: str, gas: int, last_usage: Optional[float]):
+    def add_uri(self, uri: celaut_pb2.Instance.Uri, slot_id: str):
         """
-        Adds a client to the database, updating if a conflict occurs.
+        Adds a URI to the database.
 
         Args:
-            client_id (str): The ID of the client.
-            gas (int): The gas amount.
-            last_usage (Optional[float]): The last usage time.
+            uri (celaut_pb2.Instance.Uri): The URI to add.
+            slot_id (str): The ID of the slot.
         """
-        self._execute('''
-            INSERT INTO clients (id, gas, last_usage)
-            VALUES (?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET gas=excluded.gas, last_usage=excluded.last_usage
-        ''', (client_id, gas, last_usage))
-
-    def get_token_by_uri(self, uri: str) -> str:
-        """
-        Retrieves the token for a given URI.
-
-        Args:
-            uri (str): The URI to look up.
-
-        Returns:
-            str: The associated token.
-        """
-        result = self._execute('''
-            SELECT token FROM internal_services WHERE ip = ?
-        ''', (uri,))
-        row = result.fetchone()
-        if row:
-            return row['token']
-        raise Exception(f'Token not found for URI: {uri}')
-
-    def get_gas_amount_by_client_id(self, id: str) -> int:
-        """
-        Retrieves the gas amount for a client ID.
-
-        Args:
-            id (str): The client ID.
-
-        Returns:
-            int: The gas amount.
-        """
-        result = self._execute('''
-            SELECT gas FROM clients WHERE id = ?
-        ''', (id,))
-        row = result.fetchone()
-        if row:
-            return row['gas']
-        raise Exception(f'Gas amount not found for ID: {id}')
-
-    def get_gas_amount_by_father_id(self, id: str) -> int:
-        """
-        Retrieves the gas amount for a father ID, checking both clients and internal services.
-
-        Args:
-            id (str): The father ID.
-
-        Returns:
-            int: The gas amount.
-        """
-        if self.client_exists(client_id=id):
-            return self.get_gas_amount_by_client_id(id=id)
-        elif self.container_exists(token=id):
-            return self.get_internal_service_gas(token=id)
-        else:
-            return int(DEFAULT_INTIAL_GAS_AMOUNT)
-
-    def add_internal_service(self, father_id: str, container_ip: str, container_id: str, token: str, gas: int):
-        """
-        Adds an internal service to the database.
-
-        Args:
-            father_id (str): The father ID.
-            container_ip (str): The IP address of the container.
-            container_id (str): The container ID.
-            token (str): The token.
-            gas (int): The gas amount.
-        """
-        self._execute('''
-            INSERT INTO internal_services (id, ip, father_id, gas, mem_limit)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (container_id, container_ip, father_id, gas, 0))
-        l.LOGGER(f'Set on cache {token} as dependency of {father_id}')
-
-    def update_gas_to_container(self, token: str, gas: int):
-        """
-        Updates the gas amount for a container.
-
-        Args:
-            token (str): The token of the container.
-            gas (int): The new gas amount.
-        """
-        self._execute('''
-            UPDATE internal_services SET gas = ? WHERE id = ?
-        ''', (gas, get_internal_service_id_by_token(token=token)))
-
-    def container_exists(self, token: str) -> bool:
-        """
-        Checks if a container exists in the database.
-
-        Args:
-            token (str): The token of the container.
-
-        Returns:
-            bool: True if the container exists, False otherwise.
-        """
-        result = self._execute('''
-            SELECT COUNT(*)
-            FROM internal_services
-            WHERE id = ?
-        ''', (get_internal_service_id_by_token(token=token),))
-        return result.fetchone()[0] > 0
+        ip: str = uri.ip
+        port: int = uri.port
+        self._execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
+                      (ip, port, slot_id))
 
     def add_external_service(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str):
         """
@@ -509,46 +530,14 @@ class SQLConnection(metaclass=Singleton):
             VALUES (?, ?, ?, ?)
         ''', (external_token, encrypted_external_token, peer_id, client_id))
 
-    def purge_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
-        """
-        Purges an internal service and optionally removes its Docker container.
-
-        Args:
-            agent_id (str, optional): The agent ID.
-            container_id (str, optional): The container ID.
-            container_ip (str, optional): The container IP.
-            token (str, optional): The token of the internal service.
-
-        Returns:
-            int: The gas amount refunded.
-        """
-        if token is None and (agent_id is None or container_id is None or container_ip is None):
-            raise Exception(
-                'purge_internal: token is None and (agent_id is None or container_id is None or container_ip is None)'
-            )
-
-        if REMOVE_CONTAINERS:
-            try:
-                DOCKER_CLIENT().containers.get(container_id).remove(force=True)
-            except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-                l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
-                return 0
-
-        refund = self.get_internal_service_gas(token=token)
-
-        self._execute('''
-            DELETE FROM internal_services WHERE id = ? AND father_id = ?
-        ''', (container_id, agent_id))
-
-        return refund
-
     def purge_external(self, agent_id: str, peer_id: str, his_token: str) -> int:
         """
         Purges an external service and refunds gas.
 
         Args:
             agent_id (str): The agent ID.
-            peer_id (str): The peer ID.
+            peer_id (str):
+            The peer ID.
             his_token (str): The token of the external service.
 
         Returns:
@@ -582,8 +571,55 @@ class SQLConnection(metaclass=Singleton):
 
         return refund
 
+    # Common Methods
+
+    def get_token_by_uri(self, uri: str) -> str:
+        """
+        Retrieves the token for a given URI.
+
+        Args:
+            uri (str): The URI to look up.
+
+        Returns:
+            str: The associated token.
+        """
+        result = self._execute('''
+            SELECT token FROM internal_services WHERE ip = ?
+        ''', (uri,))
+        row = result.fetchone()
+        if row:
+            return row['token']
+        raise Exception(f'Token not found for URI: {uri}')
+
+    def get_gas_amount_by_father_id(self, id: str) -> int:
+        """
+        Retrieves the gas amount for a father ID, checking both clients and internal services.
+
+        Args:
+            id (str): The father ID.
+
+        Returns:
+            int: The gas amount.
+        """
+        if self.client_exists(client_id=id):
+            return self.get_gas_amount_by_client_id(id=id)
+        elif self.container_exists(token=id):
+            return self.get_internal_service_gas(token=id)
+        else:
+            return int(DEFAULT_INTIAL_GAS_AMOUNT)
+
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
+    """
+    Checks if a peer is available based on the number of open slots.
+
+    Args:
+        peer_id (str): The ID of the peer.
+        min_slots_open (int): Minimum number of open slots required.
+
+    Returns:
+        bool: True if the peer is available, False otherwise.
+    """
     SQLConnection().peer_exists(peer_id=peer_id)
     try:
         return any(list(generate_uris_by_peer_id(peer_id))) if min_slots_open == 1 else \
