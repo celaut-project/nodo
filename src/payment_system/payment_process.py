@@ -111,11 +111,11 @@ def validate_payment_process(amount: int, ledger: str, contract: bytes, contract
 
 def __check_payment_process(amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
     _l.LOGGER('Check payment process to ' + token + ' of ' + str(amount))
-    if token not in sc.clients:
-        _l.LOGGER('Client ' + token + ' is not in ' + str(sc.clients))
+    if not sc.client_exists(client_id=token):
+        _l.LOGGER(f"Client id {token} not in clients.")
         return False
     return PAYMENT_PROCESS_VALIDATORS[sha3_256(contract).hexdigest()](amount, token, ledger, contract_addr,
-                                                                    validate_token=lambda t: t in sc.clients)
+                                                                    validate_token=lambda t: sc.client_exists(client_id=t))
 
 
 def init_contract_interfaces():
