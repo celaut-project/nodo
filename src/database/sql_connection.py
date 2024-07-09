@@ -349,7 +349,7 @@ class SQLConnection(metaclass=Singleton):
         Returns:
             List[str]: A list of tokens.
         """
-        result = self._execute(''''
+        result = self._execute('''
             SELECT father_id, ip, id FROM internal_services
         ''')
         return [f"{row['father_id']}##{row['ip']}##{row['id']}" for row in result.fetchall()]
