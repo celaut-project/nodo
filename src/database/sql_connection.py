@@ -501,6 +501,67 @@ class SQLConnection(metaclass=Singleton):
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
             return False
+        
+    def peer_has_client(self, peer_id: str) -> bool:
+        """
+        Checks if a peer has an associated client and token.
+
+        Args:
+            peer_id (str): The ID of the peer.
+
+        Returns:
+            bool: True if the peer has both a client and a token, False otherwise.
+        """
+        try:
+            result = self._execute('''
+                SELECT client_id FROM peer WHERE id = ?
+            ''', (peer_id,))
+            row = result.fetchone()
+            if row and row['client_id']:
+                return True
+            return False
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to check client and token for peer {peer_id}: {e}')
+            return False
+        
+    def get_peer_client(self, peer_id: str) -> Optional[str]:
+        """
+        Retrieves the client ID and token associated with a peer.
+
+        Args:
+            peer_id (str): The ID of the peer.
+
+        Returns:
+            Tuple[Optional[str], Optional[str]]: A tuple containing the client ID and token if they exist,
+            or (None, None) if the peer does not exist or an error occurs.
+        """
+        try:
+            result = self._execute('''
+                SELECT client_id FROM peer WHERE id = ?
+            ''', (peer_id,))
+            row = result.fetchone()
+            if row:
+                return row['client_id']
+            return None
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to retrieve client and token for peer {peer_id}: {e}')
+            return None
+
+    def delete_external_client(self, peer_id: str):
+        """
+        Deletes the external client and its associated token from a peer.
+
+        Args:
+            peer_id (str): The ID of the peer.
+        """
+        try:
+            self._execute('''
+                UPDATE peer SET client_id = NULL WHERE id = ?
+            ''', (peer_id,))
+            logger.LOGGER(f'Successfully deleted external client and token associated with peer {peer_id}')
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to delete external client and token associated with peer {peer_id}: {e}')
+            pass
 
     def add_uri(self, uri: celaut_pb2.Instance.Uri, slot_id: str):
         """

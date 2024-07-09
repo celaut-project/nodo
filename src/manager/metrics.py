@@ -87,22 +87,24 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
     :rtype: int
     :raises Exception: If an error occurs while fetching the gas amount.
     """
+
+    
+    client_id, token = sc.get_peer_client(peer_id=peer_id)
+    if not token or not client_id:
+        client_id = generate_client_id_in_other_peer(peer_id=peer_id)
+
     try:
         return from_gas_amount(
             __get_metrics_external(
                 peer_id=peer_id,
-                token=generate_client_id_in_other_peer(peer_id=peer_id)
+                token=token
             ).gas_amount
         )
     except:
         log('Error getting gas amount from ' + peer_id + '.')
         if is_peer_available(peer_id=peer_id):
             log('It is assumed that the client was invalid on peer ' + peer_id)
-            try:
-                sc.cache_locks.delete(peer_id)
-                del sc.clients_on_other_peers[peer_id]
-            finally:
-                pass
+            sc.delete_external_client(peer_id=peer_id)
         return 0
 
 
@@ -124,7 +126,7 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
     :raises InvalidTokenException: If the token format is invalid.
     :raises Exception: If an error occurs during the metric retrieval process.
     """
-    if token in sc.clients:
+    if sc.client_exists(client_id=token):
         return __get_metrics_client(client_id=token)
 
     elif '##' not in token:
@@ -139,5 +141,5 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
     else:
         return __get_metrics_external(
             peer_id=token.split('##')[1],  # peer_id
-            token=sc.external_token_hash_map[token.split('##')[2]]  # If the token starts with ## ...
+            token=token.split('##')[2]  # If the token starts with ## ...
         )
