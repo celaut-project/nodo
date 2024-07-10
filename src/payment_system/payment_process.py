@@ -9,7 +9,7 @@ from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, PAYMENT
 
 from protos import gateway_pb2_grpc, gateway_pb2
 
-from src.manager.manager import generate_client_id_in_other_peer, increase_local_gas_for_client
+from src.manager.manager import get_client_id_on_other_peer, increase_local_gas_for_client
 from src.database.sql_connection import SQLConnection
 
 from src.utils import logger as _l
@@ -22,7 +22,7 @@ sc = SQLConnection()
 
 
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
-    deposit_token: str = generate_client_id_in_other_peer(peer_id=peer_id)
+    deposit_token: str = get_client_id_on_other_peer(peer_id=peer_id)
     _l.LOGGER('Peer payment process to peer ' + peer_id + ' with client ' + deposit_token + ' of ' + str(amount))
     for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():
         # check if the payment process is compatible with this peer.

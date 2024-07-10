@@ -175,7 +175,34 @@ def generate_client() -> gateway_pb2.Client:
     )
 
 
-def generate_client_id_in_other_peer(peer_id: str) -> Optional[str]:
+def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
+    """
+    Retrieves or generates a client ID for a given peer. If the peer already has an associated client ID for our client,
+    it returns that ID. If not, it checks if the peer is available. If the peer is available, it generates a new client ID,
+    associates it with the peer, and returns the new client ID.
+
+    Args:
+        peer_id (str): The ID of the peer for which to retrieve or generate a client ID for our client.
+
+    Returns:
+        Optional[str]: The client ID associated with the peer for our client. Returns None if client ID generation or association fails.
+
+    Raises:
+        Exception: If the peer is not available (i.e., it does not have the minimum required open slots).
+
+    Detailed Steps:
+        1. Check if the peer already has an associated client ID for our client using `sc.get_peer_client`.
+        2. If a client ID is found, return it.
+        3. If no client ID is found, check if the peer is available using `is_peer_available`.
+        4. If the peer is not available, log the unavailability and raise an exception.
+        5. If the peer is available, generate a new client ID using `grpcbf.client_grpc`.
+        6. Log the generation of the new client ID.
+        7. Attempt to associate the new client ID with the peer using `sc.add_external_client`.
+        8. If the association is successful, return the new client ID.
+        9. If the association fails, return None.
+    """
+    client_id = sc.get_peer_client(peer_id=peer_id)
+    if client_id: return client_id
     if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
         logger.LOGGER('Peer ' + peer_id + ' is not available.')
         raise Exception('Peer not available.')
