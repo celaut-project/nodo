@@ -25,7 +25,7 @@ from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
 
 # Define a maximum mantissa and exponent
 MAX_MANTISSA = 10**9  # Adjust this limit as needed
-MAX_EXPONENT = 9  # Adjust this limit as needed
+MAX_EXPONENT = 128  # Adjust this limit as needed
 
 
 def get_internal_service_id_by_token(token: str) -> str:
@@ -65,20 +65,25 @@ def _validate_gas(mantissa: int, exponent: int):
 
 
 def _split_gas(gas: int) -> Tuple[int, int]:
-        """
-        Splits a gas amount into mantissa and exponent.
+    """
+    Splits a gas amount into mantissa and exponent.
 
-        Args:
-            gas (int): The gas amount.
+    Args:
+        gas (int): The gas amount.
 
-        Returns:
-            Tuple[int, int]: The mantissa and exponent.
-        """
-        exponent = 0
-        while gas >= 10 and exponent < MAX_EXPONENT:
-            gas //= 10
-            exponent += 1
-        return gas, exponent
+    Returns:
+        Tuple[int, int]: The mantissa and exponent.
+    """
+    exponent = 0
+    while gas >= MAX_MANTISSA and exponent < MAX_EXPONENT:
+        gas //= 10
+        exponent += 1
+
+    # Ensure the mantissa is within range
+    if gas > MAX_MANTISSA:
+        raise ValueError(f"Splitted mantissa {gas} is out of acceptable range (0 to {MAX_MANTISSA})")
+
+    return gas, exponent
 
 
 class SQLConnection(metaclass=Singleton):
