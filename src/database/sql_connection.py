@@ -190,7 +190,7 @@ class SQLConnection(metaclass=Singleton):
             SELECT gas_mantissa, gas_exponent, last_usage FROM clients WHERE id = ?
         ''', (client_id,))
         row = result.fetchone()
-        if row and row['gas_mantissa'] and row['gas_exponent']:
+        if row:
             return _combine_gas(mantissa=row['gas_mantissa'], exponent=row['gas_exponent']), row['last_usage']
         raise Exception(f'Client not found: {client_id}')
 
