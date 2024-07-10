@@ -27,9 +27,59 @@ from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
 MAX_MANTISSA = 10**9  # Adjust this limit as needed
 MAX_EXPONENT = 9  # Adjust this limit as needed
 
+
 def get_internal_service_id_by_token(token: str) -> str:
     """Extracts the internal service ID from a token."""
     return token.split("##")[2]
+
+
+def _combine_gas(mantissa: int, exponent: int) -> int:
+    """
+    Combines mantissa and exponent into a single gas amount.
+
+    Args:
+        mantissa (int): The mantissa of the gas amount.
+        exponent (int): The exponent of the gas amount.
+
+    Returns:
+        int: The combined gas amount.
+    """
+    return mantissa * (10 ** exponent)
+
+
+def _validate_gas(mantissa: int, exponent: int):
+    """
+    Validates the gas amount to ensure it is within acceptable limits.
+
+    Args:
+        mantissa (int): The mantissa of the gas amount.
+        exponent (int): The exponent of the gas amount.
+
+    Raises:
+        ValueError: If the gas amount exceeds the maximum limit.
+    """
+    if mantissa < 0 or mantissa > MAX_MANTISSA:
+        raise ValueError(f"Mantissa {mantissa} is out of acceptable range (0 to {MAX_MANTISSA})")
+    if exponent < 0 or exponent > MAX_EXPONENT:
+        raise ValueError(f"Exponent {exponent} is out of acceptable range (0 to {MAX_EXPONENT})")
+
+
+def _split_gas(gas: int) -> Tuple[int, int]:
+        """
+        Splits a gas amount into mantissa and exponent.
+
+        Args:
+            gas (int): The gas amount.
+
+        Returns:
+            Tuple[int, int]: The mantissa and exponent.
+        """
+        exponent = 0
+        while gas >= 10 and exponent < MAX_EXPONENT:
+            gas //= 10
+            exponent += 1
+        return gas, exponent
+
 
 class SQLConnection(metaclass=Singleton):
     _connection = None
@@ -64,52 +114,6 @@ class SQLConnection(metaclass=Singleton):
                 raise e
             return self.cursor
 
-    def _validate_gas(self, mantissa: int, exponent: int):
-        """
-        Validates the gas amount to ensure it is within acceptable limits.
-
-        Args:
-            mantissa (int): The mantissa of the gas amount.
-            exponent (int): The exponent of the gas amount.
-
-        Raises:
-            ValueError: If the gas amount exceeds the maximum limit.
-        """
-        if mantissa < 0 or mantissa > MAX_MANTISSA:
-            raise ValueError(f"Mantissa {mantissa} is out of acceptable range (0 to {MAX_MANTISSA})")
-        if exponent < 0 or exponent > MAX_EXPONENT:
-            raise ValueError(f"Exponent {exponent} is out of acceptable range (0 to {MAX_EXPONENT})")
-
-    def _split_gas(self, gas: int) -> Tuple[int, int]:
-        """
-        Splits a gas amount into mantissa and exponent.
-
-        Args:
-            gas (int): The gas amount.
-
-        Returns:
-            Tuple[int, int]: The mantissa and exponent.
-        """
-        exponent = 0
-        while gas >= 10 and exponent < MAX_EXPONENT:
-            gas //= 10
-            exponent += 1
-        return gas, exponent
-    
-    def _combine_gas(mantissa: int, exponent: int) -> int:
-        """
-        Combines mantissa and exponent into a single gas amount.
-
-        Args:
-            mantissa (int): The mantissa of the gas amount.
-            exponent (int): The exponent of the gas amount.
-
-        Returns:
-            int: The combined gas amount.
-        """
-        return mantissa * (10 ** exponent)
-
-
     # Client Methods
 
     def add_client(self, client_id: str, gas: int, last_usage: Optional[float]):
@@ -121,8 +125,8 @@ class SQLConnection(metaclass=Singleton):
             gas (int): The gas amount.
             last_usage (Optional[float]): The last usage time.
         """
-        gas_mantissa, gas_exponent = self._split_gas(gas)
-        self._validate_gas(gas_mantissa, gas_exponent)
+        gas_mantissa, gas_exponent = _split_gas(gas)
+        _validate_gas(gas_mantissa, gas_exponent)
         self._execute('''
             INSERT INTO clients (id, gas_mantissa, gas_exponent, last_usage)
             VALUES (?, ?, ?, ?)
@@ -186,8 +190,8 @@ class SQLConnection(metaclass=Singleton):
             SELECT gas_mantissa, gas_exponent, last_usage FROM clients WHERE id = ?
         ''', (client_id,))
         row = result.fetchone()
-        if row:
-            return self._combine_gas(row['gas_mantissa'], row['gas_exponent']), row['last_usage']
+        if row and row['gas_mantissa'] and row['gas_exponent']:
+            return _combine_gas(mantissa=row['gas_mantissa'], exponent=row['gas_exponent']), row['last_usage']
         raise Exception(f'Client not found: {client_id}')
 
     def delete_client(self, client_id: str):
@@ -206,8 +210,8 @@ class SQLConnection(metaclass=Singleton):
         """
         _mantissa, _exponent, _last_usage = self.get_client_gas(client_id)
         total_gas = (_mantissa * (10 ** _exponent)) + gas
-        new_mantissa, new_exponent = self._split_gas(total_gas)
-        self._validate_gas(new_mantissa, new_exponent)
+        new_mantissa, new_exponent = _split_gas(total_gas)
+        _validate_gas(new_mantissa, new_exponent)
         if _last_usage and total_gas >= CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME:
             _last_usage = None
         self.__update_client(client_id, new_mantissa, new_exponent, _last_usage)
@@ -222,8 +226,8 @@ class SQLConnection(metaclass=Singleton):
         """
         _mantissa, _exponent, _last_usage = self.get_client_gas(client_id)
         total_gas = (_mantissa * (10 ** _exponent)) - gas
-        new_mantissa, new_exponent = self._split_gas(total_gas)
-        self._validate_gas(new_mantissa, new_exponent)
+        new_mantissa, new_exponent = _split_gas(total_gas)
+        _validate_gas(new_mantissa, new_exponent)
         if total_gas == 0 and _last_usage is None:
             _last_usage = time.time()
         self.__update_client(client_id, new_mantissa, new_exponent, _last_usage)
@@ -243,7 +247,7 @@ class SQLConnection(metaclass=Singleton):
 
     def __update_client(self, client_id: str, mantissa: int, exponent: int, last_usage: float):
         """Updates the gas and last usage time for a client."""
-        self._validate_gas(mantissa, exponent)
+        _validate_gas(mantissa, exponent)
         self._execute('''
             UPDATE clients SET gas_mantissa = ?, gas_exponent = ?, last_usage = ? WHERE id = ?
         ''', (mantissa, exponent, last_usage, client_id))
@@ -279,8 +283,8 @@ class SQLConnection(metaclass=Singleton):
             token (str): The token.
             gas (int): The gas amount.
         """
-        gas_mantissa, gas_exponent = self._split_gas(gas)
-        self._validate_gas(gas_mantissa, gas_exponent)
+        gas_mantissa, gas_exponent = _split_gas(gas)
+        _validate_gas(gas_mantissa, gas_exponent)
         self._execute('''
             INSERT INTO internal_services (id, ip, father_id, gas_mantissa, gas_exponent, mem_limit)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -362,8 +366,8 @@ class SQLConnection(metaclass=Singleton):
             token (str): The token of the container.
             gas (int): The new gas amount.
         """
-        gas_mantissa, gas_exponent = self._split_gas(gas)
-        self._validate_gas(gas_mantissa, gas_exponent)
+        gas_mantissa, gas_exponent = _split_gas(gas)
+        _validate_gas(gas_mantissa, gas_exponent)
         self._execute('''
             UPDATE internal_services SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
         ''', (gas_mantissa, gas_exponent, get_internal_service_id_by_token(token=token)))
