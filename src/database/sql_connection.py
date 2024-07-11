@@ -466,6 +466,26 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error fetching peer IDs: {e}')
             return []
 
+    def add_gas_to_peer(self, peer_id: str, gas: int):
+        try:
+            result = self._execute('SELECT gas_mantissa, gas_exponent FROM peer WHERE id = ?', (peer_id,))
+            row = result.fetchone()
+            if row:
+                current_gas = _combine_gas(row['gas_mantissa'], row['gas_exponent'])
+                total_gas = current_gas + gas
+                new_mantissa, new_exponent = _split_gas(total_gas)
+                _validate_gas(new_mantissa, new_exponent)
+                self._execute('''
+                    UPDATE peer SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
+                ''', (new_mantissa, new_exponent, peer_id))
+                return True
+            else:
+                raise Exception(f'Peer not found: {peer_id}')
+        except Exception as e:
+            logger.LOGGER(f'Error adding gas to peer {peer_id}: {e}')
+            return False
+            
+
     def add_peer(self, peer_id: str, token: Optional[str], metadata: Optional[bytes], app_protocol: bytes) -> bool:
         """
         Adds a peer to the database.
