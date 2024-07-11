@@ -439,7 +439,16 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('''
             SELECT id, token, client_id, gas_mantissa, gas_exponent FROM peer
         ''')
-        return [dict(row) for row in result.fetchall()]
+
+        peers = []
+        for row in result.fetchall():
+            peer = dict(row)
+            gas_mantissa = peer.pop('gas_mantissa')
+            gas_exponent = peer.pop('gas_exponent')
+            peer['gas'] = _combine_gas(gas_mantissa, gas_exponent)
+            peers.append(peer)
+
+        return peers
 
     def get_peers_id(self) -> List[str]:
         """
