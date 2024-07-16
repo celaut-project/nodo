@@ -1,47 +1,48 @@
 #!/bin/bash
 
-set -e  # Salir inmediatamente si un comando falla.
+set -e # Salir inmediatamente si un comando falla.
 
 if [ -z "$1" ]; then
-  echo "Error: TARGET_DIR is not provided."
-  exit 1
+echo "Error: TARGET_DIR is not provided."
+exit 1
 fi
 
 TARGET_DIR="$1"
 
 handle_update_errors() {
-    exit_code=$1
-    echo "Failed to update package lists. Exit code: $exit_code"
+exit_code=$1
+echo "Failed to update package lists. Exit code: $exit_code"
 
-    case $exit_code in
-        100)
-            echo "Lock file exists, maybe another package manager is running. Attempting to remove lock file and retrying..."
-            sudo rm /var/lib/apt/lists/lock
-            ;;
-        200)
-            echo "Authentication error. Verify if GPG keys are properly added."
-            ;;
-        *)
-            echo "Unknown error occurred during package update."
-            ;;
-    esac
+case $exit_code in
+    100)
+        echo "Lock file exists, maybe another package manager is running. Attempting to remove lock file and retrying..."
+        sudo rm /var/lib/apt/lists/lock
+        ;;
+    200)
+        echo "Authentication error. Verify if GPG keys are properly added."
+        ;;
+    *)
+        echo "Unknown error occurred during package update."
+        ;;
+esac
+
 }
 
 echo "Updating package lists..."
 sudo apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false update > /dev/null 2>&1 || {
-    handle_update_errors $?
+handle_update_errors $?
 }
 
 echo "Installing required build dependencies..."
 sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
-                        libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null
+libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null
 
 echo "Adding Python 3.11 repository..."
 sudo add-apt-repository ppa:deadsnakes/ppa -y > /dev/null
 
 echo "Updating package lists after adding Python repository..."
 sudo apt-get -y update > /dev/null 2>&1 || {
-    handle_update_errors $?
+handle_update_errors $?
 }
 
 echo "Installing Python 3.11 and pip..."
@@ -60,9 +61,9 @@ REQUIREMENTS_FILE="$TARGET_DIR/bash/requirements.txt"
 
 # Check if requirements.txt exists
 if [ ! -f "$REQUIREMENTS_FILE" ]; then
-  echo "Error: requirements.txt not found at $REQUIREMENTS_FILE"
-  deactivate
-  exit 1
+    echo "Error: requirements.txt not found at $REQUIREMENTS_FILE"
+    deactivate
+    exit 1
 fi
 
 echo "Installing Python dependencies from $REQUIREMENTS_FILE..."
@@ -93,7 +94,7 @@ sudo apt-get -y update > /dev/null 2>&1 || {
 # Check if Docker is already installed and its version
 if command -v docker > /dev/null 2>&1; then
     DOCKER_VERSION=$(docker --version | grep -oP '\d+\.\d+\.\d+')
-    if [ "$DOCKER_VERSION" != "24" ]; then
+    if [[ "$DOCKER_VERSION" != 24* ]]; then
         echo "Docker version $DOCKER_VERSION is installed. Removing it..."
         sudo apt-get -y remove docker docker-engine docker.io containerd runc > /dev/null
     else
@@ -101,9 +102,9 @@ if command -v docker > /dev/null 2>&1; then
     fi
 fi
 
-if ! command -v docker > /dev/null 2>&1 || [ "$DOCKER_VERSION" != "24" ]; then
+if ! command -v docker > /dev/null 2>&1 || [[ "$DOCKER_VERSION" != 24* ]]; then
     echo "Installing Docker version 24..."
-    sudo apt-get -y install docker-ce=5:24.* docker-ce-cli=5:24.* containerd.io > /dev/null
+    sudo apt-get -y --allow-downgrades install docker-ce=5:24.* docker-ce-cli=5:24.* containerd.io > /dev/null
 fi
 
 echo "Installing QEMU and binfmt-support for multi-architecture support..."
