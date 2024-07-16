@@ -73,6 +73,6 @@ def compile_directory(directory: str):
                 ip, port = _ip, _port
         if not ip or not port:
             ip, port = 'localhost', GATEWAY_PORT
-        next((__on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)))
+        __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
     finally:
         os.remove(service_zip_dir)
