@@ -28,9 +28,6 @@ dependencies, irrespective of the node on which they are executed, promoting a s
 5. **Service Compilation**: Although it is not necessarily a CELAUT node's responsibility, this implementation allows you to send
 a Dockerfile along with a configuration file and a zip file and get a specification for that service, making it a hassle-free process for users (or bots ...).
 
-*Nodo is the glue that holds your distributed network of services together, making complex interactions 
-simple and efficient.*
-
 
 ## Installation
 

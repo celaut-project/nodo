@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e  # Salir inmediatamente si un comando falla.
+set -e
 
 if [ -z "$1" ]; then
   echo "Error: TARGET_DIR is not provided."
@@ -77,9 +77,9 @@ REQUIREMENTS_FILE="$TARGET_DIR/bash/requirements.txt"
 
 # Check if requirements.txt exists
 if [ ! -f "$REQUIREMENTS_FILE" ]; then
-  echo "Error: requirements.txt not found at $REQUIREMENTS_FILE"
-  deactivate
-  exit 1
+    echo "Error: requirements.txt not found at $REQUIREMENTS_FILE"
+    deactivate
+    exit 1
 fi
 
 echo "Installing Python dependencies from $REQUIREMENTS_FILE..."
@@ -103,49 +103,31 @@ fi
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 echo "Updating package lists again..."
+sudo apt-get -y update > /dev/null 2>&1 || {
+    handle_update_errors $?
+}
 
-# Try to execute the update command, redirecting both stdout and stderr to /dev/null
-# Capture the exit code of the command in the variable $?
-sudo apt-get -y update > /dev/null 2>&1
-exit_code=$?
-
-# Check the exit code
-if [ $exit_code -ne 0 ]; then
-    echo "Error: Failed to update package lists. Exit code: $exit_code"
-    # You can add additional actions here if needed upon error
-else
-    echo "Package lists updated successfully."
-fi
-
-# Check if Docker is already installed
-echo "Check if Docker is already installed"
+# Check if Docker is already installed and its version
 if command -v docker > /dev/null 2>&1; then
-    echo "Docker is already installed."
-    docker --version
-else
-    echo "Installing Docker..."
-    sudo apt-get update > /dev/null
-    sudo apt-get -y install docker-ce docker-ce-cli containerd.io > /dev/null
-
-    echo "Installing QEMU and binfmt-support for multi-architecture support..."
-    sudo apt-get -y install qemu-system binfmt-support qemu-user-static > /dev/null
-
-    # Configure QEMU for multi-architecture support
-    docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
+    DOCKER_VERSION=$(docker --version | grep -oP '\d+\.\d+\.\d+')
+    if [[ "$DOCKER_VERSION" != 24* ]]; then
+        echo "Docker version $DOCKER_VERSION is installed. Removing it..."
+        sudo apt-get -y remove docker docker-engine docker.io containerd runc > /dev/null
+    else
+        echo "Docker version 24 is already installed."
+    fi
 fi
 
-# Check if rustc is already installed
-# echo "Check if rustc is already installed"
-# if command -v rustc > /dev/null 2>&1; then
-#     echo "Rust is already installed."
-#     rustc --version
-# else
-#     echo "Installing Rust (Cargo)..."
-#     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y > /dev/null
+if ! command -v docker > /dev/null 2>&1 || [[ "$DOCKER_VERSION" != 24* ]]; then
+    echo "Installing Docker version 24..."
+    sudo apt-get -y --allow-downgrades install docker-ce=5:24.* docker-ce-cli=5:24.* containerd.io > /dev/null
+fi
 
-#     echo "Sourcing the Rust environment..."
-#     source $HOME/.cargo/env
-# fi
+echo "Installing QEMU and binfmt-support for multi-architecture support..."
+sudo apt-get -y install qemu-system binfmt-support qemu-user-static > /dev/null
+
+# Configure QEMU for multi-architecture support
+docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
 
 echo "Executing initialization script for x86..."
 sh ./bash/init_x86.sh > /dev/null
