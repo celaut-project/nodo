@@ -48,6 +48,14 @@ if [ -d "$TARGET_DIR" ]; then
     echo "Error: Failed to perform git pull."
     exit 1
   fi
+
+  # Check if nodo.service exists and restart it
+  if systemctl list-units --full -all | grep -Fq "nodo.service"; then
+    echo "Restarting nodo.service..."
+    systemctl restart nodo.service
+  else
+    echo "nodo.service does not exist, will create it later in the script."
+  fi
 else
   # Clone the repository into the target directory
   echo "Cloning repository from $REPO_URL into $TARGET_DIR..."
@@ -82,7 +90,7 @@ SCRIPT_USER=$(logname)
 # Function to create nodo.service if it doesn't exist
 create_service_file() {
   SERVICE_FILE="/etc/systemd/system/nodo.service"
-  
+
   # Remove existing service file if it already exists
   if [ -f "$SERVICE_FILE" ]; then
     echo "Service file $SERVICE_FILE already exists. Removing it..."
@@ -122,8 +130,10 @@ EOF
   systemctl start nodo.service
 }
 
-# Create nodo.service
-create_service_file
+# Create nodo.service if it doesn't exist
+if ! systemctl list-units --full -all | grep -Fq "nodo.service"; then
+  create_service_file
+fi
 
 # Function to create a wrapper script for nodo
 create_wrapper_script() {
@@ -163,4 +173,3 @@ chown -R $SCRIPT_USER:$SCRIPT_USER $TARGET_DIR
 
 echo "Installation and service setup completed successfully. The repository is located at $TARGET_DIR."
 echo "********** You can now use the 'nodo' command. **********"
-
