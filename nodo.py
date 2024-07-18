@@ -94,6 +94,7 @@ if __name__ == '__main__':
 
     if len(sys.argv) == 1:
         print("Command needed: "
+              "\n- execute <service id>"
               "\n- seeder"
               "\n- connect"
               "\n- envs"
@@ -120,9 +121,13 @@ if __name__ == '__main__':
             print(f"Error checking nodo.service status: {e}")
 
         print(f"Nodo version (Git commit): {get_git_commit()}")
-    
+
     else:
         match sys.argv[1]:
+
+            case "execute":
+                from src.commands.execute import execute
+                execute(sys.argv[2])
 
             case "seeder":
                 from src.payment_system.contracts.ethereum.seeder import seed
@@ -135,7 +140,7 @@ if __name__ == '__main__':
             case 'envs':
                 os.system(f"nano {MAIN_DIR}/.env")
                 os.system(f"nano {MAIN_DIR}/bash/update_env.sh {MAIN_DIR}")
-        
+
             case 'serve':
                 if not is_nodo_service_running():
                     from src.serve import serve
