@@ -97,7 +97,6 @@ class SQLConnection(metaclass=Singleton):
         if SQLConnection._connection is None:
             SQLConnection._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
             SQLConnection._connection.row_factory = sqlite3.Row
-            self.cursor = SQLConnection._connection.cursor()
 
     def _execute(self, query: str, params=()) -> sqlite3.Cursor:
         """
@@ -112,12 +111,14 @@ class SQLConnection(metaclass=Singleton):
         """
         with SQLConnection._lock:
             try:
-                self.cursor.execute(query, params)
+                # Create a new cursor for each execution
+                cursor = SQLConnection._connection.cursor()
+                cursor.execute(query, params)
                 SQLConnection._connection.commit()
+                return cursor
             except sqlite3.Error as e:
                 SQLConnection._connection.rollback()
                 raise e
-            return self.cursor
 
     # Client Methods
 
