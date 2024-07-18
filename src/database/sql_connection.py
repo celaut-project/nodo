@@ -181,6 +181,16 @@ class SQLConnection(metaclass=Singleton):
         ''', (client_id,))
         return result.fetchone()[0] > 0
 
+    def get_dev_clients(self) -> List[str]:
+        """
+        Fetches all client IDs that start with 'dev-' from the database.
+
+        Returns:
+            List[str]: A list of client IDs that start with 'dev-'.
+        """
+        result = self._execute('SELECT id FROM clients WHERE id LIKE ?', ('dev-%',))
+        return [row['id'] for row in result.fetchall()]
+
     def get_client_gas(self, client_id: str) -> Tuple[int, float]:
         """
         Retrieves the gas and last usage time for a client.
@@ -484,7 +494,7 @@ class SQLConnection(metaclass=Singleton):
         except Exception as e:
             logger.LOGGER(f'Error adding gas to peer {peer_id}: {e}')
             return False
-            
+
 
     def add_peer(self, peer_id: str, token: Optional[str], metadata: Optional[bytes], app_protocol: bytes) -> bool:
         """
@@ -598,7 +608,7 @@ class SQLConnection(metaclass=Singleton):
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
             return False
-        
+
     def peer_has_client(self, peer_id: str) -> bool:
         """
         Checks if a peer has an associated client.
@@ -620,7 +630,7 @@ class SQLConnection(metaclass=Singleton):
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to check client for peer {peer_id}: {e}')
             return False
-        
+
     def get_peer_client(self, peer_id: str) -> Optional[str]:
         """
         Retrieves the client ID associated with a peer.

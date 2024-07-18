@@ -1,4 +1,5 @@
 from time import sleep
+from uuid import uuid4
 
 import docker as docker_lib
 
@@ -73,10 +74,21 @@ def peer_deposits():
             if not __increase_deposit_on_peer(peer_id=peer["id"], amount=MIN_DEPOSIT_PEER):
                 l.LOGGER(f'Manager error: the peer {peer["id"]} could not be increased.')
 
+def check_dev_clients():
+    sc = SQLConnection()
+    clients = sc.get_dev_clients()
+    if len(clients) == 0:
+        sc.add_client(client_id=f"dev-{uuid4()}", gas=MIN_DEPOSIT_PEER, last_usage=None)
+    else:
+        client_gas = sc.get_client_gas(client_id=clients[0])[0]
+        if client_gas < MIN_DEPOSIT_PEER:
+            gas_to_add = MIN_DEPOSIT_PEER - client_gas
+            sc.add_gas(client_id=clients[0], gas=gas_to_add)
 
 def manager_thread():
     init_contract_interfaces()
     while True:
+        check_dev_clients()
         maintain_containers()
         maintain_clients()
         peer_deposits()

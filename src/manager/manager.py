@@ -2,7 +2,7 @@ import json
 import sqlite3
 import uuid
 from hashlib import sha3_256
-from typing import Optional
+from typing import Optional, Generator
 
 import docker as docker_lib
 import grpc
@@ -25,6 +25,12 @@ from src.utils.utils import get_network_name, \
 sc = SQLConnection()
 
 
+def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
+    client_ids = sc.get_dev_clients()
+    for client_id in sc.get_dev_clients():
+        if sc.get_client_gas(client_id=client_id)[0] > gas_amount:
+            yield client_id
+
 # Insert the instance if it does not exist.
 def add_peer_instance(instance: gateway_pb2.Instance) -> str:
     parsed_instance = json.loads(MessageToJson(instance))
@@ -37,7 +43,7 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> str:
     app_protocol: bytes = instance.instance.api.app_protocol.SerializeToString()
 
     sc.add_peer(
-        peer_id=peer_id, token=token, 
+        peer_id=peer_id, token=token,
         metadata=metadata, app_protocol=app_protocol
         )
 
