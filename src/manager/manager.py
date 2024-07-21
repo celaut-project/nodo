@@ -64,7 +64,7 @@ def get_token_by_uri(uri: str) -> str:
 
 
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
-    if sc.container_exists(token=token):
+    if not sc.container_exists(token=token):
         raise Exception('Manager error: token ' + token + ' does not exists.')
     if sys_req.HasField('mem_limit'):
         variation = sc.get_sys_req(token=token)['mem_limit'] - sys_req.mem_limit
