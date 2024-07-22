@@ -28,8 +28,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         draw_cpu_usage(frame, app, layout[2]);
     }
 
-    let controls_text =
-        "Left/Right for menu | Up/Down for table rows | Press 'i' to toggle CPU and RAM sections";
+    let controls_text = get_controls_text(app.show_cpu_ram, app.tabs.index == 0);
     let controls_paragraph = Paragraph::new(controls_text)
         .style(Style::default().fg(Color::White).bg(Color::Black))
         .alignment(Alignment::Center);
@@ -42,6 +41,26 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             layout[1]
         },
     );
+}
+
+fn get_controls_text(show_cpu_ram: bool, is_peers_tab: bool) -> String {
+    let visibility_text = if show_cpu_ram {
+        "Press 'i' to hide CPU and RAM sections"
+    } else {
+        "Press 'i' to show CPU and RAM sections"
+    };
+
+    if is_peers_tab {
+        format!(
+            "Left/Right for menu | Up/Down for table rows | {} | Press 'c' to connect",
+            visibility_text
+        )
+    } else {
+        format!(
+            "Left/Right for menu | Up/Down for table rows | {}",
+            visibility_text
+        )
+    }
 }
 
 fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {

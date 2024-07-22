@@ -250,6 +250,13 @@ impl<'a> App<'a> {
         self.running = false;
     }
 
+    pub fn connect(&self) {
+        if let Some(selected) = self.peers.state.selected() {
+            let peer = &self.peers.items[selected];
+            println!("Connecting to peer: {}", peer.uri);
+        }
+    }
+
     pub fn refresh(&mut self) {
         self.peers = StatefulList::with_items(get_peers().unwrap_or_default());
         self.services = StatefulList::with_items(get_services().unwrap_or_default());
