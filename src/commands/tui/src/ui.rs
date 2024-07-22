@@ -41,6 +41,53 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             layout[1]
         },
     );
+
+    if app.connect_popup {
+        let popup = Paragraph::new(app.connect_text.to_string())
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow))
+                    .title("Connect new peer")
+                    .title_style(
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                    .style(Style::default().bg(Color::Black).fg(Color::White)),
+            )
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: true });
+
+        let area = centered_rect(10, 5, frame.size());
+        frame.render_widget(popup, area);
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_y) / 2),
+                Constraint::Percentage(percent_y),
+                Constraint::Percentage((100 - percent_y) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_x) / 2),
+                Constraint::Percentage(percent_x),
+                Constraint::Percentage((100 - percent_x) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(popup_layout[1])[1]
 }
 
 fn get_controls_text(show_cpu_ram: bool, is_peers_tab: bool) -> String {

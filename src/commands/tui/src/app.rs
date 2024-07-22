@@ -185,7 +185,9 @@ pub struct App<'a> {
     pub ram_usage: Vec<u64>,
     pub cpu_usage: Vec<u64>,
     pub sys: System,
-    pub show_cpu_ram: bool, // Nueva variable de estado para controlar la visibilidad de CPU y RAM
+    pub show_cpu_ram: bool,
+    pub connect_popup: bool,
+    pub connect_text: String,
 }
 
 impl<'a> Default for App<'a> {
@@ -201,7 +203,9 @@ impl<'a> Default for App<'a> {
             ram_usage: [0; RAM_TIMES].to_vec(),
             cpu_usage: [0; CPU_TIMES].to_vec(),
             sys: System::new_all(),
-            show_cpu_ram: true, // Inicialmente mostramos CPU y RAM
+            show_cpu_ram: true,
+            connect_popup: false,
+            connect_text: "".to_string(),
         }
     }
 }
@@ -250,10 +254,19 @@ impl<'a> App<'a> {
         self.running = false;
     }
 
-    pub fn connect(&self) {
-        if let Some(selected) = self.peers.state.selected() {
-            let peer = &self.peers.items[selected];
-            println!("Connecting to peer: {}", peer.uri);
+    pub fn open_popup(&mut self) {
+        self.connect_popup = true;
+    }
+
+    pub fn close_popup(&mut self) {
+        self.connect_popup = false;
+    }
+
+    pub fn connect(&mut self) {
+        if !self.connect_text.is_empty() {
+            println!("Adding new peer: {}", self.connect_text);
+            self.connect_text.clear();
+            self.close_popup();
         }
     }
 
