@@ -7,6 +7,7 @@ pub fn handle_key_events(key_event: KeyEvent, app: &mut App) -> AppResult<()> {
         match key_event.code {
             KeyCode::Enter => app.connect(),
             KeyCode::Esc => {
+                app.connect_text.clear();
                 app.close_popup();
             }
             KeyCode::Char(c) => {

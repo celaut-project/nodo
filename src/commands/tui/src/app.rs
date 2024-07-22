@@ -1,4 +1,5 @@
 use ratatui::widgets::{List, ListState, TableState};
+use regex::Regex;
 use rusqlite::{Connection, Result};
 use std::{error, fs, io, path::Path, vec};
 use sysinfo::System;
@@ -264,9 +265,11 @@ impl<'a> App<'a> {
 
     pub fn connect(&mut self) {
         if !self.connect_text.is_empty() {
-            println!("Adding new peer: {}", self.connect_text);
-            self.connect_text.clear();
-            self.close_popup();
+            let re = Regex::new(r"^(\d{1,3}\.){3}\d{1,3}:\d{1,5}$").unwrap();
+            if re.is_match(&self.connect_text) {
+                self.connect_text.clear();
+                self.close_popup();
+            } // TODO else show error msg during 3 seconds or any key press.
         }
     }
 
