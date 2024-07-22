@@ -1,38 +1,52 @@
+use crate::app::{App, CPU_TIMES, RAM_TIMES};
 #[allow(clippy::wildcard_imports)]
-use ratatui::{
-    prelude::*,
-    widgets::{*},
-};
-
+use ratatui::{prelude::*, widgets::*};
 use vec_to_array::vec_to_array;
-use crate::app::{CPU_TIMES, RAM_TIMES};
-
-use crate::app::App;
 
 /// Renders the user interface widgets.
 pub fn render(app: &mut App, frame: &mut Frame) {
+    let constraints = if app.show_cpu_ram {
+        vec![
+            Constraint::Fill(1),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Length(1),
+        ]
+    } else {
+        vec![Constraint::Fill(1), Constraint::Length(1)]
+    };
+
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(vec![
-            Constraint::Percentage(50),
-            Constraint::Percentage(23),
-            Constraint::Percentage(23),
-            Constraint::Percentage(4)
-        ])
+        .constraints(constraints)
         .split(frame.size());
 
     draw_tabs(frame, app, layout[0]);
-    draw_ram_usage(frame, app, layout[1]);
-    draw_cpu_usage(frame, app, layout[2]);
+
+    if app.show_cpu_ram {
+        draw_ram_usage(frame, app, layout[1]);
+        draw_cpu_usage(frame, app, layout[2]);
+    }
+
+    let controls_text = "Navigate with arrow keys: Left/Right for menu. Up/Down for table rows. Press 'i' to toggle CPU and RAM sections.";
+    let controls_paragraph = Paragraph::new(controls_text)
+        .style(Style::default().fg(Color::White).bg(Color::Black))
+        .alignment(Alignment::Center);
+
+    frame.render_widget(
+        controls_paragraph,
+        if app.show_cpu_ram {
+            layout[3]
+        } else {
+            layout[1]
+        },
+    );
 }
 
 fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(vec![
-            Constraint::Percentage(15),
-            Constraint::Percentage(95),
-        ])
+        .constraints(vec![Constraint::Length(3), Constraint::Fill(1)])
         .split(area);
 
     let tabs = app
@@ -58,22 +72,28 @@ fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
 fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(
         Table::new(
-            app.peers.items.iter().map(|peer| {
-                Row::new(vec![peer.id.clone(), peer.uri.clone(), peer.gas.to_string()])
-            }).collect::<Vec<Row>>(),
+            app.peers
+                .items
+                .iter()
+                .map(|peer| {
+                    Row::new(vec![
+                        peer.id.clone(),
+                        peer.uri.clone(),
+                        peer.gas.to_string(),
+                    ])
+                })
+                .collect::<Vec<Row>>(),
             [
                 Constraint::Length(30),
                 Constraint::Length(30),
                 Constraint::Length(30),
-            ]
+            ],
         )
-        .header(
-            Row::new(vec![
-                Cell::from("Id"),
-                Cell::from("Main URI"),
-                Cell::from("Gas on it")
-            ])
-        )
+        .header(Row::new(vec![
+            Cell::from("Id"),
+            Cell::from("Main URI"),
+            Cell::from("Gas on it"),
+        ]))
         .block(
             Block::bordered()
                 .title("PEERS")
@@ -84,23 +104,21 @@ fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_symbol("> ")
         .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
         area,
-        &mut app.peers.state
+        &mut app.peers.state,
     );
 }
 
 fn draw_client_list(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(
         Table::new(
-            app.clients.items.iter().map(|client| {
-                Row::new(vec![client.clone()])
-            }).collect::<Vec<Row>>(),
-            [
-                Constraint::Length(70),
-            ]
+            app.clients
+                .items
+                .iter()
+                .map(|client| Row::new(vec![client.clone()]))
+                .collect::<Vec<Row>>(),
+            [Constraint::Length(70)],
         )
-        .header(
-            Row::new(vec![Cell::from("Client Id")])
-        )
+        .header(Row::new(vec![Cell::from("Client Id")]))
         .block(
             Block::bordered()
                 .title("CLIENTS")
@@ -111,23 +129,21 @@ fn draw_client_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_symbol("> ")
         .style(Style::default().fg(Color::LightGreen).bg(Color::Black)),
         area,
-        &mut app.clients.state
+        &mut app.clients.state,
     );
 }
 
 fn draw_container_list(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(
         Table::new(
-            app.containers.items.iter().map(|container| {
-                Row::new(vec![container.clone()])
-            }).collect::<Vec<Row>>(),
-            [
-                Constraint::Length(70),
-            ]
+            app.containers
+                .items
+                .iter()
+                .map(|container| Row::new(vec![container.clone()]))
+                .collect::<Vec<Row>>(),
+            [Constraint::Length(70)],
         )
-        .header(
-            Row::new(vec![Cell::from("Container Id")])
-        )
+        .header(Row::new(vec![Cell::from("Container Id")]))
         .block(
             Block::bordered()
                 .title("CONTAINERS")
@@ -138,25 +154,21 @@ fn draw_container_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_symbol("> ")
         .style(Style::default().fg(Color::LightBlue).bg(Color::Black)),
         area,
-        &mut app.containers.state
+        &mut app.containers.state,
     );
 }
 
 fn draw_service_list(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(
         Table::new(
-            app.services.items.iter().map(|peer| {
-                Row::new(vec![peer.id.clone()])
-            }).collect::<Vec<Row>>(),
-            [
-                Constraint::Length(70),
-            ]
+            app.services
+                .items
+                .iter()
+                .map(|peer| Row::new(vec![peer.id.clone()]))
+                .collect::<Vec<Row>>(),
+            [Constraint::Length(70)],
         )
-        .header(
-            Row::new(vec![
-                Cell::from("Id"),
-            ])
-        )
+        .header(Row::new(vec![Cell::from("Id")]))
         .block(
             Block::bordered()
                 .title("SERVICES")
@@ -167,17 +179,18 @@ fn draw_service_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_symbol("> ")
         .style(Style::default().fg(Color::LightMagenta).bg(Color::Black)),
         area,
-        &mut app.services.state
+        &mut app.services.state,
     );
 }
 
 fn draw_ram_usage(frame: &mut Frame, app: &mut App, area: Rect) {
-    let ram_usage_arr: [u64; RAM_TIMES]  = {
+    let ram_usage_arr: [u64; RAM_TIMES] = {
         if app.ram_usage.len() > RAM_TIMES {
-            let ram_usage_vector = app.ram_usage.clone()[(app.ram_usage.len() - RAM_TIMES)..].to_vec();
-            let ram_usage_arr: [u64; RAM_TIMES]  = vec_to_array!(ram_usage_vector, u64, RAM_TIMES);
+            let ram_usage_vector =
+                app.ram_usage.clone()[(app.ram_usage.len() - RAM_TIMES)..].to_vec();
+            let ram_usage_arr: [u64; RAM_TIMES] = vec_to_array!(ram_usage_vector, u64, RAM_TIMES);
             ram_usage_arr
-        }else {
+        } else {
             [0; RAM_TIMES]
         }
     };
@@ -188,21 +201,22 @@ fn draw_ram_usage(frame: &mut Frame, app: &mut App, area: Rect) {
             .max(100)
             .direction(RenderDirection::LeftToRight)
             .style(Style::default().light_yellow().on_white())
-        .block(
-            Block::bordered()
-                .title("Ram usage")
-                .title_alignment(Alignment::Center)
-                .border_type(BorderType::Thick),
-        )
-        .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
-        area
+            .block(
+                Block::bordered()
+                    .title("Ram usage")
+                    .title_alignment(Alignment::Center)
+                    .border_type(BorderType::Thick),
+            )
+            .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
+        area,
     );
 }
 
 fn draw_cpu_usage(frame: &mut Frame, app: &mut App, area: Rect) {
     let cpu_usage_arr: [u64; CPU_TIMES] = {
         if app.cpu_usage.len() > CPU_TIMES {
-            let cpu_usage_vector = app.cpu_usage.clone()[(app.cpu_usage.len() - CPU_TIMES)..].to_vec();
+            let cpu_usage_vector =
+                app.cpu_usage.clone()[(app.cpu_usage.len() - CPU_TIMES)..].to_vec();
             let cpu_usage_arr: [u64; CPU_TIMES] = vec_to_array!(cpu_usage_vector, u64, CPU_TIMES);
             cpu_usage_arr
         } else {
@@ -213,14 +227,14 @@ fn draw_cpu_usage(frame: &mut Frame, app: &mut App, area: Rect) {
         Sparkline::default()
             .block(
                 Block::bordered()
-                .title("CPU usage")
-                .title_alignment(Alignment::Center)
-                .border_type(BorderType::Thick),
+                    .title("CPU usage")
+                    .title_alignment(Alignment::Center)
+                    .border_type(BorderType::Thick),
             )
             .data(&cpu_usage_arr)
             .max(100)
             .direction(RenderDirection::LeftToRight)
             .style(Style::default().fg(Color::Yellow).bg(Color::Black)),
-        area
+        area,
     );
 }

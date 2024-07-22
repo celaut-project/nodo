@@ -16,6 +16,7 @@ pub fn handle_key_events(key_event: KeyEvent, app: &mut App) -> AppResult<()> {
         KeyCode::Up | KeyCode::Char('k') => app.on_up(),
         KeyCode::Right | KeyCode::Char('l') => app.on_right(),
         KeyCode::Down | KeyCode::Char('j') => app.on_down(),
+        KeyCode::Char('i') => app.toggle_cpu_ram_visibility(), // Nueva línea para manejar la tecla 'i'
         _ => {}
     }
     Ok(())

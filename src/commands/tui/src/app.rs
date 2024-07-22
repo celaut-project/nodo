@@ -1,6 +1,6 @@
-use std::{error, fs, io, path::Path, vec};
 use ratatui::widgets::{List, ListState, TableState};
 use rusqlite::{Connection, Result};
+use std::{error, fs, io, path::Path, vec};
 use sysinfo::System;
 
 /// Application result type.
@@ -16,53 +16,53 @@ pub const CPU_TIMES: usize = 500;
 pub struct Peer {
     pub id: String,
     pub uri: String,
-    pub gas: u8
+    pub gas: u8,
 }
 
 #[derive(Debug)]
 pub struct Service {
-    pub id: String
+    pub id: String,
 }
 
 fn get_peers() -> Result<Vec<Peer>> {
-    Ok(
-        Connection::open(DATABASE_FILE)?.prepare(
+    Ok(Connection::open(DATABASE_FILE)?
+        .prepare(
             "SELECT p.id, u.ip, u.port
             FROM peer p
             JOIN slot s ON p.id = s.peer_id
             JOIN uri u ON s.id = u.slot_id",
-        )?.query_map([], |row| {
+        )?
+        .query_map([], |row| {
             let id: String = row.get(0)?;
             let ip: String = row.get(1)?;
             let port: u16 = row.get(2)?;
             Ok(Peer {
                 id: id,
                 uri: format!("{}:{}", ip, port),
-                gas: 0
+                gas: 0,
             })
         })?
-        .collect::<Result<Vec<Peer>>>()?
-    )
+        .collect::<Result<Vec<Peer>>>()?)
 }
 
 fn get_clients() -> Result<Vec<String>> {
-    Ok(Connection::open(DATABASE_FILE)?.prepare(
-        "SELECT id FROM clients",
-    )?.query_map([], |row| {
-        let id: String = row.get(0)?;
-        Ok(id)
-    })?
-    .collect::<Result<Vec<String>>>()?)
+    Ok(Connection::open(DATABASE_FILE)?
+        .prepare("SELECT id FROM clients")?
+        .query_map([], |row| {
+            let id: String = row.get(0)?;
+            Ok(id)
+        })?
+        .collect::<Result<Vec<String>>>()?)
 }
 
 fn get_containers() -> Result<Vec<String>> {
-    Ok(Connection::open(DATABASE_FILE)?.prepare(
-        "SELECT id FROM containers",
-    )?.query_map([], |row| {
-        let id: String = row.get(0)?;
-        Ok(id)
-    })?
-    .collect::<Result<Vec<String>>>()?)
+    Ok(Connection::open(DATABASE_FILE)?
+        .prepare("SELECT id FROM containers")?
+        .query_map([], |row| {
+            let id: String = row.get(0)?;
+            Ok(id)
+        })?
+        .collect::<Result<Vec<String>>>()?)
 }
 
 fn get_services() -> Result<Vec<Service>, io::Error> {
@@ -76,16 +76,13 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
         // Convierte el path a String, puede que necesites ajustar esto según tu estructura Service
         let service_id = path.to_string_lossy().into_owned();
 
-        services.push(Service {
-            id: service_id,
-        });
+        services.push(Service { id: service_id });
     }
 
     Ok(services)
 }
 
 fn get_ram_usage(sys: &mut System) -> u64 {
-
     // First we update all information of our system struct.
     sys.refresh_memory();
 
@@ -95,11 +92,10 @@ fn get_ram_usage(sys: &mut System) -> u64 {
 
     // Calculate the RAM usage in percentage
     let ram_usage_percentage = (used_memory as f64 / total_memory as f64) * 100.0;
-    ram_usage_percentage as u64 
+    ram_usage_percentage as u64
 }
 
 fn get_cpu_usage(sys: &mut System) -> u64 {
-
     // Refresh CPU information
     sys.refresh_cpu();
 
@@ -108,7 +104,6 @@ fn get_cpu_usage(sys: &mut System) -> u64 {
 
     cpu_usage_percentage as u64
 }
-
 
 #[derive(Debug)]
 pub struct TabsState<'a> {
@@ -189,7 +184,8 @@ pub struct App<'a> {
     pub services: StatefulList<Service>,
     pub ram_usage: Vec<u64>,
     pub cpu_usage: Vec<u64>,
-    pub sys: System
+    pub sys: System,
+    pub show_cpu_ram: bool, // Nueva variable de estado para controlar la visibilidad de CPU y RAM
 }
 
 impl<'a> Default for App<'a> {
@@ -204,7 +200,8 @@ impl<'a> Default for App<'a> {
             services: StatefulList::with_items(get_services().unwrap_or_default()),
             ram_usage: [0; RAM_TIMES].to_vec(),
             cpu_usage: [0; CPU_TIMES].to_vec(),
-            sys: System::new_all()
+            sys: System::new_all(),
+            show_cpu_ram: true, // Inicialmente mostramos CPU y RAM
         }
     }
 }
@@ -237,6 +234,12 @@ impl<'a> App<'a> {
             3 => self.services.next(),
             _ => {}
         }
+    }
+
+    pub fn toggle_cpu_ram_visibility(&mut self) {
+        self.show_cpu_ram = !self.show_cpu_ram;
+        self.ram_usage.clear();
+        self.cpu_usage.clear();
     }
 
     /// Handles the tick event of the terminal.
