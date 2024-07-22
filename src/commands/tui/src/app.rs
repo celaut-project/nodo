@@ -1,7 +1,9 @@
 use ratatui::widgets::{List, ListState, TableState};
 use regex::Regex;
 use rusqlite::{Connection, Result};
-use std::{error, fs, io, path::Path, vec};
+use std::io::{self, BufRead};
+use std::process::{Command, Stdio};
+use std::{error, fs, path::Path, vec};
 use sysinfo::System;
 
 /// Application result type.
@@ -263,10 +265,48 @@ impl<'a> App<'a> {
         self.connect_popup = false;
     }
 
+    // Function to execute a command and print its output
+    fn execute_command(&self, command: &str, args: &[&str]) -> io::Result<()> {
+        // Spawn the command with provided arguments
+        let mut child = Command::new(command)
+            .args(args)
+            .stdout(Stdio::piped()) // Capture standard output
+            .stderr(Stdio::piped()) // Capture standard error
+            .spawn()?; // Execute the command
+
+        // Handle stdout
+        if let Some(stdout) = child.stdout.take() {
+            let reader = io::BufReader::new(stdout);
+            for line in reader.lines() {
+                // Print each line of stdout
+                println!("stdout: {}", line?);
+            }
+        }
+
+        // Handle stderr
+        if let Some(stderr) = child.stderr.take() {
+            let reader = io::BufReader::new(stderr);
+            for line in reader.lines() {
+                // Print each line of stderr
+                eprintln!("stderr: {}", line?);
+            }
+        }
+
+        // Wait for the command to finish
+        let status = child.wait()?;
+
+        // Print the exit status
+        println!("Command exited with status: {}", status);
+
+        Ok(())
+    }
+
     pub fn connect(&mut self) {
         if !self.connect_text.is_empty() {
             let re = Regex::new(r"^(\d{1,3}\.){3}\d{1,3}:\d{1,5}$").unwrap();
             if re.is_match(&self.connect_text) {
+                let args = ["connect", &self.connect_text];
+                self.execute_command("nodo", &args);
                 self.connect_text.clear();
                 self.close_popup();
             } // TODO else show error msg during 3 seconds or any key press.
