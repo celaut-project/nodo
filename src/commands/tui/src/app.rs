@@ -275,28 +275,28 @@ impl<'a> App<'a> {
             .spawn()?; // Execute the command
 
         // Handle stdout
-        if let Some(stdout) = child.stdout.take() {
-            let reader = io::BufReader::new(stdout);
-            for line in reader.lines() {
-                // Print each line of stdout
-                println!("stdout: {}", line?);
-            }
+        /*if let Some(stdout) = child.stdout.take() {
+        let reader = io::BufReader::new(stdout);
+        for line in reader.lines() {
+            // Print each line of stdout
+            println!("stdout: {}", line?);
         }
+        }*/
 
         // Handle stderr
-        if let Some(stderr) = child.stderr.take() {
-            let reader = io::BufReader::new(stderr);
-            for line in reader.lines() {
-                // Print each line of stderr
-                eprintln!("stderr: {}", line?);
-            }
+        /* if let Some(stderr) = child.stderr.take() {
+        let reader = io::BufReader::new(stderr);
+        for line in reader.lines() {
+            // Print each line of stderr
+            eprintln!("stderr: {}", line?);
         }
+        }*/
 
         // Wait for the command to finish
         let status = child.wait()?;
 
         // Print the exit status
-        println!("Command exited with status: {}", status);
+        // println!("Command exited with status: {}", status);
 
         Ok(())
     }
