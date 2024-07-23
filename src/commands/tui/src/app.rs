@@ -175,9 +175,20 @@ impl<T: Identifiable> StatefulList<T> {
 
     pub fn refresh(&mut self, items: Vec<T>) {
         self.items = items;
+        // Reset the state if the list is empty
+        if self.items.is_empty() {
+            self.state.select(None);
+            self.state_id = None;
+        }
     }
 
     pub fn next(&mut self) {
+        if self.items.is_empty() {
+            self.state.select(None);
+            self.state_id = None;
+            return;
+        }
+
         let i = match self.state.selected() {
             Some(i) => {
                 if i >= self.items.len() - 1 {
@@ -193,6 +204,12 @@ impl<T: Identifiable> StatefulList<T> {
     }
 
     pub fn previous(&mut self) {
+        if self.items.is_empty() {
+            self.state.select(None);
+            self.state_id = None;
+            return;
+        }
+
         let i = match self.state.selected() {
             Some(i) => {
                 if i == 0 {
