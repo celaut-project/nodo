@@ -66,6 +66,26 @@ impl Identifiable for Container {
 }
 
 fn get_peers() -> Result<Vec<Peer>> {
+    /*
+    Ok(Connection::open(DATABASE_FILE)?
+            .prepare(
+                "SELECT p.id, u.ip, u.port
+                FROM peer p
+                JOIN slot s ON p.id = s.peer_id
+                JOIN uri u ON s.id = u.slot_id",
+            )?
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let ip: String = row.get(1)?;
+                let port: u16 = row.get(2)?;
+                Ok(Peer {
+                    id: id,
+                    uri: format!("{}:{}", ip, port),
+                    gas: 0,
+                })
+            })?
+            .collect::<Result<Vec<Peer>>>()?)
+    */
     Ok(vec![Peer {
         id: "sljasd".to_string(),
         uri: "192.168.1.123:80".to_string(),
