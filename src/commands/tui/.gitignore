@@ -1,1 +1,2 @@
 target/*
+target/.rustc_info.json
