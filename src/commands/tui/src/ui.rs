@@ -28,7 +28,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         draw_cpu_usage(frame, app, layout[2]);
     }
 
-    let controls_text = get_controls_text(app.show_cpu_ram, app.tabs.index == 0, app.connect_popup);
+    let controls_text = get_controls_text(&app);
     let controls_paragraph = Paragraph::new(controls_text)
         .style(Style::default().fg(Color::White).bg(Color::Black))
         .alignment(Alignment::Center);
@@ -90,31 +90,46 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn get_controls_text(show_cpu_ram: bool, is_peers_tab: bool, is_connect_popop: bool) -> String {
-    let visibility_text = if show_cpu_ram {
+fn get_controls_text(app: &App) -> String {
+    let is_row_selected: bool = match app.tabs.index {
+        0 => app.peers.state_id.is_some(),
+        1 => app.clients.state_id.is_some(),
+        2 => app.containers.state_id.is_some(),
+        3 => app.services.state_id.is_some(),
+        _ => false,
+    };
+
+    let visibility_text = if app.show_cpu_ram {
         "Press 'i' to hide CPU and RAM sections"
     } else {
         "Press 'i' to show CPU and RAM sections"
     };
 
-    if is_peers_tab {
-        if is_connect_popop {
-            format!(
-                "Left/Right for menu | Up/Down for table rows | {} | Press 'esc' to close",
-                visibility_text
-            )
-        } else {
-            format!(
-                "Left/Right for menu | Up/Down for table rows | {} | Press 'c' to connect",
-                visibility_text
-            )
-        }
+    let enter_detail_text = if is_row_selected {
+        "Press '<Enter>' to open detail view"
     } else {
-        format!(
-            "Left/Right for menu | Up/Down for table rows | {}",
-            visibility_text
-        )
-    }
+        ""
+    };
+
+    let tab_specific_text = match app.tabs.index {
+        0 => {
+            if app.connect_popup {
+                "Press 'esc' to close"
+            } else {
+                "Press 'c' to connect to a new peer"
+            }
+        }
+        1 => "",
+        2 => "",
+        3 => "",
+        _ => "",
+    };
+
+    // Formatear la cadena final con más espacios entre los bloques
+    format!(
+        "Left/Right for menu  |  Up/Down for table rows  |  {}  |  {}  |  {}",
+        visibility_text, enter_detail_text, tab_specific_text
+    )
 }
 
 fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
