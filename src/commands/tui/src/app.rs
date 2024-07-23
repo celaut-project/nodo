@@ -215,8 +215,8 @@ pub struct App<'a> {
     pub tabs: TabsState<'a>,
     pub running: bool,
     pub peers: StatefulList<Peer>,
-    pub clients: StatefulList<String>,
-    pub containers: StatefulList<String>,
+    pub clients: StatefulList<Client>,
+    pub containers: StatefulList<Container>,
     pub services: StatefulList<Service>,
     pub ram_usage: Vec<u64>,
     pub cpu_usage: Vec<u64>,
@@ -263,6 +263,8 @@ impl<'a> App<'a> {
     pub fn on_up(&mut self) {
         match self.tabs.index {
             0 => self.peers.previous(),
+            1 => self.clients.previous(),
+            2 => self.containers.previous(),
             3 => self.services.previous(),
             _ => {}
         }
@@ -271,6 +273,8 @@ impl<'a> App<'a> {
     pub fn on_down(&mut self) {
         match self.tabs.index {
             0 => self.peers.next(),
+            1 => self.clients.next(),
+            2 => self.containers.next(),
             3 => self.services.next(),
             _ => {}
         }
@@ -348,6 +352,9 @@ impl<'a> App<'a> {
 
     pub fn refresh(&mut self) {
         self.peers.refresh(get_peers().unwrap_or_default());
+        self.clients.refresh(get_clients().unwrap_or_default());
+        self.containers
+            .refresh(get_containers().unwrap_or_default());
         self.services.refresh(get_services().unwrap_or_default());
         self.ram_usage.push(get_ram_usage(&mut self.sys));
         self.cpu_usage.push(get_cpu_usage(&mut self.sys));

@@ -188,7 +188,7 @@ fn draw_client_list(frame: &mut Frame, app: &mut App, area: Rect) {
             app.clients
                 .items
                 .iter()
-                .map(|client| Row::new(vec![client.clone()]))
+                .map(|client| Row::new(vec![client.id.clone()]))
                 .collect::<Vec<Row>>(),
             [Constraint::Length(70)],
         )
@@ -213,7 +213,7 @@ fn draw_container_list(frame: &mut Frame, app: &mut App, area: Rect) {
             app.containers
                 .items
                 .iter()
-                .map(|container| Row::new(vec![container.clone()]))
+                .map(|container| Row::new(vec![container.id.clone()]))
                 .collect::<Vec<Row>>(),
             [Constraint::Length(70)],
         )
