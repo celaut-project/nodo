@@ -125,7 +125,6 @@ fn get_controls_text(app: &App) -> String {
         _ => "",
     };
 
-    // Formatear la cadena final con más espacios entre los bloques
     format!(
         "Left/Right for menu  |  Up/Down for table rows  |  {}  |  {}  |  {}",
         visibility_text, enter_detail_text, tab_specific_text
