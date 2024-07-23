@@ -66,7 +66,6 @@ impl Identifiable for Container {
 }
 
 fn get_peers() -> Result<Vec<Peer>> {
-    /*
     Ok(Connection::open(DATABASE_FILE)?
             .prepare(
                 "SELECT p.id, u.ip, u.port
@@ -85,12 +84,6 @@ fn get_peers() -> Result<Vec<Peer>> {
                 })
             })?
             .collect::<Result<Vec<Peer>>>()?)
-    */
-    Ok(vec![Peer {
-        id: "sljasd".to_string(),
-        uri: "192.168.1.123:80".to_string(),
-        gas: 230,
-    }])
 }
 
 fn get_clients() -> Result<Vec<Client>> {
@@ -339,38 +332,17 @@ impl<'a> App<'a> {
         self.connect_popup = false;
     }
 
-    // Function to execute a command and print its output
-    fn execute_command(&self, command: &str, args: &[&str]) -> io::Result<()> {
+    fn execute_command(&self, args: Vec<String>) -> io::Result<()> {
+        const COMMAND: &str = "nodo";
         // Spawn the command with provided arguments
-        let mut child = Command::new(command)
-            .args(args)
+        let mut child = Command::new(COMMAND)
+            .args(&args)
             .stdout(Stdio::piped()) // Capture standard output
             .stderr(Stdio::piped()) // Capture standard error
             .spawn()?; // Execute the command
 
-        // Handle stdout
-        /*if let Some(stdout) = child.stdout.take() {
-        let reader = io::BufReader::new(stdout);
-        for line in reader.lines() {
-            // Print each line of stdout
-            println!("stdout: {}", line?);
-        }
-        }*/
-
-        // Handle stderr
-        /* if let Some(stderr) = child.stderr.take() {
-        let reader = io::BufReader::new(stderr);
-        for line in reader.lines() {
-            // Print each line of stderr
-            eprintln!("stderr: {}", line?);
-        }
-        }*/
-
         // Wait for the command to finish
         let status = child.wait()?;
-
-        // Print the exit status
-        // println!("Command exited with status: {}", status);
 
         Ok(())
     }
@@ -379,11 +351,25 @@ impl<'a> App<'a> {
         if !self.connect_text.is_empty() {
             let re = Regex::new(r"^(\d{1,3}\.){3}\d{1,3}:\d{1,5}$").unwrap();
             if re.is_match(&self.connect_text) {
-                let args = ["connect", &self.connect_text];
-                self.execute_command("nodo", &args);
+                let args = vec!["connect".to_string(), self.connect_text.clone()];
+                let _ = self.execute_command(args);
                 self.connect_text.clear();
                 self.close_popup();
             } // TODO else show error msg during 3 seconds or any key press.
+        }
+    }
+
+    pub fn delete(&mut self) {
+        match self.tabs.index {
+            0 => {
+                if let Some(id) = &self.peers.state_id {
+                    let _ = self.execute_command(vec!["prune:peer".to_string(), id.to_string()]);   
+                }
+            },
+            1 => {},
+            2 => {},
+            3 => {},
+            _ => {},
         }
     }
 
