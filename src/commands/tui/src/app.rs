@@ -15,6 +15,10 @@ const METADATA_ROOT: &str = "../../../storage/__metadata__";
 pub const RAM_TIMES: usize = 500;
 pub const CPU_TIMES: usize = 500;
 
+trait Identifiable {
+    fn id(&self) -> &str;
+}
+
 #[derive(Debug)]
 pub struct Peer {
     pub id: String,
@@ -22,50 +26,71 @@ pub struct Peer {
     pub gas: u8,
 }
 
+impl Identifiable for Peer {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
 #[derive(Debug)]
 pub struct Service {
     pub id: String,
 }
 
-fn get_peers() -> Result<Vec<Peer>> {
-    Ok(Connection::open(DATABASE_FILE)?
-        .prepare(
-            "SELECT p.id, u.ip, u.port
-            FROM peer p
-            JOIN slot s ON p.id = s.peer_id
-            JOIN uri u ON s.id = u.slot_id",
-        )?
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            let ip: String = row.get(1)?;
-            let port: u16 = row.get(2)?;
-            Ok(Peer {
-                id: id,
-                uri: format!("{}:{}", ip, port),
-                gas: 0,
-            })
-        })?
-        .collect::<Result<Vec<Peer>>>()?)
+impl Identifiable for Service {
+    fn id(&self) -> &str {
+        &self.id
+    }
 }
 
-fn get_clients() -> Result<Vec<String>> {
+#[derive(Debug)]
+pub struct Client {
+    pub id: String,
+}
+
+impl Identifiable for Client {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+#[derive(Debug)]
+pub struct Container {
+    pub id: String,
+}
+
+impl Identifiable for Container {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+fn get_peers() -> Result<Vec<Peer>> {
+    Ok(vec![Peer {
+        id: "sljasd".to_string(),
+        uri: "192.168.1.123:80".to_string(),
+        gas: 230,
+    }])
+}
+
+fn get_clients() -> Result<Vec<Client>> {
     Ok(Connection::open(DATABASE_FILE)?
         .prepare("SELECT id FROM clients")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
-            Ok(id)
+            Ok(Client { id: id })
         })?
-        .collect::<Result<Vec<String>>>()?)
+        .collect::<Result<Vec<Client>>>()?)
 }
 
-fn get_containers() -> Result<Vec<String>> {
+fn get_containers() -> Result<Vec<Container>> {
     Ok(Connection::open(DATABASE_FILE)?
         .prepare("SELECT id FROM containers")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
-            Ok(id)
+            Ok(Container { id: id })
         })?
-        .collect::<Result<Vec<String>>>()?)
+        .collect::<Result<Vec<Container>>>()?)
 }
 
 fn get_services() -> Result<Vec<Service>, io::Error> {
@@ -133,17 +158,23 @@ impl<'a> TabsState<'a> {
 }
 
 #[derive(Debug)]
-pub struct StatefulList<T> {
+pub struct StatefulList<T: Identifiable> {
     pub state: TableState,
+    pub state_id: Option<String>,
     pub items: Vec<T>,
 }
 
-impl<T> StatefulList<T> {
+impl<T: Identifiable> StatefulList<T> {
     pub fn with_items(items: Vec<T>) -> Self {
         Self {
             state: TableState::default(),
+            state_id: None,
             items,
         }
+    }
+
+    pub fn refresh(&mut self, items: Vec<T>) {
+        self.items = items;
     }
 
     pub fn next(&mut self) {
@@ -158,6 +189,7 @@ impl<T> StatefulList<T> {
             None => 0,
         };
         self.state.select(Some(i));
+        self.state_id = Some(self.items[i].id().to_string());
     }
 
     pub fn previous(&mut self) {
@@ -172,6 +204,7 @@ impl<T> StatefulList<T> {
             None => 0,
         };
         self.state.select(Some(i));
+        self.state_id = Some(self.items[i].id().to_string());
     }
 }
 
@@ -314,8 +347,8 @@ impl<'a> App<'a> {
     }
 
     pub fn refresh(&mut self) {
-        self.peers = StatefulList::with_items(get_peers().unwrap_or_default());
-        self.services = StatefulList::with_items(get_services().unwrap_or_default());
+        self.peers.refresh(get_peers().unwrap_or_default());
+        self.services.refresh(get_services().unwrap_or_default());
         self.ram_usage.push(get_ram_usage(&mut self.sys));
         self.cpu_usage.push(get_cpu_usage(&mut self.sys));
     }
