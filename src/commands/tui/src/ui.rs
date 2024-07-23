@@ -91,7 +91,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 fn get_controls_text(app: &App) -> String {
-    let is_row_selected: bool = match app.tabs.index {
+    let is_row_selected = match app.tabs.index {
         0 => app.peers.state_id.is_some(),
         1 => app.clients.state_id.is_some(),
         2 => app.containers.state_id.is_some(),
@@ -99,36 +99,38 @@ fn get_controls_text(app: &App) -> String {
         _ => false,
     };
 
-    let visibility_text = if app.show_cpu_ram {
-        "Press 'i' to hide CPU and RAM sections"
-    } else {
-        "Press 'i' to show CPU and RAM sections"
-    };
+    let mut control_text = String::new();
 
-    let enter_detail_text = if is_row_selected {
-        "Press '<Enter>' to open detail view"
-    } else {
-        ""
-    };
+    control_text.push_str("Left/Right for menu  |  Up/Down for table rows");
 
-    let tab_specific_text = match app.tabs.index {
+    if app.show_cpu_ram {
+        control_text.push_str("  |  Press 'i' to hide CPU and RAM sections");
+    } else {
+        control_text.push_str("  |  Press 'i' to show CPU and RAM sections");
+    }
+
+    if is_row_selected {
+        match app.tabs.index {
+            0 => control_text.push_str("  |  Press 'd' to delete the peer."),
+            1 => control_text.push_str("  |  Press 'd' to delete the client."),
+            2 => control_text.push_str("  |  Press 'd' to delete the container."),
+            3 => control_text.push_str("  |  Press 'd' to delete the service."),
+            _ => (),
+        }
+    }
+
+    match app.tabs.index {
         0 => {
             if app.connect_popup {
-                "Press 'esc' to close"
+                control_text.push_str("  |  Press 'esc' to close");
             } else {
-                "Press 'c' to connect to a new peer"
+                control_text.push_str("  |  Press 'c' to connect to a new peer");
             }
         }
-        1 => "",
-        2 => "",
-        3 => "",
-        _ => "",
-    };
+        _ => (),
+    }
 
-    format!(
-        "Left/Right for menu  |  Up/Down for table rows  |  {}  |  {}  |  {}",
-        visibility_text, enter_detail_text, tab_specific_text
-    )
+    control_text
 }
 
 fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
