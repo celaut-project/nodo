@@ -94,7 +94,7 @@ fn get_controls_text(app: &App) -> String {
     let is_row_selected = match app.tabs.index {
         0 => app.peers.state_id.is_some(),
         1 => app.clients.state_id.is_some(),
-        2 => app.containers.state_id.is_some(),
+        2 => app.instances.state_id.is_some(),
         3 => app.services.state_id.is_some(),
         _ => false,
     };
@@ -113,8 +113,8 @@ fn get_controls_text(app: &App) -> String {
         match app.tabs.index {
             0 => control_text.push_str("  |  Press 'd' to delete the peer."),
             1 => control_text.push_str("  |  Press 'd' to delete the client."),
-            2 => control_text.push_str("  |  Press 'd' to delete the container."),
-            3 => control_text.push_str("  |  Press 'd' to delete the service."),
+            2 => control_text.push_str("  |  Press 'd' to delete the instance."),
+            3 => control_text.push_str("  |  Press 'e' to execute an instance.  |  Press 'd' to delete the service."),
             _ => (),
         }
     }
@@ -153,7 +153,7 @@ fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.tabs.index {
         0 => draw_peer_list(frame, app, layout[1]),
         1 => draw_client_list(frame, app, layout[1]),
-        2 => draw_container_list(frame, app, layout[1]),
+        2 => draw_instance_list(frame, app, layout[1]),
         3 => draw_service_list(frame, app, layout[1]),
         _ => {}
     };
@@ -223,20 +223,20 @@ fn draw_client_list(frame: &mut Frame, app: &mut App, area: Rect) {
     );
 }
 
-fn draw_container_list(frame: &mut Frame, app: &mut App, area: Rect) {
+fn draw_instance_list(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(
         Table::new(
-            app.containers
+            app.instances
                 .items
                 .iter()
-                .map(|container| Row::new(vec![container.id.clone()]))
+                .map(|instance| Row::new(vec![instance.id.clone()]))
                 .collect::<Vec<Row>>(),
             [Constraint::Length(70)],
         )
-        .header(Row::new(vec![Cell::from("Container Id")]))
+        .header(Row::new(vec![Cell::from("Instance Id")]))
         .block(
             Block::bordered()
-                .title("CONTAINERS")
+                .title("INSTANCES")
                 .title_alignment(Alignment::Left)
                 .border_type(BorderType::Thick),
         )
@@ -244,7 +244,7 @@ fn draw_container_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_symbol("> ")
         .style(Style::default().fg(Color::LightBlue).bg(Color::Black)),
         area,
-        &mut app.containers.state,
+        &mut app.instances.state,
     );
 }
 

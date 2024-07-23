@@ -96,7 +96,7 @@ fn get_clients() -> Result<Vec<Client>> {
         .collect::<Result<Vec<Client>>>()?)
 }
 
-fn get_containers() -> Result<Vec<Container>> {
+fn get_instances() -> Result<Vec<Container>> {
     Ok(Connection::open(DATABASE_FILE)?
         .prepare("SELECT id FROM containers")?
         .query_map([], |row| {
@@ -246,7 +246,7 @@ pub struct App<'a> {
     pub running: bool,
     pub peers: StatefulList<Peer>,
     pub clients: StatefulList<Client>,
-    pub containers: StatefulList<Container>,
+    pub instances: StatefulList<Container>,
     pub services: StatefulList<Service>,
     pub ram_usage: Vec<u64>,
     pub cpu_usage: Vec<u64>,
@@ -260,11 +260,11 @@ impl<'a> Default for App<'a> {
     fn default() -> Self {
         Self {
             title: "NODO TUI",
-            tabs: TabsState::new(vec!["PEERS", "CLIENTS", "CONTAINERS", "SERVICES"]),
+            tabs: TabsState::new(vec!["PEERS", "CLIENTS", "INSTANCES", "SERVICES"]),
             running: true,
             peers: StatefulList::with_items(get_peers().unwrap_or_default()),
             clients: StatefulList::with_items(get_clients().unwrap_or_default()),
-            containers: StatefulList::with_items(get_containers().unwrap_or_default()),
+            instances: StatefulList::with_items(get_instances().unwrap_or_default()),
             services: StatefulList::with_items(get_services().unwrap_or_default()),
             ram_usage: [0; RAM_TIMES].to_vec(),
             cpu_usage: [0; CPU_TIMES].to_vec(),
@@ -294,7 +294,7 @@ impl<'a> App<'a> {
         match self.tabs.index {
             0 => self.peers.previous(),
             1 => self.clients.previous(),
-            2 => self.containers.previous(),
+            2 => self.instances.previous(),
             3 => self.services.previous(),
             _ => {}
         }
@@ -304,7 +304,7 @@ impl<'a> App<'a> {
         match self.tabs.index {
             0 => self.peers.next(),
             1 => self.clients.next(),
-            2 => self.containers.next(),
+            2 => self.instances.next(),
             3 => self.services.next(),
             _ => {}
         }
@@ -359,7 +359,7 @@ impl<'a> App<'a> {
         }
     }
 
-    pub fn delete(&mut self) {
+    pub fn press_d(&mut self) {
         match self.tabs.index {
             0 => {
                 if let Some(id) = &self.peers.state_id {
@@ -373,11 +373,25 @@ impl<'a> App<'a> {
         }
     }
 
+    pub fn press_e(&mut self) {
+        match self.tabs.index {
+            0 => {},
+            1 => {},
+            2 => {},
+            3 => {
+                if let Some(id) = &self.services.state_id {
+                    let _ = self.execute_command(vec!["execute".to_string(), id.to_string()]);   
+                }
+            },
+            _ => {},
+        }
+    }
+
     pub fn refresh(&mut self) {
         self.peers.refresh(get_peers().unwrap_or_default());
         self.clients.refresh(get_clients().unwrap_or_default());
-        self.containers
-            .refresh(get_containers().unwrap_or_default());
+        self.instances
+            .refresh(get_instances().unwrap_or_default());
         self.services.refresh(get_services().unwrap_or_default());
         self.ram_usage.push(get_ram_usage(&mut self.sys));
         self.cpu_usage.push(get_cpu_usage(&mut self.sys));

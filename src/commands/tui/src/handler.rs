@@ -35,7 +35,8 @@ pub fn handle_key_events(key_event: KeyEvent, app: &mut App) -> AppResult<()> {
             KeyCode::Right | KeyCode::Char('l') => app.on_right(),
             KeyCode::Down | KeyCode::Char('j') => app.on_down(),
             KeyCode::Char('i') => app.toggle_cpu_ram_visibility(),
-            KeyCode::Char('d') => app.delete(),
+            KeyCode::Char('d') => app.press_d(),
+            KeyCode::Char('e') => app.press_e(),
             _ => {}
         }
     }
