@@ -67,23 +67,23 @@ impl Identifiable for Container {
 
 fn get_peers() -> Result<Vec<Peer>> {
     Ok(Connection::open(DATABASE_FILE)?
-            .prepare(
-                "SELECT p.id, u.ip, u.port
+        .prepare(
+            "SELECT p.id, u.ip, u.port
                 FROM peer p
                 JOIN slot s ON p.id = s.peer_id
                 JOIN uri u ON s.id = u.slot_id",
-            )?
-            .query_map([], |row| {
-                let id: String = row.get(0)?;
-                let ip: String = row.get(1)?;
-                let port: u16 = row.get(2)?;
-                Ok(Peer {
-                    id: id,
-                    uri: format!("{}:{}", ip, port),
-                    gas: 0,
-                })
-            })?
-            .collect::<Result<Vec<Peer>>>()?)
+        )?
+        .query_map([], |row| {
+            let id: String = row.get(0)?;
+            let ip: String = row.get(1)?;
+            let port: u16 = row.get(2)?;
+            Ok(Peer {
+                id: id,
+                uri: format!("{}:{}", ip, port),
+                gas: 0,
+            })
+        })?
+        .collect::<Result<Vec<Peer>>>()?)
 }
 
 fn get_clients() -> Result<Vec<Client>> {
@@ -98,7 +98,7 @@ fn get_clients() -> Result<Vec<Client>> {
 
 fn get_instances() -> Result<Vec<Container>> {
     Ok(Connection::open(DATABASE_FILE)?
-        .prepare("SELECT id FROM containers")?
+        .prepare("SELECT id FROM internal_services")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
             Ok(Container { id: id })
@@ -363,35 +363,34 @@ impl<'a> App<'a> {
         match self.tabs.index {
             0 => {
                 if let Some(id) = &self.peers.state_id {
-                    let _ = self.execute_command(vec!["prune:peer".to_string(), id.to_string()]);   
+                    let _ = self.execute_command(vec!["prune:peer".to_string(), id.to_string()]);
                 }
-            },
-            1 => {},
-            2 => {},
-            3 => {},
-            _ => {},
+            }
+            1 => {}
+            2 => {}
+            3 => {}
+            _ => {}
         }
     }
 
     pub fn press_e(&mut self) {
         match self.tabs.index {
-            0 => {},
-            1 => {},
-            2 => {},
+            0 => {}
+            1 => {}
+            2 => {}
             3 => {
                 if let Some(id) = &self.services.state_id {
-                    let _ = self.execute_command(vec!["execute".to_string(), id.to_string()]);   
+                    let _ = self.execute_command(vec!["execute".to_string(), id.to_string()]);
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 
     pub fn refresh(&mut self) {
         self.peers.refresh(get_peers().unwrap_or_default());
         self.clients.refresh(get_clients().unwrap_or_default());
-        self.instances
-            .refresh(get_instances().unwrap_or_default());
+        self.instances.refresh(get_instances().unwrap_or_default());
         self.services.refresh(get_services().unwrap_or_default());
         self.ram_usage.push(get_ram_usage(&mut self.sys));
         self.cpu_usage.push(get_cpu_usage(&mut self.sys));
