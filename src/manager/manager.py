@@ -245,7 +245,7 @@ def add_container(
         initial_gas_amount: Optional[int],
         system_requirements_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> str:
-    logger.LOGGER('Add container for ' + father_id)
+    logger.LOGGER(f'Add container for {father_id}')
     token = father_id + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
     initial_gas_amount = initial_gas_amount if initial_gas_amount else default_initial_cost(
         father_id=father_id)
@@ -260,7 +260,8 @@ def add_container(
             token=token,
             system_requeriments_range=system_requirements_range
     ):
-        raise Exception('Manager error adding ' + token + '.')
+        logger.LOGGER(f'Exception during modify params of {token}.')
+        raise Exception(f'Exception during modify params of {token}.')
     return token
 
 
@@ -268,7 +269,7 @@ def container_modify_system_params(
         token: str,
         system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> bool:
-    logger.LOGGER('Modify params of ' + token)
+    logger.LOGGER(f'Modify params of {token}.')
 
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
