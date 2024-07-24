@@ -83,7 +83,7 @@ def local_execution(
         uri_slot.uri.append(uri)
 
     l.LOGGER('Thrown out a new instance by ' + father_id + ' of the container_id ' + container.id)
-    return gateway_pb2.Instance(
+    instance = gateway_pb2.Instance(
         token=add_container(
             father_id=father_id,
             container=container,
@@ -96,3 +96,5 @@ def local_execution(
             uri_slot=[uri_slot]
         )
     )
+    l.LOGGER(f"Instance -> {str(instance)}")
+    return instance
