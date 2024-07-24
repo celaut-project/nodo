@@ -73,7 +73,6 @@ class StartServiceIterable(AbstractServiceIterable):
                 recursion_guard_token=self.recursion_guard_token
             )
         )
-        raise StopIteration
 
     def final(self):
         if not self.service_saved:
