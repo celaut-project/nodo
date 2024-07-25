@@ -1,4 +1,4 @@
-use ratatui::widgets::{List, ListState, TableState};
+use ratatui::widgets::{TableState};
 use regex::Regex;
 use rusqlite::{Connection, Result};
 use std::io::{self, BufRead};
@@ -6,6 +6,7 @@ use std::process::Stdio;
 use std::{error, fs, path::Path, vec};
 use sysinfo::System;
 use tokio::process::Command;
+use tokio::io::AsyncBufReadExt;
 
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
@@ -264,6 +265,7 @@ pub struct App<'a> {
     pub title: &'a str,
     pub tabs: TabsState<'a>,
     pub running: bool,
+    pub logs: Vec<String>,
     pub peers: StatefulList<Peer>,
     pub clients: StatefulList<Client>,
     pub instances: StatefulList<Container>,
@@ -282,6 +284,7 @@ impl<'a> Default for App<'a> {
             title: "NODO TUI",
             tabs: TabsState::new(vec!["PEERS", "CLIENTS", "INSTANCES", "SERVICES"]),
             running: true,
+            logs: Vec::new(),
             peers: StatefulList::with_items(get_peers().unwrap_or_default()),
             clients: StatefulList::with_items(get_clients().unwrap_or_default()),
             instances: StatefulList::with_items(get_instances().unwrap_or_default()),
@@ -352,17 +355,30 @@ impl<'a> App<'a> {
         self.connect_popup = false;
     }
 
-    async fn execute_command(&self, args: Vec<String>) -> io::Result<()> {
+    async fn execute_command(&mut self, args: Vec<String>) -> io::Result<()> {
         const COMMAND: &str = "nodo";
-        // Spawn the command with provided arguments
         let mut child = Command::new(COMMAND)
             .args(&args)
-            .stdout(Stdio::piped()) // Capture standard output
-            .stderr(Stdio::piped()) // Capture standard error
-            .spawn()?; // Execute the command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
 
-        // Wait for the command to finish
+        let stdout = child.stdout.take().expect("Failed to capture stdout");
+        let stderr = child.stderr.take().expect("Failed to capture stderr");
+
+        let mut stdout_reader = tokio::io::BufReader::new(stdout).lines();
+        let mut stderr_reader = tokio::io::BufReader::new(stderr).lines();
+
+        while let Some(line) = stdout_reader.next_line().await? {
+            self.logs.push(format!("STDOUT: {}", line));
+        }
+
+        while let Some(line) = stderr_reader.next_line().await? {
+            self.logs.push(format!("STDERR: {}", line));
+        }
+
         let status = child.wait().await?;
+        self.logs.push(format!("Command exited with status: {}", status));
 
         Ok(())
     }

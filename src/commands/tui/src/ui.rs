@@ -13,7 +13,11 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             Constraint::Length(1),
         ]
     } else {
-        vec![Constraint::Fill(1), Constraint::Length(1)]
+        vec![
+            Constraint::Fill(1),
+            Constraint::Percentage(40),
+            Constraint::Length(1),
+        ]
     };
 
     let layout = Layout::default()
@@ -26,6 +30,18 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     if app.show_cpu_ram {
         draw_ram_usage(frame, app, layout[1]);
         draw_cpu_usage(frame, app, layout[2]);
+    } else {
+        let logs_text = app.logs.join("\n");
+        let logs_paragraph = Paragraph::new(logs_text)
+            .block(
+                Block::bordered()
+                    .title("Logs")
+                    .title_alignment(Alignment::Left)
+                    .border_type(BorderType::Thick),
+            )
+            .style(Style::default().fg(Color::White).bg(Color::Black));
+
+        frame.render_widget(logs_paragraph, layout[1]);
     }
 
     let controls_text = get_controls_text(&app);
@@ -38,7 +54,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         if app.show_cpu_ram {
             layout[3]
         } else {
-            layout[1]
+            layout[2]
         },
     );
 
@@ -114,7 +130,9 @@ fn get_controls_text(app: &App) -> String {
             0 => control_text.push_str("  |  Press 'd' to delete the peer."),
             1 => control_text.push_str("  |  Press 'd' to delete the client."),
             2 => control_text.push_str("  |  Press 'd' to delete the instance."),
-            3 => control_text.push_str("  |  Press 'e' to execute an instance.  |  Press 'd' to delete the service."),
+            3 => control_text.push_str(
+                "  |  Press 'e' to execute an instance.  |  Press 'd' to delete the service.",
+            ),
             _ => (),
         }
     }
@@ -286,7 +304,6 @@ fn draw_ram_usage(frame: &mut Frame, app: &mut App, area: Rect) {
     };
     frame.render_widget(
         Sparkline::default()
-            .block(Block::default().title("Sparkline").borders(Borders::ALL))
             .data(&ram_usage_arr)
             .max(100)
             .direction(RenderDirection::LeftToRight)
@@ -294,7 +311,7 @@ fn draw_ram_usage(frame: &mut Frame, app: &mut App, area: Rect) {
             .block(
                 Block::bordered()
                     .title("Ram usage")
-                    .title_alignment(Alignment::Center)
+                    .title_alignment(Alignment::Left)
                     .border_type(BorderType::Thick),
             )
             .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
@@ -318,7 +335,7 @@ fn draw_cpu_usage(frame: &mut Frame, app: &mut App, area: Rect) {
             .block(
                 Block::bordered()
                     .title("CPU usage")
-                    .title_alignment(Alignment::Center)
+                    .title_alignment(Alignment::Left)
                     .border_type(BorderType::Thick),
             )
             .data(&cpu_usage_arr)
