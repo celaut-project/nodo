@@ -31,7 +31,17 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         draw_ram_usage(frame, app, layout[1]);
         draw_cpu_usage(frame, app, layout[2]);
     } else {
-        let logs_text = app.logs.join("\n");
+        let logs_area = layout[1];
+        let log_lines = logs_area.height as usize;
+        let logs_text: String = app
+            .logs
+            .iter()
+            .rev()
+            .take(log_lines)
+            .rev()
+            .cloned()
+            .collect::<Vec<String>>()
+            .join("\n");
         let logs_paragraph = Paragraph::new(logs_text)
             .block(
                 Block::bordered()
