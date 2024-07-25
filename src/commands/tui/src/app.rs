@@ -2,9 +2,10 @@ use ratatui::widgets::{List, ListState, TableState};
 use regex::Regex;
 use rusqlite::{Connection, Result};
 use std::io::{self, BufRead};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::{error, fs, path::Path, vec};
 use sysinfo::System;
+use tokio::process::Command;
 
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
@@ -332,7 +333,7 @@ impl<'a> App<'a> {
         self.connect_popup = false;
     }
 
-    fn execute_command(&self, args: Vec<String>) -> io::Result<()> {
+    async fn execute_command(&self, args: Vec<String>) -> io::Result<()> {
         const COMMAND: &str = "nodo";
         // Spawn the command with provided arguments
         let mut child = Command::new(COMMAND)
@@ -342,28 +343,28 @@ impl<'a> App<'a> {
             .spawn()?; // Execute the command
 
         // Wait for the command to finish
-        let status = child.wait()?;
+        let status = child.wait().await?;
 
         Ok(())
     }
 
-    pub fn connect(&mut self) {
+    pub async fn connect(&mut self) {
         if !self.connect_text.is_empty() {
             let re = Regex::new(r"^(\d{1,3}\.){3}\d{1,3}:\d{1,5}$").unwrap();
             if re.is_match(&self.connect_text) {
                 let args = vec!["connect".to_string(), self.connect_text.clone()];
-                let _ = self.execute_command(args);
+                let _ = self.execute_command(args).await;
                 self.connect_text.clear();
                 self.close_popup();
             } // TODO else show error msg during 3 seconds or any key press.
         }
     }
 
-    pub fn press_d(&mut self) {
+    pub async fn press_d(&mut self) {
         match self.tabs.index {
             0 => {
                 if let Some(id) = &self.peers.state_id {
-                    let _ = self.execute_command(vec!["prune:peer".to_string(), id.to_string()]);
+                    let _ = self.execute_command(vec!["prune:peer".to_string(), id.to_string()]).await;
                 }
             }
             1 => {}
@@ -373,21 +374,21 @@ impl<'a> App<'a> {
         }
     }
 
-    pub fn press_e(&mut self) {
+    pub async fn press_e(&mut self) {
         match self.tabs.index {
             0 => {}
             1 => {}
             2 => {}
             3 => {
                 if let Some(id) = &self.services.state_id {
-                    let _ = self.execute_command(vec!["execute".to_string(), id.to_string()]);
+                    let _ = self.execute_command(vec!["execute".to_string(), id.to_string()]).await;
                 }
             }
             _ => {}
         }
     }
 
-    pub fn refresh(&mut self) {
+    pub async fn refresh(&mut self) {
         self.peers.refresh(get_peers().unwrap_or_default());
         self.clients.refresh(get_clients().unwrap_or_default());
         self.instances.refresh(get_instances().unwrap_or_default());

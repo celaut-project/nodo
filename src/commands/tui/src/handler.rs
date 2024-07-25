@@ -2,10 +2,10 @@ use crate::app::{App, AppResult};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// Handles the key events and updates the state of [`App`].
-pub fn handle_key_events(key_event: KeyEvent, app: &mut App) -> AppResult<()> {
+pub async fn handle_key_events(key_event: KeyEvent, app: &mut App<'_>) -> AppResult<()> {
     if app.connect_popup {
         match key_event.code {
-            KeyCode::Enter => app.connect(),
+            KeyCode::Enter => app.connect().await,
             KeyCode::Esc => {
                 app.connect_text.clear();
                 app.close_popup();
@@ -35,8 +35,8 @@ pub fn handle_key_events(key_event: KeyEvent, app: &mut App) -> AppResult<()> {
             KeyCode::Right | KeyCode::Char('l') => app.on_right(),
             KeyCode::Down | KeyCode::Char('j') => app.on_down(),
             KeyCode::Char('i') => app.toggle_cpu_ram_visibility(),
-            KeyCode::Char('d') => app.press_d(),
-            KeyCode::Char('e') => app.press_e(),
+            KeyCode::Char('d') => app.press_d().await,
+            KeyCode::Char('e') => app.press_e().await,
             _ => {}
         }
     }
