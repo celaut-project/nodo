@@ -1,6 +1,8 @@
-use crate::app::{App, CPU_TIMES, RAM_TIMES};
+use crate::app::{App, CPU_TIMES, LOG_FILE, RAM_TIMES};
 #[allow(clippy::wildcard_imports)]
 use ratatui::{prelude::*, widgets::*};
+use std::fs::File;
+use std::io::{self, BufRead};
 use vec_to_array::vec_to_array;
 
 /// Renders the user interface widgets.
@@ -31,27 +33,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         draw_ram_usage(frame, app, layout[1]);
         draw_cpu_usage(frame, app, layout[2]);
     } else {
-        let logs_area = layout[1];
-        let log_lines = logs_area.height as usize;
-        let logs_text: String = app
-            .logs
-            .iter()
-            .rev()
-            .take(log_lines)
-            .rev()
-            .cloned()
-            .collect::<Vec<String>>()
-            .join("\n");
-        let logs_paragraph = Paragraph::new(logs_text)
-            .block(
-                Block::bordered()
-                    .title("Logs")
-                    .title_alignment(Alignment::Left)
-                    .border_type(BorderType::Thick),
-            )
-            .style(Style::default().fg(Color::White).bg(Color::Black));
-
-        frame.render_widget(logs_paragraph, layout[1]);
+        // draw_tui_logs(frame, app, layout[1]);
+        draw_logs(frame, app, layout[1]);
     }
 
     let controls_text = get_controls_text(&app);
@@ -299,6 +282,63 @@ fn draw_service_list(frame: &mut Frame, app: &mut App, area: Rect) {
         area,
         &mut app.services.state,
     );
+}
+
+fn read_last_lines(filename: &str, line_count: usize) -> io::Result<Vec<String>> {
+    let file = File::open(filename)?;
+    let reader = io::BufReader::new(file);
+
+    let lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
+
+    let lines_to_show = if lines.len() > line_count {
+        lines.into_iter().rev().take(line_count).rev().collect()
+    } else {
+        lines
+    };
+
+    Ok(lines_to_show)
+}
+
+fn draw_logs(frame: &mut Frame, app: &mut App, area: Rect) {
+    let log_lines = area.height as usize;
+    let logs_text = match read_last_lines(LOG_FILE, log_lines) {
+        Ok(lines) => lines.join("\n"),
+        Err(_) => "Unable to read log file.".to_string(),
+    };
+
+    let logs_paragraph = Paragraph::new(logs_text)
+        .block(
+            Block::bordered()
+                .title("Logs")
+                .title_alignment(Alignment::Left)
+                .border_type(BorderType::Thick),
+        )
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+
+    frame.render_widget(logs_paragraph, area);
+}
+
+fn draw_tui_logs(frame: &mut Frame, app: &mut App, area: Rect) {
+    let log_lines = area.height as usize;
+    let logs_text: String = app
+        .logs
+        .iter()
+        .rev()
+        .take(log_lines)
+        .rev()
+        .cloned()
+        .collect::<Vec<String>>()
+        .join("\n");
+    let logs_paragraph = Paragraph::new(logs_text)
+        .block(
+            Block::bordered()
+                .title("Tui logs")
+                .title_alignment(Alignment::Left)
+                .border_type(BorderType::Thick),
+        )
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+
+    frame.render_widget(logs_paragraph, area);
 }
 
 fn draw_ram_usage(frame: &mut Frame, app: &mut App, area: Rect) {
