@@ -98,13 +98,32 @@ fn get_clients() -> Result<Vec<Client>> {
 }
 
 fn get_instances() -> Result<Vec<Container>> {
-    Ok(Connection::open(DATABASE_FILE)?
+    let conn = Connection::open(DATABASE_FILE)?;
+
+    // Obtener IDs de internal_services
+    let internal_instances = conn
         .prepare("SELECT id FROM internal_services")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
-            Ok(Container { id: id })
+            Ok(Container { id })
         })?
-        .collect::<Result<Vec<Container>>>()?)
+        .collect::<Result<Vec<Container>>>()?;
+
+    // Obtener IDs de external_services
+    let external_instances = conn
+        .prepare("SELECT token FROM external_services")?
+        .query_map([], |row| {
+            let id: String = row.get(0)?;
+            Ok(Container { id })
+        })?
+        .collect::<Result<Vec<Container>>>()?;
+
+    // Combinar ambos resultados
+    let mut instances = Vec::new();
+    instances.extend(internal_instances);
+    instances.extend(external_instances);
+
+    Ok(instances)
 }
 
 fn get_services() -> Result<Vec<Service>, io::Error> {
