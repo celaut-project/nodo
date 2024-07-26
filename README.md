@@ -16,8 +16,7 @@ locally or on its peer nodes. This ensures an efficient distribution of tasks an
 optimizing system performance.
 
 2. **Communication Interface**: Provides a robust and flexible interface that enables the services that it executes
-to communicate seamlessly with it, ensuring efficient data exchange and coordination. To accomplish this task, Nodo utilizes  [Pee-RPC](https://github.com/pee-rpc-protocol/pee-rpc),
-a protocol built on top of gRPC that enables the seamless transfer of complete services without compromising the integrity of [CELAUT's principles](https://github.com/celaut-project/celaut-architecture/blob/master/README.md#principles).
+to communicate seamlessly with it, ensuring efficient data exchange and coordination.
 
 3. **Address and Token Provisioning**: Offers a streamlined process for obtaining the communication address and 
 authentication token of a service required for interaction, enhancing security and accessibility.
