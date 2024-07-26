@@ -295,7 +295,11 @@ fn draw_env_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 .iter()
                 .map(|env| Row::new(vec![env.id.clone(), env.value.clone(), env.info.clone()]))
                 .collect::<Vec<Row>>(),
-            [Constraint::Length(70)],
+            [
+                Constraint::Length(50),
+                Constraint::Length(70),
+                Constraint::Length(70),
+            ],
         )
         .header(Row::new(vec![
             Cell::from("Id"),
@@ -310,7 +314,7 @@ fn draw_env_list(frame: &mut Frame, app: &mut App, area: Rect) {
         )
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ")
-        .style(Style::default().fg(Color::LightMagenta).bg(Color::Black)),
+        .style(Style::default().fg(Color::White).bg(Color::Black)),
         area,
         &mut app.services.state,
     );

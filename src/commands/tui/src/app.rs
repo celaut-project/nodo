@@ -117,7 +117,6 @@ fn get_clients() -> Result<Vec<Client>> {
 fn get_instances() -> Result<Vec<Container>> {
     let conn = Connection::open(DATABASE_FILE)?;
 
-    // Obtener IDs de internal_services
     let internal_instances = conn
         .prepare("SELECT id FROM internal_services")?
         .query_map([], |row| {
@@ -126,7 +125,6 @@ fn get_instances() -> Result<Vec<Container>> {
         })?
         .collect::<Result<Vec<Container>>>()?;
 
-    // Obtener IDs de external_services
     let external_instances = conn
         .prepare("SELECT token FROM external_services")?
         .query_map([], |row| {
@@ -135,7 +133,6 @@ fn get_instances() -> Result<Vec<Container>> {
         })?
         .collect::<Result<Vec<Container>>>()?;
 
-    // Combinar ambos resultados
     let mut instances = Vec::new();
     instances.extend(internal_instances);
     instances.extend(external_instances);
@@ -151,7 +148,6 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
         let entry = entry?;
         let path = entry.file_name();
 
-        // Convierte el path a String, puede que necesites ajustar esto según tu estructura Service
         let service_id = path.to_string_lossy().into_owned();
 
         services.push(Service { id: service_id });
@@ -186,20 +182,17 @@ fn get_envs() -> Result<Vec<Env>, io::Error> {
             continue;
         }
 
-        if let Some((key, value)) = line.split_once('=') {
-            let mut env_info = String::new();
-
-            if let Some(next_line) = iter.peek() {
-                if next_line.trim().starts_with('#') && !next_line.trim().starts_with("# ----") {
-                    env_info = next_line.trim_start_matches('#').trim().to_string();
-                    iter.next(); // Avanzar el iterador ya que este comentario se ha procesado como `info`
-                }
-            }
+        if let Some((key, value_with_comment)) = line.split_once('=') {
+            let (value, info) = if let Some((val, comment)) = value_with_comment.split_once('#') {
+                (val.trim().to_string(), comment.trim().to_string())
+            } else {
+                (value_with_comment.trim().to_string(), String::new())
+            };
 
             envs.push(Env {
                 id: key.trim().to_string(),
                 value: value.trim().to_string(),
-                info: env_info,
+                info: info,
                 group: current_group.clone(),
             });
         }
@@ -385,6 +378,7 @@ impl<'a> App<'a> {
             1 => self.clients.previous(),
             2 => self.instances.previous(),
             3 => self.services.previous(),
+            4 => self.envs.previous(),
             _ => {}
         }
     }
@@ -395,6 +389,7 @@ impl<'a> App<'a> {
             1 => self.clients.next(),
             2 => self.instances.next(),
             3 => self.services.next(),
+            5 => self.envs.next(),
             _ => {}
         }
     }
