@@ -389,7 +389,7 @@ impl<'a> App<'a> {
             1 => self.clients.next(),
             2 => self.instances.next(),
             3 => self.services.next(),
-            5 => self.envs.next(),
+            4 => self.envs.next(),
             _ => {}
         }
     }
