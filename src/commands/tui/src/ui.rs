@@ -316,7 +316,7 @@ fn draw_env_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_symbol("> ")
         .style(Style::default().fg(Color::White).bg(Color::Black)),
         area,
-        &mut app.services.state,
+        &mut app.envs.state,
     );
 }
 
