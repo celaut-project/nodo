@@ -13,6 +13,7 @@ pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
 
 const DATABASE_FILE: &str = "../../../storage/database.sqlite";
 pub const LOG_FILE: &str = "../../../storage/app.log";
+pub const ENV_FILE: &str = "../../../.env";
 const SERVICES_ROOT: &str = "../../../storage/__registry__";
 const METADATA_ROOT: &str = "../../../storage/__metadata__";
 pub const RAM_TIMES: usize = 500;
@@ -63,6 +64,20 @@ pub struct Container {
 }
 
 impl Identifiable for Container {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+#[derive(Debug)]
+pub struct Env {
+    pub id: String,
+    pub value: String,
+    pub info: String,
+    pub group: String,
+}
+
+impl Identifiable for Env {
     fn id(&self) -> &str {
         &self.id
     }
@@ -143,6 +158,54 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
     }
 
     Ok(services)
+}
+
+fn get_envs() -> Result<Vec<Env>, io::Error> {
+    let path = Path::new(ENV_FILE);
+    let file = fs::File::open(&path)?;
+    let reader = io::BufReader::new(file);
+
+    let lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
+    let mut envs = Vec::new();
+    let mut current_group = String::new();
+
+    let mut iter = lines.iter().peekable();
+    while let Some(line) = iter.next() {
+        let line = line.trim();
+
+        if line.starts_with("# ----") {
+            if let Some(group_line) = iter.next() {
+                if group_line.trim().starts_with("# ") {
+                    current_group = group_line.trim_start_matches("# ").to_string();
+                }
+            }
+            continue;
+        }
+
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        if let Some((key, value)) = line.split_once('=') {
+            let mut env_info = String::new();
+
+            if let Some(next_line) = iter.peek() {
+                if next_line.trim().starts_with('#') && !next_line.trim().starts_with("# ----") {
+                    env_info = next_line.trim_start_matches('#').trim().to_string();
+                    iter.next(); // Avanzar el iterador ya que este comentario se ha procesado como `info`
+                }
+            }
+
+            envs.push(Env {
+                id: key.trim().to_string(),
+                value: value.trim().to_string(),
+                info: env_info,
+                group: current_group.clone(),
+            });
+        }
+    }
+
+    Ok(envs)
 }
 
 fn get_ram_usage(sys: &mut System) -> u64 {
@@ -271,6 +334,7 @@ pub struct App<'a> {
     pub clients: StatefulList<Client>,
     pub instances: StatefulList<Container>,
     pub services: StatefulList<Service>,
+    pub envs: StatefulList<Env>,
     pub ram_usage: Vec<u64>,
     pub cpu_usage: Vec<u64>,
     pub sys: System,
@@ -283,13 +347,14 @@ impl<'a> Default for App<'a> {
     fn default() -> Self {
         Self {
             title: "NODO TUI",
-            tabs: TabsState::new(vec!["PEERS", "CLIENTS", "INSTANCES", "SERVICES"]),
+            tabs: TabsState::new(vec!["PEERS", "CLIENTS", "INSTANCES", "SERVICES", "ENVS"]),
             running: true,
             logs: Vec::new(),
             peers: StatefulList::with_items(get_peers().unwrap_or_default()),
             clients: StatefulList::with_items(get_clients().unwrap_or_default()),
             instances: StatefulList::with_items(get_instances().unwrap_or_default()),
             services: StatefulList::with_items(get_services().unwrap_or_default()),
+            envs: StatefulList::with_items(get_envs().unwrap_or_default()),
             ram_usage: [0; RAM_TIMES].to_vec(),
             cpu_usage: [0; CPU_TIMES].to_vec(),
             sys: System::new_all(),
@@ -429,6 +494,7 @@ impl<'a> App<'a> {
         self.clients.refresh(get_clients().unwrap_or_default());
         self.instances.refresh(get_instances().unwrap_or_default());
         self.services.refresh(get_services().unwrap_or_default());
+        self.envs.refresh(get_envs().unwrap_or_default());
         self.ram_usage.push(get_ram_usage(&mut self.sys));
         self.cpu_usage.push(get_cpu_usage(&mut self.sys));
     }
