@@ -171,5 +171,7 @@ fi
 
 chown -R $SCRIPT_USER:$SCRIPT_USER $TARGET_DIR
 
+systemctl restart nodo.service
+
 echo "Installation and service setup completed successfully. The repository is located at $TARGET_DIR."
 echo "********** You can now use the 'nodo' command. **********"
