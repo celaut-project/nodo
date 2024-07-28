@@ -119,7 +119,7 @@ fn get_controls_text(app: &App) -> String {
 
     control_text.push_str("Left/Right for menu  |  Up/Down for table rows");
     control_text.push_str("  |  Press 'o' and 'p' to rotate the block views sections");
-    control_text.push_str("  |  Press 'i' to change the block view layout");
+    control_text.push_str("  |  Press 'm' to change the block view layout");
 
     if is_row_selected {
         match app.tabs.index {
