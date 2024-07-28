@@ -7,7 +7,8 @@ use vec_to_array::vec_to_array;
 
 /// Renders the user interface widgets.
 pub fn render(app: &mut App, frame: &mut Frame) {
-    let view_constraints = vec![Constraint::Percentage(50)];
+    let view_constraints =
+        get_view_constraints(app.mode_view_index.state_id.as_deref().unwrap_or(""));
     let mut constraints = vec![Constraint::Fill(1)];
     constraints.extend(view_constraints.iter());
     constraints.push(Constraint::Length(1));
@@ -17,14 +18,20 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .constraints(constraints)
         .split(frame.size());
 
-    draw_tabs(frame, app, layout[0]);
+    let mut n = 0;
+    draw_tabs(frame, app, layout[n]);
 
-    match app.block_view_index.state_id.as_deref() {
-        Some("ram-usage") => draw_ram_usage(frame, app, layout[1]),
-        Some("cpu-usage") => draw_cpu_usage(frame, app, layout[1]),
-        Some("tui-logs") => draw_tui_logs(frame, app, layout[1]),
-        Some("logs") => draw_logs(frame, app, layout[1]),
-        _ => {}
+    for (i, constraint) in view_constraints.iter().enumerate() {
+        n += 1;
+        let current_index = (i + app.block_view_index.state.selected().unwrap_or(0))
+            % app.block_view_index.items.len();
+        match app.block_view_index.items[current_index].0.as_str() {
+            "ram-usage" => draw_ram_usage(frame, app, layout[n]),
+            "cpu-usage" => draw_cpu_usage(frame, app, layout[n]),
+            "tui-logs" => draw_tui_logs(frame, app, layout[n]),
+            "logs" => draw_logs(frame, app, layout[n]),
+            _ => {}
+        }
     }
 
     let controls_text = get_controls_text(&app);
@@ -32,7 +39,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .style(Style::default().fg(Color::White).bg(Color::Black))
         .alignment(Alignment::Center);
 
-    frame.render_widget(controls_paragraph, layout[2]);
+    frame.render_widget(controls_paragraph, layout[n + 1]);
 
     if app.connect_popup {
         let popup = Paragraph::new(app.connect_text.to_string())
@@ -53,6 +60,22 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
         let area = centered_rect(10, 5, frame.size());
         frame.render_widget(popup, area);
+    }
+}
+
+fn get_view_constraints(mode: &str) -> Vec<Constraint> {
+    match mode {
+        "" => vec![],
+        "10" => vec![Constraint::Percentage(25)],
+        "10-10" => vec![Constraint::Percentage(25), Constraint::Percentage(25)],
+        "10-10-10" => vec![
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+        ],
+        "20-10" => vec![Constraint::Percentage(50), Constraint::Percentage(25)],
+        "30" => vec![Constraint::Percentage(75)],
+        _ => vec![],
     }
 }
 
@@ -96,6 +119,7 @@ fn get_controls_text(app: &App) -> String {
 
     control_text.push_str("Left/Right for menu  |  Up/Down for table rows");
     control_text.push_str("  |  Press 'o' and 'p' to rotate the block views sections");
+    control_text.push_str("  |  Press 'i' to change the block view layout");
 
     if is_row_selected {
         match app.tabs.index {

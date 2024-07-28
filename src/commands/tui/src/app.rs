@@ -423,6 +423,10 @@ impl<'a> App<'a> {
         self.block_view_index.previous();
     }
 
+    pub fn change_mode_view(&mut self) {
+        self.mode_view_index.next();
+    }
+
     /// Handles the tick event of the terminal.
     pub fn tick(&self) {}
 
