@@ -34,7 +34,8 @@ pub async fn handle_key_events(key_event: KeyEvent, app: &mut App<'_>) -> AppRes
             KeyCode::Up | KeyCode::Char('k') => app.on_up(),
             KeyCode::Right | KeyCode::Char('l') => app.on_right(),
             KeyCode::Down | KeyCode::Char('j') => app.on_down(),
-            KeyCode::Char('i') => app.toggle_cpu_ram_visibility(),
+            KeyCode::Char('o') => app.next_block_view(),
+            KeyCode::Char('p') => app.previous_block_view(),
             KeyCode::Char('d') => app.press_d().await,
             KeyCode::Char('e') => app.press_e().await,
             _ => {}

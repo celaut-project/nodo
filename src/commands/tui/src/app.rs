@@ -23,6 +23,15 @@ trait Identifiable {
     fn id(&self) -> &str;
 }
 
+#[derive(Debug, Clone)]
+pub struct IdentifiableString(pub String);
+
+impl Identifiable for IdentifiableString {
+    fn id(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Debug)]
 pub struct Peer {
     pub id: String,
@@ -331,7 +340,8 @@ pub struct App<'a> {
     pub ram_usage: Vec<u64>,
     pub cpu_usage: Vec<u64>,
     pub sys: System,
-    pub show_cpu_ram: bool,
+    pub mode_view_index: StatefulList<IdentifiableString>,
+    pub block_view_index: StatefulList<IdentifiableString>,
     pub connect_popup: bool,
     pub connect_text: String,
 }
@@ -351,7 +361,18 @@ impl<'a> Default for App<'a> {
             ram_usage: [0; RAM_TIMES].to_vec(),
             cpu_usage: [0; CPU_TIMES].to_vec(),
             sys: System::new_all(),
-            show_cpu_ram: true,
+            mode_view_index: StatefulList::with_items(
+                vec!["", "10", "10-10", "10-10-10", "20-10", "30"]
+                    .into_iter()
+                    .map(|s| IdentifiableString(s.to_string()))
+                    .collect(),
+            ),
+            block_view_index: StatefulList::with_items(
+                vec!["ram-usage", "cpu-usage", "tui-logs", "logs"]
+                    .into_iter()
+                    .map(|s| IdentifiableString(s.to_string()))
+                    .collect(),
+            ),
             connect_popup: false,
             connect_text: "".to_string(),
         }
@@ -394,10 +415,12 @@ impl<'a> App<'a> {
         }
     }
 
-    pub fn toggle_cpu_ram_visibility(&mut self) {
-        self.show_cpu_ram = !self.show_cpu_ram;
-        self.ram_usage.clear();
-        self.cpu_usage.clear();
+    pub fn next_block_view(&mut self) {
+        self.block_view_index.next();
+    }
+
+    pub fn previous_block_view(&mut self) {
+        self.block_view_index.previous();
     }
 
     /// Handles the tick event of the terminal.

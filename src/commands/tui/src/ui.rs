@@ -7,20 +7,10 @@ use vec_to_array::vec_to_array;
 
 /// Renders the user interface widgets.
 pub fn render(app: &mut App, frame: &mut Frame) {
-    let constraints = if app.show_cpu_ram {
-        vec![
-            Constraint::Fill(1),
-            Constraint::Percentage(20),
-            Constraint::Percentage(20),
-            Constraint::Length(1),
-        ]
-    } else {
-        vec![
-            Constraint::Fill(1),
-            Constraint::Percentage(40),
-            Constraint::Length(1),
-        ]
-    };
+    let view_constraints = vec![Constraint::Percentage(50)];
+    let mut constraints = vec![Constraint::Fill(1)];
+    constraints.extend(view_constraints.iter());
+    constraints.push(Constraint::Length(1));
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -29,12 +19,12 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     draw_tabs(frame, app, layout[0]);
 
-    if app.show_cpu_ram {
-        draw_ram_usage(frame, app, layout[1]);
-        draw_cpu_usage(frame, app, layout[2]);
-    } else {
-        // draw_tui_logs(frame, app, layout[1]);
-        draw_logs(frame, app, layout[1]);
+    match app.block_view_index.state_id.as_deref() {
+        Some("ram-usage") => draw_ram_usage(frame, app, layout[1]),
+        Some("cpu-usage") => draw_cpu_usage(frame, app, layout[1]),
+        Some("tui-logs") => draw_tui_logs(frame, app, layout[1]),
+        Some("logs") => draw_logs(frame, app, layout[1]),
+        _ => {}
     }
 
     let controls_text = get_controls_text(&app);
@@ -42,14 +32,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .style(Style::default().fg(Color::White).bg(Color::Black))
         .alignment(Alignment::Center);
 
-    frame.render_widget(
-        controls_paragraph,
-        if app.show_cpu_ram {
-            layout[3]
-        } else {
-            layout[2]
-        },
-    );
+    frame.render_widget(controls_paragraph, layout[2]);
 
     if app.connect_popup {
         let popup = Paragraph::new(app.connect_text.to_string())
@@ -112,12 +95,7 @@ fn get_controls_text(app: &App) -> String {
     let mut control_text = String::new();
 
     control_text.push_str("Left/Right for menu  |  Up/Down for table rows");
-
-    if app.show_cpu_ram {
-        control_text.push_str("  |  Press 'i' to hide CPU and RAM sections");
-    } else {
-        control_text.push_str("  |  Press 'i' to show CPU and RAM sections");
-    }
+    control_text.push_str("  |  Press 'o' and 'p' to rotate the block views sections");
 
     if is_row_selected {
         match app.tabs.index {
