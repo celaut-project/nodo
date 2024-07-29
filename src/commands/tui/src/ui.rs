@@ -1,6 +1,7 @@
 use crate::app::{App, CPU_TIMES, LOG_FILE, RAM_TIMES};
 #[allow(clippy::wildcard_imports)]
 use ratatui::{prelude::*, widgets::*};
+use std::cmp;
 use std::fs::File;
 use std::io::{self, BufRead};
 use vec_to_array::vec_to_array;
@@ -58,7 +59,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: true });
 
-        let area = centered_rect(10, 5, frame.size());
+        let min_percent_x: u16 = cmp::min((frame.size().width as f64) as u16, 10);
+        let content_width_ratio = cmp::max(app.connect_text.len() as u16, min_percent_x);
+        let area = centered_rect(content_width_ratio, 5, frame.size());
         frame.render_widget(popup, area);
     }
 }
