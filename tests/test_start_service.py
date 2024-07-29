@@ -16,11 +16,13 @@ def test_start_service():
         SERVICE: Final[str] = eval(sys.argv[3])
     except IndexError:
         LOGGER('Provide the name of a service (from .services) as the third parameter.')
+    except SyntaxError:
+        LOGGER('The third parameter must be one of the services on tests/.services')
 
     def service_extended():
         # Send partition model.
         yield gateway_pb2.Client(client_id='dev')
-        config = gateway_pb2.Configuration(
+        yield gateway_pb2.Configuration(
             config=celaut_pb2.Configuration(),
             resources=gateway_pb2.CombinationResources(
                 clause={
@@ -33,7 +35,6 @@ def test_start_service():
                 }
             )
         )
-        yield config
         yield celaut_pb2.Any.Metadata.HashTag.Hash(
                 type=bytes.fromhex(SHA3_256),
                 value=bytes.fromhex(SERVICE)

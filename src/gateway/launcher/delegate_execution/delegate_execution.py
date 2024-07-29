@@ -7,9 +7,9 @@ from grpcbigbuffer import client as grpcbf
 import src.utils.utils
 from protos import gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input_indices
-from src.manager.manager import generate_client_id_in_other_peer
+from src.manager.manager import get_client_id_on_other_peer
 from src.manager.metrics import gas_amount_on_other_peer
-from src.manager.system_cache import SystemCache
+from src.database.sql_connection import SQLConnection
 from src.payment_system.payment_process import increase_deposit_on_peer
 from src.utils import utils, logger as l
 
@@ -48,13 +48,13 @@ def delegate_execution(
                 config=config,
                 # TODO: Could pass only the previously selected configuration with the estimate cost
                 #  request, now is allowing to select another (that could be reasonable).
-                client_id=generate_client_id_in_other_peer(peer_id=peer),
+                client_id=get_client_id_on_other_peer(peer_id=peer),
                 recursion_guard_token=recursion_guard_token
             )
         ))
         encrypted_external_token: str = sha256(service_instance.token.encode('utf-8')).hexdigest()
-        SystemCache().set_external_on_cache(
-            agent_id=father_id,
+        SQLConnection().add_external_service(
+            client_id=father_id,  # Client_id
             peer_id=peer,  # Add node_uri.
             encrypted_external_token=encrypted_external_token,  # Add token.
             external_token=service_instance.token

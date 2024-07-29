@@ -62,7 +62,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         )
         refound_gas = []
         if not spend_gas(
-                token_or_container_ip=token,
+                id=token,
                 gas_to_spend=MODIFY_SERVICE_SYSTEM_RESOURCES_COST * GAS_COST_FACTOR,
                 refund_gas_function_container=refound_gas
         ): raise Exception('Launch service error spending gas for ' + context.peer())

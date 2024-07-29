@@ -1,27 +1,24 @@
 from time import sleep
+from uuid import uuid4
 
 import docker as docker_lib
 
 from protos import celaut_pb2 as celaut
-from src.manager.manager import add_peer, prune_container, spend_gas
+from src.manager.manager import prune_container, spend_gas
 from src.manager.metrics import gas_amount_on_other_peer
-from src.manager.system_cache import SystemCache
+from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
 from src.reputation_system.simple_reputation_feedback import submit_reputation_feedback
 from src.utils import logger as l
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.utils.env import DOCKER_CLIENT, MIN_SLOTS_OPEN_PER_PEER, MIN_DEPOSIT_PEER, MANAGER_ITERATION_TIME
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
-from src.utils.utils import is_peer_available, peers_id_iterator
 
-sc = SystemCache()
+sc = SQLConnection()
 
 
 def maintain_containers():
-    for i in range(len(sc.system_cache)):
-        if i >= len(sc.system_cache):
-            break
-        token, sysreq = list(sc.system_cache.items())[i]
+    for token in sc.get_all_internal_service_tokens():
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
                 submit_reputation_feedback(token=token, amount=-100)
@@ -32,10 +29,10 @@ def maintain_containers():
             continue
 
         if not spend_gas(
-                token_or_container_ip=token,
+                id=token,
                 gas_to_spend=compute_maintenance_cost(
                     system_resources=celaut.Sysresources(
-                        mem_limit=sysreq['mem_limit']
+                        mem_limit=sc.get_sys_req(token=token)['mem_limit']
                     )
                 )
         ):
@@ -51,44 +48,47 @@ def maintain_containers():
 
 
 def maintain_clients():
-    for client_id, client in sc.clients.items():
-        if client.is_expired():
+    for client_id in SQLConnection().get_clients_id():
+        if SQLConnection().client_expired(client_id=client_id):
             l.LOGGER('Delete client ' + client_id)
-            with sc.cache_locks.lock(client_id):
-                del sc.clients[client_id]
-            sc.cache_locks.delete(client_id)
-
+            SQLConnection().delete_client(client_id)
 
 def peer_deposits():
-    for i in range(len(sc.total_deposited_on_other_peers)):
-        if i >= len(sc.total_deposited_on_other_peers):
-            break
-        peer_id, estimated_deposit = list(sc.total_deposited_on_other_peers.items())[i]
-        if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
+
+    # Controla el gas que tiene en cada uno de los pares.
+
+    # Vamos a presuponer que tenemos un struct Peer.
+    for peer in SQLConnection().get_peers():
+        if not is_peer_available(peer_id=peer['id'], min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             # l.LOGGER('Peer '+peer_id+' is not available .')
             continue
-        if estimated_deposit < MIN_DEPOSIT_PEER or \
+        if peer["gas"] < MIN_DEPOSIT_PEER or \
                 gas_amount_on_other_peer(
-                    peer_id=peer_id
+                    peer_id=peer["id"]
                 ) < MIN_DEPOSIT_PEER:
-            l.LOGGER(f'\n\n The peer {peer_id} has not enough deposit.   ')
-            # f'\n   estimated deposit -> {estimated_deposit} '
+            l.LOGGER(f'\n\n The peer {peer["id"]} has not enough deposit.   ')
+            # f'\n   estimated gas deposit -> {peer["gas"]]} '
             # f'\n   min deposit per peer -> {MIN_DEPOSIT_PEER}'
-            # f'\n   actual deposit -> {gas_amount_on_other_peer(peer_id=peer_id)}'
+            # f'\n   actual gas deposit -> {gas_amount_on_other_peer(peer_id=peer_id)}'
             # f'\n\n')
-            if not __increase_deposit_on_peer(peer_id=peer_id, amount=MIN_DEPOSIT_PEER):
-                l.LOGGER(f'Manager error: the peer {peer_id} could not be increased.')
+            if not __increase_deposit_on_peer(peer_id=peer["id"], amount=MIN_DEPOSIT_PEER):
+                l.LOGGER(f'Manager error: the peer {peer["id"]} could not be increased.')
 
-
-def load_peer_instances_from_disk():
-    for peer in peers_id_iterator():
-        add_peer(peer_id=peer)
-
+def check_dev_clients():
+    sc = SQLConnection()
+    clients = sc.get_dev_clients()
+    if len(clients) == 0:
+        sc.add_client(client_id=f"dev-{uuid4()}", gas=MIN_DEPOSIT_PEER, last_usage=None)
+    else:
+        client_gas = sc.get_client_gas(client_id=clients[0])[0]
+        if client_gas < MIN_DEPOSIT_PEER:
+            gas_to_add = MIN_DEPOSIT_PEER - client_gas
+            sc.add_gas(client_id=clients[0], gas=gas_to_add)
 
 def manager_thread():
     init_contract_interfaces()
-    load_peer_instances_from_disk()
     while True:
+        check_dev_clients()
         maintain_containers()
         maintain_clients()
         peer_deposits()

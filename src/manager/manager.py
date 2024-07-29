@@ -2,7 +2,7 @@ import json
 import sqlite3
 import uuid
 from hashlib import sha3_256
-from typing import Optional
+from typing import Optional, Generator
 
 import docker as docker_lib
 import grpc
@@ -12,82 +12,50 @@ from google.protobuf.json_format import MessageToJson
 from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 
-from src.manager.system_cache import Client, SystemCache
+from src.database.sql_connection import SQLConnection, is_peer_available
 
 from src.utils import logger as logger
 from src.utils.env import ALLOW_GAS_DEBT, DATABASE_FILE, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
     DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
     SHA3_256_ID
 from src.utils.utils import get_network_name, \
-    is_peer_available, to_gas_amount, \
+    to_gas_amount, \
     generate_uris_by_peer_id
 
-sc = SystemCache()
+sc = SQLConnection()
 
+
+def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
+    client_ids = sc.get_dev_clients()
+    for client_id in sc.get_dev_clients():
+        if sc.get_client_gas(client_id=client_id)[0] > gas_amount:
+            yield client_id
 
 # Insert the instance if it does not exist.
-def insert_instance_on_db(instance: gateway_pb2.Instance) -> str:
+def add_peer_instance(instance: gateway_pb2.Instance) -> str:
     parsed_instance = json.loads(MessageToJson(instance))
     logger.LOGGER('Inserting instance on db: ' + str(parsed_instance))
 
-    # Connect to the SQLite database
-    with sqlite3.connect(database=DATABASE_FILE) as conn:
-        cursor: sqlite3.dbapi2.Cursor = conn.cursor()
+    peer_id = str(uuid.uuid4())
+    token: Optional[str] = instance.token if instance.HasField("token") else ""
+    metadata: Optional[bytes] = instance.instance_meta.SerializeToString() \
+        if instance.HasField('instance_meta') else None
+    app_protocol: bytes = instance.instance.api.app_protocol.SerializeToString()
 
-        try:
+    sc.add_peer(
+        peer_id=peer_id, token=token,
+        metadata=metadata, app_protocol=app_protocol
+        )
 
-            peer_id = str(uuid.uuid4())
-            token: Optional[str] = instance.token if instance.HasField("token") else ""
-            metadata: Optional[bytes] = instance.instance_meta.SerializeToString() \
-                if instance.HasField('instance_meta') else None
-            app_protocol: bytes = instance.instance.api.app_protocol.SerializeToString()
+    # Slots
+    for slot in instance.instance.uri_slot:
+        sc.add_slot(slot=slot, peer_id=peer_id)
 
-            # Attempt to insert a new row into the 'peer' table
-            cursor.execute("INSERT INTO peer (id, token, metadata, app_protocol) VALUES (?, ?, ?, ?)",
-                           (peer_id, token, metadata, app_protocol))
+    # Contracts
+    for contract_ledger in instance.instance.api.contract_ledger:
+        sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
-            # Slots
-            for slot in instance.instance.uri_slot:
-                internal_port: int = slot.internal_port
-                transport_protocol: bytes = bytes("tcp", "utf-8")
-                cursor.execute("INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
-                               (internal_port, transport_protocol, peer_id))
-                slot_id: int = cursor.lastrowid
-
-                for uri in slot.uri:
-                    ip: str = uri.ip
-                    port: int = uri.port
-                    cursor.execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
-                                   (ip, port, slot_id))
-
-            print('Contracts on ledger -> ', instance.instance)
-            # Contracts
-            for contract_ledger in instance.instance.api.contract_ledger:
-                contract: bytes = contract_ledger.contract
-                address: str = contract_ledger.contract_addr
-                ledger: str = contract_ledger.ledger
-
-                contract_hash: str = sha3_256(contract).hexdigest()
-                contract_hash_type: str = SHA3_256_ID.hex()
-
-                cursor.execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
-                               (contract_hash, contract_hash_type, contract))
-
-                cursor.execute("INSERT OR IGNORE INTO ledger (id) VALUES (?)",
-                               (ledger,))
-
-                cursor.execute("INSERT INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
-                               "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
-
-            conn.commit()
-        except Exception as e:
-            # Manage the error
-            print("Error on db:", str(e))
-            # Revert all changes
-            conn.rollback()
-
-        print('Get instance for peer ->', peer_id)
-
+    print('Get instance for peer ->', peer_id)
     return peer_id
 
 
@@ -95,28 +63,22 @@ def get_token_by_uri(uri: str) -> str:
     return sc.get_token_by_uri(uri=uri)
 
 
-def __push_token(token: str):
-    with sc.cache_locks.lock(token): sc.system_cache[token] = {"mem_limit": 0}
-
-
 def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
-    if token not in sc.system_cache.keys(): raise Exception('Manager error: token ' + token + ' does not exists.')
+    if not sc.container_exists(token=token):
+        logger.LOGGER(f'Manager error: token {token} does not exists.')
+        return False
     if sys_req.HasField('mem_limit'):
-        variation = sc.system_cache[token]['mem_limit'] - sys_req.mem_limit
-
+        variation = sc.get_sys_req(token=token)['mem_limit'] - sys_req.mem_limit
         if variation < 0:
             IOBigData().lock_ram(ram_amount=abs(variation))
-
         elif variation > 0:
             IOBigData().unlock_ram(ram_amount=variation)
-
         if variation != 0:
-            with sc.cache_locks.lock(token): sc.system_cache[token]['mem_limit'] = sys_req.mem_limit
-
+            sc.update_sys_req(token=token, mem_limit=sys_req.mem_limit)
     return True
 
 
-def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Container:
+def __get_container_by_token(token: str) -> docker_lib.models.containers.Container:
     return docker_lib.from_env().containers.get(
         container_id=token.split('##')[-1]
     )
@@ -125,17 +87,10 @@ def __get_cointainer_by_token(token: str) -> docker_lib.models.containers.Contai
 def __refund_gas(
         gas: int = None,
         token: str = None,
-        cache: dict = None,
         add_function=None,  # Lambda function if cache is not a dict of token:gas
 ) -> bool:
     try:
-        with sc.cache_locks.lock(token):
-            if add_function:
-                add_function(gas)
-            elif cache:
-                cache[token] += gas
-            else:
-                raise Exception('Function usage error: Not add_function or cache provided.')
+        add_function(gas)
     except Exception as e:
         logger.LOGGER('Manager error: ' + str(e))
         return False
@@ -145,24 +100,23 @@ def __refund_gas(
 # Only can be executed once.
 def __refund_gas_function_factory(
         gas: int = None,
-        cache: dict = None,
         token: str = None,
         container: list = None,
         add_function=None
 ) -> lambda: None:
     if container:
         container.append(
-            lambda: __refund_gas(gas=gas, cache=cache, token=token, add_function=add_function)
+            lambda: __refund_gas(gas=gas, token=token, add_function=add_function)
         )
 
 
 def increase_local_gas_for_client(client_id: str, amount: int) -> bool:
     logger.LOGGER('Increase local gas for client ' + client_id + ' of ' + str(amount))
-    if client_id not in sc.clients:  # TODO no debería de añadir un peer que no existe.
+    if not sc.client_exists(client_id=client_id):
         raise Exception('Client ' + client_id + ' does not exists.')
     if not __refund_gas(
             gas=amount,
-            add_function=lambda gas: sc.clients[client_id].add_gas(gas),
+            add_function=lambda gas: sc.add_gas(client_id=client_id, gas=gas),
             token=client_id
     ):
         raise Exception('Manager error: cannot increase local gas for client ' + client_id + ' by ' + str(amount))
@@ -170,111 +124,110 @@ def increase_local_gas_for_client(client_id: str, amount: int) -> bool:
 
 
 def spend_gas(
-        token_or_container_ip: str,  # If it's peer, the token is the peer id.
+        id: str,  # If it's peer, the token is the peer id.
         #  If it's a local service, the token could be the token or the container ip,
         #  on the last case, it takes the token with cache service perspective.
         gas_to_spend: int,
         refund_gas_function_container: list = None
 ) -> bool:
     gas_to_spend = int(gas_to_spend)
-    # l.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
+    # logger.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
     try:
-        # En caso de que sea un peer, el token es el peer id.
-        if token_or_container_ip in sc.clients and (
-                sc.clients[token_or_container_ip].gas >= gas_to_spend or ALLOW_GAS_DEBT):
-            with sc.cache_locks.lock(token_or_container_ip):
-                sc.clients[token_or_container_ip].reduce_gas(gas=gas_to_spend)
+        # En caso de que sea un peer, el token es el client id.
+        if sc.client_exists(client_id=id) and (
+                sc.get_client_gas(client_id=id)[0] >= gas_to_spend or ALLOW_GAS_DEBT):
+            sc.reduce_gas(client_id=id, gas=gas_to_spend)
             __refund_gas_function_factory(
                 gas=gas_to_spend,
-                token=token_or_container_ip,
-                add_function=lambda gas: sc.clients[token_or_container_ip].add_gas(gas),
+                token=id,
+                add_function=lambda gas: sc.add_gas(client_id=id, gas=gas),
                 container=refund_gas_function_container
             )
             return True
 
         # En caso de que token_or_container_ip sea el token del contenedor.
-        elif token_or_container_ip in sc.system_cache and (
-                sc.system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with sc.cache_locks.lock(token_or_container_ip):
-                sc.system_cache[token_or_container_ip]['gas'] -= gas_to_spend
-            __refund_gas_function_factory(
-                gas=gas_to_spend,
-                cache=sc.system_cache,
-                token=token_or_container_ip,
-                container=refund_gas_function_container
-            )
-            return True
-
-        # En caso de que token_or_container_ip sea la ip del contenedor.
-        token_or_container_ip = sc.cache_service_perspective[token_or_container_ip]
-        if token_or_container_ip in sc.system_cache and (
-                sc.system_cache[token_or_container_ip]['gas'] >= gas_to_spend or ALLOW_GAS_DEBT):
-            with sc.cache_locks.lock(token_or_container_ip):
-                sc.system_cache[token_or_container_ip]['gas'] -= gas_to_spend
-            __refund_gas_function_factory(
-                gas=gas_to_spend,
-                cache=sc.system_cache,
-                token=token_or_container_ip,
-                container=refund_gas_function_container
-            )
-            return True
+        else:
+            # id could be the container id or container ip. So check first if it's an id. If not, check if it's an ip.
+            is_id = sc.container_exists(token=id)
+            if not is_id:
+                try:
+                    id = sc.get_token_by_uri(uri=id)
+                    is_id = sc.container_exists(token=id)
+                except:
+                    is_id = False
+            if is_id:
+                current_gas = sc.get_internal_service_gas(token=id)
+                if current_gas >= gas_to_spend or ALLOW_GAS_DEBT:
+                    sc.update_gas_to_container(token=id, gas=current_gas - gas_to_spend)
+                    __refund_gas_function_factory(
+                        gas=current_gas,
+                        add_function=lambda gas: sc.update_gas_to_container(token=id, gas=gas),  # TODO control race conditions.
+                        token=id,
+                        container=refund_gas_function_container
+                    )
+                    return True
 
     except Exception as e:
-        logger.LOGGER('Manager error spending gas: ' + str(e) + ' ' + str(gas_to_spend) + ' ' + token_or_container_ip +
-                 '\n peer instances -> ' + str(sc.clients) +
-                 '\n system cache -> ' + str(sc.system_cache) +
-                 '\n cache service perspective -> ' + str(sc.cache_service_perspective) +
-                 '\n        ----------------------\n\n\n')
-
+        logger.LOGGER('Manager error spending gas: ' + str(e) + ' ' + str(gas_to_spend) + '\n        ----------------------\n\n\n')
     return False
 
 
 def generate_client() -> gateway_pb2.Client:
     # No collisions expected.
     client_id = uuid.uuid4().hex
-    sc.clients[client_id] = Client()
+    sc.add_client(client_id=client_id, gas=0, last_usage=None)
     logger.LOGGER('New client created ' + client_id)
     return gateway_pb2.Client(
         client_id=client_id,
     )
 
 
-def generate_client_id_in_other_peer(peer_id: str) -> str:
+def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
+    """
+    Retrieves or generates a client ID for a given peer. If the peer already has an associated client ID for our client,
+    it returns that ID. If not, it checks if the peer is available. If the peer is available, it generates a new client ID,
+    associates it with the peer, and returns the new client ID.
+
+    Args:
+        peer_id (str): The ID of the peer for which to retrieve or generate a client ID for our client.
+
+    Returns:
+        Optional[str]: The client ID associated with the peer for our client. Returns None if client ID generation or association fails.
+
+    Raises:
+        Exception: If the peer is not available (i.e., it does not have the minimum required open slots).
+
+    Detailed Steps:
+        1. Check if the peer already has an associated client ID for our client using `sc.get_peer_client`.
+        2. If a client ID is found, return it.
+        3. If no client ID is found, check if the peer is available using `is_peer_available`.
+        4. If the peer is not available, log the unavailability and raise an exception.
+        5. If the peer is available, generate a new client ID using `grpcbf.client_grpc`.
+        6. Log the generation of the new client ID.
+        7. Attempt to associate the new client ID with the peer using `sc.add_external_client`.
+        8. If the association is successful, return the new client ID.
+        9. If the association fails, return None.
+    """
+    client_id = sc.get_peer_client(peer_id=peer_id)
+    if client_id: return client_id
     if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
         logger.LOGGER('Peer ' + peer_id + ' is not available.')
         raise Exception('Peer not available.')
 
-    if peer_id not in sc.clients_on_other_peers:
-        logger.LOGGER('Generate new client for peer ' + peer_id)
-        with sc.cache_locks.lock(peer_id):
-            sc.clients_on_other_peers[peer_id] = str(next(grpcbf.client_grpc(
-                method=gateway_pb2_grpc.GatewayStub(
-                    grpc.insecure_channel(
-                        next(generate_uris_by_peer_id(peer_id=peer_id))
-                    )
-                ).GenerateClient,
-                indices_parser=gateway_pb2.Client,
-                partitions_message_mode_parser=True
-            )).client_id)
+    logger.LOGGER('Generate new client for peer ' + peer_id)
+    new_client_id = str(next(grpcbf.client_grpc(
+        method=gateway_pb2_grpc.GatewayStub(
+            grpc.insecure_channel(
+                next(generate_uris_by_peer_id(peer_id=peer_id))
+            )
+        ).GenerateClient,
+        indices_parser=gateway_pb2.Client,
+        partitions_message_mode_parser=True
+    )).client_id)
+    if not sc.add_external_client(peer_id=peer_id, client_id=new_client_id):
+        return  # If fails return None.
 
-    return sc.clients_on_other_peers[peer_id]
-
-
-def add_peer(
-        peer_id: str
-) -> bool:
-    try:
-        if peer_id not in sc.total_deposited_on_other_peers:
-            with sc.cache_locks.lock(peer_id):
-                sc.total_deposited_on_other_peers[peer_id] = 0
-
-        logger.LOGGER('Add peer ' + peer_id + ' with client ' +
-                      generate_client_id_in_other_peer(peer_id=peer_id)
-                      )
-        return True
-    except Exception as e:
-        print('Error en add_peer', e)
-        return False
+    return new_client_id
 
 
 def default_initial_cost(
@@ -282,36 +235,34 @@ def default_initial_cost(
 ) -> int:
     logger.LOGGER('Default cost for ' + (father_id if father_id else 'local'))
     return (int(
-        sc.get_gas_amount_by_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
+        sc.get_gas_amount_by_father_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
     ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
 
 def add_container(
         father_id: str,
         container: docker_lib.models.containers.Container,
-        initial_gas_amount: int,
-        system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
+        initial_gas_amount: Optional[int],
+        system_requirements_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> str:
-    logger.LOGGER('Add container for ' + father_id)
+    logger.LOGGER(f'Add container for {father_id}')
     token = father_id + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
-    if token in sc.system_cache.keys():
-        raise Exception('Manager error: ' + token + ' exists.')
-
-    __push_token(token=token)
-    sc.set_on_cache(
-        agent_id=father_id,
-        container_id___his_token_encrypt=container.id,
-        container_ip___peer_id=container.attrs['NetworkSettings']['IPAddress'],
-        container_id____his_token=token,
+    initial_gas_amount = initial_gas_amount if initial_gas_amount else default_initial_cost(
+        father_id=father_id)
+    sc.add_internal_service(
+        father_id=father_id,
+        container_id=container.id,
+        container_ip=container.attrs['NetworkSettings']['IPAddress'],
+        token=token,
+        gas=initial_gas_amount
     )
-    with sc.cache_locks.lock(token):
-        sc.system_cache[token]['gas'] = initial_gas_amount if initial_gas_amount else default_initial_cost(
-            father_id=father_id)
     if not container_modify_system_params(
             token=token,
-            system_requeriments_range=system_requeriments_range
+            system_requeriments_range=system_requirements_range
     ):
-        raise Exception('Manager error adding ' + token + '.')
+        logger.LOGGER(f'Exception during modify params of {token}.')
+        raise Exception(f'Exception during modify params of {token}.')
+    logger.LOGGER(f"Modifed params correctly on token {token}.")
     return token
 
 
@@ -319,7 +270,7 @@ def container_modify_system_params(
         token: str,
         system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> bool:
-    logger.LOGGER('Modify params of ' + token)
+    logger.LOGGER(f'Modify params of {token}.')
 
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
@@ -333,7 +284,7 @@ def container_modify_system_params(
     ):
         try:
             # Memory limit should be smaller than already set memoryswap limit, update the memoryswap at the same time
-            __get_cointainer_by_token(
+            __get_container_by_token(
                 token=token
             ).update(
                 mem_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR == 0 \
@@ -353,12 +304,13 @@ def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
 
 
 def get_sysresources(token: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
+    sys_req = sc.get_sys_req(token=token)
     return gateway_pb2.ModifyServiceSystemResourcesOutput(
         sysreq=celaut_pb2.Sysresources(
-            mem_limit=sc.system_cache[token]["mem_limit"],
+            mem_limit=sys_req["mem_limit"],
         ),
         gas=to_gas_amount(
-            gas_amount=sc.system_cache[token]["gas"]
+            gas_amount=sc.get_internal_service_gas(token=token)["gas"]
         )
     )
 
@@ -370,7 +322,7 @@ def prune_container(token: str) -> int:
     if get_network_name(ip_or_uri=token.split('##')[1]) == DOCKER_NETWORK:
         # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
         try:
-            refund = sc.purgue_internal(
+            refund = sc.purge_internal(
                 agent_id=token.split('##')[0],
                 container_id=token.split('##')[2],
                 container_ip=token.split('##')[1],

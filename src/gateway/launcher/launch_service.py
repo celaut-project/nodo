@@ -49,7 +49,7 @@ def launch_service(
                 refund_gas = []
 
                 if not spend_gas(
-                        token_or_container_ip=father_id,
+                        id=father_id,
                         gas_to_spend=from_gas_amount(estimated_cost.cost),
                         refund_gas_function_container=refund_gas
                 ):
@@ -72,7 +72,9 @@ def launch_service(
                         refund_gas=refund_gas
                     )
 
-            except: continue
+            except Exception as e:
+               l.LOGGER(f"Exception launching service {service} on peer {peer}: {str(e)}")
+               continue
 
         _err_msg = f"Can't launch this service {service_id}"
         l.LOGGER(_err_msg)

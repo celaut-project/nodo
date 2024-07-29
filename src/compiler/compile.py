@@ -37,6 +37,8 @@ class Compiler:
         os.system("mkdir " + CACHE + self.aux_id + "/building")
         os.system("mkdir " + CACHE + self.aux_id + "/filesystem")
 
+        l.LOGGER(f"Arch selected {arch}")
+
         # Build container and get compressed layers.
         if not os.path.isfile(self.path + 'Dockerfile'): raise Exception("Error: Dockerfile no encontrado.")
         os.system(

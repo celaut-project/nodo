@@ -18,8 +18,9 @@ from src.payment_system.contracts.ethereum.utils import transact, w3_generator_f
     catch_event
 from src.database.access_functions.ledgers import get_ledger_and_contract_addr_from_contract, NonUsedLedgerException, \
     get_private_key_from_ledger
+from src.utils.env import MAIN_DIR
 
-DIR = os.path.join(os.getcwd(), 'src/payment_system/contracts/ethereum/deposit_contract')
+DIR = f"{MAIN_DIR}/src/payment_system/contracts/ethereum/deposit_contract"
 CONTRACT: bytes = open(os.path.join(DIR, 'bytecode'), 'rb').read()
 CONTRACT_HASH: str = sha3_256(CONTRACT).hexdigest()
 

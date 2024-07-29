@@ -9,7 +9,7 @@ from grpcbigbuffer import client as grpcbb
 from protos import celaut_pb2, compile_pb2, gateway_pb2_grpcbf, gateway_pb2_grpc
 from src.commands.compile.generate_service_zip import __generate_service_zip
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
-from src.utils.env import METADATA_REGISTRY, REGISTRY
+from src.utils.env import GATEWAY_PORT, METADATA_REGISTRY, REGISTRY
 
 
 def __compile(zip, node: str):
@@ -34,10 +34,8 @@ def __on_peer(peer: str, service_zip_dir: str):
         print('b -> ', b, type(b), b.type if type(b) is grpcbb.Dir else None)
         print(f"_id -> {_id}")
         if type(b) is compile_pb2.CompileOutputServiceId:
-            if _id:
-                print(f"Ya se había proporcionado el id {_id}")
-            _id = b.id.hex()
-            print(f"El id es {_id}")
+            if not _id:
+                _id = b.id.hex()
         elif type(b) == celaut_pb2.Any.Metadata and _id:
             with open(f"{METADATA_REGISTRY}{_id}", "wb") as f:
                 f.write(b.SerializeToString())
@@ -46,8 +44,7 @@ def __on_peer(peer: str, service_zip_dir: str):
             os.system(f"mv {b.dir} {REGISTRY}{_id}")
         else:
             raise Exception('\nError with the compiler output:' + str(b))
-
-    os.remove(service_zip_dir)
+        
     print('service id -> ', _id)
 
     print('\n Validate the content.')
@@ -69,8 +66,13 @@ def compile_directory(directory: str):
     )
 
     # TODO check if dependencies has directories, and compile them before.
-    next((
+    try:
+        ip, port = None, None
+        for peer_id in list(get_peer_ids()):
+            for _ip, _port in get_peer_directions(peer_id=peer_id):
+                ip, port = _ip, _port
+        if not ip or not port:
+            ip, port = 'localhost', GATEWAY_PORT
         __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
-        for peer_id in get_peer_ids()
-        for ip, port in get_peer_directions(peer_id=peer_id)
-    ))
+    finally:
+        os.remove(service_zip_dir)

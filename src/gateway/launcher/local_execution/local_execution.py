@@ -97,7 +97,7 @@ def local_execution(
             father_id=father_id,
             container=container,
             initial_gas_amount=initial_gas_amount,
-            system_requeriments_range=gateway_pb2.ModifyServiceSystemResourcesInput(
+            system_requirements_range=gateway_pb2.ModifyServiceSystemResourcesInput(
                 min_sysreq=initial_system_resources, max_sysreq=initial_system_resources)  # TODO ??
         ),
         instance=celaut.Instance(

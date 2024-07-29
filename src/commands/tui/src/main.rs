@@ -1,7 +1,7 @@
-use peer_list::app::{App, AppResult};
-use peer_list::event::{Event, EventHandler};
-use peer_list::handler::handle_key_events;
-use peer_list::tui::Tui;
+use tui::app::{App, AppResult};
+use tui::event::{Event, EventHandler};
+use tui::handler::handle_key_events;
+use tui::tui::Tui;
 use std::io;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -22,11 +22,12 @@ async fn main() -> AppResult<()> {
     while app.running {
         // Render the user interface.
         tui.draw(&mut app)?;
-        app.refresh();
+        app.refresh().await; // Make sure to call .await for the async function
+
         // Handle events.
         match tui.events.next().await? {
             Event::Tick => app.tick(),
-            Event::Key(key_event) => handle_key_events(key_event, &mut app)?,
+            Event::Key(key_event) => handle_key_events(key_event, &mut app).await?,
             Event::Mouse(_) => {}
             Event::Resize(_, _) => {}
         }

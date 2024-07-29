@@ -3,7 +3,7 @@ from protos import gateway_pb2_grpc
 from grpcbigbuffer.client import client_grpc
 import grpc
 
-from src.manager.manager import insert_instance_on_db
+from src.manager.manager import add_peer_instance
 from src.utils import logger as l
 from src.gateway.utils import generate_gateway_instance
 
@@ -54,7 +54,7 @@ def Zeroconf(network: str) -> list:
 
     # Insert the instances.
     for peer_instance in peer_instances:
-        insert_instance_on_db(instance=peer_instance.instance)
+        add_peer_instance(instance=peer_instance.instance)
 
     return peer_instances
 
@@ -64,7 +64,7 @@ def connect(peer: str):
 
     try:
         # Call the appropriate function to insert the instance into the SQLite database
-        insert_instance_on_db(
+        add_peer_instance(
             next(client_grpc(
                 method=gateway_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(peer)

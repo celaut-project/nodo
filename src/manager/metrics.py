@@ -3,15 +3,15 @@ from grpcbigbuffer import client as grpcbf
 
 from protos import gateway_pb2, gateway_pb2_grpc
 
-from src.manager.manager import generate_client_id_in_other_peer
-from src.manager.system_cache import SystemCache
+from src.manager.manager import get_client_id_on_other_peer
+from src.database.sql_connection import SQLConnection, is_peer_available
 
 from src.utils.env import DOCKER_NETWORK
-from src.utils.utils import from_gas_amount, is_peer_available, get_network_name, to_gas_amount, \
+from src.utils.utils import from_gas_amount, get_network_name, to_gas_amount, \
     generate_uris_by_peer_id
 from src.utils.logger import LOGGER as log
 
-sc = SystemCache()
+sc = SQLConnection()
 
 
 def __get_metrics_client(client_id: str) -> gateway_pb2.Metrics:
@@ -27,7 +27,7 @@ def __get_metrics_client(client_id: str) -> gateway_pb2.Metrics:
     :raises KeyError: If the provided client ID does not exist in the cached data.
     """
     return gateway_pb2.Metrics(
-        gas_amount=to_gas_amount(sc.clients[client_id].gas),
+        gas_amount=to_gas_amount(sc.get_client_gas(client_id=client_id)[0]),
     )
 
 
@@ -87,22 +87,21 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
     :rtype: int
     :raises Exception: If an error occurs while fetching the gas amount.
     """
+
+    
+    client_id = get_client_id_on_other_peer(peer_id=peer_id)
     try:
         return from_gas_amount(
             __get_metrics_external(
                 peer_id=peer_id,
-                token=generate_client_id_in_other_peer(peer_id=peer_id)
+                token=client_id
             ).gas_amount
         )
     except:
         log('Error getting gas amount from ' + peer_id + '.')
         if is_peer_available(peer_id=peer_id):
             log('It is assumed that the client was invalid on peer ' + peer_id)
-            try:
-                sc.cache_locks.delete(peer_id)
-                del sc.clients_on_other_peers[peer_id]
-            finally:
-                pass
+            sc.delete_external_client(peer_id=peer_id)
         return 0
 
 
@@ -124,7 +123,7 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
     :raises InvalidTokenException: If the token format is invalid.
     :raises Exception: If an error occurs during the metric retrieval process.
     """
-    if token in sc.clients:
+    if sc.client_exists(client_id=token):
         return __get_metrics_client(client_id=token)
 
     elif '##' not in token:
@@ -139,5 +138,5 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
     else:
         return __get_metrics_external(
             peer_id=token.split('##')[1],  # peer_id
-            token=sc.external_token_hash_map[token.split('##')[2]]  # If the token starts with ## ...
+            token=sc.get_token_by_hashed_token(hashed_token=token.split('##')[2])  # If the token starts with ## ...
         )

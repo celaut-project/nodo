@@ -1,8 +1,9 @@
-import logging
+import logging, os
 
 from src.utils.env import GET_ENV, STORAGE
 
-USE_PRINT = GET_ENV(env='USE_PRINT', default=True)
+USE_PRINT = GET_ENV(env='USE_PRINT', default=False)
+if not os.path.exists(STORAGE): os.makedirs(STORAGE)
 
 logging.basicConfig(filename=f'{STORAGE}/app.log', level=logging.INFO,
                     format='%(asctime)s %(levelname)-8s %(message)s')
