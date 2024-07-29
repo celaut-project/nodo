@@ -473,7 +473,9 @@ impl<'a> App<'a> {
 
     pub async fn connect(&mut self) {
         if !self.connect_text.is_empty() {
-            let re = Regex::new(r"^(\d{1,3}\.){3}\d{1,3}:\d{1,5}$").unwrap();
+            let re = Regex::new(
+                    r"^.*:\d{1,5}$"
+                ).unwrap();
             if re.is_match(&self.connect_text) {
                 let args = vec!["connect".to_string(), self.connect_text.clone()];
                 let _ = self.execute_command(args).await;
