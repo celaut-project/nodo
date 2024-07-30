@@ -87,8 +87,8 @@ def local_execution(
         ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
         _port: int = external
 
+        l.LOGGER(f"Required tunnel to expose the service {require_tunnel} from ip {father_ip}")
         if require_tunnel:
-            l.LOGGER("Required tunnel to expose the service.")
             _response = TunnelSystem().generate_tunnel(ip=_ip, port=_port)
             if _response:
                 _ip, _port = _response

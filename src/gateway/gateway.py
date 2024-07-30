@@ -38,15 +38,14 @@ class Gateway(gateway_pb2_grpc.Gateway):
             raise Exception('Was imposible stop the service. ' + str(e))
 
     def GetInstance(self, request_iterator, context, **kwargs):
-        l.LOGGER('Request for instance by ' + str(context.peer()))
-        require_tunnel = TunnelSystem().from_tunnel(context.peer())
-        gateway_instance = generate_gateway_instance(
-            network=get_network_name(
-                ip_or_uri=get_only_the_ip_from_context(
-                    context_peer=context.peer()
-                )
+        l.LOGGER(f'Request for instance by {context.peer()}')
+        ip = get_only_the_ip_from_context(context_peer=context.peer())
+        if TunnelSystem().from_tunnel(ip=ip):
+            gateway_instance = TunnelSystem().get_gateway_tunnel()
+        else:
+            gateway_instance = generate_gateway_instance(
+                network=get_network_name(ip_or_uri=ip)
             )
-        ) if not require_tunnel else TunnelSystem().get_gateway_tunnel()
         yield from grpcbf.serialize_to_buffer(gateway_instance)
 
     def GenerateClient(self, request_iterator, context, **kwargs):
