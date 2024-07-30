@@ -39,6 +39,7 @@ install_git_if_needed
 # Define the repository URL and the target directory
 REPO_URL="https://github.com/celaut-project/nodo.git"
 TARGET_DIR="/nodo"
+SERVICE_FILE="/etc/systemd/system/nodo.service"
 
 # Check if the target directory already exists
 if [ -d "$TARGET_DIR" ]; then
@@ -89,8 +90,6 @@ SCRIPT_USER=$(logname)
 
 # Function to create nodo.service if it doesn't exist
 create_service_file() {
-  SERVICE_FILE="/etc/systemd/system/nodo.service"
-
   # Remove existing service file if it already exists
   if [ -f "$SERVICE_FILE" ]; then
     echo "Service file $SERVICE_FILE already exists. Removing it..."
@@ -132,18 +131,21 @@ EOF
   echo "Systemd daemon reloaded and nodo service started/enabled."
 }
 
-# Create nodo.service if it doesn't exist
-echo "Checking daemon ..."
-if ! systemctl list-units --full -all | grep -Fq "nodo.service"; then
-    echo "Needs to create nodo.service"
+# Check if the service file exists
+if [ ! -f "$SERVICE_FILE" ]; then
+    echo "nodo.service does not exist. Creating service file..."
     create_service_file
+else
+    echo "nodo.service already exists. Checking its status..."
+    systemctl status nodo.service || echo "Service is not running or not correctly installed."
 fi
 
-if systemctl list-units --full -all | grep -Fq "nodo.service"; then
-    systemctl restart nodo.service
+# Restart the service if it exists
+if systemctl status nodo.service >/dev/null 2>&1; then
+    echo "Restarting nodo.service..."
     systemctl restart nodo.service
 else
-    echo "Error: nodo.service does not exist. Please check the service creation process."
+    echo "Error: nodo.service does not exist or cannot be restarted. Please check the service creation process."
 fi
 
 # Function to create a wrapper script for nodo
