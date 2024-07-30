@@ -8,7 +8,7 @@ from src.utils.singleton import Singleton
 from protos import celaut_pb2 as celaut
 
 
-NGROK_AUTH_TOKEN: Optional[str] = GET_ENV("NGROK_AUTH_TOKEN", None)
+NGROK_AUTH_TOKEN: Optional[str] = GET_ENV("NGROK_AUTH_TOKEN", "")
 
 
 class TunnelSystem(metaclass=Singleton):
