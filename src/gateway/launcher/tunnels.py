@@ -1,31 +1,38 @@
-from typing import Any, Tuple
+from typing import Any, Tuple, Optional
 from pyngrok import ngrok
 import urllib.parse
 
 from src.gateway.utils import generate_gateway_instance
-from src.utils.env import GATEWAY_PORT
+from src.utils.env import GATEWAY_PORT, GET_ENV
 from src.utils.singleton import Singleton
 from protos import celaut_pb2 as celaut
 
 
-NGROK_AUTHTOKEN="2gbYS8S5lwSqrmzNS5aUZD4d0NB_5Xx88jib9ohb8GCfBxCVx"
+NGROK_AUTH_TOKEN: Optional[str] = GET_ENV("NGROK_AUTH_TOKEN", None)
+
 
 class TunnelSystem(metaclass=Singleton):
 
     def __init__(self) -> None:
-        self.gat_ip, self.gat_port = self.generate_tunnel("localhost", GATEWAY_PORT)
-        ngrok.set_auth_token(NGROK_AUTHTOKEN)
+        self.authenticated = bool(NGROK_AUTH_TOKEN)
+        if self.authenticated:
+            ngrok.set_auth_token(NGROK_AUTH_TOKEN)
+            self.gat_ip, self.gat_port = self.generate_tunnel("localhost", GATEWAY_PORT)
 
-    def get_url(self) -> str:
-        return f"{self.gat_ip}:{self.gat_port}"
+    def get_url(self) -> Optional[str]:
+        return f"{self.gat_ip}:{self.gat_port}" if self.authenticated else None
 
     def from_tunnel(self, ip: str) -> bool:
-        # If it's localhost, it's from the ngrok service. If are from docker network or outside, are self executed services and clients from internal networks without tunneling.
+        # If it's localhost, it's from the ngrok service. If are from docker network or outside,
+        # are self executed services and clients from internal networks without tunneling.
         decoded_str = ":".join(urllib.parse.unquote(ip).split(':')[1:-1])
         if decoded_str in ['127.0.0.1', '[::1]']: print(f"The ip {ip} it's from a tunnel.")
         return decoded_str in ['127.0.0.1', '[::1]']
 
-    def generate_tunnel(self, ip: str, port: int) -> Tuple[str, int]:
+    def generate_tunnel(self, ip: str, port: int) -> Optional[Tuple[str, int]]:
+        if not self.authenticated:
+            return None
+
         _ip, _port = ip, port
         try:
             listener = ngrok.connect(f"{_ip}:{_port}", proto="tcp")
@@ -36,7 +43,10 @@ class TunnelSystem(metaclass=Singleton):
             print(f"Excepción en módulo de ngrok {str(e)}.")
         return _ip, _port
 
-    def get_gateway_tunnel(self) -> Any:
+    def get_gateway_tunnel(self) -> Optional[Any]:
+        if not self.authenticated:
+            return None
+
         _gi = generate_gateway_instance('localhost')
         _gi.instance.uri_slot[0].uri.pop()
         _gi.instance.uri_slot[0].uri.append(
