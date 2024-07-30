@@ -4,7 +4,7 @@ from protos import gateway_pb2_grpc, gateway_pb2
 from src.compiler.compile import compile_zip
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
-from src.gateway.launcher.tunnels import TunnelSystem
+from src.tunneling_system.tunnels import TunnelSystem
 from src.gateway.utils import generate_gateway_instance
 from src.manager.manager import prune_container, generate_client, get_token_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources

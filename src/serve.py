@@ -6,7 +6,7 @@ import netifaces as ni
 
 from protos import gateway_pb2, gateway_pb2_grpc
 from src.gateway.gateway import Gateway
-from src.gateway.launcher.tunnels import TunnelSystem
+from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.maintain_thread import manager_thread
 from src.utils import logger as l
 from src.utils.zeroconf import Zeroconf

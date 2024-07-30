@@ -6,7 +6,7 @@ from protos import celaut_pb2 as celaut, gateway_pb2
 from src.builder import build
 from src.gateway.launcher.local_execution.create_container import create_container
 from src.gateway.launcher.local_execution.set_config import set_config
-from src.gateway.launcher.tunnels import TunnelSystem
+from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.manager import default_initial_cost, add_container
 from src.utils import utils, logger as l
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
