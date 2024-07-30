@@ -121,18 +121,27 @@ WantedBy=multi-user.target
 EOF
 
   # Set the permissions for the service file
+  echo "Setting the permissions for the service file..."
   chmod 644 $SERVICE_FILE
 
   # Reload systemd, enable and start the service
-  echo "Reloading systemd, enabling, and starting the nodo service..."
+  echo "Reloading systemd daemon, enabling, and starting the nodo service..."
   systemctl daemon-reload
   systemctl enable nodo.service
   systemctl start nodo.service
+  echo "Systemd daemon reloaded and nodo service started/enabled."
 }
 
 # Create nodo.service if it doesn't exist
 if ! systemctl list-units --full -all | grep -Fq "nodo.service"; then
-  create_service_file
+    create_service_file
+fi
+
+if systemctl list-units --full -all | grep -Fq "nodo.service"; then
+    systemctl restart nodo.service
+    systemctl restart nodo.service
+else
+    echo "Error: nodo.service does not exist. Please check the service creation process."
 fi
 
 # Function to create a wrapper script for nodo
@@ -170,9 +179,6 @@ if ! ./$UPDATE_ENV_SCRIPT "$TARGET_DIR"; then
 fi
 
 chown -R $SCRIPT_USER:$SCRIPT_USER $TARGET_DIR
-
-systemctl restart nodo.service
-systemctl restart nodo.service
 
 echo "Installation and service setup completed successfully. The repository is located at $TARGET_DIR."
 echo "********** You can now use the 'nodo' command. **********"
