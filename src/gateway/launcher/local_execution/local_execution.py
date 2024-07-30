@@ -24,6 +24,10 @@ def local_execution(
         refund_gas: List[Callable]
 ) -> gateway_pb2.Instance:
 
+    #  TODO check this.
+    father_id = father_id if father_id else ""
+    father_ip = father_ip if father_ip else ""
+
     initial_gas_amount: int = from_gas_amount(config.initial_gas_amount) \
         if config.HasField("initial_gas_amount") else default_initial_cost(father_id=father_id)
 
@@ -83,15 +87,25 @@ def local_execution(
         ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
         _port: int = external
 
-        if require_tunnel: _ip, _port = TunnelSystem().generate_tunnel(ip=_ip, port=_port)
-        uri_slot.uri.append(
-            celaut.Instance.Uri(
-                ip=_ip,
-                port=_port
-            )
-        )
+        if require_tunnel:
+            l.LOGGER("Required tunnel to expose the service.")
+            _response = TunnelSystem().generate_tunnel(ip=_ip, port=_port)
+            if _response:
+                _ip, _port = _response
+                l.LOGGER(f"Using tunnel {_ip}:{_port}")
+                uri_slot.uri.append(
+                    celaut.Instance.Uri(
+                        ip=_ip,
+                        port=_port
+                    )
+                )
+            else:
+                _msg = "Any tunnel available. Instance can't be serve."
+                l.LOGGER(_msg)
+                # TODO Delete container.
+                raise Exception(_msg)
 
-    l.LOGGER('Thrown out a new instance by ' + father_id + ' of the container_id ' + container.id)
+    l.LOGGER(f'Thrown out a new instance by {father_id} of the container_id {container.id}')
     return gateway_pb2.Instance(
         token=add_container(
             father_id=father_id,
