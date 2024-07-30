@@ -133,7 +133,9 @@ EOF
 }
 
 # Create nodo.service if it doesn't exist
+echo "Checking daemon ..."
 if ! systemctl list-units --full -all | grep -Fq "nodo.service"; then
+    echo "Needs to create nodo.service"
     create_service_file
 fi
 
