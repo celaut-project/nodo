@@ -53,7 +53,6 @@ def serve():
     l.LOGGER('EXTERNAL_COST_TIMEOUT -> ' + str(EXTERNAL_COST_TIMEOUT))
 
     l.LOGGER('Starting gateway at port' + str(GATEWAY_PORT))
-    l.LOGGER(f'Tunnel available at {TunnelSystem().get_url()}')
 
     server.start()
     server.wait_for_termination()

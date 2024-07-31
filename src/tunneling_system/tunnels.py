@@ -1,4 +1,4 @@
-from typing import Any, Tuple, Optional
+from typing import Any, Tuple, Optional, Dict, List
 from pyngrok import ngrok
 import urllib.parse
 
@@ -8,6 +8,8 @@ from src.utils.logger import LOGGER
 from src.utils.singleton import Singleton
 from protos import celaut_pb2 as celaut
 
+
+NUM_GATEWAY_TUNNELS = 1
 
 class Provider:
     def __init__(self, name: str, auth_token: str, max_instances: int):
@@ -33,7 +35,7 @@ class Provider:
 class TunnelSystem(metaclass=Singleton):
     def __init__(self) -> None:
         self.providers: Dict[str, Provider] = {}
-        self.active_provider: Optional[Provider] = None
+        self.gateway_tunnels: List[Tuple[str, int]] = []
 
         # Load Ngrok tokens from environment and create providers
         self._initialize_providers()
@@ -54,22 +56,20 @@ class TunnelSystem(metaclass=Singleton):
                 )
                 LOGGER(f"Added provider: {provider_name}")
 
-    def select_provider(self, name: str) -> None:
+    def __select_provider(self) -> Optional[str]:
         # Select the active provider for tunnel operations
-        if name in self.providers:
-            self.active_provider = self.providers[name]
-            ngrok.set_auth_token(self.active_provider.auth_token)
-            LOGGER(f"Selected provider: {name}")
+        for name, provider in self.providers.items():
+            if provider.can_add_tunnel():
+                ngrok.set_auth_token(provider.auth_token)
+                return name
+        LOGGER("No available provider or maximum instances reached.")
 
     def generate_tunnel(self, ip: str, port: int) -> Optional[Tuple[str, int]]:
-        if not self.active_provider or not self.active_provider.can_add_tunnel():
-            LOGGER("No available provider or maximum instances reached.")
-            return None
-
         _ip, _port = ip, port
+        provider = self.__select_provider()
         try:
             listener = ngrok.connect(f"{_ip}:{_port}", proto="tcp")
-            LOGGER(f"Ingress established at: {listener.public_url} for the service slot at uri: {_ip}:{_port}")
+            LOGGER(f"Ingress established at: {listener.public_url} for the service slot at uri: {_ip}:{_port} using provider {provider}")
             _ip = listener.public_url.split("://")[1].split(":")[0]
             _port = int(listener.public_url.split("://")[1].split(":")[1])
             self.active_provider.add_tunnel((_ip, _port))
@@ -77,15 +77,12 @@ class TunnelSystem(metaclass=Singleton):
             LOGGER(f"Exception in Ngrok module: {str(e)}.")
         return _ip, _port
 
-    def close_tunnel(self, tunnel: Tuple[str, int]) -> None:
-        if self.active_provider:
-            self.active_provider.remove_tunnel(tunnel)
+    def close_tunnel(self, provider: str, tunnel: Tuple[str, int]):
+        if provider in self.providers:
+            self.providers[provider].remove_tunnel(tunnel)
             LOGGER(f"Closed tunnel: {tunnel}")
-
-    def get_url(self) -> Optional[str]:
-        if self.active_provider:
-            return f"{self.gat_ip}:{self.gat_port}"
-        return None
+        else:
+            LOGGER("Provider {provider} not found.")
 
     def from_tunnel(self, ip: str) -> bool:
         """
@@ -100,16 +97,31 @@ class TunnelSystem(metaclass=Singleton):
         """
         return urllib.parse.unquote(ip) in ['127.0.0.1', '[::1]']
 
-    def get_gateway_tunnel(self) -> Optional[Any]:
-        if not self.active_provider:
-            return None
+    def __generate_gateway_tunnel(self):
+        LOGGER("Generate gateway tunnels.")
+        for i in range(0, NUM_GATEWAY_TUNNELS - len(self.gateway_tunnels)):
+            tunnel = self.generate_tunnel("localhost", GATEWAY_PORT)
+            if tunnel:
+                self.gateway_tunnels.append(tunnel)
 
+    def get_gateway_tunnel(self) -> Optional[Any]:
         _gi = generate_gateway_instance('localhost')
         _gi.instance.uri_slot[0].uri.pop()
+
+        if not self.gateway_tunnels:
+            self.__generate_gateway_tunnel()
+
+        for gat_ip, gat_port in self.gateway_tunnels:
+            # TODO check if tunnel is available.
+            break
+
+        if not gat_ip or not gat_port:
+            return None
+
         _gi.instance.uri_slot[0].uri.append(
             celaut.Instance.Uri(
-                ip=self.gat_ip,
-                port=self.gat_port
+                ip=gat_ip,
+                port=gat_port
             )
         )
         return _gi
