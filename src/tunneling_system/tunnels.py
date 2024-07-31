@@ -115,6 +115,12 @@ class TunnelSystem(metaclass=Singleton):
                 if tunnel:
                     self.gateway_tunnels.append(tunnel)
 
+    def get_gateway_urls(self) -> List[str]:
+        if not self.gateway_tunnels:
+            self.__generate_gateway_tunnel()
+        return [f"{ip}:{port}" for ip, port in self.gateway_tunnels]
+
+
     def get_gateway_tunnel(self) -> Optional[Any]:
         _gi = generate_gateway_instance('localhost')
         _gi.instance.uri_slot[0].uri.pop()

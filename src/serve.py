@@ -1,7 +1,7 @@
 import threading
 from concurrent import futures
 
-import grpc
+import grpc, json
 import netifaces as ni
 
 from protos import gateway_pb2, gateway_pb2_grpc
@@ -53,6 +53,7 @@ def serve():
     l.LOGGER('EXTERNAL_COST_TIMEOUT -> ' + str(EXTERNAL_COST_TIMEOUT))
 
     l.LOGGER('Starting gateway at port' + str(GATEWAY_PORT))
+    l.LOGGER(f"Available tunnels: {json.dumps(TunnelSystem().get_gateway_urls(), indent=4)}")
 
     server.start()
     server.wait_for_termination()
