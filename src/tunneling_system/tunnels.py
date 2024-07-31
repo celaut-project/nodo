@@ -1,6 +1,7 @@
 from typing import Any, Tuple, Optional, Dict, List
 from pyngrok import ngrok
 import urllib.parse
+import random, socket
 
 from src.gateway.utils import generate_gateway_instance
 from src.utils.env import GATEWAY_PORT, GET_ENV
@@ -24,13 +25,20 @@ class Provider:
 
     def add_tunnel(self, tunnel: Tuple[str, int]) -> None:
         # Add a tunnel to the provider's list
-        if self.can_add_tunnel():
-            self.current_tunnels.append(tunnel)
+        self.current_tunnels.append(tunnel)
 
     def remove_tunnel(self, tunnel: Tuple[str, int]) -> None:
         # Remove a tunnel from the provider's list
         if tunnel in self.current_tunnels:
             self.current_tunnels.remove(tunnel)
+
+    def is_tunnel_active(self, tunnel: Tuple[str, int]) -> bool:
+        try:
+            ip, port = tunnel
+            with socket.create_connection((ip, port), timeout=5):
+                return True
+        except OSError:
+            return False
 
 class TunnelSystem(metaclass=Singleton):
     def __init__(self) -> None:
@@ -38,9 +46,9 @@ class TunnelSystem(metaclass=Singleton):
         self.gateway_tunnels: List[Tuple[str, int]] = []
 
         # Load Ngrok tokens from environment and create providers
-        self._initialize_providers()
+        self.__initialize_providers()
 
-    def _initialize_providers(self) -> None:
+    def __initialize_providers(self) -> None:
         # Get the Ngrok auth tokens from environment variables
         tokens = [("2gbYS8S5lwSqrmzNS5aUZD4d0NB_5Xx88jib9ohb8GCfBxCVx", 3)]
 
@@ -69,10 +77,11 @@ class TunnelSystem(metaclass=Singleton):
         provider = self.__select_provider()
         try:
             listener = ngrok.connect(f"{_ip}:{_port}", proto="tcp")
-            LOGGER(f"Ingress established at: {listener.public_url} for the service slot at uri: {_ip}:{_port} using provider {provider}")
+            LOGGER(f"""Ingress established at: {listener.public_url} for the
+                service slot at uri: {_ip}:{_port} using provider {provider}""")
             _ip = listener.public_url.split("://")[1].split(":")[0]
-            _port = int(listener.public_url.split("://")[1].split(":")[1])
-            self.active_provider.add_tunnel((_ip, _port))
+            _port = int(listener.public_url.split("://")[1].split(":")[1])  # typed: ignore
+            self.providers[provider].add_tunnel((_ip, _port))
         except Exception as e:
             LOGGER(f"Exception in Ngrok module: {str(e)}.")
         return _ip, _port
@@ -82,7 +91,7 @@ class TunnelSystem(metaclass=Singleton):
             self.providers[provider].remove_tunnel(tunnel)
             LOGGER(f"Closed tunnel: {tunnel}")
         else:
-            LOGGER("Provider {provider} not found.")
+            LOGGER(f"Provider {provider} not found.")
 
     def from_tunnel(self, ip: str) -> bool:
         """
@@ -98,11 +107,13 @@ class TunnelSystem(metaclass=Singleton):
         return urllib.parse.unquote(ip) in ['127.0.0.1', '[::1]']
 
     def __generate_gateway_tunnel(self):
-        LOGGER("Generate gateway tunnels.")
-        for i in range(0, NUM_GATEWAY_TUNNELS - len(self.gateway_tunnels)):
-            tunnel = self.generate_tunnel("localhost", GATEWAY_PORT)
-            if tunnel:
-                self.gateway_tunnels.append(tunnel)
+        _r = NUM_GATEWAY_TUNNELS - len(self.gateway_tunnels)
+        if _r:
+            LOGGER("Generate gateway tunnels.")
+            for i in range(0, _r):
+                tunnel = self.generate_tunnel("localhost", GATEWAY_PORT)
+                if tunnel:
+                    self.gateway_tunnels.append(tunnel)
 
     def get_gateway_tunnel(self) -> Optional[Any]:
         _gi = generate_gateway_instance('localhost')
@@ -111,7 +122,7 @@ class TunnelSystem(metaclass=Singleton):
         if not self.gateway_tunnels:
             self.__generate_gateway_tunnel()
 
-        for gat_ip, gat_port in self.gateway_tunnels:
+        for gat_ip, gat_port in random.sample(self.gateway_tunnels, k=len(self.gateway_tunnels)):
             # TODO check if tunnel is available.
             break
 
