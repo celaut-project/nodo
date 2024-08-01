@@ -50,7 +50,8 @@ class TunnelSystem(metaclass=Singleton):
 
     def __initialize_providers(self) -> None:
         # Get the Ngrok auth tokens from environment variables
-        tokens = [("2gbYS8S5lwSqrmzNS5aUZD4d0NB_5Xx88jib9ohb8GCfBxCVx", 3)]
+        ngrok_key = GET_ENV("NGROK_KEY", "")
+        tokens = [(ngrok_key, 3)] if ngrok_key else []
 
         for i, token_t in enumerate(tokens):
             token, max_i = token_t
