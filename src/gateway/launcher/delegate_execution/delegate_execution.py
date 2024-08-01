@@ -68,3 +68,4 @@ def delegate_execution(
             refund_gas.pop()()
         except IndexError:
             pass
+        raise e
