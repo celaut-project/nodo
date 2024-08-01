@@ -73,7 +73,7 @@ def launch_service(
                     )
 
             except Exception as e:
-               l.LOGGER(f"Exception launching service {service} on peer {peer}: {str(e)}")
+               l.LOGGER(f"Exception launching service on peer {peer}: {str(e)}")
                continue
 
         _err_msg = f"Can't launch this service {service_id}"
