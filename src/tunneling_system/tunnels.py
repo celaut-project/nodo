@@ -82,9 +82,9 @@ class TunnelSystem(metaclass=Singleton):
             _ip = listener.public_url.split("://")[1].split(":")[0]
             _port = int(listener.public_url.split("://")[1].split(":")[1])  # typed: ignore
             self.providers[provider].add_tunnel((_ip, _port))
+            return _ip, _port
         except Exception as e:
             LOGGER(f"Exception in Ngrok module: {str(e)}.")
-        return _ip, _port
 
     def close_tunnel(self, provider: str, tunnel: Tuple[str, int]):
         if provider in self.providers:
