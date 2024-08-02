@@ -1,54 +1,15 @@
 import os
-from typing import Generator, Optional
+from typing import Generator
 
 from grpcbigbuffer import client as grpcbf, buffer_pb2
-from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
 
-from protos import celaut_pb2 as celaut
-from src.gateway.launcher.launch_service import launch_service
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable
-from src.manager.resources_manager import mem_manager
+from src.gateway.launcher.launch_service import launch_service
 from src.utils import logger as l
-from src.utils.env import REGISTRY, METADATA_REGISTRY
-from src.utils.utils import get_only_the_ip_from_context, read_file
+from src.utils.env import REGISTRY
+from src.utils.utils import get_only_the_ip_from_context, read_metadata_from_disk, read_service_from_disk
 
 CONFIGURATION_REQUIRED = False  # TODO añadir como variable de entorno. Por si el nodo debe de ser mas estricto.
-
-
-def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
-    l.LOGGER('Getting ' + service_hash + ' service from the local registry.')
-    filename: str = os.path.join(REGISTRY, service_hash)
-    if not os.path.exists(filename):
-        return None
-
-    if os.path.isdir(filename):
-        filename = filename + '/' + WITHOUT_BLOCK_POINTERS_FILE_NAME
-    try:
-        with mem_manager(2 * os.path.getsize(filename)) as iolock:
-            service = celaut.Service()
-            service.ParseFromString(read_file(filename=filename))
-            return service
-    except (IOError, FileNotFoundError):
-        l.LOGGER('The service was not on registry.')
-        return None
-
-
-def read_metadata_from_disk(service_hash: str) -> Optional[celaut.Any.Metadata]:
-    filename: str = os.path.join(METADATA_REGISTRY, service_hash)
-    if not os.path.exists(filename):
-        return None
-
-    try:
-        metadata = celaut.Any.Metadata()
-        metadata.ParseFromString(read_file(filename=filename))
-        return metadata
-    except (IOError, FileNotFoundError):
-        l.LOGGER('The metadata was not on registry.')
-        return None
-
-
-class BreakIterator:
-    pass
 
 
 class StartServiceIterable(AbstractServiceIterable):

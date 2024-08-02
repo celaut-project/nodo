@@ -100,6 +100,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
 
+    def GetService(self, request_iterator, context, **kwargs):
+        yield from GetServiceIterable(request_iterator, context)
+
+
     def Payable(self, request_iterator, context, **kwargs):
         l.LOGGER('Request for payment.')
         payment = next(grpcbf.parse_from_buffer(

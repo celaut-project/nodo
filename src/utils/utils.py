@@ -1,14 +1,18 @@
+import os
 import socket
-from typing import Generator
 import typing
+from typing import Generator, Optional
 
-from grpcbigbuffer.client import Dir
 import netifaces as ni
+from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
+from grpcbigbuffer.client import Dir
 
+from protos import celaut_pb2 as celaut
+from protos import gateway_pb2
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
-from protos import celaut_pb2 as celaut, gateway_pb2
-
-from src.utils.env import REGISTRY
+from src.manager.resources_manager import mem_manager
+from src.utils import logger as l
+from src.utils.env import REGISTRY, METADATA_REGISTRY
 from src.utils.verify import get_service_hex_main_hash
 
 
@@ -38,6 +42,38 @@ def service_hashes(
         yield _hash
 
 
+def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
+    l.LOGGER('Getting ' + service_hash + ' service from the local registry.')
+    filename: str = os.path.join(REGISTRY, service_hash)
+    if not os.path.exists(filename):
+        return None
+
+    if os.path.isdir(filename):
+        filename = filename + '/' + WITHOUT_BLOCK_POINTERS_FILE_NAME
+    try:
+        with mem_manager(2 * os.path.getsize(filename)) as iolock:
+            service = celaut.Service()
+            service.ParseFromString(read_file(filename=filename))
+            return service
+    except (IOError, FileNotFoundError):
+        l.LOGGER('The service was not on registry.')
+        return None
+
+
+def read_metadata_from_disk(service_hash: str) -> Optional[celaut.Any.Metadata]:
+    filename: str = os.path.join(METADATA_REGISTRY, service_hash)
+    if not os.path.exists(filename):
+        return None
+
+    try:
+        metadata = celaut.Any.Metadata()
+        metadata.ParseFromString(read_file(filename=filename))
+        return metadata
+    except (IOError, FileNotFoundError):
+        l.LOGGER('The metadata was not on registry.')
+        return None
+
+
 def service_extended(
         metadata: celaut.Any.Metadata,
         config: typing.Optional[gateway_pb2.Configuration] = None,
@@ -45,7 +81,6 @@ def service_extended(
         client_id: typing.Optional[str] = None,
         recursion_guard_token: typing.Optional[str] = None
 ) -> Generator[object, None, None]:
-
     # 1
     if client_id:
         yield gateway_pb2.Client(
@@ -76,7 +111,6 @@ def service_extended(
         )
 
 
-
 def get_free_port() -> int:
     with socket.socket() as s:
         s.bind(('', 0))
@@ -90,7 +124,8 @@ def get_only_the_ip_from_context_method(context_peer: str) -> str:
     try:
         ipv = context_peer.split(':')[0]
         if ipv in ('ipv4', 'ipv6'):
-            ip = context_peer[5:-1 * (len(context_peer.split(':')[-1]) + 1)]  # The format is 'ipv4:49.123.106.100:4442', we don't want 'ipv4:' nor the port.
+            ip = context_peer[5:-1 * (len(context_peer.split(':')[
+                                              -1]) + 1)]  # The format is 'ipv4:49.123.106.100:4442', we don't want 'ipv4:' nor the port.
             return ip[1:-1] if ipv == 'ipv6' else ip
     except Exception as e:
         raise Exception('Error getting the ip from the context: ' + str(e))
@@ -170,21 +205,21 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     yield from (
         peer_id for peer_id in get_peer_ids()
         if not ignore_network or all(
-            not address_in_network(
-                ip_or_uri=uri,
-                net=ignore_network
-            ) for uri in generate_uris_by_peer_id(
-                peer_id=peer_id
-            )
+        not address_in_network(
+            ip_or_uri=uri,
+            net=ignore_network
+        ) for uri in generate_uris_by_peer_id(
+            peer_id=peer_id
         )
+    )
     )
 
 
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
     yield from (
         ip + ':' + str(port) for ip, port in get_peer_directions(
-            peer_id=peer_id
-        ) if is_open(ip=ip, port=port)
+        peer_id=peer_id
+    ) if is_open(ip=ip, port=port)
     )
 
 
