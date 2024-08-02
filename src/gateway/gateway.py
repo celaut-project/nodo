@@ -59,11 +59,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
         token = get_token_by_uri(
             uri=get_only_the_ip_from_context(context_peer=context.peer())
         )
-        refound_gas = []
+        refund_gas = []
         if not spend_gas(
                 id=token,
                 gas_to_spend=MODIFY_SERVICE_SYSTEM_RESOURCES_COST * GAS_COST_FACTOR,
-                refund_gas_function_container=refound_gas
+                refund_gas_function_container=refund_gas
         ): raise Exception('Launch service error spending gas for ' + context.peer())
         if not container_modify_system_params(
                 token=token,
@@ -74,7 +74,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 ))
         ):
             try:
-                refound_gas.pop()()
+                refund_gas.pop()()
             except IndexError:
                 pass
             raise Exception('Exception on service modify method.')
