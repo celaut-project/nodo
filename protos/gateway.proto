@@ -106,6 +106,7 @@ service Gateway {
     rpc Compile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // bytes -> CompileOutputServiceId || compile.ServiceWithMeta
 
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> EstimatedCost
+    rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {}  // ( celaut.Any.Metadata.HashTag.Hash=H ) -> Service
     rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Payment -> Empty
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
 }
