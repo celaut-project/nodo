@@ -18,6 +18,7 @@ class GetServiceEstimatedCostIterable(AbstractServiceIterable):
 
     def start(self):
         log('Request for the cost of a service.')
+        return super().start()
 
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
         try:
@@ -41,3 +42,7 @@ class GetServiceEstimatedCostIterable(AbstractServiceIterable):
         finally:
             yield buffer_pb2.Buffer(signal=True)
             raise BreakIteration
+
+    def final(self):
+        log('End request for the cost of a service.')
+        return super().final()
