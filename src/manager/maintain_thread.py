@@ -15,7 +15,16 @@ from src.utils.env import DOCKER_CLIENT, MIN_SLOTS_OPEN_PER_PEER, MIN_DEPOSIT_PE
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
 
 sc = SQLConnection()
-wanted_services = {}
+
+"""
+It doesn't make sense to store this on disk (DB), as each of the elements in the list (str, bool)
+requires a search in the pairs to obtain a complete service.
+Therefore, the bottleneck is in the number of operations rather than the cost of the object in memory.
+Thus, what would make sense, as a control against attacks, is a maximum number of elements in the list,
+so that if it 'fills up,' no more elements can enter, and they are not searched until requested again
+at some other time when there is space.
+"""
+wanted_services = {}  # str: bool
 
 
 def check_wanted_services():
