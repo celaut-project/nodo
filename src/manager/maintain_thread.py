@@ -28,7 +28,7 @@ wanted_services = {}  # str: bool
 
 
 def check_wanted_services():
-    pass
+    pass # TODO get services on peers. (balancer or/and gateway.iterable)
 
 def maintain_containers():
     for token in sc.get_all_internal_service_tokens():
