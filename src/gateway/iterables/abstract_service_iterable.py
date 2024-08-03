@@ -11,6 +11,7 @@ from src.gateway.utils import save_service
 from src.utils import logger as l
 from src.utils.env import SHA3_256_ID, \
     REGISTRY, METADATA_REGISTRY
+from src.manager.maintain_thread import wanted_services
 
 
 class BreakIteration(Exception):
@@ -19,8 +20,12 @@ class BreakIteration(Exception):
 
 def find_service_hash(_hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash) \
         -> Tuple[Optional[str], bool]:
-    return _hash.value.hex(), _hash.value.hex() in [s for s in os.listdir(REGISTRY)] if SHA3_256_ID == _hash.type \
-        else (None, False)
+    if SHA3_256_ID == _hash.type:
+        value = _hash.value.hex()
+        registry = os.listdir(REGISTRY)
+        return value, value in registry
+    else:
+        return (None, False)
 
 
 def combine_metadata(service_hash: str, request_metadata: Optional[celaut.Any.Metadata]) -> celaut.Any.Metadata:
@@ -150,4 +155,6 @@ class AbstractServiceIterable:
         pass
 
     def final(self):
-        pass
+        if self.service_hash and not self.service_saved and self.service_hash not in wanted_services:
+            l.LOGGER(f"Store the service hash on the wanted_list {self.service_hash}.  On the list {wanted_services.keys()}")
+            wanted_services[self.service_hash] = False

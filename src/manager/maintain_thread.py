@@ -15,7 +15,11 @@ from src.utils.env import DOCKER_CLIENT, MIN_SLOTS_OPEN_PER_PEER, MIN_DEPOSIT_PE
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
 
 sc = SQLConnection()
+wanted_services = {}
 
+
+def check_wanted_services():
+    pass
 
 def maintain_containers():
     for token in sc.get_all_internal_service_tokens():
@@ -88,6 +92,7 @@ def check_dev_clients():
 def manager_thread():
     init_contract_interfaces()
     while True:
+        check_wanted_services()
         check_dev_clients()
         maintain_containers()
         maintain_clients()
