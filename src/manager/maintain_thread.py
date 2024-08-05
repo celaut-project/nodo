@@ -8,7 +8,7 @@ from grpcbigbuffer import client as peerpc
 import docker as docker_lib
 
 from protos import celaut_pb2 as celaut, gateway_pb2_grpc, gateway_pb2
-from protos.gateway_pb2_grpcbf import StartService_input_indices
+from protos.gateway_pb2_grpcbf import StartService_input_indices, StartService_input_message_mode
 from src.manager.manager import prune_container, spend_gas
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
@@ -67,6 +67,7 @@ def check_wanted_services():
                             partitions_message_mode_parser=True,
                             indices_serializer=StartService_input_indices,
                             indices_parser=StartService_input_indices,
+                            partitions_message_mode_parser=StartService_input_message_mode,
                             input=_hash
                     ):
                         l.LOGGER(f"type of chunk -> {type(b)}")
