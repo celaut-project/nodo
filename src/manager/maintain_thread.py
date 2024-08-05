@@ -64,7 +64,6 @@ def check_wanted_services():
                                     next(generate_uris_by_peer_id(peer))
                                 )
                             ).GetService,  # TODO An timeout should be implemented when requesting a service.
-                            partitions_message_mode_parser=True,
                             indices_serializer=StartService_input_indices,
                             indices_parser=StartService_input_indices,
                             partitions_message_mode_parser=StartService_input_message_mode,
