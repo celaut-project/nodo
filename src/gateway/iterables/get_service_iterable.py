@@ -20,7 +20,7 @@ class GetServiceIterable(AbstractServiceIterable):
                     metadata=read_metadata_from_disk(service_hash=self.service_hash) if not self.metadata else self.metadata,
                     recursion_guard_token=self.recursion_guard_token
                 ),
-                indices=StartService_input_indices
+                indices=StartService_input_indices  # Client and configuration not needed.
             )
         except build.UnsupportedArchitectureException as e:
             raise e

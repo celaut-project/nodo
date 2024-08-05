@@ -1,17 +1,24 @@
 from time import sleep
 from uuid import uuid4
+import os
+
+import grpc
+from grpcbigbuffer import client as peerpc
 
 import docker as docker_lib
 
-from protos import celaut_pb2 as celaut
+from protos import celaut_pb2 as celaut, gateway_pb2_grpc, gateway_pb2
+from protos.gateway_pb2_grpcbf import StartService_input_indices
 from src.manager.manager import prune_container, spend_gas
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
 from src.reputation_system.simple_reputation_feedback import submit_reputation_feedback
 from src.utils import logger as l
+from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
-from src.utils.env import DOCKER_CLIENT, MIN_SLOTS_OPEN_PER_PEER, MIN_DEPOSIT_PEER, MANAGER_ITERATION_TIME
+from src.utils.env import DOCKER_CLIENT, MIN_SLOTS_OPEN_PER_PEER, MIN_DEPOSIT_PEER, MANAGER_ITERATION_TIME, REGISTRY, \
+    METADATA_REGISTRY
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
 
 sc = SQLConnection()
@@ -28,7 +35,44 @@ wanted_services = {}  # str: bool
 
 
 def check_wanted_services():
-    pass # TODO get services on peers. (balancer or/and gateway.iterable)
+    for wanted in wanted_services.keys():  # TODO async
+        if not wanted_services[wanted]:
+            for peer in peers_id_iterator():
+                """  TODO if get_service cost amount > 0
+                
+                if gas_amount_on_other_peer(
+                        peer_id=peer,
+                ) <= cost and not increase_deposit_on_peer(
+                    peer_id=peer,
+                    amount=cost
+                ):
+                    raise Exception(
+                        'Get service error increasing deposit on ' + peer + 'when it didn\'t have enough '
+                                                                               'gas.')
+                """
+                try:
+                    for b in peerpc.client_grpc(
+                            method=gateway_pb2_grpc.GatewayStub(
+                                grpc.insecure_channel(
+                                    next(generate_uris_by_peer_id(peer))
+                                )
+                            ).GetService,  # TODO An timeout should be implemented when requesting a service.
+                            partitions_message_mode_parser=True,
+                            indices_serializer=gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash,
+                            indices_parser=StartService_input_indices,
+                            input=wanted
+                    ):
+                        if type(b) == gateway_pb2.celaut__pb2.Any.Metadata:
+                            with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
+                                f.write(b.SerializeToString())
+                        elif type(b) == peerpc.Dir and b.type == gateway_pb2.celaut__pb2.Service:
+                            os.system(f"mv {b.dir} {REGISTRY}{wanted}")
+                        else:
+                            raise Exception('\nError with the compiler output:' + str(b))
+                except Exception as e:
+                    l.LOGGER(f"Exception on peer {peer} getting a service. {str(e)}. Continue")
+    l.LOGGER(f"Iterated all peers and all wanted services.")
+
 
 def maintain_containers():
     for token in sc.get_all_internal_service_tokens():
@@ -66,8 +110,8 @@ def maintain_clients():
             l.LOGGER('Delete client ' + client_id)
             SQLConnection().delete_client(client_id)
 
-def peer_deposits():
 
+def peer_deposits():
     # Controla el gas que tiene en cada uno de los pares.
 
     # Vamos a presuponer que tenemos un struct Peer.
@@ -87,6 +131,7 @@ def peer_deposits():
             if not __increase_deposit_on_peer(peer_id=peer["id"], amount=MIN_DEPOSIT_PEER):
                 l.LOGGER(f'Manager error: the peer {peer["id"]} could not be increased.')
 
+
 def check_dev_clients():
     sc = SQLConnection()
     clients = sc.get_dev_clients()
@@ -97,6 +142,7 @@ def check_dev_clients():
         if client_gas < MIN_DEPOSIT_PEER:
             gas_to_add = MIN_DEPOSIT_PEER - client_gas
             sc.add_gas(client_id=clients[0], gas=gas_to_add)
+
 
 def manager_thread():
     init_contract_interfaces()
