@@ -18,7 +18,7 @@ from src.utils import logger as l
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.utils.env import DOCKER_CLIENT, MIN_SLOTS_OPEN_PER_PEER, MIN_DEPOSIT_PEER, MANAGER_ITERATION_TIME, REGISTRY, \
-    METADATA_REGISTRY
+    METADATA_REGISTRY, SHA3_256_ID
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
 
 sc = SQLConnection()
@@ -39,6 +39,10 @@ def check_wanted_services():
     for wanted in wanted_services.keys():  # TODO async
         if not wanted_services[wanted]:
             l.LOGGER(f"Taking the service {wanted}")
+            _hash = gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash(
+                    type=SHA3_256_ID,
+                    value=bytes.fromhex(wanted)
+                )
             for peer in peers_id_iterator():
                 """  TODO if get_service cost amount > 0
 
@@ -63,7 +67,7 @@ def check_wanted_services():
                             partitions_message_mode_parser=True,
                             indices_serializer=gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash,
                             indices_parser=StartService_input_indices,
-                            input=wanted
+                            input=_hash
                     ):
                         if type(b) == gateway_pb2.celaut__pb2.Any.Metadata:
                             with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
