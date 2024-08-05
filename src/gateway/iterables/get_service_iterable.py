@@ -25,5 +25,4 @@ class GetServiceIterable(AbstractServiceIterable):
         except build.UnsupportedArchitectureException as e:
             raise e
         finally:
-            yield buffer_pb2.Buffer(signal=True)
-            raise BreakIteration
+            log("Finalized request for a service.")
