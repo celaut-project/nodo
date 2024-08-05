@@ -69,6 +69,9 @@ def check_wanted_services():
                             indices_parser=StartService_input_indices,
                             input=_hash
                     ):
+                        l.LOGGER(f"type of chunk -> {type(b)}")
+                        if  type(b) == peerpc.Dir:
+                            l.LOGGER(f"    type of dir {b.type}")
                         if type(b) == gateway_pb2.celaut__pb2.Any.Metadata:
                             l.LOGGER("Store the metadata.")
                             with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
