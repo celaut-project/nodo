@@ -70,9 +70,11 @@ def check_wanted_services():
                             input=_hash
                     ):
                         if type(b) == gateway_pb2.celaut__pb2.Any.Metadata:
+                            l.LOGGER("Store the metadata.")
                             with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
                                 f.write(b.SerializeToString())
                         elif type(b) == peerpc.Dir and b.type == gateway_pb2.celaut__pb2.Service:
+                            l.LOGGER(f"Store the service {b.dir}")
                             os.system(f"mv {b.dir} {REGISTRY}{wanted}")
                 except Exception as e:
                     l.LOGGER(f"Exception on peer {peer} getting a service. {str(e)}. Continue")
