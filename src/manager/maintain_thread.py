@@ -35,11 +35,13 @@ wanted_services = {}  # str: bool
 
 
 def check_wanted_services():
+    l.LOGGER(f"Go to take {len(wanted_services)} services.")
     for wanted in wanted_services.keys():  # TODO async
         if not wanted_services[wanted]:
+            l.LOGGER(f"Taking the service {wanted}")
             for peer in peers_id_iterator():
                 """  TODO if get_service cost amount > 0
-                
+
                 if gas_amount_on_other_peer(
                         peer_id=peer,
                 ) <= cost and not increase_deposit_on_peer(
@@ -50,6 +52,7 @@ def check_wanted_services():
                         'Get service error increasing deposit on ' + peer + 'when it didn\'t have enough '
                                                                                'gas.')
                 """
+                l.LOGGER(f"Using peer {peer}")
                 try:
                     for b in peerpc.client_grpc(
                             method=gateway_pb2_grpc.GatewayStub(
