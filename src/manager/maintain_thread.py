@@ -65,7 +65,7 @@ def check_wanted_services():
                                 )
                             ).GetService,  # TODO An timeout should be implemented when requesting a service.
                             partitions_message_mode_parser=True,
-                            indices_serializer=gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash,
+                            indices_serializer=StartService_input_indices,
                             indices_parser=StartService_input_indices,
                             input=_hash
                     ):
