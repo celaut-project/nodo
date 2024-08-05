@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import protos.buffer_pb2 as buffer__pb2
+from grpcbigbuffer import buffer_pb2 as buffer__pb2
 
 GRPC_GENERATED_VERSION = '1.65.4'
 GRPC_VERSION = grpc.__version__
