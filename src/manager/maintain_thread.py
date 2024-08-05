@@ -74,8 +74,6 @@ def check_wanted_services():
                                 f.write(b.SerializeToString())
                         elif type(b) == peerpc.Dir and b.type == gateway_pb2.celaut__pb2.Service:
                             os.system(f"mv {b.dir} {REGISTRY}{wanted}")
-                        else:
-                            raise Exception('\nError with the compiler output:' + str(b))
                 except Exception as e:
                     l.LOGGER(f"Exception on peer {peer} getting a service. {str(e)}. Continue")
     l.LOGGER(f"Iterated all peers and all wanted services.")
