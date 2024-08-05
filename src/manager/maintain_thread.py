@@ -35,7 +35,6 @@ wanted_services = {}  # str: bool
 
 
 def check_wanted_services():
-    l.LOGGER(f"Go to take {len(wanted_services)} services.")
     for wanted in wanted_services.keys():  # TODO async
         if not wanted_services[wanted]:
             l.LOGGER(f"Taking the service {wanted}")
@@ -81,7 +80,6 @@ def check_wanted_services():
                             os.system(f"mv {b.dir} {REGISTRY}{wanted}")
                 except Exception as e:
                     l.LOGGER(f"Exception on peer {peer} getting a service. {str(e)}. Continue")
-    l.LOGGER(f"Iterated all peers and all wanted services.")
 
 
 def maintain_containers():
