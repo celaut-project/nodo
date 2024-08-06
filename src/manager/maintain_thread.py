@@ -35,6 +35,7 @@ wanted_services = {}  # str: bool
 
 
 def check_wanted_services():
+    l.LOGGER(f"check for wanted services {wanted_services}")
     for wanted in wanted_services.keys():  # TODO async
         if not wanted_services[wanted]:
             l.LOGGER(f"Taking the service {wanted}")
