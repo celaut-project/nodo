@@ -15,6 +15,7 @@ class GetServiceIterable(AbstractServiceIterable):
 
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
         try:
+            size = 0
             for _c in grpcbf.serialize_to_buffer(
                 message_iterator=service_extended(
                     metadata=read_metadata_from_disk(service_hash=self.service_hash) if not self.metadata else self.metadata,
@@ -22,7 +23,8 @@ class GetServiceIterable(AbstractServiceIterable):
                 ),
                 indices=StartService_input_indices  # Client and configuration not needed.
             ):
-                log(f"chunk -> {_c}")
+                size += len(_c)
+                log(f"chunk size -> {size}")
                 yield _c
         except build.UnsupportedArchitectureException as e:
             raise e
