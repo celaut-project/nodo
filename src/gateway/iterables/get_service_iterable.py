@@ -23,7 +23,7 @@ class GetServiceIterable(AbstractServiceIterable):
                 ),
                 indices=StartService_input_indices  # Client and configuration not needed.
             ):
-                size += len(_c)
+                size += len(_c.chunk)
                 log(f"chunk size -> {size}")
                 yield _c
         except build.UnsupportedArchitectureException as e:
