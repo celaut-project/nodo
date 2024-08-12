@@ -44,7 +44,7 @@ def __on_peer(peer: str, service_zip_dir: str):
             os.system(f"mv {b.dir} {REGISTRY}{_id}")
         else:
             raise Exception('\nError with the compiler output:' + str(b))
-        
+
     print('service id -> ', _id)
 
     print('\n Validate the content.')
@@ -68,9 +68,10 @@ def compile_directory(directory: str):
     # TODO check if dependencies has directories, and compile them before.
     try:
         ip, port = None, None
-        for peer_id in list(get_peer_ids()):
-            for _ip, _port in get_peer_directions(peer_id=peer_id):
-                ip, port = _ip, _port
+        if False:  # TODO; control exceptions and try others; and enviroment variable COMPILE_LOCAL_FIRST
+            for peer_id in list(get_peer_ids()):
+                for _ip, _port in get_peer_directions(peer_id=peer_id):
+                    ip, port = _ip, _port
         if not ip or not port:
             ip, port = 'localhost', GATEWAY_PORT
         __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
