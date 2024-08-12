@@ -37,6 +37,7 @@ wanted_services = {}  # str: bool
 def check_wanted_services():
     for wanted in wanted_services.keys():  # TODO async
         if not wanted_services[wanted]:
+            wanted_services[wanted] = True
             l.LOGGER(f"Taking the service {wanted}")
             _hash = gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash(
                     type=SHA3_256_ID,
@@ -78,8 +79,11 @@ def check_wanted_services():
                         elif type(b) == peerpc.Dir and b.type == gateway_pb2.celaut__pb2.Service:
                             l.LOGGER(f"Store the service {b.dir}")
                             os.system(f"mv {b.dir} {REGISTRY}{wanted}")
+                    del wanted_services[wanted]
+                    l.LOGGER(f"Wanted service {wanted} stored successfully.")
                 except Exception as e:
                     l.LOGGER(f"Exception on peer {peer} getting a service. {str(e)}. Continue")
+                    wanted_services[wanted] = False
 
 
 def maintain_containers():
