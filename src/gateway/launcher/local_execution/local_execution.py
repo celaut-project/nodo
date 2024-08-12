@@ -92,18 +92,19 @@ def local_execution(
             _response = TunnelSystem().generate_tunnel(ip=_ip, port=_port)
             if _response:
                 _ip, _port = _response
-                l.LOGGER(f"Using tunnel {_ip}:{_port}")
-                uri_slot.uri.append(
-                    celaut.Instance.Uri(
-                        ip=_ip,
-                        port=_port
-                    )
-                )
             else:
                 _msg = "Any tunnel available. Instance can't be serve."
                 l.LOGGER(_msg)
                 # TODO Delete container.
                 raise Exception(_msg)
+
+        l.LOGGER(f"Using uri {_ip}:{_port}")
+        uri_slot.uri.append(
+            celaut.Instance.Uri(
+                ip=_ip,
+                port=_port
+            )
+        )
 
     l.LOGGER(f'Thrown out a new instance by {father_id} of the container_id {container.id}')
     return gateway_pb2.Instance(
