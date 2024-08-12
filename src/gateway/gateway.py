@@ -97,7 +97,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
             raise Exception("Incorrect input on Compile gRPC-bb method. Should be bytes")
         yield from compile_zip(zip=_d.dir)
 
-    # Estimacion de coste de ejecución de un servicio con la cantidad de gas por defecto.
     def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
 
