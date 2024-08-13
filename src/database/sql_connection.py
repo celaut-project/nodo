@@ -798,6 +798,7 @@ class SQLConnection(metaclass=Singleton):
             return int(DEFAULT_INTIAL_GAS_AMOUNT)
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
+    # Slot concept here refers to the number of urls. Slot should be renamed on all the code because is incorrectly used.
     """
     Checks if a peer is available based on the number of open slots.
 
