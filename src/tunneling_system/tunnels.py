@@ -123,23 +123,22 @@ class TunnelSystem(metaclass=Singleton):
 
 
     def get_gateway_tunnel(self) -> Optional[Any]:
-        _gi = generate_gateway_instance('localhost')
+        _gi = generate_gateway_instance(network='localhost')
         _gi.instance.uri_slot[0].uri.pop()
 
         if not self.gateway_tunnels:
             self.__generate_gateway_tunnel()
 
-        for gat_ip, gat_port in random.sample(self.gateway_tunnels, k=len(self.gateway_tunnels)):
-            # TODO check if tunnel is available.
-            break
-
-        if not gat_ip or not gat_port:
-            return None
-
-        _gi.instance.uri_slot[0].uri.append(
-            celaut.Instance.Uri(
-                ip=gat_ip,
-                port=gat_port
+        i = 0
+        for gat_ip, gat_port in self.gateway_tunnels:
+            _gi.instance.uri_slot[i].uri.append(
+                celaut.Instance.Uri(
+                    ip=gat_ip,
+                    port=gat_port
+                )
             )
-        )
+            i += 1
+        if not i:
+            LOGGER("Any gateway tunnel available, can't return the gateway instance")
+            return None
         return _gi
