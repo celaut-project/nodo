@@ -145,8 +145,12 @@ class AbstractServiceIterable:
 
     def __iter__(self):
         self.start()
-        yield from (t for r in self.parser_iterator for t in self.__pattern_matching(r))
-        self.final()
+        try:
+            yield from (t for r in self.parser_iterator for t in self.__pattern_matching(r))
+        except StopIteration:
+            pass
+        finally:
+            self.final()
 
     def start(self):
         pass
