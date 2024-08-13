@@ -563,8 +563,8 @@ class SQLConnection(metaclass=Singleton):
         self._execute("INSERT OR IGNORE INTO ledger (id) VALUES (?)",
                       (ledger,))
 
-        self._execute("INSERT INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
-                      "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
+        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
+                    "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
 
     def peer_exists(self, peer_id: str) -> bool:
         """

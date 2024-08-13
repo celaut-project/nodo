@@ -90,7 +90,8 @@ def create_tables(cursor):
                 peer_id TEXT NULL,
                 FOREIGN KEY (ledger_id) REFERENCES ledger (id),
                 FOREIGN KEY (contract_hash) REFERENCES contract (hash),
-                FOREIGN KEY (peer_id) REFERENCES peer (id)
+                FOREIGN KEY (peer_id) REFERENCES peer (id),
+                UNIQUE (address, ledger_id, contract_hash, peer_id)
             )
         ''',
         "internal_services": '''
@@ -123,17 +124,17 @@ def create_tables(cursor):
 def migrate():
     """Run the migration script."""
     create_directory(STORAGE)
-    
+
     conn = connect_to_database(DATABASE_FILE)
     if conn is None:
         return
-    
+
     with conn:
         cursor = conn.cursor()
         create_tables(cursor)
         conn.commit()
         print("Database schema created and saved.")
-    
+
     conn.close()
     print("Database connection closed.")
 
