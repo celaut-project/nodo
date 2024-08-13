@@ -9,7 +9,7 @@ import docker as docker_lib
 
 from protos import celaut_pb2 as celaut, gateway_pb2_grpc, gateway_pb2
 from protos.gateway_pb2_grpcbf import StartService_input_indices, StartService_input_message_mode
-from src.manager.manager import prune_container, spend_gas
+from src.manager.manager import prune_container, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
@@ -124,13 +124,26 @@ def maintain_clients():
 
 
 def peer_deposits():
-    # Controla el gas que tiene en cada uno de los pares.
-
-    # Vamos a presuponer que tenemos un struct Peer.
-    for peer in SQLConnection().get_peers():
+    for peer in SQLConnection().get_peers(): # async
         if not is_peer_available(peer_id=peer['id'], min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             # l.LOGGER('Peer '+peer_id+' is not available .')
-            continue
+            try:
+                update_peer_instance(
+                    instance=next(client_grpc(
+                        method=gateway_pb2_grpc.GatewayStub(
+                            grpc.insecure_channel(
+                                next(generate_uris_by_peer_id(peer_id=peer_id))
+                            )
+                        ).GetInstance,
+                        indices_parser=Instance,
+                        partitions_message_mode_parser=True
+                    )),
+                    peer_id=peer["id"]
+                )
+            except Exception as e:
+                l.LOGGER(f"Exception updating peer {peer['id']}: {str(e)}")
+                continue
+
         if peer["gas"] < MIN_DEPOSIT_PEER or \
                 gas_amount_on_other_peer(
                     peer_id=peer["id"]

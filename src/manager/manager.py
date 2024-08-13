@@ -55,9 +55,23 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> str:
     for contract_ledger in instance.instance.api.contract_ledger:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
-    print('Get instance for peer ->', peer_id)
+    logger.LOGGER(f'Get instance for peer -> {peer_id}')
     return peer_id
 
+def update_peer_instance(instance: gateway_pb2.Instance, peer_id: str):
+    logger.LOGGER(f"Updating peer {peer_id}")
+    parsed_instance = json.loads(MessageToJson(instance))
+    # It is assumed that app protocol and metadata have not been modified.
+
+    # Slots
+    for slot in instance.instance.uri_slot:
+        sc.add_slot(slot=slot, peer_id=peer_id)
+
+    # Contracts
+    for contract_ledger in instance.instance.api.contract_ledger:
+        sc.add_contract(contract=contract_ledger, peer_id=peer_id)
+
+    logger.LOGGER(f"Peer {peer_id} updated.")
 
 def get_token_by_uri(uri: str) -> str:
     return sc.get_token_by_uri(uri=uri)
