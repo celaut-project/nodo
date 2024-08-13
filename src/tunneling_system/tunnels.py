@@ -129,16 +129,11 @@ class TunnelSystem(metaclass=Singleton):
         if not self.gateway_tunnels:
             self.__generate_gateway_tunnel()
 
-        i = 0
         for gat_ip, gat_port in self.gateway_tunnels:
-            _gi.instance.uri_slot[i].uri.append(
+            _gi.instance.uri_slot[0].uri.append(
                 celaut.Instance.Uri(
                     ip=gat_ip,
                     port=gat_port
                 )
             )
-            i += 1
-        if not i:
-            LOGGER("Any gateway tunnel available, can't return the gateway instance")
-            return None
         return _gi
