@@ -1,71 +1,50 @@
 #!/bin/bash
 
-# Check if the script is running with root privileges
-if [ "$(id -u)" -ne 0 ]; then
-  echo "Error: This script needs to be run with sudo."
-  echo "Please run the following command to run this script with sudo:"
-  echo "  sudo $0"
-  exit 1
-fi
-
 # Function to install git if it's not already installed
 install_git_if_needed() {
   if ! command -v git >/dev/null 2>&1; then
-    echo "Git is not installed. Attempting to install git..."
+    printf "Git is not installed. Attempting to install git...\n"
 
     # Detect the operating system and install git
     if [ -x "$(command -v apt)" ]; then
-      # Debian/Ubuntu-based
       apt update && apt install -y git
     elif [ -x "$(command -v yum)" ]; then
-      # Red Hat/CentOS-based
       yum install -y git
     elif [ -x "$(command -v dnf)" ]; then
-      # Fedora-based
       dnf install -y git
     elif [ -x "$(command -v brew)" ]; then
-      # macOS
       brew install git
     else
-      echo "Error: Unsupported OS or package manager. Please install git manually."
-      exit 1
+      printf "Error: Unsupported OS or package manager. Please install git manually.\n" >&2
+      return 1
     fi
   fi
 }
 
 # Install git if needed
-install_git_if_needed
+install_git_if_needed || exit 1
 
 # Define the repository URL and the target directory
 REPO_URL="https://github.com/celaut-project/nodo.git"
-TARGET_DIR="/nodo"
-SERVICE_FILE="/etc/systemd/system/nodo.service"
+TARGET_DIR="$HOME/nodo"
+SERVICE_FILE="$HOME/.config/systemd/user/nodo.service"
 
 # Check if the target directory already exists
 if [ -d "$TARGET_DIR" ]; then
-  echo "Target directory $TARGET_DIR already exists. Performing git pull..."
-  cd "$TARGET_DIR" || { echo "Error: Failed to change directory to $TARGET_DIR."; exit 1; }
+  printf "Target directory %s already exists. Performing git pull...\n" "$TARGET_DIR"
+  cd "$TARGET_DIR" || { printf "Error: Failed to change directory to %s.\n" "$TARGET_DIR" >&2; exit 1; }
   if ! git pull; then
-    echo "Error: Failed to perform git pull."
+    printf "Error: Failed to perform git pull.\n" >&2
     exit 1
-  fi
-
-  # Check if nodo.service exists and restart it
-  if systemctl list-units --full -all | grep -Fq "nodo.service"; then
-    echo "Restarting nodo.service..."
-    systemctl restart nodo.service
-  else
-    echo "nodo.service does not exist, will create it later in the script."
   fi
 else
   # Clone the repository into the target directory
-  echo "Cloning repository from $REPO_URL into $TARGET_DIR..."
-  if ! git clone $REPO_URL $TARGET_DIR; then
-    echo "Error: Failed to clone the repository."
+  printf "Cloning repository from %s into %s...\n" "$REPO_URL" "$TARGET_DIR"
+  if ! git clone "$REPO_URL" "$TARGET_DIR"; then
+    printf "Error: Failed to clone the repository.\n" >&2
     exit 1
   fi
-  # Navigate to the cloned repository directory
-  cd $TARGET_DIR || { echo "Error: Failed to change directory to $TARGET_DIR."; exit 1; }
+  cd "$TARGET_DIR" || { printf "Error: Failed to change directory to %s.\n" "$TARGET_DIR" >&2; exit 1; }
 fi
 
 # Check the platform architecture and set the setup script accordingly
@@ -76,39 +55,35 @@ else
 fi
 
 # Make sure the setup script is executable
-chmod +x $SETUP_SCRIPT
+chmod +x "$SETUP_SCRIPT"
 
 # Execute the setup script
-echo "Running setup script $SETUP_SCRIPT..."
-if ! ./$SETUP_SCRIPT "$TARGET_DIR"; then
-  echo "Error: The setup script $SETUP_SCRIPT failed to execute."
+printf "Running setup script %s...\n" "$SETUP_SCRIPT"
+if ! ./"$SETUP_SCRIPT" "$TARGET_DIR"; then
+  printf "Error: The setup script %s failed to execute.\n" "$SETUP_SCRIPT" >&2
   exit 1
 fi
-
-# Get the user who executed the script
-SCRIPT_USER=$(logname)
 
 # Function to create nodo.service if it doesn't exist
 create_service_file() {
   # Remove existing service file if it already exists
   if [ -f "$SERVICE_FILE" ]; then
-    echo "Service file $SERVICE_FILE already exists. Removing it..."
-    systemctl stop nodo.service
-    systemctl disable nodo.service
+    printf "Service file %s already exists. Removing it...\n" "$SERVICE_FILE"
+    systemctl --user stop nodo.service
+    systemctl --user disable nodo.service
     rm -f "$SERVICE_FILE"
   fi
 
   # Create the service file
-  echo "Creating $SERVICE_FILE..."
-  cat <<EOF > $SERVICE_FILE
+  printf "Creating %s...\n" "$SERVICE_FILE"
+  mkdir -p "$(dirname "$SERVICE_FILE")"
+  cat <<EOF > "$SERVICE_FILE"
 [Unit]
 Description=Nodo Serve
 After=network.target
 
 [Service]
 Type=simple
-User=root
-Group=sudo
 WorkingDirectory=$TARGET_DIR
 ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py service'
 Restart=on-failure
@@ -116,51 +91,51 @@ RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 EOF
 
   # Set the permissions for the service file
-  echo "Setting the permissions for the service file..."
-  chmod 644 $SERVICE_FILE
+  chmod 644 "$SERVICE_FILE"
 
   # Reload systemd, enable and start the service
-  echo "Reloading systemd daemon, enabling, and starting the nodo service..."
-  systemctl daemon-reload
-  systemctl enable nodo.service
-  systemctl start nodo.service
-  echo "Systemd daemon reloaded and nodo service started/enabled."
+  printf "Reloading systemd daemon, enabling, and starting the nodo service...\n"
+  systemctl --user daemon-reload
+  systemctl --user enable nodo.service
+  systemctl --user start nodo.service
+  printf "Systemd daemon reloaded and nodo service started/enabled.\n"
 }
 
 # Check if the service file exists
 if [ ! -f "$SERVICE_FILE" ]; then
-    echo "nodo.service does not exist. Creating service file..."
-    create_service_file
+  printf "nodo.service does not exist. Creating service file...\n"
+  create_service_file
 else
-    echo "nodo.service already exists. Checking its status..."
-    systemctl status nodo.service || echo "Service is not running or not correctly installed."
+  printf "nodo.service already exists. Checking its status...\n"
+  systemctl --user status nodo.service || printf "Service is not running or not correctly installed.\n"
 fi
 
 # Restart the service if it exists
-if systemctl status nodo.service >/dev/null 2>&1; then
-    echo "Restarting nodo.service..."
-    systemctl restart nodo.service
+if systemctl --user status nodo.service >/dev/null 2>&1; then
+  printf "Restarting nodo.service...\n"
+  systemctl --user restart nodo.service
 else
-    echo "Error: nodo.service does not exist or cannot be restarted. Please check the service creation process."
+  printf "Error: nodo.service does not exist or cannot be restarted. Please check the service creation process.\n" >&2
 fi
 
 # Function to create a wrapper script for nodo
 create_wrapper_script() {
-  WRAPPER_SCRIPT="/usr/local/bin/nodo"
+  WRAPPER_SCRIPT="$HOME/.local/bin/nodo"
+  mkdir -p "$(dirname "$WRAPPER_SCRIPT")"
 
   # Remove existing wrapper script if it already exists
   if [ -f "$WRAPPER_SCRIPT" ]; then
-    echo "Wrapper script $WRAPPER_SCRIPT already exists. Removing it..."
+    printf "Wrapper script %s already exists. Removing it...\n" "$WRAPPER_SCRIPT"
     rm -f "$WRAPPER_SCRIPT"
   fi
 
   # Create the wrapper script
-  echo "Creating $WRAPPER_SCRIPT..."
-  cat <<EOF > $WRAPPER_SCRIPT
+  printf "Creating %s...\n" "$WRAPPER_SCRIPT"
+  cat <<EOF > "$WRAPPER_SCRIPT"
 #!/bin/bash
 cd $TARGET_DIR || exit
 source $TARGET_DIR/venv/bin/activate
@@ -168,21 +143,21 @@ python3 $TARGET_DIR/nodo.py "\$@"
 EOF
 
   # Set the permissions for the wrapper script
-  chmod +x $WRAPPER_SCRIPT
+  chmod +x "$WRAPPER_SCRIPT"
 }
 
 # Create wrapper script
 create_wrapper_script
 
 UPDATE_ENV_SCRIPT="bash/update_env.sh"
-chmod +x $UPDATE_ENV_SCRIPT
-echo "Updating envs $UPDATE_ENV_SCRIPT..."
-if ! ./$UPDATE_ENV_SCRIPT "$TARGET_DIR"; then
-  echo "Error: The script $UPDATE_ENV_SCRIPT failed to execute."
+chmod +x "$UPDATE_ENV_SCRIPT"
+printf "Updating envs %s...\n" "$UPDATE_ENV_SCRIPT"
+if ! ./"$UPDATE_ENV_SCRIPT" "$TARGET_DIR"; then
+  printf "Error: The script %s failed to execute.\n" "$UPDATE_ENV_SCRIPT" >&2
   exit 1
 fi
 
-chown -R $SCRIPT_USER:$SCRIPT_USER $TARGET_DIR
+chown -R "$USER":"$USER" "$TARGET_DIR"
 
-echo "Installation and service setup completed successfully. The repository is located at $TARGET_DIR."
-echo "********** You can now use the 'nodo' command. **********"
+printf "Installation and service setup completed successfully. The repository is located at %s.\n" "$TARGET_DIR"
+printf "********** You can now use the 'nodo' command. **********\n"
