@@ -160,6 +160,7 @@ if ! ./"$UPDATE_ENV_SCRIPT" "$TARGET_DIR"; then
 fi
 
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
+chmod -R 777 "$TARGET_DIR"
 
 printf "Installation and service setup completed successfully. The repository is located at $TARGET_DIR.\n"
 printf "********** You can now use the 'nodo' command. **********\n"
