@@ -62,6 +62,7 @@ def check_rust_installation():
             print("Error installing Rust:", e)
 
 if __name__ == '__main__':
+    os.umask(0o002)
 
     # Create __cache__ if it does not exist.
     if not os.path.exists(CACHE):
