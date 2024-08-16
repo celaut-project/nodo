@@ -134,7 +134,7 @@ fn get_controls_text(app: &App) -> String {
                 "  |  Press 'e' to execute an instance.  |  Press 'd' to delete the service.",
             ),
             4 => control_text.push_str("  |  Press 'e' to edit."),
-            5 => control_test.push_str(" | Press 'd' to close the tunnel."),
+            5 => control_text.push_str(" | Press 'd' to close the tunnel."),
             _ => (),
         }
     }
@@ -334,12 +334,12 @@ fn draw_tunnel_list(frame: &mut Frame, app: &mut App, area: Rect) {
             app.tunnels
                 .items
                 .iter()
-                .map(|env| {
+                .map(|tunnel| {
                     Row::new(vec![
-                        env.id.clone(),
-                        env.uri.clone(),
-                        env.service.clone(),
-                        env.live.clone(),
+                        tunnel.id.clone(),
+                        tunnel.uri.clone(),
+                        tunnel.service.clone(),
+                        tunnel.live ? "Live" : "Dead",
                     ])
                 })
                 .collect::<Vec<Row>>(),

@@ -27,7 +27,7 @@ pub async fn handle_key_events(key_event: KeyEvent, app: &mut App<'_>) -> AppRes
                 if key_event.modifiers == KeyModifiers::CONTROL {
                     app.quit();
                 } else {
-                    if (app.tabs.index == 0) {
+                    if app.tabs.index == 0 {
                         app.open_popup();
                     }
                 }
