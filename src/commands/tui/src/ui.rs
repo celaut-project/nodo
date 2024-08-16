@@ -339,7 +339,7 @@ fn draw_tunnel_list(frame: &mut Frame, app: &mut App, area: Rect) {
                         tunnel.id.clone(),
                         tunnel.uri.clone(),
                         tunnel.service.clone(),
-                        tunnel.live ? "Live" : "Dead",
+                        if tunnel.live { "Live" } else { "Dead" },
                     ])
                 })
                 .collect::<Vec<Row>>(),
