@@ -111,6 +111,14 @@ def create_tables(cursor):
                 peer_id TEXT,
                 client_id TEXT
             )
+        ''',
+        "tunnels": '''
+            CREATE TABLE IF NOT EXISTS tunnels (
+                id TEXT PRIMARY KEY,
+                uri TEXT,
+                service TEXT,
+                live BOOLEAN
+            )
         '''
     }
 

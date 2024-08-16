@@ -1,4 +1,5 @@
 import os
+import uuid
 import sqlite3
 import time
 from hashlib import sha3_256
@@ -796,6 +797,81 @@ class SQLConnection(metaclass=Singleton):
             return self.get_internal_service_gas(token=id)
         else:
             return int(DEFAULT_INTIAL_GAS_AMOUNT)
+
+
+    # Tunnel system
+
+    def add_tunnel(self, uri: str, service: str, live: bool):
+        """
+        Adds a tunnel to the database.
+
+        Args:
+            tunnel_id (str): The ID of the tunnel.
+            uri (str): The URI of the tunnel.
+            service (str): The service associated with the tunnel.
+            live (bool): Whether the tunnel is live or not.
+        """
+        tunnel_id = str(uuid.uuid4())
+        self._execute('''
+            INSERT INTO tunnels (id, uri, service, live)
+            VALUES (?, ?, ?, ?)
+        ''', (tunnel_id, uri, service, live))
+
+    def get_tunnels(self) -> List[dict]:
+        """
+        Fetches all tunnels from the database.
+
+        Returns:
+            List[dict]: A list of dictionaries containing tunnel details.
+        """
+        result = self._execute("SELECT id, uri, service, live FROM tunnels")
+        tunnels = [{'id': row['id'], 'uri': row['uri'], 'service': row['service'], 'live': row['live']} for row in result.fetchall()]
+        logger.LOGGER(f'Found tunnels: {tunnels}')
+        return tunnels
+
+    def update_tunnel(self, tunnel_id: str, uri: Optional[str] = None, service: Optional[str] = None, live: Optional[bool] = None):
+        """
+        Updates a tunnel in the database.
+
+        Args:
+            tunnel_id (str): The ID of the tunnel to update.
+            uri (Optional[str]): The new URI of the tunnel (if provided).
+            service (Optional[str]): The new service of the tunnel (if provided).
+            live (Optional[bool]): The new live status of the tunnel (if provided).
+        """
+        updates = []
+        params = []
+
+        if uri is not None:
+            updates.append("uri = ?")
+            params.append(uri)
+
+        if service is not None:
+            updates.append("service = ?")
+            params.append(service)
+
+        if live is not None:
+            updates.append("live = ?")
+            params.append(live)
+
+        if not updates:
+            raise ValueError("No values to update.")
+
+        params.append(tunnel_id)
+        query = f"UPDATE tunnels SET {', '.join(updates)} WHERE id = ?"
+        self._execute(query, tuple(params))
+
+    def delete_tunnel(self, tunnel_id: str):
+        """
+        Deletes a tunnel from the database.
+
+        Args:
+            tunnel_id (str): The ID of the tunnel to delete.
+        """
+        self._execute('''
+            DELETE FROM tunnels WHERE id = ?
+        ''', (tunnel_id,))
+
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     # Slot concept here refers to the number of urls. Slot should be renamed on all the code because is incorrectly used.

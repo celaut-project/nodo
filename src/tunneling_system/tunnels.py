@@ -1,13 +1,15 @@
 from typing import Any, Tuple, Optional, Dict, List
 from pyngrok import ngrok
 import urllib.parse
-import random, socket
+import socket
+import uuid
 
 from src.gateway.utils import generate_gateway_instance
 from src.utils.env import GATEWAY_PORT, GET_ENV
 from src.utils.logger import LOGGER
 from src.utils.singleton import Singleton
 from protos import celaut_pb2 as celaut
+from src.database.sql_connection import SQLConnection
 
 
 NUM_GATEWAY_TUNNELS = 1
@@ -20,15 +22,12 @@ class Provider:
         self.current_tunnels: List[Tuple[str, int]] = []
 
     def can_add_tunnel(self) -> bool:
-        # Check if provider can add a new tunnel
         return len(self.current_tunnels) < self.max_instances
 
     def add_tunnel(self, tunnel: Tuple[str, int]) -> None:
-        # Add a tunnel to the provider's list
         self.current_tunnels.append(tunnel)
 
     def remove_tunnel(self, tunnel: Tuple[str, int]) -> None:
-        # Remove a tunnel from the provider's list
         if tunnel in self.current_tunnels:
             self.current_tunnels.remove(tunnel)
 
@@ -44,12 +43,10 @@ class TunnelSystem(metaclass=Singleton):
     def __init__(self) -> None:
         self.providers: Dict[str, Provider] = {}
         self.gateway_tunnels: List[Tuple[str, int]] = []
-
-        # Load Ngrok tokens from environment and create providers
+        self.db = SQLConnection()
         self.__initialize_providers()
 
     def __initialize_providers(self) -> None:
-        # Get the Ngrok auth tokens from environment variables
         ngrok_key = GET_ENV("NGROK_TUNNELS_KEY", "")
         tokens = [(ngrok_key, 3)] if ngrok_key else []
 
@@ -66,7 +63,6 @@ class TunnelSystem(metaclass=Singleton):
                 LOGGER(f"Added provider: {provider_name}")
 
     def __select_provider(self) -> Optional[str]:
-        # Select the active provider for tunnel operations
         for name, provider in self.providers.items():
             if provider.can_add_tunnel():
                 ngrok.set_auth_token(provider.auth_token)
@@ -74,44 +70,45 @@ class TunnelSystem(metaclass=Singleton):
         LOGGER("No available provider or maximum instances reached.")
 
     def generate_tunnel(self, ip: str, port: int) -> Optional[Tuple[str, int]]:
-        _ip, _port = ip, port
         provider = self.__select_provider()
         try:
-            listener = ngrok.connect(f"{_ip}:{_port}", proto="tcp")
+            listener = ngrok.connect(f"{ip}:{port}", proto="tcp")
             LOGGER(f"""Ingress established at: {listener.public_url} for the
-                service slot at uri: {_ip}:{_port} using provider {provider}""")
+                service slot at uri: {ip}:{port} using provider {provider}""")
             _ip = listener.public_url.split("://")[1].split(":")[0]
-            _port = int(listener.public_url.split("://")[1].split(":")[1])  # typed: ignore
+            _port = int(listener.public_url.split("://")[1].split(":")[1], base=10)  # typed: ignore
             self.providers[provider].add_tunnel((_ip, _port))
+
+            # Store tunnel in the database
+            self.db.add_tunnel(f"{_ip}:{_port}", provider, True)
+
             return _ip, _port
         except Exception as e:
             LOGGER(f"Exception in Ngrok module: {str(e)}.")
+            return None
 
     def close_tunnel(self, provider: str, tunnel: Tuple[str, int]):
         if provider in self.providers:
             self.providers[provider].remove_tunnel(tunnel)
             LOGGER(f"Closed tunnel: {tunnel}")
+
+            # Remove tunnel from the database
+            tunnel_entry = self.db.get_tunnels()  # Fetch all tunnels to find the correct one
+            for entry in tunnel_entry:
+                if entry['uri'] == f"{tunnel[0]}:{tunnel[1]}" and entry['service'] == provider:
+                    self.db.delete_tunnel(entry['id'])
+                    break
         else:
             LOGGER(f"Provider {provider} not found.")
 
     def from_tunnel(self, ip: str) -> bool:
-        """
-        Checks if the given IP address is from a tunnel by verifying if it is a localhost address.
-        Supports both IPv4 and IPv6 formats.
-
-        Parameters:
-        ip (str): The IP address to check.
-
-        Returns:
-        bool: True if the IP is a localhost address, otherwise False.
-        """
         return urllib.parse.unquote(ip) in ['127.0.0.1', '[::1]']
 
     def __generate_gateway_tunnel(self):
         _r = NUM_GATEWAY_TUNNELS - len(self.gateway_tunnels)
         if _r:
             LOGGER("Generate gateway tunnels.")
-            for i in range(0, _r):
+            for _ in range(_r):
                 tunnel = self.generate_tunnel("localhost", GATEWAY_PORT)
                 if tunnel:
                     self.gateway_tunnels.append(tunnel)
@@ -120,7 +117,6 @@ class TunnelSystem(metaclass=Singleton):
         if not self.gateway_tunnels:
             self.__generate_gateway_tunnel()
         return [f"{ip}:{port}" for ip, port in self.gateway_tunnels]
-
 
     def get_gateway_tunnel(self) -> Optional[Any]:
         _gi = generate_gateway_instance(network='localhost')
