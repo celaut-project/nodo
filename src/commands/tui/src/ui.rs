@@ -115,6 +115,7 @@ fn get_controls_text(app: &App) -> String {
         2 => app.instances.state_id.is_some(),
         3 => app.services.state_id.is_some(),
         4 => app.envs.state_id.is_some(),
+        5 => app.tunnels.state_id.is_some(),
         _ => false,
     };
 
@@ -133,6 +134,7 @@ fn get_controls_text(app: &App) -> String {
                 "  |  Press 'e' to execute an instance.  |  Press 'd' to delete the service.",
             ),
             4 => control_text.push_str("  |  Press 'e' to edit."),
+            5 => control_test.push_str(" | Press 'd' to close the tunnel."),
             _ => (),
         }
     }
@@ -174,6 +176,7 @@ fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
         2 => draw_instance_list(frame, app, layout[1]),
         3 => draw_service_list(frame, app, layout[1]),
         4 => draw_env_list(frame, app, layout[1]),
+        5 => draw_tunnel_list(frame, app, layout[1]),
         _ => {}
     };
 }
@@ -322,6 +325,48 @@ fn draw_env_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .style(Style::default().fg(Color::White).bg(Color::Black)),
         area,
         &mut app.envs.state,
+    );
+}
+
+fn draw_tunnel_list(frame: &mut Frame, app: &mut App, area: Rect) {
+    frame.render_stateful_widget(
+        Table::new(
+            app.tunnels
+                .items
+                .iter()
+                .map(|env| {
+                    Row::new(vec![
+                        env.id.clone(),
+                        env.uri.clone(),
+                        env.service.clone(),
+                        env.live.clone(),
+                    ])
+                })
+                .collect::<Vec<Row>>(),
+            [
+                Constraint::Length(50),
+                Constraint::Length(50),
+                Constraint::Length(70),
+                Constraint::Length(20),
+            ],
+        )
+        .header(Row::new(vec![
+            Cell::from("Id"),
+            Cell::from("Uri"),
+            Cell::from("Service"),
+            Cell::from("Alive"),
+        ]))
+        .block(
+            Block::bordered()
+                .title("TUNNELS")
+                .title_alignment(Alignment::Left)
+                .border_type(BorderType::Thick),
+        )
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+        .highlight_symbol("> ")
+        .style(Style::default().fg(Color::White).bg(Color::Black)),
+        area,
+        &mut app.tunnels.state,
     );
 }
 

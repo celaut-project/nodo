@@ -92,6 +92,20 @@ impl Identifiable for Env {
     }
 }
 
+#[derive(Debug)]
+pub struct Tunnel {
+    pub id: String,
+    pub uri: String,
+    pub service: String,
+    pub live: bool,
+}
+
+impl Identifiable for Tunnel {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
 fn get_peers() -> Result<Vec<Peer>> {
     Ok(Connection::open(DATABASE_FILE)?
         .prepare(
@@ -209,6 +223,25 @@ fn get_envs() -> Result<Vec<Env>, io::Error> {
 
     Ok(envs)
 }
+
+fn get_tunnels() -> Result<Vec<Tunnel>> {
+    Ok(Connection::open(DATABASE_FILE)?
+        .prepare("SELECT id, uri, service, live FROM tunnels")?
+        .query_map([], |row| {
+            let id: String = row.get(0)?;
+            let uri: String = row.get(1)?;
+            let service: String = row.get(2)?;
+            let live: bool = row.get(3)?;
+            Ok(Tunnel {
+                id,
+                uri,
+                service,
+                live,
+            })
+        })?
+        .collect::<Result<Vec<Tunnel>>>()?)
+}
+
 
 fn get_ram_usage(sys: &mut System) -> u64 {
     // First we update all information of our system struct.
@@ -337,6 +370,7 @@ pub struct App<'a> {
     pub instances: StatefulList<Container>,
     pub services: StatefulList<Service>,
     pub envs: StatefulList<Env>,
+    pub tunnels: StatefulList<Tunnel>,
     pub ram_usage: Vec<u64>,
     pub cpu_usage: Vec<u64>,
     pub sys: System,
@@ -350,7 +384,7 @@ impl<'a> Default for App<'a> {
     fn default() -> Self {
         Self {
             title: "NODO TUI",
-            tabs: TabsState::new(vec!["PEERS", "CLIENTS", "INSTANCES", "SERVICES", "ENVS"]),
+            tabs: TabsState::new(vec!["PEERS", "CLIENTS", "INSTANCES", "SERVICES", "ENVS", "TUNNELS"]),
             running: true,
             logs: Vec::new(),
             peers: StatefulList::with_items(get_peers().unwrap_or_default()),
@@ -358,6 +392,7 @@ impl<'a> Default for App<'a> {
             instances: StatefulList::with_items(get_instances().unwrap_or_default()),
             services: StatefulList::with_items(get_services().unwrap_or_default()),
             envs: StatefulList::with_items(get_envs().unwrap_or_default()),
+            tunnels: StatefulList::with_items(get_tunnels().unwrap_or_default()),
             ram_usage: [0; RAM_TIMES].to_vec(),
             cpu_usage: [0; CPU_TIMES].to_vec(),
             sys: System::new_all(),
@@ -400,6 +435,7 @@ impl<'a> App<'a> {
             2 => self.instances.previous(),
             3 => self.services.previous(),
             4 => self.envs.previous(),
+            5 => self.tunnels.previous(),
             _ => {}
         }
     }
@@ -411,6 +447,7 @@ impl<'a> App<'a> {
             2 => self.instances.next(),
             3 => self.services.next(),
             4 => self.envs.next(),
+            5 => self.tunnels.next(),
             _ => {}
         }
     }
@@ -519,6 +556,7 @@ impl<'a> App<'a> {
         self.instances.refresh(get_instances().unwrap_or_default());
         self.services.refresh(get_services().unwrap_or_default());
         self.envs.refresh(get_envs().unwrap_or_default());
+        self.tunnels.refresh(get_tunnels().unwrap_or_default());
         self.ram_usage.push(get_ram_usage(&mut self.sys));
         self.cpu_usage.push(get_cpu_usage(&mut self.sys));
     }
