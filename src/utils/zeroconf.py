@@ -61,7 +61,7 @@ def Zeroconf(network: str) -> list:
 
 def connect(peer: str):
     print('Connecting to peer ->', peer)
-    from time import slep
+    from time import sleep
     print("wait for 10 seconds ...")
     sleep(10)
     print(f"End of sleep time")
