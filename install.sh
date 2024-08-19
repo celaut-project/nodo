@@ -159,6 +159,8 @@ if ! ./"$UPDATE_ENV_SCRIPT" "$TARGET_DIR"; then
   exit 1
 fi
 
+./"bash/restore_sc.sh"
+
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
 chmod -R 777 "$TARGET_DIR"
 
