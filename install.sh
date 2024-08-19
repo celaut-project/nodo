@@ -159,7 +159,7 @@ if ! ./"$UPDATE_ENV_SCRIPT" "$TARGET_DIR"; then
   exit 1
 fi
 
-RESTORE_SCRIPT="bash/restore_sc.sh"
+RESTORE_SCRIPT="bash/restore_src.sh"
 chmod +x "$RESTORE_SCRIPT"
 if ! ./"$RESTORE_SCRIPT" "$TARGET_DIR"; then
   printf "Error: The script $UPDATE_ENV_SCRIPT failed to execute.\n" >&2
