@@ -515,7 +515,9 @@ impl<'a> App<'a> {
                 ).unwrap();
             if re.is_match(&self.connect_text) {
                 let args = vec!["connect".to_string(), self.connect_text.clone()];
-                let _ = self.execute_command(args).await;
+                tokio::spawn(async move {
+                    let _ = self.execute_command(args).await;
+                });
                 self.connect_text.clear();
                 self.close_popup();
             } // TODO else show error msg during 3 seconds or any key press.
