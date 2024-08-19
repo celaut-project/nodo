@@ -92,7 +92,7 @@ Type=simple
 User=root
 Group=sudo
 WorkingDirectory=$TARGET_DIR
-ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py service'
+ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py daemon'
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
