@@ -98,15 +98,8 @@ if __name__ == '__main__':
               "\n- execute <service id>"
               "\n- seeder"
               "\n- connect"
-              "\n- envs"
               "\n- serve"
               "\n- migrate"
-              "\n- containers --stream"
-              "\n- peers --stream"
-              "\n- prune:peer <peer_id>"
-              "\n- prune:peers"
-              "\n- ledgers --stream"
-              "\n- view:contract"
               "\n- deploy:contract"
               "\n- storage:prune_blocks"
               "\n- test <test name>"
@@ -138,21 +131,12 @@ if __name__ == '__main__':
                 from src.utils.zeroconf import connect
                 connect(sys.argv[2])
 
-            case 'envs':
-                os.system(f"nano {MAIN_DIR}/.env")
-                os.system(f"nano {MAIN_DIR}/bash/update_env.sh {MAIN_DIR}")
-
             case 'serve':
                 if not is_nodo_service_running():
                     from src.serve import serve
                     serve()
                 else:
                     print("Nodo service is already running in the background. Cannot start serve.")
-
-            case 'service':
-                # if is_nodo_service_running(): stop_service()
-                from src.serve import serve
-                serve()
 
             case 'migrate':
                 import os
@@ -161,30 +145,6 @@ if __name__ == '__main__':
                 os.system(f"rm {DATABASE_FILE}")
                 migrate()
                 seed() if len(sys.argv) == 2 else seed(private_key=sys.argv[2])
-
-            case 'containers':
-                from src.commands.containers import containers
-                containers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
-
-            case 'peers':
-                from src.commands.peers import peers
-                peers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
-
-            case 'prune:peer':
-                from src.commands.peers import delete
-                delete(sys.argv[2])
-
-            case 'prune:peers':
-                from src.commands.peers import delete_all
-                delete_all()
-
-            case 'ledgers':
-                from src.commands.ledgers import ledgers
-                ledgers(stream=len(sys.argv) == 3 and sys.argv[2] == '--stream')
-
-            case 'view:contract':
-                from src.commands.ledgers import view
-                view(sys.argv[2])
 
             case 'deploy:contract':
                 from src.payment_system.contracts.ethereum.deploy import deploy
