@@ -1,8 +1,9 @@
-# Import external packages
+import json
 from ergpy import appkit
 import jpype
+from typing import List, TypedDict, Optional
 
-# Initialize JVM before calling the function
+# Initialize JVM before calling the decorated function
 def initialize_jvm(function):
     def wrapper(*args, **kwargs):
         try:
@@ -15,50 +16,82 @@ def initialize_jvm(function):
             return res
     return wrapper
 
+class Token(TypedDict):
+    token_id: str
+    amount: int
+
+class Registers(TypedDict):
+    r4: Optional[str]
+    r5: Optional[str]
+    r6: Optional[str]
+    r7: Optional[str]
+    r8: Optional[str]
+
+def input_box_to_dict(input_box: 'org.ergoplatform.appkit.InputBoxImpl') -> dict:
+    return json.loads(str(input_box.toJson(True)))
+
+def build_proof_box(ergo: appkit.ErgoAppKit, value: int, address: str, tokens: List[Token], registers: Registers):
+    # This function currently returns None, as the logic isn't defined yet.
+    return None
+
 @initialize_jvm
-def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str, object_to_assign: dict = None,
-                               input_proof: dict = None, mnemonic_password: str = None, prover_index: int = 0,
-                               return_signed=False, fee=1000000):
-    # 1. Obtener la dirección de cambio
+def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
+    mnemonic_password: Optional[str] = None
+    prover_index: int = 0
+    return_signed: bool = True
+    fee: int = 1_000_000  # Fee in nanoErgs
+
+    # 1. Get the change address
     mnemonic = ergo.getMnemonic(wallet_mnemonic=wallet_mnemonic, mnemonic_password=mnemonic_password)
     sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
 
-    # 2. Preparar las entradas de la transacción (obtener UTXOs)
-    # Obtener UTXOs disponibles para cubrir la transacción
+    # 2. Prepare transaction inputs (get UTXOs)
     input_boxes = ergo.getInputBoxCovering(amount_list=[fee], sender_address=sender_address)
+    print(f"Input boxes: {input_boxes}", flush=True)
 
-    if input_proof:
-        # Añadir caja adicional si hay una prueba previa
-        input_boxes += [input_proof['box']]
-
-    # 3. Construir las salidas de la transacción
+    # 3. Build transaction outputs
     outputs = []
+    contract_address = sender_address.toString()
+    print(f"Contract address: {contract_address} ({type(contract_address)})", flush=True)
 
-    if input_proof is None:
-        # Si no hay prueba previa, minar un nuevo token
-        token_id = ergo.mintToken(sender_address, "ReputationToken", "Token de Reputación", 1)
-        out_box = ergo.buildOutBox(value=1000000, address=sender_address, tokens={token_id: 1})
-    else:
-        # Si existe una prueba previa, añadir los tokens a la nueva caja
-        tokens = input_proof['tokens']
-        out_box = ergo.buildOutBox(value=1000000, address=sender_address, tokens=tokens)
+    input_box = input_box_to_dict(input_boxes[0])
+    value_in_ergs = (input_box["value"] - fee) / 10**9  # Convert from nanoErgs to Ergs
+    print(f"Requested value in Ergs: {value_in_ergs}", flush=True)
 
-    # Añadir el out_box a las salidas
-    outputs.append(out_box)
+    # Currently not adding proof box, as the buildProofBox function returns None
+    # proof_box = build_proof_box(ergo, value=value_in_ergs, address=contract_address, tokens=[], registers={})
+    output_boxes = ergo.buildOutBox(receiver_wallet_addresses=[contract_address], amount_list=[value_in_ergs])
 
-    # 4. Configurar los registros adicionales
-    if object_to_assign:
-        out_box.additionalRegisters[4] = ergo.encode_string(object_to_assign['data1'])
-        out_box.additionalRegisters[5] = ergo.encode_string(object_to_assign['data2'])
+    if not output_boxes[0]:
+        print("Output box is null.", flush=True)
+        return None
 
-    # 5. Construir y firmar la transacción
-    unsigned_tx = ergo.buildUnsignedTransaction(inputs=input_boxes, outputs=outputs, fee=fee, changeAddress=sender_address)
+    outputs.extend(output_boxes)
+    print(f"Outputs: {outputs}", flush=True)
+    print(f"Output values: {[output.getValue() for output in output_boxes]}", flush=True)
+
+    # 4. Build and sign the transaction
+    unsigned_tx = ergo.buildUnsignedTransaction(
+        input_box=input_boxes,
+        outBox=outputs,
+        fee=fee / 10**9,
+        sender_address=sender_address
+    )
+    print(f"Unsigned transaction: {unsigned_tx}", flush=True)
+
     signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index)
+    print(f"Signed transaction: {signed_tx}", flush=True)
 
-    # 6. Enviar la transacción y devolver el ID
-    tx_id = ergo.submitTransaction(signed_tx)
+    # 5. Submit the transaction and return the ID
+    tx_id = ergo.txId(signed_tx)
+    print(f"Transaction ID: {tx_id}", flush=True)
 
-    if return_signed:
-        return signed_tx
+    return signed_tx if return_signed else tx_id
 
-    return tx_id
+if __name__ == "__main__":
+    wallet_mnemonic = "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect"
+    node_url: str = "http://213.239.193.208:9052/"  # MainNet or TestNet
+    ergo = appkit.ErgoAppKit(node_url=node_url)
+
+    tx_id = create_reputation_proof_tx(ergo=ergo, wallet_mnemonic=wallet_mnemonic)
+    print(f"Transaction: {tx_id}", flush=True)
