@@ -58,8 +58,10 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
     contract_address = sender_address.toString()
     print(f"Contract address: {contract_address}", flush=True)
 
-    _input_box = input_boxes[0]
+    # Get the input box with min value to avoid NotEnoughErgsError.
+    _input_box = min(input_boxes, key=lambda box: input_box_to_dict(box)['value'], default=input_boxes[0])  # bad practice (two times converted to dict)
     input_box = input_box_to_dict(_input_box)
+    print(f"Selected input box {input_box['boxId']}", flush=True)
     value_in_ergs = (input_box["value"] - fee) / 10**9  # Convert from nanoErgs to Ergs
     print(f"Requested value in Ergs: {value_in_ergs}", flush=True)
 
