@@ -55,20 +55,19 @@ def build_proof_box(ergo: appkit.ErgoAppKit, input_boxes: List[InputBox], sender
     return ergo._ctx.newTxBuilder() \
             .outBoxBuilder() \
                 .value(SAFE_MIN_BOX_VALUE) \
-                .mintToken(   # TYPE ERROR. CAN'T USE Eip4 constructor.
-                    Eip4Token(
+                .tokens([
+                    ErgoToken(
                         input_boxes.get(0).getId().toString(),
-                        jpype.JLong(token_amount),
-                        jpype.JString(reputation_token_label),   # R4
-                        jpype.JString(object_type_to_assign),    # R5
-                        jpype.JString(object_to_assign)          # R6
+                        jpype.JLong(token_amount)
                     )
-                    # R.Proofs not follows https://github.com/ergoplatform/eips/blob/master/eip-0004.md
-                ) \
-                .registers(java.util.ArrayList(
-                    ErgoValue.of(jpype.JString(owner_address)),  # R7
-                    ErgoValue.of(jpype.JBoolean(polarization))   # R8
-                )) \
+                ]) \
+                .registers(java.util.ArrayList([
+                    ErgoValue.of(jpype.JString(reputation_token_label)),   # R4
+                    ErgoValue.of(jpype.JString(object_type_to_assign)),    # R5
+                    ErgoValue.of(jpype.JString(object_to_assign)),         # R6
+                    ErgoValue.of(jpype.JString(owner_address)),            # R7
+                    ErgoValue.of(jpype.JBoolean(polarization))             # R8
+                ])) \
                 .contract(
                     ErgoTreeContract(
                         Address.create(contract_address).getErgoAddress().script(),
