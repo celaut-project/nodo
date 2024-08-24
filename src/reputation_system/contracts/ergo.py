@@ -3,6 +3,10 @@ from ergpy import appkit
 import jpype
 from typing import List, TypedDict, Optional
 
+from jpype import *
+import java.lang
+
+
 # Initialize JVM before calling the decorated function
 def initialize_jvm(function):
     def wrapper(*args, **kwargs):
@@ -52,9 +56,10 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
     # 3. Build transaction outputs
     outputs = []
     contract_address = sender_address.toString()
-    print(f"Contract address: {contract_address} ({type(contract_address)})", flush=True)
+    print(f"Contract address: {contract_address}", flush=True)
 
-    input_box = input_box_to_dict(input_boxes[0])
+    _input_box = input_boxes[0]
+    input_box = input_box_to_dict(_input_box)
     value_in_ergs = (input_box["value"] - fee) / 10**9  # Convert from nanoErgs to Ergs
     print(f"Requested value in Ergs: {value_in_ergs}", flush=True)
 
@@ -72,7 +77,7 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
 
     # 4. Build and sign the transaction
     unsigned_tx = ergo.buildUnsignedTransaction(
-        input_box=input_boxes,
+        input_box=java.util.ArrayList([_input_box]),
         outBox=outputs,
         fee=fee / 10**9,
         sender_address=sender_address
