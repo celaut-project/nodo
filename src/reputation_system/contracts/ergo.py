@@ -61,13 +61,13 @@ def build_proof_box(ergo: appkit.ErgoAppKit, input_boxes: List[InputBox], sender
                         jpype.JLong(token_amount)
                     )
                 ]) \
-                .registers(java.util.ArrayList([
-                    ErgoValue.of(jpype.JString(reputation_token_label)),   # R4
-                    ErgoValue.of(jpype.JString(object_type_to_assign)),    # R5
-                    ErgoValue.of(jpype.JString(object_to_assign)),         # R6
-                    ErgoValue.of(jpype.JString(owner_address)),            # R7
-                    ErgoValue.of(jpype.JBoolean(polarization))             # R8
-                ])) \
+                .registers([
+                    ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),   # R4
+                    ErgoValue.of(jpype.JString(object_type_to_assign).getBytes("utf-8")),    # R5
+                    ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),         # R6
+                    ErgoValue.of(jpype.JString(owner_address).getBytes("utf-8")),            # R7
+                    ErgoValue.of(jpype.JBoolean(polarization))                               # R8
+                ]) \
                 .contract(
                     ErgoTreeContract(
                         Address.create(contract_address).getErgoAddress().script(),
