@@ -6,6 +6,11 @@ from typing import List, TypedDict, Optional
 from jpype import *
 import java.lang
 
+from org.ergoplatform.appkit import *
+from org.ergoplatform.appkit.impl import *
+
+
+SAFE_MIN_BOX_VALUE = 1_000_000
 
 # Initialize JVM before calling the decorated function
 def initialize_jvm(function):
@@ -34,12 +39,43 @@ class Registers(TypedDict):
 def input_box_to_dict(input_box: 'org.ergoplatform.appkit.InputBoxImpl') -> dict:
     return json.loads(str(input_box.toJson(True)))
 
-def build_proof_box(ergo: appkit.ErgoAppKit, tokens: List[Token], registers: Registers):
+def build_proof_box(ergo: appkit.ErgoAppKit, input_boxes: List[InputBox], sender_address: str):
     # This function currently returns None, as the logic isn't defined yet.
 
-    contract_address = ""
+    token_amount = 1_000_000
+    reputation_token_label = "REPUTATION_PROOF"
+    object_type_to_assign = "plain-txt"
+    object_to_assign = ".empty"
+    owner_address = sender_address # generate_pk_proposition
+    polarization = True
+
+    contract_address = sender_address # TODO don't use the sender address. Use the reputation proof contract address.
     print(f"Contract address: {contract_address}", flush=True)
-    return None
+
+    return ergo._ctx.newTxBuilder() \
+            .outBoxBuilder() \
+                .value(SAFE_MIN_BOX_VALUE) \
+                .mintToken(   # TYPE ERROR. CAN'T USE Eip4 constructor.
+                    Eip4Token(
+                        input_boxes.get(0).getId().toString(),
+                        jpype.JLong(token_amount),
+                        jpype.JString(reputation_token_label),   # R4
+                        jpype.JString(object_type_to_assign),    # R5
+                        jpype.JString(object_to_assign)          # R6
+                    )
+                    # R.Proofs not follows https://github.com/ergoplatform/eips/blob/master/eip-0004.md
+                ) \
+                .registers(java.util.ArrayList(
+                    ErgoValue.of(jpype.JString(owner_address)),  # R7
+                    ErgoValue.of(jpype.JBoolean(polarization))   # R8
+                )) \
+                .contract(
+                    ErgoTreeContract(
+                        Address.create(contract_address).getErgoAddress().script(),
+                        ergo._networkType
+                    )
+                ) \
+            .build()
 
 @initialize_jvm
 def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
@@ -63,11 +99,11 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
     _input_box = min(input_boxes, key=lambda box: input_box_to_dict(box)['value'], default=input_boxes[0])  # bad practice (two times converted to dict)
     input_box = input_box_to_dict(_input_box)
     print(f"Selected input box {input_box['boxId']}", flush=True)
-    value_in_ergs = (input_box["value"] - fee) / 10**9  # Convert from nanoErgs to Ergs
+    value_in_ergs = (input_box["value"] - fee - SAFE_MIN_BOX_VALUE) / 10**9  # Convert from nanoErgs to Ergs
     print(f"Requested value in Ergs: {value_in_ergs}", flush=True)
 
     # Reputation proof output box.
-    proof_box = build_proof_box(ergo, tokens=[], registers={})
+    proof_box = build_proof_box(ergo, input_boxes=input_boxes, sender_address=sender_address.toString())
     print(f"proof box -> {proof_box}", flush=True)
     if proof_box:
         outputs.append(proof_box)
