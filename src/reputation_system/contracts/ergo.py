@@ -34,8 +34,11 @@ class Registers(TypedDict):
 def input_box_to_dict(input_box: 'org.ergoplatform.appkit.InputBoxImpl') -> dict:
     return json.loads(str(input_box.toJson(True)))
 
-def build_proof_box(ergo: appkit.ErgoAppKit, value: int, address: str, tokens: List[Token], registers: Registers):
+def build_proof_box(ergo: appkit.ErgoAppKit, tokens: List[Token], registers: Registers):
     # This function currently returns None, as the logic isn't defined yet.
+
+    contract_address = ""
+    print(f"Contract address: {contract_address}", flush=True)
     return None
 
 @initialize_jvm
@@ -55,8 +58,6 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
 
     # 3. Build transaction outputs
     outputs = []
-    contract_address = sender_address.toString()
-    print(f"Contract address: {contract_address}", flush=True)
 
     # Get the input box with min value to avoid NotEnoughErgsError.
     _input_box = min(input_boxes, key=lambda box: input_box_to_dict(box)['value'], default=input_boxes[0])  # bad practice (two times converted to dict)
@@ -65,10 +66,14 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
     value_in_ergs = (input_box["value"] - fee) / 10**9  # Convert from nanoErgs to Ergs
     print(f"Requested value in Ergs: {value_in_ergs}", flush=True)
 
-    # Currently not adding proof box, as the buildProofBox function returns None
-    # proof_box = build_proof_box(ergo, value=value_in_ergs, address=contract_address, tokens=[], registers={})
-    output_boxes = ergo.buildOutBox(receiver_wallet_addresses=[contract_address], amount_list=[value_in_ergs])
+    # Reputation proof output box.
+    proof_box = build_proof_box(ergo, tokens=[], registers={})
+    print(f"proof box -> {proof_box}", flush=True)
+    if proof_box:
+        outputs.append(proof_box)
 
+    # Basic wallet output box.
+    output_boxes = ergo.buildOutBox(receiver_wallet_addresses=[sender_address.toString()], amount_list=[value_in_ergs])
     if not output_boxes[0]:
         print("Output box is null.", flush=True)
         return None
