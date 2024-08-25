@@ -83,7 +83,7 @@ def __build_proof_box(
                     ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),         # R4
                     ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),    # R5
                     ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),               # R6
-                    ErgoValue.of(jpype.JString(sender_address.toPropositionBytes())),              # R7
+                    ErgoValue.of(sender_address.toPropositionBytes()),              # R7
                     ErgoValue.of(jpype.JBoolean(polarization))                                     # R8
                 ]) \
                 .contract(ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)) \
