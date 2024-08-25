@@ -7,7 +7,7 @@ from typing import List, TypedDict, Optional
 from jpype import *
 import java.lang
 
-from org.ergoplatform.appkit import ErgoToken, ErgoValue, ConstantsBuilder
+from org.ergoplatform.appkit import ErgoToken, ErgoValue, ConstantsBuilder, Address
 
 # Constants
 DEFAULT_FEE = 1_000_000
@@ -66,7 +66,7 @@ def __input_box_to_dict(input_box: 'org.ergoplatform.appkit.InputBoxImpl') -> di
 def __build_proof_box(
     ergo: appkit.ErgoAppKit,
     input_boxes: java.util.ArrayList,
-    sender_address: str,
+    sender_address: Address,
     token_amount: int = DEFAULT_TOKEN_AMOUNT,
     reputation_token_label: str = DEFAULT_TOKEN_LABEL,
     assigned_object: Optional[ProofObject] = None,
@@ -80,11 +80,11 @@ def __build_proof_box(
                 .value(SAFE_MIN_BOX_VALUE) \
                 .tokens([ErgoToken(input_boxes.get(0).getId().toString(), jpype.JLong(token_amount))]) \
                 .registers([
-                    ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),
-                    ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),
-                    ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),
-                    ErgoValue.of(jpype.JString(sender_address).getBytes("utf-8")),
-                    ErgoValue.of(jpype.JBoolean(polarization))
+                    ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),         # R4
+                    ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),    # R5
+                    ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),               # R6
+                    ErgoValue.of(jpype.JString(sender_address.toPropositionBytes())),                             # R7
+                    ErgoValue.of(jpype.JBoolean(polarization))                                     # R8
                 ]) \
                 .contract(ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)) \
             .build()
@@ -123,7 +123,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, assigned_o
     proof_box = __build_proof_box(
         ergo=ergo,
         input_boxes=selected_input_boxes,
-        sender_address=sender_address.toString(),
+        sender_address=sender_address,
         assigned_object=assigned_object,
         polarization=polarization
     )
