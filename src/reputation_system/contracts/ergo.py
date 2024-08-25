@@ -102,14 +102,15 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
     # TODO: Make better code.
     #
     # Get the input box with min value to avoid NotEnoughErgsError.
-    _input_box, _input_box_obj = None, None
-    java.util.ArrayList([])
     for _ib in input_boxes:
         _ib_obj = input_box_to_dict(_ib)
         if _ib_obj["value"] > 2*SAFE_MIN_BOX_VALUE:
             if not _input_box_obj or _input_box_obj and _input_box_obj["value"] >= _ib_obj["value"]:
                 _input_boxes = java.util.ArrayList([_ib])
                 _input_box, _input_box_obj = _ib, _ib_obj
+
+    if not _input_box or not _input_boxes or not _input_box_obj:
+        raise Exception("No input box available.")
 
     print(f"Selected input box {_input_box_obj['boxId']}", flush=True)
     value_in_ergs = (_input_box_obj["value"] - fee - SAFE_MIN_BOX_VALUE) / 10**9  # Convert from nanoErgs to Ergs
