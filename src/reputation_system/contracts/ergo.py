@@ -39,7 +39,11 @@ class Registers(TypedDict):
 def input_box_to_dict(input_box: 'org.ergoplatform.appkit.InputBoxImpl') -> dict:
     return json.loads(str(input_box.toJson(True)))
 
-def build_proof_box(ergo: appkit.ErgoAppKit, input_boxes: List[InputBox], sender_address: str):
+def build_proof_box(
+    ergo: appkit.ErgoAppKit,
+    input_boxes: java.util.ArrayList,  # java.util.ArrayList[InputBox]
+    sender_address: str
+):
     # This function currently returns None, as the logic isn't defined yet.
 
     token_amount = 1_000_000
@@ -61,7 +65,7 @@ def build_proof_box(ergo: appkit.ErgoAppKit, input_boxes: List[InputBox], sender
                         jpype.JLong(token_amount)
                     )
                 ]) \
-                .registers([
+                .registers([  #  Strings should be SConstant(SColl(SByte, stringToBytes('utf-8', Value)))
                     ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),   # R4
                     ErgoValue.of(jpype.JString(object_type_to_assign).getBytes("utf-8")),    # R5
                     ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),         # R6
@@ -94,15 +98,25 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
     # 3. Build transaction outputs
     outputs = []
 
+    #
+    # TODO: Make better code.
+    #
     # Get the input box with min value to avoid NotEnoughErgsError.
-    _input_box = min(input_boxes, key=lambda box: input_box_to_dict(box)['value'], default=input_boxes[0])  # bad practice (two times converted to dict)
-    input_box = input_box_to_dict(_input_box)
-    print(f"Selected input box {input_box['boxId']}", flush=True)
-    value_in_ergs = (input_box["value"] - fee - SAFE_MIN_BOX_VALUE) / 10**9  # Convert from nanoErgs to Ergs
+    _input_box, _input_box_obj = None, None
+    java.util.ArrayList([])
+    for _ib in input_boxes:
+        _ib_obj = input_box_to_dict(_ib)
+        if _ib_obj["value"] > 2*SAFE_MIN_BOX_VALUE:
+            if not _input_box_obj or _input_box_obj and _input_box_obj["value"] >= _ib_obj["value"]:
+                _input_boxes = java.util.ArrayList([_ib])
+                _input_box, _input_box_obj = _ib, _ib_obj
+
+    print(f"Selected input box {_input_box_obj['boxId']}", flush=True)
+    value_in_ergs = (_input_box_obj["value"] - fee - SAFE_MIN_BOX_VALUE) / 10**9  # Convert from nanoErgs to Ergs
     print(f"Requested value in Ergs: {value_in_ergs}", flush=True)
 
     # Reputation proof output box.
-    proof_box = build_proof_box(ergo, input_boxes=input_boxes, sender_address=sender_address.toString())
+    proof_box = build_proof_box(ergo, input_boxes=_input_boxes, sender_address=sender_address.toString())
     print(f"proof box -> {proof_box}", flush=True)
     if proof_box:
         outputs.append(proof_box)
@@ -115,11 +129,11 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
 
     outputs.extend(output_boxes)
     print(f"Outputs: {outputs}", flush=True)
-    print(f"Output values: {[output.getValue() for output in output_boxes]}", flush=True)
+    print(f"Output values: {[output.getValue() for output in outputs]}", flush=True)
 
     # 4. Build and sign the transaction
     unsigned_tx = ergo.buildUnsignedTransaction(
-        input_box=java.util.ArrayList([_input_box]),
+        input_box=_input_boxes,
         outBox=outputs,
         fee=fee / 10**9,
         sender_address=sender_address
