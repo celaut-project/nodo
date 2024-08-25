@@ -1,6 +1,7 @@
 import json
 from ergpy import appkit
 import jpype
+from enum import Enum
 from typing import List, TypedDict, Optional
 
 from jpype import *
@@ -11,6 +12,8 @@ from org.ergoplatform.appkit.impl import *
 
 
 SAFE_MIN_BOX_VALUE = 1_000_000
+DEFAULT_TOKEN_AMOUNT = 1_000_000
+DEFAULT_TOKEN_LABEL = "reputation-proof-token"
 
 CONTRACT = """{
   proveDlog(SELF.R7[GroupElement].get) &&
@@ -25,6 +28,14 @@ CONTRACT = """{
     )
   })
 }"""
+
+class ProofObjectType(Enum):
+    PlainText = "plain/txt-utf8"
+    ProofByToken = "token-proof"
+
+class ProofObject(TypedDict):
+    type: ProofObjectType
+    value: str
 
 # Initialize JVM before calling the decorated function
 def initialize_jvm(function):
@@ -56,19 +67,14 @@ def input_box_to_dict(input_box: 'org.ergoplatform.appkit.InputBoxImpl') -> dict
 def build_proof_box(
     ergo: appkit.ErgoAppKit,
     input_boxes: java.util.ArrayList,  # java.util.ArrayList[InputBox]
-    sender_address: str
+    sender_address: str,
+    token_amount: int = DEFAULT_TOKEN_AMOUNT,
+    reputation_token_label: str = DEFAULT_TOKEN_LABEL,
+    assigned_object: Optional[ProofObject] = None,
+    polarization: bool = True
 ):
-    # This function currently returns None, as the logic isn't defined yet.
-
-    token_amount = 1_000_000
-    reputation_token_label = "reputation-proof-token"
-    object_type_to_assign = "plain/txt-utf8"
-    object_to_assign = "hello-nodo"
-    owner_address = sender_address # generate_pk_proposition
-    polarization = True
-
-    contract_address = sender_address # TODO don't use the sender address. Use the reputation proof contract address.
-    print(f"Contract address: {contract_address}", flush=True)
+    object_type_to_assign = assigned_object['type'] if assigned_object else ProofObjectType.PlainText
+    object_to_assign = assigned_object['value'] if assigned_object else ""
 
     return ergo._ctx.newTxBuilder() \
             .outBoxBuilder() \
@@ -79,12 +85,12 @@ def build_proof_box(
                         jpype.JLong(token_amount)
                     )
                 ]) \
-                .registers([  #  Strings should be SConstant(SColl(SByte, stringToBytes('utf-8', Value)))
-                    ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),   # R4
-                    ErgoValue.of(jpype.JString(object_type_to_assign).getBytes("utf-8")),    # R5
-                    ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),         # R6
-                    ErgoValue.of(jpype.JString(owner_address).getBytes("utf-8")),            # R7
-                    ErgoValue.of(jpype.JBoolean(polarization))                               # R8
+                .registers([
+                    ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),         # R4
+                    ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),    # R5
+                    ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),               # R6
+                    ErgoValue.of(jpype.JString(sender_address).getBytes("utf-8")),                 # R7
+                    ErgoValue.of(jpype.JBoolean(polarization))                                     # R8
                 ]) \
                 .contract(
                     ergo._ctx.compileContract(
@@ -94,7 +100,7 @@ def build_proof_box(
             .build()
 
 @initialize_jvm
-def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
+def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str, assigned_object: Optional[ProofObject], polarization: bool = True):
     mnemonic_password: Optional[str] = None
     prover_index: int = 0
     return_signed: bool = True
@@ -133,7 +139,13 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
     print(f"Requested value in Ergs: {value_in_ergs}", flush=True)
 
     # Reputation proof output box.
-    proof_box = build_proof_box(ergo, input_boxes=_input_boxes, sender_address=sender_address.toString())
+    proof_box = build_proof_box(
+        ergo=ergo,
+        input_boxes=_input_boxes,
+        sender_address=sender_address.toString(),
+        assigned_object=assigned_object,
+        polarization=polarization
+    )
     print(f"proof box -> {proof_box}", flush=True)
     if proof_box:
         outputs.append(proof_box)
@@ -167,9 +179,16 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
     return signed_tx if return_signed else tx_id
 
 if __name__ == "__main__":
+    object_to_assign = "nodo-test-1"
+    polarization = True
+    assigned_object = ProofObject(
+        type=ProofObjectType.PlainText,
+        value=object_to_assign
+    )
+
     wallet_mnemonic = "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect"
     node_url: str = "http://213.239.193.208:9052/"  # MainNet or TestNet
     ergo = appkit.ErgoAppKit(node_url=node_url)
 
-    tx_id = create_reputation_proof_tx(ergo=ergo, wallet_mnemonic=wallet_mnemonic)
+    tx_id = create_reputation_proof_tx(ergo=ergo, wallet_mnemonic=wallet_mnemonic, assigned_object=assigned_object, polarization=polarization)
     print(f"Transaction: {tx_id}", flush=True)
