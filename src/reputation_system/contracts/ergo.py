@@ -12,6 +12,20 @@ from org.ergoplatform.appkit.impl import *
 
 SAFE_MIN_BOX_VALUE = 1_000_000
 
+CONTRACT = """{
+  proveDlog(SELF.R7[GroupElement].get) &&
+  sigmaProp(SELF.tokens.size == 1) &&
+  sigmaProp(OUTPUTS.forall { (x: Box) =>
+    !(x.tokens.exists { (token: (Coll[Byte], Long)) => token._1 == SELF.tokens(0)._1 }) ||
+    (
+      x.R7[GroupElement].get == SELF.R7[GroupElement].get &&
+      x.tokens.size == 1 &&
+      x.propositionBytes == SELF.propositionBytes &&
+      (x.R8[Boolean].get == false || x.R8[Boolean].get == true)
+    )
+  })
+}"""
+
 # Initialize JVM before calling the decorated function
 def initialize_jvm(function):
     def wrapper(*args, **kwargs):
@@ -47,9 +61,9 @@ def build_proof_box(
     # This function currently returns None, as the logic isn't defined yet.
 
     token_amount = 1_000_000
-    reputation_token_label = "REPUTATION_PROOF"
-    object_type_to_assign = "plain-txt"
-    object_to_assign = ".empty"
+    reputation_token_label = "reputation-proof-token"
+    object_type_to_assign = "plain/txt-utf8"
+    object_to_assign = "hello-nodo"
     owner_address = sender_address # generate_pk_proposition
     polarization = True
 
@@ -73,9 +87,8 @@ def build_proof_box(
                     ErgoValue.of(jpype.JBoolean(polarization))                               # R8
                 ]) \
                 .contract(
-                    ErgoTreeContract(
-                        Address.create(contract_address).getErgoAddress().script(),
-                        ergo._networkType
+                    ergo._ctx.compileContract(
+                        ConstantsBuilder.empty(), CONTRACT
                     )
                 ) \
             .build()
@@ -102,6 +115,9 @@ def create_reputation_proof_tx(ergo: appkit.ErgoAppKit, wallet_mnemonic: str):
     # TODO: Make better code.
     #
     # Get the input box with min value to avoid NotEnoughErgsError.
+    _input_box = None
+    _input_box_obj = None
+    _input_boxes = None
     for _ib in input_boxes:
         _ib_obj = input_box_to_dict(_ib)
         if _ib_obj["value"] > 2*SAFE_MIN_BOX_VALUE:
