@@ -5,9 +5,26 @@ import docker as docker_lib
 from protos import celaut_pb2
 
 
-GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(default) != bool
-                                else os.environ.get(env) in ['True', 'true', 'T', 't'])\
-                                    if env in os.environ.keys() else default
+def from_env(default):
+    """
+    Decorator to fetch an environment variable with a default value.
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            name = func.__name__
+            return func(name, default)
+        return wrapper
+    return decorator
+
+@from_env(default=2.0)
+def _(env, default):
+    """
+    Fetches an environment variable value or returns the default.
+    """
+    GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(default) != bool
+                                    else os.environ.get(env) in ['True', 'true', 'T', 't'])\
+                                        if env in os.environ.keys() else default
+    globals()[env] = GET_ENV(env=env, default=default)
 
 # ------------------------------
 # ----------- START ------------
@@ -25,17 +42,21 @@ REPUTATION_DB = f"{STORAGE}/reputation.db"
 
 # Compiler Settings
 COMPILER_MEMORY_SIZE_FACTOR = GET_ENV(env='COMPILER_MEMORY_SIZE_FACTOR', default=2.0)
+ARM_COMPILER_SUPPORT = GET_ENV(env='ARM_COMPILER_SUPPORT', default=True)
+X86_COMPILER_SUPPORT = GET_ENV(env='X86_COMPILER_SUPPORT', default=False)
 COMPILER_SUPPORTED_ARCHITECTURES = [
-    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if GET_ENV(env='ARM_COMPILER_SUPPORT', default=True) else [],
-    ['linux/amd64', 'x86_64', 'amd64'] if GET_ENV(env='X86_COMPILER_SUPPORT', default=False) else []
+    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if ARM_COMPILER_SUPPORT else [],
+    ['linux/amd64', 'x86_64', 'amd64'] if X86_COMPILER_SUPPORT else []
 ]
 
 # Builder Settings
 WAIT_FOR_CONTAINER = GET_ENV(env='WAIT_FOR_CONTAINER_TIME', default=60)
 BUILD_CONTAINER_MEMORY_SIZE_FACTOR = GET_ENV(env='BUILD_CONTAINER_MEMORY_SIZE_FACTOR', default=3.1)
+ARM_SUPPORT = GET_ENV(env='ARM_SUPPORT', default=True)
+X86_SUPPORT = GET_ENV(env='X86_SUPPORT', default=False)
 SUPPORTED_ARCHITECTURES = [
-    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if GET_ENV(env='ARM_SUPPORT', default=True) else [],
-    ['linux/amd64', 'x86_64', 'amd64'] if GET_ENV(env='X86_SUPPORT', default=False) else []
+    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if ARM_SUPPORT else [],
+    ['linux/amd64', 'x86_64', 'amd64'] if X86_SUPPORT else []
 ]
 
 # Docker Configuration
