@@ -1,5 +1,6 @@
 import json
 from ergpy import appkit
+from ergpy.helper_functions import initialize_jvm
 import jpype
 from enum import Enum
 from typing import List, TypedDict, Optional
@@ -7,7 +8,9 @@ from typing import List, TypedDict, Optional
 from jpype import *
 import java.lang
 
-from org.ergoplatform.appkit import ErgoToken, ErgoValue, ConstantsBuilder, Address
+from org.ergoplatform.sdk import *
+from org.ergoplatform.appkit import *
+from org.ergoplatform.appkit.impl import *
 
 # Constants
 DEFAULT_FEE = 1_000_000
@@ -49,15 +52,6 @@ class Registers(TypedDict):
     r7: Optional[str]
     r8: Optional[str]
 
-# JVM initialization decorator
-def initialize_jvm(function):
-    def wrapper(*args, **kwargs):
-        if not jpype.isJVMStarted():
-            jpype.addClassPath('ergo.jar')
-            jpype.startJVM()
-        return function(*args, **kwargs)
-    return wrapper
-
 # Utility function to convert InputBox to dict
 def __input_box_to_dict(input_box: 'org.ergoplatform.appkit.InputBoxImpl') -> dict:
     return json.loads(str(input_box.toJson(True)))
@@ -83,11 +77,11 @@ def __build_proof_box(
                     ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),         # R4
                     ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),    # R5
                     ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),               # R6
-                    ErgoValue.of(sender_address.toPropositionBytes()),              # R7
+                    ErgoValue.of(sender_address.toPropositionBytes()),                             # R7
                     ErgoValue.of(jpype.JBoolean(polarization))                                     # R8
                 ]) \
                 .contract(ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)) \
-            .build()
+                .build()
 
 @initialize_jvm
 def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, assigned_object: Optional[ProofObject], polarization: bool = True):
@@ -97,6 +91,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, assigned_o
     # 1. Get the change address
     mnemonic = ergo.getMnemonic(wallet_mnemonic=wallet_mnemonic, mnemonic_password=None)
     sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
+
+    print(f"Sender address -> {sender_address.toString()}")
 
     # 2. Prepare transaction inputs (get UTXOs)
     input_boxes = ergo.getInputBoxCovering(amount_list=[fee], sender_address=sender_address)
