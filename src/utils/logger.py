@@ -1,8 +1,7 @@
 import logging, os
 
-from src.utils.env import GET_ENV, STORAGE
+from src.utils.env import STORAGE, USE_PRINT
 
-USE_PRINT = GET_ENV(env='USE_PRINT', default=False)
 if not os.path.exists(STORAGE): os.makedirs(STORAGE)
 
 logging.basicConfig(filename=f'{STORAGE}/app.log', level=logging.INFO,
