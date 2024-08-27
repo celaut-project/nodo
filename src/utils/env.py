@@ -23,7 +23,11 @@ def _(env, default):
     GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(default) != bool
                                     else os.environ.get(env) in ['True', 'true', 'T', 't'])\
                                         if env in os.environ.keys() else default
-    globals()[env] = GET_ENV(env=env, default=default)
+    try:
+        _value = GET_ENV(env=env, default=default)
+    except:
+        _value = default
+    globals()[env] = _value
 
 # ------------------------------
 # ----------- START ------------
