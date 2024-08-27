@@ -5,6 +5,9 @@ import jpype
 from enum import Enum
 from typing import List, TypedDict, Optional
 
+from utils.logger import LOGGER
+from utils.env import ERGO_NODE_URL, ERGO_WALLET_MNEMONIC
+
 from jpype import *
 import java.lang
 
@@ -146,12 +149,12 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, assigned_o
 
     return signed_tx if True else tx_id
 
-if __name__ == "__main__":
-    object_to_assign = "nodo-test-1"
-    assigned_object = ProofObject(type=ProofObjectType.PlainText, value=object_to_assign)
-
-    wallet_mnemonic = "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect"
-    node_url = "http://213.239.193.208:9052/"  # MainNet or TestNet
-
-    tx_id = __create_reputation_proof_tx(node_url=node_url, wallet_mnemonic=wallet_mnemonic, assigned_object=assigned_object, polarization=True)
-    print(f"Transaction: {tx_id}", flush=True)
+def submit_reputation_proof(object: str, polarization: bool) -> bool:
+    tx_id = __create_reputation_proof_tx(
+        node_url=ERGO_NODE_URL,
+        wallet_mnemonic=ERGO_WALLET_MNEMONIC,
+        assigned_object=object,
+        polarization=polarization
+    )
+    LOGGER(f"Submited tx -> {tx_id}")
+    return tx_id != None

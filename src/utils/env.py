@@ -73,6 +73,10 @@ _("NGROK_TUNNELS_KEY", "")
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
+# Ledger
+_("ERGO_NODE_URL", "http://213.239.193.208:9052/")
+_("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect")
+
 # Logging and Memory Settings
 _("MEMORY_LOGS", False)
 _("MEMORY_LIMIT_COST_FACTOR", 1 / pow(10, 6))
