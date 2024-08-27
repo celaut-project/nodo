@@ -77,7 +77,6 @@ def connect(peer: str):
                 partitions_message_mode_parser=True
             ))
         )
+        print('\nAdded peer', peer)
     except Exception as e:
         print(e)
-
-    print('\nAdded peer', peer)
