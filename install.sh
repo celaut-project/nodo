@@ -151,14 +151,6 @@ EOF
 
 create_wrapper_script
 
-UPDATE_ENV_SCRIPT="bash/update_env.sh"
-chmod +x "$UPDATE_ENV_SCRIPT"
-printf "Updating envs $UPDATE_ENV_SCRIPT...\n"
-if ! ./"$UPDATE_ENV_SCRIPT" "$TARGET_DIR"; then
-  printf "Error: The script $UPDATE_ENV_SCRIPT failed to execute.\n" >&2
-  exit 1
-fi
-
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
 chmod -R 777 "$TARGET_DIR"
 
