@@ -1,4 +1,5 @@
 import os
+import math
 import uuid
 import sqlite3
 import time
@@ -440,6 +441,71 @@ class SQLConnection(metaclass=Singleton):
         return gas
 
     # Peer Methods
+
+    def update_reputation_peer(self, peer_id: str, amount: int) -> bool:
+        """
+        Updates the reputation of a peer by increasing the reputation score and index.
+
+        Args:
+            peer_id (str): The ID of the peer whose reputation is to be updated.
+            amount (int): The amount to add to the reputation score.
+
+        Returns:
+            bool: True if the update was successful, False otherwise.
+        """
+        try:
+            # Fetch current reputation score and index
+            result = self._execute('SELECT reputation_score, reputation_index FROM peer WHERE id = ?', (peer_id,))
+            row = result.fetchone()
+
+            if row:
+                current_score = row['reputation_score'] or 0  # Handle potential NULL values
+                current_index = row['reputation_index'] or 0
+
+                # Update the reputation score and index
+                new_score = current_score + amount
+                new_index = current_index + 1
+
+                self._execute('''
+                    UPDATE peer SET reputation_score = ?, reputation_index = ? WHERE id = ?
+                ''', (new_score, new_index, peer_id))
+
+                return True
+            else:
+                raise Exception(f'Peer not found: {peer_id}')
+        except Exception as e:
+            logger.LOGGER(f'Error updating reputation for peer {peer_id}: {e}')
+            return False
+
+
+    def get_reputation(self, peer_id: str) -> Optional[float]:
+        """
+        Retrieves the reputation score for a peer, adjusted by the reputation index.
+
+        Args:
+            peer_id (str): The ID of the peer whose reputation is to be retrieved.
+
+        Returns:
+            Optional[float]: The adjusted reputation score, or None if the peer is not found.
+        """
+        try:
+            # Fetch current reputation score and index
+            result = self._execute('SELECT reputation_score, reputation_index FROM peer WHERE id = ?', (peer_id,))
+            row = result.fetchone()
+
+            if row:
+                reputation_score = row['reputation_score'] or 0  # Handle potential NULL values
+                reputation_index = row['reputation_index'] or 1  # Default to 1 to avoid division by zero
+
+                # Calculate the adjusted reputation score
+                adjusted_reputation = reputation_score * (1 + math.log(reputation_index))
+
+                return adjusted_reputation
+            else:
+                raise Exception(f'Peer not found: {peer_id}')
+        except Exception as e:
+            logger.LOGGER(f'Error fetching reputation for peer {peer_id}: {e}')
+            return None
 
     def get_peers(self) -> List[dict]:
         """

@@ -1,34 +1,22 @@
 from typing import Optional
-from src.utils.env import REPUTATION_DB
-
+from src.database.sql_connection import SQLConnection
 from src.utils.logger import LOGGER
+from src.utils.env import DOCKER_NETWORK
+from src.utils.utils import get_network_name
 
 
-try:
-    from sigma_reputation_graph import compute as lib_compute, spend as lib_spend
+def submit_reputation_feedback(token: str, amount: int) -> Optional[str]:
+    # Take the peer_id when the token it's external. Do nothing if it's an external service.
+    peer_id: str = token.split('##')[1]
+    if get_network_name(ip_or_uri=token.split('##')[1]) != DOCKER_NETWORK:
+        LOGGER(f"Submit reputation proof {peer_id}")
+        return SQLConnection().update_reputation_peer(peer_id, amount)
 
-    from src.utils.env import DOCKER_NETWORK
-    from src.utils.utils import get_network_name
-
-
-    def submit_reputation_feedback(token: str, amount: int) -> Optional[str]:
-        # Take the peer_id when the token it's external. Do nothing if it's an external service.
-        pointer: str = token.split('##')[1]
-        if get_network_name(ip_or_uri=token.split('##')[1]) != DOCKER_NETWORK: 
-            LOGGER(f"Submit reputation proof {pointer}") 
-            return lib_spend("", amount, pointer, REPUTATION_DB)
-
-    def compute_reputation_feedback(pointer) -> float:
-        _result: float = lib_compute(None, pointer, REPUTATION_DB)
-        LOGGER(f"Computed reputation: {_result}")
-        return _result
-
-except ModuleNotFoundError:
-    def submit_reputation_feedback(token: str, amount: int) -> str:
-        # LOGGER("Not implemented")
-        return ""
-
-
-    def compute_reputation_feedback(pointer) -> float:
-        # LOGGER("Not implemented")
-        return 0
+def compute_reputation_feedback(peer_id) -> float:
+    """
+    As an initial implementation, the node will only consider its own observations.
+    Therefore, it will not take into account the reputation assigned by other peers for each of the pairs it interacts with.
+    """
+    _result: float = SQLConnection().get_reputation(peer_id)
+    LOGGER(f"Computed reputation: {_result}")
+    return _result

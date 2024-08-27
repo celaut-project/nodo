@@ -31,7 +31,9 @@ def create_tables(cursor):
                 app_protocol BLOB,
                 client_id TEXT,
                 gas_mantissa INTEGER,
-                gas_exponent INTEGER
+                gas_exponent INTEGER,
+                reputation_score INTEGER,
+                reputation_index INTEGER
             )
         ''',
         "clients": '''

@@ -34,7 +34,6 @@ _("REGISTRY", f"{STORAGE}/__registry__/")
 _("METADATA_REGISTRY", f"{STORAGE}/__metadata__/")
 _("BLOCKDIR", f"{STORAGE}/__block__/")
 _("DATABASE_FILE", f'{STORAGE}/database.sqlite')
-_("REPUTATION_DB", f"{STORAGE}/reputation.db")
 
 # Compiler Settings
 _("COMPILER_MEMORY_SIZE_FACTOR", 2.0)
