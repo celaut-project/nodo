@@ -5,7 +5,7 @@ import socket
 import uuid
 
 from src.gateway.utils import generate_gateway_instance
-from src.utils.env import GATEWAY_PORT, GET_ENV
+from src.utils.env import GATEWAY_PORT, NGROK_TUNNELS_KEY
 from src.utils.logger import LOGGER
 from src.utils.singleton import Singleton
 from protos import celaut_pb2 as celaut
@@ -47,7 +47,7 @@ class TunnelSystem(metaclass=Singleton):
         self.__initialize_providers()
 
     def __initialize_providers(self) -> None:
-        ngrok_key = GET_ENV("NGROK_TUNNELS_KEY", "")
+        ngrok_key = NGROK_TUNNELS_KEY
         tokens = [(ngrok_key, 3)] if ngrok_key else []
 
         for i, token_t in enumerate(tokens):

@@ -57,9 +57,11 @@ SUPPORTED_ARCHITECTURES = [
 
 # Docker Configuration
 DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
+_("DOCKER_CLIENT_TIMEOUT", 480)
+_("DOCKER_MAX_CONNECTIONS", 1000)
 DOCKER_CLIENT = lambda: docker_lib.from_env(
-    timeout=GET_ENV(env='DOCKER_CLIENT_TIMEOUT', default=480),
-    max_pool_size=GET_ENV(env='DOCKER_MAX_CONNECTIONS', default=1000)
+    timeout=DOCKER_CLIENT_TIMEOUT,
+    max_pool_size=DOCKER_MAX_CONNECTIONS
 )
 _("CONCURRENT_CONTAINER_CREATIONS", 10)
 _("REMOVE_CONTAINERS", True)
@@ -67,6 +69,7 @@ _("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER", True)
 
 # Network and Port Settings
 _("GATEWAY_PORT", 8090)
+_("NGROK_TUNNELS_KEY", "")
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
