@@ -36,6 +36,7 @@ _("BLOCKDIR", f"{STORAGE}/__block__/")
 _("DATABASE_FILE", f'{STORAGE}/database.sqlite')
 
 # Compiler Settings
+_("SAVE_ALL", False)  # Save the services that compiles.
 _("COMPILER_MEMORY_SIZE_FACTOR", 2.0)
 _("ARM_COMPILER_SUPPORT", True)
 _("X86_COMPILER_SUPPORT", False)
@@ -119,7 +120,7 @@ _("SOCIALIZATION_FACTOR", 2)
 _("INIT_COST_CONFIGURATION_FACTOR", 1)
 _("MAINTENANCE_COST_CONFIGURATION_FACTOR", pow(10, 6))
 _("MEMSWAP_FACTOR", 0)
-_("USE_PRINT", False)
+_("USE_PRINT", True)
 
 # Hashes
 
