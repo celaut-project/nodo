@@ -4,18 +4,6 @@ from typing import Final, Dict, Callable
 import docker as docker_lib
 from protos import celaut_pb2
 
-def from_env(default):
-    """
-    Decorator to fetch an environment variable with a default value.
-    """
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            name = func.__name__
-            return func(name, default)
-        return wrapper
-    return decorator
-
-@from_env(default=2.0)
 def _(env, default):
     """
     Fetches an environment variable value or returns the default.
@@ -28,6 +16,11 @@ def _(env, default):
     except:
         _value = default
     globals()[env] = _value
+
+    # If the value is a string containing an expression, evaluate it.
+    # First, we need to check if it contains any other global variables
+    if isinstance(_value, str) and '{' in _value and '}' in _value:
+        globals()[env] = _value.format(**globals())
 
 # ------------------------------
 # ----------- START ------------
