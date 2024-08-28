@@ -76,6 +76,8 @@ LOCAL_NETWORK = 'lo'
 # Ledger
 _("ERGO_NODE_URL", "http://213.239.193.208:9052/")
 _("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect")
+_("LEDGER_SUBMISSION_THRESHOLD", 10)
+_("TOTAL_REPUTATION_TOKEN_AMOUNT", 1_000_000_000)
 
 # Logging and Memory Settings
 _("MEMORY_LOGS", False)

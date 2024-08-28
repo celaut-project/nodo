@@ -6,7 +6,7 @@ from enum import Enum
 from typing import List, TypedDict, Optional
 
 from utils.logger import LOGGER
-from utils.env import ERGO_NODE_URL, ERGO_WALLET_MNEMONIC
+from utils.env import ERGO_NODE_URL, ERGO_WALLET_MNEMONIC, TOTAL_REPUTATION_TOKEN_AMOUNT
 
 from jpype import *
 import java.lang
@@ -18,7 +18,7 @@ from org.ergoplatform.appkit.impl import *
 # Constants
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
-DEFAULT_TOKEN_AMOUNT = 1_000_000_000
+DEFAULT_TOKEN_AMOUNT = TOTAL_REPUTATION_TOKEN_AMOUNT
 DEFAULT_TOKEN_LABEL = "reputation-proof-token"
 CONTRACT = """{
   proveDlog(SELF.R7[GroupElement].get) &&

@@ -23,7 +23,7 @@ def compute_reputation_feedback(peer_id) -> float:
     return _result
 
 def submit_reputation():
-    # Two options:
-        # 1. Store the last index submited to Ergo on DB.     <-- More simple.
-        # 2. Fetch reputation proof data from chain.     <-- Need if the node manager (human) updates on sigma panel or share with other 'brother' nodes.
-    pass
+    SQLConnection().submit_to_ledger(
+        peer_id="",
+        submit=lambda proof_id, amount: submit_reputation_proof(object=proof_id, polarization=amount>0) if amount else None
+    )
