@@ -3,9 +3,10 @@ from src.database.sql_connection import SQLConnection
 from src.utils.logger import LOGGER
 from src.utils.env import DOCKER_NETWORK
 from src.utils.utils import get_network_name
+from src.reputation_system.contracts.ergo import submit_reputation_proof
 
 
-def submit_reputation_feedback(token: str, amount: int) -> Optional[str]:
+def update_reputation(token: str, amount: int) -> Optional[str]:
     # Take the peer_id when the token it's external. Do nothing if it's an external service.
     peer_id: str = token.split('##')[1]
     if get_network_name(ip_or_uri=token.split('##')[1]) != DOCKER_NETWORK:
@@ -20,3 +21,9 @@ def compute_reputation_feedback(peer_id) -> float:
     _result: float = SQLConnection().get_reputation(peer_id)
     LOGGER(f"Computed reputation: {_result}")
     return _result
+
+def submit_reputation():
+    # Two options:
+        # 1. Store the last index submited to Ergo on DB.     <-- More simple.
+        # 2. Fetch reputation proof data from chain.     <-- Need if the node manager (human) updates on sigma panel or share with other 'brother' nodes.
+    pass

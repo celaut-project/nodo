@@ -13,7 +13,7 @@ from src.manager.manager import prune_container, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
-from src.reputation_system.simple_reputation_feedback import submit_reputation_feedback
+from src.reputation_system.simple_reputation_feedback import update_reputation, submit_reputation
 from src.utils import logger as l
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
@@ -90,7 +90,7 @@ def maintain_containers():
     for token in sc.get_all_internal_service_tokens():
         try:
             if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
-                submit_reputation_feedback(token=token, amount=-100)
+                update_reputation(token=token, amount=-100)
                 l.LOGGER("Prunning container from the registry because the docker container does not exists.")
                 prune_container(token=token)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
@@ -106,14 +106,14 @@ def maintain_containers():
                 )
         ):
             try:
-                submit_reputation_feedback(token=token, amount=-10)
+                update_reputation(token=token, amount=-10)
                 l.LOGGER("Pruning container due to insufficient gas.")
                 prune_container(token=token)
             except Exception as e:
                 l.LOGGER('Error purging ' + token + ' ' + str(e))
                 raise Exception('Error purging ' + token + ' ' + str(e))
         else:
-            submit_reputation_feedback(token=token, amount=10)
+            update_reputation(token=token, amount=10)
 
 
 def maintain_clients():
@@ -175,6 +175,7 @@ def manager_thread():
         check_wanted_services()
         check_dev_clients()
         maintain_containers()
+        submit_reputation()
         maintain_clients()
         peer_deposits()
         DuplicateGrabber().manager()
