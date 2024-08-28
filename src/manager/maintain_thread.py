@@ -129,7 +129,7 @@ def peer_deposits():
             # l.LOGGER('Peer '+peer_id+' is not available .')
             try:
                 update_peer_instance(
-                    instance=next(client_grpc(
+                    instance=next(peerpc(
                         method=gateway_pb2_grpc.GatewayStub(
                             grpc.insecure_channel(
                                 next(generate_uris_by_peer_id(peer_id=peer_id))
