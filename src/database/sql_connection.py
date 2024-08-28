@@ -509,61 +509,67 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error fetching reputation for peer {peer_id}: {e}')
             return None
 
-    def submit_to_ledger(self, peer_id: str, submit: Callable[[str, int], bool]) -> bool:
+    def submit_to_ledger(self, submit: Callable[[List[Tuple[str, int]]], bool]) -> bool:
         """
-        Submits the peer's reputation data to the ledger if the condition
+        Submits the reputation data of all peers to the ledger if the condition
         (reputation_index - last_index_on_ledger > LEDGER_SUBMISSION_THRESHOLD) is met.
 
         Args:
-            peer_id (str): The ID of the peer whose data might be submitted to the ledger.
-            submit_to_ledger (Callable[[str, int], bool]): A function that submits the peer's reputation data
-                to the ledger. It takes the reputation_proof_id and the percentage amount as arguments and
-                returns a boolean indicating success.
+            submit (Callable[[List[Tuple[str, int]]], bool]): A function that submits the peer's reputation data
+                to the ledger. It takes a list of tuples where the first element is the reputation_proof_id (str)
+                and the second element is the amount (int).
 
         Returns:
             bool: True if the submission was successful, False otherwise.
         """
         try:
-            # Fetch current reputation data for the peer
-            result = self._execute('SELECT reputation_proof_id, reputation_amount, reputation_index, last_index_on_ledger FROM peer WHERE id = ?', (peer_id,))
-            row = result.fetchone()
+            # Fetch all peers' reputation data
+            result = self._execute('SELECT id, reputation_proof_id, reputation_amount, reputation_index, last_index_on_ledger FROM peer')
+            rows = result.fetchall()
 
-            if row:
+            if not rows:
+                logger.LOGGER('No peers found in the database.')
+                return True
+
+            # Fetch the total sum of all reputation amounts from the table
+            total_amount_result = self._execute('SELECT SUM(reputation_amount) AS total_amount FROM peer')
+            total_amount_row = total_amount_result.fetchone()
+            total_amount = total_amount_row['total_amount'] or 0
+
+            # List to hold data for peers that need to be submitted to the ledger
+            to_submit = []
+
+            for row in rows:
+                reputation_proof_id = row['reputation_proof_id']
                 reputation_amount = row['reputation_amount'] or 0
                 reputation_index = row['reputation_index'] or 0
                 last_index_on_ledger = row['last_index_on_ledger'] or 0
 
-                # Fetch the total sum of all reputation amounts from the table
-                total_amount_result = self._execute('SELECT SUM(reputation_amount) AS total_amount FROM peer')
-                total_amount_row = total_amount_result.fetchone()
-                total_amount = total_amount_row['total_amount'] or 0
-
                 # Check if the submission condition is met
-                if (reputation_index - last_index_on_ledger > LEDGER_SUBMISSION_THRESHOLD) and row['reputation_proof_id']:
+                if reputation_proof_id and (reputation_index - last_index_on_ledger > LEDGER_SUBMISSION_THRESHOLD):
                     # Calculate the percentage of the total reputation token amount
-                    if total_amount > 0:  # Avoid division by zero
-                        percentage_amount = (reputation_amount / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT
-                    else:
-                        logger.LOGGER(f'Total amount is zero, cannot calculate percentage for peer {peer_id}')
-                        return False
+                    percentage_amount = (reputation_amount / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
+                    to_submit.append((reputation_proof_id, percentage_amount))
 
-                    # Attempt to submit the data to the ledger
-                    success = submit(row['reputation_proof_id'], percentage_amount)
-
-                    if success:
-                        # Update the last index on ledger to the current reputation index
-                        self._execute('UPDATE peer SET last_index_on_ledger = ? WHERE id = ?', (reputation_index, peer_id))
-                        return True
-                    else:
-                        logger.LOGGER(f'Failed to submit to ledger for peer {peer_id}')
-                        return False
+            # Attempt to submit the data to the ledger
+            if to_submit:
+                success = submit(to_submit)
+                if success:
+                    logger.LOGGER('Reputation proofs submitted successfully.')
+                    # Update the last index on ledger for all submitted peers
+                    for row in rows:
+                        if (row['reputation_proof_id'], row['reputation_amount'] / total_amount * TOTAL_REPUTATION_TOKEN_AMOUNT) in to_submit:
+                            self._execute('UPDATE peer SET last_index_on_ledger = ? WHERE id = ?', (row['reputation_index'], row['id']))
+                    return True
                 else:
-                    logger.LOGGER(f'Condition not met for peer {peer_id}, no submission to ledger')
+                    logger.LOGGER('Failed to submit to ledger for some or all peers.')
                     return False
             else:
-                raise Exception(f'Peer not found: {peer_id}')
+                logger.LOGGER('No peers met the submission criteria, nothing to submit.')
+                return True
+
         except Exception as e:
-            logger.LOGGER(f'Error submitting to ledger for peer {peer_id}: {e}')
+            logger.LOGGER(f'Error submitting to ledger: {e}')
             return False
 
     def get_peers(self) -> List[dict]:

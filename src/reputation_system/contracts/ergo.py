@@ -3,7 +3,7 @@ from ergpy import appkit
 from ergpy.helper_functions import initialize_jvm
 import jpype
 from enum import Enum
-from typing import List, TypedDict, Optional
+from typing import List, TypedDict, Optional, Tuple
 
 from utils.logger import LOGGER
 from utils.env import ERGO_NODE_URL, ERGO_WALLET_MNEMONIC, TOTAL_REPUTATION_TOKEN_AMOUNT
@@ -149,12 +149,13 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, assigned_o
 
     return signed_tx if True else tx_id
 
-def submit_reputation_proof(object: str, polarization: bool) -> bool:
+def submit_reputation_proof(objects: List[Tuple[str, int]]) -> bool:
+    # TODO multiple objects
+    # TODO update the proof_id or create if not exists.
     tx_id = __create_reputation_proof_tx(
         node_url=ERGO_NODE_URL,
         wallet_mnemonic=ERGO_WALLET_MNEMONIC,
-        assigned_object=object,
-        polarization=polarization
+        objects=objects,
     )
     LOGGER(f"Submited tx -> {tx_id}")
     return tx_id != None

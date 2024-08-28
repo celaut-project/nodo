@@ -24,6 +24,5 @@ def compute_reputation_feedback(peer_id) -> float:
 
 def submit_reputation():
     SQLConnection().submit_to_ledger(
-        peer_id="",
-        submit=lambda proof_id, amount: submit_reputation_proof(object=proof_id, polarization=amount>0) if amount else None
+        submit=lambda objects: submit_reputation_proof(objects=objects)
     )
