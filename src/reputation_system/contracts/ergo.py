@@ -66,8 +66,7 @@ def __build_proof_box(
     sender_address: Address,
     token_amount: int = DEFAULT_TOKEN_AMOUNT,
     reputation_token_label: str = DEFAULT_TOKEN_LABEL,
-    assigned_object: Optional[ProofObject] = None,
-    polarization: bool = True
+    assigned_object: Optional[ProofObject] = None
 ):
     object_type_to_assign = assigned_object['type'] if assigned_object else ProofObjectType.PlainText
     object_to_assign = assigned_object['value'] if assigned_object else ""
@@ -75,19 +74,19 @@ def __build_proof_box(
     return ergo._ctx.newTxBuilder() \
             .outBoxBuilder() \
                 .value(SAFE_MIN_BOX_VALUE) \
-                .tokens([ErgoToken(input_boxes.get(0).getId().toString(), jpype.JLong(token_amount))]) \
+                .tokens([ErgoToken(input_boxes.get(0).getId().toString(), jpype.JLong(abs(token_amount)))]) \
                 .registers([
                     ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),         # R4
                     ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),    # R5
                     ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),               # R6
-                    ErgoValue.of(sender_address.toPropositionBytes()),                             # R7
-                    ErgoValue.of(jpype.JBoolean(polarization))                                     # R8
+                    ErgoValue.of(sender_address.toPropositionBytes()),                             # R7    https://discord.com/channels/668903786361651200/849659724495323206/1278352612680400948
+                    ErgoValue.of(jpype.JBoolean(token_amount >= 0))                                       # R8
                 ]) \
                 .contract(ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)) \
                 .build()
 
 @initialize_jvm
-def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, assigned_object: Optional[ProofObject], polarization: bool = True):
+def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: str, objects: List[Tuple[str, int]]):
     ergo = appkit.ErgoAppKit(node_url=node_url)
     fee = DEFAULT_FEE  # Fee in nanoErgs
 
@@ -95,39 +94,47 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, assigned_o
     mnemonic = ergo.getMnemonic(wallet_mnemonic=wallet_mnemonic, mnemonic_password=None)
     sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
 
-    print(f"Sender address -> {sender_address.toString()}")
+    LOGGER(f"Sender address -> {sender_address.toString()}")
 
     # 2. Prepare transaction inputs (get UTXOs)
-    input_boxes = ergo.getInputBoxCovering(amount_list=[fee], sender_address=sender_address)
+    wallet_input_boxes = ergo.getInputBoxCovering(amount_list=[fee], sender_address=sender_address)
 
     # Select the input box with min value to avoid NotEnoughErgsError
-    selected_input_box = min(
-        (input_box for input_box in input_boxes if __input_box_to_dict(input_box)["value"] > 2 * SAFE_MIN_BOX_VALUE),
+    selected_wallet_ib = min(
+        (input_box for input_box in wallet_input_boxes if __input_box_to_dict(input_box)["value"] > 2 * SAFE_MIN_BOX_VALUE),
         key=lambda ib: __input_box_to_dict(ib)["value"],
         default=None
     )
 
-    if not selected_input_box:
+    if not selected_wallet_ib:
         raise Exception("No input box available.")
 
-    selected_input_box_obj = __input_box_to_dict(selected_input_box)
-    selected_input_boxes = java.util.ArrayList([selected_input_box])
+    total_token_value = sum([obj[1] for obj in objects])
+    input_boxes = ergo.getInputBoxCovering(amount_list=[], sender_address=sender_address, tokenList=[proof_id], amount_tokens=[total_token_value])
+    # TODO It's important to spend proportionally from all the boxes  OR spend the 'plain-text blank box' first.
+    #   - A solution is spend all boxes, that means, create output boxes where total_token_value = DEFAULT_TOKEN_AMOUNT.
+    input_boxes.append(selected_wallet_ib)
 
-    value_in_ergs = (selected_input_box_obj["value"] - fee - SAFE_MIN_BOX_VALUE) / 10**9
+    LOGGER(f"Input boxes -> {input_boxes}")
+
+    java_input_boxes = java.util.ArrayList(input_boxes)
+
+    value_in_ergs = (__input_box_to_dict(selected_wallet_ib)["value"] - fee - SAFE_MIN_BOX_VALUE) / 10**9
 
     # 3. Build transaction outputs
     outputs = []
 
     # Reputation proof output box
-    proof_box = __build_proof_box(
-        ergo=ergo,
-        input_boxes=selected_input_boxes,
-        sender_address=sender_address,
-        assigned_object=assigned_object,
-        polarization=polarization
-    )
-    if proof_box:
-        outputs.append(proof_box)
+    for obj in objects:
+        proof_box = __build_proof_box(
+            ergo=ergo,
+            input_boxes=java_input_boxes,
+            sender_address=sender_address,
+            assigned_object=obj[0],
+            token_amount=obj[1]
+        )
+        if proof_box:
+            outputs.append(proof_box)
 
     # Basic wallet output box
     output_boxes = ergo.buildOutBox(receiver_wallet_addresses=[sender_address.toString()], amount_list=[value_in_ergs])
@@ -136,7 +143,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, assigned_o
 
     # 4. Build and sign the transaction
     unsigned_tx = ergo.buildUnsignedTransaction(
-        input_box=selected_input_boxes,
+        input_box=java_input_boxes,
         outBox=outputs,
         fee=fee / 10**9,
         sender_address=sender_address
@@ -152,9 +159,12 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, assigned_o
 def submit_reputation_proof(objects: List[Tuple[str, int]]) -> bool:
     # TODO multiple objects
     # TODO update the proof_id or create if not exists.
+    #
+    APPRAISAL_REPUTATION_PROOF_ID = ""
     tx_id = __create_reputation_proof_tx(
         node_url=ERGO_NODE_URL,
         wallet_mnemonic=ERGO_WALLET_MNEMONIC,
+        proof_id=APPRAISAL_REPUTATION_PROOF_ID,
         objects=objects,
     )
     LOGGER(f"Submited tx -> {tx_id}")
