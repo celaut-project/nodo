@@ -131,6 +131,10 @@ if __name__ == '__main__':
                 from src.utils.zeroconf import connect
                 connect(sys.argv[2])
 
+            case 'submit_reputation':
+                from src.reputation_system.simple_reputation_feedback import submit_reputation
+                submit_reputation()
+
             case 'daemon':
                 from src.serve import serve
                 serve()

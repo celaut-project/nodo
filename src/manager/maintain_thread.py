@@ -175,7 +175,7 @@ def manager_thread():
         check_wanted_services()
         check_dev_clients()
         maintain_containers()
-        submit_reputation()
+        # submit_reputation()
         maintain_clients()
         peer_deposits()
         DuplicateGrabber().manager()
