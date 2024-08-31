@@ -100,26 +100,25 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     wallet_input_boxes = ergo.getInputBoxCovering(amount_list=[fee], sender_address=sender_address)
 
     # Select the input box with min value to avoid NotEnoughErgsError
-    selected_wallet_ib = min(
+    selected_input_box = min(
         (input_box for input_box in wallet_input_boxes if __input_box_to_dict(input_box)["value"] > 2 * SAFE_MIN_BOX_VALUE),
         key=lambda ib: __input_box_to_dict(ib)["value"],
         default=None
     )
 
-    if not selected_wallet_ib:
+    if not selected_input_box:
         raise Exception("No input box available.")
 
-    total_token_value = sum([obj[1] for obj in objects])
+    total_token_value = sum([obj[1] for obj in objects])  # Should be the TOTAL_REPUTATION_TOKEN_AMOUNT.
+    LOGGER(f"Needs to be spent {total_token_value} reputation value.")
     input_boxes = ergo.getInputBoxCovering(amount_list=[], sender_address=sender_address, tokenList=[proof_id], amount_tokens=[total_token_value])
-    # TODO It's important to spend proportionally from all the boxes  OR spend the 'plain-text blank box' first.
-    #   - A solution is spend all boxes, that means, create output boxes where total_token_value = DEFAULT_TOKEN_AMOUNT.
-    input_boxes.append(selected_wallet_ib)
+    input_boxes.append(selected_input_box)
 
     LOGGER(f"Input boxes -> {input_boxes}")
 
     java_input_boxes = java.util.ArrayList(input_boxes)
 
-    value_in_ergs = (__input_box_to_dict(selected_wallet_ib)["value"] - fee - SAFE_MIN_BOX_VALUE) / 10**9
+    value_in_ergs = (__input_box_to_dict(selected_input_box)["value"] - fee - SAFE_MIN_BOX_VALUE) / 10**9
 
     # 3. Build transaction outputs
     outputs = []
@@ -138,8 +137,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     # Basic wallet output box
     output_boxes = ergo.buildOutBox(receiver_wallet_addresses=[sender_address.toString()], amount_list=[value_in_ergs])
-    if output_boxes[0]:
-        outputs.extend(output_boxes)
+    if not output_boxes: LOGGER(f"No build out boxes.")
+    outputs.extend(output_boxes)
 
     # 4. Build and sign the transaction
     unsigned_tx = ergo.buildUnsignedTransaction(
