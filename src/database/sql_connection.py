@@ -538,6 +538,7 @@ class SQLConnection(metaclass=Singleton):
 
             # List to hold data for peers that need to be submitted to the ledger
             to_submit = []
+            needs_submit = False
 
             for row in rows:
                 reputation_proof_id = row['reputation_proof_id']
@@ -545,20 +546,28 @@ class SQLConnection(metaclass=Singleton):
                 reputation_index = row['reputation_index'] or 0
                 last_index_on_ledger = row['last_index_on_ledger'] or 0
 
-                # Check if the submission condition is met
-                if reputation_proof_id and (reputation_index - last_index_on_ledger > LEDGER_SUBMISSION_THRESHOLD):
+                if reputation_proof_id:
                     # Calculate the percentage of the total reputation token amount
-                    percentage_amount = (reputation_amount / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
-                    to_submit.append((reputation_proof_id, percentage_amount))
+                    # Check if the submission condition is met
+                    if reputation_index - last_index_on_ledger >= LEDGER_SUBMISSION_THRESHOLD:
+                        needs_submit = True
+                        percentage_amount = (reputation_amount / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
+                        to_submit.append((reputation_proof_id, percentage_amount))
+
+                    # Proof percentage don't need to be changed it self, but needs to be updated if others do.
+                    elif last_index_on_ledger > 0:
+                        percentage_amount = (reputation_amount / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
+                        to_submit.append((reputation_proof_id, percentage_amount))
 
             # Attempt to submit the data to the ledger
-            if to_submit:
+            if needs_submit and to_submit:
                 success = submit(to_submit)
                 if success:
                     logger.LOGGER('Reputation proofs submitted successfully.')
                     # Update the last index on ledger for all submitted peers
                     for row in rows:
-                        if (row['reputation_proof_id'], row['reputation_amount'] / total_amount * TOTAL_REPUTATION_TOKEN_AMOUNT) in to_submit:
+                        reputation_proof_id = row['reputation_proof_id']
+                        if reputation_proof_id and any(reputation_proof_id == _e[0] for _e in to_submit):
                             self._execute('UPDATE peer SET last_index_on_ledger = ? WHERE id = ?', (row['reputation_index'], row['id']))
                     return True
                 else:

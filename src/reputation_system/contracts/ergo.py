@@ -80,7 +80,7 @@ def __build_proof_box(
                     ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),    # R5
                     ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),               # R6
                     ErgoValue.of(sender_address.toPropositionBytes()),                             # R7    https://discord.com/channels/668903786361651200/849659724495323206/1278352612680400948
-                    ErgoValue.of(jpype.JBoolean(token_amount >= 0))                                       # R8
+                    ErgoValue.of(jpype.JBoolean(token_amount >= 0))                                # R8
                 ]) \
                 .contract(ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)) \
                 .build()
@@ -160,11 +160,11 @@ def submit_reputation_proof(objects: List[Tuple[str, int]]) -> bool:
     # TODO multiple objects
     # TODO update the proof_id or create if not exists.
     #
-    APPRAISAL_REPUTATION_PROOF_ID = ""
+    REVIEWER_REPUTATION_PROOF_ID = ""
     tx_id = __create_reputation_proof_tx(
         node_url=ERGO_NODE_URL,
         wallet_mnemonic=ERGO_WALLET_MNEMONIC,
-        proof_id=APPRAISAL_REPUTATION_PROOF_ID,
+        proof_id=REVIEWER_REPUTATION_PROOF_ID,
         objects=objects,
     )
     LOGGER(f"Submited tx -> {tx_id}")
