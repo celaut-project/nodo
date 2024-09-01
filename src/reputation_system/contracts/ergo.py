@@ -6,7 +6,7 @@ from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
 from utils.logger import LOGGER
-from utils.env import ERGO_NODE_URL, ERGO_WALLET_MNEMONIC, TOTAL_REPUTATION_TOKEN_AMOUNT
+from utils.env import ERGO_NODE_URL, ERGO_WALLET_MNEMONIC, TOTAL_REPUTATION_TOKEN_AMOUNT, REVIEWER_REPUTATION_PROOF_ID
 
 from jpype import *
 import java.lang
@@ -156,10 +156,6 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     return signed_tx if True else tx_id
 
 def submit_reputation_proof(objects: List[Tuple[str, int]]) -> bool:
-    # TODO multiple objects
-    # TODO update the proof_id or create if not exists.
-    #
-    REVIEWER_REPUTATION_PROOF_ID = ""
     tx_id = __create_reputation_proof_tx(
         node_url=ERGO_NODE_URL,
         wallet_mnemonic=ERGO_WALLET_MNEMONIC,
