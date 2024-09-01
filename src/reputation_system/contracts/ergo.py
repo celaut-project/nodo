@@ -5,8 +5,8 @@ import jpype
 from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
-from utils.logger import LOGGER
-from utils.env import write_env, ERGO_NODE_URL, ERGO_WALLET_MNEMONIC, TOTAL_REPUTATION_TOKEN_AMOUNT, REVIEWER_REPUTATION_PROOF_ID
+from src.utils.logger import LOGGER
+from src.utils.env import write_env, ERGO_NODE_URL, ERGO_WALLET_MNEMONIC, TOTAL_REPUTATION_TOKEN_AMOUNT, REVIEWER_REPUTATION_PROOF_ID
 
 from jpype import *
 import java.lang
