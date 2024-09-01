@@ -6,7 +6,7 @@ from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
 from utils.logger import LOGGER
-from utils.env import ERGO_NODE_URL, ERGO_WALLET_MNEMONIC, TOTAL_REPUTATION_TOKEN_AMOUNT, REVIEWER_REPUTATION_PROOF_ID
+from utils.env import write_env, ERGO_NODE_URL, ERGO_WALLET_MNEMONIC, TOTAL_REPUTATION_TOKEN_AMOUNT, REVIEWER_REPUTATION_PROOF_ID
 
 from jpype import *
 import java.lang
@@ -63,6 +63,7 @@ def __input_box_to_dict(input_box: 'org.ergoplatform.appkit.InputBoxImpl') -> di
 def __build_proof_box(
     ergo: appkit.ErgoAppKit,
     input_boxes: java.util.ArrayList,
+    proof_id: str,
     sender_address: Address,
     token_amount: int = DEFAULT_TOKEN_AMOUNT,
     reputation_token_label: str = DEFAULT_TOKEN_LABEL,
@@ -74,7 +75,7 @@ def __build_proof_box(
     return ergo._ctx.newTxBuilder() \
             .outBoxBuilder() \
                 .value(SAFE_MIN_BOX_VALUE) \
-                .tokens([ErgoToken(input_boxes.get(0).getId().toString(), jpype.JLong(abs(token_amount)))]) \
+                .tokens([ErgoToken(proof_id, jpype.JLong(abs(token_amount)))]) \
                 .registers([
                     ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),         # R4
                     ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),    # R5
@@ -111,8 +112,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     total_token_value = sum([obj[1] for obj in objects])  # Should be the TOTAL_REPUTATION_TOKEN_AMOUNT.
     LOGGER(f"Needs to be spent {total_token_value} reputation value.")
-    input_boxes = ergo.getInputBoxCovering(amount_list=[], sender_address=sender_address, tokenList=[proof_id], amount_tokens=[total_token_value])
-    input_boxes.append(selected_input_box)
+    input_boxes = [selected_input_box]
+    input_boxes.extend(ergo.getInputBoxCovering(amount_list=[], sender_address=sender_address, tokenList=[proof_id], amount_tokens=[total_token_value]))
 
     LOGGER(f"Input boxes -> {input_boxes}")
 
@@ -123,11 +124,15 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     # 3. Build transaction outputs
     outputs = []
 
+    # Check reputation proof id.
+    proof_id = proof_id if proof_id else input_boxes.get(0).getId().toString()  # Assume that, if it is not an empty string, the proof ID corresponds to an existing token ID.
+
     # Reputation proof output box
     for obj in objects:
         proof_box = __build_proof_box(
             ergo=ergo,
             input_boxes=java_input_boxes,
+            proof_id=proof_id,
             sender_address=sender_address,
             assigned_object=obj[0],
             token_amount=obj[1]
@@ -151,7 +156,11 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     # 5. Submit the transaction and return the ID
     tx_id = ergo.txId(signed_tx)
-    print(f"Transaction ID: {tx_id}", flush=True)
+
+    if REVIEWER_REPUTATION_PROOF_ID != proof_id:
+        LOGGER(f"Store reviewer reputation proof id {proof_id} on .env file.")
+        write_env("REVIEWER_REPUTATION_PROOF_ID", proof_id)
+        LOGGER(f"Assert op. -> {REVIEWER_REPUTATION_PROOF_ID != proof_id}")
 
     return signed_tx if True else tx_id
 

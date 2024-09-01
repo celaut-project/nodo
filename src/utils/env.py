@@ -1,5 +1,6 @@
 import hashlib
 import os, subprocess
+from dotenv import load_dotenv, set_key
 from typing import Final, Dict, Callable
 import docker as docker_lib
 from protos import celaut_pb2
@@ -21,6 +22,14 @@ def _(env, default):
     # First, we need to check if it contains any other global variables
     if isinstance(_value, str) and '{' in _value and '}' in _value:
         globals()[env] = _value.format(**globals())
+
+def write_env(key, value):
+    set_key(".env", key, value)
+    _(key, value)
+
+
+if os.path.exists(".env"):
+    load_dotenv(".env")
 
 # ------------------------------
 # ----------- START ------------
@@ -149,9 +158,6 @@ DEFAULT_SYSTEM_RESOURCES: celaut_pb2.Sysresources = celaut_pb2.Sysresources(
 # ----------- END --------------
 # ------------------------------
 
-if os.path.exists(".env"):
-    from dotenv import load_dotenv
-    load_dotenv(".env")
-else:
+if not os.path.exists(".env"):
     from src.utils.write_envs import write_default_to_file
     write_default_to_file(globals())
