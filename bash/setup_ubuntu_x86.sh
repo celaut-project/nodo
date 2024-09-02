@@ -89,6 +89,9 @@ if ! python3 -m pip install -r "$REQUIREMENTS_FILE" > /dev/null; then
     exit 1
 fi
 
+echo "Installing OpenJDK 21"
+sudo apt install openjdk-21-jre-headless
+
 echo "Installing required system packages for Docker..."
 sudo apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
 
