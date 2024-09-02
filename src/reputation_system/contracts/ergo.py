@@ -168,7 +168,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     if REVIEWER_REPUTATION_PROOF_ID != proof_id:
         LOGGER(f"Store reviewer reputation proof id {proof_id} on .env file.")
         write_env("REVIEWER_REPUTATION_PROOF_ID", proof_id)
-        LOGGER(f"Assert op. -> {REVIEWER_REPUTATION_PROOF_ID != proof_id}")
+        LOGGER(f"Assert op. that validates that proof id was stored: {REVIEWER_REPUTATION_PROOF_ID == proof_id}")
 
     return signed_tx if True else tx_id
 
