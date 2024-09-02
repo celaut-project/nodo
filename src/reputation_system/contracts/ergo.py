@@ -126,6 +126,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     # Check reputation proof id.
     proof_id = proof_id if proof_id else java_input_boxes.get(0).getId().toString()  # Assume that, if it is not an empty string, the proof ID corresponds to an existing token ID.
+    LOGGER(f"proof id -> {proof_id}")
 
     # Reputation proof output box
     for obj in objects:
@@ -135,8 +136,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             proof_id=proof_id,
             sender_address=sender_address,
             assigned_object=ProofObject(
-                ProofObjectType.PlainText,
-                obj[0]
+                type=ProofObjectType.PlainText,
+                value=obj[0]
             ),
             token_amount=obj[1]
         )
