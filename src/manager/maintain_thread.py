@@ -132,7 +132,7 @@ def peer_deposits():
                     instance=next(peerpc(
                         method=gateway_pb2_grpc.GatewayStub(
                             grpc.insecure_channel(
-                                next(generate_uris_by_peer_id(peer_id=peer_id))
+                                next(generate_uris_by_peer_id(peer_id=peer['id']))
                             )
                         ).GetInstance,
                         indices_parser=Instance,
