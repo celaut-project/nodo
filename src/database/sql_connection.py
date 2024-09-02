@@ -524,7 +524,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             # Fetch all peers' reputation data
-            result = self._execute('SELECT id, reputation_proof_id, reputation_amount, reputation_index, last_index_on_ledger FROM peer')
+            result = self._execute('SELECT id, reputation_proof_id, reputation_score, reputation_index, last_index_on_ledger FROM peer')
             rows = result.fetchall()
 
             if not rows:
@@ -532,7 +532,7 @@ class SQLConnection(metaclass=Singleton):
                 return True
 
             # Fetch the total sum of all reputation amounts from the table
-            total_amount_result = self._execute('SELECT SUM(reputation_amount) AS total_amount FROM peer')
+            total_amount_result = self._execute('SELECT SUM(reputation_score) AS total_amount FROM peer')
             total_amount_row = total_amount_result.fetchone()
             total_amount = total_amount_row['total_amount'] or 0
 
@@ -542,7 +542,7 @@ class SQLConnection(metaclass=Singleton):
 
             for row in rows:
                 reputation_proof_id = row['reputation_proof_id']
-                reputation_amount = row['reputation_amount'] or 0
+                reputation_score = row['reputation_score'] or 0
                 reputation_index = row['reputation_index'] or 0
                 last_index_on_ledger = row['last_index_on_ledger'] or 0
 
@@ -551,12 +551,12 @@ class SQLConnection(metaclass=Singleton):
                     # Check if the submission condition is met
                     if reputation_index - last_index_on_ledger >= LEDGER_SUBMISSION_THRESHOLD:
                         needs_submit = True
-                        percentage_amount = (reputation_amount / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
+                        percentage_amount = (reputation_score / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
                         to_submit.append((reputation_proof_id, percentage_amount))
 
                     # Proof percentage don't need to be changed it self, but needs to be updated if others do.
                     elif last_index_on_ledger > 0:
-                        percentage_amount = (reputation_amount / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
+                        percentage_amount = (reputation_score / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
                         to_submit.append((reputation_proof_id, percentage_amount))
 
             # Attempt to submit the data to the ledger
