@@ -32,10 +32,10 @@ def create_tables(cursor):
                 client_id TEXT,
                 gas_mantissa INTEGER,
                 gas_exponent INTEGER,
-                reputation_proof_id STRING,
+                reputation_proof_id TEXT,
                 reputation_score INTEGER,
                 reputation_index INTEGER,
-                last_index_on_ledger INTEGER,
+                last_index_on_ledger INTEGER
             )
         ''',
         "clients": '''
