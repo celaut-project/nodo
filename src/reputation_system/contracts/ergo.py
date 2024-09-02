@@ -134,7 +134,10 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             input_boxes=java_input_boxes,
             proof_id=proof_id,
             sender_address=sender_address,
-            assigned_object=obj[0],
+            assigned_object=ProofObject(
+                ProofObjectType.PlainText,
+                obj[0]
+            ),
             token_amount=obj[1]
         )
         if proof_box:
