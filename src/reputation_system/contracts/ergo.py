@@ -80,7 +80,7 @@ def __build_proof_box(
                     ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),         # R4
                     ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),    # R5
                     ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),               # R6
-                    ErgoValue.of(sender_address.toPropositionBytes()),                             # R7    https://discord.com/channels/668903786361651200/849659724495323206/1278352612680400948
+                    ErgoValue.of(sender_address.toPropositionBytes()),                             # R7   TODO: https://discord.com/channels/668903786361651200/849659724495323206/1278352612680400948
                     ErgoValue.of(jpype.JBoolean(token_amount >= 0))                                # R8
                 ]) \
                 .contract(ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)) \
@@ -110,12 +110,17 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     if not selected_input_box:
         raise Exception("No input box available.")
 
-    total_token_value = sum([obj[1] for obj in objects])  # Should be the TOTAL_REPUTATION_TOKEN_AMOUNT.
+    total_token_value = sum([obj[1] for obj in objects], start=0)  # Should be the TOTAL_REPUTATION_TOKEN_AMOUNT.
     LOGGER(f"Needs to be spent {total_token_value} reputation value.")
     input_boxes = [selected_input_box]
-    input_boxes.extend(ergo.getInputBoxCovering(amount_list=[], sender_address=sender_address, tokenList=[proof_id], amount_tokens=[total_token_value]))
+    if proof_id:
+        # TODO should get all the boxes with CONTRACT and this token.
+        input_boxes.extend(ergo.getInputBoxCovering(amount_list=[],
+            sender_address=ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT),  # ??
+            tokenList=[proof_id], amount_tokens=[total_token_value])
+        )
 
-    LOGGER(f"Input boxes -> {input_boxes}")
+    LOGGER(f"Input boxes -> {[__input_box_to_dict(_i) for _i in input_boxes]}")
 
     java_input_boxes = java.util.ArrayList(input_boxes)
 
