@@ -19,7 +19,7 @@ from org.ergoplatform.appkit.impl import *
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
 DEFAULT_TOKEN_AMOUNT = TOTAL_REPUTATION_TOKEN_AMOUNT
-DEFAULT_TOKEN_LABEL = "reputation-proof-token"
+DEFAULT_TOKEN_LABEL = "celaut-node-reviewer"
 CONTRACT = """{
   proveDlog(SELF.R7[GroupElement].get) &&
   sigmaProp(SELF.tokens.size == 1) &&
@@ -111,7 +111,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     if not selected_input_box:
         raise Exception("No input box available.")
 
-    total_token_value = sum([obj[1] for obj in objects])  # Should be the TOTAL_REPUTATION_TOKEN_AMOUNT.
+    total_token_value = sum([obj[1] for obj in objects]) # type: ignore
     assert TOTAL_REPUTATION_TOKEN_AMOUNT == total_token_value, (
         "The sum of the values to be spent must equal the total reputation token amount."
     )
