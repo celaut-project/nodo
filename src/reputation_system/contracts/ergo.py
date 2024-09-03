@@ -110,15 +110,22 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     if not selected_input_box:
         raise Exception("No input box available.")
 
-    total_token_value = sum([obj[1] for obj in objects], start=0)  # Should be the TOTAL_REPUTATION_TOKEN_AMOUNT.
+    total_token_value = sum([obj[1] for obj in objects])  # Should be the TOTAL_REPUTATION_TOKEN_AMOUNT.
+    assert TOTAL_REPUTATION_TOKEN_AMOUNT == total_token_value, (
+        "The sum of the values to be spent must equal the total reputation token amount."
+    )
     LOGGER(f"Needs to be spent {total_token_value} reputation value.")
     input_boxes = [selected_input_box]
     if proof_id:
-        # TODO should get all the boxes with CONTRACT and this token.
-        input_boxes.extend(ergo.getInputBoxCovering(amount_list=[],
-            sender_address=ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT),  # ??
-            tokenList=[proof_id], amount_tokens=[total_token_value])
-        )
+        try:
+            # TODO should get all the boxes with CONTRACT and this token.
+            input_boxes.extend(ergo.getInputBoxCovering(amount_list=[],
+                sender_address=ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT),  # ??
+                tokenList=[proof_id], amount_tokens=[total_token_value])
+            )
+        except Exception as e:
+            LOGGER(f"Exception submitting with the last proof_id {str(e)}. A new one will be generated.")
+            proof_id = None
 
     LOGGER(f"Input boxes -> {[__input_box_to_dict(_i) for _i in input_boxes]}")
 
