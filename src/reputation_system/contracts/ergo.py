@@ -90,6 +90,7 @@ def __build_proof_box(
 def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: str, objects: List[Tuple[str, int]]):
     ergo = appkit.ErgoAppKit(node_url=node_url)
     fee = DEFAULT_FEE  # Fee in nanoErgs
+    safe_min_out_box = (len(objects)+1) * SAFE_MIN_BOX_VALUE
 
     # 1. Get the change address
     mnemonic = ergo.getMnemonic(wallet_mnemonic=wallet_mnemonic, mnemonic_password=None)
@@ -102,7 +103,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     # Select the input box with min value to avoid NotEnoughErgsError
     selected_input_box = min(
-        (input_box for input_box in wallet_input_boxes if __input_box_to_dict(input_box)["value"] > 2 * SAFE_MIN_BOX_VALUE),
+        (input_box for input_box in wallet_input_boxes if __input_box_to_dict(input_box)["value"] > safe_min_out_box),
         key=lambda ib: __input_box_to_dict(ib)["value"],
         default=None
     )
@@ -132,7 +133,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     java_input_boxes = java.util.ArrayList(input_boxes)
 
     LOGGER(f"selected_input_box value: {__input_box_to_dict(selected_input_box)['value']}")
-    LOGGER(f"fee: {fee}, SAFE_MIN_BOX_VALUE: {SAFE_MIN_BOX_VALUE}")
+    LOGGER(f"fee: {fee}, SAFE_MIN_BOX_VALUE: {safe_min_out_box}")
     value_in_ergs = (__input_box_to_dict(selected_input_box)["value"] - fee - SAFE_MIN_BOX_VALUE) / 10**9
 
     LOGGER(f"value in ergs to be spent: {value_in_ergs}")
