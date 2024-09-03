@@ -124,6 +124,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     java_input_boxes = java.util.ArrayList(input_boxes)
 
+    LOGGER(f"selected_input_box value: {__input_box_to_dict(selected_input_box)['value']}")
+    LOGGER(f"fee: {fee}, SAFE_MIN_BOX_VALUE: {SAFE_MIN_BOX_VALUE}")
     value_in_ergs = (__input_box_to_dict(selected_input_box)["value"] - fee - SAFE_MIN_BOX_VALUE) / 10**9
 
     # 3. Build transaction outputs
@@ -131,6 +133,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     # Check reputation proof id.
     proof_id = proof_id if proof_id else java_input_boxes.get(0).getId().toString()  # Assume that, if it is not an empty string, the proof ID corresponds to an existing token ID.
+
+    LOGGER(f"proof id -> {proof_id}")
 
     # Reputation proof output box
     for obj in objects:
