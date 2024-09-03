@@ -135,6 +135,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     LOGGER(f"fee: {fee}, SAFE_MIN_BOX_VALUE: {SAFE_MIN_BOX_VALUE}")
     value_in_ergs = (__input_box_to_dict(selected_input_box)["value"] - fee - SAFE_MIN_BOX_VALUE) / 10**9
 
+    LOGGER(f"value in ergs to be spent: {value_in_ergs}")
+
     # 3. Build transaction outputs
     outputs = []
 
