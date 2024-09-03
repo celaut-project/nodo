@@ -182,7 +182,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         if not  REVIEWER_REPUTATION_PROOF_ID == proof_id:
             LOGGER(f"Proof ID was not stored correctly: {REVIEWER_REPUTATION_PROOF_ID} != {proof_id}")
 
-    return signed_tx if True else tx_id
+    return tx_id
 
 def submit_reputation_proof(objects: List[Tuple[str, int]]) -> bool:
     try:
