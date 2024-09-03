@@ -25,6 +25,7 @@ def _(env, default):
 
 def write_env(key, value):
     set_key(".env", key, value)
+    load_dotenv(".env")
     _(key, value)
 
 
