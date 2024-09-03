@@ -179,16 +179,21 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     if REVIEWER_REPUTATION_PROOF_ID != proof_id:
         LOGGER(f"Store reviewer reputation proof id {proof_id} on .env file.")
         write_env("REVIEWER_REPUTATION_PROOF_ID", proof_id)
-        LOGGER(f"Assert op. that validates that proof id was stored: {REVIEWER_REPUTATION_PROOF_ID == proof_id}")
+        if not  REVIEWER_REPUTATION_PROOF_ID == proof_id:
+            LOGGER(f"Proof ID was not stored correctly: {REVIEWER_REPUTATION_PROOF_ID} != {proof_id}")
 
     return signed_tx if True else tx_id
 
 def submit_reputation_proof(objects: List[Tuple[str, int]]) -> bool:
-    tx_id = __create_reputation_proof_tx(
-        node_url=ERGO_NODE_URL,
-        wallet_mnemonic=ERGO_WALLET_MNEMONIC,
-        proof_id=REVIEWER_REPUTATION_PROOF_ID,
-        objects=objects,
-    )
-    LOGGER(f"Submited tx -> {tx_id}")
-    return tx_id != None
+    try:
+        tx_id = __create_reputation_proof_tx(
+            node_url=ERGO_NODE_URL,
+            wallet_mnemonic=ERGO_WALLET_MNEMONIC,
+            proof_id=REVIEWER_REPUTATION_PROOF_ID,
+            objects=objects,
+        )
+        LOGGER(f"Submited tx -> {tx_id}")
+        return tx_id != None
+    except Exception as e:
+        LOGGER(str(e))
+        return False
