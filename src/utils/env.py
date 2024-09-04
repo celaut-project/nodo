@@ -1,11 +1,11 @@
 import hashlib
 import os, subprocess
 from dotenv import load_dotenv, set_key
-from typing import Final, Dict, Callable
+from typing import Final, Dict, Callable, Tuple
 import docker as docker_lib
 from protos import celaut_pb2
 
-def _(env, default):
+def _(env, default) -> Tuple[str, str]:
     """
     Fetches an environment variable value or returns the default.
     """
@@ -23,8 +23,11 @@ def _(env, default):
     if isinstance(_value, str) and '{' in _value and '}' in _value:
         globals()[env] = _value.format(**globals())
 
+    return env, globals()[env]
+
 def write_env(key, value):
-    set_key(".env", key, value)
+    globals()[key] = value
+    write_default_to_file(globals())
     load_dotenv(".env")
     _(key, value)
 
@@ -84,11 +87,13 @@ DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
 # Ledger
-_("ERGO_NODE_URL", "http://213.239.193.208:9052/")
-_("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect")
-_("LEDGER_SUBMISSION_THRESHOLD", 10)
-_("TOTAL_REPUTATION_TOKEN_AMOUNT", 1_000_000_000)
-_("REVIEWER_REPUTATION_PROOF_ID", "")
+ERGO_ENVS = {env: value for env, value in {
+    _("ERGO_NODE_URL", "http://213.239.193.208:9052/"),
+    _("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect"),
+    _("LEDGER_SUBMISSION_THRESHOLD", 10),
+    _("TOTAL_REPUTATION_TOKEN_AMOUNT", 1_000_000_000),
+    _("REVIEWER_REPUTATION_PROOF_ID", "")
+}}
 
 # Logging and Memory Settings
 _("MEMORY_LOGS", False)
