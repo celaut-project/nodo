@@ -1,36 +1,65 @@
 import hashlib
-import os, subprocess
-from dotenv import load_dotenv, set_key
+import os
+import subprocess
+from dotenv import load_dotenv
 from typing import Final, Dict, Callable, Tuple
 import docker as docker_lib
 from protos import celaut_pb2
 
-def _(env, default) -> Tuple[str, str]:
+def get_env(env: str, default) -> Tuple[str, str]:
     """
     Fetches an environment variable value or returns the default.
     """
-    GET_ENV = lambda env, default: (type(default)(os.environ.get(env)) if type(default) != bool
-                                    else os.environ.get(env) in ['True', 'true', 'T', 't'])\
-                                        if env in os.environ.keys() else default
-    try:
-        _value = GET_ENV(env=env, default=default)
-    except:
-        _value = default
-    globals()[env] = _value
+    value = os.getenv(env, default)
 
-    # If the value is a string containing an expression, evaluate it.
-    # First, we need to check if it contains any other global variables
-    if isinstance(_value, str) and '{' in _value and '}' in _value:
-        globals()[env] = _value.format(**globals())
+    if isinstance(default, bool):
+        value = value in ['True', 'true', 'T', 't']
+    else:
+        value = type(default)(value)  # type: ignore
+
+    globals()[env] = value
+
+    # Evaluate expressions within the string
+    if isinstance(value, str) and '{' in value and '}' in value:
+        globals()[env] = value.format(**globals())
 
     return env, globals()[env]
 
-def write_env(key, value):
+def write_env(key: str, value):
+    """
+    Updates the global environment variable and writes it to the .env file.
+    """
     globals()[key] = value
     write_default_to_file(globals())
     load_dotenv(".env")
-    _(key, value)
+    get_env(key, value)
 
+def write_default_to_file(global_vars: Dict[str, any]):  # type: ignore
+    """
+    Writes the environment variables to the .env file if it doesn't already exist.
+    """
+    env_file_path = os.path.join(global_vars['MAIN_DIR'], ".env")
+
+    if not os.path.exists(env_file_path):
+        exclude_vars = {
+            "get_env", "COMPILER_SUPPORTED_ARCHITECTURES", "SUPPORTED_ARCHITECTURES",
+            "SHAKE_256_ID", "SHA3_256_ID", "SHAKE_256", "SHA3_256", "HASH_FUNCTIONS",
+            "DOCKER_CLIENT", "DEFAULT_SYSTEM_RESOURCES", "DOCKER_COMMAND",
+            "STORAGE", "CACHE", "REGISTRY", "METADATA_REGISTRY", "BLOCKDIR",
+            "DATABASE_FILE", "REPUTATION_DB"
+        }
+
+        constants = {k: v for k, v in global_vars.items() if k.isupper() and k not in exclude_vars}
+
+        with open(env_file_path, "w") as f:
+            for key, value in constants.items():
+                if isinstance(value, bool):
+                    value = "True" if value else "False"
+                f.write(f"{key}={value}\n")
+
+        print(f"Default environment variables written to {env_file_path}")
+    else:
+        print(f"The .env file already exists at {env_file_path}")
 
 if os.path.exists(".env"):
     load_dotenv(".env")
@@ -40,105 +69,106 @@ if os.path.exists(".env"):
 # ------------------------------
 
 # Directory Settings
-_("MAIN_DIR", "/nodo")
-_("STORAGE", f"{MAIN_DIR}/storage")
-_("CACHE", f"{STORAGE}/__cache__/")
-_("REGISTRY", f"{STORAGE}/__registry__/")
-_("METADATA_REGISTRY", f"{STORAGE}/__metadata__/")
-_("BLOCKDIR", f"{STORAGE}/__block__/")
-_("DATABASE_FILE", f'{STORAGE}/database.sqlite')
+get_env("MAIN_DIR", "/nodo")
+get_env("STORAGE", f"{MAIN_DIR}/storage")  # type: ignore
+get_env("CACHE", f"{STORAGE}/__cache__/")  # type: ignore
+get_env("REGISTRY", f"{STORAGE}/__registry__/")  # type: ignore
+get_env("METADATA_REGISTRY", f"{STORAGE}/__metadata__/")  # type: ignore
+get_env("BLOCKDIR", f"{STORAGE}/__block__/")  # type: ignore
+get_env("DATABASE_FILE", f'{STORAGE}/database.sqlite')  # type: ignore
 
 # Compiler Settings
-_("SAVE_ALL", False)  # Save the services that compiles.
-_("COMPILER_MEMORY_SIZE_FACTOR", 2.0)
-_("ARM_COMPILER_SUPPORT", True)
-_("X86_COMPILER_SUPPORT", False)
+get_env("SAVE_ALL", False)
+get_env("COMPILER_MEMORY_SIZE_FACTOR", 2.0)
+get_env("ARM_COMPILER_SUPPORT", True)
+get_env("X86_COMPILER_SUPPORT", False)
 COMPILER_SUPPORTED_ARCHITECTURES = [
-    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if ARM_COMPILER_SUPPORT else [],
-    ['linux/amd64', 'x86_64', 'amd64'] if X86_COMPILER_SUPPORT else []
+    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if ARM_COMPILER_SUPPORT else [],  # type: ignore
+    ['linux/amd64', 'x86_64', 'amd64'] if X86_COMPILER_SUPPORT else []  # type: ignore
 ]
 
 # Builder Settings
-_("WAIT_FOR_CONTAINER", 60)
-_("BUILD_CONTAINER_MEMORY_SIZE_FACTOR", 3.1)
-_("ARM_SUPPORT", True)
-_("X86_SUPPORT", False)
+get_env("WAIT_FOR_CONTAINER", 60)
+get_env("BUILD_CONTAINER_MEMORY_SIZE_FACTOR", 3.1)
+get_env("ARM_SUPPORT", True)
+get_env("X86_SUPPORT", False)
 SUPPORTED_ARCHITECTURES = [
-    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if ARM_SUPPORT else [],
-    ['linux/amd64', 'x86_64', 'amd64'] if X86_SUPPORT else []
+    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if ARM_SUPPORT else [],  # type: ignore
+    ['linux/amd64', 'x86_64', 'amd64'] if X86_SUPPORT else []  # type: ignore
 ]
 
 # Docker Configuration
 DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
-_("DOCKER_CLIENT_TIMEOUT", 480)
-_("DOCKER_MAX_CONNECTIONS", 1000)
+get_env("DOCKER_CLIENT_TIMEOUT", 480)
+get_env("DOCKER_MAX_CONNECTIONS", 1000)
 DOCKER_CLIENT = lambda: docker_lib.from_env(
-    timeout=DOCKER_CLIENT_TIMEOUT,
-    max_pool_size=DOCKER_MAX_CONNECTIONS
+    timeout=DOCKER_CLIENT_TIMEOUT,  # type: ignore
+    max_pool_size=DOCKER_MAX_CONNECTIONS # type: ignore
 )
-_("CONCURRENT_CONTAINER_CREATIONS", 10)
-_("REMOVE_CONTAINERS", True)
-_("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER", True)
+get_env("CONCURRENT_CONTAINER_CREATIONS", 10)
+get_env("REMOVE_CONTAINERS", True)
+get_env("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER", True)
 
 # Network and Port Settings
-_("GATEWAY_PORT", 8090)
-_("NGROK_TUNNELS_KEY", "")
+get_env("GATEWAY_PORT", 8090)
+get_env("NGROK_TUNNELS_KEY", "")
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
 # Ledger
-ERGO_ENVS = {env: value for env, value in {
-    _("ERGO_NODE_URL", "http://213.239.193.208:9052/"),
-    _("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect"),
-    _("LEDGER_SUBMISSION_THRESHOLD", 10),
-    _("TOTAL_REPUTATION_TOKEN_AMOUNT", 1_000_000_000),
-    _("REVIEWER_REPUTATION_PROOF_ID", "")
-}}
+@property
+def ERGO_ENVS(): return { env: value for env, value in [
+        get_env("ERGO_NODE_URL", "http://213.239.193.208:9052/"),
+        get_env("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect"),
+        get_env("LEDGER_SUBMISSION_THRESHOLD", 10),
+        get_env("TOTAL_REPUTATION_TOKEN_AMOUNT", 1_000_000_000),
+        get_env("REVIEWER_REPUTATION_PROOF_ID", "")
+]}
 
 # Logging and Memory Settings
-_("MEMORY_LOGS", False)
-_("MEMORY_LIMIT_COST_FACTOR", 1 / pow(10, 6))
+get_env("MEMORY_LOGS", False)
+get_env("MEMORY_LIMIT_COST_FACTOR", 1 / pow(10, 6))
 
 # Cost and Deposit Settings
-_("DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", 1 / pow(10, 6))
-_("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", False)
-_("DEFAULT_INTIAL_GAS_AMOUNT", pow(10, 9))
-_("MIN_DEPOSIT_PEER", pow(10, 64))
-_("INITIAL_PEER_DEPOSIT_FACTOR", 0.5)
-_("COST_AVERAGE_VARIATION", 1)
-_("GAS_COST_FACTOR", 1)
-_("COST_OF_BUILD", 5)
-_("EXECUTION_BENEFIT", 1)
-_("MODIFY_SERVICE_SYSTEM_RESOURCES_COST", 1)
-_("ALLOW_GAS_DEBT", False)
+get_env("DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", 1 / pow(10, 6))
+get_env("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", False)
+get_env("DEFAULT_INTIAL_GAS_AMOUNT", pow(10, 9))
+get_env("MIN_DEPOSIT_PEER", pow(10, 64))
+get_env("INITIAL_PEER_DEPOSIT_FACTOR", 0.5)
+get_env("COST_AVERAGE_VARIATION", 1)
+get_env("GAS_COST_FACTOR", 1)
+get_env("COST_OF_BUILD", 5)
+get_env("EXECUTION_BENEFIT", 1)
+get_env("MODIFY_SERVICE_SYSTEM_RESOURCES_COST", 1)
+get_env("ALLOW_GAS_DEBT", False)
 
 # Timing and Delay Settings
-_("GENERAL_WAIT_TIME", 2)
-_("GENERAL_ATTEMPTS", 10)
-_("MANAGER_ITERATION_TIME", 10)
-_("TIME_TO_PRUNE_ZERO_CLIENT", 540)
-_("COMMUNICATION_ATTEMPTS", 1)
-_("COMMUNICATION_ATTEMPTS_DELAY", 60)
-_("CLIENT_EXPIRATION_TIME", 1200)
-_("EXTERNAL_COST_TIMEOUT", 10)
+get_env("GENERAL_WAIT_TIME", 2)
+get_env("GENERAL_ATTEMPTS", 10)
+get_env("MANAGER_ITERATION_TIME", 10)
+get_env("TIME_TO_PRUNE_ZERO_CLIENT", 540)
+get_env("COMMUNICATION_ATTEMPTS", 1)
+get_env("COMMUNICATION_ATTEMPTS_DELAY", 60)
+get_env("CLIENT_EXPIRATION_TIME", 1200)
+get_env("EXTERNAL_COST_TIMEOUT", 10)
 
 # Communication Settings
-_("SEND_ONLY_HASHES_ASKING_COST", True)
-_("DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH", False)
+get_env("SEND_ONLY_HASHES_ASKING_COST", True)
+get_env("DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH", False)
 
 # Client Settings
-_("MIN_SLOTS_OPEN_PER_PEER", 1)
-_("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME", pow(10, 3))
+get_env("MIN_SLOTS_OPEN_PER_PEER", 1)
+get_env("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME", pow(10, 3))
 
 # Miscellaneous
-_("COMPUTE_POWER_RATE", 2)
-_("MIN_BUFFER_BLOCK_SIZE", 10 ** 7)
-_("WEIGHT_CONFIGURATION_FACTOR", int(pow(10, 9)))
-_("SOCIALIZATION_FACTOR", 2)
-_("INIT_COST_CONFIGURATION_FACTOR", 1)
-_("MAINTENANCE_COST_CONFIGURATION_FACTOR", pow(10, 6))
-_("MEMSWAP_FACTOR", 0)
-_("USE_PRINT", False)
+get_env("COMPUTE_POWER_RATE", 2)
+get_env("MIN_BUFFER_BLOCK_SIZE", 10 ** 7)
+get_env("WEIGHT_CONFIGURATION_FACTOR", int(pow(10, 9)))
+get_env("SOCIALIZATION_FACTOR", 2)
+get_env("INIT_COST_CONFIGURATION_FACTOR", 1)
+get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR", pow(10, 6))
+get_env("MEMSWAP_FACTOR", 0)
+get_env("USE_PRINT", False)
 
 # Hashes
 
@@ -165,5 +195,4 @@ DEFAULT_SYSTEM_RESOURCES: celaut_pb2.Sysresources = celaut_pb2.Sysresources(
 # ------------------------------
 
 if not os.path.exists(".env"):
-    from src.utils.write_envs import write_default_to_file
     write_default_to_file(globals())
