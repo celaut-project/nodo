@@ -116,7 +116,6 @@ DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
 # Ledger
-@property
 def ERGO_ENVS(): return { env: value for env, value in [
         get_env("ERGO_NODE_URL", "http://213.239.193.208:9052/"),
         get_env("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect"),
