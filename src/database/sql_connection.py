@@ -14,8 +14,7 @@ from grpcbigbuffer import client as grpcbf
 from protos import gateway_pb2_grpc, gateway_pb2, celaut_pb2
 from src.utils import logger as l, logger
 from src.utils.env import (
-    LEDGER_SUBMISSION_THRESHOLD,
-    TOTAL_REPUTATION_TOKEN_AMOUNT,
+    ERGO_ENVS,
     CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME,
     CLIENT_EXPIRATION_TIME,
     DOCKER_CLIENT,
@@ -549,14 +548,14 @@ class SQLConnection(metaclass=Singleton):
                 if reputation_proof_id:
                     # Calculate the percentage of the total reputation token amount
                     # Check if the submission condition is met
-                    if reputation_index - last_index_on_ledger >= LEDGER_SUBMISSION_THRESHOLD:
+                    if reputation_index - last_index_on_ledger >= ERGO_ENVS['LEDGER_SUBMISSION_THRESHOLD']:
                         needs_submit = True
-                        percentage_amount = (reputation_score / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
+                        percentage_amount = (reputation_score / total_amount) * ERGO_ENVS['TOTAL_REPUTATION_TOKEN_AMOUNT'] if total_amount else 0
                         to_submit.append((reputation_proof_id, percentage_amount))
 
                     # Proof percentage don't need to be changed it self, but needs to be updated if others do.
                     elif last_index_on_ledger > 0:
-                        percentage_amount = (reputation_score / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
+                        percentage_amount = (reputation_score / total_amount) * ERGO_ENVS['TOTAL_REPUTATION_TOKEN_AMOUNT'] if total_amount else 0
                         to_submit.append((reputation_proof_id, percentage_amount))
 
             # Attempt to submit the data to the ledger
