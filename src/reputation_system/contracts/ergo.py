@@ -6,7 +6,7 @@ from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
 from src.utils.logger import LOGGER
-from src.utils.env import write_env, ERGO_ENVS()
+from src.utils.env import write_env, ERGO_ENVS
 
 from jpype import *
 import java.lang
