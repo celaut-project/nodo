@@ -18,7 +18,11 @@ from src.payment_system.contracts.ethereum.utils import transact, w3_generator_f
     catch_event
 from src.database.access_functions.ledgers import get_ledger_and_contract_addr_from_contract, NonUsedLedgerException, \
     get_private_key_from_ledger
-from src.utils.env import MAIN_DIR
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+MAIN_DIR = env_manager.get_env("MAIN_DIR")
 
 DIR = f"{MAIN_DIR}/src/payment_system/contracts/ethereum/deposit_contract"
 CONTRACT: bytes = open(os.path.join(DIR, 'bytecode'), 'rb').read()

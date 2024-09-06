@@ -15,10 +15,16 @@ from grpcbigbuffer.client import copy_block_if_exists
 
 import src.utils.logger as l
 from protos import celaut_pb2, gateway_pb2
-from src.utils.env import DOCKER_COMMAND, SUPPORTED_ARCHITECTURES, BUILD_CONTAINER_MEMORY_SIZE_FACTOR, \
-    WAIT_FOR_CONTAINER, BLOCKDIR, CACHE, REGISTRY
+from src.utils.env import DOCKER_COMMAND, SUPPORTED_ARCHITECTURES, EnvManager
 from src.utils.verify import get_service_hex_main_hash
 
+env_manager = EnvManager()
+
+BUILD_CONTAINER_MEMORY_SIZE_FACTOR = env_manager.get_env("BUILD_CONTAINER_MEMORY_SIZE_FACTOR")
+WAIT_FOR_CONTAINER = env_manager.get_env("WAIT_FOR_CONTAINER")
+BLOCKDIR = env_manager.get_env("BLOCKDIR")
+CACHE = env_manager.get_env("CACHE")
+REGISTRY = env_manager.get_env("REGISTRY")
 
 def get_arch_tag(metadata: celaut_pb2.Any.Metadata) -> str:
     for _l in SUPPORTED_ARCHITECTURES:

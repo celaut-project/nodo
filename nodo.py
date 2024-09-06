@@ -3,7 +3,17 @@ from grpcbigbuffer import utils as grpcbf
 from psutil import virtual_memory
 from src.utils import logger as l
 import src.manager.resources_manager as iobd
-from src.utils.env import MEMORY_LOGS, REGISTRY, CACHE, BLOCKDIR, METADATA_REGISTRY, DATABASE_FILE, MAIN_DIR
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+MEMORY_LOGS = env_manager.get_env("MEMORY_LOGS")
+REGISTRY = env_manager.get_env("REGISTRY")
+CACHE = env_manager.get_env("CACHE")
+BLOCKDIR = env_manager.get_env("BLOCKDIR")
+METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
+MAIN_DIR = env_manager.get_env("MAIN_DIR")
 
 # Function to check if nodo.service is running
 def is_nodo_service_running():

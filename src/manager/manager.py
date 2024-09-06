@@ -15,12 +15,24 @@ from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 from src.database.sql_connection import SQLConnection, is_peer_available
 
 from src.utils import logger as logger
-from src.utils.env import ALLOW_GAS_DEBT, DATABASE_FILE, MIN_SLOTS_OPEN_PER_PEER, DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, \
-    DEFAULT_INTIAL_GAS_AMOUNT, USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR, MEMSWAP_FACTOR, DOCKER_NETWORK, \
+from src.utils.env import EnvManager, DOCKER_NETWORK, \
     SHA3_256_ID
-from src.utils.utils import get_network_name, \
-    to_gas_amount, \
+from src.utils.utils import (
+    get_network_name,
+    to_gas_amount,
     generate_uris_by_peer_id
+)
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+ALLOW_GAS_DEBT = env_manager.get_env("ALLOW_GAS_DEBT")
+DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
+MIN_SLOTS_OPEN_PER_PEER = env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER")
+DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get_env("DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
+DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
+USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get_env("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
+MEMSWAP_FACTOR = env_manager.get_env("MEMSWAP_FACTOR")
 
 sc = SQLConnection()
 

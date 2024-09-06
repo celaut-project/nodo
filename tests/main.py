@@ -1,10 +1,14 @@
 import os.path
 from typing import Optional
 
-from src.utils.env import METADATA_REGISTRY, REGISTRY
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
-from src.utils.env import SHA3_256_ID
+from src.utils.env import SHA3_256_ID, EnvManager
 from src.utils.utils import to_gas_amount
+
+env_manager = EnvManager()
+
+METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+REGISTRY = env_manager.get_env("REGISTRY")
 
 # Read the .services file and populate the constants dynamically
 with open('tests/.services', 'r') as file:

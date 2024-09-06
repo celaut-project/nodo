@@ -10,11 +10,22 @@ from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.maintain_thread import manager_thread
 from src.utils import logger as l
 from src.utils.zeroconf import Zeroconf
-from src.utils.env import GATEWAY_PORT, IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
-    SEND_ONLY_HASHES_ASKING_COST, DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH, LOCAL_NETWORK, \
-    DOCKER_NETWORK, COMPUTE_POWER_RATE, COST_OF_BUILD, EXECUTION_BENEFIT, MANAGER_ITERATION_TIME, \
-    COST_AVERAGE_VARIATION, GAS_COST_FACTOR, MODIFY_SERVICE_SYSTEM_RESOURCES_COST, EXTERNAL_COST_TIMEOUT
+from src.utils.env import LOCAL_NETWORK, DOCKER_NETWORK, EnvManager
 
+env_manager = EnvManager()
+
+GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
+IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = env_manager.get_env("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER")
+SEND_ONLY_HASHES_ASKING_COST = env_manager.get_env("SEND_ONLY_HASHES_ASKING_COST")
+DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH = env_manager.get_env("DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH")
+COMPUTE_POWER_RATE = env_manager.get_env("COMPUTE_POWER_RATE")
+COST_OF_BUILD = env_manager.get_env("COST_OF_BUILD")
+EXECUTION_BENEFIT = env_manager.get_env("EXECUTION_BENEFIT")
+MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
+COST_AVERAGE_VARIATION = env_manager.get_env("COST_AVERAGE_VARIATION")
+GAS_COST_FACTOR = env_manager.get_env("GAS_COST_FACTOR")
+MODIFY_SERVICE_SYSTEM_RESOURCES_COST = env_manager.get_env("MODIFY_SERVICE_SYSTEM_RESOURCES_COST")
+EXTERNAL_COST_TIMEOUT = env_manager.get_env("EXTERNAL_COST_TIMEOUT")
 
 def serve():
     # Zeroconf for connect to the network (one per network).

@@ -5,8 +5,11 @@ from protos import gateway_pb2
 from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
 from src.manager.manager import could_ve_this_sysreq
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost, compute_maintenance_cost
-from src.utils.env import MANAGER_ITERATION_TIME
 from src.utils.utils import to_gas_amount
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
 
 ClauseResource = gateway_pb2.CombinationResources.Clause
 #  TODO make from protos.gateway_pb2.CombinationResource.Clause as ClauseResource

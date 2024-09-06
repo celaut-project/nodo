@@ -5,7 +5,13 @@ from typing import Optional
 from protos import celaut_pb2 as celaut
 from src.gateway.utils import generate_gateway_instance
 from src.utils import logger as l
-from src.utils.env import CACHE, DOCKER_COMMAND, DOCKER_NETWORK
+from src.utils.env import DOCKER_COMMAND, DOCKER_NETWORK, EnvManager
+
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+CACHE = env_manager.get_env("CACHE")
 
 
 def set_config(container_id: str, config: Optional[celaut.Configuration], resources: celaut.Sysresources,

@@ -9,12 +9,18 @@ import json
 import threading
 from grpcbigbuffer.client import Dir, client_grpc
 
-from src.utils.env import REGISTRY, METADATA_REGISTRY, STORAGE
 from tests.protos import api_pb2, api_pb2_grpc
 from protos import gateway_pb2, celaut_pb2, gateway_pb2_grpc
 from tests.protos import solvers_dataset_pb2
 from protos.gateway_pb2_grpcbf import StartService_input_indices
 from tests.main import RANDOM, SORTER, FRONTIER, GATEWAY, generator as gen
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+REGISTRY = env_manager.get_env("REGISTRY")
+METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+STORAGE = env_manager.get_env("STORAGE")
 
 LIST_OF_SOLVERS = [FRONTIER]
 TEST_DATA_STORAGE = f'{STORAGE}/tests'

@@ -9,9 +9,14 @@ from protos.gateway_pb2_grpcbf import StartService_input_indices, \
     StartService_input_message_mode
 from src.gateway.utils import save_service
 from src.utils import logger as l
-from src.utils.env import SHA3_256_ID, \
-    REGISTRY, METADATA_REGISTRY
+from src.utils.env import SHA3_256_ID
 from src.manager.maintain_thread import wanted_services
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+REGISTRY = env_manager.get_env("REGISTRY")
+METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 
 
 class BreakIteration(Exception):

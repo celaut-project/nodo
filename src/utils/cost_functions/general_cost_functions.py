@@ -1,10 +1,16 @@
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.builder import build
 from src.utils import logger as l
-from src.utils.env import MEMORY_LIMIT_COST_FACTOR, DOCKER_CLIENT, COST_OF_BUILD, COMPUTE_POWER_RATE, EXECUTION_BENEFIT, \
-    GAS_COST_FACTOR
+from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.verify import get_service_hex_main_hash
 
+env_manager = EnvManager()
+
+MEMORY_LIMIT_COST_FACTOR = env_manager.get_env("MEMORY_LIMIT_COST_FACTOR")
+COST_OF_BUILD = env_manager.get_env("COST_OF_BUILD")
+COMPUTE_POWER_RATE = env_manager.get_env("COMPUTE_POWER_RATE")
+EXECUTION_BENEFIT = env_manager.get_env("EXECUTION_BENEFIT")
+GAS_COST_FACTOR = env_manager.get_env("GAS_COST_FACTOR")
 
 def build_cost(metadata: celaut.Any.Metadata) -> int:
     is_built = (get_service_hex_main_hash(metadata=metadata)

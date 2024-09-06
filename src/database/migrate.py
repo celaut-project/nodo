@@ -1,6 +1,11 @@
 import sqlite3
 import os
-from src.utils.env import DATABASE_FILE, STORAGE
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
+STORAGE = env_manager.get_env("STORAGE")
 
 def create_directory(path):
     """Ensure the storage directory exists."""

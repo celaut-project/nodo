@@ -6,8 +6,11 @@ from src.payment_system.contracts.ethereum.deposit_contract.interface import DIR
 from web3 import Web3
 
 from src.payment_system.contracts.ethereum.envs import ETH_LEDGER, ETH_PROVIDER
-from src.utils.env import SHA3_256_ID, DATABASE_FILE
+from src.utils.env import EnvManager, SHA3_256_ID
 
+env_manager = EnvManager()
+
+DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 
 def seed(private_key=None):
 

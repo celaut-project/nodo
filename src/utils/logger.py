@@ -1,6 +1,9 @@
 import logging, os
 
-from src.utils.env import STORAGE, USE_PRINT
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+STORAGE, USE_PRINT = env_manager.get_env("STORAGE"), env_manager.get_env("USE_PRINT")
 
 if not os.path.exists(STORAGE): os.makedirs(STORAGE)
 

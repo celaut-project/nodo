@@ -9,7 +9,13 @@ from grpcbigbuffer import client as grpcbb
 from protos import celaut_pb2, compile_pb2, gateway_pb2_grpcbf, gateway_pb2_grpc
 from src.commands.compile.generate_service_zip import __generate_service_zip
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
-from src.utils.env import GATEWAY_PORT, METADATA_REGISTRY, REGISTRY
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
+METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+REGISTRY = env_manager.get_env("REGISTRY")
 
 
 def __compile(zip, node: str):

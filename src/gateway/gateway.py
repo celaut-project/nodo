@@ -12,8 +12,13 @@ from src.manager.manager import prune_container, generate_client, get_token_by_u
 from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import validate_payment_process
 from src.utils import logger as l
-from src.utils.env import MODIFY_SERVICE_SYSTEM_RESOURCES_COST, GAS_COST_FACTOR
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+MODIFY_SERVICE_SYSTEM_RESOURCES_COST = env_manager.get_env("MODIFY_SERVICE_SYSTEM_RESOURCES_COST")
+GAS_COST_FACTOR = env_manager.get_env("GAS_COST_FACTOR")
 
 
 class Gateway(gateway_pb2_grpc.Gateway):

@@ -10,11 +10,17 @@ import src.manager.resources_manager as resources_manager
 from grpcbigbuffer import client as grpcbb
 from grpcbigbuffer import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2_grpcbf
-from src.utils.env import COMPILER_SUPPORTED_ARCHITECTURES, CACHE, COMPILER_MEMORY_SIZE_FACTOR, DOCKER_COMMAND, \
-    SAVE_ALL, \
-    MIN_BUFFER_BLOCK_SIZE, SHA3_256_ID
+from src.utils.env import EnvManager, SHA3_256_ID, DOCKER_COMMAND, COMPILER_SUPPORTED_ARCHITECTURES
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+CACHE = env_manager.get_env("CACHE")
+COMPILER_MEMORY_SIZE_FACTOR = env_manager.get_env("COMPILER_MEMORY_SIZE_FACTOR")
+SAVE_ALL = env_manager.get_env("SAVE_ALL")
+MIN_BUFFER_BLOCK_SIZE = env_manager.get_env("MIN_BUFFER_BLOCK_SIZE")
 
 
 class Compiler:
@@ -182,7 +188,7 @@ class Compiler:
         except:
             pass
 
-        #  Slots 
+        #  Slots
         if not self.json.get('api'): return
         for item in self.json.get('api'):  # iterate slots.
             slot = celaut.Service.Api.Slot()

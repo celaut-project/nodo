@@ -2,172 +2,181 @@ import hashlib
 import os
 import subprocess
 from dotenv import load_dotenv
-from typing import Final, Dict, Callable, Tuple
+from typing import Final, Dict, Callable
 import docker as docker_lib
 from protos import celaut_pb2
 
-def get_env(env: str, default) -> Tuple[str, str]:
-    """
-    Fetches an environment variable value or returns the default.
-    """
-    value = os.getenv(env, default)
+class EnvManager:
+    def __init__(self):
+        """
+        Initialize the EnvManager by loading the .env file and setting up globals.
+        """
+        if os.path.exists(".env"):
+            load_dotenv(".env")
 
-    if isinstance(default, bool):
-        value = value in ['True', 'true', 'T', 't']
-    else:
-        value = type(default)(value)  # type: ignore
+        self.env_vars = {}
 
-    globals()[env] = value
+    def get_env(self, env: str, default: str = "") -> str:
+        """
+        Fetches an environment variable value or returns the default.
+        If the value is not found, sets it with the default.
+        """
+        value = os.getenv(env, default)
 
-    # Evaluate expressions within the string
-    if isinstance(value, str) and '{' in value and '}' in value:
-        globals()[env] = value.format(**globals())
+        if isinstance(default, bool):
+            value = value in ['True', 'true', 'T', 't']
+        else:
+            value = type(default)(value)  # type: ignore
 
-    return env, globals()[env]
+        self.env_vars[env] = value
 
-def write_env(key: str, value):
-    """
-    Updates the global environment variable and writes it to the .env file.
-    """
-    globals()[key] = value
-    write_default_to_file(globals())
-    load_dotenv(".env")
-    get_env(key, value)
+        # Evaluate expressions within the string
+        if isinstance(value, str) and '{' in value and '}' in value:
+            self.env_vars[env] = value.format(**self.env_vars)
 
-def write_default_to_file(global_vars: Dict[str, any]):  # type: ignore
-    """
-    Writes the environment variables to the .env file if it doesn't already exist.
-    """
-    env_file_path = os.path.join(global_vars['MAIN_DIR'], ".env")
+        return self.env_vars[env]
 
-    if not os.path.exists(env_file_path):
-        exclude_vars = {
-            "get_env", "COMPILER_SUPPORTED_ARCHITECTURES", "SUPPORTED_ARCHITECTURES",
-            "SHAKE_256_ID", "SHA3_256_ID", "SHAKE_256", "SHA3_256", "HASH_FUNCTIONS",
-            "DOCKER_CLIENT", "DEFAULT_SYSTEM_RESOURCES", "DOCKER_COMMAND",
-            "STORAGE", "CACHE", "REGISTRY", "METADATA_REGISTRY", "BLOCKDIR",
-            "DATABASE_FILE", "REPUTATION_DB"
-        }
+    def write_env(self, key: str, value):
+        """
+        Updates the environment variable both in memory and in the .env file.
+        """
+        self.env_vars[key] = value
+        self.write_default_to_file()
+        load_dotenv(".env")  # Reload after update
+        self.get_env(key, value)  # Ensure consistency
 
-        constants = {k: v for k, v in global_vars.items() if k.isupper() and k not in exclude_vars}
+    def write_default_to_file(self):
+        """
+        Writes the current environment variables to the .env file.
+        """
+        env_file_path = os.path.join(self.env_vars['MAIN_DIR'], ".env")
 
-        with open(env_file_path, "w") as f:
-            for key, value in constants.items():
-                if isinstance(value, bool):
-                    value = "True" if value else "False"
-                f.write(f"{key}={value}\n")
+        if not os.path.exists(env_file_path):
+            exclude_vars = {
+                "get_env", "COMPILER_SUPPORTED_ARCHITECTURES", "SUPPORTED_ARCHITECTURES",
+                "SHAKE_256_ID", "SHA3_256_ID", "SHAKE_256", "SHA3_256", "HASH_FUNCTIONS",
+                "DOCKER_CLIENT", "DEFAULT_SYSTEM_RESOURCES", "DOCKER_COMMAND",
+                "STORAGE", "CACHE", "REGISTRY", "METADATA_REGISTRY", "BLOCKDIR",
+                "DATABASE_FILE", "REPUTATION_DB"
+            }
 
-        print(f"Default environment variables written to {env_file_path}")
-    else:
-        print(f"The .env file already exists at {env_file_path}")
+            constants = {k: v for k, v in self.env_vars.items() if k.isupper() and k not in exclude_vars}
 
-if os.path.exists(".env"):
-    load_dotenv(".env")
+            with open(env_file_path, "w") as f:
+                for key, value in constants.items():
+                    if isinstance(value, bool):
+                        value = "True" if value else "False"
+                    f.write(f"{key}={value}\n")
+
+            print(f"Default environment variables written to {env_file_path}")
+        else:
+            print(f"The .env file already exists at {env_file_path}")
+
+# Instantiate EnvManager
+env_manager = EnvManager()
 
 # ------------------------------
 # ----------- START ------------
 # ------------------------------
 
 # Directory Settings
-get_env("MAIN_DIR", "/nodo")
-get_env("STORAGE", f"{MAIN_DIR}/storage")  # type: ignore
-get_env("CACHE", f"{STORAGE}/__cache__/")  # type: ignore
-get_env("REGISTRY", f"{STORAGE}/__registry__/")  # type: ignore
-get_env("METADATA_REGISTRY", f"{STORAGE}/__metadata__/")  # type: ignore
-get_env("BLOCKDIR", f"{STORAGE}/__block__/")  # type: ignore
-get_env("DATABASE_FILE", f'{STORAGE}/database.sqlite')  # type: ignore
+env_manager.get_env("MAIN_DIR", "/nodo")
+env_manager.get_env("STORAGE", f"{env_manager.env_vars['MAIN_DIR']}/storage")
+env_manager.get_env("CACHE", f"{env_manager.env_vars['STORAGE']}/__cache__/")
+env_manager.get_env("REGISTRY", f"{env_manager.env_vars['STORAGE']}/__registry__/")
+env_manager.get_env("METADATA_REGISTRY", f"{env_manager.env_vars['STORAGE']}/__metadata__/")
+env_manager.get_env("BLOCKDIR", f"{env_manager.env_vars['STORAGE']}/__block__/")
+env_manager.get_env("DATABASE_FILE", f'{env_manager.env_vars["STORAGE"]}/database.sqlite')
 
 # Compiler Settings
-get_env("SAVE_ALL", False)
-get_env("COMPILER_MEMORY_SIZE_FACTOR", 2.0)
-get_env("ARM_COMPILER_SUPPORT", True)
-get_env("X86_COMPILER_SUPPORT", False)
+env_manager.get_env("SAVE_ALL", False)
+env_manager.get_env("COMPILER_MEMORY_SIZE_FACTOR", 2.0)
+env_manager.get_env("ARM_COMPILER_SUPPORT", True)
+env_manager.get_env("X86_COMPILER_SUPPORT", False)
 COMPILER_SUPPORTED_ARCHITECTURES = [
-    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if ARM_COMPILER_SUPPORT else [],  # type: ignore
-    ['linux/amd64', 'x86_64', 'amd64'] if X86_COMPILER_SUPPORT else []  # type: ignore
+    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if env_manager.env_vars["ARM_COMPILER_SUPPORT"] else [],
+    ['linux/amd64', 'x86_64', 'amd64'] if env_manager.env_vars["X86_COMPILER_SUPPORT"] else []
 ]
 
 # Builder Settings
-get_env("WAIT_FOR_CONTAINER", 60)
-get_env("BUILD_CONTAINER_MEMORY_SIZE_FACTOR", 3.1)
-get_env("ARM_SUPPORT", True)
-get_env("X86_SUPPORT", False)
+env_manager.get_env("WAIT_FOR_CONTAINER", 60)
+env_manager.get_env("BUILD_CONTAINER_MEMORY_SIZE_FACTOR", 3.1)
+env_manager.get_env("ARM_SUPPORT", True)
+env_manager.get_env("X86_SUPPORT", False)
 SUPPORTED_ARCHITECTURES = [
-    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if ARM_SUPPORT else [],  # type: ignore
-    ['linux/amd64', 'x86_64', 'amd64'] if X86_SUPPORT else []  # type: ignore
+    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if env_manager.env_vars["ARM_SUPPORT"] else [],
+    ['linux/amd64', 'x86_64', 'amd64'] if env_manager.env_vars["X86_SUPPORT"] else []
 ]
 
 # Docker Configuration
 DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
-get_env("DOCKER_CLIENT_TIMEOUT", 480)
-get_env("DOCKER_MAX_CONNECTIONS", 1000)
+env_manager.get_env("DOCKER_CLIENT_TIMEOUT", 480)
+env_manager.get_env("DOCKER_MAX_CONNECTIONS", 1000)
 DOCKER_CLIENT = lambda: docker_lib.from_env(
-    timeout=DOCKER_CLIENT_TIMEOUT,  # type: ignore
-    max_pool_size=DOCKER_MAX_CONNECTIONS # type: ignore
+    timeout=env_manager.env_vars["DOCKER_CLIENT_TIMEOUT"],
+    max_pool_size=env_manager.env_vars["DOCKER_MAX_CONNECTIONS"]
 )
-get_env("CONCURRENT_CONTAINER_CREATIONS", 10)
-get_env("REMOVE_CONTAINERS", True)
-get_env("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER", True)
+env_manager.get_env("CONCURRENT_CONTAINER_CREATIONS", 10)
+env_manager.get_env("REMOVE_CONTAINERS", True)
+env_manager.get_env("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER", True)
 
 # Network and Port Settings
-get_env("GATEWAY_PORT", 8090)
-get_env("NGROK_TUNNELS_KEY", "")
+env_manager.get_env("GATEWAY_PORT", 8090)
+env_manager.get_env("NGROK_TUNNELS_KEY", "")
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
-# Ledger
-def ERGO_ENVS(): return { env: value for env, value in [
-        get_env("ERGO_NODE_URL", "http://213.239.193.208:9052/"),
-        get_env("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect"),
-        get_env("LEDGER_SUBMISSION_THRESHOLD", 10),
-        get_env("TOTAL_REPUTATION_TOKEN_AMOUNT", 1_000_000_000),
-        get_env("REVIEWER_REPUTATION_PROOF_ID", "")
-]}
+# Ledger Settings
+env_manager.get_env("ERGO_NODE_URL", "http://213.239.193.208:9052/")
+env_manager.get_env("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect")
+env_manager.get_env("LEDGER_SUBMISSION_THRESHOLD", 10)
+env_manager.get_env("TOTAL_REPUTATION_TOKEN_AMOUNT", 1_000_000_000)
+env_manager.get_env("REVIEWER_REPUTATION_PROOF_ID", "")
 
 # Logging and Memory Settings
-get_env("MEMORY_LOGS", False)
-get_env("MEMORY_LIMIT_COST_FACTOR", 1 / pow(10, 6))
+env_manager.get_env("MEMORY_LOGS", False)
+env_manager.get_env("MEMORY_LIMIT_COST_FACTOR", 1 / pow(10, 6))
 
 # Cost and Deposit Settings
-get_env("DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", 1 / pow(10, 6))
-get_env("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", False)
-get_env("DEFAULT_INTIAL_GAS_AMOUNT", pow(10, 9))
-get_env("MIN_DEPOSIT_PEER", pow(10, 64))
-get_env("INITIAL_PEER_DEPOSIT_FACTOR", 0.5)
-get_env("COST_AVERAGE_VARIATION", 1)
-get_env("GAS_COST_FACTOR", 1)
-get_env("COST_OF_BUILD", 5)
-get_env("EXECUTION_BENEFIT", 1)
-get_env("MODIFY_SERVICE_SYSTEM_RESOURCES_COST", 1)
-get_env("ALLOW_GAS_DEBT", False)
+env_manager.get_env("DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", 1 / pow(10, 6))
+env_manager.get_env("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", False)
+env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT", pow(10, 9))
+env_manager.get_env("MIN_DEPOSIT_PEER", pow(10, 64))
+env_manager.get_env("INITIAL_PEER_DEPOSIT_FACTOR", 0.5)
+env_manager.get_env("COST_AVERAGE_VARIATION", 1)
+env_manager.get_env("GAS_COST_FACTOR", 1)
+env_manager.get_env("COST_OF_BUILD", 5)
+env_manager.get_env("EXECUTION_BENEFIT", 1)
+env_manager.get_env("MODIFY_SERVICE_SYSTEM_RESOURCES_COST", 1)
+env_manager.get_env("ALLOW_GAS_DEBT", False)
 
 # Timing and Delay Settings
-get_env("GENERAL_WAIT_TIME", 2)
-get_env("GENERAL_ATTEMPTS", 10)
-get_env("MANAGER_ITERATION_TIME", 10)
-get_env("TIME_TO_PRUNE_ZERO_CLIENT", 540)
-get_env("COMMUNICATION_ATTEMPTS", 1)
-get_env("COMMUNICATION_ATTEMPTS_DELAY", 60)
-get_env("CLIENT_EXPIRATION_TIME", 1200)
-get_env("EXTERNAL_COST_TIMEOUT", 10)
+env_manager.get_env("GENERAL_WAIT_TIME", 2)
+env_manager.get_env("GENERAL_ATTEMPTS", 10)
+env_manager.get_env("MANAGER_ITERATION_TIME", 10)
+env_manager.get_env("TIME_TO_PRUNE_ZERO_CLIENT", 540)
+env_manager.get_env("COMMUNICATION_ATTEMPTS", 1)
+env_manager.get_env("COMMUNICATION_ATTEMPTS_DELAY", 60)
+env_manager.get_env("CLIENT_EXPIRATION_TIME", 1200)
+env_manager.get_env("EXTERNAL_COST_TIMEOUT", 10)
 
 # Communication Settings
-get_env("SEND_ONLY_HASHES_ASKING_COST", True)
-get_env("DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH", False)
+env_manager.get_env("SEND_ONLY_HASHES_ASKING_COST", True)
+env_manager.get_env("DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH", False)
 
 # Client Settings
-get_env("MIN_SLOTS_OPEN_PER_PEER", 1)
-get_env("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME", pow(10, 3))
+env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER", 1)
+env_manager.get_env("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME", pow(10, 3))
 
-# Miscellaneous
-get_env("COMPUTE_POWER_RATE", 2)
-get_env("MIN_BUFFER_BLOCK_SIZE", 10 ** 7)
-get_env("WEIGHT_CONFIGURATION_FACTOR", int(pow(10, 9)))
-get_env("SOCIALIZATION_FACTOR", 2)
-get_env("INIT_COST_CONFIGURATION_FACTOR", 1)
-get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR", pow(10, 6))
-get_env("MEMSWAP_FACTOR", 0)
-get_env("USE_PRINT", False)
+# Miscellaneous Settings
+env_manager.get_env("COMPUTE_POWER_RATE", 2)
+env_manager.get_env("MIN_BUFFER_BLOCK_SIZE", 10 ** 7)
+env_manager.get_env("WEIGHT_CONFIGURATION_FACTOR", int(pow(10, 9)))
+env_manager.get_env("SOCIALIZATION_FACTOR", 2)
+env_manager.get_env("INIT_COST_CONFIGURATION_FACTOR", 1)
+env_manager.get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR", pow(10, 6))
+env_manager.get_env("MEMSWAP_FACTOR", 0)
+env_manager.get_env("USE_PRINT", False)
 
 # Hashes
 
@@ -194,4 +203,4 @@ DEFAULT_SYSTEM_RESOURCES: celaut_pb2.Sysresources = celaut_pb2.Sysresources(
 # ------------------------------
 
 if not os.path.exists(".env"):
-    write_default_to_file(globals())
+    env_manager.write_default_to_file()

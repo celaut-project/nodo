@@ -6,7 +6,7 @@ from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
 from src.utils.logger import LOGGER
-from src.utils.env import write_env, ERGO_ENVS
+from src.utils.env import EnvManager
 
 from jpype import *
 import java.lang
@@ -16,9 +16,10 @@ from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
 
 # Constants
+env_manager = EnvManager()
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
-DEFAULT_TOKEN_AMOUNT = ERGO_ENVS()['TOTAL_REPUTATION_TOKEN_AMOUNT']
+DEFAULT_TOKEN_AMOUNT = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
 DEFAULT_TOKEN_LABEL = "celaut-node-reviewer"
 CONTRACT = """{
   proveDlog(SELF.R7[GroupElement].get) &&
@@ -112,7 +113,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         raise Exception("No input box available.")
 
     total_token_value = sum([obj[1] for obj in objects]) # type: ignore
-    assert ERGO_ENVS()['TOTAL_REPUTATION_TOKEN_AMOUNT'] == total_token_value, (
+    assert env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT') == total_token_value, (
         "The sum of the values to be spent must equal the total reputation token amount."
     )
     LOGGER(f"Needs to be spent {total_token_value} reputation value.")
@@ -179,20 +180,20 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     # 5. Submit the transaction and return the ID
     tx_id = ergo.txId(signed_tx)
 
-    if ERGO_ENVS()['REVIEWER_REPUTATION_PROOF_ID'] != proof_id:
+    if env_manager.get_env('REVIEWER_REPUTATION_PROOF_ID') != proof_id:
         LOGGER(f"Store reviewer reputation proof id {proof_id} on .env file.")
-        write_env("REVIEWER_REPUTATION_PROOF_ID", proof_id)
-        if not ERGO_ENVS()['REVIEWER_REPUTATION_PROOF_ID'] == proof_id:
-            LOGGER(f"Proof ID was not stored correctly: {ERGO_ENVS()['REVIEWER_REPUTATION_PROOF_ID']} != {proof_id}")
+        env_manager.write_env("REVIEWER_REPUTATION_PROOF_ID", proof_id)
+        if not env_manager.get_env('REVIEWER_REPUTATION_PROOF_ID') == proof_id:
+            LOGGER(f"Proof ID was not stored correctly: {env_manager.get_env('REVIEWER_REPUTATION_PROOF_ID')} != {proof_id}")
 
     return tx_id
 
 def submit_reputation_proof(objects: List[Tuple[str, int]]) -> bool:
     try:
         tx_id = __create_reputation_proof_tx(
-            node_url=ERGO_ENVS()['ERGO_NODE_URL'],
-            wallet_mnemonic=ERGO_ENVS()['ERGO_WALLET_MNEMONIC'],
-            proof_id=ERGO_ENVS()['REVIEWER_REPUTATION_PROOF_ID'],
+            node_url=env_manager.get_env('ERGO_NODE_URL'),
+            wallet_mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC'),
+            proof_id=env_manager.get_env('REVIEWER_REPUTATION_PROOF_ID'),
             objects=objects,
         )
         LOGGER(f"Submited tx -> {tx_id}")

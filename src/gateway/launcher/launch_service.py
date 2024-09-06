@@ -6,10 +6,13 @@ from src.gateway.launcher.delegate_execution.delegate_execution import delegate_
 from src.gateway.launcher.local_execution.local_execution import local_execution
 from src.manager.manager import spend_gas
 from src.utils import utils, logger as l
-from src.utils.env import IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER, \
-    DOCKER_NETWORK
+from src.utils.env import DOCKER_NETWORK, EnvManager
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_gas_amount
+
+env_manager = EnvManager()
+
+IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = env_manager.get_env("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER")
 
 
 def launch_service(

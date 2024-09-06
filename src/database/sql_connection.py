@@ -14,17 +14,22 @@ from grpcbigbuffer import client as grpcbf
 from protos import gateway_pb2_grpc, gateway_pb2, celaut_pb2
 from src.utils import logger as l, logger
 from src.utils.env import (
-    ERGO_ENVS,
-    CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME,
-    CLIENT_EXPIRATION_TIME,
+    SHA3_256_ID,
     DOCKER_CLIENT,
-    REMOVE_CONTAINERS,
-    STORAGE,
-    DATABASE_FILE,
-    DEFAULT_INTIAL_GAS_AMOUNT, SHA3_256_ID
+    EnvManager
 )
 from src.utils.singleton import Singleton
 from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
+
+env_manager = EnvManager()
+
+CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = env_manager.get_env("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME")
+TOTAL_REPUTATION_TOKEN_AMOUNT = env_manager.get_env("TOTAL_REPUTATION_TOKEN_AMOUNT")
+CLIENT_EXPIRATION_TIME = env_manager.get_env("CLIENT_EXPIRATION_TIME")
+REMOVE_CONTAINERS = env_manager.get_env("REMOVE_CONTAINERS")
+STORAGE = env_manager.get_env("STORAGE")
+DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
+DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
 
 # Define a maximum mantissa and exponent
 MAX_MANTISSA = 10**9  # Adjust this limit as needed
@@ -539,8 +544,6 @@ class SQLConnection(metaclass=Singleton):
             to_submit = []
             needs_submit = False
 
-            ergo_envs = ERGO_ENVS()
-
             for row in rows:
                 reputation_proof_id = row['reputation_proof_id']
                 reputation_score = row['reputation_score'] or 0
@@ -550,14 +553,14 @@ class SQLConnection(metaclass=Singleton):
                 if reputation_proof_id:
                     # Calculate the percentage of the total reputation token amount
                     # Check if the submission condition is met
-                    if reputation_index - last_index_on_ledger >= ergo_envs['LEDGER_SUBMISSION_THRESHOLD']:
+                    if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_SUBMISSION_THRESHOLD"):
                         needs_submit = True
-                        percentage_amount = (reputation_score / total_amount) * ergo_envs['TOTAL_REPUTATION_TOKEN_AMOUNT'] if total_amount else 0
+                        percentage_amount = (reputation_score / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
                         to_submit.append((reputation_proof_id, percentage_amount))
 
                     # Proof percentage don't need to be changed it self, but needs to be updated if others do.
                     elif last_index_on_ledger > 0:
-                        percentage_amount = (reputation_score / total_amount) * ergo_envs['TOTAL_REPUTATION_TOKEN_AMOUNT'] if total_amount else 0
+                        percentage_amount = (reputation_score / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
                         to_submit.append((reputation_proof_id, percentage_amount))
 
             # Attempt to submit the data to the ledger

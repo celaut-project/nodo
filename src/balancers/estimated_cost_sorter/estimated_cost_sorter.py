@@ -4,10 +4,14 @@ from protos import gateway_pb2
 from src.reputation_system.simple_reputation_feedback import compute_reputation_feedback
 from src.utils.cost_functions.general_cost_functions import normalized_maintain_cost
 from src.utils.cost_functions.variance_cost_normalization import variance_cost_normalization
-from src.utils.env import SOCIALIZATION_FACTOR, WEIGHT_CONFIGURATION_FACTOR, INIT_COST_CONFIGURATION_FACTOR, \
-    MAINTENANCE_COST_CONFIGURATION_FACTOR
+from src.utils.env import EnvManager
 from src.utils.utils import from_gas_amount
 
+env_manager = EnvManager()
+SOCIALIZATION_FACTOR = env_manager.get_env("SOCIALIZATION_FACTOR")
+WEIGHT_CONFIGURATION_FACTOR = env_manager.get_env("WEIGHT_CONFIGURATION_FACTOR")
+INIT_COST_CONFIGURATION_FACTOR = env_manager.get_env("INIT_COST_CONFIGURATION_FACTOR")
+MAINTENANCE_COST_CONFIGURATION_FACTOR = env_manager.get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR")
 
 def estimated_cost_sorter(
         estimated_costs: Dict[str, gateway_pb2.EstimatedCost],

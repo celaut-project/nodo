@@ -1,7 +1,10 @@
 import sqlite3
 
-from src.utils.env import DATABASE_FILE
+from src.utils.env import EnvManager
 
+env_manager = EnvManager()
+
+DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 
 def fetch_query(query: str, params: tuple = ()):
     # -> Generator[

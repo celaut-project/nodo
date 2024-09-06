@@ -4,7 +4,11 @@ import string
 import sys
 from hashlib import sha3_256
 
-from src.utils.env import SHA3_256_ID, DATABASE_FILE
+from src.utils.env import SHA3_256_ID, EnvManager
+
+env_manager = EnvManager()
+
+DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 
 
 def generate_random_data(n):

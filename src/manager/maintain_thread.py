@@ -17,9 +17,17 @@ from src.reputation_system.simple_reputation_feedback import update_reputation, 
 from src.utils import logger as l
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
-from src.utils.env import DOCKER_CLIENT, MIN_SLOTS_OPEN_PER_PEER, MIN_DEPOSIT_PEER, MANAGER_ITERATION_TIME, REGISTRY, \
-    METADATA_REGISTRY, SHA3_256_ID
+from src.utils.env import DOCKER_CLIENT, SHA3_256_ID, EnvManager
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+MIN_SLOTS_OPEN_PER_PEER = env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER")
+MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
+MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
+REGISTRY = env_manager.get_env("REGISTRY")
+METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 
 sc = SQLConnection()
 

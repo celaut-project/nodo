@@ -5,13 +5,16 @@ import socket
 import uuid
 
 from src.gateway.utils import generate_gateway_instance
-from src.utils.env import GATEWAY_PORT, NGROK_TUNNELS_KEY
 from src.utils.logger import LOGGER
 from src.utils.singleton import Singleton
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
+from src.utils.env import EnvManager
 
+env_manager = EnvManager()
 
+GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
+NGROK_TUNNELS_KEY = env_manager.get_env("NGROK_TUNNELS_KEY")
 NUM_GATEWAY_TUNNELS = 1
 
 class Provider:

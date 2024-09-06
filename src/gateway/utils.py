@@ -10,7 +10,14 @@ from src.payment_system.contracts.ethereum.deposit_contract.simulator.interface 
     import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH, CONTRACT as DEFAULT_PROVISIONAL_CONTRACT # TODO se mantiene el contrato provisional
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.utils import logger as l
-from src.utils.env import GATEWAY_PORT, REGISTRY, METADATA_REGISTRY
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
+REGISTRY = env_manager.get_env("REGISTRY")
+METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+
 
 
 def __generate_contract_ledger() -> Generator[celaut.Service.Api.ContractLedger, None, None]:
@@ -33,7 +40,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
         except ValueError as e:
             l.LOGGER('You must specify a valid interface name ' + network)
             raise Exception('Error generating gateway instance --> ' + str(e))
-        
+
     uri.port = GATEWAY_PORT
     uri_slot = celaut.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT
@@ -101,5 +108,3 @@ def search_definition(hashes: List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.
         -> celaut.Service:
     l.LOGGER('SEARCH DEFINITION NOT IMPLEMENTED.')
     raise Exception('SEARCH DEFINITION NOT IMPLEMENTED.')
-
-

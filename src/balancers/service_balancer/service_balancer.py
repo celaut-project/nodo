@@ -11,10 +11,14 @@ from src.builder import build
 from src.manager.manager import default_initial_cost, get_client_id_on_other_peer
 from src.utils import logger as l
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
-from src.utils.env import SEND_ONLY_HASHES_ASKING_COST, EXTERNAL_COST_TIMEOUT
 from src.utils.utils import from_gas_amount, service_extended, peers_id_iterator, \
     generate_uris_by_peer_id
+from src.utils.env import EnvManager
 
+env_manager = EnvManager()
+
+SEND_ONLY_HASHES_ASKING_COST = env_manager.get_env("SEND_ONLY_HASHES_ASKING_COST")
+EXTERNAL_COST_TIMEOUT = env_manager.get_env("EXTERNAL_COST_TIMEOUT")
 
 def service_balancer(
         metadata: celaut.Any.Metadata,

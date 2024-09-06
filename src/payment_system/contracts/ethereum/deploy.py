@@ -9,7 +9,11 @@ from eth_account import Account
 
 from src.payment_system.contracts.ethereum.envs import ETH_LEDGER, ETH_PROVIDER, PARITY_FACTOR
 from src.database.access_functions.ledgers import get_private_key_from_ledger
-from src.utils.env import DATABASE_FILE
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 
 
 def __deploy_contract(provider_url: str, bytecode: bytes, abi: str) -> str:

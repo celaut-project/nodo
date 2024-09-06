@@ -5,11 +5,17 @@ import grpc
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc, gateway_pb2_grpcbf
 from grpcbigbuffer.client import Dir, client_grpc
 
-from src.utils.env import GATEWAY_PORT, METADATA_REGISTRY, REGISTRY
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
-from src.utils.env import SHA3_256_ID, DEFAULT_INTIAL_GAS_AMOUNT
+from src.utils.env import SHA3_256_ID, EnvManager
 from src.utils.utils import to_gas_amount
 from src.manager.manager import get_dev_clients
+
+env_manager = EnvManager()
+
+GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
+METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+REGISTRY = env_manager.get_env("REGISTRY")
+DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
 
 SHA3_256 = SHA3_256_ID.hex()
 

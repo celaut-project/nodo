@@ -13,10 +13,15 @@ from src.manager.manager import get_client_id_on_other_peer, increase_local_gas_
 from src.database.sql_connection import SQLConnection
 
 from src.utils import logger as _l
-from src.utils.env import COMMUNICATION_ATTEMPTS, COMMUNICATION_ATTEMPTS_DELAY, \
-    MIN_DEPOSIT_PEER
 from src.utils.utils import to_gas_amount, generate_uris_by_peer_id
 from src.database.access_functions.ledgers import get_peer_contract_instances
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+COMMUNICATION_ATTEMPTS = env_manager.get_env("COMMUNICATION_ATTEMPTS")
+COMMUNICATION_ATTEMPTS_DELAY = env_manager.get_env("COMMUNICATION_ATTEMPTS_DELAY")
+MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
 
 sc = SQLConnection()
 

@@ -12,9 +12,13 @@ from protos import gateway_pb2
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.manager.resources_manager import mem_manager
 from src.utils import logger as l
-from src.utils.env import REGISTRY, METADATA_REGISTRY
 from src.utils.verify import get_service_hex_main_hash
+from src.utils.env import EnvManager
 
+env_manager = EnvManager()
+
+REGISTRY = env_manager.get_env("REGISTRY")
+METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 
 def read_file(filename) -> bytes:
     def generator(file):

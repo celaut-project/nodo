@@ -2,9 +2,14 @@ import json
 import os
 
 from typing import Dict
-from src.utils.env import METADATA_REGISTRY as METADATA, REGISTRY as SERVICES, BLOCKDIR as BLOCKS
 from src.commands.compile.envs import *
+from src.utils.env import EnvManager
 
+env_manager = EnvManager()
+
+METADATA = env_manager.get_env("METADATA_REGISTRY")
+SERVICES = env_manager.get_env("REGISTRY")
+BLOCKS = env_manager.get_env("BLOCKDIR")
 
 def __export_registry(directory: str, compile_config: Dict):
     list(map(

@@ -2,7 +2,12 @@ import json
 import os
 from typing import List
 
-from src.utils.env import REGISTRY, BLOCKDIR
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+REGISTRY = env_manager.get_env("REGISTRY")
+BLOCKDIR = env_manager.get_env("BLOCKDIR")
 
 
 # It will delete all unused cache and blocks.

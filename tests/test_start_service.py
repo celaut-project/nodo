@@ -3,12 +3,16 @@ from typing import Final
 
 import grpc, sys
 from grpcbigbuffer.client import Dir, client_grpc
-from src.utils.env import METADATA_REGISTRY, REGISTRY
-
 from src.utils.logger import LOGGER
+
 from tests.main import *
 from protos import gateway_pb2, celaut_pb2, gateway_pb2_grpc, gateway_pb2_grpcbf
+from src.utils.env import EnvManager
 
+env_manager = EnvManager()
+
+METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+REGISTRY = env_manager.get_env("REGISTRY")
 
 def test_start_service():
 

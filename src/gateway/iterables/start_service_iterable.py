@@ -6,8 +6,13 @@ from grpcbigbuffer import client as grpcbf, buffer_pb2
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable
 from src.gateway.launcher.launch_service import launch_service
 from src.utils import logger as l
-from src.utils.env import REGISTRY
+from src.utils.env import EnvManager
 from src.utils.utils import get_only_the_ip_from_context, read_metadata_from_disk, read_service_from_disk
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
+
+REGISTRY = env_manager.get_env("REGISTRY")
 
 CONFIGURATION_REQUIRED = False  # TODO añadir como variable de entorno. Por si el nodo debe de ser mas estricto.
 
