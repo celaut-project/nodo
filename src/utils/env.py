@@ -41,7 +41,7 @@ class EnvManager(metaclass=Singleton):
                 return ""
 
         # 4. Attempt to determine the type of the value automatically (bool, int, float, or leave as string)
-        value = self._auto_cast_value(value) if value is str else value
+        value = self._auto_cast_value(value) if type(value) is str else value
         print(f"4. {env} => {value} {type(value)}")
 
         # 5. Store the value in env_vars for future calls
