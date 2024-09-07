@@ -5,36 +5,69 @@ from dotenv import load_dotenv
 from typing import Final, Dict, Callable
 import docker as docker_lib
 from protos import celaut_pb2
+from src.utils.singleton import Singleton
 
-class EnvManager:
+class EnvManager(metaclass=Singleton):
     def __init__(self):
         """
         Initialize the EnvManager by loading the .env file and setting up globals.
         """
-        if os.path.exists(".env"):
-            load_dotenv(".env")
+        dotenv_path = ".env"
+        if os.path.exists(dotenv_path):
+            load_dotenv(dotenv_path)
 
+        self.dotenv_path = dotenv_path
         self.env_vars = {}
 
-    def get_env(self, env: str, default: str = "") -> str:
+    def get_env(self, env: str, default = None) -> str:
         """
         Fetches an environment variable value or returns the default.
-        If the value is not found, sets it with the default.
+        If the value is not found, sets it with the default (if provided).
         """
-        value = os.getenv(env, default)
+        # 1. Check if the variable is already in env_vars
+        if env in self.env_vars:
+            return self.env_vars[env]
 
-        if isinstance(default, bool):
-            value = value in ['True', 'true', 'T', 't']
-        else:
-            value = type(default)(value)  # type: ignore
+        # 2. Check if the variable is in .env or OS environment
+        value = os.getenv(env, default=default)
 
+        if value is None:
+            # 3. If not found, use the default if provided, else return None or empty string
+            if default is not None:
+                value = default
+                self.write_env(env, default)
+            else:
+                return ""
+
+        # 4. Attempt to determine the type of the value automatically (bool, int, float, or leave as string)
+        value = self._auto_cast_value(value) if value is str else value
+
+        # 5. Store the value in env_vars for future calls
         self.env_vars[env] = value
+        return value
 
-        # Evaluate expressions within the string
-        if isinstance(value, str) and '{' in value and '}' in value:
-            self.env_vars[env] = value.format(**self.env_vars)
+    def _auto_cast_value(self, value: str):
+        """
+        Attempts to automatically cast the string value to the appropriate type.
+        Handles booleans, integers, floats, and defaults to string if no match.
+        """
+        # Handle booleans
+        if value.lower() in ['true', 't']:
+            return True
+        elif value.lower() in ['false', 'f']:
+            return False
 
-        return self.env_vars[env]
+        # Handle integers and floats
+        try:
+            if '.' in value:
+                return float(value)  # Try to cast to float
+            else:
+                return int(value, base=10)  # Try to cast to int
+        except ValueError:
+            pass  # If casting fails, just return the string
+
+        # Return as string if no other type matched
+        return value
 
     def write_env(self, key: str, value):
         """
