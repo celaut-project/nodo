@@ -30,6 +30,7 @@ class EnvManager(metaclass=Singleton):
 
         # 2. Check if the variable is in .env or OS environment
         value = os.getenv(env, default=default)
+        print(f"1. {env} => {value} {type(value)}")
 
         if value is None:
             # 3. If not found, use the default if provided, else return None or empty string
@@ -41,6 +42,7 @@ class EnvManager(metaclass=Singleton):
 
         # 4. Attempt to determine the type of the value automatically (bool, int, float, or leave as string)
         value = self._auto_cast_value(value) if value is str else value
+        print(f"4. {env} => {value} {type(value)}")
 
         # 5. Store the value in env_vars for future calls
         self.env_vars[env] = value
@@ -59,7 +61,7 @@ class EnvManager(metaclass=Singleton):
 
         # Handle integers and floats
         try:
-            if '.' in value:
+            if 'e' in value.lower() or '.' in value:
                 return float(value)  # Try to cast to float
             else:
                 return int(value, base=10)  # Try to cast to int
