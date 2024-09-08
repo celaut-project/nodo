@@ -530,13 +530,28 @@ class SQLConnection(metaclass=Singleton):
         try:
             # Fetch all peers' data along with slots, URIs, and contracts in one query
             result = self._execute('''
-                SELECT p.id, p.reputation_proof_id, p.reputation_score, p.reputation_index, p.last_index_on_ledger,
-                       p.app_protocol, s.internal_port, u.ip, u.port, c.contract, c.address, c.ledger_id
+                SELECT
+                    p.id,
+                    p.reputation_proof_id,
+                    p.reputation_score,
+                    p.reputation_index,
+                    p.last_index_on_ledger,
+                    p.app_protocol,
+                    s.internal_port,
+                    u.ip,
+                    u.port,
+                    c.contract,
+                    c.address,
+                    c.ledger_id
                 FROM peer p
+                -- Joining slot table to get information about ports
                 LEFT JOIN slot s ON s.peer_id = p.id
+                -- Joining uri table to get IP and port details for each slot
                 LEFT JOIN uri u ON u.slot_id = s.id
+                -- Joining contract_instance to get information about contracts related to the peer
                 LEFT JOIN contract_instance ci ON ci.peer_id = p.id
-                LEFT JOIN contract c ON c.hash = ci.contract_hash
+                -- Joining contract to get the contract details using the contract hash from contract_instance
+                LEFT JOIN contract c ON c.hash = ci.contract_hash;
             ''')
 
             rows = result.fetchall()
