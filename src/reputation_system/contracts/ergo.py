@@ -15,12 +15,24 @@ from org.ergoplatform.sdk import *
 from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
 
+"""
+Problemas conceptuales:
+    - ¿Donde se deberían de almacenar los datos de la instancia del nodo (urls, etc ...) para que otros lo encuentren?
+        NO -> En todos los registros de su prueba contener esos datos. Donde su id = token_id de la prueba.
+        NO -> Tener una prueba solo para almacenar esa info.  Donde su id = token_id de la prueba.
+         SIII -> Que otras pruebas suban esa info. en si registro, es decir, una prueba.
+
+    - ¿Cómo un nodo con erg=0 puede presentarse?   Puede enviar su instancia a otros nodos a través de su API, de esta forma otros nodos lo probarán y tal vez agreguen su info.
+
+"""
+
+
 # Constants
 env_manager = EnvManager()
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
 DEFAULT_TOKEN_AMOUNT = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
-DEFAULT_TOKEN_LABEL = "celaut-node-reviewer"
+DEFAULT_TOKEN_LABEL = "celaut-node"
 CONTRACT = """{
   proveDlog(SELF.R7[GroupElement].get) &&
   sigmaProp(SELF.tokens.size == 1) &&
@@ -180,11 +192,11 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     # 5. Submit the transaction and return the ID
     tx_id = ergo.txId(signed_tx)
 
-    if env_manager.get_env('REVIEWER_REPUTATION_PROOF_ID') != proof_id:
-        LOGGER(f"Store reviewer reputation proof id {proof_id} on .env file.")
-        env_manager.write_env("REVIEWER_REPUTATION_PROOF_ID", proof_id)
-        if not env_manager.get_env('REVIEWER_REPUTATION_PROOF_ID') == proof_id:
-            LOGGER(f"Proof ID was not stored correctly: {env_manager.get_env('REVIEWER_REPUTATION_PROOF_ID')} != {proof_id}")
+    if env_manager.get_env('REPUTATION_PROOF_ID') != proof_id:
+        LOGGER(f"Store reputation proof id {proof_id} on .env file.")
+        env_manager.write_env("REPUTATION_PROOF_ID", proof_id)
+        if not env_manager.get_env('REPUTATION_PROOF_ID') == proof_id:
+            LOGGER(f"Proof ID was not stored correctly: {env_manager.get_env('REPUTATION_PROOF_ID')} != {proof_id}")
 
     return tx_id
 
@@ -193,7 +205,7 @@ def submit_reputation_proof(objects: List[Tuple[str, int]]) -> bool:
         tx_id = __create_reputation_proof_tx(
             node_url=env_manager.get_env('ERGO_NODE_URL'),
             wallet_mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC'),
-            proof_id=env_manager.get_env('REVIEWER_REPUTATION_PROOF_ID'),
+            proof_id=env_manager.get_env('REPUTATION_PROOF_ID'),
             objects=objects,
         )
         LOGGER(f"Submited tx -> {tx_id}")
