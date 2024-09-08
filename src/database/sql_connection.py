@@ -584,8 +584,10 @@ class SQLConnection(metaclass=Singleton):
                 if row['internal_port']:
                     slot = peers_dict[peer_id]['instance'].uri_slot.add()
                     slot.internal_port = row['internal_port']
-                    if row['uri']:
-                        slot.uri.append(row['uri'])
+                    if row['ip'] and row['port']:
+                        uri = slot.uri.add()
+                        uri.ip = row['ip']
+                        uri.port = row['port']
 
             # List to hold data for peers that need to be submitted to the ledger
             to_submit = []
@@ -600,6 +602,7 @@ class SQLConnection(metaclass=Singleton):
                 if reputation_proof_id:
                     # Convert instance to JSON string
                     instance_json = MessageToJson(data['instance'])
+                    l.LOGGER(f"instance json -> {instance_json}")
 
                     # Calculate the percentage of the total reputation token amount
                     if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_SUBMISSION_THRESHOLD"):
