@@ -539,19 +539,12 @@ class SQLConnection(metaclass=Singleton):
                     p.app_protocol,
                     s.internal_port,
                     u.ip,
-                    u.port,
-                    c.contract,
-                    c.address,
-                    c.ledger_id
+                    u.port
                 FROM peer p
                 -- Joining slot table to get information about ports
                 LEFT JOIN slot s ON s.peer_id = p.id
                 -- Joining uri table to get IP and port details for each slot
                 LEFT JOIN uri u ON u.slot_id = s.id
-                -- Joining contract_instance to get information about contracts related to the peer
-                LEFT JOIN contract_instance ci ON ci.peer_id = p.id
-                -- Joining contract to get the contract details using the contract hash from contract_instance
-                LEFT JOIN contract c ON c.hash = ci.contract_hash;
             ''')
 
             rows = result.fetchall()
@@ -592,13 +585,6 @@ class SQLConnection(metaclass=Singleton):
                     slot.internal_port = row['internal_port']
                     if row['uri']:
                         slot.uri.append(row['uri'])
-
-                # Add contracts to the instance
-                if row['contract']:
-                    contract_ledger = peers_dict[peer_id]['instance'].api.contract_ledger.add()
-                    contract_ledger.contract = row['contract']
-                    contract_ledger.contract_addr = row['address']
-                    contract_ledger.ledger = row['ledger_id']
 
             # List to hold data for peers that need to be submitted to the ledger
             to_submit = []
