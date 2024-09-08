@@ -15,17 +15,6 @@ from org.ergoplatform.sdk import *
 from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
 
-"""
-Problemas conceptuales:
-    - ¿Donde se deberían de almacenar los datos de la instancia del nodo (urls, etc ...) para que otros lo encuentren?
-        NO -> En todos los registros de su prueba contener esos datos. Donde su id = token_id de la prueba.
-        NO -> Tener una prueba solo para almacenar esa info.  Donde su id = token_id de la prueba.
-         SIII -> Que otras pruebas suban esa info. en si registro, es decir, una prueba.
-
-    - ¿Cómo un nodo con erg=0 puede presentarse?   Puede enviar su instancia a otros nodos a través de su API, de esta forma otros nodos lo probarán y tal vez agreguen su info.
-
-"""
-
 
 # Constants
 env_manager = EnvManager()
