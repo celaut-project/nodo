@@ -176,8 +176,9 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     if env_manager.get_env('REPUTATION_PROOF_ID') != proof_id:
         LOGGER(f"Store reputation proof id {proof_id} on .env file.")
         env_manager.write_env("REPUTATION_PROOF_ID", proof_id)
-        if not env_manager.get_env('REPUTATION_PROOF_ID') == proof_id:
+        if env_manager.get_env('REPUTATION_PROOF_ID') != proof_id:
             LOGGER(f"Proof ID was not stored correctly: {env_manager.get_env('REPUTATION_PROOF_ID')} != {proof_id}")
+    LOGGER(f"Stored reputation proof id {env_manager.get_env('REPUTATION_PROOF_ID')}")
 
     return tx_id
 
