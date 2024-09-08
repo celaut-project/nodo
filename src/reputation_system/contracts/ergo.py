@@ -69,11 +69,11 @@ def __build_proof_box(
     sender_address: Address,
     token_amount: int = DEFAULT_TOKEN_AMOUNT,
     reputation_token_label: str = DEFAULT_TOKEN_LABEL,
-    assigned_object: Optional[ProofObject] = None
+    assigned_object: Optional[ProofObject] = None,
+    data: str = ""
 ):
     object_type_to_assign = assigned_object['type'] if assigned_object else ProofObjectType.PlainText
     object_to_assign = assigned_object['value'] if assigned_object else ""
-    node_instance = ""
 
     return ergo._ctx.newTxBuilder() \
             .outBoxBuilder() \
@@ -85,13 +85,13 @@ def __build_proof_box(
                     ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),               # R6
                     ErgoValue.of(sender_address.toPropositionBytes()),                             # R7   TODO: https://discord.com/channels/668903786361651200/849659724495323206/1278352612680400948
                     ErgoValue.of(jpype.JBoolean(token_amount >= 0)),                               # R8
-                    ErgoValue.of(jpype.JString(node_instance).getBytes("utf-8"))                   # R9 (node instance)
+                    ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                            # R9   JSON celaut.Instance
                 ]) \
                 .contract(ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)) \
                 .build()
 
 @initialize_jvm
-def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: str, objects: List[Tuple[str, int]]):
+def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: str, objects: List[Tuple[str, int, str]]):
     ergo = appkit.ErgoAppKit(node_url=node_url)
     fee = DEFAULT_FEE  # Fee in nanoErgs
     safe_min_out_box = (len(objects)+1) * SAFE_MIN_BOX_VALUE
@@ -158,10 +158,11 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             proof_id=proof_id,
             sender_address=sender_address,
             assigned_object=ProofObject(
-                type=ProofObjectType.PlainText,
+                type=ProofObjectType.PlainText,  # TODO must be ProofByToken
                 value=obj[0]
             ),
-            token_amount=obj[1]
+            token_amount=obj[1],
+            data=obj[2]
         )
         if proof_box:
             outputs.append(proof_box)
@@ -191,7 +192,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     return tx_id
 
-def submit_reputation_proof(objects: List[Tuple[str, int]]) -> bool:
+def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
     try:
         tx_id = __create_reputation_proof_tx(
             node_url=env_manager.get_env('ERGO_NODE_URL'),

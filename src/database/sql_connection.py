@@ -551,17 +551,20 @@ class SQLConnection(metaclass=Singleton):
                 last_index_on_ledger = row['last_index_on_ledger'] or 0
 
                 if reputation_proof_id:
+                    # Take the peer instance
+                    instance = "" #  TODO add instance.
+
                     # Calculate the percentage of the total reputation token amount
                     # Check if the submission condition is met
                     if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_SUBMISSION_THRESHOLD"):
                         needs_submit = True
                         percentage_amount = (reputation_score / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
-                        to_submit.append((reputation_proof_id, percentage_amount))
+                        to_submit.append((reputation_proof_id, percentage_amount, instance))
 
                     # Proof percentage don't need to be changed it self, but needs to be updated if others do.
                     elif last_index_on_ledger > 0:
                         percentage_amount = (reputation_score / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
-                        to_submit.append((reputation_proof_id, percentage_amount))
+                        to_submit.append((reputation_proof_id, percentage_amount, instance))
 
             # Attempt to submit the data to the ledger
             if needs_submit and to_submit:
