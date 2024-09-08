@@ -57,17 +57,6 @@ class ProofObject(TypedDict):
     type: ProofObjectType
     value: str
 
-class Token(TypedDict):
-    token_id: str
-    amount: int
-
-class Registers(TypedDict):
-    r4: Optional[str]
-    r5: Optional[str]
-    r6: Optional[str]
-    r7: Optional[str]
-    r8: Optional[str]
-
 # Utility function to convert InputBox to dict
 def __input_box_to_dict(input_box: 'org.ergoplatform.appkit.InputBoxImpl') -> dict:
     return json.loads(str(input_box.toJson(True)))
