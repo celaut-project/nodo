@@ -602,7 +602,6 @@ class SQLConnection(metaclass=Singleton):
                 if reputation_proof_id:
                     # Convert instance to JSON string
                     instance_json = MessageToJson(data['instance'])
-                    l.LOGGER(f"instance json -> {instance_json}")
 
                     # Calculate the percentage of the total reputation token amount
                     if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_SUBMISSION_THRESHOLD"):
