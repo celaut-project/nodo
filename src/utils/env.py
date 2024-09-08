@@ -84,26 +84,22 @@ class EnvManager(metaclass=Singleton):
         """
         env_file_path = os.path.join(self.env_vars['MAIN_DIR'], ".env")
 
-        if not os.path.exists(env_file_path):
-            exclude_vars = {
-                "get_env", "COMPILER_SUPPORTED_ARCHITECTURES", "SUPPORTED_ARCHITECTURES",
-                "SHAKE_256_ID", "SHA3_256_ID", "SHAKE_256", "SHA3_256", "HASH_FUNCTIONS",
-                "DOCKER_CLIENT", "DEFAULT_SYSTEM_RESOURCES", "DOCKER_COMMAND",
-                "STORAGE", "CACHE", "REGISTRY", "METADATA_REGISTRY", "BLOCKDIR",
-                "DATABASE_FILE", "REPUTATION_DB"
-            }
+        exclude_vars = {
+            "get_env", "COMPILER_SUPPORTED_ARCHITECTURES", "SUPPORTED_ARCHITECTURES",
+            "SHAKE_256_ID", "SHA3_256_ID", "SHAKE_256", "SHA3_256", "HASH_FUNCTIONS",
+            "DOCKER_CLIENT", "DEFAULT_SYSTEM_RESOURCES", "DOCKER_COMMAND",
+            "STORAGE", "CACHE", "REGISTRY", "METADATA_REGISTRY", "BLOCKDIR",
+            "DATABASE_FILE", "REPUTATION_DB"
+        }
 
-            constants = {k: v for k, v in self.env_vars.items() if k.isupper() and k not in exclude_vars}
+        constants = {k: v for k, v in self.env_vars.items() if k.isupper() and k not in exclude_vars}
 
-            with open(env_file_path, "w") as f:
-                for key, value in constants.items():
-                    if isinstance(value, bool):
-                        value = "True" if value else "False"
-                    f.write(f"{key}={value}\n")
+        with open(env_file_path, "w") as f:
+            for key, value in constants.items():
+                if isinstance(value, bool):
+                    value = "True" if value else "False"
+                f.write(f"{key}={value}\n")
 
-            print(f"Default environment variables written to {env_file_path}")
-        else:
-            print(f"The .env file already exists at {env_file_path}")
 
 # Instantiate EnvManager
 env_manager = EnvManager()
@@ -235,5 +231,4 @@ DEFAULT_SYSTEM_RESOURCES: celaut_pb2.Sysresources = celaut_pb2.Sysresources(
 # ----------- END --------------
 # ------------------------------
 
-if not os.path.exists(".env"):
-    env_manager.write_default_to_file()
+env_manager.write_default_to_file()
