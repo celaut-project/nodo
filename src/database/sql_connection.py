@@ -531,9 +531,7 @@ class SQLConnection(metaclass=Singleton):
             # Fetch all peers' data along with slots, URIs, and contracts in one query
             result = self._execute('''
                 SELECT p.id, p.reputation_proof_id, p.reputation_score, p.reputation_index, p.last_index_on_ledger,
-                    p.app_protocol,
-                    s.internal_port, u.uri,
-                    c.contract, c.address, c.ledger_id
+                       p.app_protocol, s.internal_port, u.ip, u.port, c.contract, c.address, c.ledger_id
                 FROM peer p
                 LEFT JOIN slot s ON s.peer_id = p.id
                 LEFT JOIN uri u ON u.slot_id = s.id
