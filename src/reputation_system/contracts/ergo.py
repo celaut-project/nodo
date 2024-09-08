@@ -84,6 +84,7 @@ def __build_proof_box(
 ):
     object_type_to_assign = assigned_object['type'] if assigned_object else ProofObjectType.PlainText
     object_to_assign = assigned_object['value'] if assigned_object else ""
+    node_instance = ""
 
     return ergo._ctx.newTxBuilder() \
             .outBoxBuilder() \
@@ -94,7 +95,8 @@ def __build_proof_box(
                     ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),    # R5
                     ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),               # R6
                     ErgoValue.of(sender_address.toPropositionBytes()),                             # R7   TODO: https://discord.com/channels/668903786361651200/849659724495323206/1278352612680400948
-                    ErgoValue.of(jpype.JBoolean(token_amount >= 0))                                # R8
+                    ErgoValue.of(jpype.JBoolean(token_amount >= 0)),                               # R8
+                    ErgoValue.of(jpype.JString(node_instance).getBytes("utf-8"))                   # R9 (node instance)
                 ]) \
                 .contract(ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)) \
                 .build()
