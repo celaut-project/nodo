@@ -561,7 +561,6 @@ class SQLConnection(metaclass=Singleton):
             # Dictionary to store instance data (for peers with multiple slots or contracts)
             peers_dict = {}
             for row in rows:
-                l.LOGGER(f"row -> {row.keys()}")
                 peer_id = row['id']
                 if peer_id not in peers_dict:
                     # Initialize the instance for this peer
