@@ -68,7 +68,7 @@ def __build_proof_box(
 
     ergoTree = sender_address.getErgoAddress().script()
     print(1)
-    ergoTreeBytes = ergoTree.toBytes()
+    ergoTreeBytes = ergoTree.bytes()
     print(2)
     propositionBytes = sigmastate.serialization.ErgoTreeSerializer.DefaultSerializer().deserializeErgoTree(ergoTreeBytes)
     print(3)
