@@ -120,8 +120,12 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     LOGGER(f"Using proof id -> {proof_id}")
     if proof_id:
         try:
-            _sender_address = ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)
-            print(f"contract address -> {_sender_address}")
+            _contract = ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)
+            print(f"contract -> {_contract}")
+            _ergo_tree = _contract.getErgoTree()
+            print(f"ergo tree -> {_ergo_tree}")
+            _contract_addr = Address.fromErgoTree(_ergo_tree, NetworkType.TESTNET)
+            print(f"contract addr -> {_contract_addr}")
             input_list = ergo.getInputBoxCovering(
                 amount_list=[],
                 sender_address=_sender_address,
