@@ -14,6 +14,8 @@ import java.lang
 from org.ergoplatform.sdk import *
 from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
+import sigmastate.Values
+import sigmastate.serialization.ErgoTreeSerializer
 
 
 # Constants
@@ -64,6 +66,17 @@ def __build_proof_box(
     object_type_to_assign = assigned_object['type'] if assigned_object else ProofObjectType.PlainText
     object_to_assign = assigned_object['value'] if assigned_object else ""
 
+    sigma_prop = sender_address.getSigmaProp()
+    print(0)
+    ergoTree = sigma_prop.toErgoTree()
+    print(1)
+    serializer = ErgoTreeSerializer()
+    print(2)
+    serializer.serialize(ergoTree)
+    print(3)
+    sender_address_proposition = ErgoTool.hex(propositionBytes)
+    print(f"sender address proposition -> {sender_address_proposition}")
+
     return ergo._ctx.newTxBuilder() \
             .outBoxBuilder() \
                 .value(SAFE_MIN_BOX_VALUE) \
@@ -72,7 +85,7 @@ def __build_proof_box(
                     ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),         # R4
                     ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),    # R5
                     ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),               # R6
-                    ErgoValue.of(sender_address.toPropositionBytes()),                             # R7   TODO: https://discord.com/channels/668903786361651200/849659724495323206/1278352612680400948
+                    ErgoValue.of(sender_address_proposition),                                      # R7   TODO: https://discord.com/channels/668903786361651200/849659724495323206/1278352612680400948
                     ErgoValue.of(jpype.JBoolean(token_amount >= 0)),                               # R8
                     ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                            # R9   JSON celaut.Instance
                 ]) \
