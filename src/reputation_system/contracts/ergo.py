@@ -128,7 +128,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             print(f"contract addr -> {_contract_addr}")
             input_list = ergo.getInputBoxCovering(
                 amount_list=[],
-                sender_address=_sender_address,
+                sender_address=_contract_addr,
                 tokenList=[proof_id], amount_tokens=[total_token_value]
             )
             print(f"input boxes -> {input_list}")
