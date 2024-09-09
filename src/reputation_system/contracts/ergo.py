@@ -70,9 +70,7 @@ def __build_proof_box(
     print(1)
     ergoTreeBytes = ergoTree.bytes()
     print(2)
-    propositionBytes = sigmastate.serialization.ErgoTreeSerializer.DefaultSerializer().deserializeErgoTree(ergoTreeBytes)
-    print(3)
-    sender_address_proposition = ErgoTool.hex(propositionBytes)
+    sender_address_proposition = sigmastate.serialization.ErgoTreeSerializer.DefaultSerializer().deserializeErgoTree(ergoTreeBytes)
     print(f"sender address proposition -> {sender_address_proposition}")
 
     return ergo._ctx.newTxBuilder() \
