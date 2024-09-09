@@ -14,8 +14,8 @@ import java.lang
 from org.ergoplatform.sdk import *
 from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
-import sigmastate.Values
-import sigmastate.serialization.ErgoTreeSerializer
+
+sigmastate = JPackage('sigmastate')
 
 
 # Constants
@@ -68,9 +68,9 @@ def __build_proof_box(
 
     ergoTree = sender_address.getErgoAddress().script()
     print(1)
-    serializer = ErgoTreeSerializer()
+    serializer = sigmastate.serialization.ErgoTreeSerializer()
     print(2)
-    serializer.serialize(ergoTree)
+    propositionBytes = serializer.serialize(ergoTree)
     print(3)
     sender_address_proposition = ErgoTool.hex(propositionBytes)
     print(f"sender address proposition -> {sender_address_proposition}")
