@@ -129,7 +129,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
                 )
             )
         except Exception as e:
-            LOGGER(f"Exception submitting with the last proof_id {str(e)}. A new one will be generated.")
+            LOGGER(f"Exception submitting with the last proof_id: {str(e)}. A new one will be generated.")
             proof_id = None
 
     LOGGER(f"Input boxes -> {[__input_box_to_dict(_i) for _i in input_boxes]}")
