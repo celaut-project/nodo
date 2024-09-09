@@ -67,8 +67,7 @@ def __build_proof_box(
     object_to_assign = assigned_object['value'] if assigned_object else ""
 
     ergoTree = sender_address.getErgoAddress().script()
-    ergoTreeBytes = ergoTree.bytes()
-    sender_address_proposition = sigmastate.serialization.ErgoTreeSerializer.DefaultSerializer().serializeErgoTree(ergoTreeBytes)
+    sender_address_proposition = sigmastate.serialization.ErgoTreeSerializer.DefaultSerializer().serializeErgoTree(ergoTree)
     print(f"sender address proposition -> {sender_address_proposition} {bytes(sender_address_proposition)}")
 
     return ergo._ctx.newTxBuilder() \
