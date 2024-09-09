@@ -25,17 +25,17 @@ SAFE_MIN_BOX_VALUE = 1_000_000
 DEFAULT_TOKEN_AMOUNT = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
 DEFAULT_TOKEN_LABEL = "celaut-node"
 CONTRACT = """{
-  SELF.R7[SigmaProp].get &&
-  sigmaProp(SELF.tokens.size == 1) &&
-  sigmaProp(OUTPUTS.forall { (x: Box) =>
+    proveDlog(SELF.R7[GroupElement].get) &&
+    sigmaProp(SELF.tokens.size == 1) &&
+    sigmaProp(OUTPUTS.forall { (x: Box) =>
     !(x.tokens.exists { (token: (Coll[Byte], Long)) => token._1 == SELF.tokens(0)._1 }) ||
     (
-      x.R7[SigmaProp].get == SELF.R7[SigmaProp].get &&
-      x.tokens.size == 1 &&
-      x.propositionBytes == SELF.propositionBytes &&
-      (x.R8[Boolean].get == false || x.R8[Boolean].get == true)
+        x.R7[GroupElement].get == SELF.R7[GroupElement].get &&
+        x.tokens.size == 1 &&
+        x.propositionBytes == SELF.propositionBytes &&
+        (x.R8[Boolean].get == false || x.R8[Boolean].get == true)
     )
-  })
+    })
 }"""
 
 # Enum definitions
