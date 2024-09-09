@@ -66,9 +66,7 @@ def __build_proof_box(
     object_type_to_assign = assigned_object['type'] if assigned_object else ProofObjectType.PlainText
     object_to_assign = assigned_object['value'] if assigned_object else ""
 
-    sigma_prop = sender_address.getSigmaProp()
-    print(0)
-    ergoTree = sigma_prop.toErgoTree()
+    ergoTree = sender_address.getErgoAddress().script()
     print(1)
     serializer = ErgoTreeSerializer()
     print(2)
