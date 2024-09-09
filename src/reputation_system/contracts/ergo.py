@@ -25,12 +25,12 @@ SAFE_MIN_BOX_VALUE = 1_000_000
 DEFAULT_TOKEN_AMOUNT = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
 DEFAULT_TOKEN_LABEL = "celaut-node"
 CONTRACT = """{
-  proveDlog(SELF.R7[GroupElement].get) &&
+  SELF.R7[SigmaProp].get &&
   sigmaProp(SELF.tokens.size == 1) &&
   sigmaProp(OUTPUTS.forall { (x: Box) =>
     !(x.tokens.exists { (token: (Coll[Byte], Long)) => token._1 == SELF.tokens(0)._1 }) ||
     (
-      x.R7[GroupElement].get == SELF.R7[GroupElement].get &&
+      x.R7[SigmaProp].get == SELF.R7[SigmaProp].get &&
       x.tokens.size == 1 &&
       x.propositionBytes == SELF.propositionBytes &&
       (x.R8[Boolean].get == false || x.R8[Boolean].get == true)
@@ -70,9 +70,6 @@ def __build_proof_box(
     # sender_address_proposition = sigmastate.serialization.ErgoTreeSerializer.DefaultSerializer().serializeErgoTree(ergoTree)
     p2pkAddres = sender_address.asP2PK()
     sender_address_proposition = p2pkAddres.pubkey()
-    print(f"sender address -> {sender_address_proposition} {type(sender_address_proposition)}")
-    sender_address_proposition = "07"+sender_address_proposition[4:]
-    print(f"  ---  sender address -> {sender_address_proposition} {type(sender_address_proposition)}")
 
     return ergo._ctx.newTxBuilder() \
             .outBoxBuilder() \
