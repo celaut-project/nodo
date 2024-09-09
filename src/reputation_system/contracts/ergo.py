@@ -127,7 +127,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             input_list = ergo.getInputBoxCovering(
                 amount_list=[SAFE_MIN_BOX_VALUE],
                 sender_address=_contract_addr,
-                tokenList=[proof_id], amount_tokens=[total_token_value]  # TODO: 'float' object is not subscriptable.
+                tokenList=[proof_id], amount_tokens=[[total_token_value]]  # TODO: 'float' object is not subscriptable.
             )
             print(f"input boxes -> {input_list}")
             input_boxes.extend(input_list)
