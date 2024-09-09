@@ -111,7 +111,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     if not selected_input_box:
         raise Exception("No input box available.")
 
-    total_token_value = sum([obj[1] for obj in objects]) # type: ignore
+    total_token_value = int(sum([obj[1] for obj in objects])) # type: ignore
     assert env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT') == total_token_value, (
         "The sum of the values to be spent must equal the total reputation token amount."
     )
@@ -127,8 +127,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             input_list = ergo.getInputBoxCovering(
                 amount_list=[SAFE_MIN_BOX_VALUE],
                 sender_address=_contract_addr,
-                tokenList=[], amount_tokens=[]
-                # tokenList=[proof_id], amount_tokens=[total_token_value]
+                tokenList=[proof_id], amount_tokens=[total_token_value]  # TODO: 'float' object is not subscriptable.
             )
             print(f"input boxes -> {input_list}")
             input_boxes.extend(input_list)
