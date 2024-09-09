@@ -117,12 +117,16 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     )
     LOGGER(f"Needs to be spent {total_token_value} reputation value.")
     input_boxes = [selected_input_box]
+    LOGGER(f"Using proof id -> {proof_id}")
     if proof_id:
         try:
             # TODO should get all the boxes with CONTRACT and this token.
-            input_boxes.extend(ergo.getInputBoxCovering(amount_list=[],
-                sender_address=ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT),  # ??
-                tokenList=[proof_id], amount_tokens=[total_token_value])
+            input_boxes.extend(
+                ergo.getInputBoxCovering(
+                    amount_list=[],
+                    sender_address=ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT),  # ??
+                    tokenList=[proof_id], amount_tokens=[total_token_value]
+                )
             )
         except Exception as e:
             LOGGER(f"Exception submitting with the last proof_id {str(e)}. A new one will be generated.")
