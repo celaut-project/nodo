@@ -195,8 +195,11 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     LOGGER("Sign the tx.")
     signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
 
+    LOGGER(f"Submit the tx.")
     # 5. Submit the transaction and return the ID
     tx_id = ergo.txId(signed_tx)
+
+    LOGGER("Tx submited.")
 
     if env_manager.get_env('REPUTATION_PROOF_ID') != proof_id:
         LOGGER(f"Store reputation proof id {proof_id} on .env file.")
