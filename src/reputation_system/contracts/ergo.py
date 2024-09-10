@@ -143,7 +143,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     java_input_boxes = java.util.ArrayList(input_boxes)
 
     print(f"\njava input boxes -> {java_input_boxes}")
-    print(f"\njava input boxes length {java_input_boxes.lenght()}")
+    print(f"\njava input boxes length {java_input_boxes.size()}")
     print(f"\njava input boxes first element {java_input_boxes.get(0)}")
     print(f"\njava input boxes first id {java_input_boxes.get(0).getId().toString()}")
 
