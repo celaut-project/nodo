@@ -193,7 +193,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     )
 
     LOGGER("Sign the tx.")
-    signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
+    signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=__input_box_to_dict(input_boxes[0])['index'])
 
     LOGGER(f"Submit the tx.")
     # 5. Submit the transaction and return the ID
