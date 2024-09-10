@@ -125,7 +125,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             input_list = ergo.getInputBoxCovering(
                 amount_list=[SAFE_MIN_BOX_VALUE],
                 sender_address=_contract_addr,
-                tokenList=[[proof_id]], amount_tokens=[[total_token_value]]  # TODO this filter don't work.
+                tokenList=[[proof_id]], amount_tokens=[[total_token_value]]  # TODO this filter don't work. (Where proof_id is a token_id)
             )
             input_boxes.extend([
                 _i for _i in input_list
@@ -143,7 +143,6 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             LOGGER(f"Exception submitting with the last proof_id: {str(e)}.\n A new one will be generated.")
             proof_id = None
 
-    print(f"input boxes -> {input_boxes}")
     java_input_boxes = java.util.ArrayList(input_boxes)
 
     LOGGER(f"selected_input_box value: {__input_box_to_dict(selected_input_box)['value']}")
@@ -182,8 +181,6 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     if not output_boxes: LOGGER(f"No build out boxes.")
     outputs.extend(output_boxes)
 
-    LOGGER("Going to build the unsigned tx.")
-
     # 4. Build and sign the transaction
     unsigned_tx = ergo.buildUnsignedTransaction(
         input_box=java_input_boxes,
@@ -192,14 +189,10 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         sender_address=sender_address
     )
 
-    LOGGER(f"Sign the tx.  {unsigned_tx} {mnemonic[0]}")
     signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
 
-    LOGGER(f"Submit the tx.")
     # 5. Submit the transaction and return the ID
     tx_id = ergo.txId(signed_tx)
-
-    LOGGER("Tx submited.")
 
     if env_manager.get_env('REPUTATION_PROOF_ID') != proof_id:
         LOGGER(f"Store reputation proof id {proof_id} on .env file.")
