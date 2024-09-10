@@ -63,7 +63,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                 deposit_token=deposit_token,
                                 contract_ledger=contract_ledger,
                             )
-                        )
+                        ), None
                         )
                         _l.LOGGER('Peer payment process to ' + peer_id + ' of ' + str(amount) + ' communicated.')
                         break
