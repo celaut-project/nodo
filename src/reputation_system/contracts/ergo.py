@@ -182,7 +182,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     if not output_boxes: LOGGER(f"No build out boxes.")
     outputs.extend(output_boxes)
 
-    LOGGER(f"Going to build the unsigned tx.")
+    LOGGER("Going to build the unsigned tx.")
 
     # 4. Build and sign the transaction
     unsigned_tx = ergo.buildUnsignedTransaction(
@@ -191,6 +191,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         fee=fee / 10**9,
         sender_address=sender_address
     )
+
+    LOGGER("Sign the tx.")
     signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
 
     # 5. Submit the transaction and return the ID
