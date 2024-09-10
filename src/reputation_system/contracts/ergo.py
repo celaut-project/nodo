@@ -122,29 +122,29 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             _contract = ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)
             _ergo_tree = _contract.getErgoTree()
             _contract_addr = Address.fromErgoTree(_ergo_tree, NetworkType.TESTNET)
-            print(f"contract addr -> {_contract_addr}")
             input_list = ergo.getInputBoxCovering(
                 amount_list=[SAFE_MIN_BOX_VALUE],
                 sender_address=_contract_addr,
-                tokenList=[[proof_id]], amount_tokens=[[total_token_value]]
+                tokenList=[[proof_id]], amount_tokens=[[total_token_value]]  # TODO this filter don't work.
             )
-            print(f"input boxes -> {input_list}")
-            input_boxes.extend(input_list)
+            input_boxes.extend([
+                _i for _i in input_list
+                if (
+                    isinstance(__input_box_to_dict(_i), dict)  # Check if the result is a dictionary
+                    and 'assets' in __input_box_to_dict(_i)  # Ensure the 'assets' key exists
+                    and isinstance(__input_box_to_dict(_i)['assets'], list)  # Check if 'assets' is a list
+                    and len(__input_box_to_dict(_i)['assets']) > 0  # Ensure the list is not empty
+                    and 'tokenId' in __input_box_to_dict(_i)['assets'][0]  # Check that 'tokenId' exists in the first item
+                    and __input_box_to_dict(_i)['assets'][0]['tokenId'] == proof_id  # Compare 'tokenId' with proof_id
+                )
+            ])
+            del input_list
         except Exception as e:
             LOGGER(f"Exception submitting with the last proof_id: {str(e)}.\n A new one will be generated.")
             proof_id = None
 
-    for _i in input_boxes:
-        try:
-            LOGGER(f"\nInput boxes -> {__input_box_to_dict(_i)['assets'][0]['tokenId']}")
-        except: LOGGER(f"\nInput box passed -> {__input_box_to_dict(_i)}")
-
+    print(f"input boxes -> {input_boxes}")
     java_input_boxes = java.util.ArrayList(input_boxes)
-
-    print(f"\njava input boxes -> {java_input_boxes}")
-    print(f"\njava input boxes length {java_input_boxes.size()}")
-    print(f"\njava input boxes first element {java_input_boxes.get(0)}")
-    print(f"\njava input boxes first id {java_input_boxes.get(0).getId().toString()}")
 
     LOGGER(f"selected_input_box value: {__input_box_to_dict(selected_input_box)['value']}")
     LOGGER(f"fee: {fee}, SAFE_MIN_BOX_VALUE: {safe_min_out_box}")
