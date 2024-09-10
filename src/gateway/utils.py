@@ -6,8 +6,7 @@ import netifaces as ni
 
 import src.utils.utils
 from src.database.access_functions.ledgers import get_ledger_and_contract_addr_from_contract
-from src.payment_system.contracts.ethereum.deposit_contract.simulator.interface \
-    import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH, CONTRACT as DEFAULT_PROVISIONAL_CONTRACT # TODO se mantiene el contrato provisional
+from src.payment_system.ledgers import generate_contract_ledger
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.utils import logger as l
 from src.utils.env import EnvManager
@@ -18,14 +17,6 @@ GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 
-
-
-def __generate_contract_ledger() -> Generator[celaut.Service.Api.ContractLedger, None, None]:
-    for address, ledger in get_ledger_and_contract_addr_from_contract(DEFAULT_PROVISIONAL_CONTRACT_HASH):
-        contract_ledger = celaut.Service.Api.ContractLedger()
-        contract_ledger.contract = DEFAULT_PROVISIONAL_CONTRACT
-        contract_ledger.contract_addr, contract_ledger.ledger = address, ledger
-        yield contract_ledger
 
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
@@ -52,7 +43,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance.api.slot.append(slot)
 
     instance.api.contract_ledger.extend(
-        [e for e in __generate_contract_ledger()]
+        [e for e in generate_contract_ledger()]
     )
     return gateway_pb2.Instance(
         instance=instance
