@@ -484,7 +484,6 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error updating reputation for peer {peer_id}: {e}')
             return False
 
-
     def get_reputation(self, peer_id: str) -> Optional[float]:
         """
         Retrieves the reputation score for a peer, adjusted by the reputation index.
@@ -635,437 +634,434 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error submitting to ledger: {e}')
             return False
 
+    def get_peers(self) -> List[dict]:
+        """
+        Fetches all peers from the database.
 
-        def get_peers(self) -> List[dict]:
-            """
-            Fetches all peers from the database.
+        Returns:
+            List[dict]: A list of dictionaries containing peer details.
+        """
+        result = self._execute('''
+            SELECT id, token, client_id, gas_mantissa, gas_exponent FROM peer
+        ''')
 
-            Returns:
-                List[dict]: A list of dictionaries containing peer details.
-            """
-            result = self._execute('''
-                SELECT id, token, client_id, gas_mantissa, gas_exponent FROM peer
-            ''')
+        peers = []
+        for row in result.fetchall():
+            peer = dict(row)
+            gas_mantissa = peer.pop('gas_mantissa')
+            gas_exponent = peer.pop('gas_exponent')
+            peer['gas'] = _combine_gas(gas_mantissa, gas_exponent)
+            peers.append(peer)
 
-            peers = []
-            for row in result.fetchall():
-                peer = dict(row)
-                gas_mantissa = peer.pop('gas_mantissa')
-                gas_exponent = peer.pop('gas_exponent')
-                peer['gas'] = _combine_gas(gas_mantissa, gas_exponent)
-                peers.append(peer)
+        return peers
 
-            return peers
+    def get_peers_id(self) -> List[str]:
+        """
+        Fetches all peer IDs from the database.
 
-        def get_peers_id(self) -> List[str]:
-            """
-            Fetches all peer IDs from the database.
+        Returns:
+            List[str]: A list of peer IDs.
+        """
+        try:
+            result = self._execute("SELECT id FROM peer")
+            peer_ids = [row[0] for row in result.fetchall()]
+            logger.LOGGER(f'Found peer IDs: {peer_ids}')
+            return peer_ids
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Error fetching peer IDs: {e}')
+            return []
 
-            Returns:
-                List[str]: A list of peer IDs.
-            """
-            try:
-                result = self._execute("SELECT id FROM peer")
-                peer_ids = [row[0] for row in result.fetchall()]
-                logger.LOGGER(f'Found peer IDs: {peer_ids}')
-                return peer_ids
-            except sqlite3.Error as e:
-                logger.LOGGER(f'Error fetching peer IDs: {e}')
-                return []
-
-        def add_gas_to_peer(self, peer_id: str, gas: int):
-            try:
-                result = self._execute('SELECT gas_mantissa, gas_exponent FROM peer WHERE id = ?', (peer_id,))
-                row = result.fetchone()
-                if row:
-                    current_gas = _combine_gas(row['gas_mantissa'], row['gas_exponent'])
-                    total_gas = current_gas + gas
-                    new_mantissa, new_exponent = _split_gas(total_gas)
-                    _validate_gas(new_mantissa, new_exponent)
-                    self._execute('''
-                        UPDATE peer SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
-                    ''', (new_mantissa, new_exponent, peer_id))
-                    return True
-                else:
-                    raise Exception(f'Peer not found: {peer_id}')
-            except Exception as e:
-                logger.LOGGER(f'Error adding gas to peer {peer_id}: {e}')
-                return False
-
-
-        def add_peer(self, peer_id: str, token: Optional[str], metadata: Optional[bytes], app_protocol: bytes) -> bool:
-            """
-            Adds a peer to the database.
-
-            Args:
-                peer_id (str): The ID of the peer to add.
-
-            Returns:
-                bool: True if the peer was successfully added, False otherwise.
-            """
-            logger.LOGGER(f'Attempting to add peer {peer_id}')
-
-            if not self.peer_exists(peer_id=peer_id):
-                try:
-                    self._execute('''
-                        INSERT INTO peer (id, token, metadata, app_protocol, client_id, gas_mantissa, gas_exponent)
-                        VALUES (?, ?, ?, ?, '', 0, 0)  -- Initialize with empty client_id and 0 gas
-                    ''', (peer_id, token, metadata, app_protocol))
-                    logger.LOGGER(f'Peer {peer_id} added without client_id')
-                    return True
-                except sqlite3.Error as e:
-                    logger.LOGGER(f'Failed to add peer {peer_id}: {e}')
-                    return False
+    def add_gas_to_peer(self, peer_id: str, gas: int):
+        try:
+            result = self._execute('SELECT gas_mantissa, gas_exponent FROM peer WHERE id = ?', (peer_id,))
+            row = result.fetchone()
+            if row:
+                current_gas = _combine_gas(row['gas_mantissa'], row['gas_exponent'])
+                total_gas = current_gas + gas
+                new_mantissa, new_exponent = _split_gas(total_gas)
+                _validate_gas(new_mantissa, new_exponent)
+                self._execute('''
+                    UPDATE peer SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
+                ''', (new_mantissa, new_exponent, peer_id))
+                return True
             else:
-                logger.LOGGER(f'Peer {peer_id} already exists')
-                return False
+                raise Exception(f'Peer not found: {peer_id}')
+        except Exception as e:
+            logger.LOGGER(f'Error adding gas to peer {peer_id}: {e}')
+            return False
 
-        def add_slot(self, slot: celaut_pb2.Instance.Uri_Slot, peer_id: str):
-            """
-            Adds a slot to the database.
+    def add_peer(self, peer_id: str, token: Optional[str], metadata: Optional[bytes], app_protocol: bytes) -> bool:
+        """
+        Adds a peer to the database.
 
-            Args:
-                slot (celaut_pb2.Instance.Uri_Slot): The slot to add.
-                peer_id (str): The ID of the peer.
-            """
-            internal_port: int = slot.internal_port
-            transport_protocol: bytes = bytes("tcp", "utf-8")
-            cursor = self._execute("INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
-                                (internal_port, transport_protocol, peer_id))
-            slot_id = cursor.lastrowid
-            if slot_id:
-                slot_id = str(slot_id)
-                for uri in slot.uri:
-                    self.add_uri(uri, slot_id=slot_id)
+        Args:
+            peer_id (str): The ID of the peer to add.
 
-        def add_contract(self, contract: celaut_pb2.Service.Api.ContractLedger, peer_id: str):
-            """
-            Adds a contract to the database.
+        Returns:
+            bool: True if the peer was successfully added, False otherwise.
+        """
+        logger.LOGGER(f'Attempting to add peer {peer_id}')
 
-            Args:
-                contract (celaut_pb2.Service.Api.ContractLedger): The contract to add.
-                peer_id (str): The ID of the peer.
-            """
-            contract_content: bytes = contract.contract
-            address: str = contract.contract_addr
-            ledger: str = contract.ledger
-
-            contract_hash: str = sha3_256(contract_content).hexdigest()
-            contract_hash_type: str = SHA3_256_ID.hex()
-
-            self._execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
-                        (contract_hash, contract_hash_type, contract_content))
-
-            self._execute("INSERT OR IGNORE INTO ledger (id) VALUES (?)",
-                        (ledger,))
-
-            self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
-                        "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
-
-        def peer_exists(self, peer_id: str) -> bool:
-            """
-            Checks if a peer exists in the database.
-
-            Args:
-                peer_id (str): The ID of the peer to check.
-
-            Returns:
-                bool: True if the peer exists, False otherwise.
-            """
-            result = self._execute('''
-                SELECT COUNT(*)
-                FROM peer
-                WHERE id = ?
-            ''', (peer_id,))
-            return result.fetchone()[0] > 0
-
-        def add_external_client(self, peer_id: str, client_id: str) -> bool:
-            """
-            Associates an external client ID with an existing peer.
-
-            Args:
-                peer_id (str): The ID of the peer.
-                client_id (str): The external client ID to associate.
-
-            Returns:
-                bool: True if the association was successful, False otherwise.
-            """
-            logger.LOGGER(f'Attempting to add external client {client_id} for peer {peer_id}')
-
-            if not self.peer_exists(peer_id=peer_id):
-                logger.LOGGER(f'Peer {peer_id} does not exist in the database')
-                return False
-
+        if not self.peer_exists(peer_id=peer_id):
             try:
                 self._execute('''
-                    UPDATE peer SET client_id = ? WHERE id = ?
-                ''', (client_id, peer_id))
-                logger.LOGGER(f'Associated external client {client_id} with peer {peer_id}')
+                    INSERT INTO peer (id, token, metadata, app_protocol, client_id, gas_mantissa, gas_exponent)
+                    VALUES (?, ?, ?, ?, '', 0, 0)  -- Initialize with empty client_id and 0 gas
+                ''', (peer_id, token, metadata, app_protocol))
+                logger.LOGGER(f'Peer {peer_id} added without client_id')
                 return True
             except sqlite3.Error as e:
-                logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
+                logger.LOGGER(f'Failed to add peer {peer_id}: {e}')
                 return False
+        else:
+            logger.LOGGER(f'Peer {peer_id} already exists')
+            return False
 
-        def peer_has_client(self, peer_id: str) -> bool:
-            """
-            Checks if a peer has an associated client.
+    def add_slot(self, slot: celaut_pb2.Instance.Uri_Slot, peer_id: str):
+        """
+        Adds a slot to the database.
 
-            Args:
-                peer_id (str): The ID of the peer.
+        Args:
+            slot (celaut_pb2.Instance.Uri_Slot): The slot to add.
+            peer_id (str): The ID of the peer.
+        """
+        internal_port: int = slot.internal_port
+        transport_protocol: bytes = bytes("tcp", "utf-8")
+        cursor = self._execute("INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
+                            (internal_port, transport_protocol, peer_id))
+        slot_id = cursor.lastrowid
+        if slot_id:
+            slot_id = str(slot_id)
+            for uri in slot.uri:
+                self.add_uri(uri, slot_id=slot_id)
 
-            Returns:
-                bool: True if the peer has both a client, False otherwise.
-            """
-            try:
-                result = self._execute('''
-                    SELECT client_id FROM peer WHERE id = ?
-                ''', (peer_id,))
-                row = result.fetchone()
-                if row and row['client_id']:
-                    return True
-                return False
-            except sqlite3.Error as e:
-                logger.LOGGER(f'Failed to check client for peer {peer_id}: {e}')
-                return False
+    def add_contract(self, contract: celaut_pb2.Service.Api.ContractLedger, peer_id: str):
+        """
+        Adds a contract to the database.
 
-        def get_peer_client(self, peer_id: str) -> Optional[str]:
-            """
-            Retrieves the client ID associated with a peer.
+        Args:
+            contract (celaut_pb2.Service.Api.ContractLedger): The contract to add.
+            peer_id (str): The ID of the peer.
+        """
+        contract_content: bytes = contract.contract
+        address: str = contract.contract_addr
+        ledger: str = contract.ledger
 
-            Args:
-                peer_id (str): The ID of the peer.
+        contract_hash: str = sha3_256(contract_content).hexdigest()
+        contract_hash_type: str = SHA3_256_ID.hex()
 
-            Returns:
-                str: The client ID if it exists, or None if not found.
-            """
-            try:
-                result = self._execute('''
-                    SELECT client_id FROM peer WHERE id = ?
-                ''', (peer_id,))
-                row = result.fetchone()
-                if row:
-                    return row['client_id']
-                return None
-            except sqlite3.Error as e:
-                logger.LOGGER(f'Failed to retrieve client for peer {peer_id}: {e}')
-                return None
+        self._execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
+                    (contract_hash, contract_hash_type, contract_content))
 
-        def delete_external_client(self, peer_id: str):
-            """
-            Deletes the external client from a peer.
+        self._execute("INSERT OR IGNORE INTO ledger (id) VALUES (?)",
+                    (ledger,))
 
-            Args:
-                peer_id (str): The ID of the peer.
-            """
-            try:
-                self._execute('''
-                    UPDATE peer SET client_id = NULL WHERE id = ?
-                ''', (peer_id,))
-                logger.LOGGER(f'Successfully deleted external client associated with peer {peer_id}')
-            except sqlite3.Error as e:
-                logger.LOGGER(f'Failed to delete external client associated with peer {peer_id}: {e}')
-                pass
+        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
+                    "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
 
-        def add_uri(self, uri: celaut_pb2.Instance.Uri, slot_id: str):
-            """
-            Adds a URI to the database.
+    def peer_exists(self, peer_id: str) -> bool:
+        """
+        Checks if a peer exists in the database.
 
-            Args:
-                uri (celaut_pb2.Instance.Uri): The URI to add.
-                slot_id (str): The ID of the slot.
-            """
-            ip: str = uri.ip
-            port: int = uri.port
-            self._execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
-                        (ip, port, slot_id))
+        Args:
+            peer_id (str): The ID of the peer to check.
 
-        def add_external_service(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str):
-            """
-            Adds an external service to the database.
+        Returns:
+            bool: True if the peer exists, False otherwise.
+        """
+        result = self._execute('''
+            SELECT COUNT(*)
+            FROM peer
+            WHERE id = ?
+        ''', (peer_id,))
+        return result.fetchone()[0] > 0
 
-            Args:
-                client_id (str): The client ID.
-                encrypted_external_token (str): The encrypted external token.
-                external_token (str): The external token.
-                peer_id (str): The peer ID.
-            """
+    def add_external_client(self, peer_id: str, client_id: str) -> bool:
+        """
+        Associates an external client ID with an existing peer.
+
+        Args:
+            peer_id (str): The ID of the peer.
+            client_id (str): The external client ID to associate.
+
+        Returns:
+            bool: True if the association was successful, False otherwise.
+        """
+        logger.LOGGER(f'Attempting to add external client {client_id} for peer {peer_id}')
+
+        if not self.peer_exists(peer_id=peer_id):
+            logger.LOGGER(f'Peer {peer_id} does not exist in the database')
+            return False
+
+        try:
             self._execute('''
-                INSERT INTO external_services (token, token_hash, peer_id, client_id)
-                VALUES (?, ?, ?, ?)
-            ''', (external_token, encrypted_external_token, peer_id, client_id))
+                UPDATE peer SET client_id = ? WHERE id = ?
+            ''', (client_id, peer_id))
+            logger.LOGGER(f'Associated external client {client_id} with peer {peer_id}')
+            return True
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
+            return False
 
-        def get_token_by_hashed_token(self, hashed_token: str) -> Optional[str]:
-            """
-            Retrieves the token associated with a given hashed token for an external service.
+    def peer_has_client(self, peer_id: str) -> bool:
+        """
+        Checks if a peer has an associated client.
 
-            Args:
-                hashed_token (str): The hashed token of the external service.
+        Args:
+            peer_id (str): The ID of the peer.
 
-            Returns:
-                Optional[str]: The token if it exists, or None if not found.
-            """
-            try:
-                result = self._execute('''
-                    SELECT token FROM external_services WHERE token_hash = ?
-                ''', (hashed_token,))
-                row = result.fetchone()
-                if row:
-                    return row['token']
-                return None
-            except sqlite3.Error as e:
-                logger.LOGGER(f'Failed to retrieve token for hashed token {hashed_token}: {e}')
-                return None
-
-        def purge_external(self, agent_id: str, peer_id: str, his_token: str) -> int:
-            """
-            Purges an external service and refunds gas.
-
-            Args:
-                agent_id (str): The agent ID.
-                peer_id (str): The peer ID.
-                his_token (str): The token of the external service.
-
-            Returns:
-                int: The gas amount refunded.
-            """
-            refund = 0
-
-            hashed_token = self._execute('''
-                SELECT token_hash FROM external_services WHERE token = ?
-            ''', (his_token,)).fetchone()["token_hash"]
-
-            self._execute('''
-                DELETE FROM external_services WHERE token = ?
-            ''', (his_token,))
-
-            try:
-                refund = from_gas_amount(next(grpcbf.client_grpc(
-                    method=gateway_pb2_grpc.GatewayStub(
-                        grpc.insecure_channel(
-                            next(generate_uris_by_peer_id(peer_id=peer_id))
-                        )
-                    ).StopService,
-                    input=gateway_pb2.TokenMessage(
-                        token=hashed_token
-                    ),
-                    indices_parser=gateway_pb2.Refund,
-                    partitions_message_mode_parser=True
-                )).amount)
-            except grpc.RpcError as e:
-                l.LOGGER('Error during remove a container on ' + peer_id + ' ' + str(e))
-
-            return refund
-
-        # Common Methods
-
-        def get_token_by_uri(self, uri: str) -> str:
-            """
-            Retrieves the token for a given URI.
-
-            Args:
-                uri (str): The URI to look up.
-
-            Returns:
-                str: The associated token.
-            """
+        Returns:
+            bool: True if the peer has both a client, False otherwise.
+        """
+        try:
             result = self._execute('''
-                SELECT token FROM internal_services WHERE ip = ?
-            ''', (uri,))
+                SELECT client_id FROM peer WHERE id = ?
+            ''', (peer_id,))
+            row = result.fetchone()
+            if row and row['client_id']:
+                return True
+            return False
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to check client for peer {peer_id}: {e}')
+            return False
+
+    def get_peer_client(self, peer_id: str) -> Optional[str]:
+        """
+        Retrieves the client ID associated with a peer.
+
+        Args:
+            peer_id (str): The ID of the peer.
+
+        Returns:
+            str: The client ID if it exists, or None if not found.
+        """
+        try:
+            result = self._execute('''
+                SELECT client_id FROM peer WHERE id = ?
+            ''', (peer_id,))
+            row = result.fetchone()
+            if row:
+                return row['client_id']
+            return None
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to retrieve client for peer {peer_id}: {e}')
+            return None
+
+    def delete_external_client(self, peer_id: str):
+        """
+        Deletes the external client from a peer.
+
+        Args:
+            peer_id (str): The ID of the peer.
+        """
+        try:
+            self._execute('''
+                UPDATE peer SET client_id = NULL WHERE id = ?
+            ''', (peer_id,))
+            logger.LOGGER(f'Successfully deleted external client associated with peer {peer_id}')
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to delete external client associated with peer {peer_id}: {e}')
+            pass
+
+    def add_uri(self, uri: celaut_pb2.Instance.Uri, slot_id: str):
+        """
+        Adds a URI to the database.
+
+        Args:
+            uri (celaut_pb2.Instance.Uri): The URI to add.
+            slot_id (str): The ID of the slot.
+        """
+        ip: str = uri.ip
+        port: int = uri.port
+        self._execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
+                    (ip, port, slot_id))
+
+    def add_external_service(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str):
+        """
+        Adds an external service to the database.
+
+        Args:
+            client_id (str): The client ID.
+            encrypted_external_token (str): The encrypted external token.
+            external_token (str): The external token.
+            peer_id (str): The peer ID.
+        """
+        self._execute('''
+            INSERT INTO external_services (token, token_hash, peer_id, client_id)
+            VALUES (?, ?, ?, ?)
+        ''', (external_token, encrypted_external_token, peer_id, client_id))
+
+    def get_token_by_hashed_token(self, hashed_token: str) -> Optional[str]:
+        """
+        Retrieves the token associated with a given hashed token for an external service.
+
+        Args:
+            hashed_token (str): The hashed token of the external service.
+
+        Returns:
+            Optional[str]: The token if it exists, or None if not found.
+        """
+        try:
+            result = self._execute('''
+                SELECT token FROM external_services WHERE token_hash = ?
+            ''', (hashed_token,))
             row = result.fetchone()
             if row:
                 return row['token']
-            raise Exception(f'Token not found for URI: {uri}')
+            return None
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to retrieve token for hashed token {hashed_token}: {e}')
+            return None
 
-        def get_gas_amount_by_father_id(self, id: str) -> int:
-            """
-            Retrieves the gas amount for a father ID, checking both clients and internal services.
+    def purge_external(self, agent_id: str, peer_id: str, his_token: str) -> int:
+        """
+        Purges an external service and refunds gas.
 
-            Args:
-                id (str): The father ID.
+        Args:
+            agent_id (str): The agent ID.
+            peer_id (str): The peer ID.
+            his_token (str): The token of the external service.
 
-            Returns:
-                int: The gas amount.
-            """
-            if self.client_exists(client_id=id):
-                return self.get_gas_amount_by_client_id(id=id)
-            elif self.container_exists(token=id):
-                return self.get_internal_service_gas(token=id)
-            else:
-                return int(DEFAULT_INTIAL_GAS_AMOUNT)
+        Returns:
+            int: The gas amount refunded.
+        """
+        refund = 0
 
+        hashed_token = self._execute('''
+            SELECT token_hash FROM external_services WHERE token = ?
+        ''', (his_token,)).fetchone()["token_hash"]
 
-        # Tunnel system
+        self._execute('''
+            DELETE FROM external_services WHERE token = ?
+        ''', (his_token,))
 
-        def add_tunnel(self, uri: str, service: str, live: bool):
-            """
-            Adds a tunnel to the database.
+        try:
+            refund = from_gas_amount(next(grpcbf.client_grpc(
+                method=gateway_pb2_grpc.GatewayStub(
+                    grpc.insecure_channel(
+                        next(generate_uris_by_peer_id(peer_id=peer_id))
+                    )
+                ).StopService,
+                input=gateway_pb2.TokenMessage(
+                    token=hashed_token
+                ),
+                indices_parser=gateway_pb2.Refund,
+                partitions_message_mode_parser=True
+            )).amount)
+        except grpc.RpcError as e:
+            l.LOGGER('Error during remove a container on ' + peer_id + ' ' + str(e))
 
-            Args:
-                tunnel_id (str): The ID of the tunnel.
-                uri (str): The URI of the tunnel.
-                service (str): The service associated with the tunnel.
-                live (bool): Whether the tunnel is live or not.
-            """
-            tunnel_id = str(uuid.uuid4())
-            self._execute('''
-                INSERT INTO tunnels (id, uri, service, live)
-                VALUES (?, ?, ?, ?)
-            ''', (tunnel_id, uri, service, live))
+        return refund
 
-        def get_tunnels(self) -> List[dict]:
-            """
-            Fetches all tunnels from the database.
+    # Common Methods
 
-            Returns:
-                List[dict]: A list of dictionaries containing tunnel details.
-            """
-            result = self._execute("SELECT id, uri, service, live FROM tunnels")
-            tunnels = [{'id': row['id'], 'uri': row['uri'], 'service': row['service'], 'live': row['live']} for row in result.fetchall()]
-            logger.LOGGER(f'Found tunnels: {tunnels}')
-            return tunnels
+    def get_token_by_uri(self, uri: str) -> str:
+        """
+        Retrieves the token for a given URI.
 
-        def update_tunnel(self, tunnel_id: str, uri: Optional[str] = None, service: Optional[str] = None, live: Optional[bool] = None):
-            """
-            Updates a tunnel in the database.
+        Args:
+            uri (str): The URI to look up.
 
-            Args:
-                tunnel_id (str): The ID of the tunnel to update.
-                uri (Optional[str]): The new URI of the tunnel (if provided).
-                service (Optional[str]): The new service of the tunnel (if provided).
-                live (Optional[bool]): The new live status of the tunnel (if provided).
-            """
-            updates = []
-            params = []
+        Returns:
+            str: The associated token.
+        """
+        result = self._execute('''
+            SELECT token FROM internal_services WHERE ip = ?
+        ''', (uri,))
+        row = result.fetchone()
+        if row:
+            return row['token']
+        raise Exception(f'Token not found for URI: {uri}')
 
-            if uri is not None:
-                updates.append("uri = ?")
-                params.append(uri)
+    def get_gas_amount_by_father_id(self, id: str) -> int:
+        """
+        Retrieves the gas amount for a father ID, checking both clients and internal services.
 
-            if service is not None:
-                updates.append("service = ?")
-                params.append(service)
+        Args:
+            id (str): The father ID.
 
-            if live is not None:
-                updates.append("live = ?")
-                params.append(live)
+        Returns:
+            int: The gas amount.
+        """
+        if self.client_exists(client_id=id):
+            return self.get_gas_amount_by_client_id(id=id)
+        elif self.container_exists(token=id):
+            return self.get_internal_service_gas(token=id)
+        else:
+            return int(DEFAULT_INTIAL_GAS_AMOUNT)
 
-            if not updates:
-                raise ValueError("No values to update.")
+    # Tunnel system
 
-            params.append(tunnel_id)
-            query = f"UPDATE tunnels SET {', '.join(updates)} WHERE id = ?"
-            self._execute(query, tuple(params))
+    def add_tunnel(self, uri: str, service: str, live: bool):
+        """
+        Adds a tunnel to the database.
 
-        def delete_tunnel(self, tunnel_id: str):
-            """
-            Deletes a tunnel from the database.
+        Args:
+            tunnel_id (str): The ID of the tunnel.
+            uri (str): The URI of the tunnel.
+            service (str): The service associated with the tunnel.
+            live (bool): Whether the tunnel is live or not.
+        """
+        tunnel_id = str(uuid.uuid4())
+        self._execute('''
+            INSERT INTO tunnels (id, uri, service, live)
+            VALUES (?, ?, ?, ?)
+        ''', (tunnel_id, uri, service, live))
 
-            Args:
-                tunnel_id (str): The ID of the tunnel to delete.
-            """
-            self._execute('''
-                DELETE FROM tunnels WHERE id = ?
-            ''', (tunnel_id,))
+    def get_tunnels(self) -> List[dict]:
+        """
+        Fetches all tunnels from the database.
+
+        Returns:
+            List[dict]: A list of dictionaries containing tunnel details.
+        """
+        result = self._execute("SELECT id, uri, service, live FROM tunnels")
+        tunnels = [{'id': row['id'], 'uri': row['uri'], 'service': row['service'], 'live': row['live']} for row in result.fetchall()]
+        logger.LOGGER(f'Found tunnels: {tunnels}')
+        return tunnels
+
+    def update_tunnel(self, tunnel_id: str, uri: Optional[str] = None, service: Optional[str] = None, live: Optional[bool] = None):
+        """
+        Updates a tunnel in the database.
+
+        Args:
+            tunnel_id (str): The ID of the tunnel to update.
+            uri (Optional[str]): The new URI of the tunnel (if provided).
+            service (Optional[str]): The new service of the tunnel (if provided).
+            live (Optional[bool]): The new live status of the tunnel (if provided).
+        """
+        updates = []
+        params = []
+
+        if uri is not None:
+            updates.append("uri = ?")
+            params.append(uri)
+
+        if service is not None:
+            updates.append("service = ?")
+            params.append(service)
+
+        if live is not None:
+            updates.append("live = ?")
+            params.append(live)
+
+        if not updates:
+            raise ValueError("No values to update.")
+
+        params.append(tunnel_id)
+        query = f"UPDATE tunnels SET {', '.join(updates)} WHERE id = ?"
+        self._execute(query, tuple(params))
+
+    def delete_tunnel(self, tunnel_id: str):
+        """
+        Deletes a tunnel from the database.
+
+        Args:
+            tunnel_id (str): The ID of the tunnel to delete.
+        """
+        self._execute('''
+            DELETE FROM tunnels WHERE id = ?
+        ''', (tunnel_id,))
 
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
