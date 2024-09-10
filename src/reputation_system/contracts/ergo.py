@@ -127,7 +127,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             input_list = ergo.getInputBoxCovering(
                 amount_list=[SAFE_MIN_BOX_VALUE],
                 sender_address=_contract_addr,
-                tokenList=[[proof_id]], amount_tokens=[[total_token_value]]  # TODO: java.io.IOException: invalid length 1 of Hex data
+                tokenList=[[proof_id]], amount_tokens=[[total_token_value]]
             )
             print(f"input boxes -> {input_list}")
             input_boxes.extend(input_list)
@@ -135,7 +135,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             LOGGER(f"Exception submitting with the last proof_id: {str(e)}.\n A new one will be generated.")
             proof_id = None
 
-    LOGGER(f"Input boxes -> {[__input_box_to_dict(_i) for _i in input_boxes]}")
+    for _i in input_boxes:
+        LOGGER(f"\nInput boxes -> {__input_box_to_dict(_i)}")
 
     java_input_boxes = java.util.ArrayList(input_boxes)
 
