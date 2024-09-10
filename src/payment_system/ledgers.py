@@ -1,5 +1,6 @@
 from typing import Generator
 from protos import celaut_pb2 as celaut
+from src.database.access_functions.ledgers import get_ledger_and_contract_addr_from_contract
 from src.payment_system.contracts.simulator.interface \
     import CONTRACT_HASH as DEFAULT_PROVISIONAL_CONTRACT_HASH, CONTRACT as DEFAULT_PROVISIONAL_CONTRACT
 
