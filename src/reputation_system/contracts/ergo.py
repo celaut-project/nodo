@@ -136,9 +136,14 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             proof_id = None
 
     for _i in input_boxes:
-        LOGGER(f"\nInput boxes -> {__input_box_to_dict(_i)}")
+        LOGGER(f"\nInput boxes -> {__input_box_to_dict(_i)['assets'][0]['tokenId']}")
 
     java_input_boxes = java.util.ArrayList(input_boxes)
+
+    print(f"java input boxes -> {java_input_boxes}")
+    print(f"java input boxes length {java_input_boxes.lenght()}")
+    print(f"java input boxes first element {java_input_boxes.get(0)}")
+    print(f"java input boxes first id {java_input_boxes.get(0).getId().toString()}")
 
     LOGGER(f"selected_input_box value: {__input_box_to_dict(selected_input_box)['value']}")
     LOGGER(f"fee: {fee}, SAFE_MIN_BOX_VALUE: {safe_min_out_box}")
