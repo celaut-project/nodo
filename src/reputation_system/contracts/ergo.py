@@ -55,7 +55,6 @@ def __input_box_to_dict(input_box: 'org.ergoplatform.appkit.InputBoxImpl') -> di
 # Function to build the proof box
 def __build_proof_box(
     ergo: appkit.ErgoAppKit,
-    input_boxes: java.util.ArrayList,
     proof_id: str,
     sender_address: Address,
     token_amount: int = DEFAULT_TOKEN_AMOUNT,
@@ -165,7 +164,6 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     for obj in objects:
         proof_box = __build_proof_box(
             ergo=ergo,
-            input_boxes=java_input_boxes,
             proof_id=proof_id,
             sender_address=sender_address,
             assigned_object=ProofObject(
@@ -178,10 +176,13 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         if proof_box:
             outputs.append(proof_box)
 
+    LOGGER(f"Builded all proof box boxes.")
     # Basic wallet output box
     output_boxes = ergo.buildOutBox(receiver_wallet_addresses=[sender_address.toString()], amount_list=[value_in_ergs])
     if not output_boxes: LOGGER(f"No build out boxes.")
     outputs.extend(output_boxes)
+
+    LOGGER(f"Going to build the unsigned tx.")
 
     # 4. Build and sign the transaction
     unsigned_tx = ergo.buildUnsignedTransaction(
