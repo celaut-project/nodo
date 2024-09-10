@@ -1,9 +1,8 @@
-import typing
+from typing import Generator, Tuple
 
 
-def ledger_balancer(ledger_generator: typing.Generator[typing.Tuple[str, str], None, None]) \
-        -> typing.Generator[typing.Tuple[str, str], None, None]:
-    # TODO Implementar un ledger balancer para decidir que instancia del
-    #  contrato utilizar. Ademas de filtrar entre los soportados por si mismo (por este nodo).
-    for element in ledger_generator:
-        yield element
+def ledger_balancer(ledger_generator: Generator[Tuple[str, str], None, None]) \
+        -> Generator[Tuple[str, str], None, None]:
+    # TODO Implement a ledger balancer to decide which instance of the contract to use.
+    # Also, filter between those supported by itself (by this node).
+    yield from ledger_generator
