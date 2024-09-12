@@ -77,7 +77,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                     request_iterator=request_iterator,
                     indices=gateway_pb2.ModifyServiceSystemResourcesInput,
                     partitions_message_mode=True
-                ))
+                ), None)
         ):
             try:
                 refund_gas.pop()()
