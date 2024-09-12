@@ -28,8 +28,10 @@ sc = SQLConnection()
 
 deposit_tokens = {}  # Provisional Dict[deposit_token, client_id]
 def generate_deposit_token(client_id: str) -> str:
+    _l.LOGGER("Generate deposit token.")
     deposit_token = str(uuid4())
     deposit_tokens[deposit_token] = client_id
+    _l.LOGGER("Deposit token generated.")
     return deposit_token
 
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
@@ -38,8 +40,9 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         _l.LOGGER("No client available.")
         return False
 
+    _l.LOGGER(f"Generate deposit token on the peer {peer_id} with client {client_id}")
     # Get the token for identify the deposit with that client.
-    deposit_token: str = next(grpcbf.client_grpc(
+    deposit_token_msg: str = next(grpcbf.client_grpc(
         method=gateway_pb2_grpc.GatewayStub(
             grpc.insecure_channel(
                 next(generate_uris_by_peer_id(peer_id=peer_id), None)
@@ -47,7 +50,9 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         ).GenerateDepositToken,
         partitions_message_mode_parser=True,
         input=gateway_pb2.Client(client_id=client_id)
-    ), None).token
+    ), None)
+    _l.LOGGER(f"Deposit token msg -> {deposit_token_msg}")
+    deposit_token = deposit_token_msg.token
 
     if not deposit_token:
         _l.LOGGER("No deposit token available.")
