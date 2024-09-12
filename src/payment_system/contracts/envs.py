@@ -1,7 +1,6 @@
 from typing import Callable, Dict
 from protos import celaut_pb2
 
-# from contracts.ethereum.deposit_contract import interface   # IF ACTIVATED, payment_process/payment_process.py init_contract_interfaces() MUST ALSO BE ACTIVATED
 from src.payment_system.contracts.simulator import interface as simulated
 
 contract_hash = str
