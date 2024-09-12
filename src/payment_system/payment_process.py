@@ -1,5 +1,6 @@
 import string
 from hashlib import sha3_256
+from uuid import uuid4
 from time import sleep
 import grpc
 from grpcbigbuffer import client as grpcbf
@@ -25,10 +26,35 @@ MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
 
 sc = SQLConnection()
 
+deposit_tokens = {}  # Provisional Dict[deposit_token, client_id]
+def generate_deposit_token(client_id: str) -> str:
+    deposit_token = str(uuid4())
+    deposit_tokens[deposit_token] = client_id
+    return deposit_token
 
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
-    deposit_token: str = get_client_id_on_other_peer(peer_id=peer_id)
-    _l.LOGGER('Peer payment process to peer ' + peer_id + ' with client ' + deposit_token + ' of ' + str(amount))
+    client_id: str = get_client_id_on_other_peer(peer_id=peer_id)
+    if not client_id:
+        _l.LOGGER("No client available.")
+        return False
+
+    # Get the token for identify the deposit with that client.
+    deposit_token: str = next(grpcbf.client_grpc(
+        method=gateway_pb2_grpc.GatewayStub(
+            grpc.insecure_channel(
+                next(generate_uris_by_peer_id(peer_id=peer_id), None)
+            )
+        ).GenerateDepositToken,
+        partitions_message_mode_parser=True,
+        input=gateway_pb2.Client(client_id=client_id)
+    ), None).deposit_token
+
+    if not deposit_token:
+        _l.LOGGER("No deposit token available.")
+        return False
+
+    _l.LOGGER(f'Peer payment process to peer {peer_id} and deposit token {deposit_token} of {amount}')
+    # Try to make the payment on any platform.
     for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():
         # check if the payment process is compatible with this peer.
         try:
@@ -38,23 +64,22 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                         peer_id=peer_id
                     )
             ):
-                _l.LOGGER(
-                    'Peer payment process:   Ledger: ' + str(ledger) + ' Contract address: ' + str(contract_address))
+                _l.LOGGER(f'Peer payment process: Desposit token: {deposit_token}. Ledger: {ledger}. Contract address: contract_address')
                 contract_ledger = process_payment(
                     amount=amount,
                     token=deposit_token,
                     ledger=ledger,
                     contract_address=contract_address
                 )
-                _l.LOGGER('Peer payment process: payment process executed. Ledger: ' + str(
-                    contract_ledger.ledger) + ' Contract address: ' + str(contract_ledger.contract_addr))
+                _l.LOGGER(f'Peer payment process: payment process executed. Deposit token {deposit_token}')
                 attempt = 0
                 while True:
                     try:
                         next(grpcbf.client_grpc(
                             method=gateway_pb2_grpc.GatewayStub(
-                                grpc.insecure_channel(
-                                    next(generate_uris_by_peer_id(peer_id=peer_id))
+                                grpc.insecure_channel(next(
+                                    generate_uris_by_peer_id(peer_id=peer_id),
+                                    None)
                                 )
                             ).Payable,
                             partitions_message_mode_parser=True,
@@ -63,8 +88,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                 deposit_token=deposit_token,
                                 contract_ledger=contract_ledger,
                             )
-                        ), None
-                        )
+                        ), None)
                         _l.LOGGER('Peer payment process to ' + peer_id + ' of ' + str(amount) + ' communicated.')
                         break
                     except Exception as e:
@@ -109,20 +133,26 @@ def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
 
 
 def validate_payment_process(amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
-    return __check_payment_process(amount=amount, ledger=ledger, token=token, contract=contract,
-                                   contract_addr=contract_addr) \
-        and increase_local_gas_for_client(client_id=token, amount=amount)  # TODO allow for containers too.
+    return __check_payment_process(
+        amount=amount, ledger=ledger, token=token,
+        contract=contract, contract_addr=contract_addr
+    ) and increase_local_gas_for_client(client_id=token, amount=amount)  # TODO allow for containers too.
 
 
 def __check_payment_process(amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
     _l.LOGGER('Check payment process to ' + token + ' of ' + str(amount))
-    if not sc.client_exists(client_id=token):
-        _l.LOGGER(f"Client id {token} not in clients.")
+    if token not in deposit_tokens:
+        _l.LOGGER(f"No token {token} in pending deposit_tokens")
         return False
+
+    client_id = deposit_tokens[token]
+    if not sc.client_exists(client_id=client_id):
+        _l.LOGGER(f"Client id {client_id} not in clients.")
+        return False
+
     _validator = PAYMENT_PROCESS_VALIDATORS[sha3_256(contract).hexdigest()]
-    return _validator(amount, token, ledger, contract_addr, validate_token=lambda t: sc.client_exists(client_id=t))
+    return _validator(amount, token, ledger, contract_addr, validate_token=lambda t: True)
 
 
 def init_contract_interfaces():
     pass
-    # vyper_gdc.VyperDepositContractInterface()

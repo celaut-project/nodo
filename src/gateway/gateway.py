@@ -10,7 +10,7 @@ from src.gateway.utils import generate_gateway_instance
 from src.manager.manager import prune_container, generate_client, get_token_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources
 from src.manager.metrics import get_metrics
-from src.payment_system.payment_process import validate_payment_process
+from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import logger as l
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name
 from src.utils.env import EnvManager
@@ -36,7 +36,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 request_iterator=request_iterator,
                                 indices=gateway_pb2.TokenMessage,
                                 partitions_message_mode=True
-                            )).token
+                            ), 0).token
                         ))
                     )
             )
@@ -58,6 +58,17 @@ class Gateway(gateway_pb2_grpc.Gateway):
         # TODO DDOS protection.   ¿?
         yield from grpcbf.serialize_to_buffer(
                 message_iterator=generate_client()
+        )
+
+    def GenerateDepositToken(self, request_iterator, context, *kwargs):
+        yield from grpcbf.serialize_to_buffer(
+                message_iterator=generate_deposit_token(
+                    client_id=next(grpcbf.parse_from_buffer(
+                        request_iterator=request_iterator,
+                        indices=gateway_pb2.Client,
+                        partitions_message_mode=True
+                    ), 0).client_id
+                )
         )
 
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
@@ -108,7 +119,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def GetService(self, request_iterator, context, **kwargs):
         l.LOGGER(f"Get service method.")
         yield from GetServiceIterable(request_iterator, context)
-
 
     def Payable(self, request_iterator, context, **kwargs):
         l.LOGGER('Request for payment.')
