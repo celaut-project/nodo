@@ -116,7 +116,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             request_iterator=request_iterator,
             indices=gateway_pb2.Payment,
             partitions_message_mode=True
-        ))
+        ), None)
         if not validate_payment_process(
                 amount=from_gas_amount(payment.gas_amount),
                 ledger=payment.contract_ledger.ledger,
@@ -135,7 +135,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         request_iterator=request_iterator,
                         indices=gateway_pb2.TokenMessage,
                         partitions_message_mode=True
-                    )).token
+                    ), None).token
                 ),
                 indices=gateway_pb2.Metrics,
         )
