@@ -47,7 +47,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         ).GenerateDepositToken,
         partitions_message_mode_parser=True,
         input=gateway_pb2.Client(client_id=client_id)
-    ), None).deposit_token
+    ), None).token
 
     if not deposit_token:
         _l.LOGGER("No deposit token available.")
