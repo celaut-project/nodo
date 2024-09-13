@@ -1,12 +1,13 @@
 import string
 from hashlib import sha3_256
 from uuid import uuid4
+from src.payment_system.contracts import simulator
 from time import sleep
 import grpc
 from grpcbigbuffer import client as grpcbf
 from src.payment_system.ledger_balancer import ledger_balancer
 
-from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, PAYMENT_PROCESS_VALIDATORS
+from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, PAYMENT_PROCESS_VALIDATORS, DEMOS
 
 from protos import gateway_pb2_grpc, gateway_pb2
 
@@ -65,7 +66,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                     ledger_generator=get_peer_contract_instances(
                         contract_hash=contract_hash,
                         peer_id=peer_id
-                    )
+                    ) if contract_hash not in DEMOS else [("", "")]
             ):
                 _l.LOGGER(f'Peer payment process: Desposit token: {deposit_token}. Ledger: {ledger}. Contract address: contract_address')
                 contract_ledger = process_payment(

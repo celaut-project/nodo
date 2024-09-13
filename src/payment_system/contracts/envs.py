@@ -19,3 +19,5 @@ PAYMENT_PROCESS_VALIDATORS: Dict[contract_hash, Callable[[amount, token, ledger,
 AVAILABLE_PAYMENT_PROCESS: Dict[contract_hash, Callable[[amount, token, ledger, contract_addr], contract_ledger]] = {
     simulated.CONTRACT_HASH: simulated.process_payment
 }
+
+DEMOS = [simulated.CONTRACT_HASH]
