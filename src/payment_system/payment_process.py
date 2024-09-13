@@ -57,7 +57,6 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         _l.LOGGER("No deposit token available.")
         return False
 
-    _l.LOGGER(f'Peer payment process to peer {peer_id} and deposit token {deposit_token} of {amount}')
     # Try to make the payment on any platform.
     for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():
         # check if the payment process is compatible with this peer.
