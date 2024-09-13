@@ -61,16 +61,18 @@ class Gateway(gateway_pb2_grpc.Gateway):
         )
 
     def GenerateDepositToken(self, request_iterator, context, *kwargs):
+        deposit_token = gateway_pb2.TokenMessage(
+            token=generate_deposit_token(
+                client_id=next(grpcbf.parse_from_buffer(
+                    request_iterator=request_iterator,
+                    indices=gateway_pb2.Client,
+                    partitions_message_mode=True
+                ), 0).client_id
+            )
+        )
+        print(f"deposit token msg -> {deposit_token}")
         yield from grpcbf.serialize_to_buffer(
-                message_iterator=gateway_pb2.TokenMessage(
-                    token=generate_deposit_token(
-                        client_id=next(grpcbf.parse_from_buffer(
-                            request_iterator=request_iterator,
-                            indices=gateway_pb2.Client,
-                            partitions_message_mode=True
-                        ), 0).client_id
-                    )
-                )
+                message_iterator=deposit_token
         )
 
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
