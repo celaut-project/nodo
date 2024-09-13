@@ -44,12 +44,13 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
     # Get the token for identify the deposit with that client.
     deposit_token_msg: str = next(grpcbf.client_grpc(
         method=gateway_pb2_grpc.GatewayStub(
-            grpc.insecure_channel(
-                next(generate_uris_by_peer_id(peer_id=peer_id), None)
-            )
-        ).GenerateDepositToken,
+                grpc.insecure_channel(
+                    next(generate_uris_by_peer_id(peer_id=peer_id), None)
+                )
+            ).GenerateDepositToken,
         partitions_message_mode_parser=True,
-        input=gateway_pb2.Client(client_id=client_id)
+        input=gateway_pb2.Client(client_id=client_id),
+        indices_parser=gateway_pb2.TokenMessage
     ), None)
     _l.LOGGER(f"Deposit token msg -> {deposit_token_msg}")
     deposit_token = deposit_token_msg.token
