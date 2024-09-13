@@ -52,8 +52,8 @@ CONTRACT = """
     Payer Signature: _______________________________
     Name: [Payer's Full Name]
     Date: [Date]
-"""
-CONTRACT_HASH = sha3_256(CONTRACT.encode('utf-8')).hexdigest()
+""".encode('utf-8')
+CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 
 
 def process_payment(amount: int, token: str, ledger: str,
