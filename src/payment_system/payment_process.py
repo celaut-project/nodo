@@ -108,6 +108,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
             _l.LOGGER('Peer payment process error: ' + str(e))
             return False
         return True
+    _l.LOGGER("Any payment process available.")
     return False
 
 
