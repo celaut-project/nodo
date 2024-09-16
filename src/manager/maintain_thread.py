@@ -136,16 +136,22 @@ def peer_deposits():
         if not is_peer_available(peer_id=peer['id'], min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             # l.LOGGER('Peer '+peer_id+' is not available .')
             try:
+                instance = next(peerpc(
+                    method=gateway_pb2_grpc.GatewayStub(
+                        grpc.insecure_channel(
+                            next(generate_uris_by_peer_id(peer_id=peer['id']), "")
+                        )
+                    ).GetInstance,
+                    indices_parser=Instance,
+                    partitions_message_mode_parser=True
+                ), None)
+            except:
+                continue
+            if not instance:
+                continue
+            try:
                 update_peer_instance(
-                    instance=next(peerpc(
-                        method=gateway_pb2_grpc.GatewayStub(
-                            grpc.insecure_channel(
-                                next(generate_uris_by_peer_id(peer_id=peer['id']))
-                            )
-                        ).GetInstance,
-                        indices_parser=Instance,
-                        partitions_message_mode_parser=True
-                    )),
+                    instance=instance,
                     peer_id=peer["id"]
                 )
             except Exception as e:
