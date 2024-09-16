@@ -138,13 +138,19 @@ def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
 
 
 def validate_payment_process(amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
-    return __check_payment_process(
-        amount=amount, ledger=ledger, token=token,
-        contract=contract, contract_addr=contract_addr
-    ) and increase_local_gas_for_client(client_id=token, amount=amount)  # TODO allow for containers too.
+    if token not in deposit_tokens:
+        raise Exception("Deposit token doesn't exists.")
+    try:
+        _r = __check_payment_process(
+            amount=amount, ledger=ledger, token=token,
+            contract=contract, contract_addr=contract_addr
+        ) and increase_local_gas_for_client(client_id=deposit_tokens[token], amount=amount)  # TODO allow for containers too.
+    except: _r = False
+    if _r: del deposit_tokens[token]
+    return _r
 
 
-def __check_payment_process(amount: int, ledger: str, token: str, contract: bytes, contract_addr: string) -> bool:
+def __check_payment_process(amount: int, ledger: str, token: str, contract: bytes, contract_addr: str) -> bool:
     _l.LOGGER('Check payment process to ' + token + ' of ' + str(amount))
     if token not in deposit_tokens:
         _l.LOGGER(f"No token {token} in pending deposit_tokens")
