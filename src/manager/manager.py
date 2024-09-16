@@ -241,15 +241,18 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
         raise Exception('Peer not available.')
 
     logger.LOGGER('Generate new client for peer ' + peer_id)
-    new_client_id = str(next(grpcbf.client_grpc(
+    client_msg = next(grpcbf.client_grpc(
         method=gateway_pb2_grpc.GatewayStub(
             grpc.insecure_channel(
-                next(generate_uris_by_peer_id(peer_id=peer_id))
+                next(generate_uris_by_peer_id(peer_id=peer_id), "")
             )
         ).GenerateClient,
         indices_parser=gateway_pb2.Client,
         partitions_message_mode_parser=True
-    )).client_id)
+    ), "")
+    if not client_msg:
+        raise Exception("No client msg returned.")
+    new_client_id = str(client_msg.client_id)
     if not sc.add_external_client(peer_id=peer_id, client_id=new_client_id):
         return  # If fails return None.
 
