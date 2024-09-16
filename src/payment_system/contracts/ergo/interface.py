@@ -1,47 +1,101 @@
-from ergpy import ergo
+from protos import celaut_pb2, gateway_pb2
+from hashlib import sha3_256
+from ergpy import appkit
+from src.utils.logger import LOGGER
+from src.utils.env import EnvManager
+import json
+import jpype
+from org.ergoplatform.sdk import *
+from org.ergoplatform.appkit import *
+from org.ergoplatform.appkit.impl import *
 
-# URL del nodo Ergo
-node_url = "https://your-node-url.com"
-ergo_client = ergo.ErgoClient(node_url)
+# Initialize environment and global variables
+env_manager = EnvManager()
+DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
+CONTRACT = """
+{
+  val isValid = rproveDlog("""+env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')+"""")
+  isValid
+}
+""".encode('utf-8')
+CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()  # TODO Should be without the ERGO PAYMENTS RECIVER WALLET. And without indentation. .. Hash of the ErgoScript contract for reference
 
-# Frase mnemónica de la billetera
-mnemonic = "your mnemonic phrase here"
-wallet = ergo.Wallet(mnemonic)
+# TODO Must add it's contract with ERGO_PAYMENTS_RECIVER_WALLET on contract_address with null peer, for be used on gateway instance.
+#
+# Function to process the payment, generating a transaction with the token in register R4
+def process_payment(amount: int, token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
+    LOGGER(f"Process simulated payment for token {token} of {amount}")
 
-# Dirección del contrato
-contract_address = "your_contract_address_here"
+    try:
+        # Initialize ErgoAppKit and get the sender's address
+        ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
+        sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC'), wallet_password=None)
 
-# Cargar el contrato
-contract = ergo.Contract(ergo_client, contract_address)
+        # Fetch UTXO from the contract's address
+        contract_utxo = ergo.getInputBoxCovering(
+            amount_list=[amount],
+            sender_address=sender_address
+        )
 
+        if not contract_utxo:
+            raise Exception("No UTXO found for the contract address with the required token.")
 
-# Obtener el propietario del contrato
-def get_contract_owner():
-    owner = contract.call("get_owner")
-    return owner
+        # Build the output box with the token in register R4
+        out_box = ergo._ctx.newTxBuilder() \
+                    .outBoxBuilder() \
+                    .value(amount) \
+                    .registers([
+                        ErgoValue.of(jpype.JString(token).getBytes("utf-8"))  # Store token in R4
+                    ]) \
+                    .contract(contract_address) \  # TODO correct?
+                    .build()  # Build the output box
 
+        # Create the unsigned transaction
+        unsigned_tx = ergo.buildUnsignedTransaction(
+            input_box=[contract_utxo],  # Input UTXO
+            outBox=[out_box],  # Output box
+            fee=DEFAULT_FEE,  # Fee for the transaction
+            sender_address=sender_address  # Sender's address
+        )
 
-# Agregar gas al contrato
-def add_gas_to_contract(token_id, amount):
-    tx = wallet.send_to_contract(
-        contract_address,
-        "add_gas",
-        [{"token": token_id, "amount": amount}]
+        # Sign the transaction
+        signed_tx = ergo.signTransaction(unsigned_tx, env_manager.get_env('ERGO_WALLET_MNEMONIC'), prover_index=0)
+
+        # Submit the transaction and get the transaction ID
+        tx_id = ergo.txId(signed_tx)
+        LOGGER(f"Transaction submitted: {tx_id}")
+
+    except Exception as e:
+        LOGGER(f"Error processing payment: {str(e)}")
+        raise e
+
+    # Return the updated ledger state
+    return gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
+        ledger=ledger,
+        contract_addr=contract_address,
+        contract=CONTRACT
     )
-    return tx
 
+# Function to validate the payment process by checking if there is an unspent box with the token in register R4
+def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str, validate_token) -> bool:
+    try:
+        # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
+        ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
+        utxos = ergo.getUnspentBoxForAddress(contract_addr)
 
-# Obtener información sobre el contrato
-def get_contract_info():
-    parity_factor = contract.call("get_parity_factor")
-    return {"parity_factor": parity_factor}
+        # Check if any UTXO contains the token in register R4
+        for utxo in utxos:
+            box_dict = json.loads(str(utxo.toJson(True)))  # Convert UTXO to JSON
+            if "additionalRegisters" in box_dict and "R4" in box_dict["additionalRegisters"]:
+                r4_value = box_dict["additionalRegisters"]["R4"]
+                decoded_r4 = bytes(r4_value, 'utf-8').decode("utf-8")  # Decode the value in R4
+                if decoded_r4 == token:
+                    LOGGER(f"Token {token} found in R4.")
+                    return True
 
+        LOGGER(f"Token {token} not found in R4.")
+        return False
 
-# Interactuar con el contrato
-def interact_with_contract():
-    # Obtener el propietario del contrato
-    owner = get_contract_owner()
-    print("Contract Owner:", owner)
-
-    # Agregar gas al contrato
-    token_id = b'\x01\x02\x03'
+    except Exception as e:
+        LOGGER(f"Error validating payment process: {str(e)}")
+        return False
