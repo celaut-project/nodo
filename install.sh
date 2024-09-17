@@ -119,13 +119,6 @@ else
   systemctl status nodo.service || printf "Service is not running or not correctly installed.\n"
 fi
 
-if systemctl status nodo.service >/dev/null 2>&1; then
-  printf "Restarting nodo.service...\n"
-  systemctl restart nodo.service
-else
-  printf "Error: nodo.service does not exist or cannot be restarted. Please check the service creation process.\n" >&2
-fi
-
 create_wrapper_script() {
   WRAPPER_SCRIPT="/usr/local/bin/nodo"
 
@@ -159,6 +152,13 @@ chmod +x "$RESTORE_SCRIPT"
 if ! ./"$RESTORE_SCRIPT" "$TARGET_DIR"; then
   printf "Error: The script $RESTORE_SCRIPT failed to execute.\n" >&2
   exit 1
+fi
+
+if systemctl status nodo.service >/dev/null 2>&1; then
+  printf "Restarting nodo.service...\n"
+  systemctl restart nodo.service
+else
+  printf "Error: nodo.service does not exist or cannot be restarted. Please check the service creation process.\n" >&2
 fi
 
 printf "Installation and service setup completed successfully. The repository is located at $TARGET_DIR.\n"
