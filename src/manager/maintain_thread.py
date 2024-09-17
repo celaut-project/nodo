@@ -12,7 +12,7 @@ from protos.gateway_pb2_grpcbf import StartService_input_indices, StartService_i
 from src.manager.manager import prune_container, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
-from src.payment_system.payment_process import __increase_deposit_on_peer, init_contract_interfaces
+from src.payment_system.payment_process import increase_deposit_on_peer
 from src.reputation_system.simple_reputation_feedback import update_reputation, submit_reputation
 from src.utils import logger as l
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
@@ -167,7 +167,7 @@ def peer_deposits():
             # f'\n   min deposit per peer -> {MIN_DEPOSIT_PEER}'
             # f'\n   actual gas deposit -> {gas_amount_on_other_peer(peer_id=peer_id)}'
             # f'\n\n')
-            if not __increase_deposit_on_peer(peer_id=peer["id"], amount=MIN_DEPOSIT_PEER):
+            if not increase_deposit_on_peer(peer_id=peer["id"], amount=MIN_DEPOSIT_PEER):
                 l.LOGGER(f'Manager error: the peer {peer["id"]} could not be increased.')
 
 
@@ -184,7 +184,6 @@ def check_dev_clients():
 
 
 def manager_thread():
-    init_contract_interfaces()
     while True:
         check_wanted_services()
         check_dev_clients()

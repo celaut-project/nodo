@@ -113,7 +113,8 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
     return False
 
 
-def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
+def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
+    if amount < MIN_DEPOSIT_PEER: amount = MIN_DEPOSIT_PEER
     _l.LOGGER('Increase deposit on peer ' + peer_id + ' by ' + str(amount))
     try:
         if __peer_payment_process(peer_id=peer_id, amount=amount):
@@ -126,14 +127,6 @@ def __increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
             return False
     except Exception as e:
         _l.LOGGER(f'Error increasing deposit on peer {peer_id}: {e}')
-        return False
-
-
-def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
-    try:
-        return __increase_deposit_on_peer(peer_id=peer_id, amount=amount + MIN_DEPOSIT_PEER)
-    except Exception as e:
-        _l.LOGGER('Manager error: ' + str(e))
         return False
 
 
@@ -163,7 +156,3 @@ def __check_payment_process(amount: int, ledger: str, token: str, contract: byte
 
     _validator = PAYMENT_PROCESS_VALIDATORS[sha3_256(contract).hexdigest()]
     return _validator(amount, token, ledger, contract_addr, validate_token=lambda t: True)
-
-
-def init_contract_interfaces():
-    pass
