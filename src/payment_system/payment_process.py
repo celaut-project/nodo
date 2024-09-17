@@ -35,6 +35,15 @@ def generate_deposit_token(client_id: str) -> str:
     _l.LOGGER("Deposit token generated.")
     return deposit_token
 
+
+# Helper function to create the gRPC stub and get URIs
+def __get_grpc_stub(peer_id):
+    uri = next(generate_uris_by_peer_id(peer_id=peer_id), None)
+    if uri is None:
+        return None
+    return gateway_pb2_grpc.GatewayStub(grpc.insecure_channel(uri))
+
+
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
     client_id: str = get_client_id_on_other_peer(peer_id=peer_id)
     if not client_id:
@@ -42,74 +51,89 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         return False
 
     _l.LOGGER(f"Generate deposit token on the peer {peer_id} with client {client_id}")
-    # Get the token for identify the deposit with that client.
-    deposit_token: str = next(grpcbf.client_grpc(
-        method=gateway_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(
-                    next(generate_uris_by_peer_id(peer_id=peer_id), None)
-                )
-            ).GenerateDepositToken,
-        partitions_message_mode_parser=True,
-        input=gateway_pb2.Client(client_id=client_id),
-        indices_parser=gateway_pb2.TokenMessage
-    ), None).token
+
+    # Generate the deposit token
+    grpc_stub = __get_grpc_stub(peer_id)
+    if not grpc_stub:
+        _l.LOGGER("Failed to generate gRPC stub.")
+        return False
+
+    try:
+        deposit_token = next(grpcbf.client_grpc(
+            method=grpc_stub.GenerateDepositToken,
+            partitions_message_mode_parser=True,
+            input=gateway_pb2.Client(client_id=client_id),
+            indices_parser=gateway_pb2.TokenMessage
+        ), None).token
+    except Exception as e:
+        _l.LOGGER(f"Error generating deposit token: {str(e)}")
+        return False
 
     if not deposit_token:
         _l.LOGGER("No deposit token available.")
         return False
 
-    # Try to make the payment on any platform.
+    # Attempt payment processing for each available payment process
     for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():
-        # check if the payment process is compatible with this peer.
         try:
-            for contract_address, ledger in ledger_balancer(
-                    ledger_generator=get_peer_contract_instances(
-                        contract_hash=contract_hash,
-                        peer_id=peer_id
-                    ) if contract_hash not in DEMOS else [("", "")]
-            ):
-                _l.LOGGER(f'Peer payment process: Desposit token: {deposit_token}. Ledger: {ledger}. Contract address: contract_address')
+            # Get all available ledgers for this peer and contract
+            ledgers = get_peer_contract_instances(contract_hash, peer_id) if contract_hash not in DEMOS else [("", "")]
+            for contract_address, ledger in ledger_balancer(ledger_generator=ledgers):
+                _l.LOGGER(f"Processing payment: Deposit token: {deposit_token}. Ledger: {ledger}. Contract address: {contract_address}")
+
+                # Process the payment
                 contract_ledger = process_payment(
                     amount=amount,
                     token=deposit_token,
                     ledger=ledger,
                     contract_address=contract_address
                 )
-                _l.LOGGER(f'Peer payment process: payment process executed. Deposit token {deposit_token}')
-                attempt = 0
-                while True:
-                    try:
-                        next(grpcbf.client_grpc(
-                            method=gateway_pb2_grpc.GatewayStub(
-                                grpc.insecure_channel(next(
-                                    generate_uris_by_peer_id(peer_id=peer_id),
-                                    None)
-                                )
-                            ).Payable,
-                            partitions_message_mode_parser=True,
-                            input=gateway_pb2.Payment(
-                                gas_amount=to_gas_amount(amount),
-                                deposit_token=deposit_token,
-                                contract_ledger=contract_ledger,
-                            )
-                        ), None)
-                        _l.LOGGER('Peer payment process to ' + peer_id + ' of ' + str(amount) + ' communicated.')
-                        break
-                    except Exception as e:
-                        attempt += 1
-                        if attempt >= COMMUNICATION_ATTEMPTS:
-                            _l.LOGGER('Peer payment communication process:   Failed. ' + str(e))
-                            # TODO subtract node reputation
-                            return False
-                        sleep(COMMUNICATION_ATTEMPTS_DELAY)
-            # TODO, aqui hay que controlar el caso en que no tengamos ningun contrato disponible para ese par.
-            #  porque ahora estamos diciendo que está ok. Pero en realidad no hemos hecho nada
-            #  y va a entrar en loop todo el tiempo o reducirá su reputación ....
+                _l.LOGGER(f"Payment processed. Deposit token: {deposit_token}")
+
+                # Handle communication attempts to peer
+                if not __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
+                    _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
+                    continue  # Try the next contract hash
+
+            _l.LOGGER(f"No compatible contract found for {contract_hash}")
         except Exception as e:
-            _l.LOGGER('Peer payment process error: ' + str(e))
-            return False
+            _l.LOGGER(f"Error processing payment for contract {contract_hash}: {str(e)}")
+            continue  # Continue to next contract hash
         return True
-    _l.LOGGER("Any payment process available.")
+
+    _l.LOGGER("No available payment process.")
+    return False
+
+
+# Helper function for payment communication retries
+def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: str, contract_ledger: str) -> bool:
+    attempt = 0
+    while attempt < COMMUNICATION_ATTEMPTS:
+        try:
+            grpc_stub = __get_grpc_stub(peer_id)
+            if not grpc_stub:
+                _l.LOGGER(f"Failed to get gRPC stub for peer {peer_id}")
+                return False
+
+            next(grpcbf.client_grpc(
+                method=grpc_stub.Payable,
+                partitions_message_mode_parser=True,
+                input=gateway_pb2.Payment(
+                    gas_amount=to_gas_amount(amount),
+                    deposit_token=deposit_token,
+                    contract_ledger=contract_ledger,
+                )
+            ), None)
+
+            _l.LOGGER(f"Payment of {amount} to {peer_id} communicated successfully.")
+            return True
+        except Exception as e:
+            attempt += 1
+            _l.LOGGER(f"Communication attempt {attempt} failed: {str(e)}")
+            if attempt >= COMMUNICATION_ATTEMPTS:
+                _l.LOGGER(f"Max communication attempts reached for {peer_id}.")
+                return False
+            sleep(COMMUNICATION_ATTEMPTS_DELAY)
     return False
 
 
