@@ -24,6 +24,8 @@ sql.add_contract(contract=gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
     contract=CONTRACT
 ), peer_id=None)
 
+LOGGER("ERGO PAYMENT INTERFACE INITIATED.")
+
 # Function to process the payment, generating a transaction with the token in register R4
 def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
     LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount}")
