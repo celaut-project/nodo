@@ -2,6 +2,7 @@ from typing import Callable, Dict
 from protos import celaut_pb2
 
 from src.payment_system.contracts.simulator import interface as simulated
+from src.payment_system.contracts.ergo import interface as ergo
 
 contract_hash = str
 contract_addr = str
@@ -13,11 +14,13 @@ validate_token = Callable[[token], bool]
 contract_ledger = celaut_pb2.Service.Api.ContractLedger
 
 PAYMENT_PROCESS_VALIDATORS: Dict[contract_hash, Callable[[amount, token, ledger, contract_addr, validate_token], bool]] = {
-    simulated.CONTRACT_HASH: simulated.payment_process_validator
+    # simulated.CONTRACT_HASH: simulated.payment_process_validator
+    ergo.CONTRACT_HASH: ergo.payment_process_validator
 }
 
 AVAILABLE_PAYMENT_PROCESS: Dict[contract_hash, Callable[[amount, token, ledger, contract_addr], contract_ledger]] = {
-    simulated.CONTRACT_HASH: simulated.process_payment
+    # simulated.CONTRACT_HASH: simulated.process_payment
+    ergo.CONTRACT_HASH: ergo.process_payment
 }
 
 DEMOS = [simulated.CONTRACT_HASH]
