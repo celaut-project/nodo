@@ -1,6 +1,7 @@
 from protos import celaut_pb2, gateway_pb2
 from hashlib import sha3_256
 from ergpy import appkit
+from src.database import sql_connection
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
 import json
@@ -12,20 +13,22 @@ from org.ergoplatform.appkit.impl import *
 # Initialize environment and global variables
 env_manager = EnvManager()
 DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
+LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.
 CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree script
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 
-# TODO Must add it's contract with ERGO_PAYMENTS_RECIVER_WALLET on contract_address with null peer, for be used on gateway instance.
+sql = sql_connection.SQLConnection()
+sql.add_contract(contract=gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
+    ledger=LEDGER,
+    contract_addr=env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET'),
+    contract=CONTRACT
+), peer_id=None)
 
 # Function to process the payment, generating a transaction with the token in register R4
 def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
     LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount}")
 
     try:
-        # Initialize ErgoAppKit and get the sender's address
-        ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
-        sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC'), wallet_password=None)
-
         # Fetch UTXO from the contract's address
         contract_utxo = ergo.getInputBoxCovering(
             amount_list=[amount],
