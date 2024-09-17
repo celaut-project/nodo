@@ -18,6 +18,7 @@ CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree script
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 
 def init():
+    LOGGER("Make a sql query ergo.")
     sql = sql_connection.SQLConnection()
     sql.add_contract(contract=gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
         ledger=LEDGER,
