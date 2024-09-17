@@ -24,7 +24,7 @@ def init():
         ledger=LEDGER,
         contract_addr=env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET'),
         contract=CONTRACT
-    ), peer_id=None)
+    ))
 
     LOGGER("ERGO PAYMENT INTERFACE INITIATED.")
 

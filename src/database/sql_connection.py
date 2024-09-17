@@ -735,7 +735,7 @@ class SQLConnection(metaclass=Singleton):
             for uri in slot.uri:
                 self.add_uri(uri, slot_id=slot_id)
 
-    def add_contract(self, contract: celaut_pb2.Service.Api.ContractLedger, peer_id: Optional[str]):
+    def add_contract(self, contract: celaut_pb2.Service.Api.ContractLedger, peer_id: str = "LOCAL"):
         """
         Adds a contract to the database.
 

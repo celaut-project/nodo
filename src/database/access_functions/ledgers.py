@@ -8,7 +8,7 @@ def get_ledgers() -> Generator[typing.Tuple[str, str], None, None]:
     yield from fetch_query(query="SELECT id, private_key FROM ledger")
 
 
-def get_peer_contract_instances(contract_hash: str, peer_id: str = None) \
+def get_peer_contract_instances(contract_hash: str, peer_id: str = "LOCAL") \
         -> Generator[typing.Tuple[str, str], None, None]:
     """
         get_ledger_and_contract_address_from_peer_id_and_contract_hash
@@ -20,17 +20,11 @@ def get_peer_contract_instances(contract_hash: str, peer_id: str = None) \
               "AND peer_id = ?",
         params=(contract_hash, peer_id)
 
-    ) if peer_id else fetch_query(
-        query="SELECT address, ledger_id "
-              "FROM contract_instance "
-              "WHERE contract_hash = ? "
-              "AND peer_id IS NULL",
-        params=(contract_hash,)
     )
 
 
 def get_ledger_and_contract_addr_from_contract(contract_hash: str) -> Generator[typing.Tuple[str, str], None, None]:
-    yield from get_peer_contract_instances(contract_hash=contract_hash, peer_id=None)
+    yield from get_peer_contract_instances(contract_hash=contract_hash)
 
 
 def get_ledger_providers(ledger: str) -> Generator[str, None, None]:

@@ -96,7 +96,7 @@ def create_tables(cursor):
                 address TEXT,
                 ledger_id TEXT,
                 contract_hash TEXT,
-                peer_id TEXT NULL,
+                peer_id TEXT NOT NULL,
                 FOREIGN KEY (ledger_id) REFERENCES ledger (id),
                 FOREIGN KEY (contract_hash) REFERENCES contract (hash),
                 FOREIGN KEY (peer_id) REFERENCES peer (id),
