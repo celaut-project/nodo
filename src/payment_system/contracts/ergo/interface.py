@@ -12,19 +12,14 @@ from org.ergoplatform.appkit.impl import *
 # Initialize environment and global variables
 env_manager = EnvManager()
 DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
-CONTRACT = """
-{
-  val isValid = rproveDlog("""+env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')+"""")
-  isValid
-}
-""".encode('utf-8')
-CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()  # TODO Should be without the ERGO PAYMENTS RECIVER WALLET. And without indentation. .. Hash of the ErgoScript contract for reference
+CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree script
+CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 
 # TODO Must add it's contract with ERGO_PAYMENTS_RECIVER_WALLET on contract_address with null peer, for be used on gateway instance.
-#
+
 # Function to process the payment, generating a transaction with the token in register R4
-def process_payment(amount: int, token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
-    LOGGER(f"Process simulated payment for token {token} of {amount}")
+def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
+    LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount}")
 
     try:
         # Initialize ErgoAppKit and get the sender's address
@@ -45,9 +40,9 @@ def process_payment(amount: int, token: str, ledger: str, contract_address: str)
                     .outBoxBuilder() \
                     .value(amount) \
                     .registers([
-                        ErgoValue.of(jpype.JString(token).getBytes("utf-8"))  # Store token in R4
+                        ErgoValue.of(jpype.JString(deposit_token).getBytes("utf-8"))  # Store token in R4
                     ]) \
-                    .contract(contract_address) \  # TODO correct?
+                    .contract(Address.create(contract_address).toErgoContract) \
                     .build()  # Build the output box
 
         # Create the unsigned transaction
