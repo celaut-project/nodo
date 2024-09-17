@@ -25,8 +25,6 @@ COMMUNICATION_ATTEMPTS = env_manager.get_env("COMMUNICATION_ATTEMPTS")
 COMMUNICATION_ATTEMPTS_DELAY = env_manager.get_env("COMMUNICATION_ATTEMPTS_DELAY")
 MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
 
-[_init() for _init in INIT_INTERFACES.values()]  # Init all payment interfaces.
-
 sc = SQLConnection()
 
 deposit_tokens = {}  # Provisional Dict[deposit_token, client_id]
@@ -182,3 +180,12 @@ def __check_payment_process(amount: int, ledger: str, token: str, contract: byte
 
     _validator = PAYMENT_PROCESS_VALIDATORS[sha3_256(contract).hexdigest()]
     return _validator(amount, token, ledger, contract_addr, validate_token=lambda t: True)
+
+
+def init_interfaces():
+    # Initialize all payment interfaces if they are callable
+    for _init in INIT_INTERFACES.values():
+        if callable(_init):
+            _init()  # Execute the init function
+        else:
+            _l.LOGGER(f"Warning: {_init} is not callable.")
