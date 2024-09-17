@@ -17,14 +17,15 @@ LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.
 CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree script
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 
-sql = sql_connection.SQLConnection()
-sql.add_contract(contract=gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
-    ledger=LEDGER,
-    contract_addr=env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET'),
-    contract=CONTRACT
-), peer_id=None)
+def init():
+    sql = sql_connection.SQLConnection()
+    sql.add_contract(contract=gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
+        ledger=LEDGER,
+        contract_addr=env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET'),
+        contract=CONTRACT
+    ), peer_id=None)
 
-LOGGER("ERGO PAYMENT INTERFACE INITIATED.")
+    LOGGER("ERGO PAYMENT INTERFACE INITIATED.")
 
 # Function to process the payment, generating a transaction with the token in register R4
 def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:

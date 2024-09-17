@@ -23,4 +23,8 @@ AVAILABLE_PAYMENT_PROCESS: Dict[contract_hash, Callable[[amount, token, ledger, 
     ergo.CONTRACT_HASH: ergo.process_payment
 }
 
+INIT_INTERFACES: Dict[contract_hash, Callable[[], None]] = {
+    ergo.CONTRACT_HASH: ergo.init
+}
+
 DEMOS = [simulated.CONTRACT_HASH]

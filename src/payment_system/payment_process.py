@@ -7,7 +7,7 @@ import grpc
 from grpcbigbuffer import client as grpcbf
 from src.payment_system.ledger_balancer import ledger_balancer
 
-from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, PAYMENT_PROCESS_VALIDATORS, DEMOS
+from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_INTERFACES, PAYMENT_PROCESS_VALIDATORS, DEMOS
 
 from protos import gateway_pb2_grpc, gateway_pb2
 
@@ -24,6 +24,8 @@ env_manager = EnvManager()
 COMMUNICATION_ATTEMPTS = env_manager.get_env("COMMUNICATION_ATTEMPTS")
 COMMUNICATION_ATTEMPTS_DELAY = env_manager.get_env("COMMUNICATION_ATTEMPTS_DELAY")
 MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
+
+[_init() for _init in INIT_INTERFACES.values()]  # Init all payment interfaces.
 
 sc = SQLConnection()
 
