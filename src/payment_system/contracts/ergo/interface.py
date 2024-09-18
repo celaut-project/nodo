@@ -116,8 +116,8 @@ def payment_process_validator(amount: int, token: str, ledger: str, contract_add
         # Parse the response from the API
         utxos = response.json()
 
-        for utxo in utxos:
-            box_dict = utxo  # API response is already a JSON object, so no need to convert again
+        for box_dict in utxos:
+            LOGGER(f"aux log {box_dict}")
 
             # Check if the box has additionalRegisters and specifically R4
             if "additionalRegisters" in box_dict and "R4" in box_dict["additionalRegisters"]:
