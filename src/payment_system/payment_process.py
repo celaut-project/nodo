@@ -91,9 +91,9 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                 _l.LOGGER(f"Payment processed. Deposit token: {deposit_token}")
 
                 # Handle communication attempts to peer
-                if not __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
-                    _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
-                    continue  # Try the next contract hash
+                if __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
+                    return True
+                _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
 
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
         except Exception as e:
@@ -106,7 +106,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 
 
 # Helper function for payment communication retries
-def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: str, contract_ledger: str) -> bool:
+def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: str, contract_ledger: gateway_pb2.celaut__pb2.Service.Api.ContractLedger) -> bool:
     attempt = 0
     while attempt < COMMUNICATION_ATTEMPTS:
         try:
