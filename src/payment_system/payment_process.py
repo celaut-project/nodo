@@ -94,6 +94,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                 if __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
                     return True
                 _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
+                # TODO Should decrease reputation on peer or payment network.
 
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
         except Exception as e:
