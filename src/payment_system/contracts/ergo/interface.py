@@ -120,7 +120,7 @@ def payment_process_validator(amount: int, token: str, ledger: str, contract_add
                 r4_value = box_dict["additionalRegisters"]["R4"]
 
                 # Decode the value in R4 (it may require specific encoding/decoding depending on your system)
-                decoded_r4 = bytes.fromhex(r4_value[2:]).decode("utf-8")  # Assuming hex encoding, adjust if needed
+                decoded_r4 = bytes.fromhex(r4_value).decode("utf-8")
 
                 # Check if the decoded value matches the token
                 if decoded_r4 == token:
