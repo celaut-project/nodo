@@ -72,7 +72,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
         )
 
         # Sign the transaction
-        signed_tx = ergo.signTransaction(unsigned_tx, env_manager.get_env('ERGO_WALLET_MNEMONIC'), prover_index=0)
+        signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
 
         # Submit the transaction and get the transaction ID
         tx_id = ergo.txId(signed_tx)
