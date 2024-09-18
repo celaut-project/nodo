@@ -94,9 +94,10 @@ def payment_process_validator(amount: int, token: str, ledger: str, contract_add
     try:
         # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
         ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
-        utxos = ergo.getUnspentBoxForAddress(contract_addr)
+        explorer_api = ergo.get_api_url()
+        LOGGER(f"explorer api url {explorer_api}")
 
-        # Check if any UTXO contains the token in register R4
+        utxos = []
         for utxo in utxos:
             box_dict = json.loads(str(utxo.toJson(True)))  # Convert UTXO to JSON
             if "additionalRegisters" in box_dict and "R4" in box_dict["additionalRegisters"]:
