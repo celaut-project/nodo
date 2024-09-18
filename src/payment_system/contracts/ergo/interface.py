@@ -30,6 +30,7 @@ def init():
 
 # Function to process the payment, generating a transaction with the token in register R4
 def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
+    amount = int(amount/(10**58)) if amount > 10**58 else amount
     LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount}")
 
     try:
