@@ -84,7 +84,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                 # Process the payment
                 contract_ledger = process_payment(
                     amount=amount,
-                    token=deposit_token,
+                    deposit_token=deposit_token,
                     ledger=ledger,
                     contract_address=contract_address
                 )
