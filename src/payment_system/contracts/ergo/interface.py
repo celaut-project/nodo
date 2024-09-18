@@ -67,7 +67,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
         unsigned_tx = ergo.buildUnsignedTransaction(
             input_box=input_utxo,  # Input UTXO
             outBox=[out_box],  # Output box
-            fee=DEFAULT_FEE,  # Fee for the transaction
+            fee=DEFAULT_FEE / 10**9,  # Fee for the transaction
             sender_address=sender_address  # Sender's address
         )
 
