@@ -135,10 +135,10 @@ def payment_process_validator(amount: int, token: str, ledger: str, contract_add
                     else:
                         LOGGER(f"Incorrect amount for token {token}. Value was {box_dict} but should be {__to_nanoerg(amount)}")
                         return False
-                else:
-                    # If no match found
-                    LOGGER(f"Token {token} not found in R4.")
-                    return False
+
+        # If no match found
+        LOGGER(f"Token {token} not found in R4.")
+        return False
 
     except Exception as e:
         LOGGER(f"Error validating payment process: {str(e)}")
