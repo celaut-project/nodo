@@ -6,6 +6,7 @@ from src.database import sql_connection
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
 import json
+from time import sleep
 
 from jpype import *
 import java.lang
@@ -22,6 +23,7 @@ LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.
 CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree script
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 RECIVER_ADDR = env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')
+WAIT_TX_TIME = 240
 
 def __to_nanoerg(amount: int) -> int:
     return int(amount/(10**58)) if amount > 10**58 else amount
@@ -83,16 +85,29 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
         tx_id = ergo.txId(signed_tx)
         LOGGER(f"Transaction submitted: {tx_id}")
 
+        for sec in range(0, WAIT_TX_TIME):
+            sleep(1)
+            response = requests.get(f"{ergo.get_api_url()}/api/v1/transactions/{tx_id}")
+            if response.status_code != 200:
+                LOGGER(f"Error fetching UTXOs: {response.status_code} - {response.text}")
+                continue
+
+            obj = response.json()
+            if obj["numConfirmations"] > 1:
+                LOGGER(f"Tx {tx_id} verified.")
+                return gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
+                    ledger=ledger,
+                    contract_addr=contract_address,
+                    contract=CONTRACT
+                )
+
+        err = f"Can't verify the tx {tx_id}"
+        LOGGER(err)
+        raise Exception(err)
+
     except Exception as e:
         LOGGER(f"Error processing payment: {str(e)}")
         raise e
-
-    # Return the updated ledger state
-    return gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
-        ledger=ledger,
-        contract_addr=contract_address,
-        contract=CONTRACT
-    )
 
 # Function to validate the payment process by checking if there is an unspent box with the token in register R4
 def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str) -> bool:
