@@ -23,6 +23,9 @@ CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree script
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 RECIVER_ADDR = env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')
 
+def __to_nanoerg(amount: int) -> int:
+    return int(amount/(10**58)) if amount > 10**58 else amount
+
 def init():
     LOGGER("Make a sql query ergo.")
     sql = sql_connection.SQLConnection()
@@ -36,7 +39,7 @@ def init():
 
 # Function to process the payment, generating a transaction with the token in register R4
 def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
-    amount = int(amount/(10**58)) if amount > 10**58 else amount
+    amount = __to_nanoerg(amount)
     LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount}")
 
     try:
@@ -93,8 +96,9 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
 
 # Function to validate the payment process by checking if there is an unspent box with the token in register R4
 def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str) -> bool:
+    LOGGER(f"Validating token {token}")
     try:
-        # Ensure that the contract address matches the reciver address
+        assert ledger == LEDGER, "Ledger does not match"
         assert contract_addr == RECIVER_ADDR, "Contract address does not match"
 
         # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
@@ -117,19 +121,24 @@ def payment_process_validator(amount: int, token: str, ledger: str, contract_add
 
             # Check if the box has additionalRegisters and specifically R4
             if "additionalRegisters" in box_dict and "R4" in box_dict["additionalRegisters"]:
-                r4_value = box_dict["additionalRegisters"]["R4"]
-                LOGGER(f"r4 value -> {r4_value}")
-                # Decode the value in R4 (it may require specific encoding/decoding depending on your system)
+                r4_value = box_dict["additionalRegisters"]["R4"]["renderedValue"]
                 decoded_r4 = bytes.fromhex(r4_value).decode("utf-8")
 
                 # Check if the decoded value matches the token
                 if decoded_r4 == token:
                     LOGGER(f"Token {token} found in R4.")
-                    return True
 
-        # If no match found
-        LOGGER(f"Token {token} not found in R4.")
-        return False
+                    # Validate correct amount.
+                    if "value" in box_dict and box_dict["value"] == __to_nanoerg(amount):
+                        LOGGER(f"Correct amount for token {token}")
+                        return True
+                    else:
+                        LOGGER(f"Incorrect amount for token {token}. Value was {box_dict} but should be {__to_nanoerg(amount)}")
+                        return False
+                else:
+                    # If no match found
+                    LOGGER(f"Token {token} not found in R4.")
+                    return False
 
     except Exception as e:
         LOGGER(f"Error validating payment process: {str(e)}")
