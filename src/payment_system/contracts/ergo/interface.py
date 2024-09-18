@@ -1,4 +1,5 @@
 from protos import celaut_pb2, gateway_pb2
+import requests
 from hashlib import sha3_256
 from ergpy import appkit
 from src.database import sql_connection
@@ -20,13 +21,14 @@ DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
 LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.
 CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree script
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
+RECIVER_ADDR = env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')
 
 def init():
     LOGGER("Make a sql query ergo.")
     sql = sql_connection.SQLConnection()
     sql.add_contract(contract=gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
         ledger=LEDGER,
-        contract_addr=env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET'),
+        contract_addr=RECIVER_ADDR,
         contract=CONTRACT
     ))
 
@@ -90,23 +92,42 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
     )
 
 # Function to validate the payment process by checking if there is an unspent box with the token in register R4
-def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str, validate_token) -> bool:
+def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str) -> bool:
     try:
+        # Ensure that the contract address matches the reciver address
+        assert contract_addr == RECIVER_ADDR, "Contract address does not match"
+
         # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
         ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
         explorer_api = ergo.get_api_url()
-        LOGGER(f"explorer api url {explorer_api}")
 
-        utxos = []
+        # Construct the API URL to fetch unspent UTXOs for the contract address
+        url = f"{explorer_api}/api/v1/boxes/unspent/unconfirmed/byAddress/{contract_addr}"
+        response = requests.get(url)
+
+        if response.status_code != 200:
+            LOGGER(f"Error fetching UTXOs: {response.status_code} - {response.text}")
+            return False
+
+        # Parse the response from the API
+        utxos = response.json()
+
         for utxo in utxos:
-            box_dict = json.loads(str(utxo.toJson(True)))  # Convert UTXO to JSON
+            box_dict = utxo  # API response is already a JSON object, so no need to convert again
+
+            # Check if the box has additionalRegisters and specifically R4
             if "additionalRegisters" in box_dict and "R4" in box_dict["additionalRegisters"]:
                 r4_value = box_dict["additionalRegisters"]["R4"]
-                decoded_r4 = bytes(r4_value, 'utf-8').decode("utf-8")  # Decode the value in R4
+
+                # Decode the value in R4 (it may require specific encoding/decoding depending on your system)
+                decoded_r4 = bytes.fromhex(r4_value[2:]).decode("utf-8")  # Assuming hex encoding, adjust if needed
+
+                # Check if the decoded value matches the token
                 if decoded_r4 == token:
                     LOGGER(f"Token {token} found in R4.")
                     return True
 
+        # If no match found
         LOGGER(f"Token {token} not found in R4.")
         return False
 

@@ -13,7 +13,7 @@ amount = int
 validate_token = Callable[[token], bool]
 contract_ledger = celaut_pb2.Service.Api.ContractLedger
 
-PAYMENT_PROCESS_VALIDATORS: Dict[contract_hash, Callable[[amount, token, ledger, contract_addr, validate_token], bool]] = {
+PAYMENT_PROCESS_VALIDATORS: Dict[contract_hash, Callable[[amount, token, ledger, contract_addr], bool]] = {
     # simulated.CONTRACT_HASH: simulated.payment_process_validator
     ergo.CONTRACT_HASH: ergo.payment_process_validator
 }

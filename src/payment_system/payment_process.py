@@ -180,7 +180,7 @@ def __check_payment_process(amount: int, ledger: str, token: str, contract: byte
         return False
 
     _validator = PAYMENT_PROCESS_VALIDATORS[sha3_256(contract).hexdigest()]
-    return _validator(amount, token, ledger, contract_addr, validate_token=lambda t: True)
+    return _validator(amount, token, ledger, contract_addr)
 
 
 def init_interfaces():
