@@ -56,7 +56,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
                     .registers([
                         ErgoValue.of(jpype.JString(deposit_token).getBytes("utf-8"))  # Store token in R4
                     ]) \
-                    .contract(Address.create(contract_address).toErgoContract) \
+                    .contract(Address.create(contract_address).toErgoContract()) \
                     .build()  # Build the output box
 
         # Create the unsigned transaction
