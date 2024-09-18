@@ -35,7 +35,9 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
     try:
         # Initialize ErgoAppKit and get the sender's address
         ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
-        sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC'), wallet_password=None)
+
+        mnemonic = ergo.getMnemonic(wallet_mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC'), mnemonic_password=None)
+        sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
         LOGGER(f"sender address {str(sender_address)} {type(sender_address)}")
 
         # Fetch UTXO from the contract's address
