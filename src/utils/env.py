@@ -157,8 +157,8 @@ LOCAL_NETWORK = 'lo'
 
 # Ledger Settings
 env_manager.get_env("ERGO_NODE_URL", "http://213.239.193.208:9052/")
-env_manager.get_env("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect")
-env_manager.get_env("ERGO_PAYMENTS_RECIVER_WALLET", "3Wx2YrSVcrPvC7uXQRp6ZQfRd7VxjZr6fjhFEX5r1yiM8nHkGv93")
+env_manager.get_env("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three clean borrow repeat identify wisdom horn pull entire adapt neglect")  # If not provided, should be generated
+env_manager.get_env("ERGO_PAYMENTS_RECIVER_WALLET", "3Wx2YrSVcrPvC7uXQRp6ZQfRd7VxjZr6fjhFEX5r1yiM8nHkGv93")  # If not provided, should be empty and generated on ergo payment interface.
 env_manager.get_env("LEDGER_SUBMISSION_THRESHOLD", 10)
 env_manager.get_env("TOTAL_REPUTATION_TOKEN_AMOUNT", 1_000_000_000)
 env_manager.get_env("REPUTATION_PROOF_ID", "")
