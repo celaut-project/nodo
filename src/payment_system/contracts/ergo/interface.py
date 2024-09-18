@@ -5,6 +5,10 @@ from src.database import sql_connection
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
 import json
+
+from jpype import *
+import java.lang
+
 import jpype
 from org.ergoplatform.sdk import *
 from org.ergoplatform.appkit import *
@@ -61,7 +65,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
 
         # Create the unsigned transaction
         unsigned_tx = ergo.buildUnsignedTransaction(
-            input_box=[input_utxo],  # Input UTXO
+            input_box=java.util.ArrayList([input_utxo]),  # Input UTXO
             outBox=[out_box],  # Output box
             fee=DEFAULT_FEE,  # Fee for the transaction
             sender_address=sender_address  # Sender's address
