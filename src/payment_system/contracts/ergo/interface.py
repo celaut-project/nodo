@@ -41,12 +41,12 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
         sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
 
         # Fetch UTXO from the contract's address
-        contract_utxo = ergo.getInputBoxCovering(
+        input_utxo = ergo.getInputBoxCovering(
             amount_list=[amount],
             sender_address=sender_address
         )
 
-        if not contract_utxo:
+        if not input_utxo:
             raise Exception("No UTXO found for the contract address with the required token.")
 
         # Build the output box with the token in register R4
@@ -61,7 +61,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
 
         # Create the unsigned transaction
         unsigned_tx = ergo.buildUnsignedTransaction(
-            input_box=[contract_utxo],  # Input UTXO
+            input_box=[input_utxo],  # Input UTXO
             outBox=[out_box],  # Output box
             fee=DEFAULT_FEE,  # Fee for the transaction
             sender_address=sender_address  # Sender's address
