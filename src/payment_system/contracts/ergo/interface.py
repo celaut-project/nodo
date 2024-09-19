@@ -158,7 +158,7 @@ def payment_process_validator(amount: int, token: str, ledger: str, contract_add
     LOGGER(f"Validating token {token}")
     try:
         assert ledger == LEDGER, "Ledger does not match"
-        assert contract_addr == __get_sender_addr(ERGO_AUXILIAR_MNEMONIC), "Contract address does not match"
+        assert contract_addr == str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString()), "Contract address does not match"
 
         # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
         ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
