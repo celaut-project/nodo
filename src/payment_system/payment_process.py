@@ -29,7 +29,7 @@ sc = SQLConnection()
 
 def generate_deposit_token(client_id: str) -> str:
     _l.LOGGER("Generate deposit token.")
-    deposit_token = sc.add_deposit_token(client_id=client_id, status=['pending'])
+    deposit_token = sc.add_deposit_token(client_id=client_id, status='pending')
     _l.LOGGER(f"Deposit token {deposit_token} generated.")
     return deposit_token
 
