@@ -1,5 +1,6 @@
 import string
 from hashlib import sha3_256
+from threading import Thread
 from uuid import uuid4
 from src.payment_system.contracts import simulator
 from time import sleep
@@ -24,10 +25,14 @@ env_manager = EnvManager()
 COMMUNICATION_ATTEMPTS = env_manager.get_env("COMMUNICATION_ATTEMPTS")
 COMMUNICATION_ATTEMPTS_DELAY = env_manager.get_env("COMMUNICATION_ATTEMPTS_DELAY")
 MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
+PAYMENT_MANAGER_ITERATION_TIME = 240 # Should be 86400 seconds
 
 sc = SQLConnection()
+deposit_generation_locked = False
 
 def generate_deposit_token(client_id: str) -> str:
+    if deposit_generation_locked:
+        raise Exception("Deposit generation locked. Try later.")
     _l.LOGGER("Generate deposit token.")
     deposit_token = sc.add_deposit_token(client_id=client_id, status='pending')
     _l.LOGGER(f"Deposit token {deposit_token} generated.")
@@ -181,16 +186,32 @@ def __check_payment_process(amount: int, ledger: str, token: str, contract: byte
     return _validator(amount, token, ledger, contract_addr)
 
 
+def __manage_interfaces():
+    while True:
+        sleep(PAYMENT_MANAGER_ITERATION_TIME)
+        _l.LOGGER("Execute payment manager iteration.")
+
+        deposit_generation_locked = True
+
+        while True:
+            sleep(1)
+            if len(sc.get_deposit_tokens(status="pending")) == 0:
+                _l.LOGGER("Any pending deposit token, now payment interfaces can be managed.")
+                break
+
+        for key, _manage in MANAGE_INTERFACES.items():
+            if callable(_manage):
+                _manage()
+            else:
+                _l.LOGGER(f"Warning: {_manage} is not callable.")
+
+        deposit_generation_locked = False
+
+
 def init_interfaces():
+    Thread(target=__manage_interfaces).start()
     for key, _init in INIT_INTERFACES.items():
         if callable(_init):
             _init()
         else:
             _l.LOGGER(f"Warning: {_init} is not callable.")
-
-def manage_interfaces():
-    for key, _manage in MANAGE_INTERFACES.items():
-        if callable(_manage):
-            _manage()
-        else:
-            _l.LOGGER(f"Warning: {_manage} is not callable.")
