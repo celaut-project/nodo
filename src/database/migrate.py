@@ -128,6 +128,14 @@ def create_tables(cursor):
                 service TEXT,
                 live BOOLEAN
             )
+        ''',
+        "deposit_tokens": '''
+            CREATE TABLE IF NOT EXISTS deposit_tokens (
+                id TEXT PRIMARY KEY,
+                client_id TEXT,
+                status TEXT CHECK( status IN ('pending', 'payed', 'rejected') ) NOT NULL,
+                FOREIGN KEY (client_id) REFERENCES clients (id)
+            )
         '''
     }
 

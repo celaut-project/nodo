@@ -27,12 +27,10 @@ MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
 
 sc = SQLConnection()
 
-deposit_tokens = {}  # Provisional Dict[deposit_token, client_id]
 def generate_deposit_token(client_id: str) -> str:
     _l.LOGGER("Generate deposit token.")
-    deposit_token = str(uuid4())
-    deposit_tokens[deposit_token] = client_id
-    _l.LOGGER("Deposit token generated.")
+    deposit_token = sc.add_deposit_token(client_id=client_id, status=['pending'])
+    _l.LOGGER(f"Deposit token {deposit_token} generated.")
     return deposit_token
 
 
@@ -156,25 +154,25 @@ def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
 
 
 def validate_payment_process(amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
-    if token not in deposit_tokens:
-        raise Exception("Deposit token doesn't exists.")
+    if not sc.deposit_token_exists(token_id=token, status='pending'):
+        raise Exception(f"Deposit token {token} doesn't exists.")
     try:
         _r = __check_payment_process(
             amount=amount, ledger=ledger, token=token,
             contract=contract, contract_addr=contract_addr
-        ) and increase_local_gas_for_client(client_id=deposit_tokens[token], amount=amount)  # TODO allow for containers too.
+        ) and increase_local_gas_for_client(client_id=sc.client_id_from_deposit_token(token_id=token), amount=amount)  # TODO allow for containers too.
     except: _r = False
-    if _r: del deposit_tokens[token]
+    if _r: sc.delete_deposit_token(token_id=token)
     return _r
 
 
 def __check_payment_process(amount: int, ledger: str, token: str, contract: bytes, contract_addr: str) -> bool:
     _l.LOGGER('Check payment process to ' + token + ' of ' + str(amount))
-    if token not in deposit_tokens:
+    if not sc.deposit_token_exists(token_id=token, status='pending'):
         _l.LOGGER(f"No token {token} in pending deposit_tokens")
         return False
 
-    client_id = deposit_tokens[token]
+    client_id = sc.client_id_from_deposit_token(token_id=token)
     if not sc.client_exists(client_id=client_id):
         _l.LOGGER(f"Client id {client_id} not in clients.")
         return False

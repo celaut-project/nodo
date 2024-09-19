@@ -1063,6 +1063,134 @@ class SQLConnection(metaclass=Singleton):
             DELETE FROM tunnels WHERE id = ?
         ''', (tunnel_id,))
 
+    # Payment system
+    def add_deposit_token(self, client_id: str, status: str) -> str:
+        """
+        Adds a deposit token to the database.
+
+        Args:
+            client_id (str): The ID of the client associated with the deposit token.
+            status (str): The status of the deposit token (pending, payed, or rejected).
+        """
+        if status not in ('pending', 'payed', 'rejected'):
+            raise ValueError("Invalid status. Status must be one of: 'pending', 'payed', 'rejected'.")
+
+        token_id = str(uuid.uuid4())
+        self._execute('''
+            INSERT INTO deposit_tokens (id, client_id, status)
+            VALUES (?, ?, ?)
+        ''', (token_id, client_id, status))
+
+        return token_id
+
+    def get_deposit_tokens(self, status: Optional[str] = None) -> List[dict]:
+        """
+        Fetches all deposit tokens from the database, optionally filtering by status.
+
+        Args:
+            status (Optional[str]): The status to filter deposit tokens by (pending, payed, rejected).
+
+        Returns:
+            List[dict]: A list of dictionaries containing deposit token details.
+        """
+        query = "SELECT id, client_id, status FROM deposit_tokens"
+        params = []
+
+        if status:
+            if status not in ('pending', 'payed', 'rejected'):
+                raise ValueError("Invalid status. Status must be one of: 'pending', 'payed', 'rejected'.")
+            query += " WHERE status = ?"
+            params.append(status)
+
+        result = self._execute(query, tuple(params))
+        tokens = [{'id': row['id'], 'client_id': row['client_id'], 'status': row['status']} for row in result.fetchall()]
+
+        logger.LOGGER(f'Found deposit tokens: {tokens}')
+        return tokens
+
+    def client_id_from_deposit_token(self, token_id: str) -> str:
+        """
+        Retrieves the client ID associated with a given deposit token ID.
+
+        Args:
+            token_id (str): The ID of the deposit token.
+
+        Returns:
+            str: The client ID associated with the deposit token.
+
+        Raises:
+            ValueError: If the deposit token ID does not exist.
+        """
+        query = "SELECT client_id FROM deposit_tokens WHERE id = ?"
+        result = self._execute(query, (token_id,))
+
+        row = result.fetchone()
+        if row is None:
+            raise ValueError(f"Deposit token with ID '{token_id}' does not exist.")
+
+        return row['client_id']
+
+    def update_deposit_token(self, token_id: str, status: Optional[str] = None):
+        """
+        Updates the status of a deposit token in the database.
+
+        Args:
+            token_id (str): The ID of the deposit token to update.
+            status (Optional[str]): The new status of the deposit token (if provided).
+        """
+        if status and status not in ('pending', 'payed', 'rejected'):
+            raise ValueError("Invalid status. Status must be one of: 'pending', 'payed', 'rejected'.")
+
+        updates = []
+        params = []
+
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+
+        if not updates:
+            raise ValueError("No values to update.")
+
+        params.append(token_id)
+        query = f"UPDATE deposit_tokens SET {', '.join(updates)} WHERE id = ?"
+        self._execute(query, tuple(params))
+
+    def deposit_token_exists(self, token_id: str, status: Optional[str] = None) -> bool:
+        """
+        Checks if a deposit token exists in the database, optionally filtering by status.
+
+        Args:
+            token_id (str): The ID of the deposit token to check.
+            status (Optional[str]): The status to filter by (pending, payed, rejected). If None, the status is not considered.
+
+        Returns:
+            bool: True if the deposit token exists with the given status (if provided), False otherwise.
+        """
+        query = "SELECT 1 FROM deposit_tokens WHERE id = ?"
+        params = [token_id]
+
+        if status:
+            if status not in ('pending', 'payed', 'rejected'):
+                raise ValueError("Invalid status. Status must be one of: 'pending', 'payed', 'rejected'.")
+            query += " AND status = ?"
+            params.append(status)
+
+        query += " LIMIT 1"
+        result = self._execute(query, tuple(params))
+
+        return result.fetchone() is not None
+
+    def delete_deposit_token(self, token_id: str):
+        """
+        Deletes a deposit token from the database.
+
+        Args:
+            token_id (str): The ID of the deposit token to delete.
+        """
+        self._execute('''
+            DELETE FROM deposit_tokens WHERE id = ?
+        ''', (token_id,))
+
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     # Slot concept here refers to the number of urls. Slot should be renamed on all the code because is incorrectly used.
