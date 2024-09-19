@@ -4,6 +4,7 @@ import subprocess
 from dotenv import load_dotenv
 from typing import Final, Dict, Callable
 import docker as docker_lib
+from mnemonic import Mnemonic
 from protos import celaut_pb2
 from src.utils.singleton import Singleton
 
@@ -161,6 +162,7 @@ env_manager.get_env("ERGO_WALLET_MNEMONIC", "decline reward asthma enter three c
 # This should be a cold wallet. It will not be shared with clients.
 # Instead, the private key derived from the wallet mnemonic will receive funds first.
 # After checking the r4 registers, it will then spend an optimized UTXO to the recipient's address.
+env_manager.get_env("ERGO_AUXILIAR_MNEMONIC", Mnemonic("english").generate(strength=128))
 env_manager.get_env("ERGO_PAYMENTS_RECIVER_WALLET", "3Wx2YrSVcrPvC7uXQRp6ZQfRd7VxjZr6fjhFEX5r1yiM8nHkGv93")
 env_manager.get_env("LEDGER_SUBMISSION_THRESHOLD", 10)
 env_manager.get_env("TOTAL_REPUTATION_TOKEN_AMOUNT", 1_000_000_000)
