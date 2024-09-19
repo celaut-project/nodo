@@ -34,6 +34,7 @@ payment_lock = Lock()  # Ensures that the same input box is no spent with more a
 def __to_nanoerg(amount: int) -> int:
     return int(amount/(10**58)) if amount > 10**58 else amount
 
+
 def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
     mnemonic = ERGO_WALLET_MNEMONIC if not mnemonic else mnemonic
     # Initialize ErgoAppKit and get the sender's address
@@ -42,6 +43,7 @@ def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
     _m = ergo.getMnemonic(wallet_mnemonic=mnemonic, mnemonic_password=None)
     sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=_m[1], wallet_password=_m[2])
     return sender_address
+
 
 def __get_input_boxes(amount: int) -> List[dict]:
     ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
@@ -67,9 +69,9 @@ def __get_input_boxes(amount: int) -> List[dict]:
         inputs.append(box_dict)  # TODO Should convert dict -> InputBox.
     return inputs
 
+
 def init():
     sender_addr = str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString())
-    LOGGER(f"auxiliar address -> {sender_addr}")
     sql = sql_connection.SQLConnection()
     sql.add_contract(contract=gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
         ledger=LEDGER,
@@ -77,14 +79,15 @@ def init():
         contract=CONTRACT
     ))
 
+
 def manager():
     sender_addr = __get_sender_addr(ERGO_AUXILIAR_MNEMONIC)
-    # Move the available outputs to ERGO_WALLET_MNEMONIC.
-    # Move from ERGO_WALLET_MNEMONIC to RECIVER_ADDR (should be a cold wallet)
+    # Move the available outputs from ERGO_AUXILIAR_MNEMONIC to ERGO_WALLET_MNEMONIC.
+    # Move ERGO_WALLET_MNEMONIC.value + ERGO_AUXILIAR_MNEMONIC.value - MAX (or all) from ERGO_AUXILIAR_MNEMONIC to ERGO_PAYMENTS_RECIVER_WALLET
+
 
 # Function to process the payment, generating a transaction with the token in register R4
 def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
-    LOGGER(f"Wait for payment for token {deposit_token} ...")
     with payment_lock:
         amount = __to_nanoerg(amount)
         LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount}")
@@ -127,13 +130,12 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
 
             # Submit the transaction and get the transaction ID
             tx_id = ergo.txId(signed_tx)
-            LOGGER(f"Transaction submitted: {tx_id}")
+            LOGGER(f"Transaction submitted: {tx_id} for token {deposit_token}")
 
             for sec in range(0, WAIT_TX_TIME):
                 sleep(1)
                 response = requests.get(f"{ergo.get_api_url()}/api/v1/transactions/{tx_id}")
                 if response.status_code != 200:
-                    LOGGER(f"Error fetching UTXOs: {response.status_code} - {response.text}")  # TODO should be del.
                     continue
 
                 obj = response.json()
@@ -153,9 +155,9 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
             LOGGER(f"Error processing payment: {str(e)}")
             raise e
 
+
 # Function to validate the payment process by checking if there is an unspent box with the token in register R4
 def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str) -> bool:
-    LOGGER(f"Validating token {token}")
     try:
         assert ledger == LEDGER, "Ledger does not match"
         assert contract_addr == str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString()), "Contract address does not match"
@@ -183,11 +185,8 @@ def payment_process_validator(amount: int, token: str, ledger: str, contract_add
 
                 # Check if the decoded value matches the token
                 if decoded_r4 == token:
-                    LOGGER(f"Token {token} found in R4.")
-
                     # Validate correct amount.
                     if "value" in box_dict and box_dict["value"] == __to_nanoerg(amount):
-                        LOGGER(f"Correct amount for token {token}")
                         return True
                     else:
                         LOGGER(f"Incorrect amount for token {token}. Value was {box_dict} but should be {__to_nanoerg(amount)}")

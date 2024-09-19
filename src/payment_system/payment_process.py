@@ -182,10 +182,7 @@ def __check_payment_process(amount: int, ledger: str, token: str, contract: byte
 
 
 def init_interfaces():
-    _l.LOGGER("Init payment interfaces")
-    # Initialize all payment interfaces if they are callable
     for key, _init in INIT_INTERFACES.items():
-        _l.LOGGER(f"Init {key[:6]}... payment interface.")
         if callable(_init):
             _init()  # Execute the init function
         else:
