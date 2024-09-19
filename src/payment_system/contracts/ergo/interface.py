@@ -43,7 +43,7 @@ def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
     sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
     return sender_address
 
-def __get_input_boxes(amount: int) -> List[dict]
+def __get_input_boxes(amount: int) -> List[dict]:
     ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
     explorer_api = ergo.get_api_url()
     sender_address = __get_sender_addr()
