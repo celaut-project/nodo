@@ -1,3 +1,4 @@
+from typing import Optional
 from protos import celaut_pb2, gateway_pb2
 import requests
 from hashlib import sha3_256
@@ -33,11 +34,12 @@ payment_lock = Lock()  # Ensures that the same input box is no spent with more a
 def __to_nanoerg(amount: int) -> int:
     return int(amount/(10**58)) if amount > 10**58 else amount
 
-def __get_sender_addr() -> Address:
+def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
+    mnemonic = ERGO_WALLET_MNEMONIC if not mnemonic else mnemonic
     # Initialize ErgoAppKit and get the sender's address
     ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
 
-    mnemonic = ergo.getMnemonic(wallet_mnemonic=ERGO_WALLET_MNEMONIC, mnemonic_password=None)
+    mnemonic = ergo.getMnemonic(wallet_mnemonic=mnemonic, mnemonic_password=None)
     sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
     return sender_address
 
@@ -66,14 +68,19 @@ def __get_input_boxes(amount: int) -> List[dict]
     return inputs
 
 def init():
-    sender_addr = str(__get_sender_addr().toString())
-    LOGGER(f"sender address -> {sender_addr}")
+    sender_addr = str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString())
+    LOGGER(f"auxiliar address -> {sender_addr}")
     sql = sql_connection.SQLConnection()
     sql.add_contract(contract=gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
         ledger=LEDGER,
         contract_addr=sender_addr,
         contract=CONTRACT
     ))
+
+def manager():
+    sender_addr = __get_sender_addr(ERGO_AUXILIAR_MNEMONIC)
+    # Move the available outputs to ERGO_WALLET_MNEMONIC.
+    # Move from ERGO_WALLET_MNEMONIC to RECIVER_ADDR (should be a cold wallet)
 
 # Function to process the payment, generating a transaction with the token in register R4
 def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
@@ -150,7 +157,7 @@ def payment_process_validator(amount: int, token: str, ledger: str, contract_add
     LOGGER(f"Validating token {token}")
     try:
         assert ledger == LEDGER, "Ledger does not match"
-        assert contract_addr == __get_sender_addr(), "Contract address does not match"
+        assert contract_addr == __get_sender_addr(ERGO_AUXILIAR_MNEMONIC), "Contract address does not match"
 
         # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
         ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
