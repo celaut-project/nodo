@@ -7,7 +7,7 @@ import grpc
 from grpcbigbuffer import client as grpcbf
 from src.payment_system.ledger_balancer import ledger_balancer
 
-from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_INTERFACES, PAYMENT_PROCESS_VALIDATORS, DEMOS
+from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_INTERFACES, MANAGE_INTERFACES, PAYMENT_PROCESS_VALIDATORS, DEMOS
 
 from protos import gateway_pb2_grpc, gateway_pb2
 
@@ -184,6 +184,13 @@ def __check_payment_process(amount: int, ledger: str, token: str, contract: byte
 def init_interfaces():
     for key, _init in INIT_INTERFACES.items():
         if callable(_init):
-            _init()  # Execute the init function
+            _init()
         else:
             _l.LOGGER(f"Warning: {_init} is not callable.")
+
+def manage_interfaces():
+    for key, _manage in MANAGE_INTERFACES.items():
+        if callable(_manage):
+            _manage()
+        else:
+            _l.LOGGER(f"Warning: {_manage} is not callable.")

@@ -27,4 +27,8 @@ INIT_INTERFACES: Dict[contract_hash, Callable[[], None]] = {
     ergo.CONTRACT_HASH: ergo.init
 }
 
+MANAGE_INTERFACES: Dict[contract_hash, Callable[[], None]] = {
+    ergo.CONTRACT_HASH: ergo.manager
+}
+
 DEMOS = [simulated.CONTRACT_HASH]
