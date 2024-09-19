@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from protos import celaut_pb2, gateway_pb2
 import requests
 from hashlib import sha3_256
