@@ -28,12 +28,22 @@ WAIT_TX_TIME = 240
 def __to_nanoerg(amount: int) -> int:
     return int(amount/(10**58)) if amount > 10**58 else amount
 
+def __get_sender_addr() -> Address:
+    # Initialize ErgoAppKit and get the sender's address
+    ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
+
+    mnemonic = ergo.getMnemonic(wallet_mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC'), mnemonic_password=None)
+    sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
+    return sender_address
+
 def init():
     LOGGER("Make a sql query ergo.")
+    sender_addr = str(__get_sender_addr().toString())
+    LOGGER(f"sender address -> {sender_addr}")
     sql = sql_connection.SQLConnection()
     sql.add_contract(contract=gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
         ledger=LEDGER,
-        contract_addr=RECIVER_ADDR,
+        contract_addr=sender_addr,
         contract=CONTRACT
     ))
 
@@ -47,9 +57,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
     try:
         # Initialize ErgoAppKit and get the sender's address
         ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
-
-        mnemonic = ergo.getMnemonic(wallet_mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC'), mnemonic_password=None)
-        sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
+        sender_address = __get_sender_addr()
 
         # Fetch UTXO from the contract's address
         input_utxo = ergo.getInputBoxCovering(
@@ -114,7 +122,7 @@ def payment_process_validator(amount: int, token: str, ledger: str, contract_add
     LOGGER(f"Validating token {token}")
     try:
         assert ledger == LEDGER, "Ledger does not match"
-        assert contract_addr == RECIVER_ADDR, "Contract address does not match"
+        assert contract_addr == __get_sender_addr(), "Contract address does not match"
 
         # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
         ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
