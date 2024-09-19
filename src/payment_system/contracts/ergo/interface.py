@@ -39,8 +39,8 @@ def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
     # Initialize ErgoAppKit and get the sender's address
     ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
 
-    mnemonic = ergo.getMnemonic(wallet_mnemonic=mnemonic, mnemonic_password=None)
-    sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
+    _m = ergo.getMnemonic(wallet_mnemonic=mnemonic, mnemonic_password=None)
+    sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=_m[1], wallet_password=_m[2])
     return sender_address
 
 def __get_input_boxes(amount: int) -> List[dict]:
@@ -122,7 +122,8 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
             )
 
             # Sign the transaction
-            signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
+            w_mnemonic = ergo.getMnemonic(wallet_mnemonic=ERGO_WALLET_MNEMONIC, mnemonic_password=None)[0]
+            signed_tx = ergo.signTransaction(unsigned_tx, w_mnemonic, prover_index=0)
 
             # Submit the transaction and get the transaction ID
             tx_id = ergo.txId(signed_tx)
