@@ -37,7 +37,6 @@ def __get_sender_addr() -> Address:
     return sender_address
 
 def init():
-    LOGGER("Make a sql query ergo.")
     sender_addr = str(__get_sender_addr().toString())
     LOGGER(f"sender address -> {sender_addr}")
     sql = sql_connection.SQLConnection()
@@ -46,8 +45,6 @@ def init():
         contract_addr=sender_addr,
         contract=CONTRACT
     ))
-
-    LOGGER("ERGO PAYMENT INTERFACE INITIATED.")
 
 # Function to process the payment, generating a transaction with the token in register R4
 def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
