@@ -81,6 +81,7 @@ def init():
 
 
 def manager():
+    LOGGER("Exec ergo interface manager")
     sender_addr = __get_sender_addr(ERGO_AUXILIAR_MNEMONIC)
     # Move the available outputs from ERGO_AUXILIAR_MNEMONIC to ERGO_WALLET_MNEMONIC.
     # Move ERGO_WALLET_MNEMONIC.value + ERGO_AUXILIAR_MNEMONIC.value - MAX (or all) from ERGO_AUXILIAR_MNEMONIC to ERGO_PAYMENTS_RECIVER_WALLET

@@ -25,7 +25,7 @@ env_manager = EnvManager()
 COMMUNICATION_ATTEMPTS = env_manager.get_env("COMMUNICATION_ATTEMPTS")
 COMMUNICATION_ATTEMPTS_DELAY = env_manager.get_env("COMMUNICATION_ATTEMPTS_DELAY")
 MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
-PAYMENT_MANAGER_ITERATION_TIME = 240 # Should be 86400 seconds
+PAYMENT_MANAGER_ITERATION_TIME = 1 # Should be 86400 seconds
 
 sc = SQLConnection()
 deposit_generation_locked = False
