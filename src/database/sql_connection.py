@@ -1105,7 +1105,6 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute(query, tuple(params))
         tokens = [{'id': row['id'], 'client_id': row['client_id'], 'status': row['status']} for row in result.fetchall()]
 
-        logger.LOGGER(f'Found deposit tokens: {tokens}')
         return tokens
 
     def client_id_from_deposit_token(self, token_id: str) -> str:

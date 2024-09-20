@@ -167,7 +167,8 @@ def validate_payment_process(amount: int, ledger: str, contract: bytes, contract
             contract=contract, contract_addr=contract_addr
         ) and increase_local_gas_for_client(client_id=sc.client_id_from_deposit_token(token_id=token), amount=amount)  # TODO allow for containers too.
     except: _r = False
-    if _r: sc.delete_deposit_token(token_id=token)
+    sc.update_deposit_token(token_id=token, status="payed" if _r else "rejected")
+    _l.LOGGER(f"Pending deposit tokens updated, there are still {len(sc.get_deposit_tokens(status='pending'))} tokens in the queue.")
     return _r
 
 
