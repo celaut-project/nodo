@@ -8,7 +8,6 @@ from src.database import sql_connection
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
 from threading import Lock
-import json
 from time import sleep
 
 from jpype import *
