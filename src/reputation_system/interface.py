@@ -18,7 +18,7 @@ def update_reputation(token: str, amount: int) -> Optional[str]:
     # For clients.
     # For ledgers.
 
-def compute_reputation_feedback(peer_id) -> float:
+def compute_reputation(peer_id) -> float:
     """
     As an initial implementation, the node will only consider its own observations.
     Therefore, it will not take into account the reputation assigned by other peers for each of the pairs it interacts with.

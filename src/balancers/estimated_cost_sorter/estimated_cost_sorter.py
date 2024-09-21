@@ -1,7 +1,7 @@
 from typing import Dict, Tuple, Generator
 
 from protos import gateway_pb2
-from src.reputation_system.interface import compute_reputation_feedback
+from src.reputation_system.interface import compute_reputation
 from src.utils.cost_functions.general_cost_functions import normalized_maintain_cost
 from src.utils.cost_functions.variance_cost_normalization import variance_cost_normalization
 from src.utils.env import EnvManager
@@ -43,7 +43,7 @@ def estimated_cost_sorter(
                 ]) / 2
             ) * MAINTENANCE_COST_CONFIGURATION_FACTOR
         ])
-        reputation: float = 1 if peer_id == 'local' else SOCIALIZATION_FACTOR + compute_reputation_feedback(peer_id=peer_id)
+        reputation: float = 1 if peer_id == 'local' else SOCIALIZATION_FACTOR + compute_reputation(peer_id=peer_id)
 
         print(f"\nDebug: For peer {peer_id}: priority {priority}, reputation {reputation}, cost {cost} => score {priority * reputation / cost}\n", flush=True)
 
