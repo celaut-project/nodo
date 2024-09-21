@@ -1,8 +1,5 @@
-import string
 from hashlib import sha3_256
 from threading import Thread
-from uuid import uuid4
-from src.payment_system.contracts import simulator
 from time import sleep
 import grpc
 from grpcbigbuffer import client as grpcbf
@@ -11,6 +8,8 @@ from src.payment_system.ledger_balancer import ledger_balancer
 from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_INTERFACES, MANAGE_INTERFACES, PAYMENT_PROCESS_VALIDATORS, DEMOS
 
 from protos import gateway_pb2_grpc, gateway_pb2
+
+from src.reputation_system.interface import update_reputation
 
 from src.manager.manager import get_client_id_on_other_peer, increase_local_gas_for_client
 from src.database.sql_connection import SQLConnection
@@ -93,16 +92,20 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                         contract_address=contract_address
                     )
                     _l.LOGGER(f"Payment processed. Deposit token: {deposit_token}")
+                    update_reputation(token=contract_address, amount=10)  # TODO On envs.
+                    update_reputation(token=ledger, amount=1)  # TODO On envs.
                 except Exception as e:
                     _l.LOGGER(f"Error processing payment for contract {contract_hash}: {str(e)}")
-                    # TODO reduce reputation for the contract address (and ledger ...)
+                    update_reputation(token=contract_address, amount=-100)  # TODO On envs.
+                    update_reputation(token=ledger, amount=-10)  # TODO On envs.
                     continue
 
                 # Handle communication attempts to peer
                 if __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
+                    update_reputation(token=peer_id, amount=10)  # TODO On envs.
                     return True
                 _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
-                # TODO reduce reputation on peer.
+                update_reputation(token=peer_id, amount=-100)  # TODO On envs.
 
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
         except Exception as e:
@@ -137,6 +140,7 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
             _l.LOGGER(f"Payment of {amount} to {peer_id} communicated successfully.")
             return True
         except Exception as e:
+            update_reputation(token=peer_id, amount=-1)  # TODO On envs.
             attempt += 1
             _l.LOGGER(f"Communication attempt {attempt} failed: {str(e)}")
             if attempt >= COMMUNICATION_ATTEMPTS:

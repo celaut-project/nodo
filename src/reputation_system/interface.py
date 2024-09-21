@@ -8,7 +8,8 @@ from src.reputation_system.contracts.ergo import submit_reputation_proof
 
 def update_reputation(token: str, amount: int) -> Optional[str]:
     # Take the peer_id when the token it's external. Do nothing if it's an external service.
-    peer_id: str = token.split('##')[1]
+    peer_id: str = token.split('##')[1] if "##" in token else token
+    # Check if peer exists:
     if get_network_name(ip_or_uri=token.split('##')[1]) != DOCKER_NETWORK:
         return SQLConnection().update_reputation_peer(peer_id, amount)
     
