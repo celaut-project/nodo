@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Check if the script is running with root privileges
-if [ "$(id -u)" -ne 0; then
+if [ "$(id -u)" -ne 0 ]; then
   printf "Error: This script needs to be run with sudo.\nPlease run: sudo $0\n" >&2
   exit 1
 fi
@@ -32,6 +32,26 @@ install_git_if_needed
 REPO_URL="https://github.com/celaut-project/nodo.git"
 TARGET_DIR="/nodo"
 SERVICE_FILE="/etc/systemd/system/nodo.service"
+MAX_RETRIES=3
+
+# Increase the Git buffer size to handle large repositories
+git config --global http.postBuffer 524288000  # 500MB
+
+# Function to retry git clone in case of network errors
+clone_repo() {
+  local retries=0
+  while [ $retries -lt $MAX_RETRIES ]; do
+    printf "Attempting to clone repository (try $((retries + 1))/$MAX_RETRIES)...\n"
+    if git clone "$REPO_URL" "$TARGET_DIR"; then
+      return 0  # Success
+    else
+      printf "Error: Failed to clone the repository on attempt $((retries + 1)).\n"
+      retries=$((retries + 1))
+    fi
+    sleep 5  # Wait before retrying
+  done
+  return 1  # Failure after retries
+}
 
 # Check if the target directory already exists
 if [ -d "$TARGET_DIR" ]; then
@@ -50,10 +70,20 @@ if [ -d "$TARGET_DIR" ]; then
   fi
 else
   printf "Cloning repository from $REPO_URL into $TARGET_DIR...\n"
-  if ! git clone "$REPO_URL" "$TARGET_DIR"; then
-    printf "Error: Failed to clone the repository.\n" >&2
-    exit 1
+
+  # Try cloning with retries
+  if ! clone_repo; then
+    printf "Error: Failed to clone the repository after $MAX_RETRIES attempts.\n" >&2
+
+    # Optionally, try using git:// instead of https://
+    printf "Attempting to clone using git:// protocol...\n"
+    REPO_URL="git://github.com/celaut-project/nodo.git"
+    if ! clone_repo; then
+      printf "Error: Failed to clone the repository using git:// protocol as well.\n" >&2
+      exit 1
+    fi
   fi
+
   cd "$TARGET_DIR" || { printf "Error: Failed to change directory to $TARGET_DIR.\n" >&2; exit 1; }
 fi
 
