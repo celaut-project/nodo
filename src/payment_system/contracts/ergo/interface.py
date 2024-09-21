@@ -25,6 +25,7 @@ DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
 LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.
 CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree script
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
+ERGO_NODE_URL = env_manager.get_env("ERGO_NODE_URL")
 RECIVER_ADDR = env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')
 ERGO_AUXILIAR_MNEMONIC = env_manager.get_env("ERGO_AUXILIAR_MNEMONIC")
 ERGO_WALLET_MNEMONIC = env_manager.get_env('ERGO_WALLET_MNEMONIC')
@@ -42,7 +43,7 @@ def __nanoerg_to_erg(amount: int) -> int:
 def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
     mnemonic = ERGO_WALLET_MNEMONIC if not mnemonic else mnemonic
     # Initialize ErgoAppKit and get the sender's address
-    ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
+    ergo = appkit.ErgoAppKit(node_url=ERGO_NODE_URL)
 
     _m = ergo.getMnemonic(wallet_mnemonic=mnemonic, mnemonic_password=None)
     sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=_m[1], wallet_password=_m[2])
@@ -50,7 +51,7 @@ def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
 
 
 def __get_input_boxes(amount: int) -> List[dict]:
-    ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
+    ergo = appkit.ErgoAppKit(node_url=ERGO_NODE_URL)
     explorer_api = ergo.get_api_url()
     sender_address = __get_sender_addr()
 
@@ -75,7 +76,7 @@ def __get_input_boxes(amount: int) -> List[dict]:
 
 def __balance_total(address: Address) -> Optional[dict]:
     # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
-    ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
+    ergo = appkit.ErgoAppKit(node_url=ERGO_NODE_URL)
     explorer_api = ergo.get_api_url()
 
     # Construct the API URL to fetch unspent UTXOs for the contract address
@@ -111,7 +112,7 @@ def manager():
             amount = aux_confirmed_amount - DEFAULT_FEE
             LOGGER(f"Send {amount} from receiver-node-wallet to main-node-wallet.")
             tx = simple_send(
-                ergo=appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL')),
+                ergo=appkit.ErgoAppKit(node_url=ERGO_NODE_URL),
                 amount=[__nanoerg_to_erg(amount)], receiver_addresses=[str(__get_sender_addr(ERGO_WALLET_MNEMONIC).toString())], 
                 wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC, fee=__nanoerg_to_erg(DEFAULT_FEE)
             )
@@ -130,7 +131,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
 
         try:
             # Initialize ErgoAppKit and get the sender's address
-            ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
+            ergo = appkit.ErgoAppKit(node_url=ERGO_NODE_URL)
             sender_address = __get_sender_addr()
 
             # Fetch UTXO from the contract's address
@@ -196,7 +197,7 @@ def payment_process_validator(amount: int, token: str, ledger: str, contract_add
         assert contract_addr == str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString()), "Contract address does not match"
 
         # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
-        ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
+        ergo = appkit.ErgoAppKit(node_url=ERGO_NODE_URL)
         explorer_api = ergo.get_api_url()
 
         # Construct the API URL to fetch unspent UTXOs for the contract address
