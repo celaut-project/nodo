@@ -183,9 +183,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
                         contract=CONTRACT
                     )
 
-            err = f"Can't verify the tx {tx_id}"
-            LOGGER(err)
-            raise Exception(err)
+            raise Exception(f"Can't verify the tx {tx_id}")
 
         except Exception as e:
             raise e
