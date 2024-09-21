@@ -104,13 +104,15 @@ def manager():
     LOGGER("Exec ergo interface manager")
     # Move the available outputs from ERGO_AUXILIAR_MNEMONIC to ERGO_WALLET_MNEMONIC.
     try:
-        aux_total_balance = __balance_total(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC))
-        amount = aux_total_balance["confirmed"]["nanoErgs"] - DEFAULT_FEE
-        if amount > 2*DEFAULT_FEE:
+        aux_confirmed_amount = __balance_total(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC))["confirmed"]["nanoErgs"]
+        # Funds that may have been sent in the iteration prior to the main wallet but have not yet been confirmed on the network are taken into account.
+        wallet_unconfirmed_amount = __balance_total(__get_sender_addr(ERGO_WALLET_MNEMONIC))["unconfirmed"]["nanoErgs"]
+        if aux_confirmed_amount - wallet_unconfirmed_amount > 2*DEFAULT_FEE:
+            amount = aux_confirmed_amount - DEFAULT_FEE
             LOGGER(f"Send {amount} from receiver-node-wallet to main-node-wallet.")
             tx = simple_send(
                 ergo=appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL')),
-                amount=[__nanoerg_to_erg(amount)], receiver_addresses=[str(__get_sender_addr().toString())], 
+                amount=[__nanoerg_to_erg(amount)], receiver_addresses=[str(__get_sender_addr(ERGO_WALLET_MNEMONIC).toString())], 
                 wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC, fee=__nanoerg_to_erg(DEFAULT_FEE)
             )
             LOGGER(f"Simple send tx -> {tx}")
