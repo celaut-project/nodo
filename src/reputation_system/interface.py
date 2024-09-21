@@ -11,6 +11,10 @@ def update_reputation(token: str, amount: int) -> Optional[str]:
     peer_id: str = token.split('##')[1]
     if get_network_name(ip_or_uri=token.split('##')[1]) != DOCKER_NETWORK:
         return SQLConnection().update_reputation_peer(peer_id, amount)
+    
+    # For services.
+    # For clients.
+    # For ledgers.
 
 def compute_reputation_feedback(peer_id) -> float:
     """

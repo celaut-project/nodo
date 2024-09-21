@@ -1,7 +1,7 @@
 from typing import Dict, Tuple, Generator
 
 from protos import gateway_pb2
-from src.reputation_system.simple_reputation_feedback import compute_reputation_feedback
+from src.reputation_system.interface import compute_reputation_feedback
 from src.utils.cost_functions.general_cost_functions import normalized_maintain_cost
 from src.utils.cost_functions.variance_cost_normalization import variance_cost_normalization
 from src.utils.env import EnvManager

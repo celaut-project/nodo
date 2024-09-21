@@ -13,7 +13,7 @@ from src.manager.manager import prune_container, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import increase_deposit_on_peer, init_interfaces
-from src.reputation_system.simple_reputation_feedback import update_reputation, submit_reputation
+from src.reputation_system.interface import update_reputation, submit_reputation
 from src.utils import logger as l
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
@@ -189,7 +189,7 @@ def manager_thread():
         check_wanted_services()
         check_dev_clients()
         maintain_containers()
-        # submit_reputation()
+        submit_reputation()
         maintain_clients()
         peer_deposits()
         DuplicateGrabber().manager()

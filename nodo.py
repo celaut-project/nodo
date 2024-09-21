@@ -136,7 +136,7 @@ if __name__ == '__main__':
                 connect(sys.argv[2])
 
             case 'submit_reputation':
-                from src.reputation_system.simple_reputation_feedback import submit_reputation
+                from src.reputation_system.interface import submit_reputation
                 submit_reputation()
 
             case 'daemon':
