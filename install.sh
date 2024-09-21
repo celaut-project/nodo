@@ -36,6 +36,9 @@ MAX_RETRIES=3
 
 # Increase the Git buffer size to handle large repositories
 git config --global http.postBuffer 524288000  # 500MB
+git config --global http.lowSpeedLimit 0       # Removes the low-speed limit
+git config --global http.lowSpeedTime 999999   # Adjusts the low-speed timeout
+git config --global http.noKeepAlive true      # Disables HTTP keep-alive
 
 # Function to retry git clone in case of network errors
 clone_repo() {
