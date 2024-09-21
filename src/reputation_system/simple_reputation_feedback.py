@@ -10,7 +10,6 @@ def update_reputation(token: str, amount: int) -> Optional[str]:
     # Take the peer_id when the token it's external. Do nothing if it's an external service.
     peer_id: str = token.split('##')[1]
     if get_network_name(ip_or_uri=token.split('##')[1]) != DOCKER_NETWORK:
-        LOGGER(f"Submit reputation proof {peer_id}")
         return SQLConnection().update_reputation_peer(peer_id, amount)
 
 def compute_reputation_feedback(peer_id) -> float:
