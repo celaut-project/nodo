@@ -105,7 +105,7 @@ def manager():
     # Move the available outputs from ERGO_AUXILIAR_MNEMONIC to ERGO_WALLET_MNEMONIC.
     try:
         aux_total_balance = __balance_total(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC))
-        amount = aux_total_balance["confirmed"]["nanoErgs"]
+        amount = aux_total_balance["confirmed"]["nanoErgs"] - DEFAULT_FEE
         LOGGER(f"Send {amount} from receiver-node-wallet to main-node-wallet.")
         tx = simple_send(
             ergo=appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL')),
