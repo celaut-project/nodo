@@ -32,8 +32,11 @@ WAIT_TX_TIME = 240
 
 payment_lock = Lock()  # Ensures that the same input box is no spent with more amount that it has. (could be more efficient ...)
 
-def __to_nanoerg(amount: int) -> int:
+def __gas_to_nanoerg(amount: int) -> int:
     return int(amount/(10**58)) if amount > 10**58 else amount
+
+def __nanoerg_to_erg(amount: int) -> int:
+    return amount / 1_000_000_000
 
 
 def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
@@ -106,7 +109,7 @@ def manager():
         LOGGER(f"Send {amount} from receiver-node-wallet to main-node-wallet.")
         tx = simple_send(
             ergo=appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL')),
-            amount=[amount], receiver_addresses=[str(__get_sender_addr().toString())], wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC
+            amount=[__nanoerg_to_erg(amount)], receiver_addresses=[str(__get_sender_addr().toString())], wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC
         )
         LOGGER(f"Simple send tx -> {tx}")
     except Exception as e:
@@ -118,7 +121,7 @@ def manager():
 # Function to process the payment, generating a transaction with the token in register R4
 def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
     with payment_lock:
-        amount = __to_nanoerg(amount)
+        amount = __gas_to_nanoerg(amount)
         LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount}")
 
         try:
@@ -215,10 +218,10 @@ def payment_process_validator(amount: int, token: str, ledger: str, contract_add
                 # Check if the decoded value matches the token
                 if decoded_r4 == token:
                     # Validate correct amount.
-                    if "value" in box_dict and box_dict["value"] == __to_nanoerg(amount):
+                    if "value" in box_dict and box_dict["value"] == __gas_to_nanoerg(amount):
                         return True
                     else:
-                        LOGGER(f"Incorrect amount for token {token}. Value was {box_dict} but should be {__to_nanoerg(amount)}")
+                        LOGGER(f"Incorrect amount for token {token}. Value was {box_dict} but should be {__gas_to_nanoerg(amount)}")
                         return False
 
         # If no match found
