@@ -110,7 +110,7 @@ def manager():
         tx = simple_send(
             ergo=appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL')),
             amount=[__nanoerg_to_erg(amount)], receiver_addresses=[str(__get_sender_addr().toString())], 
-            wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC, fee=DEFAULT_FEE
+            wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC, fee=__nanoerg_to_erg(DEFAULT_FEE)
         )
         LOGGER(f"Simple send tx -> {tx}")
     except Exception as e:
