@@ -106,13 +106,14 @@ def manager():
     try:
         aux_total_balance = __balance_total(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC))
         amount = aux_total_balance["confirmed"]["nanoErgs"] - DEFAULT_FEE
-        LOGGER(f"Send {amount} from receiver-node-wallet to main-node-wallet.")
-        tx = simple_send(
-            ergo=appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL')),
-            amount=[__nanoerg_to_erg(amount)], receiver_addresses=[str(__get_sender_addr().toString())], 
-            wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC, fee=__nanoerg_to_erg(DEFAULT_FEE)
-        )
-        LOGGER(f"Simple send tx -> {tx}")
+        if amount > 2*DEFAULT_FEE:
+            LOGGER(f"Send {amount} from receiver-node-wallet to main-node-wallet.")
+            tx = simple_send(
+                ergo=appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL')),
+                amount=[__nanoerg_to_erg(amount)], receiver_addresses=[str(__get_sender_addr().toString())], 
+                wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC, fee=__nanoerg_to_erg(DEFAULT_FEE)
+            )
+            LOGGER(f"Simple send tx -> {tx}")
     except Exception as e:
         LOGGER(f"Exception on simple send -> {str(e)}")
 
