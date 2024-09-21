@@ -3,6 +3,7 @@ from protos import celaut_pb2, gateway_pb2
 import requests
 from hashlib import sha3_256
 from ergpy import appkit
+from ergpy.helper_functions import simple_send
 from src.database import sql_connection
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
@@ -69,6 +70,22 @@ def __get_input_boxes(amount: int) -> List[dict]:
         inputs.append(box_dict)  # TODO Should convert dict -> InputBox.
     return inputs
 
+def __balance_total(addr: Address) -> Optional[dict]:
+    # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
+    ergo = appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL'))
+    explorer_api = ergo.get_api_url()
+
+    # Construct the API URL to fetch unspent UTXOs for the contract address
+    url = f"{explorer_api}/api/v1/addresses/{addr}/balance/total"
+    response = requests.get(url)
+
+    if response.status_code != 200:
+        LOGGER(f"Error fetching the total balance: {response.status_code} - {response.text}")
+        return None
+
+    # Parse the response from the API
+    return response.json()
+
 
 def init():
     sender_addr = str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString())
@@ -82,8 +99,19 @@ def init():
 
 def manager():
     LOGGER("Exec ergo interface manager")
-    sender_addr = __get_sender_addr(ERGO_AUXILIAR_MNEMONIC)
     # Move the available outputs from ERGO_AUXILIAR_MNEMONIC to ERGO_WALLET_MNEMONIC.
+    try:
+        aux_total_balance = __balance_total(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC))
+        amount = aux_total_balance["confirmed"]["nanoErgs"]
+        LOGGER(f"Send {amount} from receiver-node-wallet to main-node-wallet.")
+        tx = simple_send(
+            ergo=appkit.ErgoAppKit(node_url=env_manager.get_env('ERGO_NODE_URL')),
+            amount=[amount], receiver_addresses=[__get_sender_addr()], wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC
+        )
+        LOGGER(f"Simple send tx -> {tx}")
+    except Exception as e:
+        LOGGER(f"Exception on simple send -> {str(e)}")
+
     # Move ERGO_WALLET_MNEMONIC.value + ERGO_AUXILIAR_MNEMONIC.value - MAX (or all) from ERGO_AUXILIAR_MNEMONIC to ERGO_PAYMENTS_RECIVER_WALLET
 
 
