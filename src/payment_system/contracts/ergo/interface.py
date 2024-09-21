@@ -188,7 +188,6 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
             raise Exception(err)
 
         except Exception as e:
-            LOGGER(f"Error processing payment: {str(e)}")
             raise e
 
 
