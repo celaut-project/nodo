@@ -85,23 +85,28 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                 _l.LOGGER(f"Processing payment: Deposit token: {deposit_token}. Ledger: {ledger}. Contract address: {contract_address}")
 
                 # Process the payment
-                contract_ledger = process_payment(
-                    amount=amount,
-                    deposit_token=deposit_token,
-                    ledger=ledger,
-                    contract_address=contract_address
-                )
-                _l.LOGGER(f"Payment processed. Deposit token: {deposit_token}")
+                try:
+                    contract_ledger = process_payment(
+                        amount=amount,
+                        deposit_token=deposit_token,
+                        ledger=ledger,
+                        contract_address=contract_address
+                    )
+                    _l.LOGGER(f"Payment processed. Deposit token: {deposit_token}")
+                except Exception as e:
+                    _l.LOGGER(f"Error processing payment for contract {contract_hash}: {str(e)}")
+                    # TODO reduce reputation for the contract address (and ledger ...)
+                    continue
 
                 # Handle communication attempts to peer
                 if __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
                     return True
                 _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
-                # TODO Should decrease reputation on peer or payment network.
+                # TODO reduce reputation on peer.
 
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
         except Exception as e:
-            _l.LOGGER(f"Error processing payment for contract {contract_hash}: {str(e)}")
+            _l.LOGGER(f"Unhandled exception on payment process for {contract_hash}: {e}")
             continue  # Continue to next contract hash
         return True
 
