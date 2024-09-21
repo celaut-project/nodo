@@ -516,7 +516,7 @@ class SQLConnection(metaclass=Singleton):
     def submit_to_ledger(self, submit: Callable[[List[Tuple[str, int, str]]], bool]) -> bool:
         """
         Submits the reputation data of all peers to the ledger if the condition
-        (reputation_index - last_index_on_ledger > LEDGER_SUBMISSION_THRESHOLD) is met.
+        (reputation_index - last_index_on_ledger > LEDGER_REPUTATION_SUBMISSION_THRESHOLD) is met.
 
         Args:
             submit (Callable[[List[Tuple[str, int, str]]], bool]): A function that submits the peer's reputation data
@@ -602,7 +602,7 @@ class SQLConnection(metaclass=Singleton):
                     instance_json = MessageToJson(data['instance'])
 
                     # Calculate the percentage of the total reputation token amount
-                    if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_SUBMISSION_THRESHOLD"):
+                    if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
                         needs_submit = True
                         percentage_amount = (reputation_score / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
                         to_submit.append((reputation_proof_id, percentage_amount, instance_json))
