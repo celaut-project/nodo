@@ -152,18 +152,18 @@ def build_container_from_definition(service: celaut_pb2.Service,
         write_fs(fs_element=fs, dir_element=fs_dir + '/', symlinks_element=symlinks)
 
         # Build it.
-        l.LOGGER('Build process of ' + service_id + ': docker building it ...')
+        l.LOGGER('Build process of ' + service_id + ': building it ...')
         open(_dir + '/Dockerfile', 'w').write('FROM scratch\nCOPY fs .')
         cache_id = service_id + str(time()) + '.cache'
-        check_output('docker buildx build --platform ' + arch + ' -t ' + cache_id + ' ' + _dir + '/.', shell=True)
-        l.LOGGER('Build process of ' + service_id + ': docker build it.')
+        check_output(f'{DOCKER_COMMAND} buildx build --platform ' + arch + ' -t ' + cache_id + ' ' + _dir + '/.', shell=True)
+        l.LOGGER('Build process of ' + service_id + ': build it.')
         try:
             rmtree(_dir)
         except Exception:
             pass
 
         # Generate the symlinks.
-        overlay_dir = check_output("docker inspect --format='{{ .GraphDriver.Data.UpperDir }}' " + cache_id,
+        overlay_dir = check_output(f"{DOCKER_COMMAND} inspect --format='{{ .GraphDriver.Data.UpperDir }}' " + cache_id,
                                    shell=True).decode('utf-8')[:-1]
         l.LOGGER('Build process of ' + service_id + ': overlay dir ' + str(overlay_dir))
         for symlink in symlinks:
@@ -186,8 +186,8 @@ def build_container_from_definition(service: celaut_pb2.Service,
         run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
         run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
 
-        check_output('docker image tag ' + cache_id + ' ' + service_id + '.docker', shell=True)
-        check_output('docker rmi ' + cache_id, shell=True)
+        check_output(f'{DOCKER_COMMAND} image tag ' + cache_id + ' ' + service_id + '.docker', shell=True)
+        check_output(F'{DOCKER_COMMAND} rmi ' + cache_id, shell=True)
         l.LOGGER('Build process of ' + service_id + ': finished.')
 
         with actual_building_processes_lock:
