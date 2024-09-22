@@ -5,7 +5,7 @@ import os
 import grpc
 from grpcbigbuffer import client as peerpc
 
-import podman as docker_lib
+import docker as docker_lib
 
 from protos import celaut_pb2 as celaut, gateway_pb2_grpc, gateway_pb2
 from protos.gateway_pb2_grpcbf import StartService_input_indices, StartService_input_message_mode

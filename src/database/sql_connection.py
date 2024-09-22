@@ -8,7 +8,7 @@ from threading import Lock
 from typing import Callable, List, Tuple, Optional
 from google.protobuf.json_format import MessageToJson
 
-import podman as docker_lib
+import docker as docker_lib
 import grpc
 from grpcbigbuffer import client as grpcbf
 
