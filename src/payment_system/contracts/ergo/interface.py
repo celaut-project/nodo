@@ -25,7 +25,8 @@ LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.
 CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree script
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 ERGO_NODE_URL = env_manager.get_env("ERGO_NODE_URL")
-RECIVER_ADDR = env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')
+COLD_WALLET = env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')
+ERGO_ERG_HOT_WALLET_LIMITS = int(env_manager.get_env("ERGO_ERG_HOT_WALLET_LIMITS"))
 ERGO_AUXILIAR_MNEMONIC = env_manager.get_env("ERGO_AUXILIAR_MNEMONIC")
 ERGO_WALLET_MNEMONIC = env_manager.get_env('ERGO_WALLET_MNEMONIC')
 WAIT_TX_TIME = 240
@@ -38,7 +39,6 @@ def __gas_to_nanoerg(amount: int) -> int:
 def __nanoerg_to_erg(amount: int) -> int:
     return amount / 1_000_000_000
 
-
 def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
     mnemonic = ERGO_WALLET_MNEMONIC if not mnemonic else mnemonic
     # Initialize ErgoAppKit and get the sender's address
@@ -47,7 +47,6 @@ def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
     _m = ergo.getMnemonic(wallet_mnemonic=mnemonic, mnemonic_password=None)
     sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=_m[1], wallet_password=_m[2])
     return sender_address
-
 
 def __get_input_boxes(amount: int) -> List[dict]:
     ergo = appkit.ErgoAppKit(node_url=ERGO_NODE_URL)
@@ -108,18 +107,30 @@ def manager():
         # Funds that may have been sent in the iteration prior to the main wallet but have not yet been confirmed on the network are taken into account.
         wallet_unconfirmed_amount = __balance_total(__get_sender_addr(ERGO_WALLET_MNEMONIC))["unconfirmed"]["nanoErgs"]
         if aux_confirmed_amount - wallet_unconfirmed_amount > 2*DEFAULT_FEE:
-            amount = aux_confirmed_amount - DEFAULT_FEE
-            LOGGER(f"Send {amount} from receiver-node-wallet to main-node-wallet.")
+            # Normalize to ergs.
+            aux_confirmed_amount = __nanoerg_to_erg(aux_confirmed_amount)
+            fee = __nanoerg_to_erg(DEFAULT_FEE)
+            wallet_confirmed_amount = __nanoerg_to_erg(__balance_total(__get_sender_addr(ERGO_WALLET_MNEMONIC))["confirmed"]["nanoErgs"])
+
+            to_hot_amount = aux_confirmed_amount - fee
+            amounts = [to_hot_amount]
+            receiver_addresses = [str(__get_sender_addr(ERGO_WALLET_MNEMONIC).toString())]
+            if to_hot_amount + wallet_confirmed_amount > ERGO_ERG_HOT_WALLET_LIMITS:                    # TODO  REVIEW!
+                to_cold_amount = min(to_hot_amount - ERGO_ERG_HOT_WALLET_LIMITS - wallet_confirmed_amount, 0)
+                to_hot_amount -= to_cold_amount
+                amounts = [to_hot_amount, to_cold_amount]
+                receiver_addresses.append(COLD_WALLET)
+                LOGGER(f"Send {to_cold_amount} erg from receiver-node-wallet to cold-wallet.")
+
+            LOGGER(f"Send {to_hot_amount} erg from receiver-node-wallet to main-node-wallet.")
             tx = simple_send(
                 ergo=appkit.ErgoAppKit(node_url=ERGO_NODE_URL),
-                amount=[__nanoerg_to_erg(amount)], receiver_addresses=[str(__get_sender_addr(ERGO_WALLET_MNEMONIC).toString())], 
-                wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC, fee=__nanoerg_to_erg(DEFAULT_FEE)
+                amount=amounts, receiver_addresses=receiver_addresses,
+                wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC, fee=fee
             )
             LOGGER(f"Simple send tx -> {tx}")
     except Exception as e:
         LOGGER(f"Exception on simple send -> {str(e)}")
-
-    # Move ERGO_WALLET_MNEMONIC.value + ERGO_AUXILIAR_MNEMONIC.value - MAX (or all) from ERGO_AUXILIAR_MNEMONIC to ERGO_PAYMENTS_RECIVER_WALLET
 
 
 # Function to process the payment, generating a transaction with the token in register R4
