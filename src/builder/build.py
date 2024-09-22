@@ -163,7 +163,7 @@ def build_container_from_definition(service: celaut_pb2.Service,
             pass
 
         # Generate the symlinks.
-        overlay_dir = check_output(f"{DOCKER_COMMAND} inspect --format='{{ .GraphDriver.Data.UpperDir }}' " + cache_id,
+        overlay_dir = check_output(DOCKER_COMMAND+" inspect --format='{{ .GraphDriver.Data.UpperDir }}' " + cache_id,
                                    shell=True).decode('utf-8')[:-1]
         l.LOGGER('Build process of ' + service_id + ': overlay dir ' + str(overlay_dir))
         for symlink in symlinks:
