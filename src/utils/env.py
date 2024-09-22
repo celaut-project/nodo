@@ -164,6 +164,7 @@ env_manager.get_env("ERGO_PAYMENTS_RECIVER_WALLET", "")
 env_manager.get_env("ERGO_ERG_HOT_WALLET_LIMITS", 100)
 env_manager.get_env("LEDGER_REPUTATION_SUBMISSION_THRESHOLD", 10)
 env_manager.get_env("TOTAL_REPUTATION_TOKEN_AMOUNT", 1_000_000_000)
+env_manager.get_env("PAYMENT_MANAGER_ITERATION_TIME", 86_400)
 env_manager.get_env("REPUTATION_PROOF_ID", "")
 
 # Logging and Memory Settings
