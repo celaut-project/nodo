@@ -8,7 +8,7 @@ from threading import Lock
 from typing import Callable, List, Tuple, Optional
 from google.protobuf.json_format import MessageToJson
 
-import docker as docker_lib
+import podman as docker_lib
 import grpc
 from grpcbigbuffer import client as grpcbf
 
@@ -436,7 +436,7 @@ class SQLConnection(metaclass=Singleton):
             try:
                 DOCKER_CLIENT().containers.get(container_id).remove(force=True)
             except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-                l.LOGGER(str(e) + 'ERROR WITH DOCKER WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
+                l.LOGGER(str(e) + 'ERROR WITH PODMAN WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
                 return 0
 
         gas = self.get_internal_service_gas(token=token)

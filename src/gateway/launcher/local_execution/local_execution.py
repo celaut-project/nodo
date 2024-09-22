@@ -1,6 +1,6 @@
 from typing import Optional, Callable, List, Dict
 
-import docker as docker_lib
+import podman as docker_lib
 
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.builder import build

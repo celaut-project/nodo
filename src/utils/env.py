@@ -3,7 +3,7 @@ import os
 import subprocess
 from dotenv import load_dotenv
 from typing import Final, Dict, Callable
-import docker as docker_lib
+import podman as docker_lib
 from mnemonic import Mnemonic
 from protos import celaut_pb2
 from src.utils.singleton import Singleton
