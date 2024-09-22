@@ -1,8 +1,6 @@
 from typing import Optional
 from src.database.sql_connection import SQLConnection
 from src.utils.logger import LOGGER
-from src.utils.env import DOCKER_NETWORK
-from src.utils.utils import get_network_name
 from src.reputation_system.contracts.ergo import submit_reputation_proof
 
 
