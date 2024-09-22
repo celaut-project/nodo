@@ -25,7 +25,7 @@ from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
 env_manager = EnvManager()
 
 CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = env_manager.get_env("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME")
-TOTAL_REPUTATION_TOKEN_AMOUNT = env_manager.get_env("TOTAL_REPUTATION_TOKEN_AMOUNT")
+TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get_env("TOTAL_REPUTATION_TOKEN_AMOUNT"))
 CLIENT_EXPIRATION_TIME = env_manager.get_env("CLIENT_EXPIRATION_TIME")
 REMOVE_CONTAINERS = env_manager.get_env("REMOVE_CONTAINERS")
 STORAGE = env_manager.get_env("STORAGE")
@@ -589,6 +589,7 @@ class SQLConnection(metaclass=Singleton):
             # List to hold data for peers that need to be submitted to the ledger
             to_submit = []
             needs_submit = False
+            token_amount = TOTAL_REPUTATION_TOKEN_AMOUNT -1
 
             for peer_id, data in peers_dict.items():
                 reputation_proof_id = data['reputation_proof_id']
@@ -603,13 +604,15 @@ class SQLConnection(metaclass=Singleton):
                     # Calculate the percentage of the total reputation token amount
                     if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
                         needs_submit = True
-                        percentage_amount = (reputation_score / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
+                        percentage_amount = (reputation_score / total_amount) * token_amount if total_amount else 0
                         to_submit.append((reputation_proof_id, percentage_amount, instance_json))
 
                     # Proof percentage doesn't need to be changed itself, but needs to be updated if others do.
                     elif last_index_on_ledger > 0:
-                        percentage_amount = (reputation_score / total_amount) * TOTAL_REPUTATION_TOKEN_AMOUNT if total_amount else 0
+                        percentage_amount = (reputation_score / total_amount) * token_amount if total_amount else 0
                         to_submit.append((reputation_proof_id, percentage_amount, instance_json))
+
+            to_submit.append((None, 1, None))
 
             # Attempt to submit the data to the ledger
             if needs_submit and to_submit:

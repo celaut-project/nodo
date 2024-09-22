@@ -1,10 +1,13 @@
 import json
+from google.protobuf.json_format import MessageToJson
 from ergpy import appkit
 from ergpy.helper_functions import initialize_jvm
 import jpype
 from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
+from src.gateway.utils import generate_gateway_instance
+from src.payment_system.contracts.ergo.interface import ERGO_NODE_URL
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
 
@@ -86,7 +89,7 @@ def __build_proof_box(
                 .build()
 
 @initialize_jvm
-def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: str, objects: List[Tuple[str, int, str]]):
+def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: str, objects: List[Tuple[Optional[str], int, Optional[str]]]):
     ergo = appkit.ErgoAppKit(node_url=node_url)
     fee = DEFAULT_FEE  # Fee in nanoErgs
     safe_min_out_box = (len(objects)+1) * SAFE_MIN_BOX_VALUE
@@ -161,16 +164,17 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     # Reputation proof output box
     for obj in objects:
+        self_info = not obj[0]  # if obj[0] is None, refers to itself.
         proof_box = __build_proof_box(
             ergo=ergo,
             proof_id=proof_id,
             sender_address=sender_address,
             assigned_object=ProofObject(
                 type=ProofObjectType.ProofByToken,
-                value=obj[0]
+                value=obj[0] if self_info else proof_id
             ),
             token_amount=obj[1],
-            data=obj[2]
+            data=obj[2] if self_info else MessageToJson(generate_gateway_instance(ERGO_NODE_URL).instance)
         )
         if proof_box:
             outputs.append(proof_box)
