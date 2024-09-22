@@ -166,7 +166,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             proof_id=proof_id,
             sender_address=sender_address,
             assigned_object=ProofObject(
-                type=ProofObjectType.PlainText,  # TODO must be ProofByToken
+                type=ProofObjectType.ProofByToken,
                 value=obj[0]
             ),
             token_amount=obj[1],
