@@ -101,13 +101,21 @@ sudo apt-get -y update > /dev/null 2>&1 || {
     exit 1
 }
 
-# Check if Podman (or related packages) is installed and remove if necessary
+# Check if Podman is installed
 if command -v podman > /dev/null 2>&1; then
     PODMAN_VERSION=$(podman --version | grep -oP '\d+\.\d+\.\d+')
     echo "Podman version $PODMAN_VERSION is installed. Removing Podman..."
-    sudo apt-get -y remove podman podman-plugins > /dev/null
+    sudo apt-get -y remove podman > /dev/null
 else
     echo "Podman is not installed."
+fi
+
+# Check if podman-plugins is installed
+if dpkg -s podman-plugins > /dev/null 2>&1; then
+    echo "Podman-plugins is installed. Removing podman-plugins..."
+    sudo apt-get -y remove podman-plugins > /dev/null
+else
+    echo "Podman-plugins is not installed."
 fi
 
 # Installing Podman if it's not installed or was removed
