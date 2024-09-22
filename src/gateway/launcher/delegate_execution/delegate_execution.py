@@ -4,6 +4,8 @@ from typing import Callable, List
 import grpc
 from grpcbigbuffer import client as grpcbf
 
+from src.utils.env import EnvManager
+
 import src.utils.utils
 from protos import gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input_indices
@@ -13,6 +15,9 @@ from src.database.sql_connection import SQLConnection
 from src.payment_system.payment_process import increase_deposit_on_peer
 from src.utils import utils, logger as l
 
+
+env_manager = EnvManager()
+START_SERVICE_ON_PEER_TIMEOUT = int(env_manager.get_env("START_SERVICE_ON_PEER_TIMEOUT"))
 
 def delegate_execution(
                         peer: str, father_id: str,
@@ -39,7 +44,8 @@ def delegate_execution(
                 grpc.insecure_channel(
                     next(src.utils.utils.generate_uris_by_peer_id(peer))
                 )
-            ).StartService,  # TODO An timeout should be implemented when requesting a service.
+            ).StartService,
+            timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
             partitions_message_mode_parser=True,
             indices_serializer=StartService_input_indices,
             indices_parser=gateway_pb2.Instance,
