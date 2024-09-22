@@ -126,6 +126,17 @@ else
     echo "Podman is already installed."
 fi
 
+# Configure default registry for unqualified images
+REGISTRY_CONF="/etc/containers/registries.conf"
+
+if grep -q '\[registries.search\]' "$REGISTRY_CONF"; then
+    echo "Modifying existing registry configuration..."
+    sudo sed -i '/\[registries.search\]/!b;n;c\registries = [\"docker.io\"]' "$REGISTRY_CONF"
+else
+    echo "Adding registry configuration..."
+    sudo bash -c "echo -e '\n[registries.search]\nregistries = [\"docker.io\"]' >> $REGISTRY_CONF"
+fi
+
 echo "Podman installation completed successfully."
 
 echo "Installing QEMU and binfmt-support for multi-architecture support..."
