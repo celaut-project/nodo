@@ -104,7 +104,7 @@ def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
     return True
 
 
-def __get_container_by_token(token: str) -> docker_lib.models.containers.Container:
+def __get_container_by_token(token: str) -> docker_lib.domain.containers.Container:
     return docker_lib.from_env().containers.get(
         container_id=token.split('##')[-1]
     )
@@ -270,7 +270,7 @@ def default_initial_cost(
 
 def add_container(
         father_id: str,
-        container: docker_lib.models.containers.Container,
+        container: docker_lib.domain.containers.Container,
         initial_gas_amount: Optional[int],
         system_requirements_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> str:
