@@ -36,6 +36,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 
 ### Note on Installation
 
+- **version**: The Nodo version is currently in 'alpha', so it's recommended to use a virtual machine.
+
 - **sudo Usage**: The installation script requires `sudo` privileges to install various apt packages and Docker. Use it responsibly under your own discretion.
 
 - **Docker Containers**: The system will create and remove Docker containers as part of its operations.
