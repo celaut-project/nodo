@@ -23,7 +23,7 @@ def is_nodo_service_running():
         # Check if systemctl command indicates that nodo.service is active (running)
         return "Active: active" in result.stdout
     except Exception as e:
-        print(f"Error checking nodo.service status: {e}")
+        print(f"Error checking nodo.service status: {e}", flush=True)
         return False  # Return False to be safe if there's an error
 
 def stop_service():
@@ -32,13 +32,13 @@ def stop_service():
         result = subprocess.run(['systemctl', 'stop', 'nodo.service'], capture_output=True, text=True)
         # Check if the command was successful
         if result.returncode == 0:
-            print("nodo.service stopped successfully.")
+            print("nodo.service stopped successfully.", flush=True)
             return True
         else:
-            print(f"Failed to stop nodo.service: {result.stderr}")
+            print(f"Failed to stop nodo.service: {result.stderr}", flush=True)
             return False
     except Exception as e:
-        print(f"Error stopping nodo.service: {e}")
+        print(f"Error stopping nodo.service: {e}", flush=True)
         return False
 
 def get_git_commit():
@@ -53,9 +53,9 @@ def check_rust_installation():
     try:
         # Try to run 'rustc --version' to check if Rust is installed
         subprocess.run(['rustc', '--version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        print("Rust is already installed.")
+        print("Rust is already installed.", flush=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Installing Rust (Cargo)...")
+        print("Installing Rust (Cargo)...", flush=True)
         try:
             # Run the command to install Rust
             subprocess.run(
@@ -65,11 +65,11 @@ def check_rust_installation():
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
-            print("Sourcing the Rust environment...")
+            print("Sourcing the Rust environment...", flush=True)
             # Source $HOME/.cargo/env in the current environment
             os.system("source $HOME/.cargo/env")
         except subprocess.CalledProcessError as e:
-            print("Error installing Rust:", e)
+            print("Error installing Rust:", e, flush=True)
 
 if __name__ == '__main__':
     os.umask(0o002)
@@ -112,17 +112,17 @@ if __name__ == '__main__':
               "\n- storage:prune_blocks"
               "\n- test <test name>"
               "\n- compile <project directory>"
-              "\n- tui"
-              )
+              "\n- tui",
+              flush=True)
         try:
             if is_nodo_service_running():
-                print("\nNote: Nodo service is currently running in the background.")
+                print("\nNote: Nodo service is currently running in the background.", flush=True)
             else:
-                print("\nNote: Nodo service is not running.")
+                print("\nNote: Nodo service is not running.", flush=True)
         except Exception as e:
-            print(f"Error checking nodo.service status: {e}")
+            print(f"Error checking nodo.service status: {e}", flush=True)
 
-        print(f"Nodo version (Git commit): {get_git_commit()}")
+        print(f"Nodo version (Git commit): {get_git_commit()}", flush=True)
 
     else:
         match sys.argv[1]:
@@ -148,7 +148,7 @@ if __name__ == '__main__':
                     from src.serve import serve
                     serve()
                 else:
-                    print("Nodo service is already running in the background. Cannot start serve.")
+                    print("Nodo service is already running in the background. Cannot start serve.", flush=True)
 
             case 'migrate':
                 import os
@@ -173,4 +173,4 @@ if __name__ == '__main__':
                 os.system(f"cd {MAIN_DIR}/src/commands/tui && cargo run")
 
             case other:
-                print('Unknown command.')
+                print('Unknown command.', flush=True)
