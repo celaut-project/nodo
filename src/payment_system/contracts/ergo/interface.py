@@ -117,12 +117,13 @@ def manager():
             amounts = [aux_total]
             receiver_addresses = [str(__get_sender_addr(ERGO_WALLET_MNEMONIC()).toString())]
             # Check if send to cold wallet is need.
-            if aux_total + wallet_confirmed_amount > HOT_LIMITS:
+            cold_wallet = COLD_WALLET()
+            if cold_wallet and aux_total + wallet_confirmed_amount > HOT_LIMITS:
                 to_hot_amount = min(aux_total, max(0, HOT_LIMITS - wallet_confirmed_amount))
                 to_cold_amount = aux_total - to_hot_amount
                 if to_cold_amount > DEFAULT_FEE:
                     amounts = [to_hot_amount, to_cold_amount]
-                    receiver_addresses.append(COLD_WALLET())
+                    receiver_addresses.append(cold_wallet)
                     LOGGER(f"Send {to_cold_amount} erg from receiver-node-wallet to cold-wallet.")
 
             LOGGER(f"Send {to_hot_amount} erg from receiver-node-wallet to main-node-wallet.")
