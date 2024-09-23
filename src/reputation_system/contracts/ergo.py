@@ -7,7 +7,6 @@ from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
 from src.gateway.utils import generate_gateway_instance
-from src.payment_system.contracts.ergo.interface import ERGO_NODE_URL
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
 
@@ -23,6 +22,7 @@ sigmastate = JPackage('sigmastate')
 
 # Constants
 env_manager = EnvManager()
+ERGO_NODE_URL = lambda: env_manager.get_env("ERGO_NODE_URL")
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
 DEFAULT_TOKEN_AMOUNT = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
@@ -174,7 +174,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
                 value=obj[0] if self_info else proof_id
             ),
             token_amount=obj[1],
-            data=obj[2] if self_info else MessageToJson(generate_gateway_instance(ERGO_NODE_URL).instance)
+            data=obj[2] if self_info else MessageToJson(generate_gateway_instance(ERGO_NODE_URL()).instance)
         )
         if proof_box:
             outputs.append(proof_box)
@@ -208,7 +208,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
     try:
         tx_id = __create_reputation_proof_tx(
-            node_url=env_manager.get_env('ERGO_NODE_URL'),
+            node_url=ERGO_NODE_URL(),
             wallet_mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC'),
             proof_id=env_manager.get_env('REPUTATION_PROOF_ID'),
             objects=objects,
