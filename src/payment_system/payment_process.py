@@ -92,12 +92,14 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                         contract_address=contract_address
                     )
                     _l.LOGGER(f"Payment processed. Deposit token: {deposit_token}")
-                    update_reputation(token=contract_address, amount=10)  # TODO On envs.
-                    update_reputation(token=ledger, amount=1)  # TODO On envs.
+                    if contract_address and ledger:
+                        update_reputation(token=contract_address, amount=10)  # TODO On envs.
+                        update_reputation(token=ledger, amount=1)  # TODO On envs.
                 except Exception as e:
                     _l.LOGGER(f"Error processing payment for contract {contract_hash}: {str(e)}")
-                    update_reputation(token=contract_address, amount=-100)  # TODO On envs.
-                    update_reputation(token=ledger, amount=-10)  # TODO On envs.
+                    if contract_address and ledger:
+                        update_reputation(token=contract_address, amount=-100)  # TODO On envs.
+                        update_reputation(token=ledger, amount=-10)  # TODO On envs.
                     continue
 
                 # Handle communication attempts to peer
