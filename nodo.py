@@ -108,6 +108,7 @@ if __name__ == '__main__':
               "\n- execute <service id>"
               "\n- connect"
               "\n- serve"
+              "\n- config"
               "\n- migrate"
               "\n- storage:prune_blocks"
               "\n- test <test name>"
@@ -149,6 +150,9 @@ if __name__ == '__main__':
                     serve()
                 else:
                     print("Nodo service is already running in the background. Cannot start serve.", flush=True)
+
+            case 'config':
+                os.system("chmod +x bash/reconfig.sh && ./bash/reconfig.sh")
 
             case 'migrate':
                 import os
