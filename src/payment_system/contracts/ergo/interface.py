@@ -125,6 +125,8 @@ def manager():
                     amounts = [to_hot_amount, to_cold_amount]
                     receiver_addresses.append(cold_wallet)
                     LOGGER(f"Send {to_cold_amount} erg from receiver-node-wallet to cold-wallet.")
+            else:
+                to_hot_amount = aux_total
 
             LOGGER(f"Send {to_hot_amount} erg from receiver-node-wallet to main-node-wallet.")
             tx = simple_send(
