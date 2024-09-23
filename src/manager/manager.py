@@ -31,6 +31,7 @@ DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get_env("DEFAULT_INITIAL_GAS_AMO
 DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
 USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get_env("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
 MEMSWAP_FACTOR = env_manager.get_env("MEMSWAP_FACTOR")
+FEE_TRIAL_GAS_AMOUNT = int(env_manager.get_env("FREE_TRIAL_GAS_AMOUNT"))
 
 sc = SQLConnection()
 
@@ -199,7 +200,7 @@ def spend_gas(
 def generate_client() -> gateway_pb2.Client:
     # No collisions expected.
     client_id = uuid.uuid4().hex
-    sc.add_client(client_id=client_id, gas=0, last_usage=None)
+    sc.add_client(client_id=client_id, gas=FEE_TRIAL_GAS_AMOUNT, last_usage=None)
     logger.LOGGER('New client created ' + client_id)
     return gateway_pb2.Client(
         client_id=client_id,
