@@ -106,7 +106,7 @@ if __name__ == '__main__':
     if len(sys.argv) == 1:
         print("Command needed: "
               "\n- execute <service id>"
-              "\n- connect"
+              "\n- connect <ip:url>"
               "\n- serve"
               "\n- config"
               "\n- migrate"
