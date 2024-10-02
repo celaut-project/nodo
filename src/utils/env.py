@@ -167,6 +167,8 @@ env_manager.get_env("LEDGER_REPUTATION_SUBMISSION_THRESHOLD", 10)
 env_manager.get_env("TOTAL_REPUTATION_TOKEN_AMOUNT", 1_000_000_000)
 env_manager.get_env("PAYMENT_MANAGER_ITERATION_TIME", 86_400)
 env_manager.get_env("REPUTATION_PROOF_ID", "")
+env_manager.get_env("ERGO_DONATION_WALLET", "9ejNy2qoifmzfCiDtEiyugthuXMriNNPhNKzzwjPtHnrK3esvbD")
+env_manager.get_env("ERGO_DONATION_PERCENTAGE", "0.01")
 
 # Logging and Memory Settings
 env_manager.get_env("MEMORY_LOGS", False)
