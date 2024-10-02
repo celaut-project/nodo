@@ -10,7 +10,7 @@ Here is a list of the most commonly used commands in Nodo for a basic user:
 - `execute <service id>`: Executes a service instance based on the specified service ID.
 - `connect <ip:url>`: Manually connects to a peer node by specifying its IP and port.
 - `config`: Configures various settings related to the network, wallets, and optional donation setup.
-- `compile <project directory>`: Compiles a project (e.g., a Dockerfile and associated configuration) to create a service that can be executed within the Nodo network.
+- `compile <project directory>`: Compiles a project (e.g., a Dockerfile and associated configuration) to create a service that can be executed within the Celaut network.
 - `tui`: Launches a terminal user interface (TUI) to visualize peers, services, and instances.
 
 ## Command Details
