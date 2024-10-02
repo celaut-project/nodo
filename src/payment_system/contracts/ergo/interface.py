@@ -26,7 +26,9 @@ CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree script
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 ERGO_NODE_URL = lambda: env_manager.get_env("ERGO_NODE_URL")
 COLD_WALLET = lambda: env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')
-HOT_LIMITS = int(env_manager.get_env("ERGO_ERG_HOT_WALLET_LIMITS"))
+ERGO_DONATION_WALLET = lambda: env_manager.get_env('ERGO_DONATION_WALLET')
+ERGO_DONATION_PERCENTAGE = lambda: clamp(float(env_manager.get_env('ERGO_DONATION_PERCENTAGE')), 1.0, 0.0)  # type: ignore
+HOT_LIMITS = int(env_manager.get_env("ERGO_ERG_HOT_WALLET_LIMITS"))  # type: ignore
 ERGO_AUXILIAR_MNEMONIC = env_manager.get_env("ERGO_AUXILIAR_MNEMONIC")
 ERGO_WALLET_MNEMONIC = lambda: env_manager.get_env('ERGO_WALLET_MNEMONIC')
 WAIT_TX_TIME = 240
@@ -34,10 +36,10 @@ WAIT_TX_TIME = 240
 payment_lock = Lock()  # Ensures that the same input box is no spent with more amount that it has. (could be more efficient ...)
 
 def __gas_to_nanoerg(amount: int) -> int:
-    return int(amount/(10**58)) if amount > 10**58 else amount
+    return int(amount/(10**58)) if amount > 10**58 else amount  # type: ignore
 
 def __nanoerg_to_erg(amount: int) -> int:
-    return amount / 1_000_000_000
+    return amount / 1_000_000_000  # type: ignore
 
 def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
     mnemonic = ERGO_WALLET_MNEMONIC() if not mnemonic else mnemonic
@@ -118,13 +120,29 @@ def manager():
             receiver_addresses = [str(__get_sender_addr(ERGO_WALLET_MNEMONIC()).toString())]
             # Check if send to cold wallet is need.
             cold_wallet = COLD_WALLET()
+            donation_percentage = ERGO_DONATION_PERCENTAGE()
+            donation_wallet = ERGO_DONATION_WALLET()
             if cold_wallet and aux_total + wallet_confirmed_amount > HOT_LIMITS:
                 to_hot_amount = min(aux_total, max(0, HOT_LIMITS - wallet_confirmed_amount))
                 to_cold_amount = aux_total - to_hot_amount
+
                 if to_cold_amount > DEFAULT_FEE:
-                    amounts = [to_hot_amount, to_cold_amount]
-                    receiver_addresses.append(cold_wallet)
-                    LOGGER(f"Send {to_cold_amount} erg from receiver-node-wallet to cold-wallet.")
+                    # Calculate donation amount based on percentage
+                    donation_amount = to_cold_amount * donation_percentage
+
+                    if donation_wallet and donation_amount > DEFAULT_FEE:
+                        # Deduct the donation amount from the cold wallet amount
+                        to_cold_amount -= donation_amount
+                        amounts = [to_hot_amount, to_cold_amount, donation_amount]
+                        receiver_addresses.append(cold_wallet)
+                        receiver_addresses.append(donation_wallet)
+                        LOGGER(f"Send {to_cold_amount} erg from receiver-node-wallet to cold-wallet.")
+                        LOGGER(f"Send {donation_amount} erg from receiver-node-wallet to donation-wallet.")
+                    else:
+                        # If the donation amount is less than DEFAULT_FEE, send everything to the cold wallet
+                        amounts = [to_hot_amount, to_cold_amount]
+                        receiver_addresses.append(cold_wallet)
+                        LOGGER(f"Send {to_cold_amount} erg from receiver-node-wallet to cold-wallet.")
             else:
                 to_hot_amount = aux_total
 
