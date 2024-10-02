@@ -43,6 +43,15 @@ validate_wallet_address() {
     fi
 }
 
+# Function to validate donation percentage (should be 0 to 100)
+validate_percentage() {
+    if [[ $1 =~ ^[0-9]+(\.[0-9]+)?$ ]] && (( $(echo "$1 <= 100" | bc -l) )); then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Function to display and prompt for a variable
 handle_variable() {
     local var_name=$1
@@ -71,9 +80,38 @@ handle_variable() {
     fi
 }
 
-# Manage the variables
+# Function to ask for voluntary donation
+handle_donation() {
+    read -p "Do you want to donate a percentage of transactions to support node development? (y/n): " donate
+    if [[ "$donate" =~ ^[yY]$ ]]; then
+        # Handle donation wallet address
+        handle_variable "ERGO_DONATION_WALLET" validate_wallet_address
+
+        # Handle donation percentage
+        local donation_percentage=""
+        while true; do
+            read -p "Enter the donation percentage (0-100): " donation_percentage
+            if validate_percentage "$donation_percentage"; then
+                # Convert percentage from 0-100 to 0-1 before saving
+                donation_percentage=$(echo "scale=4; $donation_percentage / 100" | bc)
+                update_env_variable "ERGO_DONATION_PERCENTAGE" "$donation_percentage"
+                echo "Donation percentage successfully updated to $donation_percentage (stored as 0-1 scale)."
+                break
+            else
+                echo "Invalid percentage. Please enter a value between 0 and 100."
+            fi
+        done
+    else
+        echo "Skipping donation setup."
+    fi
+}
+
+# Manage the main variables
 handle_variable "ERGO_NODE_URL" validate_url
 handle_variable "ERGO_WALLET_MNEMONIC" validate_wallet_address
 handle_variable "ERGO_PAYMENTS_RECIVER_WALLET" validate_wallet_address
+
+# Handle optional donation
+handle_donation
 
 echo "Process completed."
