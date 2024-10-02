@@ -121,4 +121,4 @@ This will print the following:
 - `compile <project directory>`
 - `tui`
 
-For more detailed questions, please ask on ![Discord](https://discord.com/channels/668903786361651200/1242433742446788649)
+For more detailed questions, please ask on [Discord](https://discord.com/channels/668903786361651200/1242433742446788649)
