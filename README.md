@@ -41,3 +41,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 - **sudo Usage**: The installation script requires `sudo` privileges to install various apt packages and Docker. Use it responsibly under your own discretion.
 
 - **Docker Containers**: The system will create and remove Docker containers as part of its operations.
+
+
+## Usage
+
+For detailed usage instructions, please refer to the [User Guide](USAGE.md).
