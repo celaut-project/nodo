@@ -101,7 +101,7 @@ For users looking to explore deeper functionality, the following advanced comman
 
 - `serve`: Initiates the Nodo service, recommended for development purposes.
 - `migrate`: Runs database migrations to update the schema.
-- `storage:prune_blocks`: Removes unnecessary blocks from the storage to optimize performance.
+- `storage:prune_blocks`: Removes unnecessary blocks from the storage to reduce disk usage.
 - `test <test name>`: Executes tests for specific services or features.
 
 ## Getting Help
