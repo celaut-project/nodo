@@ -68,7 +68,6 @@ Currently, Nodo can only be installed using superuser privileges (sudo). As a re
 If you did not install Nodo with sudo, or are using it in a development environment, you will need to manually start the service using:
 `nodo serve`
 
-**Note**: Running `nodo serve` without sudo in a production environment is not recommended and should only be done for testing or development. In most cases, the service will be managed automatically by `systemd`.
 
 ## TUI Interface
 
