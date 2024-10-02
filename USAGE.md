@@ -53,7 +53,7 @@ The `tui` command launches the terminal-based user interface, allowing you to vi
 
 **Usage Example:**
 `nodo tui`
-Once the TUI is running, you can monitor your nodes, view active services, and manage instances directly from the terminal.
+Once the TUI is running, you can monitor your node, view services and instances directly from the terminal.
 
 ## Important Note on Service Management
 
