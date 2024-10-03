@@ -45,4 +45,4 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 
 ## Usage
 
-For detailed usage instructions, please refer to the [User Guide](USAGE.md).
+For detailed usage instructions, please refer to the [User Guide](docs/USAGE.md).
