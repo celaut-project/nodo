@@ -94,7 +94,7 @@ handle_variable() {
 handle_donation() {
     echo -e "${BLUE}---------------------------------${NC}"
     echo -e "${YELLOW}Donation Setup${NC}"
-    read -p "Do you want to donate a percentage of transactions to support node development? (y/n): " donate
+    read -p "Do you want to donate a percentage of profits to support node development? (y/n): " donate
     if [[ "$donate" =~ ^[yY]$ ]]; then
         # Handle donation percentage only
         local donation_percentage=""
