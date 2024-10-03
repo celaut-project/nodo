@@ -39,6 +39,23 @@ The `config` command is used to configure various environment variables related 
 `nodo config`
 This will initiate an interactive session to guide you through configuring your system.
 
+#### Modifiable Fields
+
+1. **ERGO_NODE_URL**:
+   This is the URL of the Ergo node, which is the default blockchain network used for both payment systems and the reputation system. It connects your node to the Ergo network, enabling it to interact with the blockchain.
+
+2. **ERGO_WALLET_MNEMONIC**:
+   This is the main wallet for your node. It is used for generating reputation proofs and for sending payments to other nodes. A random wallet is generated when the node is first installed, but the user can provide a different wallet mnemonic if they prefer.
+
+3. **ERGO_PAYMENTS_RECIEVER_WALLET**:
+   This is the public key where funds should be sent once they exceed a certain threshold. It is recommended to use a cold wallet (offline wallet) for additional security.
+
+4. **NGROK_TUNNELS_KEY**:
+   If your node doesn't have a public IP available for internet exposure, you can use a service like NGROK. This key allows the node to expose itself to the internet through NGROK tunnels.
+
+5. **ERGO_DONATION_PERCENTAGE**:
+   Users can opt to donate a percentage of their income (earned from clients) to support the development of Nodo. The donation percentage can be set by the user, with 0% being the default value, as the repository `celaut-proyect/nodo` operates as a non-profit. The donation destination can be viewed in the environment variables.
+
 ### 4. compile
 
 The `compile` command allows you to compile a project (such as a Dockerfile and associated configuration files) and create a service specification. This service can then be deployed and run on the distributed network.
