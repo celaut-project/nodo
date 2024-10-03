@@ -96,10 +96,7 @@ handle_donation() {
     echo -e "${YELLOW}Donation Setup${NC}"
     read -p "Do you want to donate a percentage of transactions to support node development? (y/n): " donate
     if [[ "$donate" =~ ^[yY]$ ]]; then
-        # Handle donation wallet address
-        handle_variable "ERGO_DONATION_WALLET" validate_wallet_address
-
-        # Handle donation percentage
+        # Handle donation percentage only
         local donation_percentage=""
         while true; do
             read -p "Enter the donation percentage (0-100): " donation_percentage
@@ -108,6 +105,10 @@ handle_donation() {
                 donation_percentage=$(echo "scale=4; $donation_percentage / 100" | bc)
                 update_env_variable "ERGO_DONATION_PERCENTAGE" "$donation_percentage"
                 echo -e "${GREEN}Donation percentage successfully updated to $donation_percentage (stored as 0-1 scale).${NC}"
+
+                if (( $(echo "$donation_percentage > 0" | bc -l) )); then
+                    echo -e "${YELLOW}Thank you for your donation!${NC}"
+                fi
                 break
             else
                 echo -e "${RED}Invalid percentage. Please enter a value between 0 and 100.${NC}"
@@ -131,6 +132,16 @@ display_summary() {
             echo -e "${GREEN}$var_name${NC}: $value"
         fi
     done
+
+    # Add donation percentage to the summary
+    local donation_percentage=$(get_env_variable "ERGO_DONATION_PERCENTAGE")
+    if [ -z "$donation_percentage" ] || (( $(echo "$donation_percentage == 0" | bc -l) )); then
+        echo -e "${YELLOW}Donation: ${RED}Not Set or 0%${NC}"
+    else
+        # Convert from 0-1 scale to 0-100 for display
+        local display_percentage=$(echo "$donation_percentage * 100" | bc)
+        echo -e "${YELLOW}Donation: ${GREEN}$display_percentage%${NC}"
+    fi
 
     echo -e "${BLUE}=================================${NC}"
 }
