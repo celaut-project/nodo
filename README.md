@@ -46,3 +46,9 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 ## Usage
 
 For detailed usage instructions, please refer to the [User Guide](docs/USAGE.md).
+
+
+## Know Your Assumptions
+
+Before using **Nodo**, it's essential to understand the assumptions and risks involved. Please review the [Know Your Assumptions (KyA)](docs/KyA.md)
+document to ensure you are fully aware of your responsibilities and the limitations of the software.
