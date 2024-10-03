@@ -69,7 +69,7 @@ handle_variable() {
         local new_value=""
         while true; do
             read -p "Enter the new value for $var_name: " new_value
-            if $validation_function "$new_value"; then
+            if [ -z "$validation_function" ] || $validation_function "$new_value"; then
                 update_env_variable "$var_name" "$new_value"
                 echo "$var_name successfully updated."
                 break
@@ -110,7 +110,7 @@ handle_donation() {
 handle_variable "ERGO_NODE_URL" validate_url
 handle_variable "ERGO_WALLET_MNEMONIC" validate_wallet_address
 handle_variable "ERGO_PAYMENTS_RECIVER_WALLET" validate_wallet_address
-handle_variable "NGROK_TUNNELS_KEY"
+handle_variable "NGROK_TUNNELS_KEY"  # No validation function needed here
 
 # Handle optional donation
 handle_donation
