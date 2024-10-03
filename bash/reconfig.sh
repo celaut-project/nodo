@@ -9,6 +9,13 @@ if [ ! -f "$ENV_FILE" ]; then
     exit 1
 fi
 
+# Colors for better visibility (works in most terminals)
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+NC='\033[0m' # No Color
+
 # Function to read a variable from the .env file
 get_env_variable() {
     local var_name=$1
@@ -58,10 +65,13 @@ handle_variable() {
     local validation_function=$2
     local current_value=$(get_env_variable "$var_name")
 
+    echo -e "${BLUE}---------------------------------${NC}"
+    echo -e "${YELLOW}Variable: ${var_name}${NC}"
+
     if [ -z "$current_value" ]; then
-        echo "$var_name does not have any assigned value."
+        echo -e "${RED}$var_name does not have any assigned value.${NC}"
     else
-        echo "Current value of $var_name: $current_value"
+        echo -e "Current value of ${GREEN}$var_name${NC}: ${current_value}"
     fi
 
     read -p "Do you want to modify $var_name? (y/n): " modify
@@ -71,10 +81,10 @@ handle_variable() {
             read -p "Enter the new value for $var_name: " new_value
             if [ -z "$validation_function" ] || $validation_function "$new_value"; then
                 update_env_variable "$var_name" "$new_value"
-                echo "$var_name successfully updated."
+                echo -e "${GREEN}$var_name successfully updated.${NC}"
                 break
             else
-                echo "Invalid value. Please try again."
+                echo -e "${RED}Invalid value. Please try again.${NC}"
             fi
         done
     fi
@@ -82,6 +92,8 @@ handle_variable() {
 
 # Function to ask for voluntary donation
 handle_donation() {
+    echo -e "${BLUE}---------------------------------${NC}"
+    echo -e "${YELLOW}Donation Setup${NC}"
     read -p "Do you want to donate a percentage of transactions to support node development? (y/n): " donate
     if [[ "$donate" =~ ^[yY]$ ]]; then
         # Handle donation wallet address
@@ -95,16 +107,37 @@ handle_donation() {
                 # Convert percentage from 0-100 to 0-1 before saving
                 donation_percentage=$(echo "scale=4; $donation_percentage / 100" | bc)
                 update_env_variable "ERGO_DONATION_PERCENTAGE" "$donation_percentage"
-                echo "Donation percentage successfully updated to $donation_percentage (stored as 0-1 scale)."
+                echo -e "${GREEN}Donation percentage successfully updated to $donation_percentage (stored as 0-1 scale).${NC}"
                 break
             else
-                echo "Invalid percentage. Please enter a value between 0 and 100."
+                echo -e "${RED}Invalid percentage. Please enter a value between 0 and 100.${NC}"
             fi
         done
     else
-        echo "Skipping donation setup."
+        echo -e "${YELLOW}Skipping donation setup.${NC}"
     fi
 }
+
+# Function to display summary before processing
+display_summary() {
+    echo -e "${BLUE}=================================${NC}"
+    echo -e "${YELLOW}Summary of current configuration:${NC}"
+
+    for var_name in "ERGO_NODE_URL" "ERGO_WALLET_MNEMONIC" "ERGO_PAYMENTS_RECIVER_WALLET" "NGROK_TUNNELS_KEY"; do
+        local value=$(get_env_variable "$var_name")
+        if [ -z "$value" ]; then
+            echo -e "${RED}$var_name: Not Set${NC}"
+        else
+            echo -e "${GREEN}$var_name${NC}: $value"
+        fi
+    done
+
+    echo -e "${BLUE}=================================${NC}"
+}
+
+# Main script execution
+echo -e "${BLUE}Welcome to the Node Configuration Script${NC}"
+display_summary
 
 # Manage the main variables
 handle_variable "ERGO_NODE_URL" validate_url
@@ -115,4 +148,4 @@ handle_variable "NGROK_TUNNELS_KEY"  # No validation function needed here
 # Handle optional donation
 handle_donation
 
-echo "Process completed."
+echo -e "${BLUE}Process completed.${NC}"
