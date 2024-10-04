@@ -63,7 +63,7 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> str:
         sc.add_slot(slot=slot, peer_id=peer_id)
 
     # Contracts
-    for contract_ledger in instance.instance.api.contract_ledger:
+    for contract_ledger in instance.instance.api.payment_contracts:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
     logger.LOGGER(f'Get instance for peer -> {peer_id}')
@@ -79,7 +79,7 @@ def update_peer_instance(instance: gateway_pb2.Instance, peer_id: str):
         sc.add_slot(slot=slot, peer_id=peer_id)
 
     # Contracts
-    for contract_ledger in instance.instance.api.contract_ledger:
+    for contract_ledger in instance.instance.api.payment_contracts:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
     logger.LOGGER(f"Peer {peer_id} updated.")

@@ -42,7 +42,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     slot.port = GATEWAY_PORT
     instance.api.slot.append(slot)
 
-    instance.api.contract_ledger.extend(
+    instance.api.payment_contracts.extend(
         [e for e in generate_contract_ledger()]
     )
     return gateway_pb2.Instance(

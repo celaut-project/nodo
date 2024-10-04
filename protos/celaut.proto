@@ -45,7 +45,7 @@ message Any {
                 bytes value = 2;
             }
             message AttrHashTag {
-                int32 key = 1;  // the attribute's index. 
+                int32 key = 1;  // the attribute's index.
                 repeated HashTag value = 2;  // HashTag, if it's a repeated field, the HashTags of every one.
             }
             repeated Hash hash = 1;
@@ -84,7 +84,8 @@ message Service {
         }
         AppDef app_protocol = 1;
         repeated Slot slot = 2;
-        repeated ContractLedger contract_ledger = 3;
+        repeated ContractLedger payment_contracts = 3;
+        repeated ContractLedger reputation_proofs = 4;
         // Cost function can be applied. <- must be optional.
     }
 
@@ -161,7 +162,7 @@ message Instance {
         repeated Uri uri = 2;
     }
     Service.Api api = 1;
-    repeated Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899], 
+    repeated Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899],
 }
 
 
