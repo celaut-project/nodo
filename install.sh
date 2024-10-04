@@ -197,7 +197,7 @@ fi
 # Accept KyA
 ACCEPT_KYA_SCRIPT="bash/accept_kya.sh"
 chmod +x "$ACCEPT_KYA_SCRIPT"
-if ! bash "$ACCEPT_KYA_SCRIPT" "$TARGET_DIR"; then
+if ! ./"$ACCEPT_KYA_SCRIPT" "$TARGET_DIR"; then
   printf "Error: The script $ACCEPT_KYA_SCRIPT failed to execute.\n" >&2
   exit 1
 fi
@@ -209,7 +209,7 @@ printf "********** You can now use the 'nodo' command. **********\n"
 # Accept KyA
 CONFIG_SCRIPT="bash/reconfig.sh"
 chmod +x "$CONFIG_SCRIPT"
-if ! bash "$CONFIG_SCRIPT"; then
+if ! ./"$CONFIG_SCRIPT"; then
   printf "Error: The script $CONFIG_SCRIPT failed to execute.\n" >&2
   exit 1
 fi
