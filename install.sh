@@ -195,7 +195,7 @@ else
 fi
 
 # Accept KyA
-ACCEPT_KYA_SCRIPT="bash/accept_kya.sh"
+ACCEPT_KYA_SCRIPT="$TARGET_DIR/bash/accept_kya.sh"
 chmod +x "$ACCEPT_KYA_SCRIPT"
 if ! ./"$ACCEPT_KYA_SCRIPT" "$TARGET_DIR"; then
   printf "Error: The script $ACCEPT_KYA_SCRIPT failed to execute.\n" >&2
