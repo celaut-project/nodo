@@ -11,7 +11,7 @@ fi
 TARGET_DIR="$1"
 
 # Define the path to the kya.md file and the target directory using $TARGET_DIR
-file="$TARGET_DIR/docs/kya.md"
+file="$TARGET_DIR/docs/KyA.md"
 directory="$TARGET_DIR"
 
 # Check if the kya.md file exists
