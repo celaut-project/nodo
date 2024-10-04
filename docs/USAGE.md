@@ -56,6 +56,8 @@ This will initiate an interactive session to guide you through configuring your 
 5. **ERGO_DONATION_PERCENTAGE**:
    Users can opt to donate a percentage of their income (earned from clients) to support the development of Nodo. The donation percentage can be set by the user, with 0% being the default value, as the repository `celaut-proyect/nodo` operates as a non-profit. The donation destination can be viewed in the environment variables.
 
+**Check how and why Nodo uses [Ergo](docs/ERGO.md).**
+
 ### 4. compile
 
 The `compile` command allows you to compile a project (such as a Dockerfile and associated configuration files) and create a service specification. This service can then be deployed and run on the distributed network.
