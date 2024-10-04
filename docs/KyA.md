@@ -17,3 +17,5 @@
 - **Alternative Payments**: Although Ergo is currently used for transactions, other payment systems may be integrated into **Nodo** in the future.
 
 **Nodo** developers cannot offer assistance in cases of asset loss, hacking, or theft of private keys.
+
+**Check how and why Nodo uses [Ergo](ERGO.md).**
