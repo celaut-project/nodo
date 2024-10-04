@@ -28,9 +28,11 @@ if [[ -f "$file" ]]; then
         echo "Deleting directory $directory..."
         rm -rf "$directory"
         echo "Directory deleted."
+        exit 1
     else
         echo "You have accepted the Know your assumptions."
     fi
 else
     echo "The file $file does not exist."
+    exit 1
 fi
