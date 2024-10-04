@@ -66,7 +66,7 @@ The node uses two wallets to manage its funds and transactions:
 
 The node operator can manually provide the seed for the **sending wallet** in case the node has been reinstalled. This wallet is also used to add reputation proofs to the network.
 
-### Sharing Information Between Nodos
+### Sharing Information Between Celaut Nodes
 
 When a node shares information with another, it provides two key elements:
 
