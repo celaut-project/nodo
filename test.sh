@@ -1,5 +1,4 @@
-# Accept KyA
-TARGET_DIR = "/nodo"
+TARGET_DIR="/nodo"
 ACCEPT_KYA_SCRIPT="bash/accept_kya.sh"
 chmod +x "$ACCEPT_KYA_SCRIPT"
 if ! ./"$ACCEPT_KYA_SCRIPT" "$TARGET_DIR"; then
