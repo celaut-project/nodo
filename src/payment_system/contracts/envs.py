@@ -39,8 +39,7 @@ DEMOS = [simulated.CONTRACT_HASH]
 
 def print_payment_info() -> str:
     ergo_addr, ergo_amount = ergo.get_ergo_info()
-    return f"""
-    Ergo Platform:
+    return f"""Ergo Platform:
         Nodo deposit amount: {ergo_amount} ERGs
         Nodo deposit wallet: {ergo_addr}  (sending wallet on docs)
     """

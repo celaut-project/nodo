@@ -106,12 +106,14 @@ if __name__ == '__main__':
 
     if len(sys.argv) == 1:
         print("Command needed: "
-              "\n- status"
               "\n- execute <service id>"
               "\n- connect <ip:url>"
               "\n- compile <project directory>"
               "\n- config"
               "\n- tui"
+              "\n- status"
+              "\n- logs"
+
               "\n\n Advanced commands:"
               "\n- serve"
               "\n- migrate"
@@ -131,21 +133,24 @@ if __name__ == '__main__':
             case "status":
                 try:
                     if is_nodo_service_running():
-                        print("\nNote: Nodo service is currently running in the background.", flush=True)
+                        print("Nodo service is currently running in the background.", flush=True)
                     else:
-                        print("\nNote: Nodo service is not running.", flush=True)
+                        print("Nodo service is not running.", flush=True)
                 except Exception as e:
                     print(f"Error checking nodo.service status: {e}", flush=True)
 
-                print(f"Nodo version (Git commit): {get_git_commit()}", flush=True)
+                print(f"\nNodo version (Git commit): {get_git_commit()}", flush=True)
 
                 print(
-                    "\n\n"
                     "Ergo info: "
                     f"\n  {print_payment_info()}",
-                    f"\n  Reputation proof id: {env_manager.get_env('REPUTATION_PROOF_ID')}",
+                    f"\n  Reputation proof id: {env_manager.get_env('REPUTATION_PROOF_ID')}"
+                    "\n\n",
                     flush=True
                 )
+
+            case "logs":
+                os.system(f"tail -f {MAIN_DIR}/storage/app.log")
 
             case "execute":
                 from src.commands.execute import execute
