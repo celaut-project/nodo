@@ -1,3 +1,6 @@
+from typing import Generator
+
+from protos import celaut_pb2 as celaut
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
