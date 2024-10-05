@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from protos import celaut_pb2, gateway_pb2
 import requests
 from hashlib import sha3_256
@@ -89,6 +89,12 @@ def __balance_total(address: Address) -> Optional[dict]:
 
     # Parse the response from the API
     return response.json()
+
+
+def get_ergo_info() -> Tuple[str, float]:
+    _addr = __get_sender_addr(ERGO_WALLET_MNEMONIC)
+    _amount = __balance_total(address=_addr)["confirmed"]["nanoErgs"]
+    return str(_addr.toString()), __nanoerg_to_erg(_amount)
 
 
 def init():

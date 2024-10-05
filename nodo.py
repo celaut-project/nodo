@@ -3,6 +3,7 @@ from grpcbigbuffer import utils as grpcbf
 from psutil import virtual_memory
 from src.utils import logger as l
 import src.manager.resources_manager as iobd
+from src.payment_system.contracts.envs import print_payment_info
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
@@ -105,28 +106,46 @@ if __name__ == '__main__':
 
     if len(sys.argv) == 1:
         print("Command needed: "
+              "\n- status"
               "\n- execute <service id>"
               "\n- connect <ip:url>"
-              "\n- serve"
+              "\n- compile <project directory>"
               "\n- config"
+              "\n- tui"
+              "\n\n Advanced commands:"
+              "\n- serve"
               "\n- migrate"
               "\n- storage:prune_blocks"
               "\n- test <test name>"
-              "\n- compile <project directory>"
-              "\n- tui",
+              "\n\n",
               flush=True)
         try:
-            if is_nodo_service_running():
-                print("\nNote: Nodo service is currently running in the background.", flush=True)
-            else:
+            if not is_nodo_service_running():
                 print("\nNote: Nodo service is not running.", flush=True)
         except Exception as e:
             print(f"Error checking nodo.service status: {e}", flush=True)
 
-        print(f"Nodo version (Git commit): {get_git_commit()}", flush=True)
-
     else:
         match sys.argv[1]:
+
+            case "status":
+                try:
+                    if is_nodo_service_running():
+                        print("\nNote: Nodo service is currently running in the background.", flush=True)
+                    else:
+                        print("\nNote: Nodo service is not running.", flush=True)
+                except Exception as e:
+                    print(f"Error checking nodo.service status: {e}", flush=True)
+
+                print(f"Nodo version (Git commit): {get_git_commit()}", flush=True)
+
+                print(
+                    "\n\n"
+                    "Ergo info: "
+                    f"\n  {print_payment_info()}",
+                    f"\n  Reputation proof id: {env_manager.get_env('REPUTATION_PROOF_ID')}",
+                    flush=True
+                )
 
             case "execute":
                 from src.commands.execute import execute

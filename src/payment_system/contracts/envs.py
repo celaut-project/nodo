@@ -4,10 +4,8 @@ from protos import celaut_pb2
 from src.payment_system.contracts.simulator import interface as simulated
 from src.payment_system.contracts.ergo import interface as ergo
 from src.utils.env import EnvManager
-from src.utils.logger import LOGGER
 
 SIMULATED = bool(EnvManager().get_env("SIMULATE_PAYMENTS"))
-LOGGER(f"Simulate payments: {SIMULATED}")
 
 contract_hash = str
 contract_addr = str
@@ -38,3 +36,11 @@ MANAGE_INTERFACES: Dict[contract_hash, Callable[[], None]] = {
 }
 
 DEMOS = [simulated.CONTRACT_HASH]
+
+def print_payment_info() -> str:
+    ergo_addr, ergo_amount = ergo.get_ergo_info()
+    return f"""
+    Ergo Platform:
+        Nodo deposit amount: {ergo_amount} ERGs
+        Nodo deposit wallet: {ergo_addr}  (sending wallet on docs)
+    """
