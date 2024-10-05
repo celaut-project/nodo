@@ -9,7 +9,7 @@ from google.protobuf.json_format import MessageToJson
 
 from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
-from src.reputation_system.interface import validate_contract_ledger
+from src.reputation_system.envs import validate_contract_ledger
 
 from src.database.sql_connection import SQLConnection, is_peer_available
 

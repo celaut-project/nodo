@@ -7,6 +7,7 @@ from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
 from src.gateway.utils import generate_gateway_instance
+from src.reputation_system.envs import CONTRACT, LEDGER
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
 
@@ -27,20 +28,6 @@ DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
 DEFAULT_TOKEN_AMOUNT = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
 DEFAULT_TOKEN_LABEL = "celaut-node"
-LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.
-CONTRACT = """{
-    SELF.R7[SigmaProp].get &&
-    sigmaProp(SELF.tokens.size == 1) &&
-    sigmaProp(OUTPUTS.forall { (x: Box) =>
-    !(x.tokens.exists { (token: (Coll[Byte], Long)) => token._1 == SELF.tokens(0)._1 }) ||
-    (
-        x.R7[SigmaProp].get == SELF.R7[SigmaProp].get &&
-        x.tokens.size == 1 &&
-        x.propositionBytes == SELF.propositionBytes &&
-        (x.R8[Boolean].get == false || x.R8[Boolean].get == true)
-    )
-    })
-}"""
 
 # Enum definitions
 class ProofObjectType(Enum):
