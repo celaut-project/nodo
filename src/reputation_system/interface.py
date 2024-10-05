@@ -39,3 +39,6 @@ def generate_instance_proofs() -> Generator[celaut.Service.Api.ContractLedger, N
         contract_addr=env_manager.get_env('REPUTATION_PROOF_ID'),
         ledger=LEDGER
     )
+
+def validate_contract_ledger(contract_ledger: celaut.Service.Api.ContractLedger) -> bool:
+    return contract_ledger.ledger == LEDGER and contract_ledger.contract==CONTRACT.encode("utf-8")

@@ -21,6 +21,7 @@ from src.utils.env import (
 )
 from src.utils.singleton import Singleton
 from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
+from src.reputation_system.interface import validate_contract_ledger
 
 env_manager = EnvManager()
 
@@ -760,6 +761,42 @@ class SQLConnection(metaclass=Singleton):
 
         self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
                     "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
+
+    def add_reputation_proof(self, contract_ledger: celaut_pb2.Service.Api.ContractLedger, peer_id: str) -> bool:
+        """
+        Add or update the reputation_proof_id for a peer.
+
+        Args:
+            peer_id (str): The ID of the peer whose reputation_proof_id is to be updated.
+            contract_ledger (celaut_pb2.Service.Api.ContractLedger): The reputation proof contract ledger.
+
+        Returns:
+            bool: True if the update was successful, False otherwise.
+        """
+
+        try:
+            if not validate_contract_ledger(contract_ledger):
+                logger.LOGGER(f"Not supported reputation contract ledger {str(contract_ledger)}")
+                return False
+            new_proof_id = contract_ledger.contract_addr
+
+            # Fetch the peer to ensure it exists
+            result = self._execute('SELECT id FROM peer WHERE id = ?', (peer_id,))
+            row = result.fetchone()
+
+            if row:
+                # Update the reputation_proof_id for the peer
+                self._execute('''
+                    UPDATE peer SET reputation_proof_id = ? WHERE id = ?
+                ''', (new_proof_id, peer_id))
+
+                logger.LOGGER(f'Reputation proof ID updated for peer {peer_id}')
+                return True
+            else:
+                raise Exception(f'Peer not found: {peer_id}')
+        except Exception as e:
+            logger.LOGGER(f'Error updating reputation_proof_id for peer {peer_id}: {e}')
+            return False
 
     def peer_exists(self, peer_id: str) -> bool:
         """
