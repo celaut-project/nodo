@@ -9,6 +9,7 @@ from google.protobuf.json_format import MessageToJson
 
 from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
+from src.reputation_system.interface import validate_contract_ledger
 
 from src.database.sql_connection import SQLConnection, is_peer_available
 
@@ -67,6 +68,9 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> str:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
     for contract_ledger in instance.instance.reputation_proofs:
+        if not validate_contract_ledger(contract_ledger):
+            logger.LOGGER(f"Not supported reputation contract ledger {str(contract_ledger)}")
+            continue
         sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
     logger.LOGGER(f'Get instance for peer -> {peer_id}')

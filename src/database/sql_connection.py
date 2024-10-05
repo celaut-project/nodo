@@ -21,7 +21,6 @@ from src.utils.env import (
 )
 from src.utils.singleton import Singleton
 from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
-from src.reputation_system.interface import validate_contract_ledger
 
 env_manager = EnvManager()
 
@@ -775,9 +774,6 @@ class SQLConnection(metaclass=Singleton):
         """
 
         try:
-            if not validate_contract_ledger(contract_ledger):
-                logger.LOGGER(f"Not supported reputation contract ledger {str(contract_ledger)}")
-                return False
             new_proof_id = contract_ledger.contract_addr
 
             # Fetch the peer to ensure it exists
