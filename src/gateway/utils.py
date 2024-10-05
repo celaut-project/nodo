@@ -7,6 +7,7 @@ import netifaces as ni
 import src.utils.utils
 from src.database.access_functions.ledgers import get_ledger_and_contract_addr_from_contract
 from src.payment_system.ledgers import generate_contract_ledger
+from src.reputation_system.interface import generate_instance_proofs
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.utils import logger as l
 from src.utils.env import EnvManager
@@ -45,6 +46,11 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     instance.api.payment_contracts.extend(
         [e for e in generate_contract_ledger()]
     )
+
+    instance.api.reputation_proofs.extend(
+        [e for e in generate_instance_proofs()]
+    )
+
     return gateway_pb2.Instance(
         instance=instance
     )

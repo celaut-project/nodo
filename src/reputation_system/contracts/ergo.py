@@ -27,6 +27,7 @@ DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
 DEFAULT_TOKEN_AMOUNT = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
 DEFAULT_TOKEN_LABEL = "celaut-node"
+LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.
 CONTRACT = """{
     SELF.R7[SigmaProp].get &&
     sigmaProp(SELF.tokens.size == 1) &&
