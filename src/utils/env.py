@@ -139,7 +139,7 @@ SUPPORTED_ARCHITECTURES = [
 ]
 
 # Docker Configuration
-DOCKER_COMMAND = subprocess.check_output(["which", "podman"]).strip().decode("utf-8")
+DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
 env_manager.get_env("DOCKER_CLIENT_TIMEOUT", 480)
 env_manager.get_env("DOCKER_MAX_CONNECTIONS", 1000)
 DOCKER_CLIENT = lambda: docker_lib.from_env(
