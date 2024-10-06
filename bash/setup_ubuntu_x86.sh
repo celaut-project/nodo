@@ -92,7 +92,7 @@ fi
 echo "Installing OpenJDK 21"
 sudo apt-get -y install openjdk-21-jre-headless
 
-echo "Installing required system packages for Podman..."
+echo "Installing required system packages for Docker ..."
 sudo apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
 
 echo "Updating package lists..."
