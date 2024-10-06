@@ -36,7 +36,7 @@ impl Identifiable for IdentifiableString {
 pub struct Peer {
     pub id: String,
     pub uri: String,
-    pub gas: u8,
+    pub gas: String
 }
 
 impl Identifiable for Peer {
@@ -59,6 +59,7 @@ impl Identifiable for Service {
 #[derive(Debug)]
 pub struct Client {
     pub id: String,
+    pub gas: String
 }
 
 impl Identifiable for Client {
@@ -109,7 +110,7 @@ impl Identifiable for Tunnel {
 fn get_peers() -> Result<Vec<Peer>> {
     Ok(Connection::open(DATABASE_FILE)?
         .prepare(
-            "SELECT p.id, u.ip, u.port
+            "SELECT p.id, u.ip, u.port, p.gas_mantissa, p.gas_exponent
                 FROM peer p
                 JOIN slot s ON p.id = s.peer_id
                 JOIN uri u ON s.id = u.slot_id",
@@ -118,10 +119,17 @@ fn get_peers() -> Result<Vec<Peer>> {
             let id: String = row.get(0)?;
             let ip: String = row.get(1)?;
             let port: u16 = row.get(2)?;
+            let gas_mantissa: i64 = row.get(3)?;
+            let gas_exponent: i32 = row.get(4)?;
+
+            // Calcula el valor del gas como String
+            let gas_value = gas_mantissa as f64 * 10f64.powi(gas_exponent as i32);
+            let gas = gas_value.to_string();
+
             Ok(Peer {
-                id: id,
+                id,
                 uri: format!("{}:{}", ip, port),
-                gas: 0,
+                gas
             })
         })?
         .collect::<Result<Vec<Peer>>>()?)
@@ -129,10 +137,20 @@ fn get_peers() -> Result<Vec<Peer>> {
 
 fn get_clients() -> Result<Vec<Client>> {
     Ok(Connection::open(DATABASE_FILE)?
-        .prepare("SELECT id FROM clients")?
+        .prepare("SELECT id, gas_mantissa, gas_exponent FROM clients")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
-            Ok(Client { id: id })
+            let gas_mantissa: i64 = row.get(1)?;
+            let gas_exponent: i32 = row.get(2)?;
+
+            // Calcula el valor del gas como String
+            let gas_value = gas_mantissa as f64 * 10f64.powi(gas_exponent as i32);
+            let gas = gas_value.to_string();
+
+            Ok(Client {
+                id,
+                gas,
+            })
         })?
         .collect::<Result<Vec<Client>>>()?)
 }

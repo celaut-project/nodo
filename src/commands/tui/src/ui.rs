@@ -187,13 +187,7 @@ fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
             app.peers
                 .items
                 .iter()
-                .map(|peer| {
-                    Row::new(vec![
-                        peer.id.clone(),
-                        peer.uri.clone(),
-                        peer.gas.to_string(),
-                    ])
-                })
+                .map(|peer| Row::new(vec![peer.id.clone(), peer.uri.clone(), peer.gas.clone()]))
                 .collect::<Vec<Row>>(),
             [
                 Constraint::Length(30),
@@ -226,11 +220,16 @@ fn draw_client_list(frame: &mut Frame, app: &mut App, area: Rect) {
             app.clients
                 .items
                 .iter()
-                .map(|client| Row::new(vec![client.id.clone()]))
+                .map(|client| {
+                    Row::new(vec![
+                        client.id.clone(),  // Id del cliente
+                        client.gas.clone(), // Gas asociado con el cliente
+                    ])
+                })
                 .collect::<Vec<Row>>(),
-            [Constraint::Length(70)],
+            [Constraint::Length(70), Constraint::Length(30)],
         )
-        .header(Row::new(vec![Cell::from("Client Id")]))
+        .header(Row::new(vec![Cell::from("Client Id"), Cell::from("Gas")]))
         .block(
             Block::bordered()
                 .title("CLIENTS")
