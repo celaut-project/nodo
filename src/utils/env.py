@@ -157,7 +157,8 @@ DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
 # Ledger Settings
-env_manager.get_env("ERGO_NODE_URL", "http://213.239.193.208:9052/")
+env_manager.get_env("ERGO_NODE_URL", "http://135.181.107.130:9053/")
+# env_manager.get_env("ERGO_NODE_URL", "http://213.239.193.208:9052/")   <-- TESTNET
 env_manager.get_env("ERGO_WALLET_MNEMONIC", Mnemonic("english").generate(strength=128))
 env_manager.get_env("ERGO_AUXILIAR_MNEMONIC", Mnemonic("english").generate(strength=128))
 env_manager.get_env("ERGO_PAYMENTS_RECIVER_WALLET", "")
