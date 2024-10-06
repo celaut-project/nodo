@@ -36,6 +36,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 
 ### Note on Installation
 
+- **requirements**: Needs Ubuntu 22.04.5 LTS and curl package installed.
+
 - **version**: The Nodo version is currently in 'alpha', so it's recommended to use a virtual machine.
 
 - **sudo Usage**: The installation script requires `sudo` privileges to install various apt packages and Docker. Use it responsibly under your own discretion.
