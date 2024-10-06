@@ -220,12 +220,7 @@ fn draw_client_list(frame: &mut Frame, app: &mut App, area: Rect) {
             app.clients
                 .items
                 .iter()
-                .map(|client| {
-                    Row::new(vec![
-                        client.id.clone(),  // Id del cliente
-                        client.gas.clone(), // Gas asociado con el cliente
-                    ])
-                })
+                .map(|client| Row::new(vec![client.id.clone(), client.gas.clone()]))
                 .collect::<Vec<Row>>(),
             [Constraint::Length(70), Constraint::Length(30)],
         )
