@@ -66,9 +66,21 @@ def check_rust_installation():
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
-            print("Sourcing the Rust environment...", flush=True)
-            # Source $HOME/.cargo/env in the current environment
-            os.system("source $HOME/.cargo/env")
+            print("Rust installation completed.", flush=True)
+
+            # Load Rust environment variables directly in the current process
+            cargo_bin_path = os.path.expanduser("~/.cargo/bin")
+            
+            # Check if $HOME/.cargo/bin exists and add it to PATH
+            if os.path.exists(cargo_bin_path):
+                os.environ["PATH"] += os.pathsep + cargo_bin_path
+                print(f"Updated PATH with Rust binaries: {cargo_bin_path}", flush=True)
+            else:
+                print(f"Rust binaries directory not found: {cargo_bin_path}", flush=True)
+
+            # Verify installation by checking rustc version again
+            subprocess.run(['rustc', '--version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            print("Rust has been successfully installed and configured.", flush=True)
         except subprocess.CalledProcessError as e:
             print("Error installing Rust:", e, flush=True)
 
