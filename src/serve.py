@@ -9,6 +9,7 @@ from src.gateway.gateway import Gateway
 from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.maintain_thread import manager_thread
 from src.utils import logger as l
+from src.utils.utils import get_free_port
 from src.utils.zeroconf import Zeroconf
 from src.utils.env import LOCAL_NETWORK, DOCKER_NETWORK, EnvManager
 
@@ -48,6 +49,10 @@ def serve():
     SERVICE_NAMES = (
         gateway_pb2.DESCRIPTOR.services_by_name['Gateway'].full_name,
     )
+
+    if not GATEWAY_PORT:
+        env_manager.write_env('GATEWAY_PORT', get_free_port())
+        GATEWAY_PORT = int(env_manager.get_env('GATEWAY_PORT'))
 
     server.add_insecure_port('[::]:' + str(GATEWAY_PORT))
 
