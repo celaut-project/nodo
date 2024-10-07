@@ -115,13 +115,6 @@ def service_extended(
             _type=celaut.Service
         )
 
-
-def get_free_port() -> int:
-    with socket.socket() as s:
-        s.bind(('', 0))
-        return int(s.getsockname()[1])
-
-
 get_only_the_ip_from_context = lambda context_peer: get_only_the_ip_from_context_method(context_peer)
 
 

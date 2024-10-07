@@ -7,6 +7,7 @@ import docker as docker_lib
 from mnemonic import Mnemonic
 from protos import celaut_pb2
 from src.utils.singleton import Singleton
+from src.utils.network import get_free_port
 
 class EnvManager(metaclass=Singleton):
     def __init__(self):
@@ -151,7 +152,7 @@ env_manager.get_env("REMOVE_CONTAINERS", True)
 env_manager.get_env("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER", True)
 
 # Network and Port Settings
-env_manager.get_env("GATEWAY_PORT", "")
+env_manager.get_env("GATEWAY_PORT", get_free_port())
 env_manager.get_env("NGROK_TUNNELS_KEY", "")
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'

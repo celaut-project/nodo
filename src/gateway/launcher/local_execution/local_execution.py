@@ -11,6 +11,7 @@ from src.manager.manager import default_initial_cost, add_container
 from src.utils import utils, logger as l
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
 from src.utils.utils import from_gas_amount
+from src.utils.network import get_free_port
 
 
 def local_execution(
@@ -54,7 +55,7 @@ def local_execution(
     require_tunnel = TunnelSystem().from_tunnel(ip=father_ip)
     by_local: bool = father_id == father_ip and not require_tunnel
     assigment_ports: Optional[Dict[int, int]] = \
-        {slot.port: utils.get_free_port() for slot in service.api.slot} if not by_local \
+        {slot.port: get_free_port() for slot in service.api.slot} if not by_local \
         else {slot.port: slot.port for slot in service.api.slot}
 
     container = create_container(
