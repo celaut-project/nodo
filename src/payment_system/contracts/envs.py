@@ -22,7 +22,7 @@ PAYMENT_PROCESS_VALIDATORS = {
 }
 
 AVAILABLE_PAYMENT_PROCESS: Dict[contract_hash, Callable[[amount, token, ledger, contract_addr], contract_ledger]] = {
-    simulated.CONTRACT_HASH: simulated.process_payment,
+    **({simulated.CONTRACT_HASH: simulated.process_payment} if SIMULATED else {}),
     ergo.CONTRACT_HASH: ergo.process_payment
 }
 

@@ -112,8 +112,6 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
         except Exception as e:
             _l.LOGGER(f"Unhandled exception on payment process for {contract_hash}: {e}")
-            continue  # Continue to next contract hash
-        return True
 
     _l.LOGGER("No available payment process.")
     return False
