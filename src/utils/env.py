@@ -151,7 +151,7 @@ env_manager.get_env("REMOVE_CONTAINERS", True)
 env_manager.get_env("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER", True)
 
 # Network and Port Settings
-env_manager.get_env("GATEWAY_PORT", None)
+env_manager.get_env("GATEWAY_PORT", "")
 env_manager.get_env("NGROK_TUNNELS_KEY", "")
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
