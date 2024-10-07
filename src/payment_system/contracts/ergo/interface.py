@@ -31,7 +31,8 @@ ERGO_DONATION_PERCENTAGE = lambda: clamp(float(env_manager.get_env('ERGO_DONATIO
 HOT_LIMITS = int(env_manager.get_env("ERGO_ERG_HOT_WALLET_LIMITS"))  # type: ignore
 ERGO_AUXILIAR_MNEMONIC = env_manager.get_env("ERGO_AUXILIAR_MNEMONIC")
 ERGO_WALLET_MNEMONIC = lambda: env_manager.get_env('ERGO_WALLET_MNEMONIC')
-WAIT_TX_TIME = 240
+WAIT_TX_TIME = 240  # 20 minutes (each 5 seconds)
+WAT_TX_SLEEP_TIME = 5
 
 payment_lock = Lock()  # Ensures that the same input box is no spent with more amount that it has. (could be more efficient ...)
 
@@ -209,10 +210,11 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
             LOGGER(f"Transaction submitted: {tx_id} for token {deposit_token}")
 
             for sec in range(0, WAIT_TX_TIME):
-                sleep(1)
+                sleep(WAT_TX_SLEEP_TIME)
                 response = requests.get(f"{ergo.get_api_url()}/api/v1/transactions/{tx_id}")
                 if response.status_code != 200:
-                    LOGGER(f"{ergo.get_api_url()} requests to check tx {tx_id} failed with status code {response.status_code}")
+                    if response.status_code != 404:
+                        LOGGER(f"{ergo.get_api_url()} requests to check tx {tx_id} failed with status code {response.status_code}")
                     continue
 
                 obj = response.json()
