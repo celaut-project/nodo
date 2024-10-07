@@ -56,9 +56,9 @@ CONTRACT = """
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 
 
-def process_payment(amount: int, token: str, ledger: str,
+def process_payment(amount: int, deposit_token: str, ledger: str,
                     contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
-    LOGGER(f"Process simulated payment for token {token} of {amount}")
+    LOGGER(f"Process simulated payment for token {deposit_token} of {amount}")
     return gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
                 ledger=ledger,
                 contract_addr=contract_address,

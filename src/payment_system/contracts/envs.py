@@ -23,7 +23,6 @@ PAYMENT_PROCESS_VALIDATORS = {
 
 AVAILABLE_PAYMENT_PROCESS: Dict[contract_hash, Callable[[amount, token, ledger, contract_addr], contract_ledger]] = {
     simulated.CONTRACT_HASH: simulated.process_payment,
-    **({simulated.CONTRACT_HASH: simulated.process_payment} if SIMULATED else {}),
     ergo.CONTRACT_HASH: ergo.process_payment
 }
 
@@ -35,7 +34,7 @@ MANAGE_INTERFACES: Dict[contract_hash, Callable[[], None]] = {
     ergo.CONTRACT_HASH: ergo.manager
 }
 
-DEMOS = [simulated.CONTRACT_HASH]
+DEMOS = [simulated.CONTRACT_HASH] if SIMULATED else []
 
 def print_payment_info() -> str:
     ergo_addr, ergo_amount = ergo.get_ergo_info()
