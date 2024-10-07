@@ -212,6 +212,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
                 sleep(1)
                 response = requests.get(f"{ergo.get_api_url()}/api/v1/transactions/{tx_id}")
                 if response.status_code != 200:
+                    LOGGER(f"{ergo.get_api_url()} requests to check tx {tx_id} failed with status code {response.status_code}")
                     continue
 
                 obj = response.json()
