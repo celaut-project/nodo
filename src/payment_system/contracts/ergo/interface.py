@@ -41,8 +41,7 @@ def __gas_to_nanoerg(amount: int) -> int:
 def __nanoerg_to_erg(amount: int) -> int:
     return amount / 1_000_000_000  # type: ignore
 
-def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
-    mnemonic = ERGO_WALLET_MNEMONIC() if not mnemonic else mnemonic
+def __get_sender_addr(mnemonic: str) -> Address:
     # Initialize ErgoAppKit and get the sender's address
     ergo = appkit.ErgoAppKit(node_url=ERGO_NODE_URL())
 
@@ -53,7 +52,7 @@ def __get_sender_addr(mnemonic: Optional[str] = None) -> Address:
 def __get_input_boxes(amount: int) -> List[dict]:
     ergo = appkit.ErgoAppKit(node_url=ERGO_NODE_URL())
     explorer_api = ergo.get_api_url()
-    sender_address = __get_sender_addr()
+    sender_address = __get_sender_addr(ERGO_WALLET_MNEMONIC())
 
     url = f"{explorer_api}/api/v1/boxes/unspent/unconfirmed/byAddress/{sender_address}"
     response = requests.get(url)
@@ -92,7 +91,7 @@ def __balance_total(address: Address) -> Optional[dict]:
 
 
 def get_ergo_info() -> Tuple[str, float]:
-    _addr = __get_sender_addr(ERGO_WALLET_MNEMONIC)
+    _addr = __get_sender_addr(ERGO_WALLET_MNEMONIC())
     _amount = __balance_total(address=_addr)["confirmed"]["nanoErgs"]
     return str(_addr.toString()), __nanoerg_to_erg(_amount)
 
@@ -172,7 +171,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
         try:
             # Initialize ErgoAppKit and get the sender's address
             ergo = appkit.ErgoAppKit(node_url=ERGO_NODE_URL())
-            sender_address = __get_sender_addr()
+            sender_address = __get_sender_addr(ERGO_WALLET_MNEMONIC())
 
             # Fetch UTXO from the contract's address
             input_utxo = ergo.getInputBoxCovering(
