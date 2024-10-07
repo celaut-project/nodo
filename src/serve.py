@@ -50,6 +50,7 @@ def serve():
         gateway_pb2.DESCRIPTOR.services_by_name['Gateway'].full_name,
     )
 
+    global GATEWAY_PORT
     if not GATEWAY_PORT:
         env_manager.write_env('GATEWAY_PORT', get_free_port())
         GATEWAY_PORT = int(env_manager.get_env('GATEWAY_PORT'))
