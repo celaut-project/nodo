@@ -159,8 +159,8 @@ if __name__ == '__main__':
 
                 print(
                     "Ergo info: "
-                    f"\n  {print_payment_info()}",
-                    f"\n  Reputation proof id: {env_manager.get_env('REPUTATION_PROOF_ID')}"
+                    f"    {print_payment_info()}",
+                    f"    Reputation proof id: {env_manager.get_env('REPUTATION_PROOF_ID')}"
                     "\n\n",
                     flush=True
                 )
