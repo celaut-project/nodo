@@ -5,9 +5,11 @@ from src.utils import logger as l
 import src.manager.resources_manager as iobd
 from src.payment_system.contracts.envs import print_payment_info
 from src.utils.env import EnvManager
+from src.utils.network import get_local_ip
 
 env_manager = EnvManager()
 
+GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 MEMORY_LOGS = env_manager.get_env("MEMORY_LOGS")
 REGISTRY = env_manager.get_env("REGISTRY")
 CACHE = env_manager.get_env("CACHE")
@@ -152,6 +154,8 @@ if __name__ == '__main__':
                     print(f"Error checking nodo.service status: {e}", flush=True)
 
                 print(f"\nNodo version (Git commit): {get_git_commit()}", flush=True)
+
+                print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}")
 
                 print(
                     "Ergo info: "
