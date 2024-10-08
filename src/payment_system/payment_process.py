@@ -1,6 +1,8 @@
 from hashlib import sha3_256
 from threading import Thread
 from time import sleep
+from datetime import datetime, timedelta
+from threading import Lock
 import grpc
 from grpcbigbuffer import client as grpcbf
 from src.payment_system.exceptions import DoubleSpendingAttempt
@@ -29,6 +31,9 @@ PAYMENT_MANAGER_ITERATION_TIME = int(env_manager.get_env("PAYMENT_MANAGER_ITERAT
 
 sc = SQLConnection()
 deposit_generation_locked = False
+
+auxiliar_contract_address_reputation = {}
+auxiliar_contract_address_reputation_lock = Lock()
 
 def generate_deposit_token(client_id: str) -> str:
     if deposit_generation_locked:
@@ -82,6 +87,14 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
             # Get all available ledgers for this peer and contract
             ledgers = get_peer_contract_instances(contract_hash, peer_id) if contract_hash not in DEMOS else [("", "")]
             for contract_address, ledger in ledger_balancer(ledger_generator=ledgers):
+                with auxiliar_contract_address_reputation_lock:
+                    # Check if contract address is in the auxiliar dictionary        TODO use reputation instead.
+                    if contract_address in auxiliar_contract_address_reputation:
+                        if auxiliar_contract_address_reputation[contract_address] > datetime.now():
+                            continue
+                        else:
+                            del auxiliar_contract_address_reputation[contract_address]
+
                 _l.LOGGER(f"Processing payment: Deposit token: {deposit_token}. Ledger: {ledger}. Contract address: {contract_address}")
 
                 # Process the payment
@@ -103,11 +116,19 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                     continue
                 except Exception as e:
                     _l.LOGGER(f"Error processing payment for contract {contract_hash}: {str(e)}")
+                    
+                    # TODO
+                    # In case of failure, we need to handle attempts to retry x times
+                    # and if it still fails, leave it until after x time or something similar.
+                    # This is auxiliary because ideally, it would be based on its reputation.
+
+                    if contract_address:
+                        with auxiliar_contract_address_reputation_lock:  # TODO use reputation instead.
+                            if contract_address not in auxiliar_contract_address_reputation:
+                                auxiliar_contract_address_reputation[contract_address] = datetime.now()
+                            auxiliar_contract_address_reputation[contract_address] += timedelta(seconds=600)  # Adds 10 minutes.
+
                     if contract_address and ledger:
-                        # TODO
-                        # In case of failure, we need to handle attempts to retry x times
-                        # and if it still fails, leave it until after x time or something similar.
-                        # This is auxiliary because ideally, it would be based on its reputation.
                         update_reputation(token=contract_address, amount=-100)  # TODO On envs.
                         update_reputation(token=ledger, amount=-10)  # TODO On envs.
                     continue
