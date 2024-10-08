@@ -3,6 +3,7 @@ from threading import Thread
 from time import sleep
 import grpc
 from grpcbigbuffer import client as grpcbf
+from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.payment_system.ledger_balancer import ledger_balancer
 
 from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_INTERFACES, MANAGE_INTERFACES, PAYMENT_PROCESS_VALIDATORS, DEMOS
@@ -95,12 +96,22 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                     if contract_address and ledger:
                         update_reputation(token=contract_address, amount=10)  # TODO On envs.
                         update_reputation(token=ledger, amount=1)  # TODO On envs.
+                except DoubleSpendingAttempt as e:
+                    _l.LOGGER(f"Double spending attempt at {ledger}. Wait x time more to try. Exception: {str(e)}")
+                    # Update the ledger as "unavailable until x time" or something similar.
+                    # It doesn't make sense to affect the ledger's reputation.
+                    pass
                 except Exception as e:
                     _l.LOGGER(f"Error processing payment for contract {contract_hash}: {str(e)}")
                     if contract_address and ledger:
+                        # TODO
+                        # In case of failure, we need to handle attempts to retry x times
+                        # and if it still fails, leave it until after x time or something similar.
+                        # This is auxiliary because ideally, it would be based on its reputation.
                         update_reputation(token=contract_address, amount=-100)  # TODO On envs.
                         update_reputation(token=ledger, amount=-10)  # TODO On envs.
                     continue
+
 
                 # Handle communication attempts to peer
                 if __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):

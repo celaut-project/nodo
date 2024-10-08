@@ -5,6 +5,7 @@ from hashlib import sha3_256
 from ergpy import appkit
 from ergpy.helper_functions import simple_send
 from src.database import sql_connection
+from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
 from threading import Lock
@@ -206,8 +207,14 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
             signed_tx = ergo.signTransaction(unsigned_tx, w_mnemonic, prover_index=0)
 
             # Submit the transaction and get the transaction ID
-            tx_id = ergo.txId(signed_tx)
-            LOGGER(f"Transaction submitted: {tx_id} for token {deposit_token}")
+            try:
+                tx_id = ergo.txId(signed_tx)
+                LOGGER(f"Transaction submitted: {tx_id} for token {deposit_token}")
+            except Exception as e:
+                if "Double spending attempt" in str(e):
+                    raise DoubleSpendingAttempt(LEDGER)
+                else:
+                    raise e
 
             for sec in range(0, WAIT_TX_TIME):
                 sleep(WAT_TX_SLEEP_TIME)
