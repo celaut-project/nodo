@@ -97,10 +97,10 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                         update_reputation(token=contract_address, amount=10)  # TODO On envs.
                         update_reputation(token=ledger, amount=1)  # TODO On envs.
                 except DoubleSpendingAttempt as e:
-                    _l.LOGGER(f"Double spending attempt at {ledger}. Wait x time more to try. Exception: {str(e)}")
-                    # Update the ledger as "unavailable until x time" or something similar.
-                    # It doesn't make sense to affect the ledger's reputation.
-                    pass
+                    _l.LOGGER(str(e))
+                    # Internally, the exception updates the wait time to retry the ledger. 
+                    # It is not necessary to update its reputation at this point.
+                    continue
                 except Exception as e:
                     _l.LOGGER(f"Error processing payment for contract {contract_hash}: {str(e)}")
                     if contract_address and ledger:

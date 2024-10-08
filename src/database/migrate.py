@@ -79,7 +79,8 @@ def create_tables(cursor):
         "ledger": '''
             CREATE TABLE IF NOT EXISTS ledger (
                 id TEXT PRIMARY KEY,
-                private_key TEXT NULL
+                private_key TEXT NULL,
+                double_spending_retry_time DATETIME DEFAULT NULL
             )
         ''',
         "ledger_provider": '''

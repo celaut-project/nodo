@@ -1,3 +1,4 @@
+import datetime
 import os
 import math
 import uuid
@@ -635,6 +636,54 @@ class SQLConnection(metaclass=Singleton):
         except Exception as e:
             logger.LOGGER(f'Error submitting to ledger: {e}')
             return False
+
+    def update_double_attempt_retry_time_on_ledger(self, ledger: str):
+        """
+        Updates the double_spending_retry_time field in the ledger table 
+        by setting it to the current time plus 10 minutes for the specified ledger.
+
+        Args:
+            ledger (str): The identifier of the ledger whose retry_time needs to be updated.
+        """
+        query = """
+        UPDATE ledger
+        SET double_spending_retry_time = DATETIME('now', '+10 minutes')
+        WHERE id = ?
+        """
+        
+        # Execute the query, passing the ledger ID to update the appropriate record.
+        self._execute(query, (ledger,))
+
+    def check_if_ledger_is_available(self, ledger: str) -> bool:
+        """
+        Checks if the specified ledger is available for use.
+        A ledger is considered available if its double_spending_retry_time is NULL
+        or is in the past.
+
+        Args:
+            ledger (str): The identifier of the ledger to check.
+
+        Returns:
+            bool: True if the ledger is available, False otherwise.
+        """
+        query = """
+        SELECT double_spending_retry_time
+        FROM ledger
+        WHERE id = ?
+        """
+        
+        # Execute the query to get the retry time for the specified ledger.
+        result = self._execute(query, (ledger,)).fetchone()
+
+        # Check if a result was returned and evaluate its availability.
+        if result:
+            retry_time = result[0]
+            
+            # A ledger is available if the retry_time is NULL or in the past.
+            if retry_time is None or retry_time < datetime.utcnow().isoformat():
+                return True
+
+        return False
 
     def get_peers(self) -> List[dict]:
         """
