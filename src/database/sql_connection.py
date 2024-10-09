@@ -630,7 +630,6 @@ class SQLConnection(metaclass=Singleton):
                     logger.LOGGER('Failed to submit to ledger for some or all peers.')
                     return False
             else:
-                logger.LOGGER('No peers met the submission criteria, nothing to submit.')
                 return True
 
         except Exception as e:
