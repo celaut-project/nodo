@@ -1,4 +1,4 @@
-from typing import Optional, Generator
+from typing import Optional
 from src.utils.env import EnvManager
 from src.database.sql_connection import SQLConnection
 from src.utils.logger import LOGGER
