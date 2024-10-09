@@ -1,3 +1,4 @@
+from textwrap import dedent
 from typing import Callable, Dict
 from protos import celaut_pb2
 
@@ -37,9 +38,21 @@ MANAGE_INTERFACES: Dict[contract_hash, Callable[[], None]] = {
 DEMOS = [simulated.CONTRACT_HASH] if SIMULATED else []
 
 def print_payment_info() -> str:
-    ergo_addr, ergo_amount = ergo.get_ergo_info()
-    return f"""
+    main, aux = ergo.get_ergo_info()
+    ergo_addr, ergo_amount = main
+    aux_addr, aux_amount = aux
+    return dedent(f"""
     Ergo Platform:
-        Nodo deposit amount: {ergo_amount} ERGs
-        Nodo deposit wallet: {ergo_addr}  (sending wallet on docs)
-    """
+
+    1. **Sending Wallet Address**: {ergo_addr} (for processing payments)
+    2. **Amount to Send**: {ergo_amount} ERGs
+
+    3. **Receiver Wallet Address**: {aux_addr} (public wallet for client payments)
+    4. **Amount Received**: {aux_amount} ERGs
+
+    5. **Total Transaction Amount**: {ergo_amount + aux_amount} ERGs
+
+    **Important Note**: The node periodically transfers funds from the Receiver Wallet to the Sending Wallet, where most deposits accumulate. 
+    To increase the node's deposit, please send funds to the Sending Wallet Address.
+    """)
+

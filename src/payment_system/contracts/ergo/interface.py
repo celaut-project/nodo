@@ -95,7 +95,13 @@ def __balance_total(address: Address) -> Optional[dict]:
 def get_ergo_info() -> Tuple[str, float]:
     _addr = __get_sender_addr(ERGO_WALLET_MNEMONIC())
     _amount = __balance_total(address=_addr)["confirmed"]["nanoErgs"]
-    return str(_addr.toString()), __nanoerg_to_erg(_amount)
+
+    _aux_addr = __get_sender_addr(ERGO_AUXILIAR_MNEMONIC)
+    _aux_amount = __balance_total(address=_aux_addr)["confirmed"]["nanoErgs"]
+    return (
+        str(_addr.toString()), __nanoerg_to_erg(_amount),
+        str(_aux_addr.toString()), __nanoerg_to_erg(_aux_amount)
+        )
 
 
 def init():
