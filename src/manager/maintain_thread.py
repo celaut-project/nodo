@@ -159,7 +159,7 @@ def peer_deposits():
                 continue
 
         if peer["gas"] < MIN_DEPOSIT_PEER or \
-                gas_amount_on_other_peer(
+                gas_amount_on_other_peer(  # Only check on RPC, not on DB.
                     peer_id=peer["id"]
                 ) < MIN_DEPOSIT_PEER:
             l.LOGGER(f'\n\n The peer {peer["id"]} has not enough deposit.   ')
