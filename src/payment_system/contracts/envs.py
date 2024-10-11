@@ -38,9 +38,9 @@ MANAGE_INTERFACES: Dict[contract_hash, Callable[[], None]] = {
 DEMOS = [simulated.CONTRACT_HASH] if SIMULATED else []
 
 def print_payment_info() -> str:
-    info = ergo.get_ergo_info()
-    ergo_addr, ergo_amount = info[0]
-    aux_addr, aux_amount = info[1]
+    main, aux = ergo.get_ergo_info()
+    ergo_addr, ergo_amount = main
+    aux_addr, aux_amount = aux
     return dedent(f"""
     Ergo Platform:
 
