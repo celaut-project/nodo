@@ -40,7 +40,7 @@ payment_lock = Lock()  # Ensures that the same input box is no spent with more a
 def __gas_to_nanoerg(amount: int) -> int:
     return int(amount/(10**58)) if amount > 10**58 else amount  # type: ignore
 
-def __nanoerg_to_erg(amount: int) -> int:
+def __nanoerg_to_erg(amount: int) -> float:
     return amount / 1_000_000_000  # type: ignore
 
 def __get_sender_addr(mnemonic: str) -> Address:
@@ -92,7 +92,7 @@ def __balance_total(address: Address) -> Optional[dict]:
     return response.json()
 
 
-def get_ergo_info() -> Tuple[str, float]:
+def get_ergo_info() -> Tuple[Tuple[str, float], Tuple[str, float]]:
     _addr = __get_sender_addr(ERGO_WALLET_MNEMONIC())
     _amount = __balance_total(address=_addr)["confirmed"]["nanoErgs"]
 
