@@ -6,9 +6,9 @@ across a network of computers.
 In a network where
 services are specialized software components encapsulated within binary files, and nodes represent the computers in
 the network responsible for discovering and establishing connections with other nodes
-(aka [CELAUT](https://github.com/celaut-project/celaut-architecture/blob/master/README.md)).
+(aka [CELAUT](https://github.com/celaut-project/paradigm/blob/master/README.md)).
 
-As is described in the [architecture](https://github.com/celaut-project/celaut-architecture/blob/master/README.md#node-responsabilities),
+As is described in the [paradigm repository](https://github.com/celaut-project/paradigm/blob/master/README.md#node-responsabilities),
 it's responsibilities are:
 
 1. **Service Execution**: Handles service instance requests, balancing the load between running them
