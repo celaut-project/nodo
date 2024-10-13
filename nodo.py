@@ -159,7 +159,7 @@ if __name__ == '__main__':
                 reputation_proof_id = env_manager.get_env('REPUTATION_PROOF_ID')
 
                 print(
-                    f"{payment_info} \nReputation Proof ID: {reputation_proof_id or 'N/A'}",
+                    f"Reputation Proof ID: {reputation_proof_id or 'N/A'} \n {payment_info}",
                     flush=True
                 )
 
