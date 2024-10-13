@@ -133,9 +133,10 @@ def maintain_clients():
 
 
 def peer_deposits():
+    l.LOGGER(f"Peer deposit manage.")
     for peer_id in SQLConnection().get_peers_id(): # async
         if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
-            # l.LOGGER('Peer '+peer_id+' is not available .')
+            l.LOGGER('Peer '+peer_id+' is not available .')
             try:
                 instance = next(peerpc(
                     method=gateway_pb2_grpc.GatewayStub(
