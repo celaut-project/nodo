@@ -158,9 +158,12 @@ def peer_deposits():
                 l.LOGGER(f"Exception updating peer {peer['id']}: {str(e)}")
                 continue
 
-        l.LOGGER(f"Gas on the peer {peer['id']} is {peer['gas']}.")
+        gas_rpc = gas_amount_on_other_peer(
+                    peer_id=peer["id"]
+                )
+        l.LOGGER(f"Gas on the peer {peer['id']} is {peer['gas']}.  \n On RPC it says {gas_rpc}")
         if peer["gas"] < MIN_DEPOSIT_PEER or \
-                gas_amount_on_other_peer(  # Only check on RPC, not on DB.
+                gas_amount_on_other_peer(
                     peer_id=peer["id"]
                 ) < MIN_DEPOSIT_PEER:
             l.LOGGER(f'\n\n The peer {peer["id"]} has not enough deposit.   ')
