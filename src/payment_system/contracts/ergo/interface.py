@@ -99,11 +99,13 @@ def get_ergo_info() -> Tuple[Tuple[str, float], Tuple[str, float]]:
     _aux_addr = __get_sender_addr(ERGO_AUXILIAR_MNEMONIC)
     _aux_amount = __balance_total(address=_aux_addr)["confirmed"]["nanoErgs"]
     return (
-            str(_addr.toString()), 
-            __nanoerg_to_erg(_amount)
-        ) (
-            str(_aux_addr.toString()), 
-            __nanoerg_to_erg(_aux_amount)
+            (
+                str(_addr.toString()), 
+                __nanoerg_to_erg(_amount)
+            ) (
+                str(_aux_addr.toString()), 
+                __nanoerg_to_erg(_aux_amount)
+            )
         )
 
 
