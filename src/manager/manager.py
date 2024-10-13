@@ -67,7 +67,7 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> str:
     for contract_ledger in instance.instance.api.payment_contracts:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
-    for contract_ledger in instance.instance.reputation_proofs:
+    for contract_ledger in instance.instance.api.reputation_proofs:
         if not validate_contract_ledger(contract_ledger):
             logger.LOGGER(f"Not supported reputation contract ledger {str(contract_ledger)}")
             continue
@@ -89,7 +89,7 @@ def update_peer_instance(instance: gateway_pb2.Instance, peer_id: str):
     for contract_ledger in instance.instance.api.payment_contracts:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
-    for contract_ledger in instance.instance.reputation_proofs:
+    for contract_ledger in instance.instance.api.reputation_proofs:
         sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
     logger.LOGGER(f"Peer {peer_id} updated.")
