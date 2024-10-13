@@ -12,9 +12,13 @@ from src.utils.env import DOCKER_NETWORK
 from src.utils.utils import from_gas_amount, get_network_name, to_gas_amount, \
     generate_uris_by_peer_id
 from src.utils.logger import LOGGER as log
+from src.utils.env import EnvManager
+
+env_manager = EnvManager()
 
 sc = SQLConnection()
 
+MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
 
 def __get_metrics_client(client_id: str) -> gateway_pb2.Metrics:
     """
@@ -91,22 +95,12 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
     :raises Exception: If an error occurs while fetching the gas amount.
     """
 
-    log("CHECK GAS PEER.")
+    peer = sc.get_peer_by_id(peer_id=peer_id)
+    if peer and 'gas_last_update' in peer and peer['gas_last_update']:
+        last_update_time = datetime.datetime.fromisoformat(peer['gas_last_update'])
+        if (datetime.datetime.now() - last_update_time).total_seconds() <= min(10, MANAGER_ITERATION_TIME):
+            return peer['gas']
 
-    try:
-        peer = sc.get_peer_by_id(peer_id=peer_id)
-        log(str(peer))
-        if peer and 'gas_last_update' in peer and peer['gas_last_update']:
-            last_update_time = datetime.datetime.fromisoformat(peer['gas_last_update'])
-            if (datetime.datetime.now() - last_update_time).total_seconds() <= 10:
-                log("RETURN THE LOCAL GAS")
-                return peer['gas']
-    except Exception as e:
-        log("raise exception")
-        log(e)
-        raise e
-    
-    log("CHECK ON THE RPC METHOD FOR THE LAST UPDATED GAS.")
     client_id = get_client_id_on_other_peer(peer_id=peer_id)
     try:
         gas = from_gas_amount(

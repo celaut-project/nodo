@@ -133,9 +133,7 @@ def maintain_clients():
 
 
 def peer_deposits():
-    l.LOGGER(f"Peer deposit manage.")
     for peer_id in SQLConnection().get_peers_id(): # TODO async
-        l.LOGGER(f"Check the peer {peer_id}")
         if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             l.LOGGER('Peer '+peer_id+' is not available .')
             try:
@@ -155,7 +153,7 @@ def peer_deposits():
             try:
                 update_peer_instance(
                     instance=instance,
-                    peer_id=peer["id"]
+                    peer_id=peer_id
                 )
             except Exception as e:
                 l.LOGGER(f"Exception updating peer {peer_id}: {str(e)}")
@@ -164,7 +162,6 @@ def peer_deposits():
         peer_gas = gas_amount_on_other_peer(
                     peer_id=peer_id
                 )
-        l.LOGGER(f"peer gas {peer_gas}")
         if peer_gas < MIN_DEPOSIT_PEER:
             l.LOGGER(f'\n\n The peer {peer_id} has not enough deposit.   ')
             # f'\n   estimated gas deposit -> {peer["gas"]]} '
