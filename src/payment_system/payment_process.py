@@ -86,7 +86,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         try:
             # Get all available ledgers for this peer and contract
             ledgers = get_peer_contract_instances(contract_hash, peer_id) if contract_hash not in DEMOS else [("", "")]
-            for contract_address, ledger in ledger_balancer(ledger_generator=ledgers):
+            for contract_address, ledger in (ledgers if contract_hash in DEMOS else ledger_balancer(ledger_generator=ledgers)):
                 with auxiliar_contract_address_reputation_lock:
                     # Check if contract address is in the auxiliar dictionary        TODO use reputation instead.
                     if contract_address in auxiliar_contract_address_reputation:
