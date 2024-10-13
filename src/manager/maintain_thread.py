@@ -164,6 +164,7 @@ def peer_deposits():
         peer_gas = gas_amount_on_other_peer(
                     peer_id=peer_id
                 )
+        l.LOGGER(f"peer gas {peer_gas}")
         if peer_gas < MIN_DEPOSIT_PEER:
             l.LOGGER(f'\n\n The peer {peer_id} has not enough deposit.   ')
             # f'\n   estimated gas deposit -> {peer["gas"]]} '
