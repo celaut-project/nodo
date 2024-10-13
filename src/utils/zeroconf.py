@@ -6,7 +6,9 @@ import grpc
 from src.manager.manager import add_peer_instance
 from src.utils import logger as l
 from src.gateway.utils import generate_gateway_instance
+from src.database.sql_connection import SQLConnection
 
+sc = SQLConnection()
 
 def Zeroconf(network: str) -> list:
     ipversion_is_4 = True
@@ -61,6 +63,10 @@ def Zeroconf(network: str) -> list:
 
 def connect(peer: str):
     print('Connecting to peer ->', peer)
+
+    if sc.uri_exists(uri=peer):
+        print(f"Peer {peer} is already registered.")
+        return
 
     try:
         # Call the appropriate function to insert the instance into the SQLite database

@@ -941,6 +941,34 @@ class SQLConnection(metaclass=Singleton):
         ''', (peer_id,))
         return result.fetchone()[0] > 0
 
+    def uri_exists(self, uri: str) -> bool:
+        """
+        Checks if a URI (ip:port) exists in the database.
+
+        Args:
+            uri (str): The complete URI to check in the format 'ip:port'.
+
+        Returns:
+            bool: True if the URI exists, False otherwise.
+        """
+        try:
+            # Split the URI into IP and port
+            ip, port = uri.split(':')
+            port = int(port)  # Convert port to an integer
+
+            # Query the database to check if the IP and port exist
+            result = self._execute('''
+                SELECT COUNT(*)
+                FROM uri
+                WHERE ip = ? AND port = ?
+            ''', (ip, port))
+
+            return result.fetchone()[0] > 0
+        except ValueError:
+            # Handle the case where the URI is not in the correct format
+            logger.LOGGER(f'Invalid URI format: {uri}. Expected format is "ip:port".')
+            return False
+
     def add_external_client(self, peer_id: str, client_id: str) -> bool:
         """
         Associates an external client ID with an existing peer.
