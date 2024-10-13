@@ -37,6 +37,7 @@ def create_tables(cursor):
                 client_id TEXT,
                 gas_mantissa INTEGER,
                 gas_exponent INTEGER,
+                gas_last_update DATETIME DEFAULT NULL,
                 reputation_proof_id TEXT,
                 reputation_score INTEGER,
                 reputation_index INTEGER,

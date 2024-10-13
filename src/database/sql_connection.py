@@ -704,6 +704,33 @@ class SQLConnection(metaclass=Singleton):
             peers.append(peer)
 
         return peers
+        
+    def get_peer_by_id(self, peer_id: str) -> dict:
+        """
+        Fetches details of a peer by its ID from the database.
+        
+        Parameters:
+        - peer_id (str): The unique identifier of the peer.
+
+        Returns:
+        - dict: A dictionary containing peer details if found, otherwise an empty dictionary.
+        """
+        try:
+            # Execute SQL query to retrieve peer details by ID
+            result = self._execute('SELECT * FROM peer WHERE id = ?', (peer_id,))
+            row = result.fetchone()
+
+            if row:
+                # Convert the row to a dictionary
+                peer_info = dict(row)
+                # Combine gas values into a single 'gas' key
+                peer_info['gas'] = _combine_gas(peer_info.pop('gas_mantissa'), peer_info.pop('gas_exponent'))
+                return peer_info
+            else:
+                return {}  # Return empty dict if peer not found
+        except Exception as e:
+            logger.LOGGER(f'Error fetching peer details for ID {peer_id}: {e}')
+            return {}
 
     def get_peers_id(self) -> List[str]:
         """
@@ -720,14 +747,9 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error fetching peer IDs: {e}')
             return []
 
-    def add_gas_to_peer(self, peer_id: str, gas: int):
+    def add_gas_to_peer(self, peer_id: str, gas: int) -> bool:
         """
         Adds the specified amount of gas to the existing gas value of a peer.
-        
-        This function retrieves the current gas value of a peer, adds the specified 
-        gas amount to it, and updates the peer's gas value in the database. It handles 
-        the conversion of the gas value to its mantissa and exponent form and validates 
-        the resulting values before updating the database.
         
         Parameters:
         - peer_id (str): The unique identifier of the peer.
@@ -754,10 +776,13 @@ class SQLConnection(metaclass=Singleton):
                 # Validate the new mantissa and exponent values.
                 _validate_gas(new_mantissa, new_exponent)
                 
-                # Update the peer's gas values in the database.
+                # Get the current timestamp for gas_last_update.
+                current_time = datetime.datetime.now().isoformat()
+                
+                # Update the peer's gas values and gas_last_update in the database.
                 self._execute('''
-                    UPDATE peer SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
-                ''', (new_mantissa, new_exponent, peer_id))
+                    UPDATE peer SET gas_mantissa = ?, gas_exponent = ?, gas_last_update = ? WHERE id = ?
+                ''', (new_mantissa, new_exponent, current_time, peer_id))
                 
                 return True
             else:
@@ -766,15 +791,9 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error adding gas to peer {peer_id}: {e}')
             return False
 
-
-    def refresh_gas_for_peer(self, peer_id: str, gas: int):
+    def refresh_gas_for_peer(self, peer_id: str, gas: int) -> bool:
         """
         Sets the gas value of a peer to a specified amount, replacing any existing value.
-        
-        This function directly updates the gas value of a peer to the specified value, 
-        ignoring any previous gas value. It converts the provided gas amount to its 
-        mantissa and exponent form, validates the values, and updates the peer's gas 
-        record in the database.
         
         Parameters:
         - peer_id (str): The unique identifier of the peer.
@@ -790,16 +809,18 @@ class SQLConnection(metaclass=Singleton):
             # Validate the new gas values.
             _validate_gas(new_mantissa, new_exponent)
             
-            # Update the peer's gas directly with the new mantissa and exponent values.
+            # Get the current timestamp for gas_last_update.
+            current_time = datetime.datetime.now().isoformat()
+            
+            # Update the peer's gas and gas_last_update directly in the database.
             self._execute('''
-                UPDATE peer SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
-            ''', (new_mantissa, new_exponent, peer_id))
+                UPDATE peer SET gas_mantissa = ?, gas_exponent = ?, gas_last_update = ? WHERE id = ?
+            ''', (new_mantissa, new_exponent, current_time, peer_id))
             
             return True
         except Exception as e:
             logger.LOGGER(f'Error refreshing gas for peer {peer_id}: {e}')
             return False
-
 
     def add_peer(self, peer_id: str, token: Optional[str], metadata: Optional[bytes], app_protocol: bytes) -> bool:
         """
