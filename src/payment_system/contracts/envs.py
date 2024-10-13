@@ -44,8 +44,8 @@ def print_payment_info() -> str:
     total_amount = ergo_amount + aux_amount
 
     return (
-        f"Sending Wallet: {ergo_addr}, Amount: {ergo_amount} ERGs \n "
-        f"Receiver Wallet: {aux_addr}, Received: {aux_amount} ERGs \n "
+        f"Sending Wallet: {ergo_addr}, Amount: {ergo_amount} ERGs \n"
+        f"Receiver Wallet: {aux_addr}, Received: {aux_amount} ERGs \n"
         f"Total: {total_amount} ERGs"
     )
 
