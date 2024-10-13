@@ -158,6 +158,7 @@ def peer_deposits():
                 l.LOGGER(f"Exception updating peer {peer['id']}: {str(e)}")
                 continue
 
+        l.LOGGER(f"Gas on the peer {peer['id']} is {peer['gas']}.")
         if peer["gas"] < MIN_DEPOSIT_PEER or \
                 gas_amount_on_other_peer(  # Only check on RPC, not on DB.
                     peer_id=peer["id"]
