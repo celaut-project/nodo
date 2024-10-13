@@ -715,7 +715,6 @@ class SQLConnection(metaclass=Singleton):
         try:
             result = self._execute("SELECT id FROM peer")
             peer_ids = [row[0] for row in result.fetchall()]
-            logger.LOGGER(f'Found peer IDs: {peer_ids}')
             return peer_ids
         except sqlite3.Error as e:
             logger.LOGGER(f'Error fetching peer IDs: {e}')
