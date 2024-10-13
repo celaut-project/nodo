@@ -96,7 +96,7 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
     try:
         peer = sc.get_peer_by_id(peer_id=peer_id)
         log(str(peer))
-        if peer and 'gas_last_update' in peer:
+        if peer and 'gas_last_update' in peer and peer['gas_last_update']:
             last_update_time = datetime.datetime.fromisoformat(peer['gas_last_update'])
             if (datetime.datetime.now() - last_update_time).total_seconds() <= 10:
                 log("RETURN THE LOCAL GAS")
