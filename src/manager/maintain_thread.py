@@ -25,6 +25,7 @@ env_manager = EnvManager()
 
 MIN_SLOTS_OPEN_PER_PEER = env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER")
 MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
+TOTAL_REFILLED_DEPOSIT = env_manager.get_env("TOTAL_REFILLED_DEPOSIT")
 MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
@@ -167,7 +168,7 @@ def peer_deposits():
             # f'\n   min deposit per peer -> {MIN_DEPOSIT_PEER}'
             # f'\n   actual gas deposit -> {gas_amount_on_other_peer(peer_id=peer_id)}'
             # f'\n\n')
-            if not increase_deposit_on_peer(peer_id=peer_id, amount=MIN_DEPOSIT_PEER):
+            if not increase_deposit_on_peer(peer_id=peer_id, amount=TOTAL_REFILLED_DEPOSIT-peer_gas):
                 l.LOGGER(f'Manager error: the peer {peer_id} could not be increased.')
 
 

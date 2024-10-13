@@ -28,15 +28,11 @@ def delegate_execution(
     try:
         l.LOGGER('El servicio se lanza en el nodo ' + str(peer))
 
-        if gas_amount_on_other_peer(
-                peer_id=peer,
-        ) <= cost and not increase_deposit_on_peer(
-            peer_id=peer,
-            amount=cost
-        ):
+        if gas_amount_on_other_peer(peer_id=peer) <= cost:
             raise Exception(
-                'Launch service error increasing deposit on ' + peer + 'when it didn\'t have enough '
-                                                                       'gas.')
+                'Launch service error: Not enough gas on ' + peer + '. '
+                'Current gas: ' + str(gas_amount_on_other_peer(peer_id=peer)) + ', required: ' + str(cost) + '.'
+            )
 
         l.LOGGER('Spent gas, go to launch the service on ' + str(peer))
         service_instance = next(grpcbf.client_grpc(

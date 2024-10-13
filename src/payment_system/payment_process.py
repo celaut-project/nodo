@@ -183,8 +183,7 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
 
 
 def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
-    if amount < MIN_DEPOSIT_PEER: 
-        amount = MIN_DEPOSIT_PEER  # TODO Should add more than the min deposit.
+    if amount < MIN_DEPOSIT_PEER: amount = MIN_DEPOSIT_PEER
     
     _l.LOGGER('Increase deposit on peer ' + peer_id + ' by ' + str(amount))
     try:
