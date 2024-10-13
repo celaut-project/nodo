@@ -6,7 +6,7 @@ from src.payment_system.contracts.simulator import interface as simulated
 from src.payment_system.contracts.ergo import interface as ergo
 from src.utils.env import EnvManager
 
-SIMULATED = EnvManager().get_env("SIMULATE_PAYMENTS") in ("T", "t", "true", "True", "TRUE", "1")
+SIMULATED = EnvManager().get_env("SIMULATE_PAYMENTS")
 
 contract_hash = str
 contract_addr = str
