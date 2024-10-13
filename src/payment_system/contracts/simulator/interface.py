@@ -66,5 +66,5 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
             )
 
 
-def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str, validate_token) -> bool:
+def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str) -> bool:
     return True
