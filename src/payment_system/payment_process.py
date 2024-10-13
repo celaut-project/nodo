@@ -183,16 +183,19 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
 
 
 def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
-    if amount < MIN_DEPOSIT_PEER: amount = MIN_DEPOSIT_PEER
+    if amount < MIN_DEPOSIT_PEER: 
+        amount = MIN_DEPOSIT_PEER  # TODO Should add more than the min deposit.
+    
     _l.LOGGER('Increase deposit on peer ' + peer_id + ' by ' + str(amount))
     try:
         if __peer_payment_process(peer_id=peer_id, amount=amount):
             if sc.add_gas_to_peer(peer_id=peer_id, gas=amount):
                 return True
             else:
-                _l.LOGGER(f'Failed to add gas to peer {peer_id}')
+                _l.LOGGER(f'Failed to update the gas peer {peer_id} on DB')
                 return False
         else:
+            _l.LOGGER(f'Failed to add gas to peer {peer_id}')
             return False
     except Exception as e:
         _l.LOGGER(f'Error increasing deposit on peer {peer_id}: {e}')

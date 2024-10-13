@@ -132,14 +132,14 @@ def maintain_clients():
 
 
 def peer_deposits():
-    for peer in SQLConnection().get_peers(): # async
-        if not is_peer_available(peer_id=peer['id'], min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
+    for peer_id in SQLConnection().get_peers_id(): # async
+        if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             # l.LOGGER('Peer '+peer_id+' is not available .')
             try:
                 instance = next(peerpc(
                     method=gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
-                            next(generate_uris_by_peer_id(peer_id=peer['id']), "")
+                            next(generate_uris_by_peer_id(peer_id=peer_id), "")
                         )
                     ).GetInstance,
                     indices_parser=Instance,
@@ -155,24 +155,21 @@ def peer_deposits():
                     peer_id=peer["id"]
                 )
             except Exception as e:
-                l.LOGGER(f"Exception updating peer {peer['id']}: {str(e)}")
+                l.LOGGER(f"Exception updating peer {peer_id}: {str(e)}")
                 continue
 
-        gas_rpc = gas_amount_on_other_peer(
-                    peer_id=peer["id"]
+        peer_gas = gas_amount_on_other_peer(
+                    peer_id=peer_id
                 )
-        l.LOGGER(f"Gas on the peer {peer['id']} is {peer['gas']}.  \n On RPC it says {gas_rpc}")
-        if peer["gas"] < MIN_DEPOSIT_PEER or \
-                gas_amount_on_other_peer(
-                    peer_id=peer["id"]
-                ) < MIN_DEPOSIT_PEER:
-            l.LOGGER(f'\n\n The peer {peer["id"]} has not enough deposit.   ')
+        l.LOGGER(f"Gas on the peer {peer_id} is {peer_gas}.")
+        if peer_gas < MIN_DEPOSIT_PEER:
+            l.LOGGER(f'\n\n The peer {peer_id} has not enough deposit.   ')
             # f'\n   estimated gas deposit -> {peer["gas"]]} '
             # f'\n   min deposit per peer -> {MIN_DEPOSIT_PEER}'
             # f'\n   actual gas deposit -> {gas_amount_on_other_peer(peer_id=peer_id)}'
             # f'\n\n')
-            if not increase_deposit_on_peer(peer_id=peer["id"], amount=MIN_DEPOSIT_PEER):
-                l.LOGGER(f'Manager error: the peer {peer["id"]} could not be increased.')
+            if not increase_deposit_on_peer(peer_id=peer_id, amount=MIN_DEPOSIT_PEER):
+                l.LOGGER(f'Manager error: the peer {peer_id} could not be increased.')
 
 
 def check_dev_clients():

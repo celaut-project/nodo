@@ -93,12 +93,14 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
     
     client_id = get_client_id_on_other_peer(peer_id=peer_id)
     try:
-        return from_gas_amount(
+        gas = from_gas_amount(
             __get_metrics_external(
                 peer_id=peer_id,
                 token=client_id
             ).gas_amount
         )
+        sc.refresh_gas_for_peer(peer_id=peer_id, gas=gas)
+        return gas
     except:
         log('Error getting gas amount from ' + peer_id + '.')
         if is_peer_available(peer_id=peer_id):
