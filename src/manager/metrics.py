@@ -91,15 +91,20 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
     :raises Exception: If an error occurs while fetching the gas amount.
     """
 
+    log("CHECK GAS PEER.")
+
     try:
         peer = sc.get_peer_by_id(peer_id=peer_id)
+        log(str(peer))
         if peer and 'gas_last_update' in peer:
             last_update_time = datetime.datetime.fromisoformat(peer['gas_last_update'])
             if (datetime.datetime.now() - last_update_time).total_seconds() <= 10:
                 log("RETURN THE LOCAL GAS")
                 return peer['gas']
     except Exception as e:
+        log("raise exception")
         log(e)
+        raise e
     
     log("CHECK ON THE RPC METHOD FOR THE LAST UPDATED GAS.")
     client_id = get_client_id_on_other_peer(peer_id=peer_id)
