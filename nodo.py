@@ -146,22 +146,20 @@ if __name__ == '__main__':
 
             case "status":
                 try:
-                    if is_nodo_service_running():
-                        print("Nodo service is currently running in the background.", flush=True)
-                    else:
-                        print("Nodo service is not running.", flush=True)
+                    status = "running" if is_nodo_service_running() else "not running"
+                    print(f"Nodo service is currently {status}.", flush=True)
                 except Exception as e:
                     print(f"Error checking nodo.service status: {e}", flush=True)
 
-                print(f"\nNodo version (Git commit): {get_git_commit()}", flush=True)
+                print(f"Nodo version: {get_git_commit()}", flush=True)
 
-                print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}")
+                print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}", flush=True)
+
+                payment_info = print_payment_info()
+                reputation_proof_id = env_manager.get_env('REPUTATION_PROOF_ID')
 
                 print(
-                    "Ergo info: "
-                    f"    {print_payment_info()}",
-                    f"    Reputation proof id: {env_manager.get_env('REPUTATION_PROOF_ID')}"
-                    "\n\n",
+                    f"Ergo Info: {payment_info} \n Reputation Proof ID: {reputation_proof_id or 'N/A'}",
                     flush=True
                 )
 
