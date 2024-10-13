@@ -122,9 +122,8 @@ fn get_peers() -> Result<Vec<Peer>> {
             let gas_mantissa: i64 = row.get(3)?;
             let gas_exponent: i32 = row.get(4)?;
 
-            // Calcula el valor del gas como String
             let gas_value = gas_mantissa as f64 * 10f64.powi(gas_exponent as i32);
-            let gas = gas_value.to_string();
+            let gas = format!("{:e}", gas_value);
 
             Ok(Peer {
                 id,
@@ -143,9 +142,8 @@ fn get_clients() -> Result<Vec<Client>> {
             let gas_mantissa: i64 = row.get(1)?;
             let gas_exponent: i32 = row.get(2)?;
 
-            // Calcula el valor del gas como String
             let gas_value = gas_mantissa as f64 * 10f64.powi(gas_exponent as i32);
-            let gas = gas_value.to_string();
+            let gas = format!("{:e}", gas_value);
 
             Ok(Client {
                 id,
