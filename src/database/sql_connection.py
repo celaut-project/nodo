@@ -38,11 +38,6 @@ MAX_MANTISSA = 10**9  # Adjust this limit as needed
 MAX_EXPONENT = 128  # Adjust this limit as needed
 
 
-def get_internal_service_id_by_token(token: str) -> str:
-    """Extracts the internal service ID from a token."""
-    return token.split("##")[2]
-
-
 def _combine_gas(mantissa: int, exponent: int) -> int:
     """
     Combines mantissa and exponent into a single gas amount.
@@ -298,7 +293,7 @@ class SQLConnection(metaclass=Singleton):
 
     # Internal Service Methods
 
-    def add_internal_service(self, father_id: str, container_ip: str, container_id: str, token: str, gas: int):
+    def add_internal_service(self, father_id: str, container_ip: str, container_id: str, gas: int):
         """
         Adds an internal service to the database.
 
@@ -306,7 +301,6 @@ class SQLConnection(metaclass=Singleton):
             father_id (str): The father ID.
             container_ip (str): The IP address of the container.
             container_id (str): The container ID.
-            token (str): The token.
             gas (int): The gas amount.
         """
         gas_mantissa, gas_exponent = _split_gas(gas)
@@ -315,14 +309,14 @@ class SQLConnection(metaclass=Singleton):
             INSERT INTO internal_services (id, ip, father_id, gas_mantissa, gas_exponent, mem_limit)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (container_id, container_ip, father_id, gas_mantissa, gas_exponent, 0))
-        l.LOGGER(f'Set on cache {token} as dependency of {father_id}')
+        l.LOGGER(f'Saved service {container_id} as dependency of {father_id}')
 
-    def update_sys_req(self, token: str, mem_limit: Optional[int]) -> bool:
+    def update_sys_req(self, id: str, mem_limit: Optional[int]) -> bool:
         """
         Updates system requirements for an internal service.
 
         Args:
-            token (str): The token of the internal service.
+            id (str): The id of the internal service.
             mem_limit (Optional[int]): The new memory limit.
 
         Returns:
@@ -331,79 +325,79 @@ class SQLConnection(metaclass=Singleton):
         try:
             self._execute('''
                 UPDATE internal_services SET mem_limit = ? WHERE id = ?
-            ''', (mem_limit, get_internal_service_id_by_token(token=token)))
+            ''', (mem_limit, id))
             return True
         except:
             return False
 
-    def get_sys_req(self, token: str) -> dict:
+    def get_sys_req(self, id: str) -> dict:
         """
         Retrieves system requirements for an internal service.
 
         Args:
-            token (str): The token of the internal service.
+            id (str): The id of the internal service.
 
         Returns:
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
             SELECT mem_limit FROM internal_services WHERE id = ?
-        ''', (get_internal_service_id_by_token(token=token),))
+        ''', (id,))
         row = result.fetchone()
         if row:
             return row
-        raise Exception(f'Internal service {token}')
+        raise Exception(f'Internal service {id}')
 
-    def get_internal_service_gas(self, token: str) -> int:
+    def get_internal_service_gas(self, id: str) -> int:
         """
         Retrieves the gas amount for an internal service.
 
         Args:
-            token (str): The token of the internal service.
+            id (str): The id of the internal service.
 
         Returns:
             int: The gas amount.
         """
         result = self._execute('''
             SELECT gas_mantissa, gas_exponent FROM internal_services WHERE id = ?
-        ''', (get_internal_service_id_by_token(token=token),))
+        ''', (id,))
         row = result.fetchone()
         if row:
             return row['gas_mantissa'] * (10 ** row['gas_exponent'])
-        raise Exception(f'Internal service {token}')
+        raise Exception(f'Internal service {id}')
 
-    def get_all_internal_service_tokens(self) -> List[str]:
+    def get_all_internal_service_ids(self) -> List[str]:
         """
-        Fetches all tokens of internal services.
+        Fetches all ids of internal services.
 
         Returns:
-            List[str]: A list of tokens.
+            List[str]: A list of ids.
         """
         result = self._execute('''
             SELECT father_id, ip, id FROM internal_services
         ''')
-        return [f"{row['father_id']}##{row['ip']}##{row['id']}" for row in result.fetchall()]
+        return [row['id'] for row in result.fetchall()]
 
-    def update_gas_to_container(self, token: str, gas: int):
+    def update_gas_to_container(self, id: str, gas: int):
         """
         Updates the gas amount for a container.
 
         Args:
-            token (str): The token of the container.
+            id (str): The id of the container.
             gas (int): The new gas amount.
         """
         gas_mantissa, gas_exponent = _split_gas(gas)
         _validate_gas(gas_mantissa, gas_exponent)
         self._execute('''
             UPDATE internal_services SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
-        ''', (gas_mantissa, gas_exponent, get_internal_service_id_by_token(token=token)))
+        ''', (gas_mantissa, gas_exponent, id))
 
-    def container_exists(self, token: str) -> bool:
+    def container_exists(self, id: str) -> bool:
         """
         Checks if a container exists in the database.
 
         Args:
-            token (str): The token of the container.
+            id (str): The id of the container.
 
         Returns:
             bool: True if the container exists, False otherwise.
@@ -412,39 +406,31 @@ class SQLConnection(metaclass=Singleton):
             SELECT COUNT(*)
             FROM internal_services
             WHERE id = ?
-        ''', (get_internal_service_id_by_token(token=token),))
+        ''', (id,))
         return result.fetchone()[0] > 0
 
-    def purge_internal(self, agent_id=None, container_id=None, container_ip=None, token=None) -> int:
+    def purge_internal(self, id: str) -> int:
         """
         Purges an internal service and optionally removes its Docker container.
 
         Args:
-            agent_id (str, optional): The agent ID.
-            container_id (str, optional): The container ID.
-            container_ip (str, optional): The container IP.
-            token (str, optional): The token of the internal service.
+            id (str): The id of the internal service.
 
         Returns:
             int: The gas amount refunded.
         """
-        if token is None and (agent_id is None or container_id is None or container_ip is None):
-            raise Exception(
-                'purge_internal: token is None and (agent_id is None or container_id is None or container_ip is None)'
-            )
-
         if REMOVE_CONTAINERS:
             try:
-                DOCKER_CLIENT().containers.get(container_id).remove(force=True)
+                DOCKER_CLIENT().containers.get(id).remove(force=True)
             except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-                l.LOGGER(str(e) + 'ERROR WITH PODMAN WHEN TRYING TO REMOVE THE CONTAINER ' + container_id)
+                l.LOGGER(str(e) + 'ERROR WITH PODMAN WHEN TRYING TO REMOVE THE CONTAINER ' + id)
                 return 0
 
-        gas = self.get_internal_service_gas(token=token)
+        gas = self.get_internal_service_gas(id=id)
 
         self._execute('''
-            DELETE FROM internal_services WHERE id = ? AND father_id = ?
-        ''', (container_id, agent_id))
+            DELETE FROM internal_services WHERE id = ?
+        ''', (id))
 
         return gas
 
@@ -1148,23 +1134,23 @@ class SQLConnection(metaclass=Singleton):
 
     # Common Methods
 
-    def get_token_by_uri(self, uri: str) -> str:
+    def get_internal_service_id_by_uri(self, uri: str) -> str:
         """
-        Retrieves the token for a given URI.
+        Retrieves the internal service id for a given URI.
 
         Args:
             uri (str): The URI to look up.
 
         Returns:
-            str: The associated token.
+            str: The associated internal service id.
         """
         result = self._execute('''
-            SELECT token FROM internal_services WHERE ip = ?
+            SELECT id FROM internal_services WHERE ip = ?
         ''', (uri,))
         row = result.fetchone()
         if row:
-            return row['token']
-        raise Exception(f'Token not found for URI: {uri}')
+            return row['id']
+        raise Exception(f'Internal service not found for URI: {uri}')
 
     def get_gas_amount_by_father_id(self, id: str) -> int:
         """
@@ -1178,8 +1164,8 @@ class SQLConnection(metaclass=Singleton):
         """
         if self.client_exists(client_id=id):
             return self.get_gas_amount_by_client_id(id=id)
-        elif self.container_exists(token=id):
-            return self.get_internal_service_gas(token=id)
+        elif self.container_exists(id=id):
+            return self.get_internal_service_gas(id=id)
         else:
             return int(DEFAULT_INTIAL_GAS_AMOUNT)
 

@@ -94,28 +94,28 @@ def update_peer_instance(instance: gateway_pb2.Instance, peer_id: str):
 
     logger.LOGGER(f"Peer {peer_id} updated.")
 
-def get_token_by_uri(uri: str) -> str:
-    return sc.get_token_by_uri(uri=uri)
+def get_internal_service_id_by_uri(uri: str) -> str:
+    return sc.get_internal_service_id_by_uri(uri=uri)
 
 
-def __modify_sysreq(token: str, sys_req: celaut_pb2.Sysresources) -> bool:
-    if not sc.container_exists(token=token):
-        logger.LOGGER(f'Manager error: token {token} does not exists.')
+def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
+    if not sc.container_exists(id=id):
+        logger.LOGGER(f'Manager error: container {id} does not exists.')
         return False
     if sys_req.HasField('mem_limit'):
-        variation = sc.get_sys_req(token=token)['mem_limit'] - sys_req.mem_limit
+        variation = sc.get_sys_req(id=id)['mem_limit'] - sys_req.mem_limit
         if variation < 0:
             IOBigData().lock_ram(ram_amount=abs(variation))
         elif variation > 0:
             IOBigData().unlock_ram(ram_amount=variation)
         if variation != 0:
-            sc.update_sys_req(token=token, mem_limit=sys_req.mem_limit)
+            sc.update_sys_req(id=id, mem_limit=sys_req.mem_limit)
     return True
 
 
-def __get_container_by_token(token: str) -> docker_lib.models.containers.Container:
+def __get_container_by_id(id: str) -> docker_lib.models.containers.Container:
     return docker_lib.from_env().containers.get(
-        container_id=token.split('##')[-1]
+        container_id=id
     )
 
 
@@ -159,9 +159,7 @@ def increase_local_gas_for_client(client_id: str, amount: int) -> bool:
 
 
 def spend_gas(
-        id: str,  # If it's peer, the token is the peer id.
-        #  If it's a local service, the token could be the token or the container ip,
-        #  on the last case, it takes the token with cache service perspective.
+        id: str,
         gas_to_spend: int,
         refund_gas_function_container: list = None
 ) -> bool:
@@ -183,20 +181,20 @@ def spend_gas(
         # En caso de que token_or_container_ip sea el token del contenedor.
         else:
             # id could be the container id or container ip. So check first if it's an id. If not, check if it's an ip.
-            is_id = sc.container_exists(token=id)
+            is_id = sc.container_exists(id=id)
             if not is_id:
                 try:
-                    id = sc.get_token_by_uri(uri=id)
-                    is_id = sc.container_exists(token=id)
+                    id = sc.get_internal_service_id_by_uri(uri=id)  #  TODO don't should check this at this point.
+                    is_id = sc.container_exists(id=id)
                 except:
                     is_id = False
             if is_id:
-                current_gas = sc.get_internal_service_gas(token=id)
+                current_gas = sc.get_internal_service_gas(id=id)
                 if current_gas >= gas_to_spend or ALLOW_GAS_DEBT:
-                    sc.update_gas_to_container(token=id, gas=current_gas - gas_to_spend)
+                    sc.update_gas_to_container(id=id, gas=current_gas - gas_to_spend)
                     __refund_gas_function_factory(
                         gas=current_gas,
-                        add_function=lambda gas: sc.update_gas_to_container(token=id, gas=gas),  # TODO control race conditions.
+                        add_function=lambda gas: sc.update_gas_to_container(id=id, gas=gas),  # TODO control race conditions.
                         token=id,
                         container=refund_gas_function_container
                     )
@@ -283,32 +281,31 @@ def add_container(
         initial_gas_amount: Optional[int],
         system_requirements_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> str:
+    id: str = container.id
     logger.LOGGER(f'Add container for {father_id}')
-    token = father_id + '##' + container.attrs['NetworkSettings']['IPAddress'] + '##' + container.id
     initial_gas_amount = initial_gas_amount if initial_gas_amount else default_initial_cost(
         father_id=father_id)
     sc.add_internal_service(
         father_id=father_id,
         container_id=container.id,
         container_ip=container.attrs['NetworkSettings']['IPAddress'],
-        token=token,
         gas=initial_gas_amount
     )
     if not container_modify_system_params(
-            token=token,
+            id=id,
             system_requeriments_range=system_requirements_range
     ):
-        logger.LOGGER(f'Exception during modify params of {token}.')
-        raise Exception(f'Exception during modify params of {token}.')
-    logger.LOGGER(f"Modifed params correctly on token {token}.")
-    return token
+        logger.LOGGER(f'Exception during modify params of {id}.')
+        raise Exception(f'Exception during modify params of {id}.')
+    logger.LOGGER(f"Modifed params correctly on token {id}.")
+    return id
 
 
 def container_modify_system_params(
-        token: str,
+        id: str,
         system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> bool:
-    logger.LOGGER(f'Modify params of {token}.')
+    logger.LOGGER(f'Modify params of {id}.')
 
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
@@ -317,13 +314,13 @@ def container_modify_system_params(
     if not system_requeriments: return False
 
     if __modify_sysreq(
-            token=token,
+            id=id,
             sys_req=system_requeriments
     ):
         try:
             # Memory limit should be smaller than already set memoryswap limit, update the memoryswap at the same time
-            __get_container_by_token(
-                token=token
+            __get_container_by_id(
+                id=id
             ).update(
                 mem_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR == 0 \
                     else system_requeriments.mem_limit - MEMSWAP_FACTOR * system_requeriments.mem_limit,
@@ -342,33 +339,28 @@ def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
 
 
 def get_sysresources(token: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
-    sys_req = sc.get_sys_req(token=token)
+    sys_req = sc.get_sys_req(id=token)
     return gateway_pb2.ModifyServiceSystemResourcesOutput(
         sysreq=celaut_pb2.Sysresources(
             mem_limit=sys_req["mem_limit"],
         ),
         gas=to_gas_amount(
-            gas_amount=sc.get_internal_service_gas(token=token)["gas"]
+            gas_amount=sc.get_internal_service_gas(id=token)["gas"]
         )
     )
 
 
 # PRUNE CONTAINER METHOD
 
-def prune_container(token: str) -> int:
+def prune_container(token: str) -> int:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     logger.LOGGER('Prune container ' + token)
-    if get_network_name(ip_or_uri=token.split('##')[1]) == DOCKER_NETWORK:
+    if sc.container_exists(id=token):
         # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
         try:
-            refund = sc.purge_internal(
-                agent_id=token.split('##')[0],
-                container_id=token.split('##')[2],
-                container_ip=token.split('##')[1],
-                token=token
-            )
+            refund = sc.purge_internal(id=token)
         except Exception as e:
             logger.LOGGER('Error purging ' + token + ' ' + str(e))
-            return False
+            return 0
 
     else:
         try:
@@ -379,8 +371,8 @@ def prune_container(token: str) -> int:
             )
         except Exception as e:
             logger.LOGGER('Error purging ' + token + ' ' + str(e))
-            return False
+            return 0
 
-    # __refound_gas() # TODO refound gas to parent. Need to check what cache is. peer_instances or system_cache.
-    #  Podría usar una variable de entorno para hacerlo o no.
+    # __refound_gas() # TODO refound gas to parent.
+    #  env variable could be used.
     return refund

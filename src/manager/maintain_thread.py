@@ -96,33 +96,34 @@ def check_wanted_services():
 
 
 def maintain_containers():
-    for token in sc.get_all_internal_service_tokens():
+    for id in sc.get_all_internal_service_ids():
         try:
-            if DOCKER_CLIENT().containers.get(token.split('##')[-1]).status == 'exited':
-                update_reputation(token=token, amount=-100)
+            container = DOCKER_CLIENT().containers.get(id)   # TODO refactor with manager.__get_container_by_id()
+            if container.status == 'exited':
+                update_reputation(token=id, amount=-100)
                 l.LOGGER("Prunning container from the registry because the docker container does not exists.")
-                prune_container(token=token)
+                prune_container(token=id)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
             l.LOGGER('Exception on maintain container process: ' + str(e))
             continue
 
         if not spend_gas(
-                id=token,
+                id=id,
                 gas_to_spend=compute_maintenance_cost(
                     system_resources=celaut.Sysresources(
-                        mem_limit=sc.get_sys_req(token=token)['mem_limit']
+                        mem_limit=sc.get_sys_req(id=id)['mem_limit']
                     )
                 )
         ):
             try:
-                update_reputation(token=token, amount=-10)
+                update_reputation(token=id, amount=-10)
                 l.LOGGER("Pruning container due to insufficient gas.")
-                prune_container(token=token)
+                prune_container(token=id)
             except Exception as e:
-                l.LOGGER('Error purging ' + token + ' ' + str(e))
-                raise Exception('Error purging ' + token + ' ' + str(e))
+                l.LOGGER('Error purging ' + id + ' ' + str(e))
+                raise Exception('Error purging ' + id + ' ' + str(e))
         else:
-            update_reputation(token=token, amount=10)
+            update_reputation(token=id, amount=10)
 
 
 def maintain_clients():

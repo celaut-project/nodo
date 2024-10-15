@@ -7,7 +7,7 @@ from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.tunneling_system.tunnels import TunnelSystem
 from src.gateway.utils import generate_gateway_instance
-from src.manager.manager import prune_container, generate_client, get_token_by_uri, spend_gas, \
+from src.manager.manager import prune_container, generate_client, get_internal_service_id_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources
 from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
@@ -75,9 +75,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
         l.LOGGER('Request for modify service system resources.')
-        token = get_token_by_uri(
-            uri=get_only_the_ip_from_context(context_peer=context.peer())
-        )
+        token = get_internal_service_id_by_uri(uri=get_only_the_ip_from_context(context_peer=context.peer()))
         refund_gas = []
         if not spend_gas(
                 id=token,
@@ -85,7 +83,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 refund_gas_function_container=refund_gas
         ): raise Exception('Launch service error spending gas for ' + context.peer())
         if not container_modify_system_params(
-                token=token,
+                id=token,
                 system_requeriments_range=next(grpcbf.parse_from_buffer(
                     request_iterator=request_iterator,
                     indices=gateway_pb2.ModifyServiceSystemResourcesInput,
