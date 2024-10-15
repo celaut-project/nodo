@@ -338,14 +338,14 @@ def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
     # It's not possible local, but other pair can, returns True.
 
 
-def get_sysresources(token: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
-    sys_req = sc.get_sys_req(id=token)
+def get_sysresources(id: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
+    sys_req = sc.get_sys_req(id=id)
     return gateway_pb2.ModifyServiceSystemResourcesOutput(
         sysreq=celaut_pb2.Sysresources(
             mem_limit=sys_req["mem_limit"],
         ),
         gas=to_gas_amount(
-            gas_amount=sc.get_internal_service_gas(id=token)["gas"]
+            gas_amount=sc.get_internal_service_gas(id=id)
         )
     )
 

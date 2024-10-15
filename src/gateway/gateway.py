@@ -98,7 +98,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
         yield from grpcbf.serialize_to_buffer(
                 message_iterator=get_sysresources(
-                    token=token
+                    id=token
                 )
         )
 
