@@ -38,20 +38,20 @@ def __get_metrics_client(client_id: str) -> gateway_pb2.Metrics:
     )
 
 
-def __get_metrics_internal(token: str) -> gateway_pb2.Metrics:
+def __get_metrics_internal(id: str) -> gateway_pb2.Metrics:
     """
-    Retrieve internal metrics using cached data.
+    Retrieve internal metrics from DB
 
-    This function retrieves internal metrics from cached data based on the provided token.
+    This function retrieves internal metrics from DB.
 
-    :param token: The token used to identify the source of internal metrics.
+    :param id: The id used to identify the source of internal metrics.
     :type token: str
     :return: A protobuf object containing the internal metrics retrieved.
     :rtype: gateway_pb2.Metrics
     :raises KeyError: If the provided token does not exist in the cached data.
     """
     return gateway_pb2.Metrics(
-        gas_amount=to_gas_amount(sc.system_cache[token]['gas']),
+        gas_amount=to_gas_amount(sc.get_internal_service_gas(id=id)),
     )
 
 
@@ -140,14 +140,11 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
     if sc.client_exists(client_id=token):
         return __get_metrics_client(client_id=token)
 
+    elif sc.container_exists(id=token):
+        return __get_metrics_internal(id=token)
+    
     elif '##' not in token:
         raise InvalidTokenException()
-
-    elif get_network_name(
-            ip_or_uri=token.split('##')[1],
-
-    ) == DOCKER_NETWORK:
-        return __get_metrics_internal(token=token)
 
     else:
         return __get_metrics_external(
