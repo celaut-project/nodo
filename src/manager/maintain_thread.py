@@ -116,7 +116,7 @@ def maintain_containers():
                 )
         ):
             try:
-                update_reputation(token=id, amount=-10)
+                update_reputation(token=id, amount=-10)  # TODO Needs to update the reputation of the service, not the instance. 
                 l.LOGGER("Pruning container due to insufficient gas.")
                 prune_container(token=id)
             except Exception as e:
