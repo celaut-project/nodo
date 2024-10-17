@@ -71,6 +71,7 @@ impl Identifiable for Client {
 #[derive(Debug)]
 pub struct Container {
     pub id: String,
+    pub gas: String
 }
 
 impl Identifiable for Container {
@@ -157,24 +158,34 @@ fn get_instances() -> Result<Vec<Container>> {
     let conn = Connection::open(DATABASE_FILE)?;
 
     let internal_instances = conn
-        .prepare("SELECT id FROM internal_services")?
+        .prepare("SELECT id, gas_mantissa, gas_exponent FROM internal_services")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
-            Ok(Container { id })
+
+            let gas_mantissa: i64 = row.get(1)?;
+            let gas_exponent: i32 = row.get(2)?;
+
+            let gas_value = gas_mantissa as f64 * 10f64.powi(gas_exponent as i32);
+            let gas = format!("{:e}", gas_value);
+
+            Ok(Container {
+                id, gas 
+            })
         })?
         .collect::<Result<Vec<Container>>>()?;
 
-    let external_instances = conn
+    /*let external_instances = conn
         .prepare("SELECT token FROM external_services")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
             Ok(Container { id })
         })?
         .collect::<Result<Vec<Container>>>()?;
+    */
 
     let mut instances = Vec::new();
     instances.extend(internal_instances);
-    instances.extend(external_instances);
+    // instances.extend(external_instances);
 
     Ok(instances)
 }

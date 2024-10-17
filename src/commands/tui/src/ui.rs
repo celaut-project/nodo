@@ -245,11 +245,11 @@ fn draw_instance_list(frame: &mut Frame, app: &mut App, area: Rect) {
             app.instances
                 .items
                 .iter()
-                .map(|instance| Row::new(vec![instance.id.clone()]))
+                .map(|instance| Row::new(vec![instance.id.clone(), instance.gas.clone()]))
                 .collect::<Vec<Row>>(),
             [Constraint::Length(70)],
         )
-        .header(Row::new(vec![Cell::from("Instance Id")]))
+        .header(Row::new(vec![Cell::from("Instance Id"), , Cell::from("Gas")]))
         .block(
             Block::bordered()
                 .title("INSTANCES")
