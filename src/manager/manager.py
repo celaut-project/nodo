@@ -14,10 +14,8 @@ from src.reputation_system.envs import validate_contract_ledger
 from src.database.sql_connection import SQLConnection, is_peer_available
 
 from src.utils import logger as logger
-from src.utils.env import EnvManager, DOCKER_NETWORK, \
-    SHA3_256_ID
+from src.utils.env import EnvManager
 from src.utils.utils import (
-    get_network_name,
     to_gas_amount,
     generate_uris_by_peer_id
 )
@@ -164,7 +162,7 @@ def spend_gas(
         refund_gas_function_container: list = None
 ) -> bool:
     gas_to_spend = int(gas_to_spend)
-    # logger.LOGGER('Spend '+str(gas_to_spend)+' gas by ' + token_or_container_ip)
+    logger.LOGGER(f"Spend {gas_to_spend} gas by {id}")
     try:
         # En caso de que sea un peer, el token es el client id.
         if sc.client_exists(client_id=id) and (
@@ -184,7 +182,7 @@ def spend_gas(
             is_id = sc.container_exists(id=id)
             if not is_id:
                 try:
-                    id = sc.get_internal_service_id_by_uri(uri=id)  #  TODO don't should check this at this point.  Needs to take the id on launch_service.py l.36-37 (if not father_id: father_id = father_ip)
+                    id = sc.get_internal_service_id_by_uri(uri=id)  #  TODO don't should check this at this point.
                     is_id = sc.container_exists(id=id)
                 except:
                     is_id = False

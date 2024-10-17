@@ -9,8 +9,10 @@ from src.utils import utils, logger as l
 from src.utils.env import DOCKER_NETWORK, EnvManager
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_gas_amount
+from src.database.sql_connection import SQLConnection
 
 env_manager = EnvManager()
+sc = SQLConnection()
 
 IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = env_manager.get_env("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER")
 
@@ -19,7 +21,7 @@ def launch_service(
         service: celaut.Service,
         metadata: celaut.Any.Metadata,
         father_ip: str,
-        father_id: str = None,
+        father_id: Optional[str] = None,
         service_id: str = None,
         config: Optional[gateway_pb2.Configuration] = None,
         recursion_guard_token: str = None,
@@ -34,9 +36,9 @@ def launch_service(
     ) as recursion_guard_token:
 
         if not father_id:
-            father_id = father_ip
-        if father_ip == father_id and utils.get_network_name(father_ip) != DOCKER_NETWORK:
-            raise Exception('Client id not provided.')
+            father_id = sc.get_internal_service_id_by_uri(father_ip)
+            if not father_id:
+                raise Exception('Client id not provided.')
 
         for peer, estimated_cost in service_balancer(
                 metadata=metadata,

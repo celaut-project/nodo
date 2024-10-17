@@ -1134,7 +1134,7 @@ class SQLConnection(metaclass=Singleton):
 
     # Common Methods
 
-    def get_internal_service_id_by_uri(self, uri: str) -> str:
+    def get_internal_service_id_by_uri(self, uri: str) -> Optional[str]:
         """
         Retrieves the internal service id for a given URI.
 
