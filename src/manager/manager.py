@@ -184,7 +184,7 @@ def spend_gas(
             is_id = sc.container_exists(id=id)
             if not is_id:
                 try:
-                    id = sc.get_internal_service_id_by_uri(uri=id)  #  TODO don't should check this at this point.
+                    id = sc.get_internal_service_id_by_uri(uri=id)  #  TODO don't should check this at this point.  Needs to take the id on launch_service.py l.36-37 (if not father_id: father_id = father_ip)
                     is_id = sc.container_exists(id=id)
                 except:
                     is_id = False
