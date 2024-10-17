@@ -162,7 +162,6 @@ def spend_gas(
         refund_gas_function_container: list = None
 ) -> bool:
     gas_to_spend = int(gas_to_spend)
-    logger.LOGGER(f"Spend {gas_to_spend} gas by {id}")
     try:
         # En caso de que sea un peer, el token es el client id.
         if sc.client_exists(client_id=id) and (
@@ -180,7 +179,6 @@ def spend_gas(
         else:
             # id could be the container id or container ip. So check first if it's an id. If not, check if it's an ip.
             is_id = sc.container_exists(id=id)
-            logger.LOGGER(f"The container exists {is_id}")
             if not is_id:
                 try:
                     id = sc.get_internal_service_id_by_uri(uri=id)  #  TODO don't should check this at this point.
@@ -189,7 +187,6 @@ def spend_gas(
                     is_id = False
             if is_id:
                 current_gas = sc.get_internal_service_gas(id=id)
-                logger.LOGGER(f"Is going to spend gas, the current gas is {current_gas}, and wants to spend {gas_to_spend}")
                 if current_gas >= gas_to_spend or ALLOW_GAS_DEBT:
                     sc.update_gas_to_container(id=id, gas=current_gas - gas_to_spend)
                     __refund_gas_function_factory(
