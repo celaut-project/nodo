@@ -249,7 +249,7 @@ fn draw_instance_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 .collect::<Vec<Row>>(),
             [Constraint::Length(70)],
         )
-        .header(Row::new(vec![Cell::from("Instance Id"), , Cell::from("Gas")]))
+        .header(Row::new(vec![Cell::from("Instance Id"), Cell::from("Gas")]))
         .block(
             Block::bordered()
                 .title("INSTANCES")
