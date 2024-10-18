@@ -107,6 +107,7 @@ def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
         elif variation > 0:
             IOBigData().unlock_ram(ram_amount=variation)
         if variation != 0:
+            logger.LOGGER(f"DEBUG: Go to update sys req on DB.")
             sc.update_sys_req(id=id, mem_limit=sys_req.mem_limit)
     return True
 
@@ -323,10 +324,12 @@ def container_modify_system_params(
                     else system_requeriments.mem_limit - MEMSWAP_FACTOR * system_requeriments.mem_limit,
                 memswap_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR > 0 else -1
             )
-        except:
+        except Exception as e:
+            logger.LOGGER(f"DEBUG: Docker container id fail with e: {str(e)}")
             return False
         return True
 
+    logger.LOGGER(f"DEBUG: System req could not be modified: mem limit {system_requeriments.mem_limit}")
     return False
 
 
