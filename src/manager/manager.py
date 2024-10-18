@@ -107,7 +107,6 @@ def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
         elif variation > 0:
             IOBigData().unlock_ram(ram_amount=variation)
         if variation != 0:
-            logger.LOGGER(f"DEBUG: Go to update sys req on DB.")
             sc.update_sys_req(id=id, mem_limit=sys_req.mem_limit)
     return True
 
@@ -311,6 +310,7 @@ def container_modify_system_params(
     system_requeriments = system_requeriments_range.max_sysreq  # TODO implement the use of min_sysreq.
     if not system_requeriments: return False
 
+    # TODO Docker has a minimum of 6Mb of mem limit. It should be parametrize on .env and controlled here.
     if __modify_sysreq(
             id=id,
             sys_req=system_requeriments
@@ -325,11 +325,12 @@ def container_modify_system_params(
                 memswap_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR > 0 else -1
             )
         except Exception as e:
-            logger.LOGGER(f"DEBUG: Docker container id fail with e: {str(e)}")
+            logger.LOGGER(f"Docker container for {id} fail with e: {str(e)}")
+            # TODO reset modified system req.  Maybe the __get_container_by_id should be inside of __modify_sysreq.
             return False
         return True
 
-    logger.LOGGER(f"DEBUG: System req could not be modified: mem limit {system_requeriments.mem_limit}")
+    logger.LOGGER(f"System req could not be modified for {id}: mem limit {system_requeriments.mem_limit}")
     return False
 
 
