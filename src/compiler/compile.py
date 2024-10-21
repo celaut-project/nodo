@@ -43,20 +43,31 @@ class Compiler:
         os.system("mkdir " + CACHE + self.aux_id + "/building")
         os.system("mkdir " + CACHE + self.aux_id + "/filesystem")
 
+        # Log the selected architecture.
         l.LOGGER(f"Arch selected {arch}")
 
         # Build container and get compressed layers.
-        if not os.path.isfile(self.path + 'Dockerfile'): raise Exception("Error: Dockerfile no encontrado.")
-        os.system(
-            DOCKER_COMMAND + ' buildx build --platform ' + arch + ' --no-cache -t builder' + self.aux_id + ' ' + self.path)
-        os.system(
-            DOCKER_COMMAND + " save builder" + self.aux_id + " > " + CACHE + self.aux_id + "/building/container.tar")
-        os.system(
-            "tar -xvf " + CACHE + self.aux_id + "/building/container.tar -C " + CACHE + self.aux_id + "/building/")
+        if not os.path.isfile(self.path + 'Dockerfile'):
+            raise Exception("Error: Dockerfile not found.")
 
+        # Execute Docker commands with error handling.
+        commands = [
+            f"{DOCKER_COMMAND} buildx build --platform {arch} --no-cache -t builder{self.aux_id} {self.path}",
+            f"{DOCKER_COMMAND} save builder{self.aux_id} > {CACHE}{self.aux_id}/building/container.tar",
+            f"tar -xvf {CACHE}{self.aux_id}/building/container.tar -C {CACHE}{self.aux_id}/building/"
+        ]
+
+        # Iterate through the commands and execute each.
+        for cmd in commands:
+            ret_code = os.system(cmd)
+            if ret_code != 0:  # If the return code is not zero, log the failure.
+                l.LOGGER(f"Error executing command: {cmd} with return code {ret_code}")
+                raise Exception(f"Command failed: {cmd}")
+
+        # Get the buffer length.
         self.buffer_len = int(
-            subprocess.check_output([DOCKER_COMMAND + " image inspect builder" + aux_id + " --format='{{.Size}}'"],
-                                    shell=True))
+            subprocess.check_output([f"{DOCKER_COMMAND} image inspect builder{self.aux_id} --format='{{.Size}}'"], shell=True)
+        )
 
     def parseContainer(self):
         def parseFilesys() -> celaut.Any.Metadata.HashTag:
