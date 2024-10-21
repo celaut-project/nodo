@@ -170,6 +170,10 @@ if __name__ == '__main__':
                 from src.commands.execute import execute
                 execute(sys.argv[2])
 
+            case "remove":
+                from src.commands.remove import remove
+                remove(sys.argv[2])
+
             case 'connect':
                 from src.utils.zeroconf import connect
                 connect(sys.argv[2])
