@@ -123,6 +123,7 @@ if __name__ == '__main__':
               "\n- execute <service id>"
               "\n- remove <service id>"
               "\n- stop <instance id>"
+              "\n- services"
               "\n- connect <ip:url>"
               "\n- compile <project directory>"
               "\n- config"
@@ -176,10 +177,15 @@ if __name__ == '__main__':
                 from src.commands.stop import stop
                 stop(instance=sys.argv[2])
 
-
             case "remove":
                 from src.commands.remove import remove
                 remove(service=sys.argv[2])
+
+            case "services":
+                services = os.listdir(REGISTRY)
+                print("Available services:")
+                for service in services:
+                    print(service)
 
             case 'connect':
                 from src.utils.zeroconf import connect

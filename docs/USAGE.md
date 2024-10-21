@@ -10,6 +10,7 @@ Here is a list of the most commonly used commands in Nodo for a basic user:
 - `execute <service id>`: Executes a service instance based on the specified service ID.
 - `remove <service id>`: Removes a service based on the specified service ID from the node.
 - `stop <instance id>`: Removes a service instance based on the specified instance ID.
+- `services`: List all the services currently available on the node.
 - `connect <ip:url>`: Manually connects to a peer node by specifying its IP and port.
 - `config`: Configures various settings related to the network, wallets, and optional donation setup.
 - `compile <project directory>`: Compiles a project (e.g., a Dockerfile and associated configuration) to create a service that can be executed within the Celaut network.
@@ -50,7 +51,16 @@ no longer needed.
 `nodo stop abcdef1234567890`
 This will stop the service instance with the ID abcdef1234567890.
 
-### 5. config
+### 5. services
+
+The services command is used to list all the services currently available on the node. This includes services that have been compiled or added and are ready for
+execution. It helps users see what services are at their disposal, along with their respective service IDs.
+
+**Usage Example:**
+`nodo services`
+This will display a list of all services available on the node, including their names, IDs, and other relevant details.
+
+### 6. config
 
 The `config` command is used to configure various environment variables related to Nodo's operation. This includes network URLs, wallet mnemonics, and optional donation settings.
 
@@ -77,7 +87,7 @@ This will initiate an interactive session to guide you through configuring your 
 
 **Check how and why Nodo uses [Ergo](ERGO.md).**
 
-### 6. compile
+### 7. compile
 
 The `compile` command allows you to compile a project (such as a Dockerfile and associated configuration files) and create a service specification. This service can then be deployed and run on the distributed network.
 
@@ -85,7 +95,7 @@ The `compile` command allows you to compile a project (such as a Dockerfile and 
 `nodo compile /path/to/project`
 This will compile the project located in `/path/to/project`.
 
-### 7. tui
+### 8. tui
 
 The `tui` command launches the terminal-based user interface, allowing you to visualize and interact with the network in real-time. You can view peer connections, service instances, and other important details about the network's operation.
 
@@ -150,6 +160,9 @@ If you ever need assistance with commands or usage, you can run `nodo` without a
 This will print the following:
 
 - `execute <service id>`
+- `remove <service id>`
+- `stop <instance id>`
+- `services`
 - `connect <ip:url>`
 - `serve`
 - `config`
