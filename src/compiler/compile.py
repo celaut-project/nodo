@@ -66,8 +66,8 @@ class Compiler:
 
         # Get the buffer length.
         self.buffer_len = int(
-            subprocess.check_output([f"{DOCKER_COMMAND} image inspect builder{self.aux_id} --format='{{.Size}}'"], shell=True)
-        )
+            subprocess.check_output([DOCKER_COMMAND + " image inspect builder" + aux_id + " --format='{{.Size}}'"], shell=True)
+            )
 
     def parseContainer(self):
         def parseFilesys() -> celaut.Any.Metadata.HashTag:
