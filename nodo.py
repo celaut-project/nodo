@@ -121,6 +121,8 @@ if __name__ == '__main__':
     if len(sys.argv) == 1:
         print("Command needed: "
               "\n- execute <service id>"
+              "\n- remove <service id>"
+              "\n- stop <instance id>"
               "\n- connect <ip:url>"
               "\n- compile <project directory>"
               "\n- config"
@@ -168,11 +170,16 @@ if __name__ == '__main__':
 
             case "execute":
                 from src.commands.execute import execute
-                execute(sys.argv[2])
+                execute(service=sys.argv[2])
+
+            case "stop":
+                from src.commands.stop import stop
+                stop(instance=sys.argv[2])
+
 
             case "remove":
                 from src.commands.remove import remove
-                remove(sys.argv[2])
+                remove(service=sys.argv[2])
 
             case 'connect':
                 from src.utils.zeroconf import connect
