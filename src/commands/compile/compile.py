@@ -59,8 +59,7 @@ def __on_peer(peer: str, service_zip_dir: str):
             validate_id.update(i)
         print("validated service id -> ", validate_id.hexdigest())
     except Exception as e:
-        print(f"Maybe it doesn't have blocks? {str(e)}")
-        print("Validation will occurr into an error due to https://github.com/celaut-project/nodo/issues/38")
+        print(f"Maybe it doesn't have blocks? validation will occurr into an error due to https://github.com/celaut-project/nodo/issues/38")
 
 
 def compile_directory(directory: str):
