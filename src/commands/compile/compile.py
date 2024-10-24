@@ -37,8 +37,6 @@ def __on_peer(peer: str, service_zip_dir: str):
             zip=service_zip_dir,
             node=peer
     ):
-        print('b -> ', b, type(b), b.type if type(b) is grpcbb.Dir else None)
-        print(f"_id -> {_id}")
         if type(b) is compile_pb2.CompileOutputServiceId:
             if not _id:
                 _id = b.id.hex()
@@ -52,7 +50,6 @@ def __on_peer(peer: str, service_zip_dir: str):
             raise Exception('\nError with the compiler output:' + str(b))
 
     print('service id -> ', _id)
-
     print('\n Validate the content.')
 
     validate_id = sha3_256()
@@ -60,10 +57,10 @@ def __on_peer(peer: str, service_zip_dir: str):
     try:
         for i in grpcbb.read_multiblock_directory(f"{REGISTRY}{_id}/"):
             validate_id.update(i)
+        print("validated service id -> ", validate_id.hexdigest())
     except Exception as e:
         print(f"Maybe it doesn't have blocks? {str(e)}")
-
-    print("validated service id -> ", validate_id.hexdigest())
+        print("Validation will occurr into an error due to https://github.com/celaut-project/nodo/issues/38")
 
 
 def compile_directory(directory: str):

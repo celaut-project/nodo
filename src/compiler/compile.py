@@ -329,9 +329,6 @@ class Compiler:
             for i in grpcbb.read_multiblock_directory(directory=service_directory):
                 validate_content.update(i)
 
-            print(f'\n\nCONTENT ID -> {service_id}')
-            print(f'\n\nCONTENT VALIDATED ID -> {validate_content.hexdigest()}')
-
             service = service_directory
 
         return service_id, self.metadata, service
@@ -348,7 +345,7 @@ def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.S
 
         identifier, metadata, service = spec_file.save()
 
-    # os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')
+    os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')  # 
     os.system(DOCKER_COMMAND + ' rmi builder' + aux_id)
     os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier, metadata, service
@@ -387,18 +384,3 @@ def compile_zip( zip, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, N
 
     # shutil.rmtree(service_with_meta.name)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
-
-
-"""
-if __name__ == "__main__":
-    from protos.gateway_pb2_grpcbf import StartService_input_partitions_v1
-
-    id = repo_ok(
-        repo=sys.argv[1],
-        partitions_model=StartService_input_partitions_v1[2] if not len(sys.argv) > 1 else [
-            buffer_pb2.Buffer.Head.Partition()]
-    )
-    os.system('mv ' + CACHE + 'compile' + id + ' ' + REGISTRY + id)
-    print(id)
-
-"""
