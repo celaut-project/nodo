@@ -1,5 +1,4 @@
 import os
-
 from src.utils.env import EnvManager, DOCKER_COMMAND
 
 env_manager = EnvManager()
@@ -9,10 +8,12 @@ REGISTRY = env_manager.get_env("REGISTRY")
 DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
 
 
-
-
 def remove(service: str):
 
+    # Check if script is run as root
+    if os.geteuid() != 0:
+        print("This script requires superuser privileges. Please run with sudo.")
+        return
 
     # Iterate through the commands and execute each.
     for cmd in [
