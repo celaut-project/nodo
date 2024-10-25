@@ -1,11 +1,9 @@
-import os.path
-from typing import Optional, Any, Generator
+from typing import Any, Generator
 import grpc
 
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc, gateway_pb2_grpcbf
-from grpcbigbuffer.client import Dir, client_grpc
+from grpcbigbuffer.client import client_grpc
 
-from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.utils.env import SHA3_256_ID, EnvManager
 from src.utils.utils import to_gas_amount
 from src.manager.manager import get_dev_clients
