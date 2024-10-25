@@ -6,6 +6,7 @@ import src.manager.resources_manager as iobd
 from src.payment_system.contracts.envs import print_payment_info
 from src.utils.env import EnvManager
 from src.utils.network import get_local_ip
+from src.database.sql_connection import SQLConnection
 
 env_manager = EnvManager()
 
@@ -165,6 +166,9 @@ if __name__ == '__main__':
                     f"Reputation Proof ID: {reputation_proof_id or 'N/A'} \n{payment_info}",
                     flush=True
                 )
+
+                dev_client = SQLConnection().get_dev_clients()[0]
+                print("Dev client for dev purposes: {dev_client}")
 
             case "logs":
                 os.system(f"tail -f {MAIN_DIR}/storage/app.log")
