@@ -168,7 +168,7 @@ if __name__ == '__main__':
                 )
 
                 dev_client = SQLConnection().get_dev_clients()[0]
-                print("Dev client for dev purposes: {dev_client}")
+                print(f"Dev client for dev purposes: {dev_client}")
 
             case "logs":
                 os.system(f"tail -f {MAIN_DIR}/storage/app.log")
