@@ -235,5 +235,9 @@ if __name__ == '__main__':
                 check_rust_installation()
                 os.system(f"cd {MAIN_DIR}/src/commands/tui && cargo run")
 
+            case "rundev":
+                from src.commands.run_dev import run_dev
+                run_dev(path==sys.argv[2])
+
             case other:
                 print('Unknown command.', flush=True)
