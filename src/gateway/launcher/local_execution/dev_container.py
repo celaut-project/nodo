@@ -58,6 +58,20 @@ def create_dev_container(
             service_path
         ], check=True)
 
+        # Check if a Docker image with the specified tag already exists
+        print(f"Checking if Docker image '{container_name}' exists...")
+        existing_images = subprocess.run(
+            ["docker", "images", "-q", container_name],
+            capture_output=True, text=True
+        )
+
+        # If the image exists, remove it
+        if existing_images.stdout.strip():
+            print(f"Removing existing Docker image '{container_name}'...")
+            subprocess.run(["docker", "rmi", "-f", container_name], check=True)
+        else:
+            print(f"No existing image found for '{container_name}'.")
+
         # Build the Docker image
         print("Building Docker image...")
         subprocess.run([
@@ -79,7 +93,7 @@ def create_dev_container(
                 "docker", "run",
                 "-d",  # Run in detached mode to get container ID
                 "--rm",  # Remove container after exit
-                "-v", f"{service_dir}:{container_workdir}",
+                #  "-v", f"{service_dir}:{container_workdir}",   # For now, better to rebuild because most of the entrypoint process doesn't have hot reload.
                 container_name
             ],
             check=True,
