@@ -106,7 +106,7 @@ def create_dev_container(
         ], check=True)
         
         # Run the container with volume mount in detached mode        
-        print("Running container with volume mount...")
+        print("Running container...")
         result = subprocess.run(
             [
                 "docker", "run",
