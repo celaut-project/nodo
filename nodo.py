@@ -237,7 +237,7 @@ if __name__ == '__main__':
 
             case "rundev":
                 from src.commands.run_dev import run_dev
-                run_dev(path==sys.argv[2])
+                run_dev(path=sys.argv[2])
 
             case other:
                 print('Unknown command.', flush=True)
