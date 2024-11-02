@@ -1,8 +1,7 @@
-from typing import Optional
 import json
 import subprocess
 from pathlib import Path
-from protos import gateway_pb2, celaut_pb2 as celaut
+from protos import celaut_pb2 as celaut
 from src.gateway.launcher.local_execution.set_config import set_config
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
 
@@ -45,33 +44,44 @@ def create_dev_container(
     if not container_workdir:
         raise ValueError("Workdir not specified in pre-compile.json")
     
+    if service_dir.name != container_workdir:
+        raise ValueError("In order to use this command, the workdir on .service/pre-comile.json must be equal to the repo folder name. You should rename it.")
+    
     # Generate container name from directory
     container_name = f"{service_dir.name}-container"
     
     try:
+        # Copy the .service/Dockerfile into the root project folder.
+        subprocess.run([
+            "cp",
+            dockerfile_path,
+            service_path
+        ], check=True)
+
         # Build the Docker image
-        build_cmd = [
+        print("Building Docker image...")
+        subprocess.run([
             "docker", "build",
             "-t", container_name,
-            "-f", str(dockerfile_path),
-            str(service_dir / '.service')
-        ]
+            str(service_dir)              # This will include all the repository into the container, without keep in mind the include list from pre-compile.json
+        ], check=True)
+
+        # Deletes the auxiliar dockerfile
+        subprocess.run([
+            "rm",
+            service_dir / "Dockerfile"
+        ], check=True)
         
-        print("Building Docker image...")
-        subprocess.run(build_cmd, check=True)
-        
-        # Run the container with volume mount in detached mode
-        run_cmd = [
-            "docker", "run",
-            "-d",  # Run in detached mode to get container ID
-            "--rm",  # Remove container after exit
-            "-v", f"{service_dir}:{container_workdir}",
-            container_name
-        ]
-        
+        # Run the container with volume mount in detached mode        
         print("Running container with volume mount...")
         result = subprocess.run(
-            run_cmd,
+            [
+                "docker", "run",
+                "-d",  # Run in detached mode to get container ID
+                "--rm",  # Remove container after exit
+                "-v", f"{service_dir}:{container_workdir}",
+                container_name
+            ],
             check=True,
             capture_output=True,
             text=True
