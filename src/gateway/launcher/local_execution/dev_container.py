@@ -58,19 +58,38 @@ def create_dev_container(
             service_path
         ], check=True)
 
-        # Check if a Docker image with the specified tag already exists
+        # Check if the Docker image with the specified tag exists
         print(f"Checking if Docker image '{container_name}' exists...")
         existing_images = subprocess.run(
             ["docker", "images", "-q", container_name],
             capture_output=True, text=True
         )
 
-        # If the image exists, remove it
+        # If the image exists, proceed to remove containers using it and then delete the image
         if existing_images.stdout.strip():
+            print(f"Docker image '{container_name}' exists. Proceeding with cleanup...")
+
+            # Find and stop/remove any containers using this image
+            print(f"Finding containers using image '{container_name}'...")
+            containers = subprocess.run(
+                ["docker", "ps", "-a", "-q", "--filter", f"ancestor={container_name}"],
+                capture_output=True, text=True
+            )
+
+            if containers.stdout.strip():
+                print(f"Stopping and removing containers using image '{container_name}'...")
+                container_ids = containers.stdout.strip().splitlines()
+                for container_id in container_ids:
+                    subprocess.run(["docker", "stop", container_id], check=True)
+                    subprocess.run(["docker", "rm", container_id], check=True)
+            else:
+                print(f"No containers found using image '{container_name}'.")
+
+            # Remove the image
             print(f"Removing existing Docker image '{container_name}'...")
             subprocess.run(["docker", "rmi", "-f", container_name], check=True)
         else:
-            print(f"No existing image found for '{container_name}'.")
+            print(f"No existing image found for '{container_name}', no cleanup needed.")
 
         # Build the Docker image
         print("Building Docker image...")
