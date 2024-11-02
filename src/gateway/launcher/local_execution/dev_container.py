@@ -96,18 +96,17 @@ def __build_container_image(service_dir: Path, container_name: str) -> None:
 
 def __start_container(container_name: str) -> str:
     """
-    Start the Docker container.
+    Create a new Docker container without starting its main process.
     
     Args:
-        container_name (str): Name of the container to start
+        container_name (str): Name of the container to create
         
     Returns:
-        str: Container ID of the running container
+        str: Container ID of the created container
     """
     result = subprocess.run(
         [
-            "docker", "run",
-            "-d",
+            "docker", "create",
             "--rm",
             container_name
         ],
@@ -118,13 +117,26 @@ def __start_container(container_name: str) -> str:
     
     container_id = result.stdout.strip()
     if not container_id:
-        raise ValueError("Failed to get container ID from docker run command")
+        raise ValueError("Failed to get container ID from docker create command")
     
     return container_id
 
+def __run_container(container_id: str) -> None:
+    """
+    Start the execution of a created Docker container.
+    
+    Args:
+        container_id (str): ID of the container to start
+    """
+    subprocess.run(
+        ["docker", "start", container_id],
+        check=True
+    )
+    print(f"Container {container_id} execution started")
+
 def __configure_container(container_id: str, config: Optional[dict] = None) -> None:
     """
-    Configure the running container.
+    Configure the created container.
     
     Args:
         container_id (str): ID of the container to configure
@@ -158,13 +170,16 @@ def create_and_start_container(service_path: str, config: Optional[dict] = None)
         # Step 3: Build the container image
         __build_container_image(service_dir, container_name)
         
-        # Step 4: Start the container
+        # Step 4: Create the container (but don't start it)
         container_id = __start_container(container_name)
         
         # Step 5: Configure the container
         __configure_container(container_id, config)
+
+        # Step 6: Start the container execution
+        __run_container(container_id)
         
-        print(f"Container started and configured successfully with ID: {container_id}")
+        print(f"Container created, configured, and started successfully with ID: {container_id}")
         return container_id
         
     except subprocess.CalledProcessError as e:
