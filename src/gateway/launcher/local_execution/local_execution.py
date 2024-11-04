@@ -115,7 +115,7 @@ def local_execution(
             initial_gas_amount=initial_gas_amount,
             system_requirements_range=gateway_pb2.ModifyServiceSystemResourcesInput(
                 min_sysreq=initial_system_resources, max_sysreq=initial_system_resources)  # TODO ??
-        ),
+            ),
         instance=celaut.Instance(
             api=service.api,
             uri_slot=[uri_slot]

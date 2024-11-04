@@ -1,9 +1,11 @@
 import os
 from pathlib import Path
 import docker as docker_lib
+from protos import gateway_pb2
 from src.gateway.launcher.local_execution.set_config import get_config, write_config
 from src.manager.manager import add_container, get_dev_clients
 from src.utils.env import EnvManager
+from src.utils.env import DEFAULT_SYSTEM_RESOURCES
 
 # Crear cliente Docker
 client = docker_lib.from_env()
@@ -89,7 +91,9 @@ def __interactive_dev_container(service_path: str) -> str:
         father_id=client_id,
         container=container,
         initial_gas_amount=None,
-        system_requirements_range=None
+        system_requirements_range=gateway_pb2.ModifyServiceSystemResourcesInput(
+                min_sysreq=DEFAULT_SYSTEM_RESOURCES, max_sysreq=DEFAULT_SYSTEM_RESOURCES
+        )
     )
 
 
