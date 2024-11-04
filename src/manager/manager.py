@@ -36,7 +36,6 @@ sc = SQLConnection()
 
 
 def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
-    client_ids = sc.get_dev_clients()
     for client_id in sc.get_dev_clients():
         if sc.get_client_gas(client_id=client_id)[0] > gas_amount:
             yield client_id
