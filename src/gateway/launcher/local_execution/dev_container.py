@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 from protos import celaut_pb2 as celaut
-from src.gateway.launcher.local_execution.set_config import set_config
+from src.gateway.launcher.local_execution.set_config import get_config, set_config, write_config
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
 
 def __prepare_container_environment(service_path: str) -> tuple[Path, str, dict]:
@@ -188,3 +188,9 @@ def create_and_start_container(service_path: str, config: Optional[dict] = None)
     except Exception as e:
         print(f"Unexpected error: {e}")
         raise
+
+def interactive_dev_container(service_path: str) -> str:
+    config = get_config()
+    write_config(path=service_path, config=config)
+
+    # TODO Should create the container as internal service.

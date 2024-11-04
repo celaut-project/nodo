@@ -1,4 +1,4 @@
-from src.gateway.launcher.local_execution.dev_container import create_and_start_container
+from src.gateway.launcher.local_execution.dev_container import create_and_start_container, interactive_dev_container
 import os
 
 def run_dev(path: str):
@@ -8,4 +8,4 @@ def run_dev(path: str):
         return
 
     print(f"Executing container for development purposes, project: {path}")
-    create_and_start_container(service_path=path)
+    interactive_dev_container(service_path=path)
