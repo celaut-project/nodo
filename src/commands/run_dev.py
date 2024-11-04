@@ -43,7 +43,7 @@ def __build_container_image(service_dir: Path, container_name: str) -> None:
     client.images.build(path=str(service_dir), tag=container_name)
 
 
-def __run_container(image_id: str, port: str) -> None:
+def __run_container(image_id: str, port: str) -> docker_lib.models.containers.Container:
     """
     Run a Docker container.
     
@@ -52,7 +52,7 @@ def __run_container(image_id: str, port: str) -> None:
         port (str): Port to expose
     """
     print(f"Running Docker container '{image_id}' on port {port}...")
-    client.containers.run(
+    container = client.containers.run(
         image=image_id,
         ports={f"{port}/tcp": int(port)},
         detach=True,
@@ -79,16 +79,15 @@ def __interactive_dev_container(service_path: str) -> str:
     __build_container_image(service_dir=service_path, container_name=image_id)
     
     # Create internal service
-    container = client.containers.get(image_id)
+    port = "5000"  # Should take from .service/service.json api [0] port...
+    container = __run_container(image_id=image_id, port=port)
+    
     add_container(
         father_id=get_dev_clients(gas_amount=DEFAULT_INITIAL_GAS_AMOUNT),
         container=container,
         initial_gas_amount=None,
         system_requirements_range=None
     )
-    
-    port = "5000"  # Should take from .service/service.json api [0] port...
-    __run_container(image_id=image_id, port=port)
 
 
 def run_dev(path: str):
