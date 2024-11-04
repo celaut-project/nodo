@@ -94,7 +94,7 @@ def __build_container_image(service_dir: Path, container_name: str) -> None:
         # Clean up copied Dockerfile
         subprocess.run(["rm", service_dir / "Dockerfile"], check=True)
 
-def __start_container(container_name: str) -> str:
+def __create_container(container_name: str) -> str:
     """
     Create a new Docker container without starting its main process.
     
@@ -121,7 +121,7 @@ def __start_container(container_name: str) -> str:
     
     return container_id
 
-def __run_container(container_id: str) -> None:
+def __start_container(container_id: str) -> None:
     """
     Start the execution of a created Docker container.
     
@@ -129,10 +129,22 @@ def __run_container(container_id: str) -> None:
         container_id (str): ID of the container to start
     """
     subprocess.run(
-        ["docker", "exec", "-it", container_id, "/bin/bash"],
+        ["docker", "start", container_id],
         check=True
     )
     print(f"Container {container_id} execution started")
+    
+def __run_container(image_id: str, port: str) -> None:
+    """
+    Run a Docker container.
+    
+    Args:
+        image_id (str): ID of the image to run
+    """
+    subprocess.run(
+        ["docker", "run", "-i", "-t", f"-p {port}:{port}", image_id],
+        check=True
+    )
 
 def __configure_container(container_id: str, config: Optional[dict] = None) -> None:
     """
@@ -171,13 +183,13 @@ def create_and_start_container(service_path: str, config: Optional[dict] = None)
         __build_container_image(service_dir, container_name)
         
         # Step 4: Create the container (but don't start it)
-        container_id = __start_container(container_name)
+        container_id = __create_container(container_name)
         
         # Step 5: Configure the container
         __configure_container(container_id, config)
 
         # Step 6: Start the container execution
-        __run_container(container_id)
+        __start_container(container_id)
         
         print(f"Container created, configured, and started successfully with ID: {container_id}")
         return container_id
@@ -192,5 +204,11 @@ def create_and_start_container(service_path: str, config: Optional[dict] = None)
 def interactive_dev_container(service_path: str) -> str:
     config = get_config(config=None, resources=None)
     write_config(path=service_path, config=config)
-
-    # TODO Should create the container as internal service.
+    
+    image_id = f"{Path(service_path).resolve().name}-container"
+    __build_container_image(service_dir=service_path, container_name=image_id)
+    
+    port = "5000"
+    __run_container(image_id=image_id, port=port)
+    
+    
