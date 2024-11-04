@@ -190,7 +190,7 @@ def create_and_start_container(service_path: str, config: Optional[dict] = None)
         raise
 
 def interactive_dev_container(service_path: str) -> str:
-    config = get_config()
+    config = get_config(config=None, resources=None)
     write_config(path=service_path, config=config)
 
     # TODO Should create the container as internal service.
