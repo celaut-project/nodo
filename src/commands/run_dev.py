@@ -52,7 +52,7 @@ def __run_container(image_id: str, port: str) -> docker_lib.models.containers.Co
         port (str): Port to expose
     """
     print(f"Running Docker container '{image_id}' on port {port}...")
-    container = client.containers.run(
+    return client.containers.run(
         image=image_id,
         ports={f"{port}/tcp": int(port)},
         detach=True,
