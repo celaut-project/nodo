@@ -245,7 +245,10 @@ def __manage_interfaces():
 
         for key, _manage in MANAGE_INTERFACES.items():
             if callable(_manage):
-                _manage()
+                try:
+                    _manage()
+                except Exception as e:
+                    _l.LOGGER(f"Exception on manage interface {key}. {str(e)}")
             else:
                 _l.LOGGER(f"Warning: {_manage} is not callable.")
 
@@ -256,6 +259,9 @@ def init_interfaces():
     Thread(target=__manage_interfaces).start()
     for key, _init in INIT_INTERFACES.items():
         if callable(_init):
-            _init()
+            try:
+                _init()
+            except Exception as e:
+                _l.LOGGER(f"Exception on init interface {key}. {str(e)}")
         else:
             _l.LOGGER(f"Warning: {_init} is not callable.")
