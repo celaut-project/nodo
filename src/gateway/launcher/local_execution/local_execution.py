@@ -64,10 +64,8 @@ def local_execution(
         entrypoint=service.container.entrypoint
     )
 
-    l.LOGGER("Adding config.")
     set_config(container_id=container.id, config=config.config, resources=initial_system_resources,
                api=service.container.config)
-    l.LOGGER("Config added.")
 
     # The container must be started after adding the configuration file and
     #  before requiring its IP address, since docker assigns it at startup.
@@ -76,8 +74,8 @@ def local_execution(
         container.start()
     except docker_lib.errors.APIError as e:
         l.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' ' + str(e))
+        raise e
 
-    l.LOGGER("Container started.")
     # Reload this object from the server again and update attrs with the new data.
     container.reload()
 
