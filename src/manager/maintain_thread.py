@@ -189,6 +189,7 @@ def check_dev_clients():
 def manager_thread():
     init_interfaces()
     while True:
+        l.LOGGER("Manage iteration.")
         check_wanted_services()
         check_dev_clients()
         maintain_containers()
