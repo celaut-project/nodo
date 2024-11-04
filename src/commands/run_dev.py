@@ -83,7 +83,7 @@ def __interactive_dev_container(service_path: str) -> str:
     container = __run_container(image_id=image_id, port=port)
     
     add_container(
-        father_id=get_dev_clients(gas_amount=DEFAULT_INITIAL_GAS_AMOUNT),
+        father_id=next(get_dev_clients(gas_amount=DEFAULT_INITIAL_GAS_AMOUNT)),
         container=container,
         initial_gas_amount=None,
         system_requirements_range=None
