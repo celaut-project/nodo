@@ -8,7 +8,7 @@ from src.utils.env import EnvManager
 # Crear cliente Docker
 client = docker_lib.from_env()
 env_manager = EnvManager()
-DEFAULT_INITIAL_GAS_AMOUNT = int(env_manager.get_env("DEFAULT_INITIAL_GAS_AMOUNT"))
+DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
 
 
 def __cleanup_existing_container(container_name: str) -> None:
@@ -82,7 +82,7 @@ def __interactive_dev_container(service_path: str) -> str:
     port = "5000"  # Should take from .service/service.json api [0] port...
     container = __run_container(image_id=image_id, port=port)
     
-    client_id = next(get_dev_clients(gas_amount=DEFAULT_INITIAL_GAS_AMOUNT))
+    client_id = next(get_dev_clients(gas_amount=DEFAULT_INTIAL_GAS_AMOUNT))
     print(f"Client id -> {client_id}")
     
     add_container(
