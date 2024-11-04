@@ -8,7 +8,7 @@ from src.utils.env import EnvManager
 # Crear cliente Docker
 client = docker_lib.from_env()
 env_manager = EnvManager()
-DEFAULT_INITIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INITIAL_GAS_AMOUNT")
+DEFAULT_INITIAL_GAS_AMOUNT = int(env_manager.get_env("DEFAULT_INITIAL_GAS_AMOUNT"))
 
 
 def __cleanup_existing_container(container_name: str) -> None:
