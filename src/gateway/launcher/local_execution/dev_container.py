@@ -129,7 +129,7 @@ def __run_container(container_id: str) -> None:
         container_id (str): ID of the container to start
     """
     subprocess.run(
-        ["docker", "start", "-it", "/bin/bash", container_id],
+        ["docker", "exec", "-it", container_id, "/bin/bash"],
         check=True
     )
     print(f"Container {container_id} execution started")
