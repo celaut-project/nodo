@@ -1,4 +1,4 @@
-# Nodo: Service Orchestration for Distributed Networks
+# Nodo: A Celaut node implementation
 
 Nodo is a powerful framework designed to streamline communication, management, and orchestration of services
 across a network of computers.
