@@ -187,7 +187,9 @@ def check_dev_clients():
 
 
 def manager_thread():
+    l.LOGGER("Init interfaces.")
     init_interfaces()
+    l.LOGGER("Interfaces initiated.")
     while True:
         l.LOGGER("Manage iteration.")
         check_wanted_services()
