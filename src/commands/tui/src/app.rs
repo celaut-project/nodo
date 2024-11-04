@@ -71,6 +71,7 @@ impl Identifiable for Client {
 #[derive(Debug)]
 pub struct Container {
     pub id: String,
+    pub ip: String,
     pub gas: String
 }
 
