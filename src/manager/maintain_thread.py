@@ -177,6 +177,7 @@ def check_dev_clients():
     sc = SQLConnection()
     clients = sc.get_dev_clients()
     if len(clients) == 0:
+        l.LOGGER("Adds dev client.")
         sc.add_client(client_id=f"dev-{uuid4()}", gas=MIN_DEPOSIT_PEER, last_usage=None)
     else:
         client_gas = sc.get_client_gas(client_id=clients[0])[0]
