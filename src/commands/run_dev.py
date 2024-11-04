@@ -83,6 +83,7 @@ def __interactive_dev_container(service_path: str) -> str:
     # Create internal service
     port = "5000"  # Should take from .service/service.json api [0] port...
     container = __run_container(image_id=image_id, port=port)
+    container.reload()
     
     client_id = next(get_dev_clients(gas_amount=DEFAULT_INTIAL_GAS_AMOUNT))
     print(f"Client id -> {client_id}")
