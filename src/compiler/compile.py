@@ -239,7 +239,7 @@ class Compiler:
             )
         )
 
-    def parseLedger(self):
+    def parseNetwork(self):
         #  TODO: self.service.ledger.
 
         #  Add ledger metadata to the global metadata.
@@ -254,40 +254,6 @@ class Compiler:
                     )
                 )
             )
-
-    def parseTensor(self):
-        tensor = self.json.get('tensor') or None
-        if tensor:
-            self.service.tensor.rank = tensor["rank"] or None
-            indexes = tensor.get('index') or None
-            if indexes:
-                for var in indexes:
-                    try:
-                        with open(self.path + var + ".field", "rb") as var_desc:
-                            self.service.tensor.index[var].ParseFromString(var_desc.read())
-                    except FileNotFoundError:
-                        pass
-
-                # Add tensor metadata to the global metadata.
-                self.metadata.hashtag.attr_hashtag.append(
-                    celaut.Any.Metadata.HashTag.AttrHashTag(
-                        key=3,  # Tensor attr.
-                        value=[
-                            celaut.Any.Metadata.HashTag(
-                                attr_hashtag=[
-                                    celaut.Any.Metadata.HashTag.AttrHashTag(
-                                        key=1,  # index attr.
-                                        value=[
-                                            celaut.Any.Metadata.HashTag(
-                                                tag=indexes[var]
-                                            ) for var in indexes
-                                        ]
-                                    )
-                                ]
-                            ),
-                        ]
-                    )
-                )
 
     def save(self) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
         service: Union[str, compile_pb2.Service]
@@ -340,8 +306,7 @@ def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.S
     with resources_manager.mem_manager(len=COMPILER_MEMORY_SIZE_FACTOR * spec_file.buffer_len):
         spec_file.parseContainer()
         spec_file.parseApi()
-        spec_file.parseLedger()
-        spec_file.parseTensor()
+        spec_file.parseNetwork()
 
         identifier, metadata, service = spec_file.save()
 
