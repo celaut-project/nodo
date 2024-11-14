@@ -110,7 +110,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             partitions_message_mode={0: False}
         ), None)
         if _d.type != bytes:
-            raise Exception("Incorrect input on Compile gRPC-bb method. Should be bytes")
+            raise Exception("Incorrect input on Compile peerpc method. Should be bytes")
         yield from compile_zip(zip=_d.dir)
 
     def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
