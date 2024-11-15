@@ -293,8 +293,10 @@ class Compiler:
                 )]
             )
             
-            # Add the tag attribute as the first tag in the metadata. This could be used as the name of the service for better human identification.
+            # Add the tag attribute as the first tag or tag list in the metadata. This could be used as the name of the service for better human identification.
             if self.tag and type(self.tag) is str: 
+                self.metadata.hashtag.tag.extend([self.tag])
+            elif self.tag and type(self.tag) is list: 
                 self.metadata.hashtag.tag.extend(self.tag)
 
             from hashlib import sha3_256
