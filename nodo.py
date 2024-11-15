@@ -186,10 +186,8 @@ if __name__ == '__main__':
                 remove(service=sys.argv[2])
 
             case "services":
-                services = os.listdir(REGISTRY)
-                print("Available services:")
-                for service in services:
-                    print(service)
+                from src.commands.services import list
+                list()
 
             case 'connect':
                 from src.utils.zeroconf import connect
