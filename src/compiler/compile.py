@@ -68,6 +68,9 @@ class Compiler:
         self.buffer_len = int(
             subprocess.check_output([DOCKER_COMMAND + " image inspect builder" + aux_id + " --format='{{.Size}}'"], shell=True)
             )
+        
+        # Check first tag for use as name
+        self.tag = self.json["tag"] if "tag" in self.json else None
 
     def parseContainer(self):
         def parseFilesys() -> celaut.Any.Metadata.HashTag:
@@ -255,7 +258,7 @@ class Compiler:
                 )
             )
 
-    def save(self, title) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
+    def save(self) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
         service: Union[str, compile_pb2.Service]
         if not self.blocks:
             service_buffer = self.service.SerializeToString()  # 2*len
@@ -290,7 +293,9 @@ class Compiler:
                 )]
             )
             
-            if title: self.metadata.hashtag.tag.extend(f"{title}")
+            # Add the tag attribute as the first tag in the metadata. This could be used as the name of the service for better human identification.
+            if self.tag and type(self.tag) is str: 
+                self.metadata.hashtag.tag.extend(self.tag)
 
             from hashlib import sha3_256
             validate_content = sha3_256()
@@ -302,7 +307,7 @@ class Compiler:
         return service_id, self.metadata, service
 
 
-def ok(path, aux_id, title) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
+def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
     spec_file = Compiler(path=path, aux_id=aux_id)
 
     with resources_manager.mem_manager(len=COMPILER_MEMORY_SIZE_FACTOR * spec_file.buffer_len):
@@ -310,7 +315,7 @@ def ok(path, aux_id, title) -> Tuple[str, celaut.Any.Metadata, Union[str, compil
         spec_file.parseApi()
         spec_file.parseNetwork()
 
-        identifier, metadata, service = spec_file.save(title)
+        identifier, metadata, service = spec_file.save()
 
     os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')  # 
     os.system(DOCKER_COMMAND + ' rmi builder' + aux_id)
@@ -318,9 +323,7 @@ def ok(path, aux_id, title) -> Tuple[str, celaut.Any.Metadata, Union[str, compil
     return identifier, metadata, service
 
 
-def zipfile_ok(
-        zip: str, title: Optional[str]
-) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
+def zipfile_ok(zip: str) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
     import random
     aux_id = str(random.random())
     os.system('mkdir ' + CACHE + aux_id)
@@ -329,14 +332,13 @@ def zipfile_ok(
     os.system('rm ' + zip)
     return ok(
         path=CACHE + aux_id + '/for_build/',
-        aux_id=aux_id,
-        title=title
+        aux_id=aux_id
     )  # Specification file
 
 
-def compile_zip( zip, title: Optional[str], saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
+def compile_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
     l.LOGGER('Compiling zip ' + str(zip))
-    service_id, metadata, service = zipfile_ok(zip=zip, title=title)
+    service_id, metadata, service = zipfile_ok(zip=zip)
     for b in grpcbb.serialize_to_buffer(
             message_iterator=[
                 compile_pb2.CompileOutputServiceId(
