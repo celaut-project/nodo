@@ -186,8 +186,8 @@ if __name__ == '__main__':
                 remove(service=sys.argv[2])
 
             case "services":
-                from src.commands.services import list
-                list()
+                from src.commands.services import list_services
+                list_services()
 
             case 'connect':
                 from src.utils.zeroconf import connect
