@@ -33,7 +33,7 @@ sudo apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-
 }
 
 echo "Installing required build dependencies..."
-if sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
+if sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev protobuf-compiler \
                            libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null 2>&1; then
     echo "Dependencies installed successfully."
 else
