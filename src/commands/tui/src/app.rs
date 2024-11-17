@@ -215,6 +215,8 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
         // Construct the metadata file path
         let metadata_path = PathBuf::from(METADATA_ROOT).join(&service_id);
 
+        let mut tag = String::from("any");
+
         // Check if the metadata file exists
         if metadata_path.exists() {
             // Open the metadata file
@@ -227,8 +229,6 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
             // Decode the protobuf message from the buffer
             let any: protos::Any = protos::Any::decode(&*buf)?;
 
-            let mut tag = String::from("any");
-
             // Access the embedded `Metadata` message inside `Any`
             if let Some(metadata) = any.metadata {
                 // Extract relevant information from `Metadata`
@@ -237,10 +237,10 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
                     .and_then(|ht| ht.tag.get(0).cloned())
                     .unwrap_or_else(|| String::from("Unknown Title"));
             }
-
-            // Push the service into the vector
-            services.push(Service { id: service_id, tag });
         }
+
+        // Push the service into the vector
+        services.push(Service { id: service_id, tag });
     }
 
     Ok(services)
