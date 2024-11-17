@@ -65,7 +65,7 @@ def execute(service: str):
                     metadata.ParseFromString(f.read())
                     first_tag = metadata.hashtag.tag[0] if len(metadata.hashtag.tag) > 0 else ""
                     print(f"First tag found: {first_tag}")
-                    if first_tag == service:
+                    if str(first_tag) == str(service):
                         print(f"Found matching service: {selected}")
                         service = selected
                         break
