@@ -274,7 +274,7 @@ fn draw_service_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 .collect::<Vec<Row>>(),
             [Constraint::Length(70)],
         )
-        .header(Row::new(vec![Cell::from("Id")]))
+        .header(Row::new(vec![Cell::from("Id"), Cell::from("Tag")]))
         .block(
             Block::bordered()
                 .title("SERVICES")

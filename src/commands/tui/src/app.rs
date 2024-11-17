@@ -7,6 +7,9 @@ use std::{error, fs, path::Path, vec};
 use sysinfo::System;
 use tokio::process::Command;
 use tokio::io::AsyncBufReadExt;
+use prost::Message;
+use std::fs::File;
+use std::io::Read;
 
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
@@ -18,6 +21,10 @@ const SERVICES_ROOT: &str = "../../../storage/__registry__";
 const METADATA_ROOT: &str = "../../../storage/__metadata__";
 pub const RAM_TIMES: usize = 500;
 pub const CPU_TIMES: usize = 500;
+
+pub mod protos {
+    include!(concat!("../../../../protos", "/celaut.rs"));
+}
 
 trait Identifiable {
     fn id(&self) -> &str;
@@ -48,6 +55,7 @@ impl Identifiable for Peer {
 #[derive(Debug)]
 pub struct Service {
     pub id: String,
+    pub tag: String
 }
 
 impl Identifiable for Service {
@@ -193,6 +201,7 @@ fn get_instances() -> Result<Vec<Container>> {
 }
 
 fn get_services() -> Result<Vec<Service>, io::Error> {
+    // Read all entries in the SERVICES_ROOT directory
     let entries = fs::read_dir(Path::new(SERVICES_ROOT))?;
     let mut services = Vec::new();
 
@@ -200,9 +209,37 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
         let entry = entry?;
         let path = entry.file_name();
 
+        // Convert the file name to a string
         let service_id = path.to_string_lossy().into_owned();
 
-        services.push(Service { id: service_id });
+        // Construct the metadata file path
+        let metadata_path = PathBuf::from(METADATA_ROOT).join(&service_id);
+
+        // Check if the metadata file exists
+        if metadata_path.exists() {
+            // Open the metadata file
+            let mut file = File::open(&metadata_path)?;
+            let mut buf = Vec::new();
+
+            // Read the metadata file into the buffer
+            file.read_to_end(&mut buf)?;
+
+            // Decode the protobuf message from the buffer
+            let any: protos::Any = protos::Any::decode(&*buf)?;
+
+            let mut tag = "any";
+
+            // Access the embedded `Metadata` message inside `Any`
+            if let Some(metadata) = any.metadata {
+                // Extract relevant information (e.g., title) from `Metadata`
+                tag = metadata.hashtag.tag.get(0)
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "Unknown Title".to_string());
+
+            }
+            // Push the service into the vector
+            services.push(Service { id: service_id, tag: tag });
+        }
     }
 
     Ok(services)

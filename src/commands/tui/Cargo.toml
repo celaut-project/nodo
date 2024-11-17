@@ -14,3 +14,8 @@ rusqlite = { version = "0.31.0", features = ["bundled"] }
 sysinfo = "0.30.7"
 vec_to_array = "0.2.3"
 regex = "1.10.5"
+prost = "0.11"
+prost-derive = "0.11"
+
+[build-dependencies]
+prost-build = "0.11"
