@@ -1,15 +1,14 @@
 use ratatui::widgets::{TableState};
 use regex::Regex;
 use rusqlite::{Connection, Result};
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Read};
 use std::process::Stdio;
 use std::{error, fs, vec};
 use sysinfo::System;
 use tokio::process::Command;
 use tokio::io::AsyncBufReadExt;
 use prost::Message;
-use std::fs::{self, File};
-use std::io::{self, Read};
+use std::fs::{File};
 use std::path::{Path, PathBuf};
 
 /// Application result type.
@@ -235,7 +234,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
                 // Extract relevant information from `Metadata`
                 // Assuming hashtag is an Option<HashTag> and HashTag has a tags field
                 tag = metadata.hashtag
-                    .and_then(|ht| ht.tags.get(0).cloned())
+                    .and_then(|ht| ht.tag.get(0).cloned())
                     .unwrap_or_else(|| String::from("Unknown Title"));
             }
 
