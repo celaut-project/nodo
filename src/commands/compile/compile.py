@@ -41,6 +41,7 @@ def __on_peer(peer: str, service_zip_dir: str):
             if not _id:
                 _id = b.id.hex()
         elif type(b) == celaut_pb2.Any.Metadata and _id:
+            print(b)
             with open(f"{METADATA_REGISTRY}{_id}", "wb") as f:
                 f.write(b.SerializeToString())
         elif type(b) == grpcbb.Dir and b.type == compile_pb2.Service and _id:
