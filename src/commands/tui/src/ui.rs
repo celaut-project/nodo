@@ -270,7 +270,7 @@ fn draw_service_list(frame: &mut Frame, app: &mut App, area: Rect) {
             app.services
                 .items
                 .iter()
-                .map(|peer| Row::new(vec![peer.id.clone()]))
+                .map(|peer| Row::new(vec![peer.id.clone(), peer.tag.clone()]))
                 .collect::<Vec<Row>>(),
             [Constraint::Length(70)],
         )
