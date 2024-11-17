@@ -9,6 +9,7 @@ fn main() {
     // Tell prost-build where to find the .proto file and output the Rust file.
     prost_build::Config::new()
         .out_dir("src/protos")
+        .protoc_arg("--experimental_allow_proto3_optional")
         .compile_protos(&["protos/celaut.proto"], &["protos"])
         .expect("Failed to compile protobuf files");
 }
