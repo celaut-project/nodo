@@ -31,6 +31,7 @@ class Compiler:
         self.metadata = celaut.Any.Metadata()
         self.path = path
         self.json = json.load(open(self.path + "service.json", "r"))
+        l.LOGGER(f"json  ->  {str(self.json)}")
         self.aux_id = aux_id
 
         arch = None
@@ -298,6 +299,8 @@ class Compiler:
                 self.metadata.hashtag.tag.extend([self.tag])
             elif self.tag and type(self.tag) is list: 
                 self.metadata.hashtag.tag.extend(self.tag)
+                
+            l.LOGGER(f"metadata -> {str(self.metadata)}")
 
             from hashlib import sha3_256
             validate_content = sha3_256()
