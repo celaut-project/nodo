@@ -4,6 +4,7 @@ from protos.celaut_pb2 import Any
 
 env_manager = EnvManager()
 REGISTRY = env_manager.get_env("REGISTRY")
+METADATA = env_manager.get_env("METADATA_REGISTRY")
 
 def list_services():
     # List available services in the specified registry path
@@ -14,7 +15,7 @@ def list_services():
         metadata = Any.Metadata()
         try:
             # Attempt to parse the metadata from the binary file
-            with open(os.path.join(REGISTRY, service), "rb") as f:
+            with open(os.path.join(METADATA, service), "rb") as f:
                 metadata.ParseFromString(f.read())
             name = metadata.hashtag.tag[0] if metadata.hashtag.tag else ""
         except FileNotFoundError:
