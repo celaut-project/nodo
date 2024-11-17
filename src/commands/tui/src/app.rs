@@ -24,7 +24,7 @@ pub const RAM_TIMES: usize = 500;
 pub const CPU_TIMES: usize = 500;
 
 pub mod protos {
-    include!(concat!("../../../../protos", "/celaut.rs"));
+    include!(concat!("protos", "/celaut.rs"));
 }
 
 trait Identifiable {
