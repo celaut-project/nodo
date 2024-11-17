@@ -3,13 +3,14 @@ use regex::Regex;
 use rusqlite::{Connection, Result};
 use std::io::{self, BufRead};
 use std::process::Stdio;
-use std::{error, fs, path::Path, vec};
+use std::{error, fs, vec};
 use sysinfo::System;
 use tokio::process::Command;
 use tokio::io::AsyncBufReadExt;
 use prost::Message;
-use std::fs::File;
-use std::io::Read;
+use std::fs::{self, File};
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
@@ -227,18 +228,19 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
             // Decode the protobuf message from the buffer
             let any: protos::Any = protos::Any::decode(&*buf)?;
 
-            let mut tag = "any";
+            let mut tag = String::from("any");
 
             // Access the embedded `Metadata` message inside `Any`
             if let Some(metadata) = any.metadata {
-                // Extract relevant information (e.g., title) from `Metadata`
-                tag = metadata.hashtag.tag.get(0)
-                    .map(|t| t.to_string())
-                    .unwrap_or_else(|| "Unknown Title".to_string());
-
+                // Extract relevant information from `Metadata`
+                // Assuming hashtag is an Option<HashTag> and HashTag has a tags field
+                tag = metadata.hashtag
+                    .and_then(|ht| ht.tags.get(0).cloned())
+                    .unwrap_or_else(|| String::from("Unknown Title"));
             }
+
             // Push the service into the vector
-            services.push(Service { id: service_id, tag: tag });
+            services.push(Service { id: service_id, tag });
         }
     }
 
