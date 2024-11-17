@@ -306,8 +306,6 @@ class Compiler:
         elif self.tag and type(self.tag) is list: 
             self.metadata.hashtag.tag.extend(self.tag)
             
-        l.LOGGER(f"metadata -> {str(self.metadata)}")
-            
         return service_id, self.metadata, service
 
 
