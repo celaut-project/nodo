@@ -58,9 +58,9 @@ def execute(service: str):
     if not os.path.exists(os.path.join(REGISTRY, service)):
         print(f"Service {service} not found in {REGISTRY}. Trying to find matching service...")
         try:
-            for selected in os.listdir(os.path.join(REGISTRY, service)):
+            for selected in os.listdir(os.path.join(METADATA_REGISTRY)):
                 print(f"Checking file: {selected}")
-                with open(os.path.join(REGISTRY, selected), "rb") as f:
+                with open(os.path.join(METADATA_REGISTRY, selected), "rb") as f:
                     metadata = celaut_pb2.Any.Metadata()
                     metadata.ParseFromString(f.read())
                     first_tag = metadata.hashtag.tag[0]
