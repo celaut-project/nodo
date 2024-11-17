@@ -63,7 +63,7 @@ def execute(service: str):
                 with open(os.path.join(METADATA_REGISTRY, selected), "rb") as f:
                     metadata = celaut_pb2.Any.Metadata()
                     metadata.ParseFromString(f.read())
-                    first_tag = metadata.hashtag.tag[0]
+                    first_tag = metadata.hashtag.tag[0] if len(metadata.hashtag.tag) > 0 else ""
                     print(f"First tag found: {first_tag}")
                     if first_tag == service:
                         print(f"Found matching service: {selected}")
