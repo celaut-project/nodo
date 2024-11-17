@@ -31,7 +31,6 @@ class Compiler:
         self.metadata = celaut.Any.Metadata()
         self.path = path
         self.json = json.load(open(self.path + "service.json", "r"))
-        l.LOGGER(f"json  ->  {str(self.json)}")
         self.aux_id = aux_id
 
         arch = None
@@ -293,14 +292,6 @@ class Compiler:
                     value=bytes_id
                 )]
             )
-            
-            # Add the tag attribute as the first tag or tag list in the metadata. This could be used as the name of the service for better human identification.
-            if self.tag and type(self.tag) is str: 
-                self.metadata.hashtag.tag.extend([self.tag])
-            elif self.tag and type(self.tag) is list: 
-                self.metadata.hashtag.tag.extend(self.tag)
-                
-            l.LOGGER(f"metadata -> {str(self.metadata)}")
 
             from hashlib import sha3_256
             validate_content = sha3_256()
@@ -309,6 +300,14 @@ class Compiler:
 
             service = service_directory
 
+        # Add the tag attribute as the first tag or tag list in the metadata. This could be used as the name of the service for better human identification.
+        if self.tag and type(self.tag) is str: 
+            self.metadata.hashtag.tag.extend([self.tag])
+        elif self.tag and type(self.tag) is list: 
+            self.metadata.hashtag.tag.extend(self.tag)
+            
+        l.LOGGER(f"metadata -> {str(self.metadata)}")
+            
         return service_id, self.metadata, service
 
 
