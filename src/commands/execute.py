@@ -1,5 +1,6 @@
 from typing import Any, Generator
 import grpc
+import os
 
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc, gateway_pb2_grpcbf
 from grpcbigbuffer.client import client_grpc
@@ -53,6 +54,21 @@ def execute(service: str):
     g_stub = gateway_pb2_grpc.GatewayStub(
         grpc.insecure_channel(f"localhost:{GATEWAY_PORT}"),
     )
+    
+    if not os.path.exists(os.path.join(REGISTRY, service)):
+        try:
+            for selected in os.listdir(os.path.join(REGISTRY, service)):
+                with open(os.path.join(REGISTRY, selected), "rb") as f:
+                    metadata = celaut_pb2.Any.Metadata()
+                    metadata.ParseFromString(f.read())
+                    first_tag = metadata.hashtag.tag[0]
+                    if first_tag == service:
+                        service = selected
+                        break
+            raise Exception
+        except:
+            print("No service allowed.")
+            return
 
     service = next(client_grpc(
         method=g_stub.StartService,
