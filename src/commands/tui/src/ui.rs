@@ -272,7 +272,7 @@ fn draw_service_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 .iter()
                 .map(|peer| Row::new(vec![peer.id.clone(), peer.tag.clone()]))
                 .collect::<Vec<Row>>(),
-            [Constraint::Length(30), Constraint::Length(70)],
+            [Constraint::Length(5), Constraint::Length(95)],
         )
         .header(Row::new(vec![Cell::from("Id"), Cell::from("Tag")]))
         .block(
