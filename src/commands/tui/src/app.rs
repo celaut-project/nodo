@@ -236,7 +236,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
                     if let Some(hashtag) = metadata.hashtag {
                         hashtag.tag.first().cloned()
                     } else {
-                        String::from("No hashtag found")
+                       Some(String::from("No hashtag found"))
                     }
                 } else {
                     String::from("No metadata found")
