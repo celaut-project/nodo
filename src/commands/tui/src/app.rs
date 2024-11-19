@@ -229,7 +229,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
                 file.read_to_end(&mut buf)?;
     
                 // Decode the protobuf message from the buffer
-                let metadata: protos::Metadata = protos::Metadata::decode(&*buf)?;
+                let metadata: protos::any::Metadata = protos::any::Metadata::decode(&*buf)?;
     
                 let result_tag = if let Some(hashtag) = metadata.hashtag {
                     if !hashtag.tag.is_empty() {
