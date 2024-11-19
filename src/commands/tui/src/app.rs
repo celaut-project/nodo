@@ -234,9 +234,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
                 // Access the embedded `Metadata` message inside `Any`
                 let result_tag = if let Some(metadata) = any.metadata {
                     if let Some(hashtag) = metadata.hashtag {
-                        hashtag
-                        .and_then(|ht| ht.tag.first().cloned())
-                        .unwrap_or_else(|| String::from("Unknown Title"))
+                        hashtag.tag.first().cloned()
                     } else {
                         String::from("No hashtag found")
                     }
