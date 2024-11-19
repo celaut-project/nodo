@@ -230,7 +230,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
     
                 // Decode the protobuf message from the buffer
                 let any: protos::Any = protos::Any::decode(&*buf)
-                    .map_err(|e| format!("Failed to decode Protobuf message: {} {}", e, metadata_path))?;
+                    .map_err(|e| format!("Failed to decode Protobuf message: {} {}", e, metadata_path.display()))?;
     
                 // Access the embedded `Metadata` message inside `Any`
                 let result_tag = if let Some(metadata) = any.metadata {
