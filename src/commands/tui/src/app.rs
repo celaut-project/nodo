@@ -239,7 +239,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
                        Some(String::from("No hashtag found"))
                     }
                 } else {
-                    String::from("No metadata found")
+                    Some(String::from("No metadata found"))
                 };
     
                 Ok(result_tag)
