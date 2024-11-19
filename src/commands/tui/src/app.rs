@@ -208,39 +208,47 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
     for entry in entries {
         let entry = entry?;
         let path = entry.file_name();
-
+    
         // Convert the file name to a string
         let service_id = path.to_string_lossy().into_owned();
-
+    
         // Construct the metadata file path
         let metadata_path = PathBuf::from(METADATA_ROOT).join(&service_id);
-
+    
         let mut tag = String::from("any");
-
+    
         // Check if the metadata file exists
         if metadata_path.exists() {
-            // Open the metadata file
-            let mut file = File::open(&metadata_path)?;
-            let mut buf = Vec::new();
-
-            // Read the metadata file into the buffer
-            file.read_to_end(&mut buf)?;
-
-            // Decode the protobuf message from the buffer
-            let any: protos::Any = protos::Any::decode(&*buf)?;
-
-            // Access the embedded `Metadata` message inside `Any`
-            if let Some(metadata) = any.metadata {
-                // Extract relevant information from `Metadata`
-                // Assuming hashtag is an Option<HashTag> and HashTag has a tags field
-                tag = metadata.hashtag
-                    .and_then(|ht| ht.tag.get(0).cloned())
-                    .unwrap_or_else(|| String::from("Unknown Title"));
-            }
+            // Wrap the metadata processing in a Result handling block
+            tag = match (|| -> Result<String, Box<dyn std::error::Error>> {
+                // Open the metadata file
+                let mut file = File::open(&metadata_path)?;
+                let mut buf = Vec::new();
+    
+                // Read the metadata file into the buffer
+                file.read_to_end(&mut buf)?;
+    
+                // Decode the protobuf message from the buffer
+                let any: protos::Any = protos::Any::decode(&*buf)?;
+    
+                // Access the embedded `Metadata` message inside `Any`
+                let result_tag = if let Some(metadata) = any.metadata {
+                    metadata.hashtag
+                        .and_then(|ht| ht.tag.get(0).cloned())
+                        .unwrap_or_else(|| String::from("Unknown Title"))
+                } else {
+                    String::from("No metadata found")
+                };
+    
+                Ok(result_tag)
+            })() {
+                Ok(t) => t,
+                Err(e) => format!("Error processing metadata: {}", e)
+            };
         }
-
+    
         // Push the service into the vector
-        services.push(Service { id: service_id, tag: String::from("any") });
+        services.push(Service { id: service_id, tag: tag });
     }
 
     Ok(services)
