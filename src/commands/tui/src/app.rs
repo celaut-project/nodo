@@ -242,7 +242,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
                     Some(String::from("No metadata found"))
                 };
     
-                Ok(result_tag)
+                Ok(result_tag.unwrap_or_else(|| String::from("No tag available")))
             })() {
                 Ok(t) => t,
                 Err(e) => format!("Error processing metadata: {}", e)
