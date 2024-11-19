@@ -131,6 +131,7 @@ if __name__ == '__main__':
               "\n- tui"
               "\n- status"
               "\n- logs"
+              "\n- export"
 
               "\n\n Advanced commands:"
               "\n- serve"
@@ -172,6 +173,10 @@ if __name__ == '__main__':
 
             case "logs":
                 os.system(f"tail -f {MAIN_DIR}/storage/app.log")
+
+            case "export":
+                from src.commands.export import export
+                export(service=sys.argv[2], path=sys.argv[3])
 
             case "execute":
                 from src.commands.execute import execute
