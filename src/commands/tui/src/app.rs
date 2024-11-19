@@ -213,7 +213,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
         let service_id = path.to_string_lossy().into_owned();
 
         // Construct the metadata file path
-       /* let metadata_path = PathBuf::from(METADATA_ROOT).join(&service_id);
+        let metadata_path = PathBuf::from(METADATA_ROOT).join(&service_id);
 
         let mut tag = String::from("any");
 
@@ -237,7 +237,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
                     .and_then(|ht| ht.tag.get(0).cloned())
                     .unwrap_or_else(|| String::from("Unknown Title"));
             }
-        } */
+        }
 
         // Push the service into the vector
         services.push(Service { id: service_id, tag: String::from("any") });
