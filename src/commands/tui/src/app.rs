@@ -219,7 +219,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
     
         // Check if the metadata file exists
         if metadata_path.exists() {
-            /*// Wrap the metadata processing in a Result handling block
+            // Wrap the metadata processing in a Result handling block
             tag = match (|| -> Result<String, Box<dyn std::error::Error>> {
                 // Open the metadata file
                 let mut file = File::open(&metadata_path)?;
@@ -242,19 +242,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
                     Some(String::from("No metadata found"))
                 };
     
-                Ok(result_tag.unwrap_or_else(|| String::from("No tag available")))*/
-
-
-                tag = match (|| -> Result<String, io::Error> {
-                    // Open the file
-                    let mut file = File::open(&metadata_path)?;
-                    let mut content = String::new();
-
-                    // Read the file's content into a string
-                    file.read_to_string(&mut content)?;
-
-                    // Return the file content
-                    Ok(content)
+                Ok(result_tag.unwrap_or_else(|| String::from("No tag available")))
             })() {
                 Ok(t) => t,
                 Err(e) => format!("Error processing metadata: {}", e)
