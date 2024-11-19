@@ -58,7 +58,6 @@ def check_rust_installation():
         # Try to run 'rustc --version' to check if Rust is installed
         subprocess.run(['rustc', '--version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         print("Rust is already installed.", flush=True)
-        subprocess.run(["rm", "-y", f"{MAIN_DIR}/src/commands/tui/Cargo.lock"])
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("Installing Rust (Cargo)...", flush=True)
         try:
