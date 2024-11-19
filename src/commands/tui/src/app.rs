@@ -240,7 +240,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
         } */
 
         // Push the service into the vector
-        services.push(Service { id: service_id, tag: tag });
+        services.push(Service { id: service_id, tag: String::from("any") });
     }
 
     Ok(services)
