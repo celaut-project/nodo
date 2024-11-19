@@ -245,7 +245,7 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
                 Ok(result_tag.unwrap_or_else(|| String::from("No tag available")))
             })() {
                 Ok(t) => t,
-                Err(e) => format!("Error processing metadata: {}", e)
+                Err(e) => format!("{}", e)
             };
         }
     
