@@ -229,17 +229,16 @@ fn get_services() -> Result<Vec<Service>, io::Error> {
                 file.read_to_end(&mut buf)?;
     
                 // Decode the protobuf message from the buffer
-                let any: protos::Any = protos::Any::decode(&*buf)?;
+                let metadata: protos::Metadata = protos::Metadata::decode(&*buf)?;
     
-                // Access the embedded `Metadata` message inside `Any`
-                let result_tag = if let Some(metadata) = any.metadata {
-                    if let Some(hashtag) = metadata.hashtag {
+                let result_tag = if let Some(hashtag) = metadata.hashtag {
+                    if !hashtag.tag.is_empty() {
                         hashtag.tag.first().cloned()
                     } else {
-                       Some(String::from("No hashtag found"))
+                        Some(String::from("No tags found in hashtag"))
                     }
                 } else {
-                    Some(String::from("No metadata found"))
+                    Some(String::from("No hashtag found in metadata"))
                 };
     
                 Ok(result_tag.unwrap_or_else(|| String::from("No tag available")))
