@@ -9,5 +9,5 @@ ecdsa==0.18.0
 python-dotenv==1.0.0
 pyngrok==7.1.6
 mnemonic==0.21
-git+https://github.com/pee-rpc-protocol/pee-rpc
+git+https://github.com/bee-rpc-protocol/bee-rpc
 git+https://github.com/reputation-systems/ergpy
