@@ -9,11 +9,17 @@ def import_bee(path: str):
         return
     
     try:
-        for d in read_from_file(path=path, indices={
+        it = read_from_file(path=path, indices={
                 1: celaut_pb2.Any.Metadata,
                 2: celaut_pb2.Service,
-            }):
-            print("-  ", d.dir)
+            })
+            
+        metadata = celaut_pb2.Any.Metadata()
+        metadata.ParseFromString(open(next(it).dir, "rb").read())
+        print(f"metaadat -> {metadata}")
+        
+        service_dir = next(it).dir
+        print(f"service dir -> {service_dir}")
         
         print("Service imported correctly")
     
