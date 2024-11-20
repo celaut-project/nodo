@@ -1,5 +1,6 @@
 import os
-from grpcbigbuffer.reader import read_from_registry as bee_reader
+from protos import celaut_pb2
+from grpcbigbuffer.client import read_from_file
 
 
 def import_bee(path: str):
@@ -7,5 +8,13 @@ def import_bee(path: str):
         print(f"{path} not exists.")
         return
     
-    for buff in bee_reader(filename=path):
-        pass
+    try:
+        read_from_file(path=path, indices={
+                1: celaut_pb2.Any.Metadata,
+                2: celaut_pb2.Service,
+            })
+        
+        print("Service imported correctly")
+    
+    except Exception as e:
+        print(f"Error importing service: {e}")
