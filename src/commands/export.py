@@ -1,11 +1,29 @@
 import os
-from grpcbigbuffer.reader import read_from_registry
+from typing import Generator, Any
+from grpcbigbuffer.client import write_to_file, Dir
 from src.utils.env import EnvManager
+from protos import celaut_pb2
 
 # Initialize the environment manager and get the REGISTRY environment variable
 env_manager = EnvManager()
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA = env_manager.get_env("METADATA_REGISTRY")
+
+def __generator(service: str) -> Generator[Any, None, None]:
+    try:
+
+        yield Dir(
+            dir=os.path.join(METADATA, service),
+            _type=celaut_pb2.Any.Metadata
+        )
+
+        yield Dir(
+            dir=os.path.join(REGISTRY, service),
+            _type=celaut_pb2.Service
+        )
+
+    except Exception as e:
+        print(f"Exception on exporting {service[:6]}: {e}")
 
 def export(service: str, path: str):
     """
@@ -15,21 +33,13 @@ def export(service: str, path: str):
         service (str): The name of the service to read data from.
         path (str): The directory path where the output file should be saved.
     """
-    # Create the full path for the output file
-    output_file = os.path.join(path, f"{service}.bee")  # bee-rpc file extension
+    
+    output_file = write_to_file(
+        path=path, file_name=service[:6], 
+        input=__generator(service=service), 
+        indices={
+            1: celaut_pb2.Any.Metadata,
+            2: celaut_pb2.Service,
+        })
 
-    # Ensure the output directory exists
-    os.makedirs(path, exist_ok=True)
-
-    # Open the output file in write-binary mode
-    with open(output_file, 'wb') as f:
-        
-        # Read chunks of data from the registry and write them to the file
-        for buff in read_from_registry(filename=os.path.join(METADATA, service)):
-            f.write(buff.SerializeToString())
-        
-        # Read chunks of data from the registry and write them to the file
-        for buff in read_from_registry(filename=os.path.join(REGISTRY, service)):
-            f.write(buff.SerializeToString())
-
-    print(f"Export completed.")
+    print(f"Export completed {output_file}")
