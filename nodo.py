@@ -175,8 +175,12 @@ if __name__ == '__main__':
                 os.system(f"tail -f {MAIN_DIR}/storage/app.log")
 
             case "export":
-                from src.commands.export import export
-                export(service=sys.argv[2], path=sys.argv[3])
+                from src.commands.export_bee import export_bee
+                export_bee(service=sys.argv[2], path=sys.argv[3])
+
+            case "import":
+                from src.commands.import_bee import import_bee
+                import_bee(path=sys.argv[2])
 
             case "execute":
                 from src.commands.execute import execute

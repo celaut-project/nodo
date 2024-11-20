@@ -25,7 +25,7 @@ def __generator(service: str) -> Generator[Any, None, None]:
     except Exception as e:
         print(f"Exception on exporting {service[:6]}: {e}")
 
-def export(service: str, path: str):
+def export_bee(service: str, path: str):
     """
     Export data from the specified service in the registry and save it to a file.
 
