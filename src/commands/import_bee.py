@@ -26,16 +26,16 @@ def import_bee(path: str):
         metadata = celaut_pb2.Any.Metadata()
         metadata.ParseFromString(open(metadata_dir, "rb").read())
         
-        os.system(f"mv {metadata_dir} {os.path.join(METADATA_REGISTRY, service_hash)}")
-        
         service_hash = None
         for _hash in metadata.hashtag.hash:
-            if not service_hash:
-                service_hash, service_saved = find_service_hash(_hash=_hash)
+            service_hash, service_saved = find_service_hash(_hash=_hash)
+            break
                 
         if not service_hash:
             print(".bee file doesn't contain service hash.  Should be implemented the task: https://github.com/celaut-project/nodo/issues/47")
             return
+        
+        os.system(f"mv {metadata_dir} {os.path.join(METADATA_REGISTRY, service_hash)}")
         
         if not service_saved:
             service_dir = next(it).dir
