@@ -26,6 +26,7 @@ def export(service: str, path: str):
         
         # Read chunks of data from the registry and write them to the file
         for buff in read_from_registry(filename=os.path.join(METADATA, service)):
+            print(f"Meta chunk {len(buff.chunk)}")
             f.write(buff.chunk)
         
         # Read chunks of data from the registry and write them to the file
