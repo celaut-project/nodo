@@ -4,7 +4,7 @@ from grpcbigbuffer import client as grpcbf, buffer_pb2
 
 from protos.gateway_pb2_grpcbf import StartService_input_indices
 from src.builder import build
-from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable, BreakIteration
+from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable
 from src.utils.logger import LOGGER as log
 from src.utils.utils import service_extended, read_metadata_from_disk
 
