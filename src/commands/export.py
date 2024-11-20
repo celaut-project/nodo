@@ -23,7 +23,7 @@ def export(service: str, path: str):
     # Open the output file in write-binary mode
     with open(output_file, 'wb') as f:
         # Read chunks of data from the registry and write them to the file
-        for chunk in read_from_registry(filename=os.path.join(REGISTRY, service)):
-            f.write(chunk)
+        for buff in read_from_registry(filename=os.path.join(REGISTRY, service)):
+            f.write(buff.chunk)
 
     print(f"Export completed.")
