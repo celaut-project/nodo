@@ -37,10 +37,10 @@ def import_bee(path: str):
         
         os.system(f"mv {metadata_dir} {os.path.join(METADATA_REGISTRY, service_hash)}")
         
+        service_dir = next(it).dir
         if not service_saved:
-            service_dir = next(it).dir
             os.system(f"mv -r {service_dir} {os.path.join(REGISTRY, service_hash)}")
-        
+            
         else:
             os.system(f"rm -rf {service_dir}")
         
