@@ -5,6 +5,7 @@ from src.utils.env import EnvManager
 # Initialize the environment manager and get the REGISTRY environment variable
 env_manager = EnvManager()
 REGISTRY = env_manager.get_env("REGISTRY")
+METADATA = env_manager.get_env("METADATA_REGISTRY")
 
 def export(service: str, path: str):
     """
@@ -22,6 +23,11 @@ def export(service: str, path: str):
 
     # Open the output file in write-binary mode
     with open(output_file, 'wb') as f:
+        
+        # Read chunks of data from the registry and write them to the file
+        for buff in read_from_registry(filename=os.path.join(METADATA, service)):
+            f.write(buff.chunk)
+        
         # Read chunks of data from the registry and write them to the file
         for buff in read_from_registry(filename=os.path.join(REGISTRY, service)):
             f.write(buff.chunk)
