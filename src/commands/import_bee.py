@@ -13,7 +13,7 @@ def import_bee(path: str):
                 1: celaut_pb2.Any.Metadata,
                 2: celaut_pb2.Service,
             }):
-            print(d)
+            print("-  ", d)
         
         print("Service imported correctly")
     
