@@ -1,4 +1,4 @@
-import os
+import os, sys, time, threading
 from hashlib import sha3_256
 
 from typing import Optional
@@ -17,6 +17,18 @@ GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 REGISTRY = env_manager.get_env("REGISTRY")
 
+def __spinner(event):
+    """Spinner function to show progress while the main task runs."""
+    spinner = ['|', '/', '-', '\\']
+    idx = 0
+    while not event.is_set():
+        sys.stdout.write(f'\rProcessing... {spinner[idx]}')  # Spinner animation
+        sys.stdout.flush()
+        idx = (idx + 1) % len(spinner)  # Loop through spinner characters
+        time.sleep(0.1)  # Adjust speed of spinner
+    sys.stdout.write('\rProcess complete!   \n')  # Clear spinner after done
+    sys.stdout.flush()
+
 
 def __compile(zip, node: str):
     yield from grpcbb.client_grpc(
@@ -32,25 +44,38 @@ def __compile(zip, node: str):
 
 def __on_peer(peer: str, service_zip_dir: str):
     _id: Optional[str] = None
-    print(f'Start compile on {peer}')
-    for b in __compile(
-            zip=service_zip_dir,
-            node=peer
-    ):
-        if type(b) is compile_pb2.CompileOutputServiceId:
-            if not _id:
-                _id = b.id.hex()
-        elif type(b) == celaut_pb2.Any.Metadata and _id:
-            with open(f"{METADATA_REGISTRY}{_id}", "wb") as f:
-                f.write(b.SerializeToString())
-        elif type(b) == grpcbb.Dir and b.type == compile_pb2.Service and _id:
-            # b is ServiceWithMeta grpc-bb cache directory.
-            os.system(f"mv {b.dir} {REGISTRY}{_id}")
-        else:
-            raise Exception('\nError with the compiler output:' + str(b))
+    print(f'Starting compilation on {peer}...')
+    
+    # Create an event to control the spinner thread
+    stop_event = threading.Event()
+    spinner_thread = threading.Thread(target=__spinner, args=(stop_event,))
+    spinner_thread.start()
+    
+    try:
+        for b in __compile(
+                zip=service_zip_dir,
+                node=peer
+        ):
+            if type(b) is compile_pb2.CompileOutputServiceId:
+                if not _id:
+                    _id = b.id.hex()
+            elif type(b) == celaut_pb2.Any.Metadata and _id:
+                with open(f"{METADATA_REGISTRY}{_id}", "wb") as f:
+                    f.write(b.SerializeToString())
+            elif type(b) == grpcbb.Dir and b.type == compile_pb2.Service and _id:
+                # b is ServiceWithMeta grpc-bb cache directory.
+                os.system(f"mv {b.dir} {REGISTRY}{_id}")
+            else:
+                raise Exception('\nError with the compiler output:' + str(b))
 
-    print('service id -> ', _id)
-    print('\n Validate the content.')
+    finally:
+        # Stop the spinner when the process completes
+        stop_event.set()
+        spinner_thread.join()
+
+    print('Compilation complete.')
+    print('Service ID -> ', _id)
+    print('\nValidating the content...')
 
     validate_id = sha3_256()
 
