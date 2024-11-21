@@ -20,14 +20,32 @@ REGISTRY = env_manager.get_env("REGISTRY")
 def __spinner(event):
     """Spinner function to show progress while the main task runs."""
     spinner = ['|', '/', '-', '\\']
+    messages = [
+        "Processing... This might take a while.",
+        "Processing... Please wait, the node is working.",
+        "Processing... Almost there, please hold on.",
+        "Processing... Still working, hang tight."
+    ]
     idx = 0
+    msg_idx = 0
+    start_time = time.time()
+
     while not event.is_set():
-        sys.stdout.write(f'\rProcessing... {spinner[idx]}')  # Spinner animation
+        # Show spinner animation
+        sys.stdout.write(f'\r{messages[msg_idx]} {spinner[idx]}')
         sys.stdout.flush()
-        idx = (idx + 1) % len(spinner)  # Loop through spinner characters
+        idx = (idx + 1) % len(spinner)
+
+        # Update message every minute
+        if time.time() - start_time > 60:
+            msg_idx = (msg_idx + 1) % len(messages)
+            start_time = time.time()
+
         time.sleep(0.1)  # Adjust speed of spinner
+
     sys.stdout.write('\rProcess complete!   \n')  # Clear spinner after done
     sys.stdout.flush()
+
 
 
 def __compile(zip, node: str):
