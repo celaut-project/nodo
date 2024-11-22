@@ -60,7 +60,7 @@ def generate_service_zip(project_directory: str) -> str:
     os.system(f"cd {project_directory}/.service && rm .service.zip && rm -rf service")
 
     # Define the complete path for the destination source directory
-    complete_source_directory = f"{CACHE}/compile_repositories/{project_directory}/.service/service"
+    complete_source_directory = f"{project_directory}/.service/service"
 
     # Create the destination source directory and copy all files and folders from the project there
     os.system(f"mkdir {complete_source_directory}")
