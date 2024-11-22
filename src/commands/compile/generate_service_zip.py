@@ -52,9 +52,16 @@ def __export_registry(directory: str, compile_config: Dict):
                                           f"{directory}/{compile_config[BLOCKS_DIRECTORY]}")
 
 def generate_service_zip(project_directory: str) -> str:
+    
     # Remove the last character '/' from the path if it exists
     if project_directory[-1] == '/':
         project_directory = project_directory[:-1]
+    
+    # Clone the repository on cache to work with.
+    repo_dir = project_directory
+    repo_dir_name = project_directory.split("/")[-1]
+    project_directory = f"{CACHE}/compilations/{repo_dir_name}"
+    os.system(f"cp -r {repo_dir} {project_directory}")
 
     # Remove the ZIP file and the destination source directory if they already exist
     os.system(f"cd {project_directory}/.service && rm .service.zip && rm -rf service")
