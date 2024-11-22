@@ -66,7 +66,7 @@ def generate_service_zip(project_directory: str) -> str:
     os.makedirs(project_directory, exist_ok=True)
 
     # Copy the repository to the destination directory
-    os.system(f"cp -r {repo_dir}/* {project_directory}")
+    os.system(f"cp -r {repo_dir}/.* {project_directory}/")
 
     # Remove the ZIP file and the destination source directory if they already exist
     os.system(f"cd {project_directory}/.service && rm .service.zip && rm -rf service")
