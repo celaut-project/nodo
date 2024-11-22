@@ -7,7 +7,7 @@ import grpc
 from grpcbigbuffer import client as grpcbb
 
 from protos import celaut_pb2, compile_pb2, gateway_pb2_grpcbf, gateway_pb2_grpc
-from src.commands.compile.generate_service_zip import __generate_service_zip
+from src.commands.compile.generate_service_zip import generate_service_zip
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.utils.env import EnvManager
 
@@ -106,7 +106,7 @@ def __on_peer(peer: str, service_zip_dir: str):
 
 
 def compile_directory(directory: str):
-    service_zip_dir: str = __generate_service_zip(
+    service_zip_dir: str = generate_service_zip(
         project_directory=directory
     )
 
