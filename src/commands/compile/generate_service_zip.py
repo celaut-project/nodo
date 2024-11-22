@@ -60,7 +60,7 @@ def generate_service_zip(project_directory: str) -> str:
     # Clone the repository on cache to work with.
     repo_dir = project_directory
     repo_dir_name = project_directory.split("/")[-1]
-    project_directory = f"{CACHE}/compilations/{repo_dir_name}"
+    project_directory = f"{CACHE}compilations/{repo_dir_name}"
     os.system(f"cp -r {repo_dir} {project_directory}")
 
     # Remove the ZIP file and the destination source directory if they already exist
