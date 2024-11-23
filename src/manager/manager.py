@@ -372,7 +372,22 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
 
     else:
         try:
-            print(f"NOT IMPLEMENTED.")  # TODO <--
+            external_token = sc.get_token_by_hashed_token(hashed_token=token)
+            peer_id = sc.get_peer_id_by_external_service(token=external_token)
+            refund = utils.from_gas_amount(
+                next(grpcbf.client_grpc(
+                    method=gateway_pb2_grpc.GatewayStub(
+                        grpc.insecure_channel(
+                            next(utils.generate_uris_by_peer_id(peer_id))
+                        )
+                    ).ModifyGasDeposit,
+                        partitions_message_mode_parser=True,
+                        indices_parser=gateway_pb2.ModifyGasDepositOutput,
+                        input=gateway_pb2.TokenMessage(
+                            token=external_token
+                        )
+                )).amount
+            )
         except Exception as e:
             logger.LOGGER('Error purging ' + token + ' ' + str(e))
             return None
