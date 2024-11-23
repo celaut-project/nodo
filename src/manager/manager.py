@@ -165,7 +165,7 @@ def spend_gas(
     try:
         # En caso de que sea un peer, el token es el client id.
         if sc.client_exists(client_id=id) and (
-                sc.get_client_gas(client_id=id)[0] >= gas_to_spend or ALLOW_GAS_DEBT):
+                sc.get_client_gas(client_id=id)[0] >= gas_to_spend or bool(ALLOW_GAS_DEBT)):
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
             __refund_gas_function_factory(
                 gas=gas_to_spend,
