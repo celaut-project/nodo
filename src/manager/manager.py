@@ -453,21 +453,25 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
         sc.update_gas_to_container(id=service_token, gas=desired_amount)
     
     else:
-        external_token = sc.get_token_by_hashed_token(hashed_token=service_token)
-        peer_id = sc.get_peer_id_by_external_service(token=external_token)
-        _output = next(grpcbf.client_grpc(
-            method=gateway_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(
-                    next(utils.generate_uris_by_peer_id(peer_id))
+        try:
+            external_token = sc.get_token_by_hashed_token(hashed_token=service_token)
+            peer_id = sc.get_peer_id_by_external_service(token=external_token)
+            _output = next(grpcbf.client_grpc(
+                method=gateway_pb2_grpc.GatewayStub(
+                    grpc.insecure_channel(
+                        next(utils.generate_uris_by_peer_id(peer_id))
+                    )
+                ).ModifyGasDeposit,
+                partitions_message_mode_parser=True,
+                indices_parser=gateway_pb2.ModifyGasDepositOutput,
+                input=gateway_pb2.ModifyGasDepositInput(
+                    gas_difference=utils.to_gas_amount(gas_amount),
+                    service_token=external_token
                 )
-            ).ModifyGasDeposit,
-            partitions_message_mode_parser=True,
-            indices_parser=gateway_pb2.ModifyGasDepositOutput,
-            input=gateway_pb2.ModifyGasDepositInput(
-                gas_difference=utils.to_gas_amount(gas_amount),
-                service_token=external_token
-            )
-        ))
-        return _output.success, _output.message
+            ))
+            return _output.success, _output.message
+        except Exception as e:
+            logger.LOGGER(f"Exception on modify_gas_deposit for external service: {e}")
+            return False, "Node error."
     
     return True, "Gas modified correctly"
