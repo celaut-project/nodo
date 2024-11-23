@@ -393,6 +393,16 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
         logger.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
         return False, 'No father id'
     
+    current_gas = sc.get_internal_service_gas(id=service_token)
+    desired_amount = current_gas+gas_amount
+    
+    if desired_amount < 0:
+        return False, "Negative amount have no sense"
+    
+    # if gas_amount > father_amount: 
+    #   return False, "The father does not have enough gas."    
+    #   #  If it cannot, it will throw an exception later.
+    
     if gas_amount > 0:
         if not spend_gas(
                 id=father_id,
@@ -421,9 +431,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
         return True, '0 gas have no sense'
     
     if is_internal:
-        _gas = sc.get_internal_service_gas(id=service_token)
-        _gas += gas_amount
-        sc.update_gas_to_container(id=service_token, gas=_gas)
+        sc.update_gas_to_container(id=service_token, gas=desired_amount)
     
     else:
         print(f"NOT IMPLEMENTED.")  # TODO <--
