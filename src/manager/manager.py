@@ -14,7 +14,7 @@ from src.reputation_system.envs import validate_contract_ledger
 from src.database.sql_connection import SQLConnection, is_peer_available
 
 from src.utils import logger as logger
-from src.utils.env import EnvManager
+from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.utils import (
     from_gas_amount,
     to_gas_amount,
@@ -351,24 +351,30 @@ def get_sysresources(id: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
     )
 
 
-# PRUNE CONTAINER METHOD
-
-def prune_container(token: str) -> int:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
+def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     logger.LOGGER('Prune container ' + token)
     if sc.container_exists(id=token):
-        # Suponemos que no tenemos un token externo que empieza por una direccion de nuestra subnet.
+        
         try:
-            refund = sc.purge_internal(id=token)
+            DOCKER_CLIENT().containers.get(id).remove(force=True)
+        except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
+            logger.LOGGER(str(e) + 'ERROR WITH PODMAN WHEN TRYING TO REMOVE THE CONTAINER ' + id)
+            return None
+        
+        try:
+            refund = sc.get_internal_service_gas(id=token)
+            sc.purge_internal(id=token)
+            
         except Exception as e:
             logger.LOGGER('Error purging ' + token + ' ' + str(e))
-            return 0
+            return None
 
     else:
         try:
             print(f"NOT IMPLEMENTED.")  # TODO <--
         except Exception as e:
             logger.LOGGER('Error purging ' + token + ' ' + str(e))
-            return 0
+            return None
 
     # __refound_gas() # TODO refound gas to parent.
     #  env variable could be used.

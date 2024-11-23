@@ -10,5 +10,7 @@ SHA3_256 = SHA3_256_ID.hex()
 
 
 def stop(instance: str):
-    prune_container(token=instance)
-    print(f"Service instance {instance} deleted.")
+    if prune_container(token=instance):
+        print(f"Service instance {instance} deleted.")
+    else:
+        print(f"Something was wrong.")

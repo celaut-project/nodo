@@ -9,7 +9,6 @@ from threading import Lock
 from typing import Callable, List, Tuple, Optional
 from google.protobuf.json_format import MessageToJson
 
-import docker as docker_lib
 import grpc
 from grpcbigbuffer import client as grpcbf
 
@@ -28,7 +27,6 @@ env_manager = EnvManager()
 CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = env_manager.get_env("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME")
 TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get_env("TOTAL_REPUTATION_TOKEN_AMOUNT"))
 CLIENT_EXPIRATION_TIME = env_manager.get_env("CLIENT_EXPIRATION_TIME")
-REMOVE_CONTAINERS = env_manager.get_env("REMOVE_CONTAINERS")
 STORAGE = env_manager.get_env("STORAGE")
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
@@ -409,30 +407,17 @@ class SQLConnection(metaclass=Singleton):
         ''', (id,))
         return result.fetchone()[0] > 0
 
-    def purge_internal(self, id: str) -> int:
+    def purge_internal(self, id: str):
         """
-        Purges an internal service and optionally removes its Docker container.
+        Purges an internal service
 
         Args:
             id (str): The id of the internal service.
 
-        Returns:
-            int: The gas amount refunded.
         """
-        if REMOVE_CONTAINERS:
-            try:
-                DOCKER_CLIENT().containers.get(id).remove(force=True)
-            except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-                l.LOGGER(str(e) + 'ERROR WITH PODMAN WHEN TRYING TO REMOVE THE CONTAINER ' + id)
-                return 0
-
-        gas = self.get_internal_service_gas(id=id)
-
         self._execute('''
             DELETE FROM internal_services WHERE id = ?
         ''', (id))
-
-        return gas
     
     def get_internal_father_id(self, id: str) -> str:
         """
