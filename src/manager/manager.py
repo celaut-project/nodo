@@ -165,7 +165,8 @@ def spend_gas(
     try:
         # En caso de que sea un peer, el token es el client id.
         if sc.client_exists(client_id=id) and (
-                sc.get_client_gas(client_id=id)[0] >= gas_to_spend or bool(ALLOW_GAS_DEBT)):
+            sc.get_client_gas(client_id=id)[0] >= gas_to_spend or bool(ALLOW_GAS_DEBT)
+        ):
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
             __refund_gas_function_factory(
                 gas=gas_to_spend,
@@ -392,17 +393,37 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
         logger.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
         return False, 'No father id'
     
-    if not spend_gas(
-            id=father_id,
-            gas_to_spend=gas_amount,
-            refund_gas_function_container=[]
-    ):
-        return False, 'Error spending gas'
+    if gas_amount > 0:
+        if not spend_gas(
+                id=father_id,
+                gas_to_spend=gas_amount,
+                refund_gas_function_container=[]
+        ):
+            return False, 'Error spending gas'
+    
+    elif gas_amount < 0:
+        # This should be a increase_gas() function, reverse to spend_gas()
+        
+        if sc.container_exists(id=father_id):
+            _gas = sc.get_internal_service_gas(id=father_id)
+            _gas += abs(gas_amount)
+            sc.update_gas_to_container(id=service_token, gas=_gas)
+            
+        elif sc.client_exists(client_id=father_id):
+            sc.add_gas(client_id=father_id, gas=gas_amount)
+        
+        else:
+            return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
+            
+        pass
+    
+    else:
+        return True, '0 gas have no sense'
     
     if is_internal:
-        gas = sc.get_internal_service_gas(id=service_token)
-        gas += gas_amount
-        sc.update_gas_to_container(id=service_token, gas=gas)
+        _gas = sc.get_internal_service_gas(id=service_token)
+        _gas += gas_amount
+        sc.update_gas_to_container(id=service_token, gas=_gas)
     
     else:
         print(f"NOT IMPLEMENTED.")  # TODO <--
