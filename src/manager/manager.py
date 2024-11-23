@@ -1,6 +1,6 @@
 import json
 import uuid
-from typing import Optional, Generator
+from typing import Optional, Generator, Tuple
 
 import docker as docker_lib
 import grpc
@@ -16,6 +16,7 @@ from src.database.sql_connection import SQLConnection, is_peer_available
 from src.utils import logger as logger
 from src.utils.env import EnvManager
 from src.utils.utils import (
+    from_gas_amount,
     to_gas_amount,
     generate_uris_by_peer_id
 )
@@ -364,11 +365,7 @@ def prune_container(token: str) -> int:  # TODO Should be divided into two funct
 
     else:
         try:
-            refund = sc.purgue_external(
-                agent_id=token.split('##')[0],
-                peer_id=token.split('##')[1],
-                his_token=token.split('##')[2],
-            )
+            print(f"NOT IMPLEMENTED.")  # TODO <--
         except Exception as e:
             logger.LOGGER('Error purging ' + token + ' ' + str(e))
             return 0
@@ -376,3 +373,35 @@ def prune_container(token: str) -> int:  # TODO Should be divided into two funct
     # __refound_gas() # TODO refound gas to parent.
     #  env variable could be used.
     return refund
+
+
+# Modify Gas Deposit
+def modify_gas_deposit(gas_amount: gateway_pb2.GasAmount, service_token: str) -> Tuple[bool, str]:
+    
+    is_internal = sc.container_exists(id=service_token)
+    
+    father_id: str = sc.get_internal_father_id(id=service_token) if is_internal \
+        else sc.get_external_father_id(token=service_token)
+        
+    if not father_id:
+        logger.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
+        return False, 'No father id'
+    
+    gas_amount = from_gas_amount(gas_amount)
+    
+    if not spend_gas(
+            id=father_id,
+            gas_to_spend=gas_amount,
+            refund_gas_function_container=[]
+    ):
+        return False, 'Error spending gas'
+    
+    if is_internal:
+        gas = sc.get_internal_service_gas(id=service_token)
+        gas += gas_amount
+        sc.update_gas_to_container(id=service_token, gas=gas)
+    
+    else:
+        print(f"NOT IMPLEMENTED.")  # TODO <--
+    
+    return True, "Gas modified correctly"

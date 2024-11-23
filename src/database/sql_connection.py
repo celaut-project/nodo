@@ -433,6 +433,24 @@ class SQLConnection(metaclass=Singleton):
         ''', (id))
 
         return gas
+    
+    def get_internal_father_id(self, id: str) -> str:
+        """
+        Retrieves the father_id of an internal service.
+
+        Args:
+            id (str): The id of the internal service.
+
+        Returns:
+            str: The father_id of the internal service, or an empty string if not found.
+        """
+        cursor = self._execute('''
+            SELECT father_id
+            FROM internal_services
+            WHERE id = ?
+        ''', (id,))
+        result = cursor.fetchone()
+        return result[0] if result else ""
 
     # Peer Methods
 
@@ -981,6 +999,24 @@ class SQLConnection(metaclass=Singleton):
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
             return False
+        
+    def get_external_father_id(self, token: str) -> str:
+        """
+        Retrieves the father_id of an external service based on the token.
+
+        Args:
+            token (str): The token of the external service.
+
+        Returns:
+            str: The father_id of the external service, or an empty string if not found.
+        """
+        cursor = self._execute('''
+            SELECT client_id
+            FROM external_services
+            WHERE token = ?
+        ''', (token,))
+        result = cursor.fetchone()
+        return result[0] if result else ""
 
     def peer_has_client(self, peer_id: str) -> bool:
         """

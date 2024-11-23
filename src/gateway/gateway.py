@@ -7,7 +7,7 @@ from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.tunneling_system.tunnels import TunnelSystem
 from src.gateway.utils import generate_gateway_instance
-from src.manager.manager import prune_container, generate_client, get_internal_service_id_by_uri, spend_gas, \
+from src.manager.manager import modify_gas_deposit, prune_container, generate_client, get_internal_service_id_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources
 from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
@@ -38,6 +38,32 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 partitions_message_mode=True
                             ), 0).token
                         ))
+                    )
+            )
+        except Exception as e:
+            raise Exception('Was imposible stop the service. ' + str(e))
+        
+    def ModifyGasDeposit(self, request_iterator, context, **kwargs):
+        try:
+            l.LOGGER('Modifying gas deposit on service.')
+            
+            _input = next(grpcbf.parse_from_buffer(
+                                request_iterator=request_iterator,
+                                indices=gateway_pb2.ModifyGasDepositInput,
+                                partitions_message_mode=True
+                            ), 0)
+            
+            success, message = modify_gas_deposit(
+                        gas_amount=_input.gas_amount,
+                        service_token=_input.service_token
+                    )
+            
+            l.LOGGER(f"Message on modify gas deposit: {message}")
+            
+            yield from grpcbf.serialize_to_buffer(
+                    message_iterator=gateway_pb2.ModifyGasDepositOutput(
+                        success=success,
+                        message=message
                     )
             )
         except Exception as e:
