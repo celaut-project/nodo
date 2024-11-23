@@ -1110,7 +1110,29 @@ class SQLConnection(metaclass=Singleton):
                 return row['token']
             return None
         except sqlite3.Error as e:
-            logger.LOGGER(f'Failed to retrieve token for hashed token {hashed_token}: {e}')
+            logger.LOGGER(f'Failed to retrieve token for hashed external service token {hashed_token}: {e}')
+            return None
+        
+    def get_peer_id_by_external_service(self, token: str) -> Optional[str]:
+        """
+        Retrieves the peer id where the external service was requested.
+
+        Args:
+            token (str): The token of the external service.
+
+        Returns:
+            Optional[str]: The peer id if it exists, or None if not found.
+        """
+        try:
+            result = self._execute('''
+                SELECT peer_id FROM external_services WHERE token = ?
+            ''', (token,))
+            row = result.fetchone()
+            if row:
+                return row['peer_id']
+            return None
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to retrieve peer_id for external service {token}: {e}')
             return None
 
     def purge_external(self, agent_id: str, peer_id: str, his_token: str) -> int:

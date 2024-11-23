@@ -14,6 +14,7 @@ from src.reputation_system.envs import validate_contract_ledger
 from src.database.sql_connection import SQLConnection, is_peer_available
 
 from src.utils import logger as logger
+from src.utils import utils
 from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.utils import (
     from_gas_amount,
@@ -389,17 +390,11 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
     is_internal = sc.container_exists(id=service_token)
     
     father_id: str = sc.get_internal_father_id(id=service_token) if is_internal \
-        else sc.get_external_father_id(token=service_token)
+        else sc.get_external_father_id(token=sc.get_token_by_hashed_token(hashed_token=service_token))
         
     if not father_id:
         logger.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
         return False, 'No father id'
-    
-    current_gas = sc.get_internal_service_gas(id=service_token)
-    desired_amount = current_gas+gas_amount
-    
-    if desired_amount < 0:
-        return False, "Negative amount have no sense"
     
     # if gas_amount > father_amount: 
     #   return False, "The father does not have enough gas."    
@@ -435,9 +430,29 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
         return True, '0 gas have no sense'
     
     if is_internal:
+        current_gas = sc.get_internal_service_gas(id=service_token)
+        desired_amount = current_gas+gas_amount
+        
+        if desired_amount < 0:
+            return False, "Negative amount have no sense"
         sc.update_gas_to_container(id=service_token, gas=desired_amount)
     
     else:
-        print(f"NOT IMPLEMENTED.")  # TODO <--
+        external_token = sc.get_token_by_hashed_token(hashed_token=service_token)
+        peer_id = sc.get_peer_id_by_external_service(token=external_token)
+        _output = next(grpcbf.client_grpc(
+            method=gateway_pb2_grpc.GatewayStub(
+                grpc.insecure_channel(
+                    next(utils.generate_uris_by_peer_id(peer_id))
+                )
+            ).ModifyGasDeposit,
+            partitions_message_mode_parser=True,
+            indices_parser=gateway_pb2.ModifyGasDepositOutput,
+            input=gateway_pb2.ModifyGasDepositInput(
+                gas_difference=utils.to_gas_amount(gas_amount),
+                service_token=external_token
+            )
+        ))
+        return _output.success, _output.message
     
     return True, "Gas modified correctly"

@@ -147,7 +147,8 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
         raise InvalidTokenException()
 
     else:
+        token = sc.get_token_by_hashed_token(hashed_token=token)
         return __get_metrics_external(
-            peer_id=token.split('##')[1],  # peer_id
-            token=sc.get_token_by_hashed_token(hashed_token=token.split('##')[2])  # If the token starts with ## ...
+            peer_id=sc.get_peer_id_by_external_service(token),  # peer_id
+            token=token  # If the token starts with ## ...
         )

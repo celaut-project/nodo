@@ -6,7 +6,6 @@ from grpcbigbuffer import client as grpcbf
 
 from src.utils.env import EnvManager
 
-import src.utils.utils
 from protos import gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_grpcbf import StartService_input_indices
 from src.manager.manager import get_client_id_on_other_peer
@@ -38,7 +37,7 @@ def delegate_execution(
         service_instance = next(grpcbf.client_grpc(
             method=gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
-                    next(src.utils.utils.generate_uris_by_peer_id(peer))
+                    next(utils.generate_uris_by_peer_id(peer))
                 )
             ).StartService,
             timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
@@ -61,7 +60,7 @@ def delegate_execution(
             encrypted_external_token=encrypted_external_token,  # Add token.
             external_token=service_instance.token
         )
-        service_instance.token = father_id + '##' + peer + '##' + encrypted_external_token
+        service_instance.token = encrypted_external_token
         # TODO adapt for ipv6 too.
         return service_instance
     except Exception as e:

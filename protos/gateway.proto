@@ -93,7 +93,7 @@ message ModifyServiceSystemResourcesInput {
 }
 
 message ModifyGasDepositInput {
-    GasAmount gas_amount = 1;
+    GasAmount gas_difference = 1;
     string service_token = 2;
 }
 
