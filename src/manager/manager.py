@@ -406,6 +406,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
     #   #  If it cannot, it will throw an exception later.
     
     if gas_amount > 0:
+        logger.LOGGER(f"Spend gas from father {father_id}")
         if not spend_gas(
                 id=father_id,
                 gas_to_spend=gas_amount,
@@ -415,6 +416,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
     
     elif gas_amount < 0:
         # This should be a increase_gas() function, reverse to spend_gas()
+        logger.LOGGER(f"Add gas to father {father_id}")
         
         if sc.container_exists(id=father_id):
             _gas = sc.get_internal_service_gas(id=father_id)
