@@ -381,7 +381,7 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
 
 
 # Modify Gas Deposit
-def modify_gas_deposit(gas_amount: gateway_pb2.GasAmount, service_token: str) -> Tuple[bool, str]:
+def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
     
     is_internal = sc.container_exists(id=service_token)
     
@@ -391,8 +391,6 @@ def modify_gas_deposit(gas_amount: gateway_pb2.GasAmount, service_token: str) ->
     if not father_id:
         logger.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
         return False, 'No father id'
-    
-    gas_amount = from_gas_amount(gas_amount)
     
     if not spend_gas(
             id=father_id,

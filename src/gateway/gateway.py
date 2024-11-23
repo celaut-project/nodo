@@ -54,7 +54,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                             ), 0)
             
             success, message = modify_gas_deposit(
-                        gas_amount=_input.gas_amount,
+                        gas_amount=from_gas_amount(_input.gas_amount),
                         service_token=_input.service_token
                     )
             

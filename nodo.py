@@ -124,6 +124,8 @@ if __name__ == '__main__':
               "\n- execute <service id>"
               "\n- remove <service id>"
               "\n- stop <instance id>"
+              "\n- increase_gas <instance id> <gas to add>"
+              "\n- decrease_gas <instance id> <gas to retire>"
               "\n- services"
               "\n- connect <ip:url>"
               "\n- compile <project directory>"
@@ -138,6 +140,7 @@ if __name__ == '__main__':
               "\n- migrate"
               "\n- storage:prune_blocks"
               "\n- test <test name>"
+              "\n- rundev <repository path>"
               "\n\n",
               flush=True)
         try:
@@ -189,6 +192,14 @@ if __name__ == '__main__':
             case "stop":
                 from src.commands.stop import stop
                 stop(instance=sys.argv[2])
+                
+            case "increase_gas":
+                from src.commands.modify_gas import modify_gas
+                modify_gas(instance=sys.argv[2], gas=int(sys.argv[3]), decrement=False)
+                
+            case "decrease_gas":
+                from src.commands.modify_gas import modify_gas
+                modify_gas(instance=sys.argv[2], gas=int(sys.argv[3]), decrement=True)
 
             case "remove":
                 from src.commands.remove import remove
