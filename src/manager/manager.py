@@ -354,19 +354,18 @@ def get_sysresources(id: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
 def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     logger.LOGGER('Prune container ' + token)
     if sc.container_exists(id=token):
+                
+        try:
+            refund = sc.get_internal_service_gas(id=token)
+            sc.purge_internal(id=token)
+        except Exception as e:
+            logger.LOGGER('Error purging ' + token + ' ' + str(e))
+            return None
         
         try:
             DOCKER_CLIENT().containers.get(token).remove(force=True)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-            logger.LOGGER(str(e) + 'ERROR WITH PODMAN WHEN TRYING TO REMOVE THE CONTAINER ' + id)
-            return None
-        
-        try:
-            refund = sc.get_internal_service_gas(id=token)
-            sc.purge_internal(id=token)
-            
-        except Exception as e:
-            logger.LOGGER('Error purging ' + token + ' ' + str(e))
+            logger.LOGGER(str(e) + ' error with docker trying to remove the container with id ' + id)
             return None
 
     else:
