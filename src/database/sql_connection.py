@@ -417,7 +417,7 @@ class SQLConnection(metaclass=Singleton):
         """
         self._execute('''
             DELETE FROM internal_services WHERE id = ?
-        ''', (id))
+        ''', (id,))
     
     def get_internal_father_id(self, id: str) -> str:
         """
