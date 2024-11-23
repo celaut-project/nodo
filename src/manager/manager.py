@@ -384,6 +384,8 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
 # Modify Gas Deposit
 def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
     
+    logger.LOGGER(f"Modify {gas_amount} gas of the service {service_token}")
+    
     is_internal = sc.container_exists(id=service_token)
     
     father_id: str = sc.get_internal_father_id(id=service_token) if is_internal \
