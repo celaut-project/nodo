@@ -356,7 +356,7 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
     if sc.container_exists(id=token):
         
         try:
-            DOCKER_CLIENT().containers.get(id).remove(force=True)
+            DOCKER_CLIENT().containers.get(token).remove(force=True)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
             logger.LOGGER(str(e) + 'ERROR WITH PODMAN WHEN TRYING TO REMOVE THE CONTAINER ' + id)
             return None
