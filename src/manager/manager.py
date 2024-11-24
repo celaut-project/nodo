@@ -1,6 +1,6 @@
 import json
 import uuid
-from typing import Optional, Generator, Tuple
+from typing import Optional, Generator, Protocol, Tuple
 
 import docker as docker_lib
 import grpc
@@ -21,6 +21,7 @@ from src.utils.utils import (
     generate_uris_by_peer_id
 )
 from src.utils.env import EnvManager
+from src.virtualizers.docker.firewall import remove_rule
 
 env_manager = EnvManager()
 
@@ -368,6 +369,8 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
             logger.LOGGER(str(e) + ' error with docker trying to remove the container with id ' + id)
             return None
+        
+        father_id = sc.get_internal_father_id(id=token)
 
     else:
         try:
@@ -387,12 +390,15 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
                         )
                 )).amount
             )
+            father_id = sc.get_external_father_id(token=external_token)
         except Exception as e:
             logger.LOGGER('Error purging ' + token + ' ' + str(e))
             return None
 
-    # TODO If the parent of the container is internal_service, apply remove_rule()
-    # to all URIs of the service instance that was just terminated.
+    # Block the parent's access to the ports of the removed service.
+    if sc.container_exists(id=father_id):
+        # TODO loop over all uri slot. 
+        remove_rule(container_id=father_id, ip="", port=0, protocol=Protocol.TCP)
 
     # __refound_gas() # TODO refound gas to parent.
     #  env variable could be used.

@@ -1,7 +1,7 @@
 from grpcbigbuffer import client as grpcbf
 
 from protos import gateway_pb2_grpc, gateway_pb2
-from src.compiler.compile import compile_zip
+from src.compilers.zip_with_dockerfile import compile_zip
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
