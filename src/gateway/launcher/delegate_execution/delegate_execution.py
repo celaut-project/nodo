@@ -62,6 +62,7 @@ def delegate_execution(
         )
         service_instance.token = encrypted_external_token
         # TODO adapt for ipv6 too.
+        # TODO In case of different IP networks, deploy a local proxy service to enable communication between the client and the service (with the necessary overhead).
         return service_instance
     except Exception as e:
         l.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
