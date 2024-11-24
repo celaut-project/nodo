@@ -246,7 +246,7 @@ if __name__ == '__main__':
                 getattr(__import__(f"tests.{_t}", fromlist=[_t]), _t)()  # Import the test passed on param.
 
             case 'compile':
-                from src.commands.compile.compile import compile_directory
+                from src.commands.compile.zip_with_dockerfile.compile import compile_directory
                 compile_directory(directory=sys.argv[2])
 
             case "tui":

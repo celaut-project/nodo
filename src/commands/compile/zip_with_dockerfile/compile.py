@@ -7,7 +7,7 @@ import grpc
 from grpcbigbuffer import client as grpcbb
 
 from protos import celaut_pb2, compile_pb2, gateway_pb2_grpcbf, gateway_pb2_grpc
-from src.commands.compile.generate_service_zip import generate_service_zip
+from src.commands.compile.zip_with_dockerfile.generate_service_zip import generate_service_zip
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.utils.env import EnvManager
 
@@ -84,7 +84,7 @@ def __on_peer(peer: str, service_zip_dir: str):
                 # b is ServiceWithMeta grpc-bb cache directory.
                 os.system(f"mv {b.dir} {REGISTRY}{_id}")
             else:
-                raise Exception('\nError with the compiler output:' + str(b))
+                raise Exception('\nError with the compilers output:' + str(b))
 
     finally:
         # Stop the spinner when the process completes

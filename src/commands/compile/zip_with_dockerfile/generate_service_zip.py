@@ -12,6 +12,13 @@ METADATA = env_manager.get_env("METADATA_REGISTRY")
 SERVICES = env_manager.get_env("REGISTRY")
 BLOCKS = env_manager.get_env("BLOCKDIR")
 
+# Pre-compile json keys of service storage directories.
+SERVICE_DEPENDENCIES_DIRECTORY = "service_dependencies_directory"
+METADATA_DEPENDENCIES_DIRECTORY = "metadata_dependencies_directory"
+BLOCKS_DIRECTORY = "blocks_directory"
+DEPENDENCIES_DIR = "dependencies"
+
+
 def __export_registry(directory: str, compile_config: Dict):
     list(map(
         lambda _reg: os.makedirs(f"{directory}/{compile_config[_reg]}")

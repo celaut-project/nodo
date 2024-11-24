@@ -1,5 +1,5 @@
 from protos import celaut_pb2 as celaut, gateway_pb2
-from src.builder import build
+from src.virtualizers.docker import build
 from src.utils import logger as l
 from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.verify import get_service_hex_main_hash

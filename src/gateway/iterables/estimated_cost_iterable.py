@@ -3,7 +3,7 @@ from typing import Optional, Generator
 from grpcbigbuffer import client as grpcbf, buffer_pb2
 
 from protos import gateway_pb2
-from src.builder import build
+from src.virtualizers.docker import build
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable, BreakIteration
 from src.manager.manager import default_initial_cost
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost

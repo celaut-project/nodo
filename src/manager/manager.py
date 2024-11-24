@@ -17,7 +17,6 @@ from src.utils import logger as logger
 from src.utils import utils
 from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.utils import (
-    from_gas_amount,
     to_gas_amount,
     generate_uris_by_peer_id
 )

@@ -3,7 +3,7 @@ from typing import Optional, Callable, List, Dict
 import docker as docker_lib
 
 from protos import celaut_pb2 as celaut, gateway_pb2
-from src.builder import build
+from src.virtualizers.docker import build
 from src.gateway.launcher.local_execution.create_container import create_container
 from src.gateway.launcher.local_execution.set_config import set_config
 from src.tunneling_system.tunnels import TunnelSystem
