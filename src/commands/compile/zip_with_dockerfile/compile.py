@@ -82,6 +82,9 @@ def __on_peer(peer: str, service_zip_dir: str):
             elif type(b) == grpcbb.Dir and b.type == compile_pb2.Service and _id:
                 # b is ServiceWithMeta grpc-bb cache directory.
                 os.system(f"mv {b.dir} {REGISTRY}{_id}")
+            elif type(b) == compile_pb2.CompileOutputError:
+                print(f"\nError in the compilation process: \n{b.message}")
+                return
             else:
                 raise Exception('\nError with the compilers output:' + str(b))
 
