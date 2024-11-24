@@ -58,7 +58,8 @@ def delegate_execution(
             client_id=father_id,  # Client_id  # TODO <-- Could be called father_id too, like on the internal table.
             peer_id=peer,  # Add node_uri.
             encrypted_external_token=encrypted_external_token,  # Add token.
-            external_token=service_instance.token
+            external_token=service_instance.token,
+            serialized_instance=service_instance.instance.SerializeToString()
         )
         service_instance.token = encrypted_external_token
         # TODO adapt for ipv6 too.

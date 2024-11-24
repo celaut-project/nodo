@@ -94,7 +94,8 @@ def __interactive_dev_container(service_path: str) -> str:
         initial_gas_amount=None,
         system_requirements_range=gateway_pb2.ModifyServiceSystemResourcesInput(
                 min_sysreq=DEFAULT_SYSTEM_RESOURCES, max_sysreq=DEFAULT_SYSTEM_RESOURCES
-        )
+        ),
+        serialized_instance=""
     )
 
 

@@ -278,24 +278,30 @@ def add_container(
         father_id: str,
         container: docker_lib.models.containers.Container,
         initial_gas_amount: Optional[int],
+        serialized_instance: str,
         system_requirements_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> str:
+    
     id: str = container.id
     logger.LOGGER(f'Add container for {father_id}')
-    initial_gas_amount = initial_gas_amount if initial_gas_amount else default_initial_cost(
-        father_id=father_id)
+    initial_gas_amount = initial_gas_amount if initial_gas_amount \
+        else default_initial_cost(father_id=father_id)
+        
     sc.add_internal_service(
         father_id=father_id,
         container_id=container.id,
         container_ip=container.attrs['NetworkSettings']['IPAddress'],
-        gas=initial_gas_amount
+        gas=initial_gas_amount,
+        serialized_instance=serialized_instance
     )
+    
     if not container_modify_system_params(
             id=id,
             system_requeriments_range=system_requirements_range
     ):
         logger.LOGGER(f'Exception during modify params of {id}.')
         raise Exception(f'Exception during modify params of {id}.')
+    
     logger.LOGGER(f"Modifed params correctly on token {id}.")
     return id
 

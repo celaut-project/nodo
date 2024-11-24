@@ -119,17 +119,20 @@ def local_execution(
             )
         )
 
+    instance = celaut.Instance(
+            api=service.api,
+            uri_slot=[uri_slot]
+        )
+    
     l.LOGGER(f'Thrown out a new instance by {father_id} of the container_id {container.id}')
     return gateway_pb2.Instance(
         token=add_container(
             father_id=father_id,
             container=container,
             initial_gas_amount=initial_gas_amount,
+            serialized_instance=instance.SerializeToString(),
             system_requirements_range=gateway_pb2.ModifyServiceSystemResourcesInput(
                 min_sysreq=initial_system_resources, max_sysreq=initial_system_resources)  # TODO ??
             ),
-        instance=celaut.Instance(
-            api=service.api,
-            uri_slot=[uri_slot]
-        )
+        instance=instance
     )

@@ -112,7 +112,8 @@ def create_tables(cursor):
                 father_id TEXT,
                 gas_mantissa INTEGER,
                 gas_exponent INTEGER,
-                mem_limit INTEGER
+                mem_limit INTEGER,
+                serialized_instance TEXT
             )
         ''',
         "external_services": '''
@@ -120,7 +121,8 @@ def create_tables(cursor):
                 token TEXT PRIMARY KEY,
                 token_hash TEXT,
                 peer_id TEXT,
-                client_id TEXT
+                client_id TEXT,
+                serialized_instance TEXT
             )
         ''',
         "tunnels": '''
