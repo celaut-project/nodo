@@ -7,6 +7,7 @@ import grpc
 from grpcbigbuffer import client as grpcbb
 
 from protos import celaut_pb2, compile_pb2, gateway_pb2_grpcbf, gateway_pb2_grpc
+from src.commands.compile.zip_with_dockerfile import in_case_of_remote
 from src.commands.compile.zip_with_dockerfile.generate_service_zip import generate_service_zip
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.utils.env import EnvManager
@@ -106,6 +107,8 @@ def __on_peer(peer: str, service_zip_dir: str):
 
 
 def compile_directory(directory: str):
+    is_remote, directory = in_case_of_remote(directory)
+    
     service_zip_dir: str = generate_service_zip(
         project_directory=directory
     )
@@ -122,3 +125,4 @@ def compile_directory(directory: str):
         __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
     finally:
         os.remove(service_zip_dir)
+        if is_remote: os.remove(directory)
