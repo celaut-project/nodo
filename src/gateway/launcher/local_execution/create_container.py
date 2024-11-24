@@ -1,6 +1,6 @@
 import docker as docker_lib
 
-from src.utils import logger as l
+from src.utils import logger as log
 from src.utils.env import DOCKER_CLIENT
 
 
@@ -12,9 +12,9 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
             ports=use_other_ports
         )
     except docker_lib.errors.ImageNotFound as e:
-        l.LOGGER('CONTAINER IMAGE NOT FOUND')
+        log.LOGGER('CONTAINER IMAGE NOT FOUND')
         # TODO build(id) using agents model.
         raise e
     except Exception as e:
-        l.LOGGER('DOCKER RUN ERROR -> ' + str(e))
+        log.LOGGER('DOCKER RUN ERROR -> ' + str(e))
         raise e

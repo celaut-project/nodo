@@ -12,7 +12,7 @@ from src.manager.manager import get_client_id_on_other_peer
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection
 from src.payment_system.payment_process import increase_deposit_on_peer
-from src.utils import utils, logger as l
+from src.utils import utils, logger as log
 
 
 env_manager = EnvManager()
@@ -25,7 +25,7 @@ def delegate_execution(
                         refund_gas: List[Callable]
                    ) -> gateway_pb2.Instance:
     try:
-        l.LOGGER('El servicio se lanza en el nodo ' + str(peer))
+        log.LOGGER('El servicio se lanza en el nodo ' + str(peer))
 
         if gas_amount_on_other_peer(peer_id=peer) <= cost:
             raise Exception(
@@ -33,7 +33,7 @@ def delegate_execution(
                 'Current gas: ' + str(gas_amount_on_other_peer(peer_id=peer)) + ', required: ' + str(cost) + '.'
             )
 
-        l.LOGGER('Spent gas, go to launch the service on ' + str(peer))
+        log.LOGGER('Spent gas, go to launch the service on ' + str(peer))
         service_instance = next(grpcbf.client_grpc(
             method=gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
@@ -66,7 +66,7 @@ def delegate_execution(
         # TODO In case of different IP networks, deploy a local proxy service to enable communication between the client and the service (with the necessary overhead).
         return service_instance
     except Exception as e:
-        l.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
+        log.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
         try:
             refund_gas.pop()()
         except IndexError:

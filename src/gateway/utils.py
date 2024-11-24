@@ -9,7 +9,7 @@ from src.database.access_functions.ledgers import get_ledger_and_contract_addr_f
 from src.payment_system.ledgers import generate_contract_ledger
 from src.reputation_system.envs import generate_instance_proofs
 from protos import celaut_pb2 as celaut, gateway_pb2
-from src.utils import logger as l
+from src.utils import logger as log
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
@@ -30,7 +30,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
         try:
             uri.ip = ni.ifaddresses(network)[ni.AF_INET][0]['addr']
         except ValueError as e:
-            l.LOGGER('You must specify a valid interface name ' + network)
+            log.LOGGER('You must specify a valid interface name ' + network)
             raise Exception('Error generating gateway instance --> ' + str(e))
 
     uri.port = GATEWAY_PORT
@@ -67,7 +67,7 @@ def save_service(
             shutil.move(service_dir, REGISTRY + service_hash)
             return True
         except Exception as e:
-            l.LOGGER(f'Exception saving a service {service_hash}: ' + str(e))
+            log.LOGGER(f'Exception saving a service {service_hash}: ' + str(e))
             return False
         finally:
             if metadata:
@@ -75,7 +75,7 @@ def save_service(
                     with open(METADATA_REGISTRY + service_hash, "wb") as f:
                         f.write(metadata.SerializeToString())
                 except Exception as e:
-                    l.LOGGER(f'Exception writing metadata of {service_hash}: ' + str(e))
+                    log.LOGGER(f'Exception writing metadata of {service_hash}: ' + str(e))
 
     return os.path.isdir(REGISTRY + service_hash) or __save()
 
@@ -90,7 +90,7 @@ def search_container(
             print('SEARCH CONTAINER NOT IMPLEMENTED')
             break
         except Exception as e:
-            l.LOGGER('Exception during search container process: ' + str(e))
+            log.LOGGER('Exception during search container process: ' + str(e))
             pass
 
 
@@ -103,5 +103,5 @@ Generator[celaut.Any, None, None]:
 
 def search_definition(hashes: List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash], ignore_network: str = None) \
         -> celaut.Service:
-    l.LOGGER('SEARCH DEFINITION NOT IMPLEMENTED.')
+    log.LOGGER('SEARCH DEFINITION NOT IMPLEMENTED.')
     raise Exception('SEARCH DEFINITION NOT IMPLEMENTED.')

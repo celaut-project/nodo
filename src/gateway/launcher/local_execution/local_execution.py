@@ -9,7 +9,7 @@ from src.gateway.launcher.local_execution.create_container import create_contain
 from src.gateway.launcher.local_execution.set_config import set_config
 from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.manager import default_initial_cost, add_container
-from src.utils import utils, logger as l
+from src.utils import utils, logger as log
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
@@ -45,12 +45,12 @@ def local_execution(
         )  # If the container is not built, build it.
     except Exception as e:
         try:
-            l.LOGGER('Error building the container: ' + str(e))
+            log.LOGGER('Error building the container: ' + str(e))
             refund_gas.pop()()  # Refund the gas.
         except IndexError:
-            l.LOGGER('Error refunding the gas.')
+            log.LOGGER('Error refunding the gas.')
         finally:
-            l.LOGGER(str(e))
+            log.LOGGER(str(e))
             raise e
 
     # If the request is made by a local service.
@@ -76,17 +76,17 @@ def local_execution(
     try:
         container.start()
     except docker_lib.errors.APIError as e:
-        l.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' ' + str(e))
+        log.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' ' + str(e))
         raise e
 
     # Reload this object from the server again and update attrs with the new data.
     container.reload()
 
     if not block_all(container_id=container.id):
-        l.LOGGER(f"Docker firewall block all function failed for {container.id}")
+        log.LOGGER(f"Docker firewall block all function failed for {container.id}")
 
     if not allow_connection(container_id=container.id, ip='172.17.0.1', port=GATEWAY_PORT, protocol=Protocol.TCP):
-        l.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
+        log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
 
     # TODO END OF virtualizers.docker.execute.py
 
@@ -100,18 +100,18 @@ def local_execution(
         ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
         _port: int = external
 
-        l.LOGGER(f"Required tunnel to expose the service {require_tunnel} from ip {father_ip}")
+        log.LOGGER(f"Required tunnel to expose the service {require_tunnel} from ip {father_ip}")
         if require_tunnel:
             _response = TunnelSystem().generate_tunnel(ip=_ip, port=_port)
             if _response:
                 _ip, _port = _response
             else:
                 _msg = "Any tunnel available. Instance can't be serve."
-                l.LOGGER(_msg)
+                log.LOGGER(_msg)
                 # TODO Delete container.
                 raise Exception(_msg)
 
-        l.LOGGER(f"Using uri {_ip}:{_port}")
+        log.LOGGER(f"Using uri {_ip}:{_port}")
         uri_slot.uri.append(
             celaut.Instance.Uri(
                 ip=_ip,
@@ -124,7 +124,7 @@ def local_execution(
             uri_slot=[uri_slot]
         )
     
-    l.LOGGER(f'Thrown out a new instance by {father_id} of the container_id {container.id}')
+    log.LOGGER(f'Thrown out a new instance by {father_id} of the container_id {container.id}')
     return gateway_pb2.Instance(
         token=add_container(
             father_id=father_id,

@@ -1,6 +1,6 @@
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.virtualizers.docker import build
-from src.utils import logger as l
+from src.utils import logger as log
 from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.verify import get_service_hex_main_hash
 
@@ -54,14 +54,14 @@ def __build_cost(metadata: celaut.Any.Metadata) -> int:
         ])
 
     except Exception as e:
-        l.LOGGER('Manager - build cost exception: ' + str(e))
+        log.LOGGER('Manager - build cost exception: ' + str(e))
         pass  # Optionally, return a default cost or re-raise the exception
 
     return COST_OF_BUILD  # Default to return base build cost
 
 
 def __execution_cost(metadata: celaut.Any.Metadata) -> int:
-    l.LOGGER('Get execution cost')
+    log.LOGGER('Get execution cost')
     try:
         return sum([
             len(DOCKER_CLIENT().containers.list()) * COMPUTE_POWER_RATE,
@@ -71,7 +71,7 @@ def __execution_cost(metadata: celaut.Any.Metadata) -> int:
     except build.UnsupportedArchitectureException as e:
         raise e
     except Exception as e:
-        l.LOGGER('Error calculating execution cost ' + str(e))
+        log.LOGGER('Error calculating execution cost ' + str(e))
         raise e
 
 

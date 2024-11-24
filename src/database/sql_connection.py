@@ -13,7 +13,7 @@ import grpc
 from grpcbigbuffer import client as grpcbf
 
 from protos import gateway_pb2_grpc, gateway_pb2, celaut_pb2
-from src.utils import logger as l, logger
+from src.utils import logger as log, logger
 from src.utils.env import (
     SHA3_256_ID,
     DOCKER_CLIENT,
@@ -308,7 +308,7 @@ class SQLConnection(metaclass=Singleton):
             INSERT INTO internal_services (id, ip, father_id, gas_mantissa, gas_exponent, mem_limit, serialized_instance)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (container_id, container_ip, father_id, gas_mantissa, gas_exponent, 0, serialized_instance))
-        l.LOGGER(f'Saved service {container_id} as dependency of {father_id}')
+        log.LOGGER(f'Saved service {container_id} as dependency of {father_id}')
 
     def update_sys_req(self, id: str, mem_limit: Optional[int]) -> bool:
         """
@@ -1209,7 +1209,7 @@ class SQLConnection(metaclass=Singleton):
                 partitions_message_mode_parser=True
             )).amount)
         except grpc.RpcError as e:
-            l.LOGGER('Error during remove a container on ' + peer_id + ' ' + str(e))
+            log.LOGGER('Error during remove a container on ' + peer_id + ' ' + str(e))
 
         return refund
 

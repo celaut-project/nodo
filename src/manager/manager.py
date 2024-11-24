@@ -13,7 +13,7 @@ from src.reputation_system.envs import validate_contract_ledger
 
 from src.database.sql_connection import SQLConnection, is_peer_available
 
-from src.utils import logger as logger
+from src.utils import logger as log
 from src.utils import utils
 from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.utils import (
@@ -45,7 +45,7 @@ def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
 # Insert the instance if it does not exist.
 def add_peer_instance(instance: gateway_pb2.Instance) -> str:
     parsed_instance = json.loads(MessageToJson(instance))
-    logger.LOGGER('Inserting instance on db: ' + str(parsed_instance))
+    log.LOGGER('Inserting instance on db: ' + str(parsed_instance))
 
     peer_id = str(uuid.uuid4())
     token: Optional[str] = instance.token if instance.HasField("token") else ""
@@ -68,15 +68,15 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> str:
 
     for contract_ledger in instance.instance.api.reputation_proofs:
         if not validate_contract_ledger(contract_ledger):
-            logger.LOGGER(f"Not supported reputation contract ledger {str(contract_ledger)}")
+            log.LOGGER(f"Not supported reputation contract ledger {str(contract_ledger)}")
             continue
         sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
-    logger.LOGGER(f'Get instance for peer -> {peer_id}')
+    log.LOGGER(f'Get instance for peer -> {peer_id}')
     return peer_id
 
 def update_peer_instance(instance: gateway_pb2.Instance, peer_id: str):
-    logger.LOGGER(f"Updating peer {peer_id}")
+    log.LOGGER(f"Updating peer {peer_id}")
     parsed_instance = json.loads(MessageToJson(instance))
     # It is assumed that app protocol and metadata have not been modified.
 
@@ -91,7 +91,7 @@ def update_peer_instance(instance: gateway_pb2.Instance, peer_id: str):
     for contract_ledger in instance.instance.api.reputation_proofs:
         sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
-    logger.LOGGER(f"Peer {peer_id} updated.")
+    log.LOGGER(f"Peer {peer_id} updated.")
 
 def get_internal_service_id_by_uri(uri: str) -> str:
     return sc.get_internal_service_id_by_uri(uri=uri)
@@ -99,7 +99,7 @@ def get_internal_service_id_by_uri(uri: str) -> str:
 
 def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
     if not sc.container_exists(id=id):
-        logger.LOGGER(f'Manager error: container {id} does not exists.')
+        log.LOGGER(f'Manager error: container {id} does not exists.')
         return False
     if sys_req.HasField('mem_limit'):
         variation = sc.get_sys_req(id=id)['mem_limit'] - sys_req.mem_limit
@@ -126,7 +126,7 @@ def __refund_gas(
     try:
         add_function(gas)
     except Exception as e:
-        logger.LOGGER('Manager error: ' + str(e))
+        log.LOGGER('Manager error: ' + str(e))
         return False
     return True
 
@@ -145,7 +145,7 @@ def __refund_gas_function_factory(
 
 
 def increase_local_gas_for_client(client_id: str, amount: int) -> bool:
-    logger.LOGGER('Increase local gas for client ' + client_id + ' of ' + str(amount))
+    log.LOGGER('Increase local gas for client ' + client_id + ' of ' + str(amount))
     if not sc.client_exists(client_id=client_id):
         raise Exception('Client ' + client_id + ' does not exists.')
     if not __refund_gas(
@@ -200,7 +200,7 @@ def spend_gas(
                     return True
 
     except Exception as e:
-        logger.LOGGER('Manager error spending gas: ' + str(e) + ' ' + str(gas_to_spend) + '\n        ----------------------\n\n\n')
+        log.LOGGER('Manager error spending gas: ' + str(e) + ' ' + str(gas_to_spend) + '\n        ----------------------\n\n\n')
     return False
 
 
@@ -208,7 +208,7 @@ def generate_client() -> gateway_pb2.Client:
     # No collisions expected.
     client_id = uuid.uuid4().hex
     sc.add_client(client_id=client_id, gas=FEE_TRIAL_GAS_AMOUNT, last_usage=None)
-    logger.LOGGER('New client created ' + client_id)
+    log.LOGGER('New client created ' + client_id)
     return gateway_pb2.Client(
         client_id=client_id,
     )
@@ -243,10 +243,10 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
     client_id = sc.get_peer_client(peer_id=peer_id)
     if client_id: return client_id
     if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
-        logger.LOGGER('Peer ' + peer_id + ' is not available.')
+        log.LOGGER('Peer ' + peer_id + ' is not available.')
         raise Exception('Peer not available.')
 
-    logger.LOGGER('Generate new client for peer ' + peer_id)
+    log.LOGGER('Generate new client for peer ' + peer_id)
     client_msg = next(grpcbf.client_grpc(
         method=gateway_pb2_grpc.GatewayStub(
             grpc.insecure_channel(
@@ -268,7 +268,7 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
 def default_initial_cost(
         father_id: str = None,
 ) -> int:
-    logger.LOGGER('Default cost for ' + (father_id if father_id else 'local'))
+    log.LOGGER('Default cost for ' + (father_id if father_id else 'local'))
     return (int(
         sc.get_gas_amount_by_father_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
     ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
@@ -283,7 +283,7 @@ def add_container(
 ) -> str:
     
     id: str = container.id
-    logger.LOGGER(f'Add container for {father_id}')
+    log.LOGGER(f'Add container for {father_id}')
     initial_gas_amount = initial_gas_amount if initial_gas_amount \
         else default_initial_cost(father_id=father_id)
         
@@ -299,10 +299,10 @@ def add_container(
             id=id,
             system_requeriments_range=system_requirements_range
     ):
-        logger.LOGGER(f'Exception during modify params of {id}.')
+        log.LOGGER(f'Exception during modify params of {id}.')
         raise Exception(f'Exception during modify params of {id}.')
     
-    logger.LOGGER(f"Modifed params correctly on token {id}.")
+    log.LOGGER(f"Modifed params correctly on token {id}.")
     return id
 
 
@@ -310,7 +310,7 @@ def container_modify_system_params(
         id: str,
         system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
 ) -> bool:
-    logger.LOGGER(f'Modify params of {id}.')
+    log.LOGGER(f'Modify params of {id}.')
 
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
@@ -333,12 +333,12 @@ def container_modify_system_params(
                 memswap_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR > 0 else -1
             )
         except Exception as e:
-            logger.LOGGER(f"Docker container for {id} fail with e: {str(e)}")
+            log.LOGGER(f"Docker container for {id} fail with e: {str(e)}")
             # TODO reset modified system req.  Maybe the __get_container_by_id should be inside of __modify_sysreq.
             return False
         return True
 
-    logger.LOGGER(f"System req could not be modified for {id}: mem limit {system_requeriments.mem_limit}")
+    log.LOGGER(f"System req could not be modified for {id}: mem limit {system_requeriments.mem_limit}")
     return False
 
 
@@ -360,7 +360,7 @@ def get_sysresources(id: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
 
 
 def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
-    logger.LOGGER('Prune container ' + token)
+    log.LOGGER('Prune container ' + token)
     father_id, serialized_instance = None, None
     
     if sc.container_exists(id=token):
@@ -369,13 +369,13 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
             refund = sc.get_internal_service_gas(id=token)
             sc.purge_internal(id=token)
         except Exception as e:
-            logger.LOGGER('Error purging ' + token + ' ' + str(e))
+            log.LOGGER('Error purging ' + token + ' ' + str(e))
             return None
         
         try:
             DOCKER_CLIENT().containers.get(token).remove(force=True)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-            logger.LOGGER(str(e) + ' error with docker trying to remove the container with id ' + id)
+            log.LOGGER(str(e) + ' error with docker trying to remove the container with id ' + id)
             return None
         
         father_id = sc.get_internal_father_id(id=token)
@@ -402,7 +402,7 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
             father_id = sc.get_external_father_id(token=external_token)
             serialized_instance = sc.get_external_instance(token=external_token)
         except Exception as e:
-            logger.LOGGER('Error purging ' + token + ' ' + str(e))
+            log.LOGGER('Error purging ' + token + ' ' + str(e))
             return None
 
     # Block the parent's access to the ports of the removed service.
@@ -413,10 +413,10 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
             for slot in instance.instance.uri_slot:
                 for uri in slot:
                     if not remove_rule(container_id=father_id, ip=uri.ip, port=uri.port, protocol=Protocol.TCP):
-                        logger.LOGGER(f"Docker firewall remove rule function failed for the father {father_id}")
+                        log.LOGGER(f"Docker firewall remove rule function failed for the father {father_id}")
                         # TODO This should be controlled.
         except Exception as e:
-            logger.LOGGER(f"Exception removing rules for the father {father_id}")
+            log.LOGGER(f"Exception removing rules for the father {father_id}")
 
     # __refound_gas() # TODO refound gas to parent.
     #  env variable could be used.
@@ -426,7 +426,7 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
 # Modify Gas Deposit
 def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
     
-    logger.LOGGER(f"Modify {gas_amount} gas of the service {service_token}")
+    log.LOGGER(f"Modify {gas_amount} gas of the service {service_token}")
     
     is_internal = sc.container_exists(id=service_token)
     
@@ -434,7 +434,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
         else sc.get_external_father_id(token=sc.get_token_by_hashed_token(hashed_token=service_token))
         
     if not father_id:
-        logger.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
+        log.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
         return False, 'No father id'
     
     # if gas_amount > father_amount: 
@@ -442,7 +442,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
     #   #  If it cannot, it will throw an exception later.
     
     if gas_amount > 0:
-        logger.LOGGER(f"Spend gas from father {father_id}")
+        log.LOGGER(f"Spend gas from father {father_id}")
         if not spend_gas(
                 id=father_id,
                 gas_to_spend=gas_amount,
@@ -452,7 +452,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
     
     elif gas_amount < 0:
         # This should be a increase_gas() function, reverse to spend_gas()
-        logger.LOGGER(f"Add gas to father {father_id}")
+        log.LOGGER(f"Add gas to father {father_id}")
         
         if sc.container_exists(id=father_id):
             _gas = sc.get_internal_service_gas(id=father_id)
@@ -497,7 +497,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
             ))
             return _output.success, _output.message
         except Exception as e:
-            logger.LOGGER(f"Exception on modify_gas_deposit for external service: {e}")
+            log.LOGGER(f"Exception on modify_gas_deposit for external service: {e}")
             return False, "Node error."
     
     return True, "Gas modified correctly"

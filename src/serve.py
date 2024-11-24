@@ -8,7 +8,7 @@ from protos import gateway_pb2, gateway_pb2_grpc
 from src.gateway.gateway import Gateway
 from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.maintain_thread import manager_thread
-from src.utils import logger as l
+from src.utils import logger as log
 from src.utils.zeroconf import Zeroconf
 from src.utils.env import LOCAL_NETWORK, DOCKER_NETWORK, EnvManager
 
@@ -51,20 +51,20 @@ def serve():
 
     server.add_insecure_port('[::]:' + str(GATEWAY_PORT))
 
-    l.LOGGER('COMPUTE POWER RATE -> ' + str(COMPUTE_POWER_RATE))
-    l.LOGGER('COST OF BUILD -> ' + str(COST_OF_BUILD))
-    l.LOGGER('EXECUTION BENEFIT -> ' + str(EXECUTION_BENEFIT))
-    l.LOGGER('IGNORE FATHER NETWORK ON SERVICE BALANCER -> ' + str(IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER))
-    l.LOGGER('SEND ONLY HASHES ASKING COST -> ' + str(SEND_ONLY_HASHES_ASKING_COST))
-    l.LOGGER('DENEGATE COST REQUEST IF DONT VE THE HASH -> ' + str(DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH))
-    l.LOGGER('MANAGER ITERATION TIME-> ' + str(MANAGER_ITERATION_TIME))
-    l.LOGGER('AVG COST MAX PROXIMITY FACTOR-> ' + str(COST_AVERAGE_VARIATION))
-    l.LOGGER('GAS_COST_FACTOR-> ' + str(GAS_COST_FACTOR))
-    l.LOGGER('MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR-> ' + str(MODIFY_SERVICE_SYSTEM_RESOURCES_COST))
-    l.LOGGER('EXTERNAL_COST_TIMEOUT -> ' + str(EXTERNAL_COST_TIMEOUT))
+    log.LOGGER('COMPUTE POWER RATE -> ' + str(COMPUTE_POWER_RATE))
+    log.LOGGER('COST OF BUILD -> ' + str(COST_OF_BUILD))
+    log.LOGGER('EXECUTION BENEFIT -> ' + str(EXECUTION_BENEFIT))
+    log.LOGGER('IGNORE FATHER NETWORK ON SERVICE BALANCER -> ' + str(IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER))
+    log.LOGGER('SEND ONLY HASHES ASKING COST -> ' + str(SEND_ONLY_HASHES_ASKING_COST))
+    log.LOGGER('DENEGATE COST REQUEST IF DONT VE THE HASH -> ' + str(DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH))
+    log.LOGGER('MANAGER ITERATION TIME-> ' + str(MANAGER_ITERATION_TIME))
+    log.LOGGER('AVG COST MAX PROXIMITY FACTOR-> ' + str(COST_AVERAGE_VARIATION))
+    log.LOGGER('GAS_COST_FACTOR-> ' + str(GAS_COST_FACTOR))
+    log.LOGGER('MODIFY_SERVICE_SYSTEM_RESOURCES_COST_FACTOR-> ' + str(MODIFY_SERVICE_SYSTEM_RESOURCES_COST))
+    log.LOGGER('EXTERNAL_COST_TIMEOUT -> ' + str(EXTERNAL_COST_TIMEOUT))
 
-    l.LOGGER('Starting gateway at port' + str(GATEWAY_PORT))
-    l.LOGGER(f"Available tunnels: {json.dumps(TunnelSystem().get_gateway_urls(), indent=4)}")
+    log.LOGGER('Starting gateway at port' + str(GATEWAY_PORT))
+    log.LOGGER(f"Available tunnels: {json.dumps(TunnelSystem().get_gateway_urls(), indent=4)}")
 
     server.start()
     server.wait_for_termination()

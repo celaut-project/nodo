@@ -4,7 +4,7 @@ from grpcbigbuffer.client import client_grpc
 import grpc
 
 from src.manager.manager import add_peer_instance
-from src.utils import logger as l
+from src.utils import logger as log
 from src.gateway.utils import generate_gateway_instance
 from src.database.sql_connection import SQLConnection
 
@@ -47,7 +47,7 @@ def Zeroconf(network: str) -> list:
                     ))
                 )
             except grpc.RpcError:
-                l.LOGGER('Node ' + peer_uri + ' not response.')
+                log.LOGGER('Node ' + peer_uri + ' not response.')
                 continue
 
     # Check if is a docker node with http/1.

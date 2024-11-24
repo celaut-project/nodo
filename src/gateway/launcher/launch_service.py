@@ -5,7 +5,7 @@ from src.balancers.service_balancer.service_balancer import service_balancer
 from src.gateway.launcher.delegate_execution.delegate_execution import delegate_execution
 from src.gateway.launcher.local_execution.local_execution import local_execution
 from src.manager.manager import spend_gas
-from src.utils import utils, logger as l
+from src.utils import utils, logger as log
 from src.utils.env import DOCKER_NETWORK, EnvManager
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_gas_amount
@@ -27,7 +27,7 @@ def launch_service(
         config: Optional[gateway_pb2.Configuration] = None,
         recursion_guard_token: str = None,
 ) -> gateway_pb2.Instance:
-    l.LOGGER('Go to launch a service. ')
+    log.LOGGER('Go to launch a service. ')
     if service is None:
         raise Exception("Service object can't be None")
 
@@ -50,7 +50,7 @@ def launch_service(
                 recursion_guard_token=recursion_guard_token
         ):
             try:
-                l.LOGGER(f'Service balancer select peer {peer}')
+                log.LOGGER(f'Service balancer select peer {peer}')
 
                 refund_gas = []
 
@@ -83,15 +83,15 @@ def launch_service(
                         for uri in slot:
                             if not allow_connection(container_id=father_id,
                                                     ip=uri.ip, port=uri.port, protocol=Protocol.TCP):
-                                l.LOGGER(f"Docker firewall allow connection function failed for the father {father_id}")
+                                log.LOGGER(f"Docker firewall allow connection function failed for the father {father_id}")
                                 # TODO This should be controlled.
 
                 return instance
 
             except Exception as e:
-               l.LOGGER(f"Exception launching service on peer {peer}: {str(e)}")
+               log.LOGGER(f"Exception launching service on peer {peer}: {str(e)}")
                continue
 
         _err_msg = f"Can't launch this service {service_id}"
-        l.LOGGER(_err_msg)
+        log.LOGGER(_err_msg)
         raise Exception(_err_msg)

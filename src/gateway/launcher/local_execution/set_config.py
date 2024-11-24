@@ -4,7 +4,7 @@ from typing import Optional
 
 from protos import celaut_pb2 as celaut
 from src.gateway.utils import generate_gateway_instance
-from src.utils import logger as l
+from src.utils import logger as log
 from src.utils.env import DOCKER_COMMAND, DOCKER_NETWORK, EnvManager
 
 from src.utils.env import EnvManager
@@ -41,6 +41,6 @@ def set_config(container_id: str, config: Optional[celaut.Configuration], resour
             )
             break
         except subprocess.CalledProcessError as e:
-            l.LOGGER(e.output)
+            log.LOGGER(e.output)
     os.remove(CACHE + container_id + '/__config__')
     os.rmdir(CACHE + container_id)

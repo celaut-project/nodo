@@ -11,7 +11,7 @@ from src.manager.manager import modify_gas_deposit, prune_container, generate_cl
     container_modify_system_params, get_sysresources
 from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
-from src.utils import logger as l
+from src.utils import logger as log
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name
 from src.utils.env import EnvManager
 
@@ -28,7 +28,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def StopService(self, request_iterator, context, **kwargs):
         try:
-            l.LOGGER('Stopping service.')
+            log.LOGGER('Stopping service.')
             yield from grpcbf.serialize_to_buffer(
                     message_iterator=gateway_pb2.Refund(
                         amount=to_gas_amount(prune_container(
@@ -45,7 +45,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         
     def ModifyGasDeposit(self, request_iterator, context, **kwargs):
         try:
-            l.LOGGER('Modifying gas deposit on service.')
+            log.LOGGER('Modifying gas deposit on service.')
             
             _input = next(grpcbf.parse_from_buffer(
                                 request_iterator=request_iterator,
@@ -58,7 +58,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         service_token=_input.service_token
                     )
             
-            l.LOGGER(f"Message on modify gas deposit: {message}")
+            log.LOGGER(f"Message on modify gas deposit: {message}")
             
             yield from grpcbf.serialize_to_buffer(
                     message_iterator=gateway_pb2.ModifyGasDepositOutput(
@@ -70,7 +70,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             raise Exception('Was imposible stop the service. ' + str(e))
 
     def GetInstance(self, request_iterator, context, **kwargs):
-        l.LOGGER(f'Request for instance by {context.peer()}')
+        log.LOGGER(f'Request for instance by {context.peer()}')
         ip = get_only_the_ip_from_context(context_peer=context.peer())
         if TunnelSystem().from_tunnel(ip=ip):
             gateway_instance = TunnelSystem().get_gateway_tunnel()
@@ -100,7 +100,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         )
 
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
-        l.LOGGER('Request for modify service system resources.')
+        log.LOGGER('Request for modify service system resources.')
         token = get_internal_service_id_by_uri(uri=get_only_the_ip_from_context(context_peer=context.peer()))
         refund_gas = []
         if not spend_gas(
@@ -129,7 +129,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         )
 
     def Compile(self, request_iterator, context, **kwargs):
-        l.LOGGER('Go to compile a proyect.')
+        log.LOGGER('Go to compile a proyect.')
         _d: grpcbf.Dir = next(grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
             indices={0: bytes},
@@ -143,11 +143,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
 
     def GetService(self, request_iterator, context, **kwargs):
-        l.LOGGER(f"Get service method.")
+        log.LOGGER(f"Get service method.")
         yield from GetServiceIterable(request_iterator, context)
 
     def Payable(self, request_iterator, context, **kwargs):
-        l.LOGGER('Request for payment.')
+        log.LOGGER('Request for payment.')
         payment = next(grpcbf.parse_from_buffer(
             request_iterator=request_iterator,
             indices=gateway_pb2.Payment,
@@ -161,7 +161,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 token=payment.deposit_token,
         ):
             raise Exception('Error: payment not valid.')
-        l.LOGGER('Payment is valid.')
+        log.LOGGER('Payment is valid.')
         for b in grpcbf.serialize_to_buffer(): yield b
 
     def GetMetrics(self, request_iterator, context, **kwargs):

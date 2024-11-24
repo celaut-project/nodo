@@ -5,7 +5,7 @@ from grpcbigbuffer import client as grpcbf, buffer_pb2
 
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable
 from src.gateway.launcher.launch_service import launch_service
-from src.utils import logger as l
+from src.utils import logger as log
 from src.utils.env import EnvManager
 from src.utils.utils import get_only_the_ip_from_context, read_metadata_from_disk, read_service_from_disk
 from src.utils.env import EnvManager
@@ -20,13 +20,13 @@ CONFIGURATION_REQUIRED = False  # TODO add as an environment variable, in case t
 class StartServiceIterable(AbstractServiceIterable):
 
     def start(self):
-        l.LOGGER('Starting service by ' + str(self.context.peer()) + ' ...')
+        log.LOGGER('Starting service by ' + str(self.context.peer()) + ' ...')
 
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
         if CONFIGURATION_REQUIRED and not self.configuration.config:
             raise Exception("Client or configuration ")
 
-        l.LOGGER('Launch service with configuration')
+        log.LOGGER('Launch service with configuration')
         yield from grpcbf.serialize_to_buffer(
             indices={},
             message_iterator=launch_service(
@@ -42,7 +42,7 @@ class StartServiceIterable(AbstractServiceIterable):
 
     def final(self):
         if not self.service_saved:
-            l.LOGGER(
+            log.LOGGER(
                 f"\n"
                 f"The service is not in the registry and the request does not have the definition.\n "
                 f"Only has the service hash -> {self.service_hash} \n"

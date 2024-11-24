@@ -5,7 +5,7 @@ from uuid import uuid4
 from threading import Event, Lock
 
 from src.utils.singleton import Singleton
-from src.utils import logger as l
+from src.utils import logger as log
 
 from protos import celaut_pb2 as celaut
 
@@ -57,7 +57,7 @@ class DuplicateGrabber(metaclass=Singleton):
                 if hash_element in self.hashes.keys():
                     session = self.hashes[hash_element]
                     if session not in self.sessions:
-                        l.LOGGER(f"The session {session} is not in the registry, maybe was once time.")
+                        log.LOGGER(f"The session {session} is not in the registry, maybe was once time.")
                     wait = True
                     break
 
@@ -70,12 +70,12 @@ class DuplicateGrabber(metaclass=Singleton):
         if wait:
             if self.sessions[session].end_time:
                 return self.sessions[session].value, False
-            l.LOGGER('It is already downloading. waiting for it to end. ' + session)
+            log.LOGGER('It is already downloading. waiting for it to end. ' + session)
             self.sessions[session].wait()
             return self.sessions[session].value, False
 
         else:
-            l.LOGGER('Start download ' + session)
+            log.LOGGER('Start download ' + session)
             self.sessions[session].value = next(generator)
             self.sessions[session].set()
             return self.sessions[session].value, True

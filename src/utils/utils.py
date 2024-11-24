@@ -11,7 +11,7 @@ from protos import celaut_pb2 as celaut
 from protos import gateway_pb2
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.manager.resources_manager import mem_manager
-from src.utils import logger as l
+from src.utils import logger as log
 from src.utils.verify import get_service_hex_main_hash
 from src.utils.env import EnvManager
 
@@ -47,7 +47,7 @@ def service_hashes(
 
 
 def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
-    l.LOGGER('Getting ' + service_hash + ' service from the local registry.')
+    log.LOGGER('Getting ' + service_hash + ' service from the local registry.')
     filename: str = os.path.join(REGISTRY, service_hash)
     if not os.path.exists(filename):
         return None
@@ -60,7 +60,7 @@ def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
             service.ParseFromString(read_file(filename=filename))
             return service
     except (IOError, FileNotFoundError):
-        l.LOGGER('The service was not on registry.')
+        log.LOGGER('The service was not on registry.')
         return None
 
 
@@ -74,7 +74,7 @@ def read_metadata_from_disk(service_hash: str) -> Optional[celaut.Any.Metadata]:
         metadata.ParseFromString(read_file(filename=filename))
         return metadata
     except (IOError, FileNotFoundError):
-        l.LOGGER('The metadata was not on registry.')
+        log.LOGGER('The metadata was not on registry.')
         return None
 
 
@@ -109,7 +109,7 @@ def service_extended(
         yield metadata
 
         # 6
-        l.LOGGER(f"Send the service {REGISTRY + get_service_hex_main_hash(metadata=metadata)} using utils.service_extended.")
+        log.LOGGER(f"Send the service {REGISTRY + get_service_hex_main_hash(metadata=metadata)} using utils.service_extended.")
         yield Dir(
             dir=REGISTRY + get_service_hex_main_hash(metadata=metadata),
             _type=celaut.Service

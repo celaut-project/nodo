@@ -9,7 +9,7 @@ from protos.gateway_pb2_grpcbf import StartService_input_indices
 from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
 from src.virtualizers.docker import build
 from src.manager.manager import default_initial_cost, get_client_id_on_other_peer
-from src.utils import logger as l
+from src.utils import logger as log
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.utils import from_gas_amount, service_extended, peers_id_iterator, \
     generate_uris_by_peer_id
@@ -40,15 +40,15 @@ def service_balancer(
                 config=config
             )
     except build.UnsupportedArchitectureException as e:
-        l.LOGGER(e.__str__())
+        log.LOGGER(e.__str__())
         pass
     except Exception as e:
-        l.LOGGER('Error getting the local cost ' + str(e))
+        log.LOGGER('Error getting the local cost ' + str(e))
         raise e
 
     try:
         for peer_id in peers_id_iterator(ignore_network=ignore_network):
-            l.LOGGER('Check cost on peer ' + peer_id)
+            log.LOGGER('Check cost on peer ' + peer_id)
             # TODO could use async or concurrency
             try:
                 peers[peer_id] = next(grpcbf.client_grpc(
@@ -72,9 +72,9 @@ def service_balancer(
                         #  si es que se especifica.
                     ))
             except Exception as e:
-                l.LOGGER('Error taking the cost on ' + peer_id + ' : ' + str(e))
+                log.LOGGER('Error taking the cost on ' + peer_id + ' : ' + str(e))
     except Exception as e:
-        l.LOGGER('Error iterating peers on service balancer ->>' + str(e))
+        log.LOGGER('Error iterating peers on service balancer ->>' + str(e))
 
     try:
         return estimated_cost_sorter(
@@ -82,5 +82,5 @@ def service_balancer(
                 weight_clauses={_id: clause.cost_weight for _id, clause in config.resources.clause.items()}
             )
     except Exception as e:
-        l.LOGGER('Error during balancer, ' + str(e))
+        log.LOGGER('Error during balancer, ' + str(e))
         raise StopIteration

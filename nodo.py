@@ -1,7 +1,7 @@
 import sys, os, subprocess
 from grpcbigbuffer import utils as grpcbf
 from psutil import virtual_memory
-from src.utils import logger as l
+from src.utils import logger as log
 import src.manager.resources_manager as iobd
 from src.payment_system.contracts.envs import print_payment_info
 from src.utils.env import EnvManager
@@ -109,7 +109,7 @@ if __name__ == '__main__':
     iobd.IOBigData(
         ram_pool_method=lambda: virtual_memory().available
     ).set_log(
-        log=l.LOGGER if MEMORY_LOGS else lambda message: None
+        log=log.LOGGER if MEMORY_LOGS else lambda message: None
     )
 
     grpcbf.modify_env(

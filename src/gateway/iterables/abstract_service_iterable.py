@@ -8,7 +8,7 @@ from protos import gateway_pb2
 from protos.gateway_pb2_grpcbf import StartService_input_indices, \
     StartService_input_message_mode
 from src.gateway.utils import save_service
-from src.utils import logger as l
+from src.utils import logger as log
 from src.utils.env import SHA3_256_ID
 from src.manager.maintain_thread import wanted_services
 from src.utils.env import EnvManager
@@ -125,7 +125,7 @@ class AbstractServiceIterable:
                 #  RETORNAMOS EL TIPO JUNTO CON EL DIRECTORIO DEL SERVICIO YA DESCARGADO. EL DUPLICATE GRABBER DEBERIA
                 #  USARSE ANTES.
 
-                l.LOGGER('Save service on disk')
+                log.LOGGER('Save service on disk')
                 # Take it from metadata.
                 if not self.service_hash:
                     # TODO  compute the hash of r.dir.
@@ -165,5 +165,5 @@ class AbstractServiceIterable:
 
     def final(self):
         if self.service_hash and not self.service_saved and self.service_hash not in wanted_services:
-            l.LOGGER(f"Store the service hash on the wanted_list {self.service_hash}.  On the list {wanted_services.keys()}")
+            log.LOGGER(f"Store the service hash on the wanted_list {self.service_hash}.  On the list {wanted_services.keys()}")
             wanted_services[self.service_hash] = False

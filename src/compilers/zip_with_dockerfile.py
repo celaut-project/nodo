@@ -1,9 +1,9 @@
 import codecs
-from typing import Generator, List, Optional, Tuple, Union
+from typing import Generator, List, Tuple, Union
 
 from protos.celaut_pb2 import Any
 
-from src.utils import logger as l
+from src.utils import logger as log
 import json
 import os, subprocess
 import src.manager.resources_manager as resources_manager
@@ -44,7 +44,7 @@ class Compiler:
         os.system("mkdir " + CACHE + self.aux_id + "/filesystem")
 
         # Log the selected architecture.
-        l.LOGGER(f"Arch selected {arch}")
+        log.LOGGER(f"Arch selected {arch}")
 
         # Build container and get compressed layers.
         if not os.path.isfile(self.path + 'Dockerfile'):
@@ -61,7 +61,7 @@ class Compiler:
         for cmd in commands:
             ret_code = os.system(cmd)
             if ret_code != 0:  # If the return code is not zero, log the failure.
-                l.LOGGER(f"Error executing command: {cmd} with return code {ret_code}")
+                log.LOGGER(f"Error executing command: {cmd} with return code {ret_code}")
                 raise Exception(f"Command failed: {cmd}")
 
         # Get the buffer length.
@@ -77,7 +77,7 @@ class Compiler:
             # Save his filesystem on cache.
             for layer in os.listdir(CACHE + self.aux_id + "/building/"):
                 if os.path.isdir(CACHE + self.aux_id + "/building/" + layer):
-                    l.LOGGER('Unzipping layer ' + layer)
+                    log.LOGGER('Unzipping layer ' + layer)
                     os.system(
                         "tar -xvf " + CACHE + self.aux_id + "/building/" + layer + "/layer.tar -C "
                         + CACHE + self.aux_id + "/filesystem/"
@@ -339,7 +339,7 @@ def zipfile_ok(zip: str) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_p
 
 
 def compile_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
-    l.LOGGER('Compiling zip ' + str(zip))
+    log.LOGGER('Compiling zip ' + str(zip))
     service_id, metadata, service = zipfile_ok(zip=zip)
     for b in grpcbb.serialize_to_buffer(
             message_iterator=[
