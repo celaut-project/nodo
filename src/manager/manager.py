@@ -391,6 +391,9 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
             logger.LOGGER('Error purging ' + token + ' ' + str(e))
             return None
 
+    # TODO If the parent of the container is internal_service, apply remove_rule()
+    # to all URIs of the service instance that was just terminated.
+
     # __refound_gas() # TODO refound gas to parent.
     #  env variable could be used.
     return refund

@@ -10,6 +10,7 @@ from src.utils.env import DOCKER_NETWORK, EnvManager
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_gas_amount
 from src.database.sql_connection import SQLConnection
+from src.virtualizers.docker.firewall import Protocol, allow_connection
 
 env_manager = EnvManager()
 sc = SQLConnection()
@@ -62,7 +63,7 @@ def launch_service(
 
                 # Delegate the service instance execution.
                 if peer != 'local':
-                    return delegate_execution(
+                    instance = delegate_execution(
                         peer=peer, father_id=father_id,
                         cost=from_gas_amount(estimated_cost.cost), metadata=metadata, config=config,
                         recursion_guard_token=recursion_guard_token,
@@ -70,12 +71,22 @@ def launch_service(
                     )
 
                 else:
-                    return local_execution(
+                    instance = local_execution(
                         config=config, resources=config.resources.clause[estimated_cost.comb_resource_selected],
                         father_id=father_id, father_ip=father_ip,
                         metadata=metadata, service=service, service_id=service_id,
                         refund_gas=refund_gas
                     )
+
+                if sc.container_exists(id=father_id):
+                    for slot in instance.instance.uri_slot:
+                        for uri in slot:
+                            if not allow_connection(container_id=father_id,
+                                                    ip=uri.ip, port=uri.port, protocol=Protocol.TCP):
+                                l.LOGGER(f"Docker firewall allow connection function failed for the father {father_id}")
+                                # TODO This should be controlled.
+
+                return instance
 
             except Exception as e:
                l.LOGGER(f"Exception launching service on peer {peer}: {str(e)}")

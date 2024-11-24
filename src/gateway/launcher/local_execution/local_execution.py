@@ -3,6 +3,7 @@ from typing import Optional, Callable, List, Dict
 import docker as docker_lib
 
 from protos import celaut_pb2 as celaut, gateway_pb2
+from src.gateway.utils import GATEWAY_PORT
 from src.virtualizers.docker import build
 from src.gateway.launcher.local_execution.create_container import create_container
 from src.gateway.launcher.local_execution.set_config import set_config
@@ -12,6 +13,7 @@ from src.utils import utils, logger as l
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
+from src.virtualizers.docker.firewall import block_all, allow_connection, Protocol
 
 
 def local_execution(
@@ -58,6 +60,7 @@ def local_execution(
         {slot.port: get_free_port() for slot in service.api.slot} if not by_local \
         else {slot.port: slot.port for slot in service.api.slot}
 
+    # TODO START OF virtualizers.docker.execute.py
     container = create_container(
         use_other_ports=assigment_ports if not by_local else None,
         id=service_id,
@@ -78,6 +81,14 @@ def local_execution(
 
     # Reload this object from the server again and update attrs with the new data.
     container.reload()
+
+    if not block_all(container_id=container.id):
+        l.LOGGER(f"Docker firewall block all function failed for {container.id}")
+
+    if not allow_connection(container_id=container.id, ip='172.17.0.1', port=GATEWAY_PORT, protocol=Protocol.TCP):
+        l.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
+
+    # TODO END OF virtualizers.docker.execute.py
 
     for internal, external in assigment_ports.items():
         uri_slot = celaut.Instance.Uri_Slot()
