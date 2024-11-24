@@ -1,8 +1,9 @@
 from typing import Tuple
-from src.utils.env import EnvManager
 import os
 import subprocess
 import uuid
+
+from src.utils.env import EnvManager
 
 env_manager = EnvManager()
 
