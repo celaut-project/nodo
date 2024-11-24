@@ -306,7 +306,7 @@ class SQLConnection(metaclass=Singleton):
         _validate_gas(gas_mantissa, gas_exponent)
         self._execute('''
             INSERT INTO internal_services (id, ip, father_id, gas_mantissa, gas_exponent, mem_limit, serialized_instance)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (container_id, container_ip, father_id, gas_mantissa, gas_exponent, 0, serialized_instance))
         l.LOGGER(f'Saved service {container_id} as dependency of {father_id}')
 
@@ -1126,7 +1126,7 @@ class SQLConnection(metaclass=Singleton):
         """
         self._execute('''
             INSERT INTO external_services (token, token_hash, peer_id, client_id, serialized_instance)
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
         ''', (external_token, encrypted_external_token, peer_id, client_id, serialized_instance))
 
     def get_token_by_hashed_token(self, hashed_token: str) -> Optional[str]:
