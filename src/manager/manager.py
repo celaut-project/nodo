@@ -361,6 +361,8 @@ def get_sysresources(id: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
 
 def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     logger.LOGGER('Prune container ' + token)
+    father_id, serialized_instance = None, None
+    
     if sc.container_exists(id=token):
                 
         try:
@@ -377,6 +379,7 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
             return None
         
         father_id = sc.get_internal_father_id(id=token)
+        serialized_instance = sc.get_internal_instance(id=token)
 
     else:
         try:
@@ -397,14 +400,23 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
                 )).amount
             )
             father_id = sc.get_external_father_id(token=external_token)
+            serialized_instance = sc.get_external_instance(token=external_token)
         except Exception as e:
             logger.LOGGER('Error purging ' + token + ' ' + str(e))
             return None
 
     # Block the parent's access to the ports of the removed service.
     if sc.container_exists(id=father_id):
-        # TODO loop over all uri slot. 
-        remove_rule(container_id=father_id, ip="", port=0, protocol=Protocol.TCP)
+        try:
+            instance = celaut_pb2.Instance()
+            instance.ParseFromString(serialized_instance)
+            for slot in instance.instance.uri_slot:
+                for uri in slot:
+                    if not remove_rule(container_id=father_id, ip=uri.ip, port=uri.port, protocol=Protocol.TCP):
+                        logger.LOGGER(f"Docker firewall remove rule function failed for the father {father_id}")
+                        # TODO This should be controlled.
+        except Exception as e:
+            logger.LOGGER(f"Exception removing rules for the father {father_id}")
 
     # __refound_gas() # TODO refound gas to parent.
     #  env variable could be used.

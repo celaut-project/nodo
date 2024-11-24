@@ -437,6 +437,24 @@ class SQLConnection(metaclass=Singleton):
         ''', (id,))
         result = cursor.fetchone()
         return result[0] if result else ""
+    
+    def get_internal_instance(self, id: str) -> Optional[str]:
+        """
+        Retrieves the serialized_instance of an internal service.
+
+        Args:
+            id (str): The id of the internal service.
+
+        Returns:
+            str: The serialized_instance of the internal service, or None if not found.
+        """
+        cursor = self._execute('''
+            SELECT serialized_instance
+            FROM internal_services
+            WHERE id = ?
+        ''', (id,))
+        result = cursor.fetchone()
+        return result[0] if result else None
 
     # Peer Methods
 
@@ -1003,6 +1021,24 @@ class SQLConnection(metaclass=Singleton):
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else ""
+    
+    def get_external_instance(self, token: str) -> Optional[str]:
+        """
+        Retrieves the serialized_service of an external service based on the token.
+
+        Args:
+            token (str): The token of the external service.
+
+        Returns:
+            str: The serialized_service of the external service, or None if not found.
+        """
+        cursor = self._execute('''
+            SELECT serialized_service
+            FROM external_services
+            WHERE token = ?
+        ''', (token,))
+        result = cursor.fetchone()
+        return result[0] if result else None
 
     def peer_has_client(self, peer_id: str) -> bool:
         """
