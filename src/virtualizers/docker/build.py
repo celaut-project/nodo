@@ -21,7 +21,7 @@ from src.utils.verify import get_service_hex_main_hash
 env_manager = EnvManager()
 
 BUILD_CONTAINER_MEMORY_SIZE_FACTOR = env_manager.get_env("BUILD_CONTAINER_MEMORY_SIZE_FACTOR")
-WAIT_FOR_CONTAINER = env_manager.get_env("WAIT_FOR_CONTAINER")
+WAIT_FOR_CONTAINER = int(env_manager.get_env("WAIT_FOR_CONTAINER"))
 BLOCKDIR = env_manager.get_env("BLOCKDIR")
 CACHE = env_manager.get_env("CACHE")
 REGISTRY = env_manager.get_env("REGISTRY")
