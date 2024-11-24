@@ -2,7 +2,6 @@ import json
 import os
 
 from typing import Dict
-from src.commands.compile.envs import *
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
