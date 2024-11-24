@@ -1,4 +1,4 @@
-import os, sys, time, threading
+import os, sys, time, threading, shutil
 from hashlib import sha3_256
 from typing import Optional
 import grpc
@@ -104,6 +104,12 @@ def __on_peer(peer: str, service_zip_dir: str):
         print(f"Maybe it doesn't have blocks? validation will occurr into an error due to https://github.com/celaut-project/nodo/issues/38")
 
 
+def __remove_path(path):
+    if os.path.exists(path):
+        (os.remove if os.path.isfile(path) else shutil.rmtree)(path)
+        print(f"Removed: '{path}'")
+
+
 def compile_directory(directory: str):
     is_remote, directory = in_case_of_remote(directory)
     
@@ -122,5 +128,6 @@ def compile_directory(directory: str):
             ip, port = 'localhost', GATEWAY_PORT
         __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
     finally:
-        os.remove(service_zip_dir)
-        if is_remote: os.remove(directory)
+        __remove_path(service_zip_dir)
+        if is_remote: 
+            __remove_path(directory)
