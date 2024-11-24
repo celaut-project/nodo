@@ -341,18 +341,29 @@ def zipfile_ok(zip: str) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_p
 def compile_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
     log.LOGGER('Compiling zip ' + str(zip))
     service_id, metadata, service = zipfile_ok(zip=zip)
-    for b in grpcbb.serialize_to_buffer(
+    error_msg = ""
+    if error_msg:
+        yield from grpcbb.serialize_to_buffer(
             message_iterator=[
-                compile_pb2.CompileOutputServiceId(
-                    id=bytes.fromhex(service_id)
-                ),
-                metadata,
-                grpcbb.Dir(dir=service, _type=compile_pb2.Service)
-                if type(service) is str else service
+                compile_pb2.CompileOutputError(
+                    message=error_msg
+                )
             ],
             indices=gateway_pb2_grpcbf.CompileOutput_indices
-    ):
-        yield b
+        )
+        
+    else:
+        yield from grpcbb.serialize_to_buffer(
+                message_iterator=[
+                    compile_pb2.CompileOutputServiceId(
+                        id=bytes.fromhex(service_id)
+                    ),
+                    metadata,
+                    grpcbb.Dir(dir=service, _type=compile_pb2.Service)
+                    if type(service) is str else service
+                ],
+                indices=gateway_pb2_grpcbf.CompileOutput_indices
+        )
 
     # shutil.rmtree(service_with_meta.name)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.

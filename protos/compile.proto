@@ -31,3 +31,7 @@ message Service {
 message CompileOutputServiceId {
     bytes id = 1;
 }
+
+message CompileOutputError {
+    string message = 1;
+}

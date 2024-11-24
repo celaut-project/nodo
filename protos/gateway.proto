@@ -115,7 +115,7 @@ service Gateway {
 
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput ->
 
-    rpc Compile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // bytes -> CompileOutputServiceId || compile.ServiceWithMeta
+    rpc Compile(stream buffer.Buffer) returns (stream buffer.Buffer) {} // bytes -> compile.CompileOutputServiceId || compile.Service || Metadata || compile.CompileOutputError
 
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> EstimatedCost
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {}  // ( celaut.Any.Metadata.HashTag.Hash=H ) -> Service

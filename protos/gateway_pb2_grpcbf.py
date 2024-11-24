@@ -14,4 +14,5 @@ CompileOutput_indices = {
     1: compile_pb2.CompileOutputServiceId,
     2: gateway_pb2.celaut__pb2.Any.Metadata,
     3: compile_pb2.Service,
+    4: compile_pb2.CompileOutputError
 }
