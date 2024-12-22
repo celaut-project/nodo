@@ -20,20 +20,22 @@ METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
-    log.LOGGER('Generating gateway instance')
+    log.LOGGER(f'Generating gateway instance for the network {network}')
     instance = celaut.Instance()
 
     uri = celaut.Instance.Uri()
     if network == "localhost":
         uri.ip = "127.0.0.1"
         log.LOGGER('Using localhost IP: 127.0.0.1')
-    else:
+    elif network:
         try:
             uri.ip = ni.ifaddresses(network)[ni.AF_INET][0]['addr']
             log.LOGGER(f'Using network interface {network} with IP: {uri.ip}')
         except (ValueError, KeyError, IndexError) as e:
             log.LOGGER('You must specify a valid interface name ' + network)
             raise Exception('Error generating gateway instance --> ' + str(e))
+    else:
+        raise ValueError('Network interface name cannot be None')
 
     uri.port = GATEWAY_PORT
     log.LOGGER(f'Setting URI port: {GATEWAY_PORT}')
