@@ -557,8 +557,7 @@ class SQLConnection(metaclass=Singleton):
 
             rows = result.fetchall()
 
-            if not rows:
-                logger.LOGGER('No peers found in the database.')
+            if not rows and not force_submit:
                 return True
 
             # Fetch the total sum of all reputation amounts from the table
