@@ -621,7 +621,7 @@ class SQLConnection(metaclass=Singleton):
                         percentage_amount = (reputation_score / total_amount) * token_amount if total_amount else 0
                         to_submit.append((reputation_proof_id, percentage_amount, instance_json))
 
-            to_submit.append((None, 1, None))
+            to_submit.append((None, 1, None))  # This will be treated as a pointer to itself, used to include the node instance in the proof
 
             # Attempt to submit the data to the ledger
             if needs_submit and to_submit:

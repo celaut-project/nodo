@@ -159,10 +159,10 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             sender_address=sender_address,
             assigned_object=ProofObject(
                 type=ProofObjectType.ProofByToken,
-                value=obj[0] if self_info else proof_id
+                value=obj[0] if not self_info else proof_id
             ),
             token_amount=obj[1],
-            data=obj[2] if self_info else MessageToJson(generate_gateway_instance(ERGO_NODE_URL()).instance)
+            data=obj[2] if not self_info else MessageToJson(generate_gateway_instance(ERGO_NODE_URL()).instance)
         )
         if proof_box:
             outputs.append(proof_box)
