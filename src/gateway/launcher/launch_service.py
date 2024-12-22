@@ -44,7 +44,7 @@ def launch_service(
         for peer, estimated_cost in service_balancer(
                 metadata=metadata,
                 ignore_network=utils.get_network_name(
-                    ip_or_uri=father_ip
+                    direction=father_ip
                 ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None,
                 config=config,
                 recursion_guard_token=recursion_guard_token

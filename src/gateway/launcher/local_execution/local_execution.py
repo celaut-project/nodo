@@ -96,7 +96,7 @@ def local_execution(
 
         # for host_ip in host_ip_list:
         _ip: str = utils.get_local_ip_from_network(
-            network=utils.get_network_name(ip_or_uri=father_ip)
+            network=utils.get_network_name(direction=father_ip)
         ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
         _port: int = external
 

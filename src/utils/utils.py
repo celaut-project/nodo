@@ -155,16 +155,28 @@ def address_in_network(ip_or_uri, net) -> bool:
         ni.ifaddresses(net)[ni.AF_INET6][0]['addr'] == ip_or_uri
 
 
-def get_network_name(ip_or_uri: str) -> str:
+def get_network_name(direction: str) -> str:
+    """
+    Get the network name for a given direction. If the direction contains a port, it will be removed.
+    If the direction is localhost, it will return 'localhost'.
+    
+    Args:
+        direction (str): The direction to get the network name for.
+        
+    Returns:
+        str: The network name.
+    """
+    direction = direction.replace("http://", "").replace("https://", "").split(':')[0]
+    
     # If is localhost
-    if "::1" in ip_or_uri or '0.0.0.0' == ip_or_uri:
+    if "::1" in direction or '0.0.0.0' == direction:
         return "localhost"
 
     #  https://stackoverflow.com/questions/819355/how-can-i-check-if-an-ip-is-in-a-network-in-python
     try:
         for network in ni.interfaces():
             try:
-                if address_in_network(ip_or_uri=ip_or_uri, net=network):
+                if address_in_network(ip_or_uri=direction, net=network):
                     return network
             except KeyError:
                 continue

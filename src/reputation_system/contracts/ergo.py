@@ -17,6 +17,7 @@ import java.lang
 from org.ergoplatform.sdk import *
 from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
+from src.utils.utils import get_network_name
 
 sigmastate = JPackage('sigmastate')
 
@@ -155,11 +156,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     for obj in objects:
         self_info = not obj[0]  # if obj[0] is None, refers to itself.
         LOGGER(f"Is itself? {self_info}")
-        if self_info:
-            node_url = ERGO_NODE_URL().replace("http://", "").replace("https://", "")
-            data = MessageToJson(generate_gateway_instance(node_url).instance)
-        else:
-            data = obj[2]
+        data = obj[2] if not self_info else MessageToJson(generate_gateway_instance(network=get_network_name(direction=ERGO_NODE_URL())).instance)
         LOGGER(f"Building proof box with data: {data}")
         proof_box = __build_proof_box(
             ergo=ergo,

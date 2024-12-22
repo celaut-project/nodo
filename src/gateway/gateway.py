@@ -76,7 +76,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             gateway_instance = TunnelSystem().get_gateway_tunnel()
         else:
             gateway_instance = generate_gateway_instance(
-                network=get_network_name(ip_or_uri=ip)
+                network=get_network_name(direction=ip)
             )
         yield from grpcbf.serialize_to_buffer(gateway_instance)
 
