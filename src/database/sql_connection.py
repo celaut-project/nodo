@@ -558,6 +558,7 @@ class SQLConnection(metaclass=Singleton):
             rows = result.fetchall()
 
             if not rows:
+                logger.LOGGER('No peers found in the database.')
                 return True
 
             # Fetch the total sum of all reputation amounts from the table
