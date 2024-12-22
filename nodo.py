@@ -141,6 +141,8 @@ if __name__ == '__main__':
               "\n- storage:prune_blocks"
               "\n- test <test name>"
               "\n- rundev <repository path>"
+              "\n- submit_reputation"
+              "\n- daemon"
               "\n\n",
               flush=True)
         try:
