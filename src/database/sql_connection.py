@@ -522,7 +522,7 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error fetching reputation for peer {peer_id}: {e}')
             return None
 
-    def submit_to_ledger(self, submit: Callable[[List[Tuple[str, int, str]]], bool]) -> bool:
+    def submit_to_ledger(self, submit: Callable[[List[Tuple[str, int, str]]], bool], force_submit: bool = False) -> bool:
         """
         Submits the reputation data of all peers to the ledger if the condition
         (reputation_index - last_index_on_ledger > LEDGER_REPUTATION_SUBMISSION_THRESHOLD) is met.
@@ -597,7 +597,7 @@ class SQLConnection(metaclass=Singleton):
 
             # List to hold data for peers that need to be submitted to the ledger
             to_submit = []
-            needs_submit = False
+            needs_submit = force_submit
             token_amount = TOTAL_REPUTATION_TOKEN_AMOUNT -1
 
             for peer_id, data in peers_dict.items():

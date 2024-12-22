@@ -215,7 +215,7 @@ if __name__ == '__main__':
 
             case 'submit_reputation':
                 from src.reputation_system.interface import submit_reputation
-                submit_reputation()
+                submit_reputation(force_submit=True)
 
             case 'daemon':
                 from src.serve import serve

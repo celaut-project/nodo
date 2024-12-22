@@ -3,8 +3,6 @@ from src.utils.env import EnvManager
 from src.database.sql_connection import SQLConnection
 from src.utils.logger import LOGGER
 from src.reputation_system.contracts.ergo import submit_reputation_proof
-from protos import celaut_pb2 as celaut
-
 
 sc = SQLConnection()
 env_manager = EnvManager()
@@ -28,7 +26,8 @@ def compute_reputation(peer_id) -> float:
     LOGGER(f"Computed reputation: {_result}")
     return _result
 
-def submit_reputation():
+def submit_reputation(force_submit: bool = False):
     sc.submit_to_ledger(
-        submit=lambda objects: submit_reputation_proof(objects=objects)
+        submit=lambda objects: submit_reputation_proof(objects=objects),
+        force_submit=force_submit
     )

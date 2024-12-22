@@ -195,6 +195,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
 def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
     try:
+        LOGGER(f"Submitting reputation proof with {len(objects)} objects.")
         tx_id = __create_reputation_proof_tx(
             node_url=ERGO_NODE_URL(),
             wallet_mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC'),
