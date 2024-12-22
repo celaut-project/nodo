@@ -155,7 +155,11 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     for obj in objects:
         self_info = not obj[0]  # if obj[0] is None, refers to itself.
         LOGGER(f"Is itself? {self_info}")
-        data = obj[2] if not self_info else MessageToJson(generate_gateway_instance(ERGO_NODE_URL()).instance)
+        if self_info:
+            node_url = ERGO_NODE_URL().replace("http://", "").replace("https://", "")
+            data = MessageToJson(generate_gateway_instance(node_url).instance)
+        else:
+            data = obj[2]
         LOGGER(f"Building proof box with data: {data}")
         proof_box = __build_proof_box(
             ergo=ergo,
