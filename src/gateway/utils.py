@@ -35,6 +35,9 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
         except ValueError as e:
             log.LOGGER('You must specify a valid interface name ' + network)
             raise Exception('Error generating gateway instance --> ' + str(e))
+        except KeyError as e:
+            log.LOGGER('You must specify a valid interface name ' + network)
+            raise Exception('Error generating gateway instance --> ' + str(e))
 
     uri.port = GATEWAY_PORT
     log.LOGGER(f'Setting URI port: {GATEWAY_PORT}')
