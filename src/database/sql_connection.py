@@ -595,34 +595,40 @@ class SQLConnection(metaclass=Singleton):
                         uri.ip = row['ip']
                         uri.port = row['port']
 
-            # List to hold data for peers that need to be submitted to the ledger
-            to_submit = []
+            # List to hold data for peers that need to be submitted to the ledger            
             needs_submit = force_submit
-            token_amount = TOTAL_REPUTATION_TOKEN_AMOUNT -1
+            
+            if peers_dict:  # If peers are found
+                to_submit = []
+                token_amount = TOTAL_REPUTATION_TOKEN_AMOUNT -1  # Subtract 1 to account for the node instance
 
-            for peer_id, data in peers_dict.items():
-                reputation_proof_id = data['reputation_proof_id']
-                reputation_score = data['reputation_score']
-                reputation_index = data['reputation_index']
-                last_index_on_ledger = data['last_index_on_ledger']
+                for peer_id, data in peers_dict.items():
+                    reputation_proof_id = data['reputation_proof_id']
+                    reputation_score = data['reputation_score']
+                    reputation_index = data['reputation_index']
+                    last_index_on_ledger = data['last_index_on_ledger']
 
-                if reputation_proof_id:
-                    # Convert instance to JSON string
-                    instance_json = MessageToJson(data['instance'])
+                    if reputation_proof_id:
+                        # Convert instance to JSON string
+                        instance_json = MessageToJson(data['instance'])
 
-                    # Calculate the percentage of the total reputation token amount
-                    if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
-                        needs_submit = True
-                        percentage_amount = (reputation_score / total_amount) * token_amount if total_amount else 0
-                        to_submit.append((reputation_proof_id, percentage_amount, instance_json))
+                        # Calculate the percentage of the total reputation token amount
+                        if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
+                            needs_submit = True
+                            percentage_amount = (reputation_score / total_amount) * token_amount if total_amount else 0
+                            to_submit.append((reputation_proof_id, percentage_amount, instance_json))
 
-                    # Proof percentage doesn't need to be changed itself, but needs to be updated if others do.
-                    elif last_index_on_ledger > 0:
-                        percentage_amount = (reputation_score / total_amount) * token_amount if total_amount else 0
-                        to_submit.append((reputation_proof_id, percentage_amount, instance_json))
+                        # Proof percentage doesn't need to be changed itself, but needs to be updated if others do.
+                        elif last_index_on_ledger > 0:
+                            percentage_amount = (reputation_score / total_amount) * token_amount if total_amount else 0
+                            to_submit.append((reputation_proof_id, percentage_amount, instance_json))
 
-            to_submit.append((None, 1, None))  # This will be treated as a pointer to itself, used to include the node instance in the proof
-
+                to_submit.append((None, 1, None))  # This will be treated as a pointer to itself, used to include the node instance in the proof
+                
+            else:  # If no peers are found, submit the total amount of reputation tokens, but only if force_submit is True
+                to_submit = [(None, TOTAL_REPUTATION_TOKEN_AMOUNT, None)]
+                
+            
             # Attempt to submit the data to the ledger
             if needs_submit and to_submit:
                 success = submit(to_submit)
