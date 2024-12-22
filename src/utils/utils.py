@@ -115,10 +115,10 @@ def service_extended(
             _type=celaut.Service
         )
 
-get_only_the_ip_from_context = lambda context_peer: get_only_the_ip_from_context_method(context_peer)
+get_only_the_ip_from_context = lambda context_peer: __get_only_the_ip_from_context_method(context_peer)
 
 
-def get_only_the_ip_from_context_method(context_peer: str) -> str:
+def __get_only_the_ip_from_context_method(context_peer: str) -> str:
     try:
         ipv = context_peer.split(':')[0]
         if ipv in ('ipv4', 'ipv6'):
