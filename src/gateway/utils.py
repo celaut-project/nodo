@@ -5,7 +5,6 @@ from typing import Generator, List, Optional
 import netifaces as ni
 
 import src.utils.utils
-from src.database.access_functions.ledgers import get_ledger_and_contract_addr_from_contract
 from src.payment_system.ledgers import generate_contract_ledger
 from src.reputation_system.envs import generate_instance_proofs
 from protos import celaut_pb2 as celaut, gateway_pb2
@@ -32,10 +31,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
         try:
             uri.ip = ni.ifaddresses(network)[ni.AF_INET][0]['addr']
             log.LOGGER(f'Using network interface {network} with IP: {uri.ip}')
-        except ValueError as e:
-            log.LOGGER('You must specify a valid interface name ' + network)
-            raise Exception('Error generating gateway instance --> ' + str(e))
-        except KeyError as e:
+        except (ValueError, KeyError, IndexError) as e:
             log.LOGGER('You must specify a valid interface name ' + network)
             raise Exception('Error generating gateway instance --> ' + str(e))
 
