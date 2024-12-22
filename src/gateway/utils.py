@@ -21,6 +21,7 @@ METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 
 
 def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
+    log.LOGGER('Generating gateway instance')
     instance = celaut.Instance()
 
     uri = celaut.Instance.Uri()
@@ -51,6 +52,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
         [e for e in generate_instance_proofs()]
     )
 
+    log.LOGGER('Gateway instance generated')
     return gateway_pb2.Instance(
         instance=instance
     )
