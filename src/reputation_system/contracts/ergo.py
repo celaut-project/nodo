@@ -53,6 +53,7 @@ def __build_proof_box(
     assigned_object: Optional[ProofObject] = None,
     data: str = ""
 ):
+    LOGGER(f"Building proof box with token amount {token_amount} and reputation token label {reputation_token_label}")
     object_type_to_assign = assigned_object['type'] if assigned_object else ProofObjectType.PlainText
     object_to_assign = assigned_object['value'] if assigned_object else ""
 
@@ -153,6 +154,9 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     # Reputation proof output box
     for obj in objects:
         self_info = not obj[0]  # if obj[0] is None, refers to itself.
+        LOGGER(f"Is itself? {self_info}")
+        data = obj[2] if not self_info else MessageToJson(generate_gateway_instance(ERGO_NODE_URL()).instance)
+        LOGGER(f"Building proof box with data: {data}")
         proof_box = __build_proof_box(
             ergo=ergo,
             proof_id=proof_id,
@@ -162,10 +166,13 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
                 value=obj[0] if not self_info else proof_id
             ),
             token_amount=obj[1],
-            data=obj[2] if not self_info else MessageToJson(generate_gateway_instance(ERGO_NODE_URL()).instance)
+            data=data
         )
         if proof_box:
+            LOGGER("Proof box built.")
             outputs.append(proof_box)
+        else:
+            LOGGER(f"Proof box not built for object {obj}")
 
     LOGGER(f"Builded all proof box boxes.")
     # Basic wallet output box
