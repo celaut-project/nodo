@@ -27,30 +27,37 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     uri = celaut.Instance.Uri()
     if network == "localhost":
         uri.ip = "127.0.0.1"
+        log.LOGGER('Using localhost IP: 127.0.0.1')
     else:
         try:
             uri.ip = ni.ifaddresses(network)[ni.AF_INET][0]['addr']
+            log.LOGGER(f'Using network interface {network} with IP: {uri.ip}')
         except ValueError as e:
             log.LOGGER('You must specify a valid interface name ' + network)
             raise Exception('Error generating gateway instance --> ' + str(e))
 
     uri.port = GATEWAY_PORT
+    log.LOGGER(f'Setting URI port: {GATEWAY_PORT}')
     uri_slot = celaut.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT
     uri_slot.uri.append(uri)
     instance.uri_slot.append(uri_slot)
+    log.LOGGER('URI slot configured')
 
     slot = celaut.Service.Api.Slot()
     slot.port = GATEWAY_PORT
     instance.api.slot.append(slot)
+    log.LOGGER('API slot configured')
 
     instance.api.payment_contracts.extend(
         [e for e in generate_contract_ledger()]
     )
+    log.LOGGER('Payment contracts added to API')
 
     instance.api.reputation_proofs.extend(
         [e for e in generate_instance_proofs()]
     )
+    log.LOGGER('Reputation proofs added to API')
 
     log.LOGGER('Gateway instance generated')
     return gateway_pb2.Instance(
