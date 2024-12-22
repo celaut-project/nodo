@@ -136,7 +136,7 @@ longestSublistFinder = lambda string1, string2, split: split.join(
     [a for a in string1.split(split) for b in string2.split(split) if a == b]) + split
 
 
-def address_in_network(ip_or_uri, net) -> bool:
+def __address_in_network(ip_or_uri, net) -> bool:
     #  Return if the ip network portion (addr and broadcast common) is in the ip.
     return (
                    longestSublistFinder(
@@ -176,7 +176,7 @@ def get_network_name(direction: str) -> str:
     try:
         for network in ni.interfaces():
             try:
-                if address_in_network(ip_or_uri=direction, net=network):
+                if __address_in_network(ip_or_uri=direction, net=network):
                     return network
             except KeyError:
                 continue
@@ -215,7 +215,7 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     yield from (
         peer_id for peer_id in get_peer_ids()
         if not ignore_network or all(
-        not address_in_network(
+        not __address_in_network(
             ip_or_uri=uri,
             net=ignore_network
         ) for uri in generate_uris_by_peer_id(
