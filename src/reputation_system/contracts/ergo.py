@@ -205,5 +205,5 @@ def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
         LOGGER(f"Submited tx -> {tx_id}")
         return tx_id != None
     except Exception as e:
-        LOGGER(str(e))
+        LOGGER(f"Exception submitting reputation proof: {str(e)}")
         return False
