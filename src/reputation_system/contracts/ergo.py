@@ -8,6 +8,7 @@ from typing import List, TypedDict, Optional, Tuple
 
 from src.gateway.utils import generate_gateway_instance
 from src.reputation_system.envs import CONTRACT, LEDGER
+from src.tunneling_system.tunnels import TunnelSystem
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
 
@@ -156,7 +157,12 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     for obj in objects:
         self_info = not obj[0]  # if obj[0] is None, refers to itself.
         LOGGER(f"Is itself? {self_info}")
-        data = obj[2] if not self_info else MessageToJson(generate_gateway_instance(network=get_network_name(direction=ERGO_NODE_URL())).instance)
+        if self_info:
+            data = MessageToJson(TunnelSystem().get_gateway_tunnel().instance)  # Use the tunnel because is considering that the node is not exposed to the internet with a public IP. TODO allow to use the public IP instead of the tunnel.
+            
+        else:
+            data = obj[2]
+            
         LOGGER(f"Building proof box with data: {data}")
         proof_box = __build_proof_box(
             ergo=ergo,
