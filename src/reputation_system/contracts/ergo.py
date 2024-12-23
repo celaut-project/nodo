@@ -158,7 +158,10 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         self_info = not obj[0]  # if obj[0] is None, refers to itself.
         LOGGER(f"Is itself? {self_info}")
         if self_info:
-            data = MessageToJson(TunnelSystem().get_gateway_tunnel().instance)  # Use the tunnel because is considering that the node is not exposed to the internet with a public IP. TODO allow to use the public IP instead of the tunnel.
+            try:
+                data = MessageToJson(TunnelSystem().get_gateway_tunnel().instance)  # Use the tunnel because is considering that the node is not exposed to the internet with a public IP. TODO allow to use the public IP instead of the tunnel.
+            except:
+                data = "No IP available."
             
         else:
             data = obj[2]
