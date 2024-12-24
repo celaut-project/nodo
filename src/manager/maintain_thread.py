@@ -188,6 +188,7 @@ def check_dev_clients():
 
 def manager_thread():
     init_interfaces()
+    submit_reputation(force_submit=True)
     while True:
         check_wanted_services()
         check_dev_clients()
