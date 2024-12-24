@@ -143,8 +143,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     LOGGER(f"fee: {fee}, SAFE_MIN_BOX_VALUE: {safe_min_out_box}")
     
     value_in_nanoergs = (__input_box_to_dict(selected_input_box)["value"] - fee - safe_min_out_box)
-    assert value_in_ergs >= SAFE_MIN_BOX_VALUE, ""
-    f"Value in nanoergs ({value_in_nanoergs}) must be greater than SAFE_MIN_BOX_VALUE ({SAFE_MIN_BOX_VALUE})"
+    assert value_in_nanoergs >= SAFE_MIN_BOX_VALUE, f"Value in nanoergs ({value_in_nanoergs}) must be greater than SAFE_MIN_BOX_VALUE ({SAFE_MIN_BOX_VALUE})"
     value_in_ergs = value_in_nanoergs  / 10**9
     LOGGER(f"value in ergs to be spent: {value_in_ergs}")
 
