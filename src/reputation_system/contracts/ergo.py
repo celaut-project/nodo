@@ -184,7 +184,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         else:
             LOGGER(f"Proof box not built for object {obj}")
 
-    LOGGER(f"Builded all proof box boxes.")
+    LOGGER(f"Builded all proof boxes.")
     # Basic wallet output box
     output_boxes = ergo.buildOutBox(receiver_wallet_addresses=[sender_address.toString()], amount_list=[value_in_ergs])
     if not output_boxes: LOGGER(f"No build out boxes.")
