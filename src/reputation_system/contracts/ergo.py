@@ -6,8 +6,7 @@ import jpype
 from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
-from src.gateway.utils import generate_gateway_instance
-from src.reputation_system.envs import CONTRACT, LEDGER
+from src.reputation_system.envs import CONTRACT
 from src.tunneling_system.tunnels import TunnelSystem
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
@@ -18,7 +17,6 @@ import java.lang
 from org.ergoplatform.sdk import *
 from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
-from src.utils.utils import get_network_name
 
 sigmastate = JPackage('sigmastate')
 
