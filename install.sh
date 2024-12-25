@@ -56,6 +56,17 @@ clone_repo() {
   return 1  # Failure after retries
 }
 
+# Check if the optional argument is provided
+if [ "$1" == "--enable-ssh" ]; then
+  printf "Running enable_ssh.sh script...\n"
+  ENABLE_SSH_SCRIPT="bash/enable_ssh.sh"
+  chmod +x "$ENABLE_SSH_SCRIPT"
+  if ! ./"$ENABLE_SSH_SCRIPT"; then
+    printf "Error: The script $ENABLE_SSH_SCRIPT failed to execute.\n" >&2
+    exit 1
+  fi
+fi
+
 # Check if the target directory already exists
 if [ -d "$TARGET_DIR" ]; then
   printf "Target directory $TARGET_DIR already exists. Performing git pull...\n"
