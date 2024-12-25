@@ -57,7 +57,7 @@ clone_repo() {
 }
 
 # Check if the optional argument is provided
-if [ "$1" == "--enable-ssh" ]; then
+if [ "$1" = "--enable-ssh" ]; then
   printf "Running enable_ssh.sh script...\n"
   ENABLE_SSH_SCRIPT="bash/enable_ssh.sh"
   chmod +x "$ENABLE_SSH_SCRIPT"
