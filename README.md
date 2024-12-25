@@ -37,7 +37,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 
 With SSH console access enabled:
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/master/install.sh | sudo sh -s -- --enable-ssh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/master/bash/enable_ssh.sh | sudo sh
 ```
 
 
