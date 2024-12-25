@@ -66,15 +66,24 @@ fi
 # Get the IP address of the server
 IP_ADDRESS=$(hostname -I | awk '{print $1}')
 
+# Get the actual username (even when running with sudo)
+if [ -n "$SUDO_USER" ]; then
+    ACTUAL_USER=$SUDO_USER
+else
+    ACTUAL_USER=$(whoami)
+fi
+
 message "Installation complete. Here's how to connect to your SSH server:"
 message "1. From another Linux/Mac terminal use:"
-message "   ssh username@$IP_ADDRESS"
+message "   ssh $ACTUAL_USER@$IP_ADDRESS"
 message ""
 message "2. From Windows:"
-message "   - Use PuTTY: Enter $IP_ADDRESS in the Host Name field"
-message "   - Or use PowerShell/Windows Terminal: ssh username@$IP_ADDRESS"
+message "   - Use PuTTY: Enter $IP_ADDRESS in the Host Name field and $ACTUAL_USER as username"
+message "   - Or use PowerShell/Windows Terminal: ssh $ACTUAL_USER@$IP_ADDRESS"
 message ""
-message "Note: Replace 'username' with your actual username on this server"
-message "Your server's IP address is: $IP_ADDRESS"
+message "Your connection details:"
+message "- IP address: $IP_ADDRESS"
+message "- Username: $ACTUAL_USER"
+message "- Port: 22 (default)"
 
 exit 0
