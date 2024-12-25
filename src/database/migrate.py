@@ -140,6 +140,24 @@ def create_tables(cursor):
                 status TEXT CHECK( status IN ('pending', 'payed', 'rejected') ) NOT NULL,
                 FOREIGN KEY (client_id) REFERENCES clients (id)
             )
+        ''',
+        "energy_consumption": '''
+            CREATE TABLE IF NOT EXISTS energy_consumption (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME,
+                cpu_percent REAL,
+                memory_usage REAL,
+                power_consumption REAL,
+                cost REAL
+            )
+        ''',
+        "monitoring_config": '''
+            CREATE TABLE IF NOT EXISTS monitoring_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                max_power_limit REAL,
+                cost_per_kwh REAL,
+                last_updated DATETIME
+            )
         '''
     }
 

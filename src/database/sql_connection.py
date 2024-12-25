@@ -6,7 +6,7 @@ import sqlite3
 import time
 from hashlib import sha3_256
 from threading import Lock
-from typing import Callable, List, Tuple, Optional
+from typing import Callable, Dict, Generator, List, Tuple, Optional
 from google.protobuf.json_format import MessageToJson
 
 import grpc
@@ -1456,6 +1456,25 @@ class SQLConnection(metaclass=Singleton):
             DELETE FROM deposit_tokens WHERE id = ?
         ''', (token_id,))
 
+    def insert_energy_record(self, cpu_percent: float, memory_usage: float, 
+                           power_consumption: float, cost: float):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO energy_consumption 
+            (timestamp, cpu_percent, memory_usage, power_consumption, cost)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (datetime.now(), cpu_percent, memory_usage, power_consumption, cost))
+        self.conn.commit()
+
+    def get_latest_energy_records(self, limit: int = 100) -> Generator[Dict, None, None]:
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM energy_consumption 
+            ORDER BY timestamp DESC LIMIT ?
+        ''', (limit,))
+        columns = [description[0] for description in cursor.description]
+        for row in cursor.fetchall():
+            yield dict(zip(columns, row))
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     # Slot concept here refers to the number of urls. Slot should be renamed on all the code because is incorrectly used.
