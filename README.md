@@ -30,9 +30,16 @@ a Dockerfile along with a configuration file and a zip file and get a specificat
 
 ## Installation
 
+Basic installation:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/master/install.sh | sudo sh
 ```
+
+With SSH console access enabled:
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/master/install.sh | sudo sh -s -- --enable-ssh
+```
+
 
 ### Note on Installation
 
