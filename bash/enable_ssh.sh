@@ -63,5 +63,18 @@ if command -v ufw >/dev/null 2>&1; then
     ufw allow ssh
 fi
 
-message "Installation complete. You can now connect via SSH."
+# Get the IP address of the server
+IP_ADDRESS=$(hostname -I | awk '{print $1}')
+
+message "Installation complete. Here's how to connect to your SSH server:"
+message "1. From another Linux/Mac terminal use:"
+message "   ssh username@$IP_ADDRESS"
+message ""
+message "2. From Windows:"
+message "   - Use PuTTY: Enter $IP_ADDRESS in the Host Name field"
+message "   - Or use PowerShell/Windows Terminal: ssh username@$IP_ADDRESS"
+message ""
+message "Note: Replace 'username' with your actual username on this server"
+message "Your server's IP address is: $IP_ADDRESS"
+
 exit 0
