@@ -110,11 +110,10 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     input_boxes = [selected_input_box]
     LOGGER(f"Using proof id -> {proof_id}")
     if proof_id:
-        # TODO IS FAILLING HERE. NEED TO FIX THIS.
         try:
             _contract = ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)
             _ergo_tree = _contract.getErgoTree()
-            _contract_addr = Address.fromErgoTree(_ergo_tree, NetworkType.TESTNET)
+            _contract_addr = Address.fromErgoTree(_ergo_tree, NetworkType.MAINNET)
             input_list = ergo.getInputBoxCovering(
                 amount_list=[SAFE_MIN_BOX_VALUE],
                 sender_address=_contract_addr,
