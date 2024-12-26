@@ -1,5 +1,5 @@
 from protos.gateway_pb2 import Instance
-from protos import gateway_pb2_grpc
+from protos import gateway_pb2_grpc, gateway_pb2
 from grpcbigbuffer.client import client_grpc
 import grpc
 
@@ -106,7 +106,9 @@ def connect(peer: str):
                         grpc.insecure_channel(peer)
                     ).IntroducePeer,
                     indices_serializer=Instance,
-                    input=gateway_instance
+                    input=gateway_instance,
+                    indices_parser=gateway_pb2.RecursionGuard,  # Recursion guard shouldn't be used here, another message should be used. TODO
+                    partitions_message_mode_parser=True
                 ))
                 
                 print(_result)

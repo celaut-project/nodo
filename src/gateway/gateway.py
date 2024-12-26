@@ -90,6 +90,8 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 partitions_message_mode=True
             ), None)
         )
+        
+        yield from grpcbf.serialize_to_buffer(gateway_pb2.RecursionGuard(token="OK"))  # Recursion guard shouldn't be used here, another message should be used. TODO
 
     def GenerateClient(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?
