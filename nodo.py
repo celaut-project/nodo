@@ -131,7 +131,7 @@ if __name__ == '__main__':
               "\n- compile <project directory>"
               "\n- config"
               "\n- tui"
-              "\n- status"
+              "\n- info"
               "\n- logs"
               "\n- export"
 
@@ -154,7 +154,7 @@ if __name__ == '__main__':
     else:
         match sys.argv[1]:
 
-            case "status":
+            case "info":
                 try:
                     status = "running" if is_nodo_service_running() else "not running"
                     print(f"Nodo service is currently {status}.", flush=True)
@@ -165,7 +165,12 @@ if __name__ == '__main__':
 
                 print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}", flush=True)
 
-                payment_info = print_payment_info()
+                try:
+                    payment_info = print_payment_info()
+                except:
+                    print("\n> Error getting payment info and reputation proof.\n", flush=True)
+                    payment_info = "N/A"
+                    
                 reputation_proof_id = env_manager.get_env('REPUTATION_PROOF_ID')
 
                 print(
