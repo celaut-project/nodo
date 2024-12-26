@@ -243,7 +243,6 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
     client_id = sc.get_peer_client(peer_id=peer_id)
     if client_id: return client_id
     if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
-        log.LOGGER('Peer ' + peer_id + ' is not available.')
         raise Exception('Peer not available.')
 
     log.LOGGER('Generate new client for peer ' + peer_id)
