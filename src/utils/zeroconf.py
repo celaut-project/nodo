@@ -86,16 +86,19 @@ def connect(peer: str):
         print('\nAdded peer', peer)
         
         if SEND_INSTANCE:
-            print(f'Sending instance to peer.')
-            print(f'Peer: {peer}')
+            print(f'Sending instance to peer: {peer}')
             
-            # Could be refactored with Gateway.GetInstance
-            if TunnelSystem().from_tunnel(ip=peer):
-                gateway_instance = TunnelSystem().get_gateway_tunnel()
-            else:
-                gateway_instance = generate_gateway_instance(
-                    network=get_network_name(direction=peer)
-                )
+            try:
+                # Could be refactored with Gateway.GetInstance
+                if TunnelSystem().from_tunnel(ip=peer):
+                    gateway_instance = TunnelSystem().get_gateway_tunnel()
+                else:
+                    gateway_instance = generate_gateway_instance(
+                        network=get_network_name(direction=peer)
+                    )
+            except Exception as e:
+                print(f"Error generating instance for peer {peer}. {e}")
+                return
             
             try:
                 _result = next(client_grpc(
