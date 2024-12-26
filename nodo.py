@@ -169,7 +169,7 @@ if __name__ == '__main__':
                     payment_info = print_payment_info()
                 except Exception as e:
                     print("\n> Error getting payment info and reputation proof.\n", flush=True)
-                    log(f"Error getting payment info and reputation proof {e}.")
+                    log.LOGGER(f"Error getting payment info and reputation proof {e}.")
                     payment_info = "N/A"
                     
                 reputation_proof_id = env_manager.get_env('REPUTATION_PROOF_ID')
