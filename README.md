@@ -35,7 +35,8 @@ Basic installation:
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/master/install.sh | sudo sh
 ```
 
-With SSH console access enabled:
+#### Extra commands
+Enable SSH console access:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/master/bash/enable_ssh.sh | sudo sh
 ```
