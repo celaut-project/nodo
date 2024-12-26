@@ -23,6 +23,7 @@ from src.utils.env import EnvManager
 
 env_manager = EnvManager()
 
+SUBMIT_REPUTATION_AT_INIT = env_manager.get_env("SUBMIT_REPUTATION_AT_INIT")
 MIN_SLOTS_OPEN_PER_PEER = env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER")
 MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
 TOTAL_REFILLED_DEPOSIT = env_manager.get_env("TOTAL_REFILLED_DEPOSIT")
@@ -188,7 +189,8 @@ def check_dev_clients():
 
 def manager_thread():
     init_interfaces()
-    submit_reputation(force_submit=True)
+    if SUBMIT_REPUTATION_AT_INIT: 
+        submit_reputation(force_submit=True)
     while True:
         check_wanted_services()
         check_dev_clients()

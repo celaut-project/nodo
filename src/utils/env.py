@@ -171,6 +171,7 @@ env_manager.get_env("PAYMENT_MANAGER_ITERATION_TIME", 86_400)
 env_manager.get_env("REPUTATION_PROOF_ID", "")
 env_manager.get_env("ERGO_DONATION_WALLET", "9gGZp7HRAFxgGWSwvS4hCbxM2RpkYr6pHvwpU4GPrpvxY7Y2nQo")
 env_manager.get_env("ERGO_DONATION_PERCENTAGE", "0.00")
+env_manager.get_env("SUBMIT_REPUTATION_AT_INIT", False)
 
 # Logging and Memory Settings
 env_manager.get_env("MEMORY_LOGS", False)
