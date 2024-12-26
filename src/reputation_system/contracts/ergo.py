@@ -103,9 +103,15 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         raise Exception("No input box available.")
 
     total_token_value = int(sum([obj[1] for obj in objects])) # type: ignore
-    assert env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT') == total_token_value, (
-        "The sum of the values to be spent must equal the total reputation token amount."
-    )
+    _expected_total_reputation = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
+    
+    if not total_token_value:
+        # If all the objects have a percentage of 0, then the total reputation value must be divided equally.  This is because division by zero was avoided on the sql function.
+        objects = [(obj[0], _expected_total_reputation/len(objects), obj[2]) for obj in objects]
+    
+    assert _expected_total_reputation == total_token_value, (
+        "The sum of the values to be spent must equal the total reputation token amount.")
+    
     LOGGER(f"Needs to be spent {total_token_value} reputation value.")
     input_boxes = [selected_input_box]
     LOGGER(f"Using proof id -> {proof_id}")
