@@ -110,6 +110,7 @@ service Gateway {
     rpc ModifyGasDeposit(stream buffer.Buffer) returns (stream buffer.Buffer) {}  // ModifyGasDepositInput -> ModifyGasDepositOutput
 
     rpc GetInstance(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  -> Instance
+    rpc IntroducePeer(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Instance -> 
     rpc GenerateClient(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  -> Client
     rpc GenerateDepositToken(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  Client -> TokenMessage
 
