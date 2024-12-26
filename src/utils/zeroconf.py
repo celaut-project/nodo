@@ -86,6 +86,8 @@ def connect(peer: str):
         print('\nAdded peer', peer)
         
         if SEND_INSTANCE:
+            print(f'Sending instance to peer {peer}')
+            
             # Could be refactored with Gateway.GetInstance
             if TunnelSystem().from_tunnel(ip=peer):
                 gateway_instance = TunnelSystem().get_gateway_tunnel()
@@ -94,14 +96,19 @@ def connect(peer: str):
                     network=get_network_name(direction=peer)
                 )
             
-            _result = next(client_grpc(
-                method=gateway_pb2_grpc.GatewayStub(
-                    grpc.insecure_channel(peer)
-                ).IntroducePeer,
-                indices_serializer=Instance,
-                input=gateway_instance
-            ))
+            try:
+                _result = next(client_grpc(
+                    method=gateway_pb2_grpc.GatewayStub(
+                        grpc.insecure_channel(peer)
+                    ).IntroducePeer,
+                    indices_serializer=Instance,
+                    input=gateway_instance
+                ))
+                
+                print(_result)
+                
+            except Exception as e:
+                print(f"Error sending instance to peer {peer}. {e}")
             
-            print(_result)
     except Exception as e:
         print(e)
