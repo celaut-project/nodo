@@ -86,7 +86,8 @@ def connect(peer: str):
         print('\nAdded peer', peer)
         
         if SEND_INSTANCE:
-            print(f'Sending instance to peer {peer}')
+            print(f'Sending instance to peer.')
+            print(f'Peer: {peer}')
             
             # Could be refactored with Gateway.GetInstance
             if TunnelSystem().from_tunnel(ip=peer):
