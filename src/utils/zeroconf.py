@@ -4,9 +4,13 @@ from grpcbigbuffer.client import client_grpc
 import grpc
 
 from src.manager.manager import add_peer_instance
+from src.tunneling_system.tunnels import TunnelSystem
 from src.utils import logger as log
 from src.gateway.utils import generate_gateway_instance
 from src.database.sql_connection import SQLConnection
+from src.utils.utils import get_network_name
+
+SEND_INSTANCE = True  # TODO Variable, true only in case of  ERG amount not sufficient to send instance to the reputation system.
 
 sc = SQLConnection()
 
@@ -80,5 +84,24 @@ def connect(peer: str):
             ))
         )
         print('\nAdded peer', peer)
+        
+        if SEND_INSTANCE:
+            # Could be refactored with Gateway.GetInstance
+            if TunnelSystem().from_tunnel(ip=peer):
+                gateway_instance = TunnelSystem().get_gateway_tunnel()
+            else:
+                gateway_instance = generate_gateway_instance(
+                    network=get_network_name(direction=peer)
+                )
+            
+            _result = next(client_grpc(
+                method=gateway_pb2_grpc.GatewayStub(
+                    grpc.insecure_channel(peer)
+                ).IntroducePeer,
+                indices_serializer=Instance,
+                input=gateway_instance
+            ))
+            
+            print(_result)
     except Exception as e:
         print(e)
