@@ -107,9 +107,14 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     
     if not external_token_value:
         # If all the objects have a percentage of 0, then the total reputation value must be divided equally.  This is because division by zero was avoided on the sql function.
-        objects = [(obj[0], _expected_total_reputation / len(objects), obj[2]) if obj[0] 
-                   else (obj[0], obj[1], obj[2])  # In case of self reputation, the value is not divided.
-                   for obj in objects]
+        _no_self = any(obj[0] for obj in objects)
+        _num = len(objects) if _no_self else len(objects) - 1
+        _total = _expected_total_reputation if _no_self else _expected_total_reputation - 1
+
+        objects = [
+            (obj[0], _total / _num, obj[2]) if obj[0] else (obj[0], obj[1], obj[2])
+            for obj in objects
+        ]
     
     total_token_value = int(sum([obj[1] for obj in objects]))
                 
