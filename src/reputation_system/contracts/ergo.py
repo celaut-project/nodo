@@ -110,7 +110,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         objects = [(obj[0], _expected_total_reputation/len(objects), obj[2]) for obj in objects]
     
     assert _expected_total_reputation == total_token_value, (
-        "The sum of the values to be spent must equal the total reputation token amount.")
+        f"The sum of the values to be spent must equal the total reputation token amount ({_expected_total_reputation}) and not {total_token_value}")
     
     LOGGER(f"Needs to be spent {total_token_value} reputation value.")
     input_boxes = [selected_input_box]
