@@ -110,11 +110,15 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         _no_self = any(obj[0] for obj in objects)
         _num = len(objects) if _no_self else len(objects) - 1
         _total = _expected_total_reputation if _no_self else _expected_total_reputation - 1
+        
+        LOGGER(f"SELF: {not _no_self}, NUM: {_num}, TOTAL: {_total}")
 
         objects = [
             (obj[0], _total / _num, obj[2]) if obj[0] else (obj[0], obj[1], obj[2])
             for obj in objects
         ]
+        
+    LOGGER(f"Objects: {objects}")
     
     total_token_value = int(sum([obj[1] for obj in objects]))
                 
