@@ -102,19 +102,17 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     if not selected_input_box:
         raise Exception("No input box available.")
 
-    total_token_value = int(sum([obj[1] for obj in objects if obj[0]])) # type: ignore  # In case of self reputation, the value is not divided.
+    external_token_value = int(sum([obj[1] for obj in objects if obj[0]])) # type: ignore  # In case of self reputation, the value is not divided.
     _expected_total_reputation = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
     
-    if not total_token_value:
+    if not external_token_value:
         # If all the objects have a percentage of 0, then the total reputation value must be divided equally.  This is because division by zero was avoided on the sql function.
         objects = [(obj[0], _expected_total_reputation / len(objects), obj[2]) if obj[0] 
                    else (obj[0], obj[1], obj[2])  # In case of self reputation, the value is not divided.
                    for obj in objects]
     
-    for obj in objects:
-        if obj[1] is None:
-            total_token_value += 1
-    
+    total_token_value = int(sum([obj[1] for obj in objects]))
+                
     assert _expected_total_reputation == total_token_value, (
         f"The sum of the values to be spent must equal the total reputation token amount ({_expected_total_reputation}) and not {total_token_value}")
     
