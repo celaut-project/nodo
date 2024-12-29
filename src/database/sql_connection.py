@@ -535,9 +535,7 @@ class SQLConnection(metaclass=Singleton):
         Returns:
             bool: True if the submission was successful, False otherwise.
         """
-        
-        logger.LOGGER(f'Attempting to submit reputation proofs to the ledger where submission threshold is {env_manager.get_env("LEDGER_REPUTATION_SUBMISSION_THRESHOLD")}')
-        
+ 
         try:
             # Fetch all peers' data along with slots, URIs, and contracts in one query
             result = self._execute('''
