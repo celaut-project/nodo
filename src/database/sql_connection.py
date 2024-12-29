@@ -535,6 +535,9 @@ class SQLConnection(metaclass=Singleton):
         Returns:
             bool: True if the submission was successful, False otherwise.
         """
+        
+        logger.LOGGER(f'Attempting to submit reputation proofs to the ledger where submission threshold is {env_manager.get_env("LEDGER_REPUTATION_SUBMISSION_THRESHOLD")}')
+        
         try:
             # Fetch all peers' data along with slots, URIs, and contracts in one query
             result = self._execute('''
@@ -599,6 +602,7 @@ class SQLConnection(metaclass=Singleton):
             needs_submit = force_submit
             
             if peers_dict:  # If peers are found
+                logger.LOGGER(f'Peers found in the database: {peers_dict.keys()}')
                 to_submit = []
                 token_amount = TOTAL_REPUTATION_TOKEN_AMOUNT -1  # Subtract 1 to account for the node instance
 
@@ -614,18 +618,21 @@ class SQLConnection(metaclass=Singleton):
 
                         # Calculate the percentage of the total reputation token amount
                         if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
+                            logger.LOGGER(f'Peer {peer_id} with proof {reputation_proof_id} meets the submission threshold.')
                             needs_submit = True
                             percentage_amount = (reputation_score / total_amount) * token_amount if total_amount else 0
                             to_submit.append((reputation_proof_id, percentage_amount, instance_json))
 
                         # Proof percentage doesn't need to be changed itself, but needs to be updated if others do.
                         elif last_index_on_ledger > 0:
+                            logger.LOGGER(f'Peer {peer_id} with proof {reputation_proof_id} does not meet the submission threshold, but is included in the proof.')
                             percentage_amount = (reputation_score / total_amount) * token_amount if total_amount else 0
                             to_submit.append((reputation_proof_id, percentage_amount, instance_json))
 
                 to_submit.append((None, 1, None))  # This will be treated as a pointer to itself, used to include the node instance in the proof
                 
             else:  # If no peers are found, submit the total amount of reputation tokens, but only if force_submit is True
+                logger.LOGGER('No peers found in the database.')
                 to_submit = [(None, TOTAL_REPUTATION_TOKEN_AMOUNT, None)]
                 
             
