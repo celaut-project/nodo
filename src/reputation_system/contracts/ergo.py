@@ -24,6 +24,7 @@ sigmastate = JPackage('sigmastate')
 # Constants
 env_manager = EnvManager()
 ERGO_NODE_URL = lambda: env_manager.get_env("ERGO_NODE_URL")
+SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF = env_manager.get_env('SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF')
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
 DEFAULT_TOKEN_AMOUNT = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
@@ -171,12 +172,13 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     # Reputation proof output box
     for obj in objects:
         self_info = not obj[0]  # if obj[0] is None, refers to itself.
-        LOGGER(f"Is itself? {self_info}")
         if self_info:
-            try:
-                data = MessageToJson(TunnelSystem().get_gateway_tunnel().instance)  # Use the tunnel because is considering that the node is not exposed to the internet with a public IP. TODO allow to use the public IP instead of the tunnel.
-            except:
-                data = "No IP available."
+            data = "No IP available."
+            if SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF:
+                try:
+                    data = MessageToJson(TunnelSystem().get_gateway_tunnel().instance)
+                except Exception as e:
+                    LOGGER(f"Exception getting gateway tunnel instance: {str(e)}")
             
         else:
             data = obj[2]
