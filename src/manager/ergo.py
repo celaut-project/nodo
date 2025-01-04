@@ -67,13 +67,28 @@ def __get_refresh_peers() -> Dict[str, Dict]:
     return available_peers
     
 def check_ergo_node_availability():
-    if __available_ergo_node(None):
+    """
+    Checks the availability of the current Ergo node. If the current node is not available,
+    it attempts to find a new available node from refreshed peers and updates the environment
+    variable "ERGO_NODE_URL" with the new node URL.
+    - Retrieves the current Ergo node URL from the environment.
+    - Checks if the current Ergo node is available.
+    - If not available, logs the unavailability and fetches a list of refreshed available peers.
+    - If no available peers are found and the current node URL has not been manually changed,
+      logs the absence of available nodes and clears the "ERGO_NODE_URL" environment variable.
+    - If available peers are found, updates the "ERGO_NODE_URL" environment variable with the
+      first available peer and logs the update.
+    Note: Check for equality in case it has been manually changed.
+    """
+    
+    current_ergo_node = env_manager.get_env("ERGO_NODE_URL")
+    if __available_ergo_node(current_ergo_node):
         return
     
-    log(f"Ergo node {env_manager.get_env('ERGO_NODE_URL')} is not available.")
+    log(f"Ergo node {current_ergo_node} is not available.")
     availables = __get_refresh_peers()  # New refreshed available peers.
     
-    if not availables:
+    if not availables and current_ergo_node == env_manager.get_env("ERGO_NODE_URL"): 
         log("No available Ergo nodes found.")
         env_manager.write_env("ERGO_NODE_URL", "")
         return
