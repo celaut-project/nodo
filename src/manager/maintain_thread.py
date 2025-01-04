@@ -9,13 +9,13 @@ import docker as docker_lib
 
 from protos import celaut_pb2 as celaut, gateway_pb2_grpc, gateway_pb2
 from protos.gateway_pb2_grpcbf import StartService_input_indices, StartService_input_message_mode
+from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import prune_container, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import increase_deposit_on_peer, init_interfaces
 from src.reputation_system.interface import update_reputation, submit_reputation
 from src.utils import logger as log
-from src.utils.network import available_ergo_node
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.utils.env import DOCKER_CLIENT, SHA3_256_ID, EnvManager
@@ -192,8 +192,7 @@ def manager_thread():
     if SUBMIT_REPUTATION_AT_INIT: 
         submit_reputation(force_submit=True)
     while True:
-        if not available_ergo_node():
-            pass # TODO change_ergo_node()
+        check_ergo_node_availability()
         check_wanted_services()
         check_dev_clients()
         maintain_containers()

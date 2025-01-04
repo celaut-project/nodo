@@ -21,14 +21,4 @@ def get_local_ip() -> str:
     except Exception as e:
         print(f"Error getting local IP: {e}")
         return None
-
-def available_ergo_node() -> bool:
-    ergo_node_url = env_manager.get_env("ERGO_NODE_URL")
-    _ip, _port = ergo_node_url.split(":")
-    try:
-        response = socket.create_connection((_ip, _port), timeout=5)
-        response.close()
-        return True
-    except Exception as e:
-        print(f"Error connecting to Ergo node: {e}")
-        return False
+    
