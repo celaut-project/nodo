@@ -1,7 +1,4 @@
 import socket
-from src.utils.env import EnvManager
-
-env_manager = EnvManager()
 
 def get_free_port() -> int:
     with socket.socket() as s:
