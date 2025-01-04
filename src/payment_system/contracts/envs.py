@@ -47,6 +47,6 @@ def print_payment_info() -> str:
         f"Sending Wallet: {ergo_addr}, Amount: {ergo_amount} ERGs \n"
         f"Receiver Wallet: {aux_addr}, Received: {aux_amount} ERGs \n"
         f"Total: {total_amount} ERGs \n"
-        "\n**Important Note**: The node periodically transfers funds from the Receiver Wallet to the Sending Wallet, where most deposits accumulate. To increase the node's deposit, please send funds to the Sending Wallet Address."
+       #  "\n**Important Note**: The node periodically transfers funds from the Receiver Wallet to the Sending Wallet, where most deposits accumulate. To increase the node's deposit, please send funds to the Sending Wallet Address."
     )
 

@@ -179,8 +179,8 @@ if __name__ == '__main__':
                     flush=True
                 )
 
-                dev_client = SQLConnection().get_dev_clients()[0]
-                print(f"Dev client for dev purposes: {dev_client}")
+                # dev_client = SQLConnection().get_dev_clients()[0]
+                # print(f"Dev client for dev purposes: {dev_client}")
 
             case "logs":
                 os.system(f"tail -f {MAIN_DIR}/storage/app.log")
