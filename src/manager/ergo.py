@@ -41,10 +41,25 @@ def __get_refresh_peers() -> Dict[str, Dict]:
         peers = json.load(f)
     
     available_peers = {}
-    for peer, info in peers.items():
-        node_info = __available_ergo_node(peer)
-        if node_info:
-            available_peers[peer] = node_info
+    checked_peers = set(peers.keys())
+    
+    def fetch_peers(url: str):
+        try:
+            with urllib.request.urlopen(f"{url}/peers/connected") as response:
+                data = json.loads(response.read().decode())
+                for peer in data:
+                    rest_api_url = peer.get("restApiUrl")
+                    if rest_api_url and rest_api_url not in checked_peers:
+                        checked_peers.add(rest_api_url)
+                        node_info = __available_ergo_node(rest_api_url)
+                        if node_info:
+                            available_peers[rest_api_url] = node_info
+                            fetch_peers(rest_api_url)
+        except Exception as e:
+            log(f"Error fetching peers from {url}: {e}")
+    
+    for peer in peers.keys():
+        fetch_peers(peer)
     
     with open(http_peers_file, 'w') as f:
         json.dump(available_peers, f)
