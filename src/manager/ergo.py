@@ -10,7 +10,11 @@ env_manager = EnvManager()
 def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
     ergo_node_url = env_manager.get_env("ERGO_NODE_URL") if not url else url
     try:
-        response = socket.create_connection((ergo_node_url.split(":")[0], int(ergo_node_url.split(":")[1])), timeout=5)
+        parsed_url = urllib.parse.urlparse(ergo_node_url)
+        host = parsed_url.hostname
+        port = parsed_url.port if parsed_url.port else (443 if parsed_url.scheme == "https" else 80)
+        
+        response = socket.create_connection((host, port), timeout=5)
         response.close()
         
         # Check the /info endpoint
