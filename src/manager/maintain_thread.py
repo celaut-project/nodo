@@ -24,6 +24,7 @@ from src.utils.env import EnvManager
 
 env_manager = EnvManager()
 
+SHORT_INTERVAL_COUNT = env_manager.get_env("SHORT_INTERVAL_COUNT")
 SUBMIT_REPUTATION_AT_INIT = env_manager.get_env("SUBMIT_REPUTATION_AT_INIT")
 MIN_SLOTS_OPEN_PER_PEER = env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER")
 MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
@@ -188,16 +189,28 @@ def check_dev_clients():
 
 
 def manager_thread():
+    
+    # Functions to be executed at the beginning
     init_interfaces()
-    if SUBMIT_REPUTATION_AT_INIT: 
-        submit_reputation(force_submit=True)
+    check_ergo_node_availability()
+    if SUBMIT_REPUTATION_AT_INIT: submit_reputation(force_submit=True)
+    
+    short_interval_count = 0
     while True:
-        check_ergo_node_availability()
+        if short_interval_count == int(SHORT_INTERVAL_COUNT):
+            short_interval_count = 0
+            
+            # Functions to be executed every long interval
+            check_ergo_node_availability()
+            submit_reputation()
+        
+        # Functions to be executed every short interval
         check_wanted_services()
         check_dev_clients()
         maintain_containers()
-        submit_reputation()
         maintain_clients()
         peer_deposits()
         DuplicateGrabber().manager()
+        
         sleep(MANAGER_ITERATION_TIME)
+        short_interval_count += 1
