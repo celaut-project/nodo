@@ -6,7 +6,6 @@ import src.manager.resources_manager as iobd
 from src.payment_system.contracts.envs import print_payment_info
 from src.utils.env import EnvManager
 from src.utils.network import get_local_ip
-from src.database.sql_connection import SQLConnection
 
 env_manager = EnvManager()
 
