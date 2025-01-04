@@ -34,7 +34,7 @@ update_env_variable() {
 
 # Function to validate URLs
 validate_url() {
-    if [[ $1 =~ ^https?://.* ]]; then
+    if [[ $1 =~ ^http://.* ]] || [[ $1 =~ ^https://.* ]]; then
         return 0
     else
         return 1
