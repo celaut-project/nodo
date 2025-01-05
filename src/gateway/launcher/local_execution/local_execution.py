@@ -98,6 +98,7 @@ def local_execution(
             # for host_ip in host_ip_list:
             try:
                 log.LOGGER(F"by local {by_local}")
+                log.LOGGER(f"Getting network name from father ip {father_ip}")
                 network = utils.get_network_name(direction=father_ip)
                 log.LOGGER(f"Getting local ip from network {network}")
                 _ip: str = utils.get_local_ip_from_network(
