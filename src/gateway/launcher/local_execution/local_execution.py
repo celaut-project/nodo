@@ -90,34 +90,39 @@ def local_execution(
 
     # TODO END OF virtualizers.docker.execute.py
 
-    for internal, external in assigment_ports.items():
-        uri_slot = celaut.Instance.Uri_Slot()
-        uri_slot.internal_port = internal
+    try:
+        for internal, external in assigment_ports.items():
+            uri_slot = celaut.Instance.Uri_Slot()
+            uri_slot.internal_port = internal
 
-        # for host_ip in host_ip_list:
-        _ip: str = utils.get_local_ip_from_network(
-            network=utils.get_network_name(direction=father_ip)
-        ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
-        _port: int = external
+            # for host_ip in host_ip_list:
+            _ip: str = utils.get_local_ip_from_network(
+                network=utils.get_network_name(direction=father_ip)
+            ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
+            _port: int = external
 
-        log.LOGGER(f"Required tunnel to expose the service {require_tunnel} from ip {father_ip}")
-        if require_tunnel:
-            _response = TunnelSystem().generate_tunnel(ip=_ip, port=_port)
-            if _response:
-                _ip, _port = _response
-            else:
-                _msg = "Any tunnel available. Instance can't be serve."
-                log.LOGGER(_msg)
-                # TODO Delete container.
-                raise Exception(_msg)
+            log.LOGGER(f"Required tunnel to expose the service {require_tunnel} from ip {father_ip}")
+            if require_tunnel:
+                _response = TunnelSystem().generate_tunnel(ip=_ip, port=_port)
+                if _response:
+                    _ip, _port = _response
+                else:
+                    _msg = "Any tunnel available. Instance can't be serve."
+                    log.LOGGER(_msg)
+                    # TODO Delete container.
+                    raise Exception(_msg)
 
-        log.LOGGER(f"Using uri {_ip}:{_port}")
-        uri_slot.uri.append(
-            celaut.Instance.Uri(
-                ip=_ip,
-                port=_port
+            log.LOGGER(f"Using uri {_ip}:{_port}")
+            uri_slot.uri.append(
+                celaut.Instance.Uri(
+                    ip=_ip,
+                    port=_port
+                )
             )
-        )
+            
+    except Exception as e:
+        log.LOGGER(f"Exception setting uri_slot: {str(e)}")
+        raise e
 
     instance = celaut.Instance(
             api=service.api,
