@@ -30,7 +30,7 @@ def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
         log(f"Error connecting to Ergo node: {e}")
         return None
 
-def __get_refresh_peers() -> Dict[str, Dict]:
+def get_refresh_peers() -> Dict[str, Dict]:
     http_peers_file = env_manager.get_env("ERGO_HTTP_PEERS")
     if not os.path.exists(http_peers_file):
         with open(http_peers_file, 'w') as f:
@@ -44,17 +44,20 @@ def __get_refresh_peers() -> Dict[str, Dict]:
     
     def fetch_peers(url: str):
         try:
-            with urllib.request.urlopen(f"{url}/peers/connected") as response:
-                data = json.loads(response.read().decode())
-                for peer in data:
-                    rest_api_url = peer.get("restApiUrl")
-                    if rest_api_url and rest_api_url not in checked_peers:
-                        checked_peers.add(rest_api_url)
-                        node_info = __available_ergo_node(rest_api_url)
-                        if node_info:
-                            available_peers[rest_api_url] = node_info
-                            fetch_peers(rest_api_url)
-        except Exception as e:
+            response = requests.get(f"{url}/peers/connected", timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            for peer in data:
+                rest_api_url = peer.get("restApiUrl")
+                if rest_api_url and rest_api_url not in checked_peers:
+                    checked_peers.add(rest_api_url)
+                    
+                    node_info = __available_ergo_node(rest_api_url)
+                    if node_info:
+                        available_peers[rest_api_url] = node_info
+                        fetch_peers(rest_api_url)
+        except requests.RequestException as e:
             log(f"Error fetching peers from {url}: {e}")
     
     for peer in peers.keys():
@@ -87,7 +90,7 @@ def check_ergo_node_availability():
         return
     
     log(f"Ergo node {current_ergo_node} is not available.")
-    availables = __get_refresh_peers()  # New refreshed available peers.
+    availables = get_refresh_peers()  # New refreshed available peers.
     
     if not availables and current_ergo_node == env_manager.get_env("ERGO_NODE_URL"): 
         log("No available Ergo nodes found.")

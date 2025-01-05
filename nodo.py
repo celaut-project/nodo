@@ -142,7 +142,7 @@ if __name__ == '__main__':
             "\n- test <test name>"
             "\n- rundev <repository path>"
             "\n- submit_reputation"
-            "\n- check_ergo_node_availability"
+            "\n- refresh_ergo_nodes"
             "\n- daemon"
             "\n\n",
               flush=True)
@@ -225,9 +225,9 @@ if __name__ == '__main__':
                 from src.reputation_system.interface import submit_reputation
                 submit_reputation(force_submit=True)
                 
-            case 'check_ergo_node_availability':
-                from src.manager.ergo import check_ergo_node_availability
-                check_ergo_node_availability()
+            case 'refresh_ergo_nodes':
+                from src.manager.ergo import get_refresh_peers
+                get_refresh_peers()
 
             case 'daemon':
                 from src.serve import serve
