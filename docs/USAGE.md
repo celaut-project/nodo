@@ -162,6 +162,7 @@ For users exploring deeper functionality:
 - `test <test name>`: Executes tests for specific services or features.
 - `rundev <repository path>`: Run development version from specified repo.
 - `submit_reputation`: Force submits reputation info.
+- `check_ergo_node_availability`: Check ergo node availability.
 - `daemon`: Starts Nodo in daemon mode.
 
 ## Getting Help
