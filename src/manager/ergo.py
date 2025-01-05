@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict
-import os, json, socket, urllib
+import os, json, requests
 
 from src.utils.env import EnvManager
 from src.utils.logger import LOGGER as log
@@ -10,28 +10,23 @@ env_manager = EnvManager()
 def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
     ergo_node_url = env_manager.get_env("ERGO_NODE_URL") if not url else url
     try:
-        parsed_url = urllib.parse.urlparse(ergo_node_url)
-        host = parsed_url.hostname
-        port = parsed_url.port if parsed_url.port else (443 if parsed_url.scheme == "https" else 80)
-        
-        response = socket.create_connection((host, port), timeout=5)
-        response.close()
-        
-        # Check the /info endpoint
         info_url = f"{ergo_node_url}/info"
-        with urllib.request.urlopen(info_url) as response:
-            data = json.loads(response.read().decode())
-            if data.get("network") == "mainnet" and data.get("genesisBlockId") == env_manager.get_env("ERGO_GENESIS_BLOCK_ID"):
-                return {
-                    "isMining": data.get("isMining", False),
-                    "parameters": data.get("parameters", {}),
-                    "eip27Supported": data.get("eip27Supported", False),
-                    "appVersion": data.get("appVersion", "unknown")
-                }
-            else:
-                log(f"Ergo node {ergo_node_url} is not on the mainnet or has an incorrect genesis block ID.")
-                return None
-    except Exception as e:
+        response = requests.get(info_url)
+        response.raise_for_status() 
+
+        data = response.json()
+
+        if data.get("network") == "mainnet" and data.get("genesisBlockId") == env_manager.get_env("ERGO_GENESIS_BLOCK_ID"):
+            return {
+                "isMining": data.get("isMining", False),
+                "parameters": data.get("parameters", {}),
+                "eip27Supported": data.get("eip27Supported", False),
+                "appVersion": data.get("appVersion", "unknown")
+            }
+        else:
+            log(f"Ergo node {ergo_node_url} is not on the mainnet or has an incorrect genesis block ID.")
+            return None
+    except requests.exceptions.RequestException as e:
         log(f"Error connecting to Ergo node: {e}")
         return None
 
