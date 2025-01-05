@@ -164,7 +164,10 @@ def get_network_name(direction: str) -> str:
         direction (str): The direction to get the network name for.
         
     Returns:
-        str: The network name.
+        str: The network name. Returns 'localhost' if no matching network is found.
+        
+    Raises:
+        Exception: If there's an error processing the network interfaces
     """
     direction = direction.replace("http://", "").replace("https://", "").split(':')[0]
     
@@ -180,6 +183,10 @@ def get_network_name(direction: str) -> str:
                     return network
             except KeyError:
                 continue
+        
+        # If no network is found, return localhost
+        return "localhost"
+     
     except Exception as e:
         raise Exception('Error getting the network name: ' + str(e))
 
