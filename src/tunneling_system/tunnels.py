@@ -50,29 +50,33 @@ class TunnelSystem(metaclass=Singleton):
 
     def __initialize_providers(self) -> None:
         ngrok_key = NGROK_TUNNELS_KEY
-        tokens = [(ngrok_key, 3)] if ngrok_key else []
+        if ngrok_key:
+            tokens = [(ngrok_key, 3)] if ngrok_key else []
 
-        for i, token_t in enumerate(tokens):
-            token, max_i = token_t
-            token = token.strip()
-            if token:
-                provider_name = f"ngrok_{i+1}"
-                self.providers[provider_name] = Provider(
-                    name=provider_name,
-                    auth_token=token,
-                    max_instances=max_i
-                )
-                LOGGER(f"Added provider: {provider_name}")
+            for i, token_t in enumerate(tokens):
+                token, max_i = token_t
+                token = token.strip()
+                if token:
+                    provider_name = f"ngrok_{i+1}"
+                    self.providers[provider_name] = Provider(
+                        name=provider_name,
+                        auth_token=token,
+                        max_instances=max_i
+                    )
+                    LOGGER(f"Added provider: {provider_name}")
 
     def __select_provider(self) -> Optional[str]:
         for name, provider in self.providers.items():
             if provider.can_add_tunnel():
                 ngrok.set_auth_token(provider.auth_token)
                 return name
-        LOGGER("No available tunnel provider or maximum instances reached.")
+        return None
 
     def generate_tunnel(self, ip: str, port: int) -> Optional[Tuple[str, int]]:
         provider = self.__select_provider()
+        if not provider:
+            return None
+        
         try:
             listener = ngrok.connect(f"{ip}:{port}", proto="tcp")
             LOGGER(f"""Ingress established at: {listener.public_url} for the
