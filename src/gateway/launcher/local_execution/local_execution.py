@@ -96,19 +96,9 @@ def local_execution(
             uri_slot.internal_port = internal
 
             # for host_ip in host_ip_list:
-            try:
-                log.LOGGER(F"by local {by_local}")
-                log.LOGGER(f"Getting network name from father ip {father_ip}")
-                network = utils.get_network_name(direction=father_ip)
-                log.LOGGER(f"Getting local ip from network {network}")
-                _ip: str = utils.get_local_ip_from_network(
-                    network=network,
+            _ip: str = utils.get_local_ip_from_network(
+                    network=utils.get_network_name(direction=father_ip),
                 ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
-                log.LOGGER(f"Local ip {_ip}")
-            except Exception as e:
-                log.LOGGER(f"Exception setting ip: {str(e)}")
-                raise e
-            
             _port: int = external
 
             log.LOGGER(f"Required tunnel to expose the service {require_tunnel} from ip {father_ip}")
