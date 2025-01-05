@@ -115,127 +115,143 @@ def block_all(container_id: str) -> bool:
     """
     Block all outgoing traffic from a specific container.
     """
-    if not __validate_container_id(container_id):
-        raise ValueError(f"Invalid or non-running container: {container_id}")
+    try:
+        if not __validate_container_id(container_id):
+            raise ValueError(f"Invalid or non-running container: {container_id}")
 
-    container_ip = __get_container_ip(container_id)
-    
-    for protocol in Protocol:
-        success, message = __execute_iptables([
-            '-I', 'FORWARD',
-            '-s', container_ip,
-            '-p', protocol.value,
-            '-j', 'DROP'
-        ])
-        if not success:
-            log(f"Failed to block {protocol.value} traffic: {message}")
-            return False
+        container_ip = __get_container_ip(container_id)
+        
+        for protocol in Protocol:
+            success, message = __execute_iptables([
+                '-I', 'FORWARD',
+                '-s', container_ip,
+                '-p', protocol.value,
+                '-j', 'DROP'
+            ])
+            if not success:
+                log(f"Failed to block {protocol.value} traffic: {message}")
+                return False
 
-    log(f"Blocked all outgoing traffic for container {container_id}")
-    return True
+        log(f"Blocked all outgoing traffic for container {container_id}")
+        return True
+    except Exception as e:
+        log(f"Failed to block all traffic: {e}")
+        return False
 
 def allow_connection(container_id: str, ip: str, port: Optional[int] = None, protocol: Protocol = Protocol.TCP) -> bool:
     """
     Allow outgoing traffic from container to specific IP and optional port.
     """
-    if not __validate_container_id(container_id):
-        raise ValueError(f"Invalid or non-running container: {container_id}")
-    if not __validate_ip(ip):
-        raise ValueError(f"Invalid IP address: {ip}")
-    if not __validate_port(port):
-        raise ValueError(f"Invalid port number: {port}")
+    try:
+        if not __validate_container_id(container_id):
+            raise ValueError(f"Invalid or non-running container: {container_id}")
+        if not __validate_ip(ip):
+            raise ValueError(f"Invalid IP address: {ip}")
+        if not __validate_port(port):
+            raise ValueError(f"Invalid port number: {port}")
 
-    container_ip = __get_container_ip(container_id)
-    
-    command = [
-        '-I', 'FORWARD',
-        '-s', container_ip,
-        '-d', ip,
-        '-p', protocol.value
-    ]
-    
-    if port is not None:
-        command.extend(['--dport', str(port)])
+        container_ip = __get_container_ip(container_id)
         
-    command.extend(['-j', 'ACCEPT'])
-    
-    success, message = __execute_iptables(command, check_exists=True)
-    
-    if success:
-        log(f"Allowed {protocol.value} connection from {container_id} to {ip}" +
-            (f":{port}" if port else ""))
-    else:
-        log(f"Failed to allow connection: {message}")
+        command = [
+            '-I', 'FORWARD',
+            '-s', container_ip,
+            '-d', ip,
+            '-p', protocol.value
+        ]
         
-    return success
+        if port is not None:
+            command.extend(['--dport', str(port)])
+            
+        command.extend(['-j', 'ACCEPT'])
+        
+        success, message = __execute_iptables(command, check_exists=True)
+        
+        if success:
+            log(f"Allowed {protocol.value} connection from {container_id} to {ip}" +
+                (f":{port}" if port else ""))
+        else:
+            log(f"Failed to allow connection: {message}")
+            
+        return success
+    except Exception as e:
+        log(f"Failed to allow connection: {e}")
+        return False
 
 def remove_rule(container_id: str, ip: str, port: Optional[int] = None, protocol: Protocol = Protocol.TCP) -> bool:
     """
     Remove a previously created rule for a specific IP and port.
     """
-    if not __validate_container_id(container_id):
-        raise ValueError(f"Invalid or non-running container: {container_id}")
-    if not __validate_ip(ip):
-        raise ValueError(f"Invalid IP address: {ip}")
-    if not __validate_port(port):
-        raise ValueError(f"Invalid port number: {port}")
+    try:
+        if not __validate_container_id(container_id):
+            raise ValueError(f"Invalid or non-running container: {container_id}")
+        if not __validate_ip(ip):
+            raise ValueError(f"Invalid IP address: {ip}")
+        if not __validate_port(port):
+            raise ValueError(f"Invalid port number: {port}")
 
-    container_ip = __get_container_ip(container_id)
-    
-    command = [
-        '-D', 'FORWARD',
-        '-s', container_ip,
-        '-d', ip,
-        '-p', protocol.value
-    ]
-    
-    if port is not None:
-        command.extend(['--dport', str(port)])
+        container_ip = __get_container_ip(container_id)
         
-    command.extend(['-j', 'ACCEPT'])
-    
-    success, message = __execute_iptables(command)
-    
-    if success:
-        log(f"Removed {protocol.value} rule for {container_id} to {ip}" +
-            (f":{port}" if port else ""))
-    else:
-        log(f"Failed to remove rule: {message}")
+        command = [
+            '-D', 'FORWARD',
+            '-s', container_ip,
+            '-d', ip,
+            '-p', protocol.value
+        ]
         
-    return success
+        if port is not None:
+            command.extend(['--dport', str(port)])
+            
+        command.extend(['-j', 'ACCEPT'])
+        
+        success, message = __execute_iptables(command)
+        
+        if success:
+            log(f"Removed {protocol.value} rule for {container_id} to {ip}" +
+                (f":{port}" if port else ""))
+        else:
+            log(f"Failed to remove rule: {message}")
+            
+        return success
+    except Exception as e:
+        log(f"Failed to remove rule: {e}")
+        return False
 
 def list_rules(container_id: str) -> List[NetworkRule]:
     """
     List all iptables rules for a specific container.
     """
-    if not __validate_container_id(container_id):
-        raise ValueError(f"Invalid or non-running container: {container_id}")
+    try:
+        if not __validate_container_id(container_id):
+            raise ValueError(f"Invalid or non-running container: {container_id}")
 
-    container_ip = __get_container_ip(container_id)
-    rules = []
-    
-    for protocol in Protocol:
-        success, output = __execute_iptables(['-L', 'FORWARD', '-n', '--line-numbers'])
-        if not success:
-            log(f"Failed to list {protocol.value} rules: {output}")
-            continue
-            
-        for line in output.splitlines():
-            if container_ip in line and protocol.value in line.lower():
-                port_match = re.search(r'dpt:(\d+)', line)
-                dst_ip_match = re.search(r'dst:(\d+\.\d+\.\d+\.\d+)', line)
-                rule_num_match = re.search(r'^\s*(\d+)', line)
+        container_ip = __get_container_ip(container_id)
+        rules = []
+        
+        for protocol in Protocol:
+            success, output = __execute_iptables(['-L', 'FORWARD', '-n', '--line-numbers'])
+            if not success:
+                log(f"Failed to list {protocol.value} rules: {output}")
+                continue
                 
-                if dst_ip_match:
-                    rule = NetworkRule(
-                        container_id=container_id,
-                        source_ip=container_ip,
-                        destination_ip=dst_ip_match.group(1),
-                        destination_port=int(port_match.group(1)) if port_match else None,
-                        protocol=protocol,
-                        created_at=datetime.now(),
-                        rule_number=int(rule_num_match.group(1)) if rule_num_match else None
-                    )
-                    rules.append(rule)
-    
-    return rules
+            for line in output.splitlines():
+                if container_ip in line and protocol.value in line.lower():
+                    port_match = re.search(r'dpt:(\d+)', line)
+                    dst_ip_match = re.search(r'dst:(\d+\.\d+\.\d+\.\d+)', line)
+                    rule_num_match = re.search(r'^\s*(\d+)', line)
+                    
+                    if dst_ip_match:
+                        rule = NetworkRule(
+                            container_id=container_id,
+                            source_ip=container_ip,
+                            destination_ip=dst_ip_match.group(1),
+                            destination_port=int(port_match.group(1)) if port_match else None,
+                            protocol=protocol,
+                            created_at=datetime.now(),
+                            rule_number=int(rule_num_match.group(1)) if rule_num_match else None
+                        )
+                        rules.append(rule)
+        
+        return rules
+    except Exception as e:
+        log(f"Failed to list rules: {e}")
+        return []
