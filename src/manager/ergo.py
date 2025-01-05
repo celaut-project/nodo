@@ -56,6 +56,7 @@ def get_refresh_peers() -> Dict[str, Dict]:
                     node_info = __available_ergo_node(rest_api_url)
                     if node_info:
                         available_peers[rest_api_url] = node_info
+                        log(f"Found available Ergo node: {rest_api_url}")
                         fetch_peers(rest_api_url)
         except requests.RequestException as e:
             log(f"Error fetching peers from {url}: {e}")
