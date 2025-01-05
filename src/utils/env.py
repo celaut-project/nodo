@@ -123,7 +123,7 @@ env_manager.get_env("DATABASE_FILE", f'{env_manager.env_vars["STORAGE"]}/databas
 env_manager.get_env("SAVE_ALL", False)
 env_manager.get_env("COMPILER_MEMORY_SIZE_FACTOR", 2.0)
 env_manager.get_env("ARM_COMPILER_SUPPORT", True)
-env_manager.get_env("X86_COMPILER_SUPPORT", False)
+env_manager.get_env("X86_COMPILER_SUPPORT", True)
 COMPILER_SUPPORTED_ARCHITECTURES = [
     ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if env_manager.env_vars["ARM_COMPILER_SUPPORT"] else [],
     ['linux/amd64', 'x86_64', 'amd64'] if env_manager.env_vars["X86_COMPILER_SUPPORT"] else []
@@ -133,7 +133,7 @@ COMPILER_SUPPORTED_ARCHITECTURES = [
 env_manager.get_env("WAIT_FOR_CONTAINER", 60)
 env_manager.get_env("BUILD_CONTAINER_MEMORY_SIZE_FACTOR", 3.1)
 env_manager.get_env("ARM_SUPPORT", True)
-env_manager.get_env("X86_SUPPORT", False)
+env_manager.get_env("X86_SUPPORT", True)
 SUPPORTED_ARCHITECTURES = [
     ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if env_manager.env_vars["ARM_SUPPORT"] else [],
     ['linux/amd64', 'x86_64', 'amd64'] if env_manager.env_vars["X86_SUPPORT"] else []
