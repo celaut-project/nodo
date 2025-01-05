@@ -227,8 +227,7 @@ if __name__ == '__main__':
                 
             case 'refresh_ergo_nodes':
                 from src.manager.ergo import get_refresh_peers
-                _info = get_refresh_peers()
-                log.LOGGER(f"Available Ergo nodes: {_info}")
+                get_refresh_peers()
 
             case 'daemon':
                 from src.serve import serve
