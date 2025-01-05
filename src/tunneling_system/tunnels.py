@@ -20,6 +20,10 @@ NUM_GATEWAY_TUNNELS = 1
 This module provides functionality for managing tunnel connections using various providers, 
 currently supporting NGROK. The implementation allows exposing the node and easily testing 
 the tunnel system, but it is important to consider the centralized nature of the provider.
+
+Some solutions to investigate for a decentralized approach:
+- https://github.com/cmars/onionpipe   using Tor network and Onion services
+- https://github.com/fatedier/frp
 """
 
 class Provider:
