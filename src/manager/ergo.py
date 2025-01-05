@@ -3,6 +3,7 @@ import os, json, requests
 
 from src.utils.env import EnvManager
 from src.utils.logger import LOGGER as log
+from concurrent.futures import ThreadPoolExecutor
 
 env_manager = EnvManager()
 
@@ -48,7 +49,7 @@ def get_refresh_peers() -> Dict[str, Dict]:
     
     def fetch_peers(url: str):
         try:
-            response = requests.get(f"{url}/peers/connected", timeout=10)
+            response = requests.get(f"{url}/peers/connected", timeout=5)
             response.raise_for_status()
             data = response.json()
             
@@ -65,8 +66,8 @@ def get_refresh_peers() -> Dict[str, Dict]:
         except requests.RequestException as e:
             log(f"Error fetching peers from {url}: {e}")
     
-    for peer in peers.keys():
-        fetch_peers(peer)
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        executor.map(fetch_peers, peers.keys())
     
     with open(http_peers_file, 'w') as f:
         json.dump(available_peers, f)
