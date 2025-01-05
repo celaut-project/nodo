@@ -80,6 +80,8 @@ def check_ergo_node_availability():
     Note: Check for equality in case it has been manually changed.
     """
     
+    log("Checking Ergo node availability...")
+    
     current_ergo_node = env_manager.get_env("ERGO_NODE_URL")
     if __available_ergo_node(current_ergo_node):
         return
