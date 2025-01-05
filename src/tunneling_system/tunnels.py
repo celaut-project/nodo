@@ -2,7 +2,6 @@ from typing import Any, Tuple, Optional, Dict, List
 from pyngrok import ngrok
 import urllib.parse
 import socket
-import uuid
 
 from src.gateway.utils import generate_gateway_instance
 from src.utils.logger import LOGGER
@@ -70,7 +69,7 @@ class TunnelSystem(metaclass=Singleton):
             if provider.can_add_tunnel():
                 ngrok.set_auth_token(provider.auth_token)
                 return name
-        LOGGER("No available provider or maximum instances reached.")
+        LOGGER("No available tunnel provider or maximum instances reached.")
 
     def generate_tunnel(self, ip: str, port: int) -> Optional[Tuple[str, int]]:
         provider = self.__select_provider()

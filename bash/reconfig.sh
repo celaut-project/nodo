@@ -154,7 +154,6 @@ display_summary
 handle_variable "ERGO_NODE_URL" validate_url
 handle_variable "ERGO_WALLET_MNEMONIC" validate_wallet_address
 handle_variable "ERGO_PAYMENTS_RECIVER_WALLET" validate_wallet_address
-handle_variable "NGROK_TUNNELS_KEY"  # No validation function needed here
 
 # Handle optional donation
 handle_donation
