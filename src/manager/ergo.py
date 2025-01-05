@@ -38,6 +38,10 @@ def get_refresh_peers() -> Dict[str, Dict]:
     
     with open(http_peers_file, 'r') as f:
         peers = json.load(f)
+        
+    current_node = env_manager.get_env("ERGO_NODE_URL")
+    if current_node not in peers:
+        peers[current_node] = {}
     
     available_peers = {}
     checked_peers = set(peers.keys())
