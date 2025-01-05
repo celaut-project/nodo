@@ -103,6 +103,214 @@ class Compiler:
         
         # Check first tag for use as name
         self.tag = self.json["tag"] if "tag" in self.json else None
+        
+    def parseContainer(self):
+        def parseFilesys() -> celaut.Any.Metadata.HashTag:
+            # Save his filesystem on cache.
+            for layer in os.listdir(CACHE + self.aux_id + "/building/"):
+                if os.path.isdir(CACHE + self.aux_id + "/building/" + layer):
+                    log.LOGGER('Unzipping layer ' + layer)
+                    os.system(
+                        "tar -xvf " + CACHE + self.aux_id + "/building/" + layer + "/layer.tar -C "
+                        + CACHE + self.aux_id + "/filesystem/"
+                    )
+            # Add filesystem data to filesystem buffer object.
+            def recursive_parsing(directory: str) -> celaut.Service.Container.Filesystem:
+                host_dir = CACHE + self.aux_id + "/filesystem"
+                filesystem = celaut.Service.Container.Filesystem()
+                for b_name in os.listdir(host_dir + directory):
+                    if b_name == '.wh..wh..opq':
+                        # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
+                        continue
+                    branch = celaut.Service.Container.Filesystem.ItemBranch()
+                    branch.name = os.path.basename(b_name)
+                    # It's a link.
+                    if os.path.islink(host_dir + directory + b_name):
+                        branch.link.dst = directory + b_name
+                        branch.link.src = os.path.realpath(host_dir + directory + b_name)[
+                                          len(host_dir):] if host_dir in os.path.realpath(
+                            host_dir + directory + b_name) else os.path.realpath(host_dir + directory + b_name)
+                    # It's a file.
+                    elif os.path.isfile(host_dir + directory + b_name):
+                        if os.path.getsize(host_dir + directory + b_name) < MIN_BUFFER_BLOCK_SIZE:
+                            with open(host_dir + directory + b_name, 'rb') as file:
+                                branch.file = file.read()
+                        else:
+                            block_hash, block = block_builder.create_block(
+                                file_path=host_dir + directory + b_name,
+                                copy=True
+                            )
+                            branch.file = block.SerializeToString()
+                            if block_hash not in self.blocks:
+                                self.blocks.append(block_hash)
+                    # It's a folder.
+                    elif os.path.isdir(host_dir + directory + b_name):
+                        branch.filesystem.CopyFrom(
+                            recursive_parsing(directory=directory + b_name + '/')
+                        )
+                    filesystem.branch.append(branch)
+                return filesystem
+            self.service.container.filesystem.CopyFrom(recursive_parsing(directory="/"))
+            return celaut.Any.Metadata.HashTag(
+                hash=calculate_hashes(
+                    value=self.service.container.filesystem.SerializeToString()
+                ) if not self.blocks else
+                calculate_hashes_by_stream(
+                    value=grpcbb.read_multiblock_directory(
+                        directory=block_builder.build_multiblock(
+                            pf_object_with_block_pointers=self.service.container.filesystem,
+                            blocks=self.blocks
+                        )[1],
+                        delete_directory=True,
+                        ignore_blocks=True
+                    )
+                )
+            )
+        # Envs
+        if self.json.get('envs'):
+            for env in self.json.get('envs'):
+                try:
+                    with open(self.path + env + ".field", "rb") as env_desc:
+                        self.service.container.enviroment_variables[env].ParseFromString(env_desc.read())
+                except FileNotFoundError:
+                    pass
+        # Entrypoint
+        if self.json.get('entrypoint'):
+            self.service.container.entrypoint.append(self.json.get('entrypoint'))
+        # Arch
+        # Config file spec.
+        self.service.container.config.path.append('__config__')
+        self.service.container.config.format.CopyFrom(
+            celaut.FieldDef()  # celaut.ConfigFile definition.
+        )
+        # Expected Gateway.
+        # Add container metadata to the global metadata.
+        self.metadata.hashtag.attr_hashtag.append(
+            celaut.Any.Metadata.HashTag.AttrHashTag(
+                key=1,  # Container attr.
+                value=[
+                    celaut.Any.Metadata.HashTag(
+                        attr_hashtag=[
+                            celaut.Any.Metadata.HashTag.AttrHashTag(
+                                key=1,  # Architecture
+                                value=[
+                                    celaut.Any.Metadata.HashTag(
+                                        tag=[
+                                            self.json.get('architecture')
+                                        ]
+                                    )
+                                ]
+                            ),
+                            celaut.Any.Metadata.HashTag.AttrHashTag(
+                                key=2,  # Filesystem
+                                value=[parseFilesys()]
+                            )
+                        ]
+                    )
+                ]
+            )
+        )
+    def parseApi(self):
+        #  App protocol
+        try:
+            with open(self.path + "api.application", "rb") as api_desc:
+                self.service.api.app_protocol.ParseFromString(api_desc.read())
+        except:
+            pass
+        #  Slots
+        if not self.json.get('api'): return
+        for item in self.json.get('api'):  # iterate slots.
+            slot = celaut.Service.Api.Slot()
+            # port.
+            slot.port = item.get('port')
+            #  transport protocol.
+            #  TODO: slot.transport_protocol = Protocol()
+            self.service.api.slot.append(slot)
+        # Add api metadata to the global metadata.
+        self.metadata.hashtag.attr_hashtag.append(
+            celaut.Any.Metadata.HashTag.AttrHashTag(
+                key=2,  # Api attr.
+                value=[
+                    celaut.Any.Metadata.HashTag(
+                        attr_hashtag=[
+                            celaut.Any.Metadata.HashTag.AttrHashTag(
+                                key=2,  # Slot attr.
+                                value=[
+                                    celaut.Any.Metadata.HashTag(
+                                        attr_hashtag=[
+                                            celaut.Any.Metadata.HashTag.AttrHashTag(
+                                                key=2,  # Transport Protocol attr.
+                                                value=[
+                                                    celaut.Any.Metadata.HashTag(
+                                                        tag=item.get('protocol')
+                                                    )
+                                                ]
+                                            )
+                                        ]
+                                    ) for item in self.json.get('api')
+                                ]
+                            )
+                        ]
+                    )
+                ]
+            )
+        )
+    def parseNetwork(self):
+        #  TODO: self.service.ledger.
+        #  Add ledger metadata to the global metadata.
+        if self.json.get('ledger'):
+            self.metadata.hashtag.attr_hashtag.append(
+                celaut.Any.Metadata.HashTag.AttrHashTag(
+                    key=4,  # Ledger attr.
+                    value=(
+                        celaut.Any.MetaData.HashTag(
+                            tag=self.json.get('ledger')
+                        )
+                    )
+                )
+            )
+    def save(self) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
+        service: Union[str, compile_pb2.Service]
+        if not self.blocks:
+            service_buffer = self.service.SerializeToString()  # 2*len
+            self.metadata.hashtag.hash.extend(
+                get_service_list_of_hashes(
+                    service_buffer=service_buffer
+                )
+            )
+            service_id: str = get_service_hex_main_hash(
+                metadata=self.metadata
+            )
+            # Once service hashes are calculated, we prune the filesystem for save storage.
+            # self.service.container.filesystem.ClearField('branch')
+            # https://github.com/moby/moby/issues/20972#issuecomment-193381422
+            del service_buffer  # -len
+            service = self.service
+        else:
+            # Generate the hashes.
+            bytes_id, service_directory = block_builder.build_multiblock(
+                pf_object_with_block_pointers=self.service,
+                blocks=self.blocks
+            )
+            service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
+            self.metadata.hashtag.hash.extend(
+                [Any.Metadata.HashTag.Hash(
+                    type=SHA3_256_ID,
+                    value=bytes_id
+                )]
+            )
+            from hashlib import sha3_256
+            validate_content = sha3_256()
+            for i in grpcbb.read_multiblock_directory(directory=service_directory):
+                validate_content.update(i)
+            service = service_directory
+        # Add the tag attribute as the first tag or tag list in the metadata. This could be used as the name of the service for better human identification.
+        if self.tag and type(self.tag) is str: 
+            self.metadata.hashtag.tag.extend([self.tag])
+        elif self.tag and type(self.tag) is list: 
+            self.metadata.hashtag.tag.extend(self.tag)
+            
+        return service_id, self.metadata, service
 
 def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.Service]]:
     spec_file = Compiler(path=path, aux_id=aux_id)
