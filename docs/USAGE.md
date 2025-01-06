@@ -95,6 +95,10 @@ Compiles a project to create a service specification for deployment on the netwo
 `nodo compile /path/to/project`
 This will compile the project located in `/path/to/project`.
 
+For the compilation to succeed, ensure that a `Dockerfile` and a `service.json` file are present either in the root directory or within a `.service` folder of the project.  
+
+For a deeper understanding of the compilation command, refer to the [Compilation Command Guide](../src/commands/compile/zip_with_dockerfile/README.md).
+
 ### 9. tui
 
 Launches the terminal-based user interface to visualize and interact with the network.
