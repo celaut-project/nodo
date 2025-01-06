@@ -81,6 +81,7 @@ def generate_service_zip(project_directory: str) -> str:
               f"{complete_source_directory}")
     
     # Print ls -la of the complete_source_directory
+    print(f"ls -la {complete_source_directory}")  # TODO remove this line
     os.system(f"ls -la {complete_source_directory}")  # TODO remove this line
 
     # Remove the files and directories specified in the "ignore" list from the configuration
