@@ -1,6 +1,6 @@
 import json
 import os
-
+import shutil
 from typing import Dict
 from src.utils.env import EnvManager
 
@@ -72,13 +72,30 @@ def generate_service_zip(project_directory: str) -> str:
     os.system(f"mkdir {complete_source_directory}")
 
     # Read the compilation's config JSON file
-    with open(f'{project_directory}/.service/pre-compile.json', 'r') as config_file:
-        compile_config = json.load(config_file)
+    config_path = f'{project_directory}/.service/pre-compile.json'
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as config_file:
+            compile_config = json.load(config_file)
+    else:
+        compile_config = {}
 
-    #  Copy the project files to the complete_source_directory.
-    # TODO   Bug: don't work for hidden directories' files.
-    os.system(f"cp -r {' '.join([os.path.join(project_directory, item) for item in compile_config['include']])} "
-              f"{complete_source_directory}")
+    # Copy the project files to the complete_source_directory.
+    if 'include' in compile_config:
+        for item in compile_config['include']:
+            src_path = os.path.join(project_directory, item)
+            dest_path = os.path.join(complete_source_directory, item)
+            if os.path.isdir(src_path):
+                shutil.copytree(src_path, dest_path, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src_path, dest_path)
+    else:
+        for item in os.listdir(project_directory):
+            src_path = os.path.join(project_directory, item)
+            dest_path = os.path.join(complete_source_directory, item)
+            if os.path.isdir(src_path):
+                shutil.copytree(src_path, dest_path, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src_path, dest_path)
 
     # Remove the files and directories specified in the "ignore" list from the configuration
     if 'ignore' in compile_config:
