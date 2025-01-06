@@ -340,8 +340,12 @@ def zipfile_ok(zip: str) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_p
     os.system('unzip ' + zip + ' -d ' + CACHE + aux_id + '/for_build')
     os.system('rm ' + zip)
     
-    print(f"Ls -l {CACHE + aux_id + '/for_build'}")  # TODO DELETE THIS LINE
-    os.system(f"ls -l {CACHE + aux_id + '/for_build'}")  # TODO DELETE THIS LINE
+    
+    log.LOGGER('Unzipped file ' + zip)
+    result = subprocess.run(f"ls -l {CACHE + aux_id + '/for_build'}", shell=True, capture_output=True, text=True)
+    log.LOGGER(result.stdout)
+    if result.stderr:
+        log.LOGGER(result.stderr)
     
     return ok(
         path=CACHE + aux_id + '/for_build/',
