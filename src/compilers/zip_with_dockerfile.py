@@ -339,6 +339,10 @@ def zipfile_ok(zip: str) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_p
     os.system('mkdir ' + CACHE + aux_id + '/for_build')
     os.system('unzip ' + zip + ' -d ' + CACHE + aux_id + '/for_build')
     os.system('rm ' + zip)
+    
+    print(f"Ls -l {CACHE + aux_id + '/for_build'}")  # TODO DELETE THIS LINE
+    os.system(f"ls -l {CACHE + aux_id + '/for_build'}")  # TODO DELETE THIS LINE
+    
     return ok(
         path=CACHE + aux_id + '/for_build/',
         aux_id=aux_id
