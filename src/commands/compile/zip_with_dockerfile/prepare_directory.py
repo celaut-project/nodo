@@ -48,7 +48,7 @@ def prepare_directory(directory: str) -> Tuple[bool, str]:
         
         # Combine the repository name with the UUID to create a unique path
         repo_name_with_uuid = f"{repo_name}_{unique_id}"
-        repo_path = os.path.join(CACHE, "git_repositories", repo_name_with_uuid)
+        repo_path = os.path.join(CACHE, "local_repositories", repo_name_with_uuid)
 
         # Create the destination directory
         os.makedirs(repo_path, exist_ok=True)
