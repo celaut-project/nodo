@@ -2,6 +2,7 @@ from typing import Tuple
 import os
 import subprocess
 import uuid
+import shutil
 
 from src.utils.env import EnvManager
 
@@ -53,20 +54,15 @@ def prepare_directory(directory: str) -> Tuple[bool, str]:
         # Create the destination directory
         os.makedirs(repo_path, exist_ok=True)
 
-        # Use subprocess.run for safer directory copying
         try:
             # Copy regular files and directories
-            subprocess.run(["cp", "-r", os.path.join(directory, "."), repo_path], check=True)
-            
-            # Copy hidden files and directories if they exist
-            hidden_files = subprocess.run(["ls", "-A", directory], 
-                                        capture_output=True, 
-                                        text=True).stdout.split()
-            
-            for item in hidden_files:
-                if item.startswith('.'):
-                    source = os.path.join(directory, item)
-                    subprocess.run(["cp", "-r", source, repo_path], check=True)
+            for item in os.listdir(directory):
+                s = os.path.join(directory, item)
+                d = os.path.join(repo_path, item)
+                if os.path.isdir(s):
+                    shutil.copytree(s, d, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(s, d)
                     
             return False, repo_path
             
