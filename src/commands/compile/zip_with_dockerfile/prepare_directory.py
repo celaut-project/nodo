@@ -74,6 +74,7 @@ def __ensure_is_correct(directory: str):
 
     # Remove duplicates from the ignore list
     pre_compile_data["ignore"] = list(set(pre_compile_data["ignore"]))
+    print(f"pre compile data {pre_compile_data}")
 
     # Write the updated pre-compile.json content back to the file
     with open(pre_compile_json_path, 'w') as f:
