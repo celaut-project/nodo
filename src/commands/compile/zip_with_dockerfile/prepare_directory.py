@@ -11,6 +11,22 @@ env_manager = EnvManager()
 
 CACHE = env_manager.get_env("CACHE")
 
+def __dockerfile_copy_from(directory: str):
+    dockerfile_path = os.path.join(directory, ".service", "Dockerfile")
+    
+    if os.path.exists(dockerfile_path):
+        with open(dockerfile_path, 'r') as file:
+            lines = file.readlines()
+        
+        with open(dockerfile_path, 'w') as file:
+            for line in lines:
+                if line.strip().startswith("COPY "):
+                    parts = line.split()
+                    if len(parts) > 1 and parts[1].startswith("."):
+                        parts[1] = "service" + parts[1][1:]
+                        line = " ".join(parts) + "\n"
+                file.write(line)
+
 def __ensure_is_correct(directory: str):
     service_dir = os.path.join(directory, ".service")
     dockerfile_path = os.path.join(service_dir, "Dockerfile")
@@ -62,6 +78,8 @@ def __ensure_is_correct(directory: str):
     # Write the updated pre-compile.json content back to the file
     with open(pre_compile_json_path, 'w') as f:
         json.dump(pre_compile_data, f, indent=4)
+        
+    __dockerfile_copy_from(directory=directory)
 
 def prepare_directory(directory: str) -> Tuple[bool, str]:
     # Check if the directory is a remote Git repository (contains both https:// and .git)
