@@ -342,7 +342,7 @@ def zipfile_ok(zip: str) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_p
     
     
     log.LOGGER('Unzipped file ' + zip)
-    result = subprocess.run(f"ls -l {CACHE + aux_id + '/for_build'}", shell=True, capture_output=True, text=True)
+    result = subprocess.run(f"ls -l {CACHE + aux_id + '/for_build/service'}", shell=True, capture_output=True, text=True)
     log.LOGGER(result.stdout)
     if result.stderr:
         log.LOGGER(result.stderr)
