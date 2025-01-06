@@ -79,10 +79,6 @@ def generate_service_zip(project_directory: str) -> str:
     # TODO   Bug: don't work for hidden directories' files.
     os.system(f"cp -r {' '.join([os.path.join(project_directory, item) for item in compile_config['include']])} "
               f"{complete_source_directory}")
-    
-    # Print ls -la of the complete_source_directory
-    print(f"ls -la {complete_source_directory}")  # TODO remove this line
-    os.system(f"ls -la {complete_source_directory}")  # TODO remove this line
 
     # Remove the files and directories specified in the "ignore" list from the configuration
     if 'ignore' in compile_config:
