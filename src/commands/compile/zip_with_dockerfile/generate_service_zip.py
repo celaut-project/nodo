@@ -90,6 +90,7 @@ def generate_service_zip(project_directory: str) -> str:
                 shutil.copy2(src_path, dest_path)
     else:
         for item in os.listdir(project_directory):
+            if item == ".service": continue
             src_path = os.path.join(project_directory, item)
             dest_path = os.path.join(complete_source_directory, item)
             if os.path.isdir(src_path):
