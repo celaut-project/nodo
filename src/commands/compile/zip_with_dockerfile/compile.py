@@ -131,6 +131,8 @@ def compile_directory(directory: str):
             ip, port = 'localhost', GATEWAY_PORT
         __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
     finally:
-        __remove_path(service_zip_dir)
+        # __remove_path(service_zip_dir)  TODO
+        
+        print(f"Check {service_zip_dir}")
         if is_remote: 
             __remove_path(directory)
