@@ -56,7 +56,7 @@ def prepare_directory(directory: str) -> Tuple[bool, str]:
         # Use subprocess.run for safer directory copying
         try:
             # Copy regular files and directories
-            subprocess.run(["cp", "-r", directory, repo_path], check=True)
+            subprocess.run(["cp", "-r", os.path.join(directory, "."), repo_path], check=True)
             
             # Copy hidden files and directories if they exist
             hidden_files = subprocess.run(["ls", "-A", directory], 
