@@ -9,6 +9,7 @@ message GasAmount {
 
 message TokenMessage {
     string token = 1;
+    optional string slot = 2;
 }
 
 message EstimatedCost {
@@ -122,4 +123,6 @@ service Gateway {
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {}  // ( celaut.Any.Metadata.HashTag.Hash=H ) -> Service
     rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Payment -> Empty
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
+
+    rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage || bytes -> bytes
 }

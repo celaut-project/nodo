@@ -5,6 +5,7 @@ from src.compilers.zip_with_dockerfile import compile_zip
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
+from src.tunneling_system.rpc_tunnel import service_tunnel
 from src.tunneling_system.tunnels import TunnelSystem
 from src.gateway.utils import generate_gateway_instance
 from src.manager.manager import add_peer_instance, modify_gas_deposit, prune_container, generate_client, get_internal_service_id_by_uri, spend_gas, \
@@ -42,24 +43,24 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
         except Exception as e:
             raise Exception('Was imposible stop the service. ' + str(e))
-        
+
     def ModifyGasDeposit(self, request_iterator, context, **kwargs):
         try:
             log.LOGGER('Modifying gas deposit on service.')
-            
+
             _input = next(grpcbf.parse_from_buffer(
                                 request_iterator=request_iterator,
                                 indices=gateway_pb2.ModifyGasDepositInput,
                                 partitions_message_mode=True
                             ), 0)
-            
+
             success, message = modify_gas_deposit(
                         gas_amount=from_gas_amount(_input.gas_difference),
                         service_token=_input.service_token
                     )
-            
+
             log.LOGGER(f"Message on modify gas deposit: {message}")
-            
+
             yield from grpcbf.serialize_to_buffer(
                     message_iterator=gateway_pb2.ModifyGasDepositOutput(
                         success=success,
@@ -79,7 +80,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 network=get_network_name(direction=ip)
             )
         yield from grpcbf.serialize_to_buffer(gateway_instance)
-        
+
     def IntroducePeer(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?
         log.LOGGER('Introduce peer method.')
@@ -90,7 +91,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 partitions_message_mode=True
             ), None)
         )
-        
+
         yield from grpcbf.serialize_to_buffer(gateway_pb2.RecursionGuard(token="OK"))  # Recursion guard shouldn't be used here, another message should be used. TODO
 
     def GenerateClient(self, request_iterator, context, **kwargs):
@@ -185,6 +186,18 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         indices=gateway_pb2.TokenMessage,
                         partitions_message_mode=True
                     ), None).token
+                ),
+                indices=gateway_pb2.Metrics,
+        )
+
+    def ServiceTunnel(self, request_iterator, context, **kwargs):
+        yield from grpcbf.serialize_to_buffer(
+                message_iterator=service_tunnel(
+                    iterator=grpcbf.parse_from_buffer(
+                        request_iterator=request_iterator,
+                        indices={0: bytes},
+                        partitions_message_mode={0: False}
+                    )
                 ),
                 indices=gateway_pb2.Metrics,
         )

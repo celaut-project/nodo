@@ -11,5 +11,6 @@ dataset.bin
 app.log
 .env
 venv
+.venv
 tests/script_data.json
 storage/*

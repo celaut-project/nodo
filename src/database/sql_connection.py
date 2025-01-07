@@ -419,7 +419,7 @@ class SQLConnection(metaclass=Singleton):
         self._execute('''
             DELETE FROM internal_services WHERE id = ?
         ''', (id,))
-    
+
     def get_internal_father_id(self, id: str) -> str:
         """
         Retrieves the father_id of an internal service.
@@ -437,7 +437,7 @@ class SQLConnection(metaclass=Singleton):
         ''', (id,))
         result = cursor.fetchone()
         return result[0] if result else ""
-    
+
     def get_internal_instance(self, id: str) -> Optional[str]:
         """
         Retrieves the serialized_instance of an internal service.
@@ -450,6 +450,24 @@ class SQLConnection(metaclass=Singleton):
         """
         cursor = self._execute('''
             SELECT serialized_instance
+            FROM internal_services
+            WHERE id = ?
+        ''', (id,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+    def get_internal_ip(self, id: str) -> Optional[str]:
+        """
+        Retrieves the IP address of an internal service.
+
+        Args:
+            id (str): The id of the internal service.
+
+        Returns:
+            Optional[str]: The IP address of the internal service, or None if not found.
+        """
+        cursor = self._execute('''
+            SELECT ip
             FROM internal_services
             WHERE id = ?
         ''', (id,))
@@ -535,7 +553,7 @@ class SQLConnection(metaclass=Singleton):
         Returns:
             bool: True if the submission was successful, False otherwise.
         """
- 
+
         try:
             # Fetch all peers' data along with slots, URIs, and contracts in one query
             result = self._execute('''
@@ -596,9 +614,9 @@ class SQLConnection(metaclass=Singleton):
                         uri.ip = row['ip']
                         uri.port = row['port']
 
-            # List to hold data for peers that need to be submitted to the ledger            
+            # List to hold data for peers that need to be submitted to the ledger
             needs_submit = force_submit
-            
+
             if peers_dict:  # If peers are found
                 logger.LOGGER(f'Peers found in the database: {peers_dict.keys()}')
                 to_submit = []
@@ -628,12 +646,12 @@ class SQLConnection(metaclass=Singleton):
                             to_submit.append((reputation_proof_id, percentage_amount, instance_json))
 
                 to_submit.append((None, 1, None))  # This will be treated as a pointer to itself, used to include the node instance in the proof
-                
+
             else:  # If no peers are found, submit the total amount of reputation tokens, but only if force_submit is True
                 logger.LOGGER('No peers found in the database.')
                 to_submit = [(None, TOTAL_REPUTATION_TOKEN_AMOUNT, None)]
-                
-            
+
+
             # Attempt to submit the data to the ledger
             if needs_submit and to_submit:
                 success = submit(to_submit)
@@ -657,7 +675,7 @@ class SQLConnection(metaclass=Singleton):
 
     def update_double_attempt_retry_time_on_ledger(self, ledger: str):
         """
-        Updates the double_spending_retry_time field in the ledger table 
+        Updates the double_spending_retry_time field in the ledger table
         by setting it to the current time plus 10 minutes for the specified ledger.
 
         Args:
@@ -668,7 +686,7 @@ class SQLConnection(metaclass=Singleton):
         SET double_spending_retry_time = DATETIME('now', '+10 minutes')
         WHERE id = ?
         """
-        
+
         # Execute the query, passing the ledger ID to update the appropriate record.
         self._execute(query, (ledger,))
 
@@ -689,14 +707,14 @@ class SQLConnection(metaclass=Singleton):
         FROM ledger
         WHERE id = ?
         """
-        
+
         # Execute the query to get the retry time for the specified ledger.
         result = self._execute(query, (ledger,)).fetchone()
 
         # Check if a result was returned and evaluate its availability.
         if result:
             retry_time = result[0]
-            
+
             # A ledger is available if the retry_time is NULL or in the past.
             if retry_time is None or retry_time < datetime.utcnow().isoformat():
                 return True
@@ -723,11 +741,11 @@ class SQLConnection(metaclass=Singleton):
             peers.append(peer)
 
         return peers
-        
+
     def get_peer_by_id(self, peer_id: str) -> dict:
         """
         Fetches details of a peer by its ID from the database.
-        
+
         Parameters:
         - peer_id (str): The unique identifier of the peer.
 
@@ -769,7 +787,7 @@ class SQLConnection(metaclass=Singleton):
     def add_gas_to_peer(self, peer_id: str, gas: int) -> bool:
         """
         Adds the specified amount of gas to the existing gas value of a peer.
-        
+
         Parameters:
         - peer_id (str): The unique identifier of the peer.
         - gas (int): The amount of gas to be added to the peer's existing gas.
@@ -785,24 +803,24 @@ class SQLConnection(metaclass=Singleton):
             if row:
                 # Combine mantissa and exponent to get the current gas amount.
                 current_gas = _combine_gas(row['gas_mantissa'], row['gas_exponent'])
-                
+
                 # Add the specified gas to the current amount.
                 total_gas = current_gas + gas
-                
+
                 # Split the new total gas into mantissa and exponent.
                 new_mantissa, new_exponent = _split_gas(total_gas)
-                
+
                 # Validate the new mantissa and exponent values.
                 _validate_gas(new_mantissa, new_exponent)
-                
+
                 # Get the current timestamp for gas_last_update.
                 current_time = datetime.datetime.now().isoformat()
-                
+
                 # Update the peer's gas values and gas_last_update in the database.
                 self._execute('''
                     UPDATE peer SET gas_mantissa = ?, gas_exponent = ?, gas_last_update = ? WHERE id = ?
                 ''', (new_mantissa, new_exponent, current_time, peer_id))
-                
+
                 return True
             else:
                 raise Exception(f'Peer not found: {peer_id}')
@@ -813,7 +831,7 @@ class SQLConnection(metaclass=Singleton):
     def refresh_gas_for_peer(self, peer_id: str, gas: int) -> bool:
         """
         Sets the gas value of a peer to a specified amount, replacing any existing value.
-        
+
         Parameters:
         - peer_id (str): The unique identifier of the peer.
         - gas (int): The new gas amount to set for the peer.
@@ -824,18 +842,18 @@ class SQLConnection(metaclass=Singleton):
         try:
             # Split the provided gas value into mantissa and exponent.
             new_mantissa, new_exponent = _split_gas(gas)
-            
+
             # Validate the new gas values.
             _validate_gas(new_mantissa, new_exponent)
-            
+
             # Get the current timestamp for gas_last_update.
             current_time = datetime.datetime.now().isoformat()
-            
+
             # Update the peer's gas and gas_last_update directly in the database.
             self._execute('''
                 UPDATE peer SET gas_mantissa = ?, gas_exponent = ?, gas_last_update = ? WHERE id = ?
             ''', (new_mantissa, new_exponent, current_time, peer_id))
-            
+
             return True
         except Exception as e:
             logger.LOGGER(f'Error refreshing gas for peer {peer_id}: {e}')
@@ -1014,7 +1032,7 @@ class SQLConnection(metaclass=Singleton):
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
             return False
-        
+
     def get_external_father_id(self, token: str) -> str:
         """
         Retrieves the father_id of an external service based on the token.
@@ -1032,7 +1050,7 @@ class SQLConnection(metaclass=Singleton):
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else ""
-    
+
     def get_external_instance(self, token: str) -> Optional[str]:
         """
         Retrieves the serialized_service of an external service based on the token.
@@ -1161,7 +1179,7 @@ class SQLConnection(metaclass=Singleton):
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to retrieve token for hashed external service token {hashed_token}: {e}')
             return None
-        
+
     def get_peer_id_by_external_service(self, token: str) -> Optional[str]:
         """
         Retrieves the peer id where the external service was requested.
@@ -1461,11 +1479,11 @@ class SQLConnection(metaclass=Singleton):
             DELETE FROM deposit_tokens WHERE id = ?
         ''', (token_id,))
 
-    def insert_energy_record(self, cpu_percent: float, memory_usage: float, 
+    def insert_energy_record(self, cpu_percent: float, memory_usage: float,
                            power_consumption: float, cost: float):
         cursor = self.conn.cursor()
         cursor.execute('''
-            INSERT INTO energy_consumption 
+            INSERT INTO energy_consumption
             (timestamp, cpu_percent, memory_usage, power_consumption, cost)
             VALUES (?, ?, ?, ?, ?)
         ''', (datetime.now(), cpu_percent, memory_usage, power_consumption, cost))
@@ -1474,7 +1492,7 @@ class SQLConnection(metaclass=Singleton):
     def get_latest_energy_records(self, limit: int = 100) -> Generator[Dict, None, None]:
         cursor = self.conn.cursor()
         cursor.execute('''
-            SELECT * FROM energy_consumption 
+            SELECT * FROM energy_consumption
             ORDER BY timestamp DESC LIMIT ?
         ''', (limit,))
         columns = [description[0] for description in cursor.description]
