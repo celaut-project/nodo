@@ -9,6 +9,7 @@ env_manager = EnvManager()
 
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 REGISTRY = env_manager.get_env("REGISTRY")
+GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 
 # Read the .services file and populate the constants dynamically
 with open('tests/.services', 'r') as file:
@@ -28,7 +29,7 @@ GATEWAY: str = next(
         f"{ip}:{port}"
         for peer_id in get_peer_ids()
         for ip, port in get_peer_directions(peer_id=peer_id)
-    )
+    ) or f"localhost:{GATEWAY_PORT}"
 
 SHA3_256 = SHA3_256_ID.hex()
 
