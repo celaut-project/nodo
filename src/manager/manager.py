@@ -41,6 +41,18 @@ def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
     for client_id in sc.get_dev_clients():
         if sc.get_client_gas(client_id=client_id)[0] > gas_amount:
             yield client_id
+            
+def add_reputation_proof(contract_ledger, peer_id) -> bool:
+    # Verify contract and ledger compatibility
+    if not validate_contract_ledger(contract_ledger):
+        log.LOGGER(f"Not supported reputation contract ledger {str(contract_ledger)}")
+        return False
+
+    # Verify reputation ownership
+    # TODO
+    
+    # Stores on DB
+    return sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
 # Insert the instance if it does not exist.
 def add_peer_instance(instance: gateway_pb2.Instance) -> str:
@@ -67,10 +79,7 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> str:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
     for contract_ledger in instance.instance.api.reputation_proofs:
-        if not validate_contract_ledger(contract_ledger):
-            log.LOGGER(f"Not supported reputation contract ledger {str(contract_ledger)}")
-            continue
-        sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
+        add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
     log.LOGGER(f'Get instance for peer -> {peer_id}')
     return peer_id
@@ -89,7 +98,7 @@ def update_peer_instance(instance: gateway_pb2.Instance, peer_id: str):
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
     for contract_ledger in instance.instance.api.reputation_proofs:
-        sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
+        add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
     log.LOGGER(f"Peer {peer_id} updated.")
 
