@@ -8,7 +8,7 @@ sc = SQLConnection()
 env_manager = EnvManager()
 
 def update_reputation(token: str, amount: int) -> Optional[str]:
-    # Take the peer_id when the token it's external. Do nothing if it's an external service.
+    # Take the peer_id when the token it's external. Do nothing if it's an internal service.
     peer_id: str = token.split('##')[1] if "##" in token else token
     if sc.peer_exists(peer_id=peer_id):
         return sc.update_reputation_peer(peer_id, amount)
