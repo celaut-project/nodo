@@ -27,4 +27,10 @@ def generate_instance_proofs() -> Generator[celaut.Service.Api.ContractLedger, N
     )
 
 def validate_contract_ledger(contract_ledger: celaut.Service.Api.ContractLedger) -> bool:
-    return contract_ledger.ledger == LEDGER and contract_ledger.contract==CONTRACT.encode("utf-8")
+    compatibility = contract_ledger.ledger == LEDGER and contract_ledger.contract==CONTRACT.encode("utf-8")
+    
+    if not compatibility: 
+        return False
+    
+    # Verify
+    

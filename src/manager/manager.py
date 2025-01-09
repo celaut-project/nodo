@@ -43,13 +43,10 @@ def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
             yield client_id
             
 def add_reputation_proof(contract_ledger, peer_id) -> bool:
-    # Verify contract and ledger compatibility
+    # Verify contract and ledger compatibility and ownership
     if not validate_contract_ledger(contract_ledger):
         log.LOGGER(f"Not supported reputation contract ledger {str(contract_ledger)}")
         return False
-
-    # Verify reputation ownership
-    # TODO
     
     # Stores on DB
     return sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
