@@ -8,7 +8,7 @@ import random
 import string
 
 from src.reputation_system.envs import CONTRACT, LEDGER
-from src.reputation_system.bip_wallet_verification import bip_ecdsa_verify
+from src.reputation_system.bip_wallet_verification import bip_ecdsa_verify, get_public_key_hex, bip_ecdsa_sign
 from src.database.access_functions.peers import get_peer_directions
 from src.utils.logger import LOGGER as log
 from src.utils.env import EnvManager
@@ -78,15 +78,42 @@ def validate_contract_ledger(contract_ledger: celaut.Service.Api.ContractLedger,
                 public_key=public_key,
                 to_sign=message
             )
-        ))
+        )).signed
         
-        log(f"Peer {ip}:{port} sign response {sign_response.response}")
+        log(f"Peer {ip}:{port} sign response {sign_response}")
         
         # Verify the signature
-        is_valid = bip_ecdsa_verify(message=message, signature_hex=sign_response.response, public_key_hex=public_key)
+        is_valid = bip_ecdsa_verify(message=message, signature_hex=sign_response, public_key_hex=public_key)
         log(f"Signature verification: {'successful' if is_valid else 'failed'}")
         return is_valid
     
     except Exception as e:
         log(f"Error during contract validation: {e}")
         return False
+
+def sign_message(public_key, message) -> str | None:
+    """
+    Signs a message using the private key associated with the provided public key.
+    
+    Args:
+        public_key (str): The public key to verify against the wallet's public key.
+        message (str): The message to be signed.
+    
+    Returns:
+        str | None: The signed message if the public key matches the wallet's public key, otherwise None.
+    """
+    # Retrieve the mnemonic phrase from environment variables
+    mnemonic_phrase = EnvManager().get_env("ERGO_WALLET_MNEMONIC")
+    
+    # Get the public key associated with the mnemonic phrase
+    address = get_public_key_hex(mnemonic_phrase=mnemonic_phrase)
+    
+    # Check if the provided public key matches the wallet's public key
+    if public_key == address:
+        # Sign the message using the mnemonic phrase
+        signed_msg = bip_ecdsa_sign(mnemonic_phrase=mnemonic_phrase, message=message)
+        log(f"Message signed successfully for public key: {public_key}")
+        return signed_msg
+    else:
+        log(f"Public key mismatch: provided {public_key}, expected {address}")
+        return None

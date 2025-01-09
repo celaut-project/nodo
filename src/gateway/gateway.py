@@ -5,6 +5,7 @@ from src.compilers.zip_with_dockerfile import compile_zip
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
+from src.reputation_system.proof_validation import sign_message
 from src.tunneling_system.rpc_tunnel import service_tunnel
 from src.tunneling_system.tunnels import TunnelSystem
 from src.gateway.utils import generate_gateway_instance
@@ -201,3 +202,36 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 ),
                 indices=gateway_pb2.Metrics,
         )
+
+    def SignPublicKey(self, request_iterator, context, **kwargs):
+        try:
+            log.LOGGER('Signing public key.')
+            
+            # Parse the input from the request iterator
+            sign_request = next(grpcbf.parse_from_buffer(
+                request_iterator=request_iterator,
+                indices=gateway_pb2.SignRequest,
+                partitions_message_mode=True
+            ), None)
+            
+            if sign_request is None:
+                raise Exception("Invalid input for SignPublicKey method.")
+            
+            # Use the sign_message method to sign the public key
+            signed_message = sign_message(
+                public_key=sign_request.public_key,
+                message=sign_request.message
+            )
+            
+            # Create the response
+            sign_response = gateway_pb2.SignResponse(
+                signed=signed_message
+            )
+            
+            # Serialize and yield the response
+            yield from grpcbf.serialize_to_buffer(
+                message_iterator=sign_response
+            )
+            
+        except Exception as e:
+            raise Exception('Error in SignPublicKey method: ' + str(e))

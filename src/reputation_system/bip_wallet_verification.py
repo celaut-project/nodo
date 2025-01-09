@@ -4,7 +4,7 @@ import ecdsa
 import hashlib
 import binascii
 
-def bip32_derive_key(bip32: BIP32, derivation_path: str):
+def __bip32_derive_key(bip32: BIP32, derivation_path: str):
     """
     Derives private and public keys using a BIP32 object and a derivation path.
 
@@ -42,7 +42,7 @@ def bip_ecdsa_sign(mnemonic_phrase: str, message: str) -> str:
     derivation_path = "m/44'/429'/0'/0/0"
 
     # Obtain private and public keys
-    private_key_bytes, _ = bip32_derive_key(bip32, derivation_path)
+    private_key_bytes, _ = __bip32_derive_key(bip32, derivation_path)
 
     # Load the private key in the appropriate format for ecdsa
     sk = ecdsa.SigningKey.from_string(private_key_bytes, curve=ecdsa.SECP256k1)
@@ -104,7 +104,7 @@ def get_public_key_hex(mnemonic_phrase: str) -> str:
     derivation_path = "m/44'/429'/0'/0/0"
 
     # Obtain private and public keys
-    _, public_key_bytes = bip32_derive_key(bip32, derivation_path)
+    _, public_key_bytes = __bip32_derive_key(bip32, derivation_path)
 
     # Return the public key in hexadecimal format
     return binascii.hexlify(public_key_bytes).decode()
