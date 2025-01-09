@@ -3,6 +3,7 @@ from typing import Generator
 from protos import celaut_pb2 as celaut
 from src.utils.env import EnvManager
 
+
 env_manager = EnvManager()
 LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.
 CONTRACT = """{
@@ -25,12 +26,3 @@ def generate_instance_proofs() -> Generator[celaut.Service.Api.ContractLedger, N
         contract_addr=env_manager.get_env('REPUTATION_PROOF_ID'),
         ledger=LEDGER
     )
-
-def validate_contract_ledger(contract_ledger: celaut.Service.Api.ContractLedger) -> bool:
-    compatibility = contract_ledger.ledger == LEDGER and contract_ledger.contract==CONTRACT.encode("utf-8")
-    
-    if not compatibility: 
-        return False
-    
-    # Verify
-    
