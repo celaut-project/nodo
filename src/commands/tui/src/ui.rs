@@ -193,14 +193,14 @@ fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 Constraint::Length(30),
                 Constraint::Length(20),
                 Constraint::Length(20),
-                // Constraint::Length(30)
+                Constraint::Length(30)
             ],
         )
         .header(Row::new(vec![
             Cell::from("Id"),
             Cell::from("Main URI"),
             Cell::from("Gas on it"),
-           // Cell::from("Reputation proof")
+            Cell::from("Reputation proof")
         ]))
         .block(
             Block::bordered()

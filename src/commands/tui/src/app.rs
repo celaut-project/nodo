@@ -44,7 +44,7 @@ pub struct Peer {
     pub id: String,
     pub uri: String,
     pub gas: String,
-    // pub rpi: String  // Reputation proof id
+    pub rpi: String  // Reputation proof id
 }
 
 impl Identifiable for Peer {
@@ -121,34 +121,6 @@ impl Identifiable for Tunnel {
 fn get_peers() -> Result<Vec<Peer>> {
     Ok(Connection::open(DATABASE_FILE)?
         .prepare(
-            "SELECT p.id, u.ip, u.port, p.gas_mantissa, p.gas_exponent
-                FROM peer p
-                JOIN slot s ON p.id = s.peer_id
-                JOIN uri u ON s.id = u.slot_id",
-        )?
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            let ip: String = row.get(1)?;
-            let port: u16 = row.get(2)?;
-            let gas_mantissa: i64 = row.get(3)?;
-            let gas_exponent: i32 = row.get(4)?;
-
-            let gas_value = gas_mantissa as f64 * 10f64.powi(gas_exponent as i32);
-            let gas = format!("{:e}", gas_value);
-
-            Ok(Peer {
-                id,
-                uri: format!("{}:{}", ip, port),
-                gas,
-            })
-        })?
-        .collect::<Result<Vec<Peer>>>()?)
-}
-
-/*
-fn get_peers() -> Result<Vec<Peer>> {
-    Ok(Connection::open(DATABASE_FILE)?
-        .prepare(
             "SELECT p.id, u.ip, u.port, p.gas_mantissa, p.gas_exponent, p.reputation_proof_id
                 FROM peer p
                 JOIN slot s ON p.id = s.peer_id
@@ -174,7 +146,6 @@ fn get_peers() -> Result<Vec<Peer>> {
         })?
         .collect::<Result<Vec<Peer>>>()?)
 }
-        */
 
 fn get_clients() -> Result<Vec<Client>> {
     Ok(Connection::open(DATABASE_FILE)?
