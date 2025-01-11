@@ -65,7 +65,7 @@ def validate_contract_ledger(contract_ledger: celaut.Service.Api.ContractLedger,
     try:
         # Get peer directions
         ip, port = next(get_peer_directions(peer_id=peer_id))
-        log(f"Connecting to peer at {ip}:{port}")
+        log(f"Connecting to peer at {ip}:{port} to validate reputation proof.")
         
         # Request signature of the message
         sign_response = next(client_grpc(
