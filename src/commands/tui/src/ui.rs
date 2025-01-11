@@ -187,18 +187,20 @@ fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
             app.peers
                 .items
                 .iter()
-                .map(|peer| Row::new(vec![peer.id.clone(), peer.uri.clone(), peer.gas.clone()]))
+                .map(|peer| Row::new(vec![peer.id.clone(), peer.uri.clone(), peer.gas.clone(), peer.rpi.clone()]))
                 .collect::<Vec<Row>>(),
             [
                 Constraint::Length(30),
-                Constraint::Length(30),
-                Constraint::Length(30),
+                Constraint::Length(20),
+                Constraint::Length(20),
+                Constraint::Length(30)
             ],
         )
         .header(Row::new(vec![
             Cell::from("Id"),
             Cell::from("Main URI"),
             Cell::from("Gas on it"),
+            Cell::from("Reputation proof")
         ]))
         .block(
             Block::bordered()
