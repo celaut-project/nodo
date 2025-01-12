@@ -32,7 +32,7 @@ def import_bee(path: str):
             break
                 
         if not service_hash:
-            print(".bee file doesn't contain service hash.  Should be implemented the task: https://github.com/celaut-project/nodo/issues/47")
+            print(".celaut file doesn't contain service hash.  Should be implemented the task: https://github.com/celaut-project/nodo/issues/47")
             return
         
         os.system(f"mv {metadata_dir} {os.path.join(METADATA_REGISTRY, service_hash)}")
