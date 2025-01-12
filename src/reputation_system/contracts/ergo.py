@@ -7,6 +7,7 @@ from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
 from src.reputation_system.envs import CONTRACT
+from src.reputation_system.proof_validation import validate_reputation_proof_ownership
 from src.tunneling_system.tunnels import TunnelSystem
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
@@ -124,6 +125,11 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     
     LOGGER(f"Needs to be spent {total_token_value} reputation value.")
     input_boxes = [selected_input_box]
+    
+    # Validates reputation proof.
+    if not validate_reputation_proof_ownership():
+        return None
+    
     LOGGER(f"Using proof id -> {proof_id}")
     if proof_id:
         try:

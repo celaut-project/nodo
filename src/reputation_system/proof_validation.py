@@ -134,3 +134,25 @@ def sign_message(public_key, message) -> str | None:
     else:
         log(f"Public key mismatch: provided {public_key}, expected {address}")
         return None
+
+def validate_reputation_proof_ownership() -> bool:
+    # Retrieve the mnemonic phrase from environment variables
+    mnemonic_phrase = EnvManager().get_env("ERGO_WALLET_MNEMONIC")
+    proof_id = EnvManager().get_env("REPUTATION_PROOF_ID")
+    
+    # Get the public key associated with the mnemonic phrase
+    address = get_public_key_hex(mnemonic_phrase=mnemonic_phrase)
+    
+    # Get public key associated with the reputation proof.
+    proof_owner_pk = __get_single_address_with_all_tokens(proof_id)
+    
+    # Validate that the retrieved public key matches the expected proof owner public key
+    valid = address == proof_owner_pk
+    
+    if not valid: 
+        log((
+            f"Validation failed: The derived public key ({address}) does not match "
+            f"the proof owner's public key ({proof_owner_pk})."
+        ))
+    
+    return valid
