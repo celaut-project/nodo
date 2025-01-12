@@ -13,34 +13,48 @@ from src.database.access_functions.peers import get_peer_directions
 from src.utils.logger import LOGGER as log
 from src.utils.env import EnvManager
 
-def __get_single_address_with_all_tokens(token_id) -> str | None:
+from typing import Optional
+
+def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
     ergo_node = EnvManager().get_env("ERGO_NODE_URL")
     if not ergo_node:
         return None
+
     url = f"{ergo_node}/blockchain/box/unspent/byTokenId/{token_id}"
     params = {
         "offset": 0,
         "limit": 100  # Adjust the limit as needed
     }
     
-    response = requests.get(url, params=params)
-    if response.status_code != 200:
-        log(f"Failed to fetch data from API for token_id {token_id}. Status code: {response.status_code}")
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code != 200:
+            log(f"Failed to fetch data from API for token_id {token_id}. Status code: {response.status_code}")
+            return None
+        
+        data = response.json()
+
+        # Ensure data is a list of boxes
+        if not isinstance(data, list):
+            log(f"Unexpected response structure: {data}")
+            return None
+
+        # Extract addresses from all boxes
+        addresses = {box.get("address") for box in data if "address" in box}
+
+        # Return the address if all boxes have the same address
+        if len(addresses) == 1:
+            return addresses.pop()
+
+        log(f"Multiple or no addresses found for token_id {token_id}.")
         return None
-    
-    data = response.json()
-    addresses = set()
-    
-    for item in data.get('items', []):
-        for output in item.get('outputs', []):
-            addresses.add(output.get('address'))
-    
-    # If only one unique address contains all the tokens, return it
-    if len(addresses) == 1:
-        return addresses.pop()
-    
-    log(f"Multiple addresses found for token_id {token_id}, or no addresses found.")
-    return None
+
+    except requests.RequestException as e:
+        log(f"HTTP request failed: {e}")
+        return None
+    except ValueError as e:
+        log(f"Failed to parse JSON response for token_id {token_id}: {e}")
+        return None
 
 def validate_contract_ledger(contract_ledger: celaut.Service.Api.ContractLedger, peer_id: str) -> bool:
     """
