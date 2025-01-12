@@ -35,23 +35,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         }
     }
 
-    control_text_content = get_controls_text(&app);
-
-    let frame_width = frame.size().width as usize;
-    app.scroll_offset = (app.scroll_offset + 1) % control_text_content.len();
-
-    let controls_text = {
-        let visible_text_start = app.scroll_offset;
-        let visible_text_end = visible_text_start + frame_width;
-        if visible_text_end <= control_text_content.len() {
-            &control_text_content[visible_text_start..visible_text_end]
-        } else {
-            let prefix = &control_text_content[visible_text_start..];
-            let suffix = &control_text_content[..visible_text_end % control_text_content.len()];
-            format!("{}{}", prefix, suffix)
-        }
-    };
-
+    let controls_text = get_controls_text(&app);
     let controls_paragraph = Paragraph::new(controls_text)
         .style(Style::default().fg(Color::White).bg(Color::Black))
         .alignment(Alignment::Center);
