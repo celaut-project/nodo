@@ -126,7 +126,6 @@ if __name__ == '__main__':
             "\n- increase_gas <instance id> <gas to add>"
             "\n- decrease_gas <instance id> <gas to retire>"
             "\n- services"
-            "\n- peers"
             "\n- connect <ip:url>"
             "\n- compile <project directory>"
             "\n- config"
@@ -135,9 +134,9 @@ if __name__ == '__main__':
             "\n- logs"
             "\n- export <service> <path>"
             "\n- import <path>"
-            "\n- update"
 
             "\n\n Advanced commands:"
+            "\n- update"
             "\n- serve"
             "\n- migrate"
             "\n- storage:prune_blocks"
@@ -226,9 +225,9 @@ if __name__ == '__main__':
                 from src.commands.services import list_services
                 list_services()
                 
-            case "peers":
-                from src.commands.peers import list_peers
-                list_peers()
+            # case "peers":
+            #     from src.commands.peers import list_peers
+            #     list_peers()
 
             case 'connect':
                 from src.utils.zeroconf import connect
