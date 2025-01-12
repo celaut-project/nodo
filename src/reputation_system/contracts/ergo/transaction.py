@@ -64,8 +64,6 @@ def __build_proof_box(
     # sender_address_proposition = sigmastate.serialization.ErgoTreeSerializer.DefaultSerializer().serializeErgoTree(ergoTree)
     p2pkAddres = sender_address.asP2PK()
     sender_address_proposition = p2pkAddres.pubkey()
-    
-    LOGGER(f"Sender address proposition {sender_address_proposition}")
 
     return ergo._ctx.newTxBuilder() \
             .outBoxBuilder() \
