@@ -10,7 +10,7 @@ from src.gateway.utils import generate_gateway_instance
 from src.database.sql_connection import SQLConnection
 from src.utils.utils import get_network_name
 
-SEND_INSTANCE = True  # TODO Variable, true only in case of  ERG amount not sufficient to send instance to the reputation system.
+SEND_INSTANCE = False  # TODO Variable, true only in case of  ERG amount not sufficient to send instance to the reputation system.
 
 sc = SQLConnection()
 
