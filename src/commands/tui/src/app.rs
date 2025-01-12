@@ -44,7 +44,7 @@ pub struct Peer {
     pub id: String,
     pub uri: String,
     pub gas: String,
-    pub rpi: String  // Reputation proof id
+    pub rpi: Option<String>  // Reputation proof id
 }
 
 impl Identifiable for Peer {
@@ -132,7 +132,7 @@ fn get_peers() -> Result<Vec<Peer>> {
             let port: u16 = row.get(2)?;
             let gas_mantissa: i64 = row.get(3)?;
             let gas_exponent: i32 = row.get(4)?;
-            let rpi: String = row.get(5)?; // Retrieve the reputation_proof_id field
+            let rpi: Option<String> = row.get(5)?;
 
             let gas_value = gas_mantissa as f64 * 10f64.powi(gas_exponent as i32);
             let gas = format!("{:e}", gas_value);
@@ -141,7 +141,7 @@ fn get_peers() -> Result<Vec<Peer>> {
                 id,
                 uri: format!("{}:{}", ip, port),
                 gas,
-                rpi, // Assign the retrieved reputation_proof_id
+                rpi, // Assign the optional reputation_proof_id
             })
         })?
         .collect::<Result<Vec<Peer>>>()?)
