@@ -23,6 +23,19 @@ pub async fn handle_key_events(key_event: KeyEvent, app: &mut App<'_>) -> AppRes
             KeyCode::Esc | KeyCode::Char('q') => {
                 app.quit();
             }
+
+            KeyCode::Left => app.on_left(),
+            KeyCode::Up => app.on_up(),
+            KeyCode::Right => app.on_right(),
+            KeyCode::Down => app.on_down(),
+
+            KeyModifiers::SHIFT && (KeyCode::Up || KeyCode::Down) => app.change_mode_view(),
+            KeyModifiers::SHIFT && KeyCode::Left => app.previous_block_view(),
+            KeyModifiers::SHIFT && KeyCode::Right => app.next_block_view(),
+
+            KeyCode::Char('d') => app.press_d().await,
+            KeyCode::Char('e') => app.press_e().await,
+
             KeyCode::Char('c') | KeyCode::Char('C') => {
                 if key_event.modifiers == KeyModifiers::CONTROL {
                     app.quit();
@@ -32,15 +45,7 @@ pub async fn handle_key_events(key_event: KeyEvent, app: &mut App<'_>) -> AppRes
                     }
                 }
             }
-            KeyCode::Left | KeyCode::Char('h') => app.on_left(),
-            KeyCode::Up | KeyCode::Char('k') => app.on_up(),
-            KeyCode::Right | KeyCode::Char('l') => app.on_right(),
-            KeyCode::Down | KeyCode::Char('j') => app.on_down(),
-            KeyCode::Char('m') => app.change_mode_view(),
-            KeyCode::Char('o') => app.next_block_view(),
-            KeyCode::Char('p') => app.previous_block_view(),
-            KeyCode::Char('d') => app.press_d().await,
-            KeyCode::Char('e') => app.press_e().await,
+
             _ => {}
         }
     }
