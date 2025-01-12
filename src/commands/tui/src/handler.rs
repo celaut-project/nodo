@@ -29,9 +29,9 @@ pub async fn handle_key_events(key_event: KeyEvent, app: &mut App<'_>) -> AppRes
             KeyCode::Right => app.on_right(),
             KeyCode::Down => app.on_down(),
 
-            KeyModifiers::SHIFT && (KeyCode::Up || KeyCode::Down) => app.change_mode_view(),
-            KeyModifiers::SHIFT && KeyCode::Left => app.previous_block_view(),
-            KeyModifiers::SHIFT && KeyCode::Right => app.next_block_view(),
+            KeyModifiers::SHIFT & (KeyCode::Up || KeyCode::Down) => app.change_mode_view(),
+            KeyModifiers::SHIFT & KeyCode::Left => app.previous_block_view(),
+            KeyModifiers::SHIFT & KeyCode::Right => app.next_block_view(),
 
             KeyCode::Char('d') => app.press_d().await,
             KeyCode::Char('e') => app.press_e().await,
