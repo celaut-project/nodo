@@ -52,7 +52,10 @@ def add_reputation_proof(contract_ledger, peer_id) -> bool:
     return sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
 # Insert the instance if it does not exist.
-def add_peer_instance(instance: gateway_pb2.Instance) -> str:
+def add_peer_instance(instance: gateway_pb2.Instance) -> Optional[str]:
+    if sc.instance_exists(instance):
+        return None
+    
     parsed_instance = json.loads(MessageToJson(instance))
     log.LOGGER('Inserting instance on db: ' + str(parsed_instance))
 
@@ -83,7 +86,7 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> str:
 
 def update_peer_instance(instance: gateway_pb2.Instance, peer_id: str):
     log.LOGGER(f"Updating peer {peer_id}")
-    parsed_instance = json.loads(MessageToJson(instance))
+    # parsed_instance = json.loads(MessageToJson(instance))
     # It is assumed that app protocol and metadata have not been modified.
 
     # Slots

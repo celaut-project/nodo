@@ -978,6 +978,30 @@ class SQLConnection(metaclass=Singleton):
         ''', (peer_id,))
         return result.fetchone()[0] > 0
 
+    def instance_exists(self, instance: gateway_pb2.Instance) -> bool:
+        """
+        Checks if any URI within an instance exists in the database.
+
+        Args:
+            instance (gateway_pb2.Instance): The instance containing URI slots to be checked.
+
+        Returns:
+            bool: 
+                - True if at least one URI from the instance exists in the database.
+                - True in case of an unexpected error (failsafe behavior).
+                - False if no URIs exist in the database or the instance is empty.
+        """
+        try:
+            # Iterate through URI slots and URIs to check existence
+            for slot in instance.instance.uri_slot:
+                for uri in slot.uri:
+                    if self.uri_exists(uri=uri):
+                        return True
+        except Exception as e:
+            logger.LOGGER(f"Error while checking instance existence: {e}")
+            return True  # Failsafe: Return True to prevent disruption in case of error
+        return False
+
     def uri_exists(self, uri: str|celaut_pb2.Instance.Uri) -> bool:
         """
         Checks if a URI (ip:port) exists in the database.
