@@ -175,16 +175,10 @@ if __name__ == '__main__':
                     log.LOGGER(f"Error getting payment info and reputation proof {e}.")
                     payment_info = "N/A"
                     
-                reputation_proof_id = env_manager.get_env('REPUTATION_PROOF_ID')
+                reputation_proof_id = env_manager.get_env('REPUTATION_PROOF_ID') if validate_reputation_proof_ownership() else ""
 
-                print(
-                    f"Reputation Proof ID: {reputation_proof_id or 'N/A'} \n{payment_info}",
-                    flush=True
-                )
+                print(f"Reputation Proof ID: {reputation_proof_id or 'N/A'} \n{payment_info}", flush=True)
                 
-                if not validate_reputation_proof_ownership():
-                    print(f"\nAlert: The reputation proof is not valid. Please, consider change the ergo wallet mnemonic to the previous one or delete the actual reputation proof id.")
-
                 # dev_client = SQLConnection().get_dev_clients()[0]
                 # print(f"Dev client for dev purposes: {dev_client}")
 
