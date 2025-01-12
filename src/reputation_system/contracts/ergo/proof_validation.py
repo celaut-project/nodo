@@ -9,7 +9,7 @@ import string
 
 from src.reputation_system.contracts.ergo.utils import get_public_key
 from src.reputation_system.envs import CONTRACT, LEDGER
-from src.reputation_system.bip_wallet_verification import bip_ecdsa_verify, get_public_key_hex, bip_ecdsa_sign
+from src.reputation_system.bip_wallet_verification import bip_ecdsa_verify, bip_ecdsa_sign
 from src.database.access_functions.peers import get_peer_directions
 from src.utils.logger import LOGGER as log
 from src.utils.env import EnvManager
