@@ -157,7 +157,7 @@ if __name__ == '__main__':
         match sys.argv[1]:
 
             case "info":
-                from src.reputation_system.proof_validation import validate_reputation_proof_ownership
+                from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
                 
                 try:
                     status = "running" if is_nodo_service_running() else "not running"

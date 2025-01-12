@@ -5,7 +5,7 @@ from src.compilers.zip_with_dockerfile import compile_zip
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
-from src.reputation_system.proof_validation import sign_message
+from src.reputation_system.contracts.ergo.proof_validation import sign_message
 from src.tunneling_system.rpc_tunnel import service_tunnel
 from src.tunneling_system.tunnels import TunnelSystem
 from src.gateway.utils import generate_gateway_instance

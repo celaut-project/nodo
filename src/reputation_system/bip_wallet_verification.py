@@ -81,30 +81,3 @@ def bip_ecdsa_verify(message: str, signature_hex: str, public_key_hex: str) -> b
 
     except (binascii.Error, ValueError, ecdsa.BadSignatureError):
         return False
-
-def get_public_key_hex(mnemonic_phrase: str) -> str:
-    """
-    Obtains the public key in hexadecimal format from the mnemonic phrase.
-
-    :param mnemonic_phrase: BIP-39 mnemonic phrase.
-    :return: Public key in hexadecimal format.
-    """
-    # Validate the mnemonic phrase
-    mnemo = Mnemonic('english')
-    if not mnemo.check(mnemonic_phrase):
-        raise ValueError("Invalid mnemonic phrase.")
-
-    # Generate the seed from the mnemonic phrase
-    seed = mnemo.to_seed(mnemonic_phrase, passphrase="")
-
-    # Initialize BIP32 with the seed
-    bip32 = BIP32.from_seed(seed)
-
-    # Define the derivation path for Ergo platform
-    derivation_path = "m/44'/429'/0'/0/0"
-
-    # Obtain private and public keys
-    _, public_key_bytes = __bip32_derive_key(bip32, derivation_path)
-
-    # Return the public key in hexadecimal format
-    return binascii.hexlify(public_key_bytes).decode()

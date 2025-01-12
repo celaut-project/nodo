@@ -6,8 +6,9 @@ import jpype
 from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
+from src.reputation_system.contracts.ergo.utils import get_public_key
 from src.reputation_system.envs import CONTRACT
-from src.reputation_system.proof_validation import validate_reputation_proof_ownership
+from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
 from src.tunneling_system.tunnels import TunnelSystem
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
@@ -86,8 +87,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     safe_min_out_box = (len(objects)+1) * SAFE_MIN_BOX_VALUE
 
     # 1. Get the change address
-    mnemonic = ergo.getMnemonic(wallet_mnemonic=wallet_mnemonic, mnemonic_password=None)
-    sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
+    sender_address = get_public_key(wallet_mnemonic)
 
     LOGGER(f"Sender address -> {sender_address.toString()}")
 

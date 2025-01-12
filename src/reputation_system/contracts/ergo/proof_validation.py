@@ -7,6 +7,7 @@ import grpc
 import random
 import string
 
+from src.reputation_system.contracts.ergo.utils import get_public_key
 from src.reputation_system.envs import CONTRACT, LEDGER
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_verify, get_public_key_hex, bip_ecdsa_sign
 from src.database.access_functions.peers import get_peer_directions
@@ -123,7 +124,7 @@ def sign_message(public_key, message) -> str | None:
     mnemonic_phrase = EnvManager().get_env("ERGO_WALLET_MNEMONIC")
     
     # Get the public key associated with the mnemonic phrase
-    address = get_public_key_hex(mnemonic_phrase=mnemonic_phrase)
+    address = get_public_key(mnemonic_phrase=mnemonic_phrase)
     
     # Check if the provided public key matches the wallet's public key
     if public_key == address:
@@ -141,7 +142,7 @@ def validate_reputation_proof_ownership() -> bool:
     proof_id = EnvManager().get_env("REPUTATION_PROOF_ID")
     
     # Get the public key associated with the mnemonic phrase
-    address = get_public_key_hex(mnemonic_phrase=mnemonic_phrase)
+    address = get_public_key(mnemonic_phrase=mnemonic_phrase)
     
     # Get public key associated with the reputation proof.
     proof_owner_pk = __get_single_address_with_all_tokens(proof_id)
