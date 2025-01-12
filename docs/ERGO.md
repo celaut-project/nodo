@@ -72,3 +72,26 @@ When a node shares information with another, it provides two key elements:
 
 1. The **ID of its reputation proof**.
 2. The **payment address** (its public wallet) where funds should be sent.
+
+
+#### ContractLedger Definition
+
+```protobuf
+message ContractLedger {
+    bytes contract = 1;     // Sigma script of the box (defines the contract logic)
+    string contract_addr = 2;  // Address or identifier associated with the contract
+    string ledger = 3;      // Ledger type (e.g., "ergo")
+}
+```
+
+##### Reputation System
+The reputation system utilizes the following fields:
+- `contract`: Contains the sigma script of the box that holds each proof
+- `ledger`: Specifies the ledger system in use, which is set to `"ergo"`
+- `contract_addr`: Maps to the reputation proof ID, corresponding to the `token_id` in Ergo
+
+##### Payment System
+The payment system implements these fields:
+- `contract`: Contains the sigma script of the box that holds each payment
+- `ledger`: Identifies the ledger system as `"ergo"`
+- `contract_addr`: Specifies the spending address of the Ergo contract
