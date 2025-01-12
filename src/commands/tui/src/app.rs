@@ -603,11 +603,7 @@ impl<'a> App<'a> {
 
     pub async fn press_d(&mut self) {
         match self.tabs.index {
-            0 => {
-                if let Some(id) = &self.peers.state_id {
-                    let _ = self.execute_command(vec!["prune:peer".to_string(), id.to_string()]).await;
-                }
-            }
+            0 => {}
             1 => {}
             2 => {}
             3 => {}
