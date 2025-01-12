@@ -19,35 +19,35 @@ pub async fn handle_key_events(key_event: KeyEvent, app: &mut App<'_>) -> AppRes
             _ => {}
         }
     } else {
-        match key_event.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                app.quit();
+        match (key_event.code, key_event.modifiers) {
+            (KeyCode::Esc, _) | (KeyCode::Char('q'), _) => app.quit(),
+        
+            (KeyCode::Left, _) => app.on_left(),
+            (KeyCode::Up, _) => app.on_up(),
+            (KeyCode::Right, _) => app.on_right(),
+            (KeyCode::Down, _) => app.on_down(),
+        
+            (KeyCode::Up, KeyModifiers::SHIFT) | (KeyCode::Down, KeyModifiers::SHIFT) => {
+                app.change_mode_view()
             }
-
-            KeyCode::Left => app.on_left(),
-            KeyCode::Up => app.on_up(),
-            KeyCode::Right => app.on_right(),
-            KeyCode::Down => app.on_down(),
-
-            KeyModifiers::SHIFT & (KeyCode::Up || KeyCode::Down) => app.change_mode_view(),
-            KeyModifiers::SHIFT & KeyCode::Left => app.previous_block_view(),
-            KeyModifiers::SHIFT & KeyCode::Right => app.next_block_view(),
-
-            KeyCode::Char('d') => app.press_d().await,
-            KeyCode::Char('e') => app.press_e().await,
-
-            KeyCode::Char('c') | KeyCode::Char('C') => {
-                if key_event.modifiers == KeyModifiers::CONTROL {
-                    app.quit();
-                } else {
-                    if app.tabs.index == 0 {
-                        app.open_popup();
-                    }
+            (KeyCode::Left, KeyModifiers::SHIFT) => app.previous_block_view(),
+            (KeyCode::Right, KeyModifiers::SHIFT) => app.next_block_view(),
+        
+            (KeyCode::Char('d'), _) => app.press_d().await,
+            (KeyCode::Char('e'), _) => app.press_e().await,
+        
+            (KeyCode::Char('c'), KeyModifiers::CONTROL) | (KeyCode::Char('C'), KeyModifiers::CONTROL) => {
+                app.quit()
+            }
+        
+            (KeyCode::Char('c'), _) | (KeyCode::Char('C'), _) => {
+                if app.tabs.index == 0 {
+                    app.open_popup();
                 }
             }
-
+        
             _ => {}
-        }
+        }        
     }
     Ok(())
 }
