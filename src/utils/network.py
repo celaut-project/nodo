@@ -18,4 +18,29 @@ def get_local_ip() -> str:
     except Exception as e:
         print(f"Error getting local IP: {e}")
         return None
+
+def internet_available() -> bool:
+    """
+    Check if the internet is available by attempting to resolve multiple host names.
+
+    Returns:
+        bool: True if at least one host is reachable, False otherwise.
+    """
+    # List of hostnames to check
+    hosts = [
+        "python.org",
+        "rust-lang.org",
+        "linux.org",
+        "ergoplatform.org",
+        "sigmaspace.io"
+    ]
     
+    for host in hosts:
+        try:
+            # Try connecting to the host on port 80 (HTTP)
+            socket.create_connection((host, 80), timeout=5)
+            return True  # Internet is available if at least one host is reachable
+        except (socket.gaierror, socket.timeout):
+            continue  # Try the next host
+    
+    return False  # Internet is not available if no hosts are reachable

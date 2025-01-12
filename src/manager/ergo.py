@@ -5,6 +5,8 @@ from src.utils.env import EnvManager
 from src.utils.logger import LOGGER as log
 from concurrent.futures import ThreadPoolExecutor
 
+from src.utils.network import internet_available
+
 env_manager = EnvManager()
 
 
@@ -88,6 +90,9 @@ def check_ergo_node_availability():
       first available peer and logs the update.
     Note: Check for equality in case it has been manually changed.
     """
+    
+    if not internet_available():
+        return
     
     log("Checking Ergo node availability...")
     
