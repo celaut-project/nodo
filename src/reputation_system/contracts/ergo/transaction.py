@@ -222,6 +222,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         sender_address=sender_address
     )
 
+    mnemonic = ergo.getMnemonic(wallet_mnemonic=wallet_mnemonic, mnemonic_password=None)
     signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
 
     # 5. Submit the transaction and return the ID
