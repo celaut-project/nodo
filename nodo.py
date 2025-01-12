@@ -157,6 +157,8 @@ if __name__ == '__main__':
         match sys.argv[1]:
 
             case "info":
+                from src.reputation_system.proof_validation import validate_reputation_proof_ownership
+                
                 try:
                     status = "running" if is_nodo_service_running() else "not running"
                     print(f"Nodo service is currently {status}.", flush=True)
@@ -179,6 +181,9 @@ if __name__ == '__main__':
                     f"Reputation Proof ID: {reputation_proof_id or 'N/A'} \n{payment_info}",
                     flush=True
                 )
+                
+                if not validate_reputation_proof_ownership():
+                    print(f"\nAlert: The reputation proof is not valid. Please, consider change the ergo wallet mnemonic to the previous one or delete the actual reputation proof id.")
 
                 # dev_client = SQLConnection().get_dev_clients()[0]
                 # print(f"Dev client for dev purposes: {dev_client}")
