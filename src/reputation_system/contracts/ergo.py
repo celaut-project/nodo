@@ -128,7 +128,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     
     # Validates reputation proof.
     if not validate_reputation_proof_ownership():
-        return None
+        LOGGER(f"The reputation proof ID {proof_id} is not associated with the current Ergo wallet mnemonic and will be removed.")
+        proof_id = ""
     
     LOGGER(f"Using proof id -> {proof_id}")
     if proof_id:
