@@ -197,7 +197,10 @@ if __name__ == '__main__':
                 import_bee(path=sys.argv[2])
                 
             case "update":
-                os.system(f"{MAIN_DIR}/bash/install.sh")
+                if os.geteuid() != 0:
+                    print("This script requires superuser privileges. Please run with sudo.")
+                else:
+                    os.system(f"{MAIN_DIR}/bash/install.sh")
 
             case "execute":
                 from src.commands.execute import execute
