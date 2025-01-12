@@ -220,7 +220,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             # Use the sign_message method to sign the public key
             signed_message = sign_message(
                 public_key=sign_request.public_key,
-                message=sign_request.message
+                message=sign_request.to_sign
             )
             
             # Create the response
