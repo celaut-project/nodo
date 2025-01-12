@@ -15,7 +15,9 @@ from src.utils.env import EnvManager
 
 def __get_single_address_with_all_tokens(token_id) -> str | None:
     ergo_node = EnvManager().get_env("ERGO_NODE_URL")
-    url = f"{ergo_node}/api/v1/boxes/unspent/byTokenId/{token_id}"
+    if not ergo_node:
+        return None
+    url = f"{ergo_node}/blockchain/box/unspent/byTokenId/{token_id}"
     params = {
         "offset": 0,
         "limit": 100  # Adjust the limit as needed
