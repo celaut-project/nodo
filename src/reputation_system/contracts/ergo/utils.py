@@ -4,9 +4,7 @@ from ergpy.helper_functions import initialize_jvm
 from jpype import *
 import java.lang
 
-from org.ergoplatform.sdk import *
 from org.ergoplatform.appkit import *
-from org.ergoplatform.appkit.impl import *
 
 from src.utils.env import EnvManager
 
