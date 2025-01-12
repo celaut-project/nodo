@@ -135,6 +135,7 @@ if __name__ == '__main__':
             "\n- logs"
             "\n- export <service> <path>"
             "\n- import <path>"
+            "\n- update"
 
             "\n\n Advanced commands:"
             "\n- serve"
@@ -194,6 +195,9 @@ if __name__ == '__main__':
             case "import":
                 from src.commands.import_bee import import_bee
                 import_bee(path=sys.argv[2])
+                
+            case "update":
+                os.system(f"{MAIN_DIR}/bash/install.sh")
 
             case "execute":
                 from src.commands.execute import execute
