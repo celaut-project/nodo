@@ -18,6 +18,7 @@ from typing import Optional
 def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
     ergo_node = EnvManager().get_env("ERGO_NODE_URL")
     if not ergo_node:
+        log("No ergo node available.")
         return None
 
     url = f"{ergo_node}/blockchain/box/unspent/byTokenId/{token_id}"
