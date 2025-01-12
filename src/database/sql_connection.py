@@ -978,19 +978,25 @@ class SQLConnection(metaclass=Singleton):
         ''', (peer_id,))
         return result.fetchone()[0] > 0
 
-    def uri_exists(self, uri: str) -> bool:
+    def uri_exists(self, uri: str|celaut_pb2.Instance.Uri) -> bool:
         """
         Checks if a URI (ip:port) exists in the database.
 
         Args:
-            uri (str): The complete URI to check in the format 'ip:port'.
+            uri (str | celaut_pb2.Instance.Uri): 
+                The URI to check. It can be a string in the format 'ip:port' 
+                or an instance of `celaut_pb2.Instance.Uri` with `ip` and `port` attributes.
 
         Returns:
             bool: True if the URI exists, False otherwise.
         """
         try:
             # Split the URI into IP and port
-            ip, port = uri.split(':')
+            if type(uri) is str:
+                
+                ip, port = uri.split(':')
+            else:
+                ip, port = uri.ip, uri.port
             port = int(port)  # Convert port to an integer
 
             # Query the database to check if the IP and port exist
