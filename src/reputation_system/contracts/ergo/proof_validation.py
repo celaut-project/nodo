@@ -42,7 +42,7 @@ def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
             return None
 
         # Extract addresses from all boxes
-        addresses = {box.get("additionalRegisters").get("R7") for box in data if "additionalRegisters" in box and "R7" in box["additionalRegisters"]}
+        addresses = {box.get("additionalRegisters").get("R7")[4:] for box in data if "additionalRegisters" in box and "R7" in box["additionalRegisters"]}
 
         # Return the address if all boxes have the same address
         if len(addresses) == 1:
