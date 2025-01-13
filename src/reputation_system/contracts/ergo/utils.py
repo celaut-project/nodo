@@ -21,16 +21,9 @@ def get_public_key(mnemonic_phrase: str) -> str:
     mnemonic = ergo.getMnemonic(wallet_mnemonic=mnemonic_phrase, mnemonic_password=None)
     return ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
 
-"""
 @initialize_jvm
 def pub_key_hex_to_addr(pub_key_hex: str) -> str:
-    pubKeyBytes = Utils.hexStringToBytes(pub_key_hex)
     
-    groupElement = JavaHelpers.decodeGroupElement(pubKeyBytes)
-    
-    proveDlog = Values.ProveDlog.apply(groupElement)
-    
-    address = Address(proveDlog, NetworkType.MAINNET)
+    address = Address(pub_key_hex, NetworkType.MAINNET)
     
     return address
-"""
