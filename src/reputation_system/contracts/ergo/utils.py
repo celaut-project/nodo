@@ -3,6 +3,7 @@ from ergpy import appkit as ergpy
 from ergpy.helper_functions import initialize_jvm
 
 from jpype import *
+from jpype.types import JByte
 import java.lang
 
 from org.ergoplatform.sdk import *
@@ -43,6 +44,7 @@ def addr_to_pub_key_hex(address: str) -> str:
     pk = address.getPublicKey()
     ec_point = pk.value()
     group_element = JavaHelpers.SigmaDsl().GroupElement(ec_point)
-    bytes = group_element.getEncoded()
-    public_key_hex = hexlify(bytes).decode('utf-8')
+    java_bytes = group_element.getEncoded()
+    python_bytes = bytes([b for b in java_bytes])
+    public_key_hex = hexlify(python_bytes).decode('utf-8')
     return public_key_hex
