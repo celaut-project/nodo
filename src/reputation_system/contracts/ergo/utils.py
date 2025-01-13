@@ -1,4 +1,4 @@
-from ergpy import appkit
+from ergpy import appkit as ergpy
 from ergpy.helper_functions import initialize_jvm
 
 from jpype import *
@@ -18,7 +18,7 @@ def get_public_key(mnemonic_phrase: str) -> str:
     :param mnemonic_phrase: BIP-39 mnemonic phrase.
     :return: Public key in hexadecimal format.
     """
-    ergo = appkit.ErgoAppKit(node_url=EnvManager().get_env("ERGO_NODE_URL"))
+    ergo = ergpy.ErgoAppKit(node_url=EnvManager().get_env("ERGO_NODE_URL"))
     mnemonic = ergo.getMnemonic(wallet_mnemonic=mnemonic_phrase, mnemonic_password=None)
     return ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
 
