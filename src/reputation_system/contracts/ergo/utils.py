@@ -9,7 +9,6 @@ from org.ergoplatform.sdk import *
 from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
 from org.ergoplatform import *
-from  org.ergoplatform.sigmastate.eval import CostingSigmaDslBuilder
 
 from src.utils.env import EnvManager
 
@@ -43,5 +42,5 @@ def pub_key_hex_to_addr(pub_key_hex: str) -> str:
 def addr_to_pub_key_hex(address: str) -> str:
     pk = address.getPublicKey()
     ec_point = pk.value()
-    ge = CostingSigmaDslBuilder.GroupElement(ec_point)
-    return ge.getEncoded(True).hex()
+    group_element = JavaHelpers.SigmaDsl().GroupElement(ec_point)
+    return group_element
