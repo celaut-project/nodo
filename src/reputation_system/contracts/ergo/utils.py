@@ -43,5 +43,5 @@ def pub_key_hex_to_addr(pub_key_hex: str) -> str:
 def addr_to_pub_key_hex(address: str) -> str:
     
     pk = address.getPublicKey()
-    return pk
+    return pk.value
     # ErgoValue.of(pk)    ???
