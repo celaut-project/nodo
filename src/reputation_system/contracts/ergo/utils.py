@@ -25,6 +25,6 @@ def get_public_key(mnemonic_phrase: str) -> str:
 @initialize_jvm
 def pub_key_hex_to_addr(pub_key_hex: str) -> str:
     
-    address = Address.createP2PKAddress(pub_key_hex, NetworkType.MAINNET)
+    address = Address.createP2PKAddress(bytes.fromhex(pub_key_hex), NetworkType.MAINNET)
     
     return address
