@@ -7,7 +7,7 @@ import grpc
 import random
 import string
 
-from src.reputation_system.contracts.ergo.utils import get_public_key, pub_key_hex_to_addr
+from src.reputation_system.contracts.ergo.utils import get_public_key, addr_to_pub_key_hex  #, pub_key_hex_to_addr
 from src.reputation_system.envs import CONTRACT, LEDGER
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_verify, bip_ecdsa_sign
 from src.database.access_functions.peers import get_peer_directions
@@ -47,7 +47,7 @@ def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
         # Return the address if all boxes have the same address
         if len(addresses) == 1:
             pub_key_hex = addresses.pop()
-            return pub_key_hex_to_addr(pub_key_hex)
+            return pub_key_hex  #pub_key_hex_to_addr(pub_key_hex)
 
         log(f"Multiple or no addresses found for token_id {token_id}.")
         return None
@@ -144,12 +144,13 @@ def validate_reputation_proof_ownership() -> bool:
     
     # Get the public key associated with the mnemonic phrase
     address = get_public_key(mnemonic_phrase=mnemonic_phrase)
+    addr_pk = addr_to_pub_key_hex(address)
     
     # Get public key associated with the reputation proof.
     proof_owner_pk = __get_single_address_with_all_tokens(proof_id)
     
     # Validate that the retrieved public key matches the expected proof owner public key
-    valid = address == proof_owner_pk
+    valid = addr_pk == proof_owner_pk
     
     if not valid: 
         log((
