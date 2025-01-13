@@ -157,5 +157,12 @@ def validate_reputation_proof_ownership() -> bool:
             f"Validation failed: The derived public key ({addr_pk}) does not match "
             f"the proof owner's public key ({proof_owner_pk})."
         ))
+        
+    """
+    Validation failed: The derived public key 
+    (ProveDlog(Ecp((8696f0bfa01ecf1244ae08579cbe486cf755d892de754cb674179bb3293b79c0,515cdaf7ae08876901334938490b625a4cf1792cd188d5c36f94ecd5c63a6c9d,1)))) 
+    does not match the proof owner's public key (038696f0bfa01ecf1244ae08579cbe486cf755d892de754cb674179bb3293b79c0).
+
+    """
     
     return valid
