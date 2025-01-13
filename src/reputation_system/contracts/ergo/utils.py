@@ -43,8 +43,13 @@ def pub_key_hex_to_addr(pub_key_hex: str) -> str:
 @initialize_jvm
 def addr_to_pub_key_hex(address: str) -> str:
     
+    def ecp_to_hex(point):
+        # Get x and y coordinates as hex strings without '0x' prefix
+        x_hex = format(point.x, 'x').zfill(64)
+        y_hex = format(point.y, 'x').zfill(64)
+        # Concatenate with '02' or '03' prefix based on y being even/odd
+        prefix = '02' if point.y % 2 == 0 else '03'
+        return prefix + x_hex
+        
     pk = address.getPublicKey()
-    return pk.value()
-    encoded_bytes = ec_point.getEncoded(True)
-    hex_string = hexlify(bytes(encoded_bytes)).decode('utf-8')
-    return hex_string
+    return ecp_to_hex(pk.value())
