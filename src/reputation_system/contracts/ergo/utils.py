@@ -7,6 +7,7 @@ import java.lang
 from org.ergoplatform.sdk import *
 from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
+from org.ergoplatform import *
 
 from src.utils.env import EnvManager
 
