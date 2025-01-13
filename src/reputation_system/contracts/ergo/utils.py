@@ -44,7 +44,7 @@ def pub_key_hex_to_addr(pub_key_hex: str) -> str:
 def addr_to_pub_key_hex(address: str) -> str:
     
     pk = address.getPublicKey()
-    ec_point = pk.value()
+    return pk.value()
     encoded_bytes = ec_point.getEncoded(True)
     hex_string = hexlify(bytes(encoded_bytes)).decode('utf-8')
     return hex_string
