@@ -42,6 +42,5 @@ def pub_key_hex_to_addr(pub_key_hex: str) -> str:
 @initialize_jvm
 def addr_to_pub_key_hex(address: str) -> str:
     
-    addr = Address.create(address)
-    pk = addr.getPublicKey()
+    pk = address.getPublicKey()
     return pk
