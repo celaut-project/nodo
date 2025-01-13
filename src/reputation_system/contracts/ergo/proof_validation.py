@@ -154,7 +154,7 @@ def validate_reputation_proof_ownership() -> bool:
     
     if not valid: 
         log((
-            f"Validation failed: The derived public key ({address}) does not match "
+            f"Validation failed: The derived public key ({addr_pk}) does not match "
             f"the proof owner's public key ({proof_owner_pk})."
         ))
     
