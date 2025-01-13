@@ -43,4 +43,6 @@ def addr_to_pub_key_hex(address: str) -> str:
     pk = address.getPublicKey()
     ec_point = pk.value()
     group_element = JavaHelpers.SigmaDsl().GroupElement(ec_point)
-    return group_element
+    bytes = group_element.getEncoded()
+    public_key_hex = hexlify(bytes).decode('utf-8')
+    return public_key_hex
