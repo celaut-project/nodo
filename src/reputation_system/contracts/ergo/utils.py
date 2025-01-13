@@ -1,3 +1,4 @@
+from binascii import hexlify
 from ergpy import appkit as ergpy
 from ergpy.helper_functions import initialize_jvm
 
@@ -43,5 +44,7 @@ def pub_key_hex_to_addr(pub_key_hex: str) -> str:
 def addr_to_pub_key_hex(address: str) -> str:
     
     pk = address.getPublicKey()
-    return pk.value.getEncoded(True).map("%02x".format(_)).mkString
-    # ErgoValue.of(pk)    ???
+    ec_point = pk.value()
+    encoded_bytes = ec_point.getEncoded(True)
+    hex_string = hexlify(bytes(encoded_bytes)).decode('utf-8')
+    return hex_string
