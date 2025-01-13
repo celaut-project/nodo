@@ -44,8 +44,8 @@ def addr_to_pub_key_hex(address: str) -> str:
     pk = address.getPublicKey()
     ec_point = pk.value()
     group_element = JavaHelpers.SigmaDsl().GroupElement(ec_point)
-    java_bytes = group_element.getEncoded()
+    java_bytes = group_element.getEncoded()  # sigma.data.CollOverArray$mcB$sp
     java_byte_array = java_bytes.toArray()
-    python_bytes = bytes([int(byte) for byte in java_byte_array])
+    python_bytes = bytes([(byte + 256) % 256 for byte in java_byte_array])
     public_key_hex = hexlify(python_bytes).decode('utf-8')
     return public_key_hex
