@@ -24,6 +24,6 @@ def get_public_key(mnemonic_phrase: str) -> str:
 @initialize_jvm
 def pub_key_hex_to_addr(pub_key_hex: str) -> str:
     
-    address = Address(pub_key_hex, NetworkType.MAINNET)
+    address = Address(ErgoAddress(pub_key_hex, NetworkType.MAINNET))
     
     return address
