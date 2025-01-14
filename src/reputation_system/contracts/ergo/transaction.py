@@ -65,7 +65,7 @@ def __build_proof_box(
     p2pkAddres = sender_address.asP2PK()
     sender_address_proposition = p2pkAddres.pubkey()
     
-    LOGGER(f"Sender address -> {sender_address_proposition}")
+    LOGGER(f"Sender address -> {ErgoValue.of(sender_address_proposition)}")
     
     raise Exception
 
