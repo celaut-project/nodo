@@ -146,4 +146,4 @@ def prepare_directory(directory: str) -> Tuple[bool, str]:
             raise Exception(f"Failed to copy directory: {str(e)}")
         
     else:
-        raise Exception("SOMETHING SHOULD BE WRITTEN HERE.")
+        raise Exception(f"The directory {directory} must be an absolute path")
