@@ -153,7 +153,7 @@ def build_container_from_definition(service: celaut_pb2.Service,
 
         # Build it.
         l.LOGGER('Build process of ' + service_id + ': building it ...')
-        open(_dir + '/Dockerfile', 'w').write('FROM scratch\nCOPY fs .')
+        open(_dir + '/Dockerfile', 'w').write('FROM scratch\nCOPY --chmod=777 fs .')
         cache_id = service_id + str(time()) + '.cache'
         check_output(f'{DOCKER_COMMAND} buildx build --platform ' + arch + ' -t ' + cache_id + ' ' + _dir + '/.', shell=True)
         l.LOGGER('Build process of ' + service_id + ': build it.')
@@ -179,12 +179,6 @@ def build_container_from_definition(service: celaut_pb2.Service,
                 l.LOGGER(
                     'Build process of ' + service_id + ': symlink error (AttributeError) ' + str(symlink.src) + str(
                         symlink.dst))
-
-        l.LOGGER('Build process of ' + service_id + ': apply permissions.')
-        # Apply permissions. # TODO check that is only own by the container root.
-        #  https://programmer.ink/think/docker-security-container-resource-control-using-cgroups-mechanism.html
-        run('find . -type d -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
-        run('find . -type f -exec chmod 777 {} \;', shell=True, cwd=overlay_dir)
 
         check_output(f'{DOCKER_COMMAND} image tag ' + cache_id + ' ' + service_id + '.docker', shell=True)
         check_output(F'{DOCKER_COMMAND} rmi ' + cache_id, shell=True)
