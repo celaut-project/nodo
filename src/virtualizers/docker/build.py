@@ -153,7 +153,7 @@ def build_container_from_definition(service: celaut_pb2.Service,
 
         # Build it.
         l.LOGGER('Build process of ' + service_id + ': building it ...')
-        open(_dir + '/Dockerfile', 'w').write('FROM scratch\nCOPY --chmod=777 fs .')
+        open(_dir + '/Dockerfile', 'w').write('FROM scratch\nCOPY fs/ /\nRUN chmod -R 777 /')
         cache_id = service_id + str(time()) + '.cache'
         check_output(f'{DOCKER_COMMAND} buildx build --platform ' + arch + ' -t ' + cache_id + ' ' + _dir + '/.', shell=True)
         l.LOGGER('Build process of ' + service_id + ': build it.')
