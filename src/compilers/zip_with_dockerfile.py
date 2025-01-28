@@ -326,8 +326,8 @@ def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.S
 
         identifier, metadata, service = spec_file.save()
 
-    os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')
-    os.system(DOCKER_COMMAND + ' rmi builder' + aux_id)
+    # os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')  <-- This avoids rebuilding the container on the first run, but it causes file permission issues since it inherits them as they were on the host. Preferably, if using Docker, it is better to rebuild it.
+    os.system(DOCKER_COMMAND + ' rmi -f builder' + aux_id)
     os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier, metadata, service
 
