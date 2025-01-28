@@ -35,13 +35,6 @@ Basic installation:
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/master/install.sh | sudo sh
 ```
 
-#### Extra commands
-Enable SSH console access:
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/master/bash/enable_ssh.sh | sudo sh
-```
-
-
 ### Note on Installation
 
 - **requirements**: Needs Ubuntu 22.04.5 LTS and curl package installed.
