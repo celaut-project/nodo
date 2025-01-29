@@ -180,14 +180,19 @@ def spend_gas(
                 actual_gas = sc.get_client_gas(client_id=id)
             except Exception as e:
                 log.LOGGER(f"actual gas exception {e}")
+                
+            log.LOGGER(f"AUX LOG 1.1")
             
             if not actual_gas: return False
             try:
                 actual_gas, last_usage, sci_not = actual_gas
             except Exception as e:
                 log.LOGGER(f"actual gas to 3 {e}")
+                
+            log.LOGGER(f"AUX LOG 1.2")
             
             if actual_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
+                log.LOGGER(f"AUX LOG 1.3")
                 try:
                     gas_to_send_mant, gas_to_send_exp = _split_gas(gas_to_spend)
                 except Exception as e:
@@ -196,13 +201,17 @@ def spend_gas(
                 log.LOGGER(f"Insufficient amount of gas {sci_not} from {gas_to_send_mant}e{gas_to_send_exp}")
                 return False
             
+            log.LOGGER(f"AUX LOG 2")
+            
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
+            log.LOGGER(f"AUX LOG 3")
             __refund_gas_function_factory(
                 gas=gas_to_spend,
                 token=id,
                 add_function=lambda gas: sc.add_gas(client_id=id, gas=gas),
                 container=refund_gas_function_container
             )
+            log.LOGGER(f"AUX LOG 4")
             return True
 
         # En caso de que token_or_container_ip sea el token del contenedor.
