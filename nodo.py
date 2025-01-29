@@ -126,6 +126,8 @@ if __name__ == '__main__':
             "\n- increase_gas <instance id> <gas to add>"
             "\n- decrease_gas <instance id> <gas to retire>"
             "\n- services"
+            "\n- clients"
+            "\n- peers"
             "\n- connect <ip:url>"
             "\n- compile <project directory>"
             "\n- config"
@@ -225,9 +227,13 @@ if __name__ == '__main__':
                 from src.commands.services import list_services
                 list_services()
                 
-            # case "peers":
-            #     from src.commands.peers import list_peers
-            #     list_peers()
+            case 'clients':
+                from src.database.sql_connection import SQLConnection
+                print("\n".join([client for client in SQLConnection().get_clients()]))
+                
+            case "peers":
+                from src.commands.peers import list_peers
+                list_peers()
 
             case 'connect':
                 from src.utils.zeroconf import connect
