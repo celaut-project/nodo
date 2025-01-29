@@ -176,11 +176,23 @@ def spend_gas(
         # En caso de que sea un peer, el token es el client id.
         if sc.client_exists(client_id=id):
             log.LOGGER(f"Spend gas for the client {id}.")
-            actual_gas = sc.get_client_gas(client_id=id)
+            try:
+                actual_gas = sc.get_client_gas(client_id=id)
+            except Exception as e:
+                log.LOGGER(f"actual gas exception {e}")
+            
             if not actual_gas: return False
-            actual_gas, last_usage, sci_not = actual_gas
+            try:
+                actual_gas, last_usage, sci_not = actual_gas
+            except Exception as e:
+                log.LOGGER(f"actual gas to 3 {e}")
+            
             if actual_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
-                gas_to_send_mant, gas_to_send_exp = _split_gas(gas_to_spend)
+                try:
+                    gas_to_send_mant, gas_to_send_exp = _split_gas(gas_to_spend)
+                except Exception as e:
+                    log.LOGGER(f"split gas to spend exceptiocn {e}")
+                
                 log.LOGGER(f"Insufficient amount of gas {sci_not} from {gas_to_send_mant}e{gas_to_send_exp}")
                 return False
             
