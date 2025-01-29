@@ -195,7 +195,7 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('SELECT id FROM clients WHERE id LIKE ?', ('dev-%',))
         return [row['id'] for row in result.fetchall()]
 
-    def get_client_gas(self, client_id: str) -> Tuple[int, float]:
+    def get_client_gas(self, client_id: str) -> Optional[Tuple[int, float, str]]:
         """
         Retrieves the gas and last usage time for a client.
 
@@ -203,15 +203,20 @@ class SQLConnection(metaclass=Singleton):
             client_id (str): The ID of the client.
 
         Returns:
-            Tuple[int, int, float]: The mantissa, exponent of gas amount, and last usage time.
+            Tuple[int, float, str]: The gas amount, last usage time and gas in scientific notation.
         """
         result = self._execute('''
             SELECT gas_mantissa, gas_exponent, last_usage FROM clients WHERE id = ?
         ''', (client_id,))
         row = result.fetchone()
         if row:
-            return _combine_gas(mantissa=row['gas_mantissa'], exponent=row['gas_exponent']), row['last_usage']
-        raise Exception(f'Client not found: {client_id}')
+            return (
+                _combine_gas(mantissa=row['gas_mantissa'], exponent=row['gas_exponent']),
+                row['last_usage'],
+                f"{row['gas_mantissa']}e{row['gas_exponent']}"
+            )
+                
+        log.LOGGER(f'Client not found: {client_id}')
 
     def delete_client(self, client_id: str):
         """Deletes a client from the database."""
