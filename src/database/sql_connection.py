@@ -32,8 +32,8 @@ DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
 
 # Define a maximum mantissa and exponent
-MAX_MANTISSA = 10**9  # Adjust this limit as needed
-MAX_EXPONENT = 128  # Adjust this limit as needed
+MAX_MANTISSA = 10**3  # Adjust this limit as needed
+MAX_EXPONENT = 1024  # Adjust this limit as needed
 
 
 def _combine_gas(mantissa: int, exponent: int) -> int:
