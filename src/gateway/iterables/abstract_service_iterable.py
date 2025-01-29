@@ -88,6 +88,7 @@ class AbstractServiceIterable:
     def __pattern_matching(self, r) -> Generator[buffer_pb2.Buffer, None, None]:
         match type(r):
             case gateway_pb2.Client:
+                
                 self.client_id = r.client_id
 
             case gateway_pb2.RecursionGuard:

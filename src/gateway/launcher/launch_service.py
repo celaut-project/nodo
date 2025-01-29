@@ -40,6 +40,10 @@ def launch_service(
             father_id = sc.get_internal_service_id_by_uri(father_ip)
             if not father_id:
                 raise Exception('Client id not provided.')
+            else:
+                log.LOGGER(f"Service launch request made by the service {father_id}.")
+        else:
+            log.LOGGER(f"Service launch request made by the client {father_id}.")
 
         for peer, estimated_cost in service_balancer(
                 metadata=metadata,
