@@ -193,6 +193,7 @@ env_manager.get_env("COST_OF_BUILD", 5)
 env_manager.get_env("EXECUTION_BENEFIT", 1)
 env_manager.get_env("MODIFY_SERVICE_SYSTEM_RESOURCES_COST", 1)
 env_manager.get_env("ALLOW_GAS_DEBT", False)
+env_manager.get_env("DEV_CLIENT_GAS_AMOUNT", pow(10, 256))
 
 # Timing and Delay Settings
 env_manager.get_env("GENERAL_WAIT_TIME", 2)

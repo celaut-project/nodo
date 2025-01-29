@@ -28,6 +28,7 @@ SHORT_INTERVAL_COUNT = env_manager.get_env("SHORT_INTERVAL_COUNT")
 SUBMIT_REPUTATION_AT_INIT = env_manager.get_env("SUBMIT_REPUTATION_AT_INIT")
 MIN_SLOTS_OPEN_PER_PEER = env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER")
 MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
+DEV_CLIENT_GAS_AMOUNT = env_manager.get_env("DEV_CLIENT_GAS_AMOUNT")
 TOTAL_REFILLED_DEPOSIT = env_manager.get_env("TOTAL_REFILLED_DEPOSIT")
 MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
 REGISTRY = env_manager.get_env("REGISTRY")
@@ -180,7 +181,7 @@ def check_dev_clients():
     clients = sc.get_dev_clients()
     if len(clients) == 0:
         log.LOGGER("Adds dev client.")
-        sc.add_client(client_id=f"dev-{uuid4()}", gas=MIN_DEPOSIT_PEER, last_usage=None)
+        sc.add_client(client_id=f"dev-{uuid4()}", gas=DEV_CLIENT_GAS_AMOUNT, last_usage=None)
     else:
         client_gas = sc.get_client_gas(client_id=clients[0])[0]
         if client_gas < MIN_DEPOSIT_PEER:
