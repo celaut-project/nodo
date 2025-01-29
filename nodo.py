@@ -229,7 +229,7 @@ if __name__ == '__main__':
                 
             case 'clients':
                 from src.database.sql_connection import SQLConnection
-                print("\n".join([client for client in SQLConnection().get_clients()]))
+                print("\n".join([str(client) for client in SQLConnection().get_clients()]))
                 
             case "peers":
                 from src.commands.peers import list_peers
