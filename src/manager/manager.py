@@ -177,10 +177,11 @@ def spend_gas(
         if sc.client_exists(client_id=id):
             log.LOGGER(f"Spend gas for the client {id}.")
             actual_gas = sc.get_client_gas(client_id=id)
-            if actual_gas[0] < gas_to_spend and not bool(ALLOW_GAS_DEBT):
-                gas_to_send_sci = _split_gas(gas_to_spend)
-                gas_to_send_sci_str = f"{gas_to_send_sci[0]}e{gas_to_send_sci[1]}"
-                log.LOGGER(f"Insufficient amount of gas {actual_gas[2]} from {gas_to_send_sci_str}")
+            if not actual_gas: return False
+            actual_gas, last_usage, sci_not = actual_gas
+            if actual_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
+                gas_to_send_mant, gas_to_send_exp = _split_gas(gas_to_spend)
+                log.LOGGER(f"Insufficient amount of gas {sci_not} from {gas_to_send_mant}e{gas_to_send_exp}")
                 return False
             
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
