@@ -217,6 +217,7 @@ class SQLConnection(metaclass=Singleton):
             )
                 
         log.LOGGER(f'Client not found: {client_id}')
+        return None
 
     def delete_client(self, client_id: str):
         """Deletes a client from the database."""

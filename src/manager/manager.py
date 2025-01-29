@@ -175,6 +175,7 @@ def spend_gas(
     try:
         # En caso de que sea un peer, el token es el client id.
         if sc.client_exists(client_id=id):
+            log.LOGGER(f"Spend gas for the client {id}.")
             actual_gas = sc.get_client_gas(client_id=id)
             if not (actual_gas[0] >= gas_to_spend or bool(ALLOW_GAS_DEBT)):
                 log.LOGGER(f"Insufficient amount of gas {actual_gas[3]} from {gas_to_spend}")
@@ -198,6 +199,7 @@ def spend_gas(
                 is_id = sc.container_exists(id=id) if id else False
 
             if is_id:
+                log.LOGGER(f"Spend gas for the service {id}.")
                 current_gas = sc.get_internal_service_gas(id=id)
                 if current_gas >= gas_to_spend or ALLOW_GAS_DEBT:
                     sc.update_gas_to_container(id=id, gas=current_gas - gas_to_spend)
