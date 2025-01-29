@@ -194,6 +194,7 @@ def manager_thread():
     
     # Functions to be executed at the beginning
     init_interfaces()
+    check_dev_clients()
     check_ergo_node_availability()
     if SUBMIT_REPUTATION_AT_INIT: submit_reputation(force_submit=True)
     
