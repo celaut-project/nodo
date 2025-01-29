@@ -179,8 +179,8 @@ def spend_gas(
             actual_gas = sc.get_client_gas(client_id=id)
             if actual_gas[0] < gas_to_spend and not bool(ALLOW_GAS_DEBT):
                 gas_to_send_sci = _split_gas(gas_to_spend)
-                gas_to_send_sci = f"{gas_to_send_sci[0]}e{gas_to_send_sci[1]}"
-                log.LOGGER(f"Insufficient amount of gas {actual_gas[2]} from {gas_to_send_sci}")
+                gas_to_send_sci_str = f"{gas_to_send_sci[0]}e{gas_to_send_sci[1]}"
+                log.LOGGER(f"Insufficient amount of gas {actual_gas[2]} from {gas_to_send_sci_str}")
                 return False
             
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
@@ -214,7 +214,7 @@ def spend_gas(
                     return True
 
     except Exception as e:
-        log.LOGGER('Manager error spending gas: ' + str(e) + ' ' + str(gas_to_spend) + '\n        ----------------------\n\n\n')
+        log.LOGGER('Manager error spending gas: ' + str(e))
     return False
 
 
