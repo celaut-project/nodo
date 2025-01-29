@@ -11,7 +11,7 @@ from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger
 
-from src.database.sql_connection import SQLConnection, is_peer_available
+from src.database.sql_connection import SQLConnection, _split_gas, is_peer_available
 
 from src.utils import logger as log
 from src.utils import utils
@@ -177,8 +177,10 @@ def spend_gas(
         if sc.client_exists(client_id=id):
             log.LOGGER(f"Spend gas for the client {id}.")
             actual_gas = sc.get_client_gas(client_id=id)
-            if not (actual_gas[0] >= gas_to_spend or bool(ALLOW_GAS_DEBT)):
-                log.LOGGER(f"Insufficient amount of gas {actual_gas[2]} from {gas_to_spend}")
+            if actual_gas[0] < gas_to_spend and not bool(ALLOW_GAS_DEBT):
+                gas_to_send_sci = _split_gas(gas_to_spend)
+                gas_to_send_sci = f"{gas_to_send_sci[0]}e{gas_to_send_sci[1]}"
+                log.LOGGER(f"Insufficient amount of gas {actual_gas[2]} from {gas_to_send_sci}")
                 return False
             
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
