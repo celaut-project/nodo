@@ -1290,7 +1290,8 @@ class SQLConnection(metaclass=Singleton):
         row = result.fetchone()
         if row:
             return row['id']
-        raise Exception(f'Internal service not found for URI: {uri}')
+        
+        log.LOGGER(f'Internal service not found for URI: {uri}')
 
     def get_gas_amount_by_father_id(self, id: str) -> int:
         """

@@ -191,11 +191,9 @@ def spend_gas(
             # id could be the container id or container ip. So check first if it's an id. If not, check if it's an ip.
             is_id = sc.container_exists(id=id)
             if not is_id:
-                try:
-                    id = sc.get_internal_service_id_by_uri(uri=id)  #  TODO don't should check this at this point.
-                    is_id = sc.container_exists(id=id)
-                except:
-                    is_id = False
+                id = sc.get_internal_service_id_by_uri(uri=id)  #  TODO don't should check this at this point.
+                is_id = sc.container_exists(id=id) if id else False
+
             if is_id:
                 current_gas = sc.get_internal_service_gas(id=id)
                 if current_gas >= gas_to_spend or ALLOW_GAS_DEBT:
