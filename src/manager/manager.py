@@ -174,9 +174,12 @@ def spend_gas(
     gas_to_spend = int(gas_to_spend)
     try:
         # En caso de que sea un peer, el token es el client id.
-        if sc.client_exists(client_id=id) and (
-            sc.get_client_gas(client_id=id)[0] >= gas_to_spend or bool(ALLOW_GAS_DEBT)
-        ):
+        if sc.client_exists(client_id=id):
+            actual_gas = sc.get_client_gas(client_id=id)
+            if not (actual_gas[0] >= gas_to_spend or bool(ALLOW_GAS_DEBT)):
+                log.LOGGER(f"Insufficient amount of gas {actual_gas[0]} from {gas_to_spend}")
+                return False
+            
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
             __refund_gas_function_factory(
                 gas=gas_to_spend,
