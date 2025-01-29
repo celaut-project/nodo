@@ -233,7 +233,7 @@ class SQLConnection(metaclass=Singleton):
             client_id (str): The ID of the client.
             gas (int): The amount of gas to add.
         """
-        _gas, _last_usage = self.get_client_gas(client_id)
+        _gas, _last_usage, _ = self.get_client_gas(client_id)
         total_gas = _gas + gas
         new_mantissa, new_exponent = _split_gas(total_gas)
         _validate_gas(new_mantissa, new_exponent)
@@ -249,7 +249,7 @@ class SQLConnection(metaclass=Singleton):
             client_id (str): The ID of the client.
             gas (int): The amount of gas to reduce.
         """
-        _gas, _last_usage = self.get_client_gas(client_id)
+        _gas, _last_usage, _ = self.get_client_gas(client_id)
         total_gas = _gas - gas
         new_mantissa, new_exponent = _split_gas(total_gas)
         _validate_gas(new_mantissa, new_exponent)
@@ -267,7 +267,7 @@ class SQLConnection(metaclass=Singleton):
         Returns:
             bool: True if the client has expired, False otherwise.
         """
-        _gas, _last_usage = self.get_client_gas(client_id)
+        _gas, _last_usage, _ = self.get_client_gas(client_id)
         return _last_usage is not None and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)
 
     def __update_client(self, client_id: str, mantissa: int, exponent: int, last_usage: float):

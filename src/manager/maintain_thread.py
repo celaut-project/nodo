@@ -183,7 +183,7 @@ def check_dev_clients():
         log.LOGGER("Adds dev client.")
         sc.add_client(client_id=f"dev-{uuid4()}", gas=DEV_CLIENT_GAS_AMOUNT, last_usage=None)
     else:
-        client_gas = sc.get_client_gas(client_id=clients[0])[0]
+        client_gas, _, _ = sc.get_client_gas(client_id=clients[0])
         if client_gas < DEV_CLIENT_GAS_AMOUNT:
             gas_to_add = DEV_CLIENT_GAS_AMOUNT - client_gas
             sc.add_gas(client_id=clients[0], gas=gas_to_add)

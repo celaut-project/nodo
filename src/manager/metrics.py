@@ -32,7 +32,7 @@ def __get_metrics_client(client_id: str) -> gateway_pb2.Metrics:
     :rtype: gateway_pb2.Metrics
     :raises KeyError: If the provided client ID does not exist in the cached data.
     """
-    client_gas = sc.get_client_gas(client_id=client_id)[0]
+    client_gas, _, _ = sc.get_client_gas(client_id=client_id)
     return gateway_pb2.Metrics(
         gas_amount=to_gas_amount(client_gas),
     )
