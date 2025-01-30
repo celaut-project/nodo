@@ -55,9 +55,12 @@ def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
     if os.path.isdir(filename):
         filename = filename + '/' + WITHOUT_BLOCK_POINTERS_FILE_NAME
     try:
+        mem_size = 2 * os.path.getsize(filename)
+        log.LOGGER(f"Wait to unlock memory {mem_size}")
         with mem_manager(2 * os.path.getsize(filename)) as iolock:
             service = celaut.Service()
             service.ParseFromString(read_file(filename=filename))
+            log.LOGGER(f"Service {service_hash} loaded.")
             return service
     except (IOError, FileNotFoundError):
         log.LOGGER('The service was not on registry.')
