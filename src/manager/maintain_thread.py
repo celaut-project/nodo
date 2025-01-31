@@ -98,19 +98,20 @@ def check_wanted_services():
                     log.LOGGER(f"Exception on peer {peer} getting a service. {str(e)}. Continue")
                     wanted_services[wanted] = False
 
-
 def maintain_containers():
+    def remove_and_penalize_container(id):
+        update_reputation(token=id, amount=-100)
+        log.LOGGER("Prunning container from the registry because the docker container does not exists.")
+        prune_container(token=id)
+    
     for id in sc.get_all_internal_service_ids():
         try:
             container = DOCKER_CLIENT().containers.get(id)   # TODO refactor with manager.__get_container_by_id()
             if container.status == 'exited':
-                update_reputation(token=id, amount=-100)
-                log.LOGGER("Prunning container from the registry because the docker container does not exists.")
-                prune_container(token=id)
+                remove_and_penalize_container(id=id)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-            log.LOGGER('Exception on maintain container process: ' + str(e))
-            continue
-
+            remove_and_penalize_container(id=id)
+            
         if not spend_gas(
                 id=id,
                 gas_to_spend=compute_maintenance_cost(
