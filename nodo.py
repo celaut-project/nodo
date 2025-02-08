@@ -146,6 +146,7 @@ if __name__ == '__main__':
             "\n- rundev <repository path>"
             "\n- submit_reputation"
             "\n- refresh_ergo_nodes"
+            "\n- prune_containers"
             "\n- daemon"
             "\n\n",
               flush=True)
@@ -286,6 +287,10 @@ if __name__ == '__main__':
             case "rundev":
                 from src.commands.run_dev import run_dev
                 run_dev(path=sys.argv[2])
+                
+            case "prune_containers":
+                from src.manager.maintain_thread import maintain_containers
+                maintain_containers()
 
             case other:
                 print('Unknown command.', flush=True)
