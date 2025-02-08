@@ -290,7 +290,7 @@ if __name__ == '__main__':
                 
             case "prune_containers":
                 from src.manager.maintain_thread import maintain_containers
-                maintain_containers()
+                maintain_containers(debug_mode=True)
 
             case other:
                 print('Unknown command.', flush=True)
