@@ -289,6 +289,11 @@ if __name__ == '__main__':
                 run_dev(path=sys.argv[2])
                 
             case "prune_containers":
+                # Check if script is run as root
+                if os.geteuid() != 0:
+                    print("This script requires superuser privileges. Please run with sudo.")
+                    exit()
+                
                 from src.manager.maintain_thread import maintain_containers
                 maintain_containers(debug_mode=True)
 
