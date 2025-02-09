@@ -319,7 +319,6 @@ def add_container(
         log.LOGGER(f'Exception during modify params of {id}.')
         raise Exception(f'Exception during modify params of {id}.')
     
-    log.LOGGER(f"Modifed params correctly on token {id}.")
     return id
 
 
