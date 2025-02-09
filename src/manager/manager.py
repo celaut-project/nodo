@@ -392,7 +392,7 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
         try:
             DOCKER_CLIENT().containers.get(token).remove(force=True)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-            log.LOGGER(str(e) + ' error with docker trying to remove the container with id ' + id)
+            log.LOGGER(str(e) + ' error with docker trying to remove the container with id ' + token)
             return None
         
         father_id = sc.get_internal_father_id(id=token)
