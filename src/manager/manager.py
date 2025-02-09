@@ -380,25 +380,23 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
     log.LOGGER('Prune container ' + token)
     father_id, serialized_instance = None, None
     
-    if sc.container_exists(id=token):
-                
+    if sc.container_exists(id=token):  # Is internal
+        try:
+            DOCKER_CLIENT().containers.get(token).remove(force=True)
+        except (docker_lib.errors.NotFound, docker_lib.errors.APIError):
+            pass  # Maybe was killed
+        
+        father_id = sc.get_internal_father_id(id=token)
+        serialized_instance = sc.get_internal_instance(id=token)
+        
         try:
             refund = sc.get_internal_service_gas(id=token)
             sc.purge_internal(id=token)
         except Exception as e:
             log.LOGGER('Error purging ' + token + ' ' + str(e))
             return None
-        
-        try:
-            DOCKER_CLIENT().containers.get(token).remove(force=True)
-        except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-            log.LOGGER(str(e) + ' error with docker trying to remove the container with id ' + token)
-            return None
-        
-        father_id = sc.get_internal_father_id(id=token)
-        serialized_instance = sc.get_internal_instance(id=token)
 
-    else:
+    else:  # It's external
         try:
             external_token = sc.get_token_by_hashed_token(hashed_token=token)
             peer_id = sc.get_peer_id_by_external_service(token=external_token)
@@ -408,7 +406,7 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
                         grpc.insecure_channel(
                             next(utils.generate_uris_by_peer_id(peer_id))
                         )
-                    ).ModifyGasDeposit,
+                    ).ModifyGasDeposit,  # TODO Verify: Should use StopService instead ??
                         partitions_message_mode_parser=True,
                         indices_parser=gateway_pb2.ModifyGasDepositOutput,
                         input=gateway_pb2.TokenMessage(
@@ -418,6 +416,7 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
             )
             father_id = sc.get_external_father_id(token=external_token)
             serialized_instance = sc.get_external_instance(token=external_token)
+            
         except Exception as e:
             log.LOGGER('Error purging ' + token + ' ' + str(e))
             return None

@@ -103,7 +103,10 @@ def maintain_containers(debug_mode: bool=False):
     def remove_and_penalize_container(id):
         update_reputation(token=id, amount=-100)
         log.LOGGER(f"Prunning container {id} from the registry because the docker container does not exist.")
-        prune_container(token=id)
+        try:
+            prune_container(token=id)
+        except Exception as e:
+            log.LOGGER(f"Error prunning container {id}: {e}")
     
     for id in sc.get_all_internal_service_ids():
         if debug_mode: log.LOGGER(f"Checking container: {id}")
