@@ -15,6 +15,7 @@ SERVICE_DEPENDENCIES_DIRECTORY = "service_dependencies_directory"
 METADATA_DEPENDENCIES_DIRECTORY = "metadata_dependencies_directory"
 BLOCKS_DIRECTORY = "blocks_directory"
 DEPENDENCIES_DIR = "dependencies"
+SKIP_WBP = "ignore_loadable_protobuf"
 
 
 def __export_registry(directory: str, compile_config: Dict):
@@ -29,14 +30,21 @@ def __export_registry(directory: str, compile_config: Dict):
     ))
 
     if DEPENDENCIES_DIR in compile_config:
+        skip_wbp = compile_config[SKIP_WBP] if SKIP_WBP in compile_config else False  # By default, will be included.
+        dest_dir = f"{directory}/{compile_config[SERVICE_DEPENDENCIES_DIRECTORY]}"
         for dependency in compile_config[DEPENDENCIES_DIR].values() \
                 if type(compile_config[DEPENDENCIES_DIR]) is dict else compile_config[DEPENDENCIES_DIR]:
 
             # Move dependency service.
             if not os.path.exists(f"{SERVICES}/{dependency}"):
                 raise Exception(f"Dependency not found. {dependency}")
-            os.system(f"cp -R {SERVICES}/{dependency} "
-                      f"{directory}/{compile_config[SERVICE_DEPENDENCIES_DIRECTORY]}")
+            
+            os.system(f"cp -R {SERVICES}/{dependency} {dest_dir}")
+            
+            if skip_wbp:
+                wbp_path = os.path.join(dest_dir, dependency, "wbp.bin")
+                if os.path.exists(wbp_path):
+                    os.remove(wbp_path)
 
             # Move dependency's metadata
             if os.path.exists(f"{METADATA}/{dependency}"):
