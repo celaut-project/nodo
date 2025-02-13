@@ -85,14 +85,14 @@ def launch_service(
                 if sc.container_exists(id=father_id):
                     try:
                         for slot in instance.instance.uri_slot:
-                            for uri in slot:
+                            for uri in slot.uri:
                                 if not allow_connection(container_id=father_id,
                                                         ip=uri.ip, port=uri.port, protocol=Protocol.TCP):
                                     log.LOGGER(f"Docker firewall allow connection function failed for the father {father_id}")
                                     # TODO This should be controlled.
                     except Exception as e:
-                        # TODO raise e.
                         log.LOGGER(f"Exception blocking firewall rules to {father_id} for the dependency {str(instance)}")
+                        raise e
 
                 return instance
 
