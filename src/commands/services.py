@@ -27,8 +27,8 @@ def list_services():
         # Try to get the size
         try:
             size = getsize(service)
-        except:
-            size = 0
+        except Exception as e:
+            size = f"0 - {e}"
             
         # Print.
         print(f"{service}     {name} {size}")
