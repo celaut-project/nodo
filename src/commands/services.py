@@ -26,7 +26,7 @@ def list_services():
             
         # Try to get the size
         try:
-            size = getsize(service)
+            size = getsize(os.path(REGISTRY, service))
         except Exception as e:
             size = f"0 - {e}"
             
