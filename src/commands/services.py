@@ -1,6 +1,7 @@
 import os
 from src.utils.env import EnvManager
 from protos.celaut_pb2 import Any
+from grpcbigbuffer.utils import getsize
 
 env_manager = EnvManager()
 REGISTRY = env_manager.get_env("REGISTRY")
@@ -22,4 +23,12 @@ def list_services():
             name = ""
         except Exception:
             name = ""
-        print(f"{service}     {name}")
+            
+        # Try to get the size
+        try:
+            size = getsize(service)
+        except:
+            size = 0
+            
+        # Print.
+        print(f"{service}     {name} {size}")
