@@ -27,6 +27,7 @@ def list_services():
         # Try to get the size
         try:
             size = getsize(os.path.join(REGISTRY, service))
+            size = f"{size / (1024 * 1024)} MB"
         except Exception as e:
             size = f"0 - {e}"
             
