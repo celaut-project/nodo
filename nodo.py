@@ -276,7 +276,7 @@ if __name__ == '__main__':
                 _t = sys.argv[2]
                 getattr(__import__(f"tests.{_t}", fromlist=[_t]), _t)()  # Import the test passed on param.
 
-            case 'packer':
+            case 'pack':
                 from src.commands.packer.zip_with_dockerfile.pack import pack_directory
                 pack_directory(directory=sys.argv[2])
 
