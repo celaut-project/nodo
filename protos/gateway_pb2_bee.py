@@ -11,8 +11,8 @@ StartService_input_indices = {
 StartService_input_message_mode = {1: True, 2: True, 3: True, 4: True, 5: True, 6: False}  # False yield a Dir.
 
 PackOutput_indices = {
-    1: pack_pb2.CompileOutputServiceId,
+    1: pack_pb2.PackOutputServiceId,
     2: gateway_pb2.celaut__pb2.Any.Metadata,
     3: pack_pb2.Service,
-    4: pack_pb2.CompileOutputError
+    4: pack_pb2.PackOutputError
 }
