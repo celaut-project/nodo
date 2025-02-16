@@ -23,7 +23,7 @@ SAVE_ALL = env_manager.get_env("SAVE_ALL")
 MIN_BUFFER_BLOCK_SIZE = env_manager.get_env("MIN_BUFFER_BLOCK_SIZE")
 
 
-class Compiler:
+class ZipContainerPacker:
     def __init__(self, path, aux_id):
         super().__init__()
         self.blocks: List[bytes] = []
@@ -314,7 +314,7 @@ class Compiler:
         return service_id, self.metadata, service
 
 def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, pack_pb2.Service]]:
-    spec_file = Compiler(path=path, aux_id=aux_id)
+    spec_file = ZipContainerPacker(path=path, aux_id=aux_id)
     
     # Check if there was an error during initialization
     if spec_file.error_msg:
