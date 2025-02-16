@@ -362,7 +362,7 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
                     message=error_msg
                 )
             ],
-            indices=gateway_pb2_bee.CompileOutput_indices
+            indices=gateway_pb2_bee.PackOutput_indices
         )
         
     else:
@@ -375,7 +375,7 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
                     grpcbb.Dir(dir=service, _type=pack_pb2.Service)
                     if type(service) is str else service
                 ],
-                indices=gateway_pb2_bee.CompileOutput_indices
+                indices=gateway_pb2_bee.PackOutput_indices
         )
 
     # shutil.rmtree(service_with_meta.name)

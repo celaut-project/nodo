@@ -54,7 +54,7 @@ def __pack(zip, node: str):
         ).Compile,
         input=grpcbb.Dir(dir=zip, _type=bytes),
         indices_serializer={0: bytes},
-        indices_parser=gateway_pb2_bee.CompileOutput_indices,
+        indices_parser=gateway_pb2_bee.PackOutput_indices,
         partitions_message_mode_parser={1: True, 2: True, 3: False}
     )
 
