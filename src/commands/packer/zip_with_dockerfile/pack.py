@@ -51,7 +51,7 @@ def __pack(zip, node: str):
     yield from grpcbb.client_grpc(
         method=gateway_pb2_grpc.GatewayStub(
             grpc.insecure_channel(node)
-        ).Compile,
+        ).Pack,
         input=grpcbb.Dir(dir=zip, _type=bytes),
         indices_serializer={0: bytes},
         indices_parser=gateway_pb2_bee.PackOutput_indices,
