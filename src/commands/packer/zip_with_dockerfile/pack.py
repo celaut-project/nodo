@@ -4,9 +4,9 @@ from typing import Optional
 import grpc
 from bee_rpc import client as grpcbb
 
-from protos import celaut_pb2, compile_pb2, gateway_pb2_bee, gateway_pb2_grpc
-from src.commands.compile.zip_with_dockerfile.prepare_directory import prepare_directory
-from src.commands.compile.zip_with_dockerfile.generate_service_zip import generate_service_zip
+from protos import celaut_pb2, pack_pb2, gateway_pb2_bee, gateway_pb2_grpc
+from src.commands.packer.zip_with_dockerfile.prepare_directory import prepare_directory
+from src.commands.packer.zip_with_dockerfile.generate_service_zip import generate_service_zip
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.utils.env import EnvManager
 
@@ -47,7 +47,7 @@ def __spinner(event):
 
 
 
-def __compile(zip, node: str):
+def __pack(zip, node: str):
     yield from grpcbb.client_grpc(
         method=gateway_pb2_grpc.GatewayStub(
             grpc.insecure_channel(node)
@@ -69,24 +69,24 @@ def __on_peer(peer: str, service_zip_dir: str):
     spinner_thread.start()
     
     try:
-        for b in __compile(
+        for b in __pack(
                 zip=service_zip_dir,
                 node=peer
         ):
-            if type(b) is compile_pb2.CompileOutputServiceId:
+            if type(b) is pack_pb2.PackOutputServiceId:
                 if not _id:
                     _id = b.id.hex()
             elif type(b) == celaut_pb2.Any.Metadata and _id:
                 with open(f"{METADATA_REGISTRY}{_id}", "wb") as f:
                     f.write(b.SerializeToString())
-            elif type(b) == grpcbb.Dir and b.type == compile_pb2.Service and _id:
+            elif type(b) == grpcbb.Dir and b.type == pack_pb2.Service and _id:
                 # b is ServiceWithMeta grpc-bb cache directory.
                 os.system(f"mv {b.dir} {REGISTRY}{_id}")
-            elif type(b) == compile_pb2.CompileOutputError:
+            elif type(b) == pack_pb2.PackOutputError:
                 print(f"\nError in the compilation process: \n{b.message}")
                 return
             else:
-                raise Exception('\nError with the compilers output:' + str(b))
+                raise Exception('\nError with the packer output:' + str(b))
 
     finally:
         # Stop the spinner when the process completes
@@ -113,14 +113,14 @@ def __remove_path(path):
         print(f"Removed: '{path}'")
 
 
-def compile_directory(directory: str):
+def pack_directory(directory: str):
     is_remote, directory = prepare_directory(directory)
     
     service_zip_dir: str = generate_service_zip(
         project_directory=directory
     )
 
-    # TODO check if dependencies has directories, and compile them before.
+    # TODO check if dependencies has directories, and pack them before.
     try:
         ip, port = None, None
         if False:  # TODO; control exceptions and try others; and enviroment variable COMPILE_LOCAL_FIRST

@@ -87,7 +87,7 @@ class EnvManager(metaclass=Singleton):
         env_file_path = os.path.join(self.env_vars['MAIN_DIR'], ".env")
 
         exclude_vars = {
-            "get_env", "COMPILER_SUPPORTED_ARCHITECTURES", "SUPPORTED_ARCHITECTURES",
+            "get_env", "PACKER_SUPPORTED_ARCHITECTURES", "SUPPORTED_ARCHITECTURES",
             "SHAKE_256_ID", "SHA3_256_ID", "SHAKE_256", "SHA3_256", "HASH_FUNCTIONS",
             "DOCKER_CLIENT", "DEFAULT_SYSTEM_RESOURCES", "DOCKER_COMMAND",
             "STORAGE", "CACHE", "REGISTRY", "METADATA_REGISTRY", "BLOCKDIR",
@@ -119,14 +119,14 @@ env_manager.get_env("METADATA_REGISTRY", f"{env_manager.env_vars['STORAGE']}/__m
 env_manager.get_env("BLOCKDIR", f"{env_manager.env_vars['STORAGE']}/__block__/")
 env_manager.get_env("DATABASE_FILE", f'{env_manager.env_vars["STORAGE"]}/database.sqlite')
 
-# Compiler Settings
+# Packer Settings
 env_manager.get_env("SAVE_ALL", False)
-env_manager.get_env("COMPILER_MEMORY_SIZE_FACTOR", 2.0)
-env_manager.get_env("ARM_COMPILER_SUPPORT", True)
-env_manager.get_env("X86_COMPILER_SUPPORT", True)
-COMPILER_SUPPORTED_ARCHITECTURES = [
-    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if env_manager.env_vars["ARM_COMPILER_SUPPORT"] else [],
-    ['linux/amd64', 'x86_64', 'amd64'] if env_manager.env_vars["X86_COMPILER_SUPPORT"] else []
+env_manager.get_env("PACKER_MEMORY_SIZE_FACTOR", 2.0)
+env_manager.get_env("ARM_PACKER_SUPPORT", True)
+env_manager.get_env("X86_PACKER_SUPPORT", True)
+PACKER_SUPPORTED_ARCHITECTURES = [
+    ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if env_manager.env_vars["ARM_PACKER_SUPPORT"] else [],
+    ['linux/amd64', 'x86_64', 'amd64'] if env_manager.env_vars["X86_PACKER_SUPPORT"] else []
 ]
 
 # Builder Settings

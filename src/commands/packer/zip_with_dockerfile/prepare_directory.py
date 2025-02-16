@@ -31,7 +31,7 @@ def __ensure_is_correct(directory: str):
     service_dir = os.path.join(directory, ".service")
     dockerfile_path = os.path.join(service_dir, "Dockerfile")
     service_json_path = os.path.join(service_dir, "service.json")
-    pre_compile_json_path = os.path.join(service_dir, "pre-compile.json")
+    pack_config_json_path = os.path.join(service_dir, "pack-config.json")
 
     root_dockerfile_path = os.path.join(directory, "Dockerfile")
     root_service_json_path = os.path.join(directory, "service.json")
@@ -50,18 +50,18 @@ def __ensure_is_correct(directory: str):
     if not os.path.exists(service_json_path) and os.path.exists(root_service_json_path):
         shutil.copy2(root_service_json_path, service_json_path)
 
-    # Create pre-compile.json if it doesn't exist
-    if not os.path.exists(pre_compile_json_path):
-        with open(pre_compile_json_path, 'w') as f:
+    # Create pack-config.json if it doesn't exist
+    if not os.path.exists(pack_config_json_path):
+        with open(pack_config_json_path, 'w') as f:
             f.write('{"ignore": []}')
 
-    # Read the existing pre-compile.json content
-    with open(pre_compile_json_path, 'r') as f:
-        pre_compile_data = json.load(f)
+    # Read the existing pack-config.json content
+    with open(pack_config_json_path, 'r') as f:
+        pack_config_data = json.load(f)
 
-    # Ensure "ignore" key exists in pre-compile.json
-    if "ignore" not in pre_compile_data:
-        pre_compile_data["ignore"] = []
+    # Ensure "ignore" key exists in pack-config.json
+    if "ignore" not in pack_config_data:
+        pack_config_data["ignore"] = []
 
     # Determine which .dockerignore file to use
     dockerignore_path = service_dockerignore_path if os.path.exists(service_dockerignore_path) else root_dockerignore_path
@@ -70,15 +70,15 @@ def __ensure_is_correct(directory: str):
     if os.path.exists(dockerignore_path):
         with open(dockerignore_path, 'r') as f:
             ignore_patterns = f.read().splitlines()
-            pre_compile_data["ignore"].extend(ignore_patterns)
+            pack_config_data["ignore"].extend(ignore_patterns)
 
     # Remove duplicates from the ignore list
-    pre_compile_data["ignore"] = list(set(pre_compile_data["ignore"]))
-    print(f"pre compile data {pre_compile_data}")
+    pack_config_data["ignore"] = list(set(pack_config_data["ignore"]))
+    print(f"pack configuration {pack_config_data}")
 
-    # Write the updated pre-compile.json content back to the file
-    with open(pre_compile_json_path, 'w') as f:
-        json.dump(pre_compile_data, f, indent=4)
+    # Write the updated pack-config.json content back to the file
+    with open(pack_config_json_path, 'w') as f:
+        json.dump(pack_config_data, f, indent=4)
         
     __dockerfile_copy_from(directory=directory)
 

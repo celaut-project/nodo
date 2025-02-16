@@ -10,7 +10,7 @@ METADATA = env_manager.get_env("METADATA_REGISTRY")
 SERVICES = env_manager.get_env("REGISTRY")
 BLOCKS = env_manager.get_env("BLOCKDIR")
 
-# Pre-compile json keys of service storage directories.
+# Pack-config json keys of service storage directories.
 SERVICE_DEPENDENCIES_DIRECTORY = "service_dependencies_directory"
 METADATA_DEPENDENCIES_DIRECTORY = "metadata_dependencies_directory"
 BLOCKS_DIRECTORY = "blocks_directory"
@@ -18,10 +18,10 @@ DEPENDENCIES_DIR = "dependencies"
 SKIP_WBP = "ignore_loadable_protobuf"
 
 
-def __export_registry(directory: str, compile_config: Dict):
+def __export_registry(directory: str, pack_config: Dict):
     list(map(
-        lambda _reg: os.makedirs(f"{directory}/{compile_config[_reg]}")
-            if _reg in compile_config and type(compile_config[_reg]) is str else 1,
+        lambda _reg: os.makedirs(f"{directory}/{pack_config[_reg]}")
+            if _reg in pack_config and type(pack_config[_reg]) is str else 1,
         [
             SERVICE_DEPENDENCIES_DIRECTORY,
             METADATA_DEPENDENCIES_DIRECTORY,
@@ -29,11 +29,11 @@ def __export_registry(directory: str, compile_config: Dict):
         ]
     ))
 
-    if DEPENDENCIES_DIR in compile_config:
-        skip_wbp = compile_config[SKIP_WBP] if SKIP_WBP in compile_config else False  # By default, will be included.
-        dest_dir = f"{directory}/{compile_config[SERVICE_DEPENDENCIES_DIRECTORY]}"
-        for dependency in compile_config[DEPENDENCIES_DIR].values() \
-                if type(compile_config[DEPENDENCIES_DIR]) is dict else compile_config[DEPENDENCIES_DIR]:
+    if DEPENDENCIES_DIR in pack_config:
+        skip_wbp = pack_config[SKIP_WBP] if SKIP_WBP in pack_config else False  # By default, will be included.
+        dest_dir = f"{directory}/{pack_config[SERVICE_DEPENDENCIES_DIRECTORY]}"
+        for dependency in pack_config[DEPENDENCIES_DIR].values() \
+                if type(pack_config[DEPENDENCIES_DIR]) is dict else pack_config[DEPENDENCIES_DIR]:
 
             # Move dependency service.
             if not os.path.exists(f"{SERVICES}/{dependency}"):
@@ -49,7 +49,7 @@ def __export_registry(directory: str, compile_config: Dict):
             # Move dependency's metadata
             if os.path.exists(f"{METADATA}/{dependency}"):
                 os.system(f"cp -R {METADATA}/{dependency} "
-                          f"{directory}/{compile_config[METADATA_DEPENDENCIES_DIRECTORY]}")
+                          f"{directory}/{pack_config[METADATA_DEPENDENCIES_DIRECTORY]}")
 
             # Move dependency's blocks.
             if os.path.isdir(f"{SERVICES}/{dependency}"):
@@ -59,10 +59,10 @@ def __export_registry(directory: str, compile_config: Dict):
                         if type(_e) == list:
                             block: str = _e[0]
                             if not os.path.exists(
-                                    f'{directory}/{compile_config[BLOCKS_DIRECTORY]}/{block}'
+                                    f'{directory}/{pack_config[BLOCKS_DIRECTORY]}/{block}'
                             ):
                                 os.system(f"cp -r {BLOCKS}/{block} "
-                                          f"{directory}/{compile_config[BLOCKS_DIRECTORY]}")
+                                          f"{directory}/{pack_config[BLOCKS_DIRECTORY]}")
 
 def generate_service_zip(project_directory: str) -> str:
     
@@ -80,16 +80,16 @@ def generate_service_zip(project_directory: str) -> str:
     os.system(f"mkdir {complete_source_directory}")
 
     # Read the compilation's config JSON file
-    config_path = f'{project_directory}/.service/pre-compile.json'
+    config_path = f'{project_directory}/.service/pack-config.json'
     if os.path.exists(config_path):
         with open(config_path, 'r') as config_file:
-            compile_config = json.load(config_file)
+            pack_config = json.load(config_file)
     else:
-        compile_config = {}
+        pack_config = {}
 
     # Copy the project files to the complete_source_directory.
-    if 'include' in compile_config:
-        for item in compile_config['include']:
+    if 'include' in pack_config:
+        for item in pack_config['include']:
             src_path = os.path.join(project_directory, item)
             dest_path = os.path.join(complete_source_directory, item)
             if os.path.isdir(src_path):
@@ -107,23 +107,23 @@ def generate_service_zip(project_directory: str) -> str:
                 shutil.copy2(src_path, dest_path)
 
     # Remove the files and directories specified in the "ignore" list from the configuration
-    if 'ignore' in compile_config:
-        for file in compile_config['ignore']:
+    if 'ignore' in pack_config:
+        for file in pack_config['ignore']:
             os.system(f"cd {complete_source_directory} && rm -rf {file}")
 
     # Add the dependencies
-    __export_registry(directory=complete_source_directory, compile_config=compile_config)
+    __export_registry(directory=complete_source_directory, pack_config=pack_config)
 
-    if 'zip' in compile_config and compile_config['zip']:
+    if 'zip' in pack_config and pack_config['zip']:
         os.system(f'cd {complete_source_directory} && '
                   f'zip -r services.zip'
-                  f' {compile_config[SERVICE_DEPENDENCIES_DIRECTORY]}'
-                  f' {compile_config[METADATA_DEPENDENCIES_DIRECTORY]}'
-                  f' {compile_config[BLOCKS_DIRECTORY]}')
+                  f' {pack_config[SERVICE_DEPENDENCIES_DIRECTORY]}'
+                  f' {pack_config[METADATA_DEPENDENCIES_DIRECTORY]}'
+                  f' {pack_config[BLOCKS_DIRECTORY]}')
         os.system(f'cd {complete_source_directory} && '
-                  f'rm -rf {compile_config[SERVICE_DEPENDENCIES_DIRECTORY]} '
-                  f'{compile_config[METADATA_DEPENDENCIES_DIRECTORY]} '
-                  f'{compile_config[BLOCKS_DIRECTORY]}')
+                  f'rm -rf {pack_config[SERVICE_DEPENDENCIES_DIRECTORY]} '
+                  f'{pack_config[METADATA_DEPENDENCIES_DIRECTORY]} '
+                  f'{pack_config[BLOCKS_DIRECTORY]}')
 
     # Create a ZIP file of the destination source directory
     os.system(f"cd {project_directory}/.service && zip -r .service.zip .")

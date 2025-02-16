@@ -13,7 +13,7 @@ Here is a list of the most commonly used commands in Nodo for a basic user:
 - `decrease_gas <instance id> <gas to retire>`: Decreases the gas allocated to a service instance.
 - `services`: List all the services currently available on the node.
 - `connect <ip:url>`: Manually connects to a peer node by specifying its IP and port.
-- `compile <project directory>`: Compiles a project to create a service for the Celaut network.
+- `pack <project directory>`: Compiles a project to create a service for the Celaut network.
 - `config`: Configures various settings related to the network, wallets, and optional donation setup.
 - `tui`: Launches a terminal user interface (TUI) to visualize peers, services, and instances.
 - `info`: Provides details about the Nodo service status, version, and configuration.
@@ -87,17 +87,17 @@ This will initiate an interactive session for system configuration.
 - **NGROK_TUNNELS_KEY**: Exposes the node to the internet via NGROK.
 - **ERGO_DONATION_PERCENTAGE**: Opt-in donation percentage to support Nodo.
 
-### 8. compile
+### 8. pack
 
 Compiles a project to create a service specification for deployment on the network.
 
 **Usage Example:**
-`nodo compile /path/to/project`
-This will compile the project located in `/path/to/project`.
+`nodo pack /path/to/project`
+This will pack the project located in `/path/to/project`.
 
-For the compilation to succeed, ensure that a `Dockerfile` and a [`service.json`](../src/compilers/README.md) file are present either in the root directory or within a `.service` folder of the project.  
+For the compilation to succeed, ensure that a `Dockerfile` and a [`service.json`](../src/packers/README.md) file are present either in the root directory or within a `.service` folder of the project.  
 
-For a deeper understanding of the compilation command, refer to the [Compilation Command Guide](../src/commands/compile/zip_with_dockerfile/README.md).
+For a deeper understanding of the compilation command, refer to the [Compilation Command Guide](../src/commands/pack/zip_with_dockerfile/README.md).
 
 ### 9. tui
 
@@ -181,7 +181,7 @@ Run `nodo` without arguments to see available commands:
 - decrease_gas <instance id> <gas to retire>
 - services
 - connect <ip:url>
-- compile <project directory>
+- pack <project directory>
 - config
 - tui
 - info

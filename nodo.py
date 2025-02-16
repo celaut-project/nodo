@@ -129,7 +129,7 @@ if __name__ == '__main__':
             "\n- clients"
             "\n- peers"
             "\n- connect <ip:url>"
-            "\n- compile <project directory>"
+            "\n- pack <project directory>"
             "\n- config"
             "\n- tui"
             "\n- info"
@@ -276,9 +276,9 @@ if __name__ == '__main__':
                 _t = sys.argv[2]
                 getattr(__import__(f"tests.{_t}", fromlist=[_t]), _t)()  # Import the test passed on param.
 
-            case 'compile':
-                from src.commands.compile.zip_with_dockerfile.compile import compile_directory
-                compile_directory(directory=sys.argv[2])
+            case 'packer':
+                from src.commands.packer.zip_with_dockerfile.pack import pack_directory
+                pack_directory(directory=sys.argv[2])
 
             case "tui":
                 check_rust_installation()

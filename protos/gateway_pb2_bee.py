@@ -1,4 +1,4 @@
-from protos import gateway_pb2, compile_pb2
+from protos import gateway_pb2, pack_pb2
 
 StartService_input_indices = {
     1: gateway_pb2.Client,
@@ -10,9 +10,9 @@ StartService_input_indices = {
 }
 StartService_input_message_mode = {1: True, 2: True, 3: True, 4: True, 5: True, 6: False}  # False yield a Dir.
 
-CompileOutput_indices = {
-    1: compile_pb2.CompileOutputServiceId,
+PackOutput_indices = {
+    1: pack_pb2.CompileOutputServiceId,
     2: gateway_pb2.celaut__pb2.Any.Metadata,
-    3: compile_pb2.Service,
-    4: compile_pb2.CompileOutputError
+    3: pack_pb2.Service,
+    4: pack_pb2.CompileOutputError
 }

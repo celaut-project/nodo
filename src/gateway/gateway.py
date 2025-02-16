@@ -1,7 +1,7 @@
 from bee_rpc import client as bee
 
 from protos import gateway_pb2_grpc, gateway_pb2
-from src.compilers.zip_with_dockerfile import compile_zip
+from src.packers.zip_with_dockerfile import pack_zip
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
@@ -144,7 +144,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         )
 
     def Compile(self, request_iterator, context, **kwargs):
-        log.LOGGER('Go to compile a proyect.')
+        log.LOGGER('Go to pack a proyect.')
         _d: bee.Dir = next(bee.parse_from_buffer(
             request_iterator=request_iterator,
             indices={0: bytes},
@@ -152,7 +152,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ), None)
         if _d.type != bytes:
             raise Exception("Incorrect input on Compile peerpc method. Should be bytes")
-        yield from compile_zip(zip=_d.dir)
+        yield from pack_zip(zip=_d.dir)
 
     def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
