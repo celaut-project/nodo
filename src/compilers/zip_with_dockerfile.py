@@ -320,7 +320,10 @@ def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, compile_pb2.S
     if spec_file.error_msg:
         return None, None, spec_file.error_msg
 
-    with resources_manager.mem_manager(len=COMPILER_MEMORY_SIZE_FACTOR * spec_file.buffer_len):
+    
+    _memory = int(COMPILER_MEMORY_SIZE_FACTOR) * spec_file.buffer_len
+    log.LOGGER(f"Try to lock {_memory / (1024**2):.2f} MB")
+    with resources_manager.mem_manager(len=_memory):
         spec_file.parseContainer()
         spec_file.parseApi()
         spec_file.parseNetwork()
