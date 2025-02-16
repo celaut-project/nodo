@@ -61,6 +61,7 @@ class Compiler:
         # Execute Docker commands with error handling using subprocess
         for cmd in commands:
             try:
+                log.LOGGER(cmd)
                 # Run command and capture output
                 process = subprocess.Popen(
                     cmd,
