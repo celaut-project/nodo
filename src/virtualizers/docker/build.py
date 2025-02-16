@@ -11,7 +11,7 @@ from subprocess import run
 from time import sleep, time
 from typing import Tuple, Optional, Set
 
-from grpcbigbuffer.client import copy_block_if_exists
+from bee_rpc.client import copy_block_if_exists
 
 import src.utils.logger as l
 from protos import celaut_pb2, gateway_pb2

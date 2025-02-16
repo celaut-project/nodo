@@ -1,7 +1,7 @@
 import os
 from typing import Generator
 
-from grpcbigbuffer import client as grpcbf, buffer_pb2
+from bee_rpc import client as bee, buffer_pb2
 
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable
 from src.gateway.launcher.launch_service import launch_service
@@ -27,7 +27,7 @@ class StartServiceIterable(AbstractServiceIterable):
             raise Exception("Client or configuration ")
 
         log.LOGGER('Launch service with configuration')
-        yield from grpcbf.serialize_to_buffer(
+        yield from bee.serialize_to_buffer(
             indices={},
             message_iterator=launch_service(
                 service=read_service_from_disk(service_hash=self.service_hash),

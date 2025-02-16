@@ -3,12 +3,12 @@ from uuid import uuid4
 import os
 
 import grpc
-from grpcbigbuffer import client as peerpc
+from bee_rpc import client as peerpc
 
 import docker as docker_lib
 
 from protos import celaut_pb2 as celaut, gateway_pb2_grpc, gateway_pb2
-from protos.gateway_pb2_grpcbf import StartService_input_indices, StartService_input_message_mode
+from protos.gateway_pb2_bee import StartService_input_indices, StartService_input_message_mode
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import prune_container, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer

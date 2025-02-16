@@ -2,8 +2,8 @@ from typing import Any, Generator
 import grpc
 import os
 
-from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc, gateway_pb2_grpcbf
-from grpcbigbuffer.client import client_grpc
+from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc, gateway_pb2_bee
+from bee_rpc.client import client_grpc
 
 from src.utils.env import SHA3_256_ID, EnvManager
 from src.utils.utils import to_gas_amount
@@ -78,6 +78,6 @@ def execute(service: str):
         input=generator(_hash=service),
         indices_parser=gateway_pb2.Instance,
         partitions_message_mode_parser=True,
-        indices_serializer=gateway_pb2_grpcbf.StartService_input_indices
+        indices_serializer=gateway_pb2_bee.StartService_input_indices
     ))
     print(f'service partition -> {service}')

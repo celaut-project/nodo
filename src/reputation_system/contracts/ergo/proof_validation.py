@@ -2,7 +2,7 @@ import requests
 from protos import celaut_pb2 as celaut
 
 from protos import gateway_pb2_grpc, gateway_pb2
-from grpcbigbuffer.client import client_grpc
+from bee_rpc.client import client_grpc
 import grpc
 import random
 import string

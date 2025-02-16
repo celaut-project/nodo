@@ -1,8 +1,8 @@
 import threading
 
-from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc, gateway_pb2_grpcbf
+from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc, gateway_pb2_bee
 import grpc
-from grpcbigbuffer.client import Dir, client_grpc
+from bee_rpc.client import Dir, client_grpc
 
 from tests.main import SORTER, FRONTIER, WALL, WALK, REGRESION, RANDOM, GATEWAY, generator
 
@@ -17,7 +17,7 @@ def test_build():
             input=generator(_hash=hash),
             indices_parser=gateway_pb2.Instance,
             partitions_message_mode_parser=True,
-            indices_serializer=gateway_pb2_grpcbf.StartService_input_indices
+            indices_serializer=gateway_pb2_bee.StartService_input_indices
         ))
         print('service ', hash, ' -> ', service)
 

@@ -2,9 +2,9 @@ import os, sys, time, threading, shutil
 from hashlib import sha3_256
 from typing import Optional
 import grpc
-from grpcbigbuffer import client as grpcbb
+from bee_rpc import client as grpcbb
 
-from protos import celaut_pb2, compile_pb2, gateway_pb2_grpcbf, gateway_pb2_grpc
+from protos import celaut_pb2, compile_pb2, gateway_pb2_bee, gateway_pb2_grpc
 from src.commands.compile.zip_with_dockerfile.prepare_directory import prepare_directory
 from src.commands.compile.zip_with_dockerfile.generate_service_zip import generate_service_zip
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
@@ -54,7 +54,7 @@ def __compile(zip, node: str):
         ).Compile,
         input=grpcbb.Dir(dir=zip, _type=bytes),
         indices_serializer={0: bytes},
-        indices_parser=gateway_pb2_grpcbf.CompileOutput_indices,
+        indices_parser=gateway_pb2_bee.CompileOutput_indices,
         partitions_message_mode_parser={1: True, 2: True, 3: False}
     )
 

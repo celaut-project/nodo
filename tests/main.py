@@ -22,7 +22,7 @@ with open('tests/.services', 'r') as file:
             globals()[variable] = value
 
 from protos import celaut_pb2, gateway_pb2
-from grpcbigbuffer.client import Dir
+from bee_rpc.client import Dir
 
 
 GATEWAY: str = next(

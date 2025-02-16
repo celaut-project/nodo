@@ -4,7 +4,7 @@ from time import sleep
 from datetime import datetime, timedelta
 from threading import Lock
 import grpc
-from grpcbigbuffer import client as grpcbf
+from bee_rpc import client as bee
 from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.payment_system.ledger_balancer import ledger_balancer
 
@@ -67,7 +67,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         return False
 
     try:
-        deposit_token = next(grpcbf.client_grpc(
+        deposit_token = next(bee.client_grpc(
             method=grpc_stub.GenerateDepositToken,
             partitions_message_mode_parser=True,
             input=gateway_pb2.Client(client_id=client_id),
@@ -159,7 +159,7 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
                 _l.LOGGER(f"Failed to get gRPC stub for peer {peer_id}")
                 return False
 
-            next(grpcbf.client_grpc(
+            next(bee.client_grpc(
                 method=grpc_stub.Payable,
                 partitions_message_mode_parser=True,
                 input=gateway_pb2.Payment(

@@ -2,11 +2,11 @@
 from typing import Final
 
 import grpc, sys
-from grpcbigbuffer.client import Dir, client_grpc
+from bee_rpc.client import Dir, client_grpc
 from src.utils.logger import LOGGER
 
 from tests.main import *
-from protos import gateway_pb2, celaut_pb2, gateway_pb2_grpc, gateway_pb2_grpcbf
+from protos import gateway_pb2, celaut_pb2, gateway_pb2_grpc, gateway_pb2_bee
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
@@ -56,6 +56,6 @@ def test_start_service():
         input=service_extended(),
         indices_parser=gateway_pb2.Instance,
         partitions_message_mode_parser=True,
-        indices_serializer=gateway_pb2_grpcbf.StartService_input_indices
+        indices_serializer=gateway_pb2_bee.StartService_input_indices
     ))
     print(f'service partition -> {service}')

@@ -1,11 +1,11 @@
 import os
 from typing import Optional, Generator, Set, Tuple
 
-from grpcbigbuffer import client as grpcbf, buffer_pb2
+from bee_rpc import client as bee, buffer_pb2
 
 from protos import celaut_pb2 as celaut
 from protos import gateway_pb2
-from protos.gateway_pb2_grpcbf import StartService_input_indices, \
+from protos.gateway_pb2_bee import StartService_input_indices, \
     StartService_input_message_mode
 from src.gateway.utils import save_service
 from src.utils import logger as log
@@ -78,7 +78,7 @@ class AbstractServiceIterable:
     metadata: Optional[gateway_pb2.celaut__pb2.Any.Metadata] = None
 
     def __init__(self, request_iterator, context):
-        self.parser_iterator = grpcbf.parse_from_buffer(
+        self.parser_iterator = bee.parse_from_buffer(
             request_iterator=request_iterator,
             indices=StartService_input_indices,
             partitions_message_mode=StartService_input_message_mode
@@ -117,7 +117,7 @@ class AbstractServiceIterable:
                 self.metadata.hashtag.hash.extend([_e.proto() for _e in self.hashes])
                 self.hashes.clear()
 
-            case grpcbf.Dir:
+            case bee.Dir:
                 if r.type != gateway_pb2.celaut__pb2.Service:
                     raise Exception('Incorrect service message.')
 

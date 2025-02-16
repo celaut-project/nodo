@@ -1,6 +1,6 @@
 from typing import Optional, Generator
 
-from grpcbigbuffer import client as grpcbf, buffer_pb2
+from bee_rpc import client as bee, buffer_pb2
 
 from protos import gateway_pb2
 from src.virtualizers.docker import build
@@ -29,7 +29,7 @@ class GetServiceEstimatedCostIterable(AbstractServiceIterable):
                         else get_only_the_ip_from_context(context_peer=self.context.peer())
                     )
 
-            yield from grpcbf.serialize_to_buffer(
+            yield from bee.serialize_to_buffer(
                 message_iterator=generate_estimated_cost(
                     metadata=self.metadata,
                     initial_gas_amount=initial_gas_amount,

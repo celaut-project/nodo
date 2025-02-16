@@ -1,4 +1,4 @@
-from grpcbigbuffer import client as grpcbf
+from bee_rpc import client as bee
 
 from protos import gateway_pb2_grpc, gateway_pb2
 from src.compilers.zip_with_dockerfile import compile_zip
@@ -31,10 +31,10 @@ class Gateway(gateway_pb2_grpc.Gateway):
     def StopService(self, request_iterator, context, **kwargs):
         try:
             log.LOGGER('Stopping service.')
-            yield from grpcbf.serialize_to_buffer(
+            yield from bee.serialize_to_buffer(
                     message_iterator=gateway_pb2.Refund(
                         amount=to_gas_amount(prune_container(
-                            token=next(grpcbf.parse_from_buffer(
+                            token=next(bee.parse_from_buffer(
                                 request_iterator=request_iterator,
                                 indices=gateway_pb2.TokenMessage,
                                 partitions_message_mode=True
@@ -49,7 +49,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         try:
             log.LOGGER('Modifying gas deposit on service.')
 
-            _input = next(grpcbf.parse_from_buffer(
+            _input = next(bee.parse_from_buffer(
                                 request_iterator=request_iterator,
                                 indices=gateway_pb2.ModifyGasDepositInput,
                                 partitions_message_mode=True
@@ -62,7 +62,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             log.LOGGER(f"Message on modify gas deposit: {message}")
 
-            yield from grpcbf.serialize_to_buffer(
+            yield from bee.serialize_to_buffer(
                     message_iterator=gateway_pb2.ModifyGasDepositOutput(
                         success=success,
                         message=message
@@ -80,32 +80,32 @@ class Gateway(gateway_pb2_grpc.Gateway):
             gateway_instance = generate_gateway_instance(
                 network=get_network_name(direction=ip)
             )
-        yield from grpcbf.serialize_to_buffer(gateway_instance)
+        yield from bee.serialize_to_buffer(gateway_instance)
 
     def IntroducePeer(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?
         log.LOGGER('Introduce peer method.')
         add_peer_instance(
-                instance=next(grpcbf.parse_from_buffer(
+                instance=next(bee.parse_from_buffer(
                 request_iterator=request_iterator,
                 indices=gateway_pb2.Instance,
                 partitions_message_mode=True
             ), None)
         )
 
-        yield from grpcbf.serialize_to_buffer(gateway_pb2.RecursionGuard(token="OK"))  # Recursion guard shouldn't be used here, another message should be used. TODO
+        yield from bee.serialize_to_buffer(gateway_pb2.RecursionGuard(token="OK"))  # Recursion guard shouldn't be used here, another message should be used. TODO
 
     def GenerateClient(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?
-        yield from grpcbf.serialize_to_buffer(
+        yield from bee.serialize_to_buffer(
                 message_iterator=generate_client()
         )
 
     def GenerateDepositToken(self, request_iterator, context, *kwargs):
-        yield from grpcbf.serialize_to_buffer(
+        yield from bee.serialize_to_buffer(
                 message_iterator=gateway_pb2.TokenMessage(
                     token=generate_deposit_token(
-                        client_id=next(grpcbf.parse_from_buffer(
+                        client_id=next(bee.parse_from_buffer(
                             request_iterator=request_iterator,
                             indices=gateway_pb2.Client,
                             partitions_message_mode=True
@@ -125,7 +125,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ): raise Exception('Launch service error spending gas for ' + context.peer())
         if not container_modify_system_params(
                 id=token,
-                system_requeriments_range=next(grpcbf.parse_from_buffer(
+                system_requeriments_range=next(bee.parse_from_buffer(
                     request_iterator=request_iterator,
                     indices=gateway_pb2.ModifyServiceSystemResourcesInput,
                     partitions_message_mode=True
@@ -137,7 +137,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 pass
             raise Exception('Exception on service modify method.')
 
-        yield from grpcbf.serialize_to_buffer(
+        yield from bee.serialize_to_buffer(
                 message_iterator=get_sysresources(
                     id=token
                 )
@@ -145,7 +145,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def Compile(self, request_iterator, context, **kwargs):
         log.LOGGER('Go to compile a proyect.')
-        _d: grpcbf.Dir = next(grpcbf.parse_from_buffer(
+        _d: bee.Dir = next(bee.parse_from_buffer(
             request_iterator=request_iterator,
             indices={0: bytes},
             partitions_message_mode={0: False}
@@ -163,7 +163,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def Payable(self, request_iterator, context, **kwargs):
         log.LOGGER('Request for payment.')
-        payment = next(grpcbf.parse_from_buffer(
+        payment = next(bee.parse_from_buffer(
             request_iterator=request_iterator,
             indices=gateway_pb2.Payment,
             partitions_message_mode=True
@@ -177,12 +177,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
         ):
             raise Exception('Error: payment not valid.')
         log.LOGGER('Payment is valid.')
-        for b in grpcbf.serialize_to_buffer(): yield b
+        for b in bee.serialize_to_buffer(): yield b
 
     def GetMetrics(self, request_iterator, context, **kwargs):
-        yield from grpcbf.serialize_to_buffer(
+        yield from bee.serialize_to_buffer(
                 message_iterator=get_metrics(
-                    token=next(grpcbf.parse_from_buffer(
+                    token=next(bee.parse_from_buffer(
                         request_iterator=request_iterator,
                         indices=gateway_pb2.TokenMessage,
                         partitions_message_mode=True
@@ -192,9 +192,9 @@ class Gateway(gateway_pb2_grpc.Gateway):
         )
 
     def ServiceTunnel(self, request_iterator, context, **kwargs):
-        yield from grpcbf.serialize_to_buffer(
+        yield from bee.serialize_to_buffer(
                 message_iterator=service_tunnel(
-                    iterator=grpcbf.parse_from_buffer(
+                    iterator=bee.parse_from_buffer(
                         request_iterator=request_iterator,
                         indices={0: bytes},
                         partitions_message_mode={0: False}
@@ -208,7 +208,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             log.LOGGER('Signing public key.')
             
             # Parse the input from the request iterator
-            sign_request = next(grpcbf.parse_from_buffer(
+            sign_request = next(bee.parse_from_buffer(
                 request_iterator=request_iterator,
                 indices=gateway_pb2.SignRequest,
                 partitions_message_mode=True
@@ -229,7 +229,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
             
             # Serialize and yield the response
-            yield from grpcbf.serialize_to_buffer(
+            yield from bee.serialize_to_buffer(
                 message_iterator=sign_response
             )
             

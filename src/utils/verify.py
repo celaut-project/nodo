@@ -1,6 +1,6 @@
 import hashlib
 from typing import Union, Generator, List
-from grpcbigbuffer import client as grpcbf
+from bee_rpc import client as bee
 
 from src.utils.env import SHA3_256_ID, SHA3_256, SHAKE_256_ID, SHAKE_256, HASH_FUNCTIONS
 from src.utils.logger import LOGGER

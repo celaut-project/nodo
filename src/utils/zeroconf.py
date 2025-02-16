@@ -1,6 +1,6 @@
 from protos.gateway_pb2 import Instance
 from protos import gateway_pb2_grpc, gateway_pb2
-from grpcbigbuffer.client import client_grpc
+from bee_rpc.client import client_grpc
 import grpc
 
 from src.manager.manager import add_peer_instance

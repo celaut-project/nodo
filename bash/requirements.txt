@@ -10,5 +10,5 @@ python-dotenv==1.0.0
 pyngrok==7.1.6
 mnemonic==0.21
 bip32==4.0
-git+https://github.com/bee-rpc-protocol/bee-rpc
+git+https://github.com/bee-rpc-protocol/bee-rpc-over-grpc-py
 git+https://github.com/reputation-systems/ergpy

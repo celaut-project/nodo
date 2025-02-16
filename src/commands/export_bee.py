@@ -1,6 +1,6 @@
 import os
 from typing import Generator, Any
-from grpcbigbuffer.client import write_to_file, Dir
+from bee_rpc.client import write_to_file, Dir
 from src.utils.env import EnvManager
 from protos import celaut_pb2
 

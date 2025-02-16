@@ -1,5 +1,5 @@
 import sys, os, subprocess
-from grpcbigbuffer import utils as grpcbf
+from bee_rpc.utils import modify_env
 from psutil import virtual_memory
 from src.utils import logger as log
 import src.manager.resources_manager as iobd
@@ -111,7 +111,7 @@ if __name__ == '__main__':
         log=log.LOGGER if MEMORY_LOGS else lambda message: None
     )
 
-    grpcbf.modify_env(
+    modify_env(
         cache_dir=CACHE,
         mem_manager=iobd.mem_manager,
         block_dir=BLOCKDIR,

@@ -1,5 +1,5 @@
 import grpc
-from grpcbigbuffer import client as grpcbf
+from bee_rpc import client as bee
 
 import datetime
 
@@ -68,7 +68,7 @@ def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
     :return: A protobuf object containing the external metrics retrieved.
     :rtype: gateway_pb2.Metrics
     """
-    return next(grpcbf.client_grpc(
+    return next(bee.client_grpc(
         method=gateway_pb2_grpc.GatewayStub(
             grpc.insecure_channel(
                 next(generate_uris_by_peer_id(peer_id=peer_id))

@@ -4,8 +4,8 @@ import typing
 from typing import Generator, Optional
 
 import netifaces as ni
-from grpcbigbuffer.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
-from grpcbigbuffer.client import Dir
+from bee_rpc.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
+from bee_rpc.client import Dir
 
 from protos import celaut_pb2 as celaut
 from protos import gateway_pb2

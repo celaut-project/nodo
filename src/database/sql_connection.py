@@ -10,7 +10,7 @@ from typing import Callable, Dict, Generator, List, Tuple, Optional
 from google.protobuf.json_format import MessageToJson
 
 import grpc
-from grpcbigbuffer import client as grpcbf
+from bee_rpc import client as bee
 
 from protos import gateway_pb2_grpc, gateway_pb2, celaut_pb2
 from src.utils import logger as log, logger
@@ -1261,7 +1261,7 @@ class SQLConnection(metaclass=Singleton):
         ''', (his_token,))
 
         try:
-            refund = from_gas_amount(next(grpcbf.client_grpc(
+            refund = from_gas_amount(next(bee.client_grpc(
                 method=gateway_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(
                         next(generate_uris_by_peer_id(peer_id=peer_id))

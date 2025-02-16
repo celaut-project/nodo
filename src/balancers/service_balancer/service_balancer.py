@@ -1,11 +1,11 @@
 from typing import Optional, Dict, Generator
 
 import grpc
-from grpcbigbuffer import client as grpcbf
+from bee_rpc import client as bee
 
 import protos.celaut_pb2 as celaut
 from protos import gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_grpcbf import StartService_input_indices
+from protos.gateway_pb2_bee import StartService_input_indices
 from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
 from src.virtualizers.docker import build
 from src.manager.manager import default_initial_cost, get_client_id_on_other_peer
@@ -51,7 +51,7 @@ def service_balancer(
             log.LOGGER('Check cost on peer ' + peer_id)
             # TODO could use async or concurrency
             try:
-                peers[peer_id] = next(grpcbf.client_grpc(
+                peers[peer_id] = next(bee.client_grpc(
                         method=gateway_pb2_grpc.GatewayStub(
                             grpc.insecure_channel(
                                 next(generate_uris_by_peer_id(peer_id))

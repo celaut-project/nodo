@@ -1,8 +1,8 @@
 from typing import Generator
 
-from grpcbigbuffer import client as grpcbf, buffer_pb2
+from bee_rpc import client as bee, buffer_pb2
 
-from protos.gateway_pb2_grpcbf import StartService_input_indices
+from protos.gateway_pb2_bee import StartService_input_indices
 from src.virtualizers.docker import build
 from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable
 from src.utils.logger import LOGGER as log
@@ -16,7 +16,7 @@ class GetServiceIterable(AbstractServiceIterable):
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
         try:
             yield buffer_pb2.Buffer(signal=True)  # TODO; must be deleted with https://github.com/pee-rpc-protocol/pee-rpc/issues/4 solved.
-            yield from grpcbf.serialize_to_buffer(
+            yield from bee.serialize_to_buffer(
                 message_iterator=service_extended(
                     metadata=read_metadata_from_disk(service_hash=self.service_hash) if not self.metadata else self.metadata,
                     recursion_guard_token=self.recursion_guard_token

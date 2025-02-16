@@ -1,6 +1,6 @@
 import os
 from protos import celaut_pb2
-from grpcbigbuffer.client import read_from_file
+from bee_rpc.client import read_from_file
 
 from src.gateway.iterables.abstract_service_iterable import find_service_hash
 from src.utils.env import EnvManager

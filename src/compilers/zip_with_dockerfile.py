@@ -7,9 +7,9 @@ from src.utils import logger as log
 import json
 import os, subprocess
 import src.manager.resources_manager as resources_manager
-from grpcbigbuffer import client as grpcbb
-from grpcbigbuffer import buffer_pb2, block_builder
-from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2_grpcbf
+from bee_rpc import client as grpcbb
+from bee_rpc import buffer_pb2, block_builder
+from protos import celaut_pb2 as celaut, compile_pb2, gateway_pb2_bee
 from src.utils.env import EnvManager, SHA3_256_ID, DOCKER_COMMAND, COMPILER_SUPPORTED_ARCHITECTURES
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
@@ -362,7 +362,7 @@ def compile_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffe
                     message=error_msg
                 )
             ],
-            indices=gateway_pb2_grpcbf.CompileOutput_indices
+            indices=gateway_pb2_bee.CompileOutput_indices
         )
         
     else:
@@ -375,7 +375,7 @@ def compile_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffe
                     grpcbb.Dir(dir=service, _type=compile_pb2.Service)
                     if type(service) is str else service
                 ],
-                indices=gateway_pb2_grpcbf.CompileOutput_indices
+                indices=gateway_pb2_bee.CompileOutput_indices
         )
 
     # shutil.rmtree(service_with_meta.name)

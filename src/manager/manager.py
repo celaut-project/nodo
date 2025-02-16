@@ -4,7 +4,7 @@ from typing import Optional, Generator, Protocol, Tuple
 
 import docker as docker_lib
 import grpc
-from grpcbigbuffer import client as grpcbf
+from bee_rpc import client as bee
 from google.protobuf.json_format import MessageToJson
 
 from src.manager.resources_manager import IOBigData
@@ -252,7 +252,7 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
         2. If a client ID is found, return it.
         3. If no client ID is found, check if the peer is available using `is_peer_available`.
         4. If the peer is not available, log the unavailability and raise an exception.
-        5. If the peer is available, generate a new client ID using `grpcbf.client_grpc`.
+        5. If the peer is available, generate a new client ID using `bee.client_grpc`.
         6. Log the generation of the new client ID.
         7. Attempt to associate the new client ID with the peer using `sc.add_external_client`.
         8. If the association is successful, return the new client ID.
@@ -264,7 +264,7 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
         raise Exception('Peer not available.')
 
     log.LOGGER('Generate new client for peer ' + peer_id)
-    client_msg = next(grpcbf.client_grpc(
+    client_msg = next(bee.client_grpc(
         method=gateway_pb2_grpc.GatewayStub(
             grpc.insecure_channel(
                 next(generate_uris_by_peer_id(peer_id=peer_id), "")
@@ -400,7 +400,7 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
             external_token = sc.get_token_by_hashed_token(hashed_token=token)
             peer_id = sc.get_peer_id_by_external_service(token=external_token)
             refund = utils.from_gas_amount(
-                next(grpcbf.client_grpc(
+                next(bee.client_grpc(
                     method=gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
                             next(utils.generate_uris_by_peer_id(peer_id))
@@ -497,7 +497,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
         try:
             external_token = sc.get_token_by_hashed_token(hashed_token=service_token)
             peer_id = sc.get_peer_id_by_external_service(token=external_token)
-            _output = next(grpcbf.client_grpc(
+            _output = next(bee.client_grpc(
                 method=gateway_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(
                         next(utils.generate_uris_by_peer_id(peer_id))
