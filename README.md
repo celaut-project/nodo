@@ -24,7 +24,7 @@ authentication token of a service required for interaction, enhancing security a
 4. **Dependency Management**: Takes care of ensuring that services have access to the addresses of their
 dependencies, irrespective of the node on which they are executed, promoting a smooth and efficient service ecosystem.
 
-5. **Service Compilation**: Although it is not necessarily a CELAUT node's responsibility, this implementation allows you to send
+5. **Service Packing**: Although it is not necessarily a CELAUT node's responsibility, this implementation allows you to send
 a Dockerfile along with a configuration file and a zip file and get a specification for that service, making it a hassle-free process for users (or bots ...).
 
 
