@@ -13,7 +13,7 @@ Here is a list of the most commonly used commands in Nodo for a basic user:
 - `decrease_gas <instance id> <gas to retire>`: Decreases the gas allocated to a service instance.
 - `services`: List all the services currently available on the node.
 - `connect <ip:url>`: Manually connects to a peer node by specifying its IP and port.
-- `pack <project directory>`: Compiles a project to create a service for the Celaut network.
+- `pack <project directory>`: Packs a project to create a service for the Celaut network.
 - `config`: Configures various settings related to the network, wallets, and optional donation setup.
 - `tui`: Launches a terminal user interface (TUI) to visualize peers, services, and instances.
 - `info`: Provides details about the Nodo service status, version, and configuration.
