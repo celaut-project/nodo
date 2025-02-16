@@ -10,7 +10,7 @@ import src.manager.resources_manager as resources_manager
 from bee_rpc import client as grpcbb
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_pb2_bee
-from src.utils.env import EnvManager, SHA3_256_ID, DOCKER_COMMAND, COMPILER_SUPPORTED_ARCHITECTURES
+from src.utils.env import EnvManager, SHA3_256_ID, DOCKER_COMMAND, PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
 from src.utils.env import EnvManager
@@ -18,7 +18,7 @@ from src.utils.env import EnvManager
 env_manager = EnvManager()
 
 CACHE = env_manager.get_env("CACHE")
-COMPILER_MEMORY_SIZE_FACTOR = env_manager.get_env("COMPILER_MEMORY_SIZE_FACTOR")
+PACKER_MEMORY_SIZE_FACTOR = env_manager.get_env("PACKER_MEMORY_SIZE_FACTOR")
 SAVE_ALL = env_manager.get_env("SAVE_ALL")
 MIN_BUFFER_BLOCK_SIZE = env_manager.get_env("MIN_BUFFER_BLOCK_SIZE")
 
@@ -35,7 +35,7 @@ class Compiler:
         self.error_msg = None
 
         arch = None
-        for a in COMPILER_SUPPORTED_ARCHITECTURES:
+        for a in PACKER_SUPPORTED_ARCHITECTURES:
             if self.json.get('architecture') in a: arch = a[0]
 
         if not arch: raise Exception("Can't pack this service, not supported architecture.")
@@ -321,7 +321,7 @@ def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, pack_pb2.Serv
         return None, None, spec_file.error_msg
 
     
-    _memory = int(COMPILER_MEMORY_SIZE_FACTOR) * spec_file.buffer_len
+    _memory = int(PACKER_MEMORY_SIZE_FACTOR) * spec_file.buffer_len
     log.LOGGER(f"Try to lock {_memory / (1024**2):.2f} MB")
     with resources_manager.mem_manager(len=_memory):
         spec_file.parseContainer()
