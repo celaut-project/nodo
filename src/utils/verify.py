@@ -2,6 +2,7 @@ import hashlib
 from typing import Generator, List
 
 from src.utils.env import SHA3_256_ID, SHA3_256, SHAKE_256_ID, SHAKE_256
+from protos.celaut_pb2 import Metadata
 
 
 def calculate_hashes_by_stream(value: Generator[bytes, None, None]) -> List[Metadata.HashTag.Hash]:
