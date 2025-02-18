@@ -1,6 +1,6 @@
 import os
 import shutil
-from typing import Generator, List, Optional
+from typing import Generator, Optional
 
 import netifaces as ni
 
