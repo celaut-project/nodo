@@ -1,6 +1,7 @@
 import os
 from src.utils.env import EnvManager
 from bee_rpc.utils import getsize
+from protos.celaut_pb2 import Metadata
 
 env_manager = EnvManager()
 REGISTRY = env_manager.get_env("REGISTRY")
