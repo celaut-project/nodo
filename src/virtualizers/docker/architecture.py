@@ -1,6 +1,10 @@
 import itertools
 from protos import celaut_pb2
-from src.utils.env import SUPPORTED_ARCHITECTURES, TRUST_METADATA_ARCHITECTURE
+from src.utils.env import SUPPORTED_ARCHITECTURES, EnvManager
+
+env_manager = EnvManager()
+TRUST_METADATA_ARCHITECTURE = env_manager.get_env("TRUST_METADATA_ARCHITECTURE")
+
 
 def get_arch_tag(service: celaut_pb2.Service, metadata: celaut_pb2.Metadata) -> str:
     if service.container.architecture.tags:
