@@ -3,8 +3,8 @@ from protos import celaut_pb2
 from src.utils.env import SUPPORTED_ARCHITECTURES, TRUST_METADATA_ARCHITECTURE
 
 def get_arch_tag(service: celaut_pb2.Service, metadata: celaut_pb2.Metadata) -> str:
-    if service.architecture.tags:
-        for tag in service.architecture.tags:
+    if service.container.architecture.tags:
+        for tag in service.container.architecture.tags:
             for _l in SUPPORTED_ARCHITECTURES:
                 if tag in _l:
                     return tag
@@ -21,9 +21,9 @@ def get_arch_tag(service: celaut_pb2.Service, metadata: celaut_pb2.Metadata) -> 
 
 
 def check_supported_architecture(service: celaut_pb2.Service, metadata: celaut_pb2.Metadata) -> bool:
-    if service.architecture.tags:
+    if service.container.architecture.tags:
         if any(tag in list(itertools.chain.from_iterable(SUPPORTED_ARCHITECTURES)) 
-               for tag in service.architecture.tags):
+               for tag in service.container.architecture.tags):
             return True
     
     # In case that the architecture is not on the service architecture, check on metadata.

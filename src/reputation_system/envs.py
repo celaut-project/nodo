@@ -20,8 +20,8 @@ CONTRACT = """{
     })
 }"""
 
-def generate_instance_proofs() -> Generator[celaut.Service.Api.ContractLedger, None, None]:
-    yield celaut.Service.Api.ContractLedger(
+def generate_instance_proofs() -> Generator[celaut.ContractLedger, None, None]:
+    yield celaut.ContractLedger(
         contract=CONTRACT.encode("utf-8"),
         contract_addr=env_manager.get_env('REPUTATION_PROOF_ID'),
         ledger=LEDGER

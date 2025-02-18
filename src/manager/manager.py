@@ -61,8 +61,8 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> Optional[str]:
 
     peer_id = str(uuid.uuid4())
     token: Optional[str] = instance.token if instance.HasField("token") else ""
-    metadata: Optional[bytes] = instance.instance_meta.SerializeToString() \
-        if instance.HasField('instance_meta') else None
+    metadata: Optional[bytes] = instance.metadata.SerializeToString() \
+        if instance.HasField('metadata') else None
     app_protocol: bytes = instance.instance.api.app_protocol.SerializeToString()
 
     sc.add_peer(
@@ -78,7 +78,7 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> Optional[str]:
     for contract_ledger in instance.instance.api.payment_contracts:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
-    for contract_ledger in instance.instance_meta.reputation_proofs:
+    for contract_ledger in instance.metadata.reputation_proofs:
         add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
     log.LOGGER(f'Get instance for peer -> {peer_id}')
@@ -97,7 +97,7 @@ def update_peer_instance(instance: gateway_pb2.Instance, peer_id: str):
     for contract_ledger in instance.instance.api.payment_contracts:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
-    for contract_ledger in instance.instance_meta.reputation_proofs:
+    for contract_ledger in instance.metadata.reputation_proofs:
         add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
     log.LOGGER(f"Peer {peer_id} updated.")

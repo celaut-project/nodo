@@ -59,7 +59,7 @@ def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
         log(f"Failed to parse JSON response for token_id {token_id}: {e}")
         return None
 
-def validate_contract_ledger(contract_ledger: celaut.Service.Api.ContractLedger, peer_id: str) -> bool:
+def validate_contract_ledger(contract_ledger: celaut.ContractLedger, peer_id: str) -> bool:
     """
     Validates the contract ledger by checking compatibility with predefined contract and ledger,
     generating a random message, signing it using the peer's public key, and verifying the signature.

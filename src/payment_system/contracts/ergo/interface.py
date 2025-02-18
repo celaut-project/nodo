@@ -116,7 +116,7 @@ def get_ergo_info() -> Tuple[Tuple[str, float], Tuple[str, float]]:
 def init():
     sender_addr = str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString())
     sql = sql_connection.SQLConnection()
-    sql.add_contract(contract=gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
+    sql.add_contract(contract=gateway_pb2.celaut__pb2.ContractLedger(
         ledger=LEDGER,
         contract_addr=sender_addr,
         contract=CONTRACT
@@ -180,7 +180,7 @@ def manager():
 
 
 # Function to process the payment, generating a transaction with the token in register R4
-def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.Service.Api.ContractLedger:
+def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.ContractLedger:
     with payment_lock:
         amount = __gas_to_nanoerg(amount)
         LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount}")
@@ -242,7 +242,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
                 obj = response.json()
                 if obj["numConfirmations"] > 1:
                     LOGGER(f"Tx {tx_id} verified.")
-                    return gateway_pb2.celaut__pb2.Service.Api.ContractLedger(
+                    return gateway_pb2.celaut__pb2.ContractLedger(
                         ledger=ledger,
                         contract_addr=contract_address,
                         contract=CONTRACT

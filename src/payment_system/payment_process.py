@@ -150,7 +150,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 
 
 # Helper function for payment communication retries
-def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: str, contract_ledger: gateway_pb2.celaut__pb2.Service.Api.ContractLedger) -> bool:
+def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: str, contract_ledger: gateway_pb2.celaut__pb2.ContractLedger) -> bool:
     attempt = 0
     while attempt < COMMUNICATION_ATTEMPTS:
         try:

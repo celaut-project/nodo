@@ -910,12 +910,12 @@ class SQLConnection(metaclass=Singleton):
             for uri in slot.uri:
                 self.add_uri(uri, slot_id=slot_id)
 
-    def add_contract(self, contract: celaut_pb2.Service.Api.ContractLedger, peer_id: str = "LOCAL"):
+    def add_contract(self, contract: celaut_pb2.ContractLedger, peer_id: str = "LOCAL"):
         """
         Adds a contract to the database.
 
         Args:
-            contract (celaut_pb2.Service.Api.ContractLedger): The contract to add.
+            contract (celaut_pb2.ContractLedger): The contract to add.
             peer_id (Optional[str]): The ID of the peer or None for a self contract (to be send to clients.)
         """
         contract_content: bytes = contract.contract
@@ -934,13 +934,13 @@ class SQLConnection(metaclass=Singleton):
         self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
                     "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
 
-    def add_reputation_proof(self, contract_ledger: celaut_pb2.Service.Api.ContractLedger, peer_id: str) -> bool:
+    def add_reputation_proof(self, contract_ledger: celaut_pb2.ContractLedger, peer_id: str) -> bool:
         """
         Add or update the reputation_proof_id for a peer.
 
         Args:
             peer_id (str): The ID of the peer whose reputation_proof_id is to be updated.
-            contract_ledger (celaut_pb2.Service.Api.ContractLedger): The reputation proof contract ledger.
+            contract_ledger (celaut_pb2.ContractLedger): The reputation proof contract ledger.
 
         Returns:
             bool: True if the update was successful, False otherwise.

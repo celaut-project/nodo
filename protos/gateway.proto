@@ -36,7 +36,7 @@ message SignResponse {
 
 message Payment {
     string deposit_token = 1;
-    celaut.Service.Api.ContractLedger contract_ledger = 3;
+    celaut.ContractLedger contract_ledger = 3;
     GasAmount gas_amount = 4;
 }
 
@@ -45,7 +45,7 @@ message Metrics {
 }
 
 message Instance {
-    optional celaut.Metadata instance_meta = 1;
+    optional celaut.Metadata metadata = 1;
     celaut.Instance instance = 2;
     optional string token = 3;
 }

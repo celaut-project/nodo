@@ -15,7 +15,7 @@ message Service {
             }
             repeated ItemBranch branch = 1;
         }
-        celaut.Service.Architecture architecture = 1;
+        celaut.Service.Container.Architecture architecture = 1;
         celaut.Service.Container.Filesystem filesystem = 2;
         map<string, celaut.FieldDef> enviroment_variables = 3;
         repeated string entrypoint = 4;
