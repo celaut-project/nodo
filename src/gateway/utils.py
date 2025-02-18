@@ -96,16 +96,3 @@ def search_container(
         except Exception as e:
             log.LOGGER('Exception during search container process: ' + str(e))
             pass
-
-
-def search_file(hashes: List[gateway_pb2.celaut__pb2.Metadata.HashTag.Hash], ignore_network: str = None) -> \
-Generator[celaut.Any, None, None]:
-    print('SEARCH FILE METHOD NOT IMPLEMENTED.')
-    raise Exception('SEARCH FILE METHOD NOT IMPLEMENTED.')
-
-
-
-def search_definition(hashes: List[gateway_pb2.celaut__pb2.Metadata.HashTag.Hash], ignore_network: str = None) \
-        -> celaut.Service:
-    log.LOGGER('SEARCH DEFINITION NOT IMPLEMENTED.')
-    raise Exception('SEARCH DEFINITION NOT IMPLEMENTED.')
