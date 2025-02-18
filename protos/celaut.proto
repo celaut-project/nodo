@@ -173,7 +173,7 @@ message ConfigurationFile {
 }
 
 //  ------------------------
-//  System resources.
+//  SYSTEM RESOURCES.
 //  ------------------------
 message Sysresources {                           //  https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     optional uint64 blkio_weight = 1;
