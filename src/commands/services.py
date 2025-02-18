@@ -1,6 +1,5 @@
 import os
 from src.utils.env import EnvManager
-from protos.celaut_pb2 import Any
 from bee_rpc.utils import getsize
 
 env_manager = EnvManager()
