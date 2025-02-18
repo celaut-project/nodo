@@ -182,6 +182,7 @@ class ZipContainerPacker:
         self.service.container.config.format.CopyFrom(
             celaut.FieldDef()  # celaut.ConfigFile definition.
         )
+        self.service.container.architecture.tags.extend([self.json.get('architecture')])
         # Expected Gateway.
         # Add container metadata to the global metadata.
         self.metadata.hashtag.attr_hashtag.append(
@@ -190,16 +191,6 @@ class ZipContainerPacker:
                 value=[
                     celaut.Metadata.HashTag(
                         attr_hashtag=[
-                            celaut.Metadata.HashTag.AttrHashTag(
-                                key=1,  # Architecture
-                                value=[
-                                    celaut.Metadata.HashTag(
-                                        tag=[
-                                            self.json.get('architecture')
-                                        ]
-                                    )
-                                ]
-                            ),
                             celaut.Metadata.HashTag.AttrHashTag(
                                 key=2,  # Filesystem
                                 value=[parseFilesys()]
@@ -257,7 +248,7 @@ class ZipContainerPacker:
     def parseNetwork(self):
         #  TODO: self.service.Network.
         if self.json.get('network'):
-            self.service.network.tags.extend(self.json.get("network"))
+            self.service.network.tags.extend([self.json.get("network")])
             
             #  Add network metadata to the global metadata.
             #  self.metadata.hashtag.attr_hashtag.append(

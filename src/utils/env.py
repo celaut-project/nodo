@@ -138,6 +138,7 @@ SUPPORTED_ARCHITECTURES = [
     ['linux/arm64', 'arm64', 'arm_64', 'aarch64'] if env_manager.env_vars["ARM_SUPPORT"] else [],
     ['linux/amd64', 'x86_64', 'amd64'] if env_manager.env_vars["X86_SUPPORT"] else []
 ]
+env_manager.get_env("TRUST_METADATA_ARCHITECTURE", False)
 
 # Docker Configuration
 DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")

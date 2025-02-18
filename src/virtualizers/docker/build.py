@@ -1,4 +1,4 @@
-import itertools
+
 import json
 import os
 from pathlib import Path
@@ -7,7 +7,6 @@ import src.manager.resources_manager as resources_manager
 import threading
 from shutil import rmtree
 from subprocess import check_output, CalledProcessError
-from subprocess import run
 from time import sleep, time
 from typing import Tuple, Optional, Set
 
@@ -15,8 +14,9 @@ from bee_rpc.client import copy_block_if_exists
 
 import src.utils.logger as l
 from protos import celaut_pb2, gateway_pb2
-from src.utils.env import DOCKER_COMMAND, SUPPORTED_ARCHITECTURES, EnvManager
+from src.utils.env import DOCKER_COMMAND, EnvManager
 from src.utils.verify import get_service_hex_main_hash
+from src.virtualizers.docker.architecture import UnsupportedArchitectureException, get_arch_tag, check_supported_architecture
 
 env_manager = EnvManager()
 
@@ -26,25 +26,6 @@ BLOCKDIR = env_manager.get_env("BLOCKDIR")
 CACHE = env_manager.get_env("CACHE")
 REGISTRY = env_manager.get_env("REGISTRY")
 
-def get_arch_tag(metadata: celaut_pb2.Metadata) -> str:
-    for _l in SUPPORTED_ARCHITECTURES:
-        if any(a in _l for a in {
-            ah.key: ah.value for ah in {
-                ah.key: ah.value for ah in
-                metadata.hashtag.attr_hashtag
-            }[1][0].attr_hashtag
-        }[1][0].tag):
-            return _l[0]
-
-
-def check_supported_architecture(metadata: celaut_pb2.Metadata) -> bool:
-    try:
-        return any(a in list(itertools.chain.from_iterable(SUPPORTED_ARCHITECTURES)) for a in
-                   {ah.key: ah.value for ah in
-                    {ah.key: ah.value for ah in metadata.hashtag.attr_hashtag}[1][0].attr_hashtag}[1][0].tag)
-    except Exception:
-        return False
-
 
 class WaitBuildException(Exception):
 
@@ -53,15 +34,6 @@ class WaitBuildException(Exception):
 
     def __str__(self):
         return "Getting the container, the process will've time"
-
-
-class UnsupportedArchitectureException(Exception):
-
-    def __init__(self, arch):
-        self.message = f"\n Unsupported architecture {arch} - \n Only these {SUPPORTED_ARCHITECTURES}. \n"
-
-    def __str__(self):
-        return self.message
 
 
 actual_building_processes_lock = threading.Lock()
@@ -97,7 +69,7 @@ def build_container_from_definition(service: celaut_pb2.Service,
                 symlinks_element=symlinks_element
             )
 
-    if not check_supported_architecture(metadata=metadata):
+    if not check_supported_architecture(service=service, metadata=metadata):
         l.LOGGER('Build process of ' + service_id + ': unsupported architecture.')
         raise UnsupportedArchitectureException(arch=str(metadata))
 
@@ -132,7 +104,7 @@ def build_container_from_definition(service: celaut_pb2.Service,
         )
 
         # Take architecture.
-        arch = get_arch_tag(metadata=metadata)
+        arch = get_arch_tag(service=service, metadata=metadata)
         # get_arch_tag, selecciona el tag de la arquitectura definida por el servicio,
         #  en base a la especificación y metadatos, que tiene el nodo para esa arquitectura.
         l.LOGGER('Build process of ' + service_id + ': select the architecture ' + str(arch))
