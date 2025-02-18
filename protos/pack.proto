@@ -15,17 +15,17 @@ message Service {
             }
             repeated ItemBranch branch = 1;
         }
-        bytes architecture = 1;
+        celaut.Service.Architecture architecture = 1;
         celaut.Service.Container.Filesystem filesystem = 2;
         map<string, celaut.FieldDef> enviroment_variables = 3;
         repeated string entrypoint = 4;
         celaut.Service.Container.Config config = 5;
-        celaut.Service.Container.ExpectedGateway expected_gateway = 6;
+        repeated celaut.Service.Api.Protocol node_protocol_stack = 6;
     }
-    Container container = 1;
-    celaut.Service.Api api = 2;
-    celaut.Service.Tensor tensor = 3;
-    celaut.Service.Ledger ledger = 4;
+    string prose = 1;
+    Container container = 2;
+    celaut.Service.Api api = 3;
+    repeated celaut.Service.Network network = 4;
 }
 
 message PackOutputServiceId {

@@ -1,8 +1,6 @@
 import codecs
 from typing import Generator, List, Tuple, Union
 
-from protos.celaut_pb2 import Any
-
 from src.utils import logger as log
 import json
 import os, subprocess
@@ -28,7 +26,7 @@ class ZipContainerPacker:
         super().__init__()
         self.blocks: List[bytes] = []
         self.service = pack_pb2.Service()
-        self.metadata = celaut.Any.Metadata()
+        self.metadata = celaut.Metadata()
         self.path = path
         self.json = json.load(open(self.path + "service.json", "r"))
         self.aux_id = aux_id
@@ -106,7 +104,7 @@ class ZipContainerPacker:
         self.tag = self.json["tag"] if "tag" in self.json else None
         
     def parseContainer(self):
-        def parseFilesys() -> celaut.Any.Metadata.HashTag:
+        def parseFilesys() -> celaut.Metadata.HashTag:
             # Save his filesystem on cache.
             for layer in os.listdir(CACHE + self.aux_id + "/building/"):
                 if os.path.isdir(CACHE + self.aux_id + "/building/" + layer):
@@ -152,7 +150,7 @@ class ZipContainerPacker:
                     filesystem.branch.append(branch)
                 return filesystem
             self.service.container.filesystem.CopyFrom(recursive_parsing(directory="/"))
-            return celaut.Any.Metadata.HashTag(
+            return celaut.Metadata.HashTag(
                 hash=calculate_hashes(
                     value=self.service.container.filesystem.SerializeToString()
                 ) if not self.blocks else
@@ -187,22 +185,22 @@ class ZipContainerPacker:
         # Expected Gateway.
         # Add container metadata to the global metadata.
         self.metadata.hashtag.attr_hashtag.append(
-            celaut.Any.Metadata.HashTag.AttrHashTag(
+            celaut.Metadata.HashTag.AttrHashTag(
                 key=1,  # Container attr.
                 value=[
-                    celaut.Any.Metadata.HashTag(
+                    celaut.Metadata.HashTag(
                         attr_hashtag=[
-                            celaut.Any.Metadata.HashTag.AttrHashTag(
+                            celaut.Metadata.HashTag.AttrHashTag(
                                 key=1,  # Architecture
                                 value=[
-                                    celaut.Any.Metadata.HashTag(
+                                    celaut.Metadata.HashTag(
                                         tag=[
                                             self.json.get('architecture')
                                         ]
                                     )
                                 ]
                             ),
-                            celaut.Any.Metadata.HashTag.AttrHashTag(
+                            celaut.Metadata.HashTag.AttrHashTag(
                                 key=2,  # Filesystem
                                 value=[parseFilesys()]
                             )
@@ -229,20 +227,20 @@ class ZipContainerPacker:
             self.service.api.slot.append(slot)
         # Add api metadata to the global metadata.
         self.metadata.hashtag.attr_hashtag.append(
-            celaut.Any.Metadata.HashTag.AttrHashTag(
+            celaut.Metadata.HashTag.AttrHashTag(
                 key=2,  # Api attr.
                 value=[
-                    celaut.Any.Metadata.HashTag(
+                    celaut.Metadata.HashTag(
                         attr_hashtag=[
-                            celaut.Any.Metadata.HashTag.AttrHashTag(
+                            celaut.Metadata.HashTag.AttrHashTag(
                                 key=2,  # Slot attr.
                                 value=[
-                                    celaut.Any.Metadata.HashTag(
+                                    celaut.Metadata.HashTag(
                                         attr_hashtag=[
-                                            celaut.Any.Metadata.HashTag.AttrHashTag(
+                                            celaut.Metadata.HashTag.AttrHashTag(
                                                 key=2,  # Transport Protocol attr.
                                                 value=[
-                                                    celaut.Any.Metadata.HashTag(
+                                                    celaut.Metadata.HashTag(
                                                         tag=item.get('protocol')
                                                     )
                                                 ]
@@ -257,20 +255,23 @@ class ZipContainerPacker:
             )
         )
     def parseNetwork(self):
-        #  TODO: self.service.ledger.
-        #  Add ledger metadata to the global metadata.
-        if self.json.get('ledger'):
-            self.metadata.hashtag.attr_hashtag.append(
-                celaut.Any.Metadata.HashTag.AttrHashTag(
-                    key=4,  # Ledger attr.
-                    value=(
-                        celaut.Any.MetaData.HashTag(
-                            tag=self.json.get('ledger')
-                        )
-                    )
-                )
-            )
-    def save(self) -> Tuple[str, celaut.Any.Metadata, Union[str, pack_pb2.Service]]:
+        #  TODO: self.service.Network.
+        if self.json.get('network'):
+            self.service.network.tags.extend(self.json.get("network"))
+            
+            #  Add network metadata to the global metadata.
+            #  self.metadata.hashtag.attr_hashtag.append(
+            #     celaut.Metadata.HashTag.AttrHashTag(
+            #         key=4,  # Network attr.
+            #         value=(
+            #             celaut.MetaData.HashTag(
+            #                 tag=self.json.get('ledger')
+            #             )
+            #         )
+            #     )
+            # )
+            
+    def save(self) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
         service: Union[str, pack_pb2.Service]
         if not self.blocks:
             service_buffer = self.service.SerializeToString()  # 2*len
@@ -295,7 +296,7 @@ class ZipContainerPacker:
             )
             service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
             self.metadata.hashtag.hash.extend(
-                [Any.Metadata.HashTag.Hash(
+                [Metadata.HashTag.Hash(
                     type=SHA3_256_ID,
                     value=bytes_id
                 )]
@@ -313,7 +314,7 @@ class ZipContainerPacker:
             
         return service_id, self.metadata, service
 
-def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, pack_pb2.Service]]:
+def ok(path, aux_id) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
     spec_file = ZipContainerPacker(path=path, aux_id=aux_id)
     
     # Check if there was an error during initialization
@@ -336,7 +337,7 @@ def ok(path, aux_id) -> Tuple[str, celaut.Any.Metadata, Union[str, pack_pb2.Serv
     return identifier, metadata, service
 
 
-def zipfile_ok(zip: str) -> Tuple[str, celaut.Any.Metadata, Union[str, pack_pb2.Service]]:
+def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
     import random
     aux_id = str(random.random())
     os.system('mkdir ' + CACHE + aux_id)

@@ -76,7 +76,7 @@ def __on_peer(peer: str, service_zip_dir: str):
             if type(b) is pack_pb2.PackOutputServiceId:
                 if not _id:
                     _id = b.id.hex()
-            elif type(b) == celaut_pb2.Any.Metadata and _id:
+            elif type(b) == celaut_pb2.Metadata and _id:
                 with open(f"{METADATA_REGISTRY}{_id}", "wb") as f:
                     f.write(b.SerializeToString())
             elif type(b) == grpcbb.Dir and b.type == pack_pb2.Service and _id:

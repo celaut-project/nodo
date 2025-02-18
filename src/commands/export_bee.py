@@ -14,7 +14,7 @@ def __generator(service: str) -> Generator[Any, None, None]:
 
         yield Dir(
             dir=os.path.join(METADATA, service),
-            _type=celaut_pb2.Any.Metadata
+            _type=celaut_pb2.Metadata
         )
 
         yield Dir(
@@ -40,7 +40,7 @@ def export_bee(service: str, path: str):
         extension="celaut",
         input=__generator(service=service), 
         indices={
-            1: celaut_pb2.Any.Metadata,
+            1: celaut_pb2.Metadata,
             2: celaut_pb2.Service,
         })
 

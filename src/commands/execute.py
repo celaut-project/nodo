@@ -38,7 +38,7 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: 
             initial_gas_amount=to_gas_amount(initial_gas_amount)
         )
 
-        yield celaut_pb2.Any.Metadata.HashTag.Hash(
+        yield celaut_pb2.Metadata.HashTag.Hash(
                 type=bytes.fromhex(SHA3_256),
                 value=bytes.fromhex(_hash)
             )
@@ -60,7 +60,7 @@ def execute(service: str):
         try:
             for selected in os.listdir(os.path.join(METADATA_REGISTRY)):
                 with open(os.path.join(METADATA_REGISTRY, selected), "rb") as f:
-                    metadata = celaut_pb2.Any.Metadata()
+                    metadata = celaut_pb2.Metadata()
                     metadata.ParseFromString(f.read())
                     first_tag = metadata.hashtag.tag[0] if len(metadata.hashtag.tag) > 0 else ""
                     if str(first_tag) == str(service):

@@ -23,7 +23,7 @@ class BreakIteration(Exception):
     pass
 
 
-def find_service_hash(_hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash) \
+def find_service_hash(_hash: gateway_pb2.celaut__pb2.Metadata.HashTag.Hash) \
         -> Tuple[Optional[str], bool]:
     if SHA3_256_ID == _hash.type:
         value = _hash.value.hex()
@@ -33,13 +33,13 @@ def find_service_hash(_hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash) 
         return (None, False)
 
 
-def combine_metadata(service_hash: str, request_metadata: Optional[celaut.Any.Metadata]) -> celaut.Any.Metadata:
-    disk_metadata = celaut.Any.Metadata()
+def combine_metadata(service_hash: str, request_metadata: Optional[celaut.Metadata]) -> celaut.Metadata:
+    disk_metadata = celaut.Metadata()
     with open(METADATA_REGISTRY + service_hash, 'rb') as f:
         disk_metadata.ParseFromString(f.read())
 
     if request_metadata:
-        combined_metadata = celaut.Any.Metadata()
+        combined_metadata = celaut.Metadata()
         combined_metadata.MergeFrom(disk_metadata)
         combined_metadata.MergeFrom(request_metadata)
         return combined_metadata
@@ -48,7 +48,7 @@ def combine_metadata(service_hash: str, request_metadata: Optional[celaut.Any.Me
 
 
 class Hash:
-    def __init__(self, _hash: gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash):
+    def __init__(self, _hash: gateway_pb2.celaut__pb2.Metadata.HashTag.Hash):
         self.type = _hash.type
         self.value = _hash.value
 
@@ -58,8 +58,8 @@ class Hash:
     def __eq__(self, other):
         return (self.type, self.value) == (other.type, other.value)
 
-    def proto(self) -> gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash:
-        return gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash(
+    def proto(self) -> gateway_pb2.celaut__pb2.Metadata.HashTag.Hash:
+        return gateway_pb2.celaut__pb2.Metadata.HashTag.Hash(
             type=self.type,
             value=self.value
         )
@@ -75,7 +75,7 @@ class AbstractServiceIterable:
     service_saved = False
 
     hashes: Set[Hash] = set()
-    metadata: Optional[gateway_pb2.celaut__pb2.Any.Metadata] = None
+    metadata: Optional[gateway_pb2.celaut__pb2.Metadata] = None
 
     def __init__(self, request_iterator, context):
         self.parser_iterator = bee.parse_from_buffer(
@@ -97,12 +97,12 @@ class AbstractServiceIterable:
             case gateway_pb2.Configuration:
                 self.configuration = r
 
-            case celaut.Any.Metadata.HashTag.Hash:
+            case celaut.Metadata.HashTag.Hash:
                 self.hashes.add(Hash(r))
                 if not self.service_hash:
                     self.service_hash, self.service_saved = find_service_hash(_hash=r)
 
-            case celaut.Any.Metadata:
+            case celaut.Metadata:
                 self.metadata = r
                 for _hash in self.metadata.hashtag.hash:  # TODO nos podríamos ahorrar esta iteración
                     if not self.service_hash:

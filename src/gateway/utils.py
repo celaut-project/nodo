@@ -6,7 +6,6 @@ import netifaces as ni
 
 import src.utils.utils
 from src.payment_system.ledgers import generate_contract_ledger
-from src.reputation_system.envs import generate_instance_proofs
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.utils import logger as log
 from src.utils.env import EnvManager
@@ -55,11 +54,6 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     )
     log.LOGGER('Payment contracts added to API')
 
-    instance.api.reputation_proofs.extend(
-        [e for e in generate_instance_proofs()]
-    )
-    log.LOGGER('Reputation proofs added to API')
-
     log.LOGGER('Gateway instance generated')
     return gateway_pb2.Instance(
         instance=instance
@@ -68,7 +62,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
 
 # If the service is not on the registry, save it.
 def save_service(
-        metadata: Optional[celaut.Any.Metadata],
+        metadata: Optional[celaut.Metadata],
         service_dir: str,
         service_hash: str
 ) -> bool:
@@ -91,7 +85,7 @@ def save_service(
 
 
 def search_container(
-        metadata: celaut.Any.Metadata = celaut.Any.Metadata(),
+        metadata: celaut.Metadata = celaut.Metadata(),
         ignore_network: str = None
 ) -> Generator[gateway_pb2.buffer__pb2.Buffer, None, None]:
     # Search a service tar container.
@@ -104,14 +98,14 @@ def search_container(
             pass
 
 
-def search_file(hashes: List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash], ignore_network: str = None) -> \
+def search_file(hashes: List[gateway_pb2.celaut__pb2.Metadata.HashTag.Hash], ignore_network: str = None) -> \
 Generator[celaut.Any, None, None]:
     print('SEARCH FILE METHOD NOT IMPLEMENTED.')
     raise Exception('SEARCH FILE METHOD NOT IMPLEMENTED.')
 
 
 
-def search_definition(hashes: List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash], ignore_network: str = None) \
+def search_definition(hashes: List[gateway_pb2.celaut__pb2.Metadata.HashTag.Hash], ignore_network: str = None) \
         -> celaut.Service:
     log.LOGGER('SEARCH DEFINITION NOT IMPLEMENTED.')
     raise Exception('SEARCH DEFINITION NOT IMPLEMENTED.')

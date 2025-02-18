@@ -40,8 +40,8 @@ def get_grpc_uri(instance: celaut.Instance) -> celaut.Instance.Uri:
 
 
 def service_hashes(
-        hashes: typing.List[gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash]
-) -> Generator[celaut.Any.Metadata.HashTag.Hash, None, None]:
+        hashes: typing.List[gateway_pb2.celaut__pb2.Metadata.HashTag.Hash]
+) -> Generator[celaut.Metadata.HashTag.Hash, None, None]:
     for _hash in hashes:
         yield _hash
 
@@ -67,13 +67,13 @@ def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
         return None
 
 
-def read_metadata_from_disk(service_hash: str) -> Optional[celaut.Any.Metadata]:
+def read_metadata_from_disk(service_hash: str) -> Optional[celaut.Metadata]:
     filename: str = os.path.join(METADATA_REGISTRY, service_hash)
     if not os.path.exists(filename):
         return None
 
     try:
-        metadata = celaut.Any.Metadata()
+        metadata = celaut.Metadata()
         metadata.ParseFromString(read_file(filename=filename))
         return metadata
     except (IOError, FileNotFoundError):
@@ -82,7 +82,7 @@ def read_metadata_from_disk(service_hash: str) -> Optional[celaut.Any.Metadata]:
 
 
 def service_extended(
-        metadata: celaut.Any.Metadata,
+        metadata: celaut.Metadata,
         config: typing.Optional[gateway_pb2.Configuration] = None,
         send_only_hashes: typing.Optional[bool] = False,
         client_id: typing.Optional[str] = None,

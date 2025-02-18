@@ -52,7 +52,7 @@ def check_wanted_services():
         if not wanted_services[wanted]:
             wanted_services[wanted] = True
             log.LOGGER(f"Taking the service {wanted}")
-            _hash = gateway_pb2.celaut__pb2.Any.Metadata.HashTag.Hash(
+            _hash = gateway_pb2.celaut__pb2.Metadata.HashTag.Hash(
                     type=SHA3_256_ID,
                     value=bytes.fromhex(wanted)
                 )
@@ -85,7 +85,7 @@ def check_wanted_services():
                         log.LOGGER(f"type of chunk -> {type(b)}")
                         if  type(b) == peerpc.Dir:
                             log.LOGGER(f"    type of dir {b.type}")
-                        if type(b) == gateway_pb2.celaut__pb2.Any.Metadata:
+                        if type(b) == gateway_pb2.celaut__pb2.Metadata:
                             log.LOGGER("Store the metadata.")
                             with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
                                 f.write(b.SerializeToString())

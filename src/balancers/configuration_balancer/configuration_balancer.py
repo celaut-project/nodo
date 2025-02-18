@@ -17,7 +17,7 @@ ClauseResource = gateway_pb2.CombinationResources.Clause
 
 def configuration_balancer(
         clauses: Dict[int, ClauseResource],
-        metadata: celaut.Any.Metadata,
+        metadata: celaut.Metadata,
         initial_gas_amount: int
 ) -> Tuple[str, gateway_pb2.EstimatedCost]:
     posible_clauses: Dict[str, gateway_pb2.EstimatedCost] = {}

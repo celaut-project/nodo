@@ -53,14 +53,14 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: 
             initial_gas_amount=to_gas_amount(initial_gas_amount) if initial_gas_amount else None
         )
 
-        yield celaut_pb2.Any.Metadata.HashTag.Hash(
+        yield celaut_pb2.Metadata.HashTag.Hash(
                 type=bytes.fromhex(SHA3_256),
                 value=bytes.fromhex(_hash)
             )
 
         yield Dir(
             dir=os.path.join(METADATA_REGISTRY, _hash),
-            _type=celaut_pb2.Any.Metadata
+            _type=celaut_pb2.Metadata
         )
 
         yield Dir(

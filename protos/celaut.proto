@@ -117,7 +117,7 @@ message Service {
             repeated string path = 1;
             FieldDef format = 2;
         }
-        bytes architecture = 1;
+        Architecture architecture = 1;
         bytes filesystem = 2;
         map<string, FieldDef> enviroment_variables = 3;
         repeated string entrypoint = 4;
@@ -141,7 +141,7 @@ message Service {
 //  ------------------------
 //  INSTANCE SPECIFICATION.
 //  ------------------------
-// Used for specify node peers, node-host instancies, ledger-nodes instancies and tensor instancies.
+// Used for specify node peers, node-host instancies, ledger-nodes instancies
 message Instance {
     message Uri {
         string ip = 1;

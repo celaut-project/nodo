@@ -26,7 +26,7 @@ BLOCKDIR = env_manager.get_env("BLOCKDIR")
 CACHE = env_manager.get_env("CACHE")
 REGISTRY = env_manager.get_env("REGISTRY")
 
-def get_arch_tag(metadata: celaut_pb2.Any.Metadata) -> str:
+def get_arch_tag(metadata: celaut_pb2.Metadata) -> str:
     for _l in SUPPORTED_ARCHITECTURES:
         if any(a in _l for a in {
             ah.key: ah.value for ah in {
@@ -37,7 +37,7 @@ def get_arch_tag(metadata: celaut_pb2.Any.Metadata) -> str:
             return _l[0]
 
 
-def check_supported_architecture(metadata: celaut_pb2.Any.Metadata) -> bool:
+def check_supported_architecture(metadata: celaut_pb2.Metadata) -> bool:
     try:
         return any(a in list(itertools.chain.from_iterable(SUPPORTED_ARCHITECTURES)) for a in
                    {ah.key: ah.value for ah in
@@ -69,7 +69,7 @@ actual_building_processes: Set[str] = set()  # list of hexadecimal string sha256
 
 
 def build_container_from_definition(service: celaut_pb2.Service,
-                                    metadata: gateway_pb2.celaut__pb2.Any.Metadata,
+                                    metadata: gateway_pb2.celaut__pb2.Metadata,
                                     service_id: str):
     # Build the container from filesystem definition.
     def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir_element: str, symlinks_element):
@@ -190,7 +190,7 @@ def build_container_from_definition(service: celaut_pb2.Service,
 
 def build(
         service: celaut_pb2.Service,
-        metadata: gateway_pb2.celaut__pb2.Any.Metadata,
+        metadata: gateway_pb2.celaut__pb2.Metadata,
         service_id: Optional[str] = None,
 ) -> str:
     if not service_id:

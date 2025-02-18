@@ -18,12 +18,12 @@ def import_bee(path: str):
     
     try:
         it = read_from_file(path=path, indices={
-                1: celaut_pb2.Any.Metadata,
+                1: celaut_pb2.Metadata,
                 2: celaut_pb2.Service,
             })
             
         metadata_dir = next(it).dir
-        metadata = celaut_pb2.Any.Metadata()
+        metadata = celaut_pb2.Metadata()
         metadata.ParseFromString(open(metadata_dir, "rb").read())
         
         service_hash = None

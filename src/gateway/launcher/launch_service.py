@@ -20,7 +20,7 @@ IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = env_manager.get_env("IGNORE_FATHER_N
 
 def launch_service(
         service: celaut.Service,
-        metadata: celaut.Any.Metadata,
+        metadata: celaut.Metadata,
         father_ip: str,
         father_id: Optional[str] = None,
         service_id: str = None,

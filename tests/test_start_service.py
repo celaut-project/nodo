@@ -39,11 +39,11 @@ def test_start_service():
                 }
             )
         )
-        yield celaut_pb2.Any.Metadata.HashTag.Hash(
+        yield celaut_pb2.Metadata.HashTag.Hash(
                 type=bytes.fromhex(SHA3_256),
                 value=bytes.fromhex(SERVICE)
             )
-        yield Dir(dir=METADATA_REGISTRY + SERVICE, _type=celaut_pb2.Any.Metadata)
+        yield Dir(dir=METADATA_REGISTRY + SERVICE, _type=celaut_pb2.Metadata)
         yield Dir(dir=REGISTRY + SERVICE, _type=celaut_pb2.Service)
 
 

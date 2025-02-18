@@ -45,7 +45,7 @@ message Metrics {
 }
 
 message Instance {
-    optional celaut.Any.Metadata instance_meta = 1;
+    optional celaut.Metadata instance_meta = 1;
     celaut.Instance instance = 2;
     optional string token = 3;
 }
@@ -132,8 +132,8 @@ service Gateway {
 
     rpc Pack(stream buffer.Buffer) returns (stream buffer.Buffer) {} // bytes -> pack.PackOutputServiceId || compile.Service || Metadata || pack.PackOutputError
 
-    rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ( celaut.Any.Metadata.HashTag.Hash=H, celaut.Any=S; { H v S } ) -> EstimatedCost
-    rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {}  // ( celaut.Any.Metadata.HashTag.Hash=H ) -> Service
+    rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ( celaut.Metadata.HashTag.Hash=H, celaut.Service=S; { H v S } ) -> EstimatedCost
+    rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {}  // ( celaut.Metadata.HashTag.Hash=H ) -> Service
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
 
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage || bytes -> bytes

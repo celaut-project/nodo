@@ -21,7 +21,7 @@ def local_execution(
         resources: gateway_pb2.CombinationResources.Clause,
         father_id: Optional[str],
         father_ip: Optional[str],
-        metadata: celaut.Any.Metadata,
+        metadata: celaut.Metadata,
         service: celaut.Service,
         service_id: Optional[str],
         refund_gas: List[Callable]

@@ -34,7 +34,7 @@ def __is_service_built(service_hash: str) -> bool:
     return False
 
 
-def __build_cost(metadata: celaut.Any.Metadata) -> int:
+def __build_cost(metadata: celaut.Metadata) -> int:
     """Calculate the cost of building a service based on its metadata and Docker status."""
     try:
         # Get the service hash from the metadata
@@ -60,7 +60,7 @@ def __build_cost(metadata: celaut.Any.Metadata) -> int:
     return COST_OF_BUILD  # Default to return base build cost
 
 
-def __execution_cost(metadata: celaut.Any.Metadata) -> int:
+def __execution_cost(metadata: celaut.Metadata) -> int:
     log.LOGGER('Get execution cost')
     try:
         return sum([
@@ -76,7 +76,7 @@ def __execution_cost(metadata: celaut.Any.Metadata) -> int:
 
 
 def compute_start_service_cost(
-        metadata: celaut.Any.Metadata,
+        metadata: celaut.Metadata,
         initial_gas_amount: int,
         resource: gateway_pb2.CombinationResources.Clause
 ) -> int:

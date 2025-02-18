@@ -42,7 +42,7 @@ class DuplicateGrabber(metaclass=Singleton):
                         del self.hashes[_hash]
 
     def next(self,
-             hashes: List[celaut.Any.Metadata.HashTag.Hash],
+             hashes: List[celaut.Metadata.HashTag.Hash],
              generator: Generator
              ) -> Tuple[Union[Any, str], bool]:
 

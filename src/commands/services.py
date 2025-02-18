@@ -13,7 +13,7 @@ def list_services():
     print("Available services:\n")
     for service in services:
         # Initialize metadata for each service
-        metadata = Any.Metadata()
+        metadata = Metadata()
         try:
             # Attempt to parse the metadata from the binary file
             with open(os.path.join(METADATA, service), "rb") as f:
