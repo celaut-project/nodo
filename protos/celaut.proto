@@ -17,30 +17,10 @@ package celaut;
 //  DEFINITIONS.
 //  -----------------------
 
-message FieldDef {
-    message PrimitiveDef {
-        optional string regex = 1;  // {0-10}, ...
-        // Primitive specification can be applied. <- must be optional
-    }
-    message EnumDef {
-        map<string, int32> value = 1;
-    }
-    message MessageDef {
-        message ParamDef {
-            FieldDef field = 1;
-            bool repeated = 2;
-        }
-        message OneofDef {
-            repeated int32 index = 1;
-        }
-        map<int32, ParamDef> param = 1;
-        repeated OneofDef oneof = 2; // have a list of oneof's params' index.
-    }
-    oneof value{
-        MessageDef message = 1;
-        PrimitiveDef primitive = 2;
-        EnumDef enum = 3;
-    }
+message DataFormat {
+    repeated string tags = 1;
+    string prose = 2;
+    bytes formal = 3;
 }
 
 message ContractLedger {
@@ -64,16 +44,8 @@ message Metadata {
         repeated AttrHashTag attr_hashtag = 3; // List of metadata fields. Ordened by indexes defined on format.
     }
     optional HashTag hashtag = 1;
-    optional FieldDef format = 2;
+    optional DataFormat format = 2;
     repeated ContractLedger reputation_proofs = 3;
-}
-
-message AppDef {
-    message MethodDef {
-        FieldDef input = 1;
-        FieldDef output = 2;
-    }
-    map<string, MethodDef> method = 1; // Exemple of method call: 8080.1()
 }
 
 
@@ -121,11 +93,11 @@ message Service {
         }
         message Config {
             repeated string path = 1;
-            FieldDef format = 2;
+            DataFormat format = 2;
         }
         Architecture architecture = 1;
         bytes filesystem = 2;
-        map<string, FieldDef> enviroment_variables = 3;
+        map<string, DataFormat> enviroment_variables = 3;
         repeated string entrypoint = 4;
         Config config = 5;
         repeated Api.Protocol node_protocol_stack = 6;  // Expected node protocol stack
