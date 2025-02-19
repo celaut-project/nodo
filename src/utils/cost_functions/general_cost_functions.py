@@ -1,5 +1,6 @@
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.virtualizers.docker import build
+from src.virtualizers.docker.architecture import check_supported_architecture, UnsupportedArchitectureException
 from src.utils import logger as log
 from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.verify import get_service_hex_main_hash
@@ -44,8 +45,8 @@ def __build_cost(metadata: celaut.Metadata) -> int:
         is_built = __is_service_built(service_hash)
 
         # Check if the architecture is supported
-        if not is_built and not build.check_supported_architecture(metadata=metadata):
-            raise build.UnsupportedArchitectureException(arch=str(metadata))
+        if not is_built and not check_supported_architecture(service=None, metadata=metadata):
+            raise UnsupportedArchitectureException(arch=str(metadata))
 
         # Calculate the total build cost
         return sum([

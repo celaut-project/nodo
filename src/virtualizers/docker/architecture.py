@@ -1,4 +1,5 @@
 import itertools
+from typing import Optional
 from protos import celaut_pb2
 from src.utils.env import SUPPORTED_ARCHITECTURES, EnvManager
 
@@ -24,8 +25,8 @@ def get_arch_tag(service: celaut_pb2.Service, metadata: celaut_pb2.Metadata) -> 
                 return _l[0]
 
 
-def check_supported_architecture(service: celaut_pb2.Service, metadata: celaut_pb2.Metadata) -> bool:
-    if service.container.architecture.tags:
+def check_supported_architecture(service: Optional[celaut_pb2.Service], metadata: celaut_pb2.Metadata) -> bool:
+    if service and service.container.architecture.tags:
         if any(tag in list(itertools.chain.from_iterable(SUPPORTED_ARCHITECTURES)) 
                for tag in service.container.architecture.tags):
             return True
