@@ -180,7 +180,7 @@ class ZipContainerPacker:
         # Config file spec.
         self.service.container.config.path.append('__config__')
         self.service.container.config.format.CopyFrom(
-            celaut.FieldDef()  # celaut.ConfigFile definition.
+            celaut.DataFormat()  # celaut.ConfigFile definition.
         )
         self.service.container.architecture.tags.extend([self.json.get('architecture')])
         # Expected Gateway.
