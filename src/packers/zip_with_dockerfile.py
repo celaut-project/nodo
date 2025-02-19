@@ -287,7 +287,7 @@ class ZipContainerPacker:
             )
             service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
             self.metadata.hashtag.hash.extend(
-                [Metadata.HashTag.Hash(
+                [celaut.Metadata.HashTag.Hash(
                     type=SHA3_256_ID,
                     value=bytes_id
                 )]
