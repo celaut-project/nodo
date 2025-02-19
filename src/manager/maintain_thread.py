@@ -157,7 +157,7 @@ def peer_deposits():
                             next(generate_uris_by_peer_id(peer_id=peer_id), "")
                         )
                     ).GetInstance,
-                    indices_parser=Instance,
+                    indices_parser=gateway_pb2.Instance,
                     partitions_message_mode_parser=True
                 ), None)
             except:
