@@ -7,6 +7,12 @@ syntax = "proto3";
 package celaut;
 
 
+/*
+    The formats that have bytes type, such as "formal," will continue to be that way; 
+    nodes that have a specific format will be able to add it to their celaut.proto files without any issue... 
+    It makes no sense for the message to self-define in those parts, as it goes against the philosophy behind protobuf.
+*/
+
 //  -----------------------
 //  DEFINITIONS.
 //  -----------------------
