@@ -88,7 +88,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         add_peer_instance(
                 peer=next(bee.parse_from_buffer(
                 request_iterator=request_iterator,
-                indices=gateway_pb2.Instance,
+                indices=gateway_pb2.Peer,
                 partitions_message_mode=True
             ), None)
         )
