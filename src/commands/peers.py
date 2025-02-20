@@ -28,7 +28,7 @@ def list_peers():
         # Query the peer table for all columns
         cursor.execute('''
             SELECT 
-                id, token, metadata, app_protocol, client_id, 
+                id, protocol_stack, client_id, 
                 gas_mantissa, gas_exponent, gas_last_update, 
                 reputation_proof_id, reputation_score, 
                 reputation_index, last_index_on_ledger 
@@ -40,7 +40,7 @@ def list_peers():
         if peers:
             for peer in peers:
                 (
-                    peer_id, token, metadata, app_protocol, client_id,
+                    peer_id, protocol_stack, client_id,
                     gas_mantissa, gas_exponent, gas_last_update,
                     reputation_proof_id, reputation_score,
                     reputation_index, last_index_on_ledger
@@ -48,9 +48,7 @@ def list_peers():
 
                 print(f"""
 ID: {peer_id}
-Token: {token}
-Metadata: {metadata if metadata else 'None'}
-App Protocol: {app_protocol if app_protocol else 'None'}
+Protocol stack: {protocol_stack if protocol_stack else 'None'}
 Client ID: {client_id}
 Gas Mantissa: {gas_mantissa}
 Gas Exponent: {gas_exponent}
