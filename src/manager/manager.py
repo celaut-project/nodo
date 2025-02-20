@@ -60,7 +60,7 @@ def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
     log.LOGGER('Inserting instance on db: ' + str(parsed_instance))
 
     peer_id = str(uuid.uuid4())
-    protocol_stack: bytes = peer.instance.api.protocol_stack.SerializeToString()
+    protocol_stack: bytes = peer.instance.api.slot.SerializeToString()
 
     sc.add_peer(peer_id=peer_id, protocol_stack=protocol_stack)
 
@@ -72,7 +72,7 @@ def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
     for contract_ledger in peer.instance.api.payment_contracts:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
-    for contract_ledger in peer.metadata.reputation_proofs:
+    for contract_ledger in peer.reputation_proofs:
         add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
     log.LOGGER(f'Get instance for peer -> {peer_id}')
