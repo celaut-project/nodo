@@ -52,46 +52,46 @@ def add_reputation_proof(contract_ledger, peer_id) -> bool:
     return sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
 # Insert the instance if it does not exist.
-def add_peer_instance(instance: gateway_pb2.Instance) -> Optional[str]:
-    if sc.instance_exists(instance):
+def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
+    if sc.instance_exists(peer):
         return None
     
-    parsed_instance = json.loads(MessageToJson(instance))
+    parsed_instance = json.loads(MessageToJson(peer))
     log.LOGGER('Inserting instance on db: ' + str(parsed_instance))
 
     peer_id = str(uuid.uuid4())
-    protocol_stack: bytes = instance.instance.api.protocol_stack.SerializeToString()
+    protocol_stack: bytes = peer.instance.api.protocol_stack.SerializeToString()
 
     sc.add_peer(peer_id=peer_id, protocol_stack=protocol_stack)
 
     # Slots
-    for slot in instance.instance.uri_slot:
+    for slot in peer.instance.uri_slot:
         sc.add_slot(slot=slot, peer_id=peer_id)
 
     # Contracts
-    for contract_ledger in instance.instance.api.payment_contracts:
+    for contract_ledger in peer.instance.api.payment_contracts:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
-    for contract_ledger in instance.metadata.reputation_proofs:
+    for contract_ledger in peer.metadata.reputation_proofs:
         add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
     log.LOGGER(f'Get instance for peer -> {peer_id}')
     return peer_id
 
-def update_peer_instance(instance: gateway_pb2.Instance, peer_id: str):
+def update_peer_instance(peer: gateway_pb2.Peer, peer_id: str):
     log.LOGGER(f"Updating peer {peer_id}")
-    # parsed_instance = json.loads(MessageToJson(instance))
-    # It is assumed that app protocol and metadata have not been modified.
+    # parsed_peer = json.loads(MessageToJson(peer))
+    # It is assumed that protocol stack and metadata have not been modified.
 
     # Slots
-    for slot in instance.instance.uri_slot:
+    for slot in peer.instance.uri_slot:
         sc.add_slot(slot=slot, peer_id=peer_id)
 
     # Contracts
-    for contract_ledger in instance.instance.api.payment_contracts:
+    for contract_ledger in peer.instance.api.payment_contracts:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
-    for contract_ledger in instance.metadata.reputation_proofs:
+    for contract_ledger in peer.reputation_proofs:
         add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
     log.LOGGER(f"Peer {peer_id} updated.")

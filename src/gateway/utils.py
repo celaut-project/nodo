@@ -55,7 +55,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     log.LOGGER('Payment contracts added to API')
 
     log.LOGGER('Gateway instance generated')
-    return gateway_pb2.Instance(
+    return gateway_pb2.Peer(
         # todo add reputation proofs.
         instance=instance
     )

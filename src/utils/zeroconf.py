@@ -1,6 +1,6 @@
-from protos.gateway_pb2 import Instance
 from protos import gateway_pb2_grpc, gateway_pb2
-from bee_rpc.client import client_grpc
+from bee_rpc.client import client
+
 import grpc
 
 from src.manager.manager import add_peer_instance
@@ -24,11 +24,11 @@ def connect(peer: str):
     try:
         # Call the appropriate function to insert the instance into the SQLite database
         add_peer_instance(
-            next(client_grpc(
+            next(client(
                 method=gateway_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(peer)
                 ).GetInstance,
-                indices_parser=Instance,
+                indices_parser=gateway_pb2.Peer,
                 partitions_message_mode_parser=True
             ))
         )
@@ -50,11 +50,11 @@ def connect(peer: str):
                 return
             
             try:
-                _result = next(client_grpc(
+                _result = next(client(
                     method=gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(peer)
                     ).IntroducePeer,
-                    indices_serializer=Instance,
+                    indices_serializer=gateway_pb2.Peer,
                     input=gateway_instance,
                     indices_parser=gateway_pb2.RecursionGuard,  # Recursion guard shouldn't be used here, another message should be used. TODO
                     partitions_message_mode_parser=True

@@ -151,22 +151,22 @@ def peer_deposits():
     for peer_id in SQLConnection().get_peers_id(): # TODO async
         if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             try:
-                instance = next(peerpc(
+                peer = next(peerpc(
                     method=gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
                             next(generate_uris_by_peer_id(peer_id=peer_id), "")
                         )
                     ).GetInstance,
-                    indices_parser=gateway_pb2.Instance,
+                    indices_parser=gateway_pb2.Peer,
                     partitions_message_mode_parser=True
                 ), None)
             except:
                 continue
-            if not instance:
+            if not peer:
                 continue
             try:
                 update_peer_instance(
-                    instance=instance,
+                    peer=peer,
                     peer_id=peer_id
                 )
             except Exception as e:

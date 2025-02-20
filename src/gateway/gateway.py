@@ -86,7 +86,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         # TODO DDOS protection.   ¿?
         log.LOGGER('Introduce peer method.')
         add_peer_instance(
-                instance=next(bee.parse_from_buffer(
+                peer=next(bee.parse_from_buffer(
                 request_iterator=request_iterator,
                 indices=gateway_pb2.Instance,
                 partitions_message_mode=True
