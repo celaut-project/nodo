@@ -60,15 +60,9 @@ def add_peer_instance(instance: gateway_pb2.Instance) -> Optional[str]:
     log.LOGGER('Inserting instance on db: ' + str(parsed_instance))
 
     peer_id = str(uuid.uuid4())
-    token: Optional[str] = instance.token if instance.HasField("token") else ""
-    metadata: Optional[bytes] = instance.metadata.SerializeToString() \
-        if instance.HasField('metadata') else None
-    app_protocol: bytes = instance.instance.api.app_protocol.SerializeToString()
+    protocol_stack: bytes = instance.instance.api.protocol_stack.SerializeToString()
 
-    sc.add_peer(
-        peer_id=peer_id, token=token,
-        metadata=metadata, app_protocol=app_protocol
-        )
+    sc.add_peer(peer_id=peer_id, protocol_stack=protocol_stack)
 
     # Slots
     for slot in instance.instance.uri_slot:

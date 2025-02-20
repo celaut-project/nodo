@@ -201,66 +201,22 @@ class ZipContainerPacker:
             )
         )
     def parseApi(self):
-        #  App protocol
-        try:
-            with open(self.path + "api.application", "rb") as api_desc:
-                self.service.api.app_protocol.ParseFromString(api_desc.read())
-        except:
-            pass
-        #  Slots
         if not self.json.get('api'): return
+        
         for item in self.json.get('api'):  # iterate slots.
             slot = celaut.Service.Api.Slot()
-            # port.
             slot.port = item.get('port')
-            #  transport protocol.
-            #  TODO: slot.transport_protocol = Protocol()
+            slot.protocol_stack = [
+                celaut.Service.Api.Protocol(
+                    tags=item.get('protocol')
+                )
+            ]
             self.service.api.slot.append(slot)
-        # Add api metadata to the global metadata.
-        self.metadata.hashtag.attr_hashtag.append(
-            celaut.Metadata.HashTag.AttrHashTag(
-                key=2,  # Api attr.
-                value=[
-                    celaut.Metadata.HashTag(
-                        attr_hashtag=[
-                            celaut.Metadata.HashTag.AttrHashTag(
-                                key=2,  # Slot attr.
-                                value=[
-                                    celaut.Metadata.HashTag(
-                                        attr_hashtag=[
-                                            celaut.Metadata.HashTag.AttrHashTag(
-                                                key=2,  # Transport Protocol attr.
-                                                value=[
-                                                    celaut.Metadata.HashTag(
-                                                        tag=item.get('protocol')
-                                                    )
-                                                ]
-                                            )
-                                        ]
-                                    ) for item in self.json.get('api')
-                                ]
-                            )
-                        ]
-                    )
-                ]
-            )
-        )
+            
     def parseNetwork(self):
-        #  TODO: self.service.Network.
         if self.json.get('network'):
             self.service.network.tags.extend([self.json.get("network")])
             
-            #  Add network metadata to the global metadata.
-            #  self.metadata.hashtag.attr_hashtag.append(
-            #     celaut.Metadata.HashTag.AttrHashTag(
-            #         key=4,  # Network attr.
-            #         value=(
-            #             celaut.MetaData.HashTag(
-            #                 tag=self.json.get('ledger')
-            #             )
-            #         )
-            #     )
-            # )
             
     def save(self) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
         service: Union[str, pack_pb2.Service]

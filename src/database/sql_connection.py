@@ -569,7 +569,7 @@ class SQLConnection(metaclass=Singleton):
                     p.reputation_score,
                     p.reputation_index,
                     p.last_index_on_ledger,
-                    p.app_protocol,
+                    p.protocol_stack,
                     s.internal_port,
                     u.ip,
                     u.port
@@ -598,9 +598,9 @@ class SQLConnection(metaclass=Singleton):
                     # Initialize the instance for this peer
                     instance = celaut_pb2.Instance()
 
-                    # Set app_protocol if available
-                    if row['app_protocol']:
-                        instance.api.app_protocol.ParseFromString(row['app_protocol'])
+                    # Set protocol stack if available
+                    if row['protocol_stack']:
+                        instance.api.protocol_stack.ParseFromString(row['protocol_stack'])
 
                     # Store in the dict
                     peers_dict[peer_id] = {
@@ -865,7 +865,7 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error refreshing gas for peer {peer_id}: {e}')
             return False
 
-    def add_peer(self, peer_id: str, token: Optional[str], metadata: Optional[bytes], app_protocol: bytes) -> bool:
+    def add_peer(self, peer_id: str, protocol_stack: bytes) -> bool:
         """
         Adds a peer to the database.
 
@@ -880,9 +880,9 @@ class SQLConnection(metaclass=Singleton):
         if not self.peer_exists(peer_id=peer_id):
             try:
                 self._execute('''
-                    INSERT INTO peer (id, token, metadata, app_protocol, client_id, gas_mantissa, gas_exponent)
-                    VALUES (?, ?, ?, ?, '', 0, 0)  -- Initialize with empty client_id and 0 gas
-                ''', (peer_id, token, metadata, app_protocol))
+                    INSERT INTO peer (id,, protocol_stack, client_id, gas_mantissa, gas_exponent)
+                    VALUES (?, ?, '', 0, 0)  -- Initialize with empty client_id and 0 gas
+                ''', (peer_id, protocol_stack))
                 logger.LOGGER(f'Peer {peer_id} added without client_id')
                 return True
             except sqlite3.Error as e:

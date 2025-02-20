@@ -56,6 +56,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
 
     log.LOGGER('Gateway instance generated')
     return gateway_pb2.Instance(
+        # todo add reputation proofs.
         instance=instance
     )
 

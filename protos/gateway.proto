@@ -45,9 +45,14 @@ message Metrics {
 }
 
 message Instance {
-    optional celaut.Metadata metadata = 1;
+    optional celaut.Metadata metadata = 1;  // TODO Check when is used.
     celaut.Instance instance = 2;
     optional string token = 3;
+}
+
+message Peer {
+    repeated celaut.ContractLedger reputation_proofs = 1;
+    celaut.Instance instance = 2;
 }
 
 message Client {
