@@ -53,7 +53,7 @@ def add_reputation_proof(contract_ledger, peer_id) -> bool:
 
 # Insert the instance if it does not exist.
 def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
-    if sc.instance_exists(peer):
+    if sc.instance_exists(peer.instance):
         return None
     
     parsed_instance = json.loads(MessageToJson(peer))
