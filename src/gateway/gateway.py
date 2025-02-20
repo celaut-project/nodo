@@ -71,7 +71,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         except Exception as e:
             raise Exception('Was imposible stop the service. ' + str(e))
 
-    def GetInstance(self, request_iterator, context, **kwargs):
+    def GetPeerInfo(self, request_iterator, context, **kwargs):
         log.LOGGER(f'Request for instance by {context.peer()}')
         ip = get_only_the_ip_from_context(context_peer=context.peer())
         if TunnelSystem().from_tunnel(ip=ip):

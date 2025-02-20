@@ -27,7 +27,7 @@ def connect(peer: str):
             next(client(
                 method=gateway_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(peer)
-                ).GetInstance,
+                ).GetPeerInfo,
                 indices_parser=gateway_pb2.Peer,
                 partitions_message_mode_parser=True
             ))
@@ -38,7 +38,7 @@ def connect(peer: str):
             print(f'Sending instance to peer: {peer}')
             
             try:
-                # Could be refactored with Gateway.GetInstance
+                # Could be refactored with Gateway.GetPeerInfo
                 if TunnelSystem().from_tunnel(ip=peer):
                     gateway_instance = TunnelSystem().get_gateway_tunnel()
                 else:

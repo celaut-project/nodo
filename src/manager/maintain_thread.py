@@ -156,7 +156,7 @@ def peer_deposits():
                         grpc.insecure_channel(
                             next(generate_uris_by_peer_id(peer_id=peer_id), "")
                         )
-                    ).GetInstance,
+                    ).GetPeerInfo,
                     indices_parser=gateway_pb2.Peer,
                     partitions_message_mode_parser=True
                 ), None)
