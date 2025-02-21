@@ -4,6 +4,7 @@ from typing import Generator, Optional
 
 import netifaces as ni
 
+from src.reputation_system.envs import generate_instance_proofs
 import src.utils.utils
 from src.payment_system.ledgers import generate_contract_ledger
 from protos import celaut_pb2 as celaut, gateway_pb2
@@ -56,7 +57,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
 
     log.LOGGER('Gateway instance generated')
     return gateway_pb2.Peer(
-        # todo add reputation proofs.
+        reputation_proofs=generate_instance_proofs()
         instance=instance
     )
 
