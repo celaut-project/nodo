@@ -3,7 +3,7 @@ from protos import celaut_pb2 as celaut
 from src.database.access_functions.ledgers import get_ledger_and_contract_addr_from_contract
 from src.payment_system.contracts.ergo.interface import CONTRACT_HASH, CONTRACT
 
-def generate_contract_ledger() -> Generator[celaut.ContractLedger, None, None]:
+def local_payment_methods() -> Generator[celaut.ContractLedger, None, None]:
     for address, ledger in get_ledger_and_contract_addr_from_contract(CONTRACT_HASH):
         contract_ledger = celaut.ContractLedger()
         contract_ledger.contract = CONTRACT

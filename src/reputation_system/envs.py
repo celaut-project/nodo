@@ -1,6 +1,3 @@
-from typing import Generator
-
-from protos import celaut_pb2 as celaut
 from src.utils.env import EnvManager
 
 
@@ -20,9 +17,3 @@ CONTRACT = """{
     })
 }"""
 
-def generate_instance_proofs() -> Generator[celaut.ContractLedger, None, None]:
-    yield celaut.ContractLedger(
-        contract=CONTRACT.encode("utf-8"),
-        contract_addr=env_manager.get_env('REPUTATION_PROOF_ID'),
-        ledger=LEDGER
-    )

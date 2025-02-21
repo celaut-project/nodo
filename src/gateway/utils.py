@@ -4,9 +4,9 @@ from typing import Generator, Optional
 
 import netifaces as ni
 
-from src.reputation_system.envs import generate_instance_proofs
+from src.reputation_system.fetch import local_proofs
 import src.utils.utils
-from src.payment_system.ledgers import generate_contract_ledger
+from src.payment_system.ledgers import local_payment_methods
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.utils import logger as log
 from src.utils.env import EnvManager
@@ -51,13 +51,13 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     log.LOGGER('API slot configured')
 
     instance.api.payment_contracts.extend(
-        [e for e in generate_contract_ledger()]
+        [e for e in local_payment_methods()]
     )
     log.LOGGER('Payment contracts added to API')
 
     log.LOGGER('Gateway instance generated')
     return gateway_pb2.Peer(
-        reputation_proofs=generate_instance_proofs()
+        reputation_proofs=local_proofs()
         instance=instance
     )
 
