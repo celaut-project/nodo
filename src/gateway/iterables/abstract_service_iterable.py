@@ -124,11 +124,6 @@ class AbstractServiceIterable:
                 if r.type != gateway_pb2.celaut__pb2.Service:
                     raise Exception('Incorrect service message.')
 
-                #  -- TODO --
-                #  NO TIENE SENTIDO USAR AQUI EL DUPLICATE GRABBER YA QUE AHORA NO RETORNAMOS PRIMERO EL TIPO, SI NO QUE
-                #  RETORNAMOS EL TIPO JUNTO CON EL DIRECTORIO DEL SERVICIO YA DESCARGADO. EL DUPLICATE GRABBER DEBERIA
-                #  USARSE ANTES.
-
                 log.LOGGER('Save service on disk')
                 # Take it from metadata.
                 if not self.service_hash:
