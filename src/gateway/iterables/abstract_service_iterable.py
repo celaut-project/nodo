@@ -116,6 +116,9 @@ class AbstractServiceIterable:
                 self.metadata.hashtag.ClearField("hash")
                 self.metadata.hashtag.hash.extend([_e.proto() for _e in self.hashes])
                 self.hashes.clear()
+                
+                # Service specification format could be great to be checked.
+                # Service reputation proofs are not needed to be stored, that's because the node doesn't have any interest on store them.
 
             case bee.Dir:
                 if r.type != gateway_pb2.celaut__pb2.Service:
