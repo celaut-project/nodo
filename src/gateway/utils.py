@@ -84,17 +84,3 @@ def save_service(
                     log.LOGGER(f'Exception writing metadata of {service_hash}: ' + str(e))
 
     return os.path.isdir(REGISTRY + service_hash) or __save()
-
-
-def search_container(
-        metadata: celaut.Metadata = celaut.Metadata(),
-        ignore_network: str = None
-) -> Generator[gateway_pb2.buffer__pb2.Buffer, None, None]:
-    # Search a service tar container.
-    for peer in src.utils.utils.peers_id_iterator(ignore_network=ignore_network):
-        try:
-            print('SEARCH CONTAINER NOT IMPLEMENTED')
-            break
-        except Exception as e:
-            log.LOGGER('Exception during search container process: ' + str(e))
-            pass
