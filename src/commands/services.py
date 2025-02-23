@@ -14,6 +14,8 @@ def list_services():
     for service in services:
         # Initialize metadata for each service
         metadata = Metadata()
+        
+        # Try got get the tag
         try:
             # Attempt to parse the metadata from the binary file
             with open(os.path.join(METADATA, service), "rb") as f:
@@ -32,4 +34,4 @@ def list_services():
             size = f"0 - {e}"
             
         # Print.
-        print(f"{service}     {name} {size}")
+        print(f"{service}  {name} {size}")
