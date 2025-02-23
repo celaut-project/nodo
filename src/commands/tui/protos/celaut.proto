@@ -7,34 +7,20 @@ syntax = "proto3";
 package celaut;
 
 
+/*
+    The formats that have bytes type, such as "formal," will continue to be that way; 
+    nodes that have a specific format will be able to add it to their celaut.proto files without any issue... 
+    It makes no sense for the message to self-define in those parts, as it goes against the philosophy behind protobuf.
+*/
+
 //  -----------------------
 //  DEFINITIONS.
 //  -----------------------
 
 message DataFormat {
-    message PrimitiveDef {
-        optional string regex = 1;  // {0-10}, ...
-        // Primitive specification can be applied. <- must be optional
-    }
-    message EnumDef {
-        map<string, int32> value = 1;
-    }
-    message MessageDef {
-        message ParamDef {
-            DataFormat field = 1;
-            bool repeated = 2;
-        }
-        message OneofDef {
-            repeated int32 index = 1;
-        }
-        map<int32, ParamDef> param = 1;
-        repeated OneofDef oneof = 2; // have a list of oneof's params' index.
-    }
-    oneof value{
-        MessageDef message = 1;
-        PrimitiveDef primitive = 2;
-        EnumDef enum = 3;
-    }
+    repeated string tags = 1;
+    string prose = 2;
+    bytes formal = 3;
 }
 
 message ContractLedger {
@@ -60,14 +46,6 @@ message Metadata {
     optional HashTag hashtag = 1;
     optional DataFormat format = 2;
     repeated ContractLedger reputation_proofs = 3;
-}
-
-message AppDef {
-    message MethodDef {
-        DataFormat input = 1;
-        DataFormat output = 2;
-    }
-    map<string, MethodDef> method = 1; // Exemple of method call: 8080.1()
 }
 
 

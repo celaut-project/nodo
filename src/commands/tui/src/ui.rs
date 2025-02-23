@@ -386,7 +386,7 @@ fn read_last_lines(filename: &str, line_count: usize) -> io::Result<Vec<String>>
     Ok(lines_to_show)
 }
 
-fn draw_logs(frame: &mut Frame, app: &mut App, area: Rect) {
+fn draw_logs(frame: &mut Frame, _app: &mut App, area: Rect) {
     let log_lines = area.height as usize;
     let logs_text = match read_last_lines(LOG_FILE, log_lines) {
         Ok(lines) => lines.join("\n"),
