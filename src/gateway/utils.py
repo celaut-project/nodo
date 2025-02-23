@@ -57,7 +57,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
 
     log.LOGGER('Gateway instance generated')
     return gateway_pb2.Peer(
-        reputation_proofs=local_proofs()
+        reputation_proofs=local_proofs(),
         instance=instance
     )
 
