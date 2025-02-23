@@ -5,7 +5,6 @@ from typing import Generator, Optional
 import netifaces as ni
 
 from src.reputation_system.fetch import local_proofs
-import src.utils.utils
 from src.payment_system.ledgers import local_payment_methods
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.utils import logger as log
