@@ -2,15 +2,13 @@ import threading
 from concurrent import futures
 
 import grpc, json
-import netifaces as ni
 
 from protos import gateway_pb2, gateway_pb2_grpc
 from src.gateway.gateway import Gateway
 from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.maintain_thread import manager_thread
 from src.utils import logger as log
-from src.utils.zeroconf import Zeroconf
-from src.utils.env import LOCAL_NETWORK, DOCKER_NETWORK, EnvManager
+from src.utils.env import EnvManager
 
 env_manager = EnvManager()
 
@@ -28,10 +26,6 @@ MODIFY_SERVICE_SYSTEM_RESOURCES_COST = env_manager.get_env("MODIFY_SERVICE_SYSTE
 EXTERNAL_COST_TIMEOUT = env_manager.get_env("EXTERNAL_COST_TIMEOUT")
 
 def serve():
-    # Zeroconf for connect to the network (one per network).
-    for network in ni.interfaces():
-        if network != DOCKER_NETWORK and network != LOCAL_NETWORK:
-            Zeroconf(network=network)
 
     # Run manager.
     threading.Thread(

@@ -237,7 +237,7 @@ if __name__ == '__main__':
                 list_peers()
 
             case 'connect':
-                from src.utils.zeroconf import connect
+                from src.utils.connect import connect
                 connect(sys.argv[2])
 
             case 'submit_reputation':
