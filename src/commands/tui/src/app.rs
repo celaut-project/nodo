@@ -619,6 +619,9 @@ impl<'a> App<'a> {
             3 => {
                 if let Some(id) = &self.services.state_id {
                     let _ = self.execute_command(vec!["execute".to_string(), id.to_string()]).await;
+                } 
+                else {
+                    self.logs.push("No service state ID available to execute.".to_string());
                 }
             }
             _ => {}
