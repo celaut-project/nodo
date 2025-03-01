@@ -232,11 +232,11 @@ if __name__ == '__main__':
                 
             case "service":  # TODO add to docs
                 from src.commands.services import inspect
-                inspect(sys.argv[3])
+                inspect(sys.argv[2])
             
             case "service:modify_tag":  # TODO add to docs
                 from src.commands.services import modify_tag
-                modify_tag(sys.argv[3], sys.argv[4])
+                modify_tag(sys.argv[2], sys.argv[3])
                 
             case 'clients':
                 from src.database.sql_connection import SQLConnection
