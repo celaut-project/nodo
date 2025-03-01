@@ -206,11 +206,11 @@ class ZipContainerPacker:
         for item in self.json.get('api'):  # iterate slots.
             slot = celaut.Service.Api.Slot()
             slot.port = item.get('port')
-            slot.protocol_stack = [
+            slot.protocol_stack.append(
                 celaut.Service.Api.Protocol(
                     tags=item.get('protocol')
                 )
-            ]
+            )
             self.service.api.slot.append(slot)
             
     def parseNetwork(self):
