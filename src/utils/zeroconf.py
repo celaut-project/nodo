@@ -1,5 +1,5 @@
 from protos import gateway_pb2_grpc, gateway_pb2
-from bee_rpc.client import client
+from bee_rpc.client import client_grpc as client
 
 import grpc
 
