@@ -34,7 +34,7 @@ def list_services():
             size = f"0 - {e}"
             
         # Print.
-        print(f"{service}  {name} {size}")
+        print(f"{service}  {size} {name}")
 
 def inspect(id: str):
     metadata = Metadata()
