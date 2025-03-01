@@ -236,7 +236,7 @@ if __name__ == '__main__':
             
             case "service:modify_tag":  # TODO add to docs
                 from src.commands.services import modify_tag
-                modify_tag(sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else "")
+                modify_tag(service=sys.argv[2], tag=sys.argv[3] if len(sys.argv) == 4 else "")
                 
             case 'clients':
                 from src.database.sql_connection import SQLConnection

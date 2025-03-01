@@ -1,4 +1,5 @@
 import os
+from src.commands.__by_tag import get_id
 from src.utils.env import EnvManager, DOCKER_COMMAND
 
 env_manager = EnvManager()
@@ -9,6 +10,7 @@ DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
 
 
 def remove(service: str):
+    service = get_id(service)
 
     # Check if script is run as root
     if os.geteuid() != 0:

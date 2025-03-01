@@ -8,6 +8,7 @@ from bee_rpc.client import client_grpc
 from src.utils.env import SHA3_256_ID, EnvManager
 from src.utils.utils import to_gas_amount
 from src.manager.manager import get_dev_clients
+from src.commands.__by_tag import get_id
 
 env_manager = EnvManager()
 
@@ -50,6 +51,7 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: 
 
 
 def execute(service: str):
+    service = get_id(service)
 
     g_stub = gateway_pb2_grpc.GatewayStub(
         grpc.insecure_channel(f"localhost:{GATEWAY_PORT}"),

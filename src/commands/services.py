@@ -1,4 +1,5 @@
 import os
+from src.commands.__by_tag import get_id
 from src.utils.env import EnvManager
 from bee_rpc.utils import getsize
 from protos.celaut_pb2 import Metadata
@@ -36,18 +37,20 @@ def list_services():
         # Print.
         print(f"{service}  {size} {name}")
 
-def inspect(id: str):
+def inspect(service: str):
     metadata = Metadata()
     
     # service = Service()  
     
     # TODO This should print all the wbp. ... but only when all the filesystem is outside of it, on blocks.
 
-def modify_tag(id: str, tag: str):
+def modify_tag(service: str, tag: str):
+    service = get_id(service)
+    
     metadata = Metadata()
     
     # Path to the metadata file for this service
-    metadata_path = os.path.join(METADATA, id)
+    metadata_path = os.path.join(METADATA, service)
     
     # Try to load existing metadata if it exists
     try:
@@ -70,6 +73,6 @@ def modify_tag(id: str, tag: str):
     try:
         with open(metadata_path, "wb") as f:
             f.write(metadata.SerializeToString())
-        print(f"Successfully updated first tag for {id} to '{tag}'")
+        print(f"Successfully updated first tag for {service} to '{tag}'")
     except Exception as e:
         print(f"Error saving metadata: {e}")

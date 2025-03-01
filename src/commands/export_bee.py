@@ -1,6 +1,7 @@
 import os
 from typing import Generator, Any
 from bee_rpc.client import write_to_file, Dir
+from src.commands.__by_tag import get_id
 from src.utils.env import EnvManager
 from protos import celaut_pb2
 
@@ -34,6 +35,7 @@ def export_bee(service: str, path: str):
         path (str): The directory path where the output file should be saved.
     """
     
+    service = get_id(service)
     output_file = write_to_file(
         path=path, 
         file_name=service[:6], 
