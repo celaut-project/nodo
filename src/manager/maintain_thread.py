@@ -219,7 +219,7 @@ def manager_thread():
         
         # Functions to be executed every short interval
         check_wanted_services()
-        maintain_containers(debug_mode=True)
+        maintain_containers(debug_mode=False)
         maintain_clients()
         peer_deposits()
         DuplicateGrabber().manager()
