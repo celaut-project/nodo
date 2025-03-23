@@ -12,7 +12,14 @@ METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 
 
 def import_bee(path: str):
-    # Convert relative path to absolute path
+    # Get the current directory (where the "nodo" command is executed from)
+    current_directory = os.getcwd()
+    
+    # Resolve the path: if it's relative, combine it with the current directory
+    if not os.path.isabs(path):
+        path = os.path.join(current_directory, path)
+    
+    # Convert the path to absolute (just in case)
     path = os.path.abspath(path)
     
     # Validate if the path exists
@@ -32,12 +39,12 @@ def import_bee(path: str):
             2: celaut_pb2.Service,
         })
         
-        # Extract metadata directory and parse metadata
+        # Extract the metadata directory and parse the metadata
         metadata_dir = next(it).dir
         metadata = celaut_pb2.Metadata()
         metadata.ParseFromString(open(metadata_dir, "rb").read())
         
-        # Find the service hash from metadata
+        # Find the service hash in the metadata
         service_hash = None
         for _hash in metadata.hashtag.hash:
             service_hash, service_saved = find_service_hash(_hash=_hash)

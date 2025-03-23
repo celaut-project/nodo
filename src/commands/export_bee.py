@@ -35,7 +35,14 @@ def export_bee(service: str, path: str):
         service (str): The name of the service to read data from.
         path (str): The directory path where the output file should be saved.
     """
-    # Convert relative path to absolute path
+    # Get the current directory (where the "nodo" command is executed from)
+    current_directory = os.getcwd()
+    
+    # Resolve the path: if it's relative, combine it with the current directory
+    if not os.path.isabs(path):
+        path = os.path.join(current_directory, path)
+    
+    # Convert the path to absolute (just in case)
     path = os.path.abspath(path)
     
     # Validate if the output directory exists
