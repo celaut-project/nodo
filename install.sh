@@ -163,9 +163,10 @@ create_wrapper_script() {
   printf "Creating $WRAPPER_SCRIPT...\n"
   cat <<EOF > "$WRAPPER_SCRIPT"
 #!/bin/bash
+ORIGINAL_DIR="$PWD"
 cd $TARGET_DIR || exit
 source $TARGET_DIR/venv/bin/activate
-python3 $TARGET_DIR/nodo.py "\$@"
+ORIGINAL_DIR="$ORIGINAL_DIR" python3 $TARGET_DIR/nodo.py "\$@"
 EOF
 
   chmod +x "$WRAPPER_SCRIPT"

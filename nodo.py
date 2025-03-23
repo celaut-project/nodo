@@ -194,11 +194,55 @@ if __name__ == '__main__':
 
             case "export":
                 from src.commands.export_bee import export_bee
-                export_bee(service=sys.argv[2], path=sys.argv[3])
+                import os
+                import sys
+
+                # Get the original directory where the command was executed
+                original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
+
+                # Get the path provided by the user
+                user_path = sys.argv[3]
+
+                # Determine if the path is absolute or relative
+                if os.path.isabs(user_path):
+                    # If it's absolute, use it directly
+                    absolute_path = user_path
+                else:
+                    # If it's relative, combine it with the original directory
+                    absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+
+                # Create the directory structure if it doesn't exist
+                os.makedirs(os.path.dirname(absolute_path), exist_ok=True)
+
+                # Call the export_bee function
+                export_bee(service=sys.argv[2], path=absolute_path)
 
             case "import":
                 from src.commands.import_bee import import_bee
-                import_bee(path=sys.argv[2])
+                import os
+                import sys
+
+                # Get the original directory where the command was executed
+                original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
+
+                # Get the path provided by the user
+                user_path = sys.argv[2]
+
+                # Determine if the path is absolute or relative
+                if os.path.isabs(user_path):
+                    # If it's absolute, use it directly
+                    absolute_path = user_path
+                else:
+                    # If it's relative, combine it with the original directory
+                    absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+
+                # Check if the file exists
+                if not os.path.exists(absolute_path):
+                    print(f"Error: The file {absolute_path} does not exist")
+                    sys.exit(1)
+
+                # Call the import_bee function
+                import_bee(path=absolute_path)
                 
             case "update":
                 if os.geteuid() != 0:
