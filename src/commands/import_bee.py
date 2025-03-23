@@ -12,39 +12,54 @@ METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 
 
 def import_bee(path: str):
+    # Convert relative path to absolute path
+    path = os.path.abspath(path)
+    
+    # Validate if the path exists
     if not os.path.exists(path):
-        print(f"{path} not exists.")
+        print(f"Error: The path '{path}' does not exist.")
+        return
+    
+    # Validate if the path is a file
+    if not os.path.isfile(path):
+        print(f"Error: The path '{path}' is not a file.")
         return
     
     try:
+        # Read the file using bee_rpc.client
         it = read_from_file(path=path, indices={
-                1: celaut_pb2.Metadata,
-                2: celaut_pb2.Service,
-            })
-            
+            1: celaut_pb2.Metadata,
+            2: celaut_pb2.Service,
+        })
+        
+        # Extract metadata directory and parse metadata
         metadata_dir = next(it).dir
         metadata = celaut_pb2.Metadata()
         metadata.ParseFromString(open(metadata_dir, "rb").read())
         
+        # Find the service hash from metadata
         service_hash = None
         for _hash in metadata.hashtag.hash:
             service_hash, service_saved = find_service_hash(_hash=_hash)
             break
                 
         if not service_hash:
-            print(".celaut file doesn't contain service hash.  Should be implemented the task: https://github.com/celaut-project/nodo/issues/47")
+            print("Error: The .celaut file does not contain a service hash. Implement the task: https://github.com/celaut-project/nodo/issues/47")
             return
         
-        os.system(f"mv {metadata_dir} {os.path.join(METADATA_REGISTRY, service_hash)}")
+        # Move metadata to the metadata registry
+        metadata_destination = os.path.join(METADATA_REGISTRY, service_hash)
+        os.system(f"mv {metadata_dir} {metadata_destination}")
         
+        # Move or remove the service file based on whether it's already saved
         service_dir = next(it).dir
         if not service_saved:
-            os.system(f"mv {service_dir} {os.path.join(REGISTRY, service_hash)}")
-            
+            service_destination = os.path.join(REGISTRY, service_hash)
+            os.system(f"mv {service_dir} {service_destination}")
         else:
             os.system(f"rm -rf {service_dir}")
         
-        print("Service imported correctly")
+        print("Service imported successfully.")
     
     except Exception as e:
         print(f"Error importing service: {e}")
