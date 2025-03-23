@@ -39,7 +39,7 @@ def export_bee(service: str, path: str):
     service = get_id(service)
     output_file = write_to_file(
         path=path,
-        file_name=file_name if file_name != service else service[:6],  # In case that tag is not used, use only the first 6 chars of the hash.
+        file_name=(file_name if file_name != service else service[:6]).replace("-", "_"),  # In case that tag is not used, use only the first 6 chars of the hash.
         extension="celaut",
         input=__generator(service=service), 
         indices={
