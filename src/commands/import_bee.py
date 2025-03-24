@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from protos import celaut_pb2
 from bee_rpc.client import read_from_file
 
@@ -11,7 +12,7 @@ REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 
 
-def import_bee(path: str):
+def import_bee(path: str) -> Optional[str]:
     # Get the current directory (where the "nodo" command is executed from)
     current_directory = os.getcwd()
     
@@ -67,6 +68,7 @@ def import_bee(path: str):
             os.system(f"rm -rf {service_dir}")
         
         print("Service imported successfully.")
+        return service_hash
     
     except Exception as e:
         print(f"Error importing service: {e}")
