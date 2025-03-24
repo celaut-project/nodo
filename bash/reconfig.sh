@@ -147,7 +147,7 @@ display_summary() {
 }
 
 # Main script execution
-echo -e "${BLUE}Welcome to the Node Configuration Script${NC}"
+echo -e "${BLUE}Nodo Configuration Script${NC}"
 display_summary
 
 # Manage the main variables
