@@ -52,7 +52,6 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: 
 
 def execute(service: str):
     service = get_id(service)
-    print(f"Execute {service}")
 
     g_stub = gateway_pb2_grpc.GatewayStub(
         grpc.insecure_channel(f"localhost:{GATEWAY_PORT}"),
@@ -76,6 +75,7 @@ def execute(service: str):
             print("No service allowed.")
             return
 
+    print(f"Execute {service}")
     service = next(client_grpc(
         method=g_stub.StartService,
         input=generator(_hash=service),
