@@ -155,23 +155,36 @@ fi
 create_wrapper_script() {
   WRAPPER_SCRIPT="/usr/local/bin/nodo"
 
+  # Check if the wrapper script already exists
   if [ -f "$WRAPPER_SCRIPT" ]; then
     printf "Wrapper script $WRAPPER_SCRIPT already exists. Removing it...\n"
     rm -f "$WRAPPER_SCRIPT"
   fi
 
   printf "Creating $WRAPPER_SCRIPT...\n"
-  cat <<EOF > "$WRAPPER_SCRIPT"
+
+  # Create the wrapper script with a here-document, ensuring variables are expanded at runtime
+  cat <<'EOF' > "$WRAPPER_SCRIPT"
 #!/bin/bash
+# Store the original directory where the script is executed from
 ORIGINAL_DIR="$PWD"
-cd $TARGET_DIR || exit
-source $TARGET_DIR/venv/bin/activate
-ORIGINAL_DIR="$ORIGINAL_DIR" python3 $TARGET_DIR/nodo.py "\$@"
+
+# Change to the target directory (where the script is located)
+cd "$TARGET_DIR" || exit
+
+# Activate the virtual environment
+source "$TARGET_DIR/venv/bin/activate"
+
+# Execute the Python script while keeping the original directory
+ORIGINAL_DIR="$ORIGINAL_DIR" python3 "$TARGET_DIR/nodo.py" "$@"
 EOF
 
+  # Make the wrapper script executable
   chmod +x "$WRAPPER_SCRIPT"
 
   printf "Setting permissions for $TARGET_DIR and wrapper script...\n"
+
+  # Set permissions to allow full access to the target directory and the script
   chmod -R 777 "$TARGET_DIR"
   chmod +x "$WRAPPER_SCRIPT"
 }
