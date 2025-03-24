@@ -55,7 +55,7 @@ def import_bee(path: str) -> Optional[str]:
         if not service_hash:
             try:
                 print("There is no service hash, try to get it from the service specification")
-                service_hash = validate(service_dir)
+                # service_hash = validate(service_dir)
             except Exception as e:
                 print(e)
                 pass
