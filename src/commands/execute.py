@@ -20,9 +20,12 @@ DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
 SHA3_256 = SHA3_256_ID.hex()
 
 def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: int = DEFAULT_INTIAL_GAS_AMOUNT) -> Generator[Any, None, None]:
-    print("Get de clients")
+    print("Get clients")
     clients = get_dev_clients(gas_amount=initial_gas_amount)
     client_id = next(clients)
+    if not client_id:
+        print("There is no dev client available")
+        exit
     print(f"Client obtained {str(client_id)}")
     try:
         
