@@ -120,7 +120,7 @@ if __name__ == '__main__':
 
     if len(sys.argv) == 1:
         print("Command needed: "
-            "\n- execute <service id>"
+            "\n- execute <service id> | <service tag> | <'.celaut' file path>"
             "\n- remove <service id>"
             "\n- stop <instance id>"
             "\n- increase_gas <instance id> <gas to add>"
@@ -244,15 +244,45 @@ if __name__ == '__main__':
                 # Call the import_bee function
                 import_bee(path=absolute_path)
                 
+            case "execute":
+                from src.commands.execute import execute
+                
+                arg = sys.argv[2]
+                
+                if ".celaut" in arg:
+                    from src.commands.import_bee import import_bee
+                    import os
+                    import sys
+
+                    # Get the original directory where the command was executed
+                    original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
+
+                    # Get the path provided by the user
+                    user_path = arg
+
+                    # Determine if the path is absolute or relative
+                    if os.path.isabs(user_path):
+                        # If it's absolute, use it directly
+                        absolute_path = user_path
+                    else:
+                        # If it's relative, combine it with the original directory
+                        absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+
+                    # Check if the file exists
+                    if not os.path.exists(absolute_path):
+                        print(f"Error: The file {absolute_path} does not exist")
+                        sys.exit(1)
+
+                    # Call the import_bee function
+                    arg = import_bee(path=absolute_path)
+                
+                execute(service=arg)
+                
             case "update":
                 if os.geteuid() != 0:
                     print("This script requires superuser privileges. Please run with sudo.")
                 else:
                     os.system(f"{MAIN_DIR}/install.sh")
-
-            case "execute":
-                from src.commands.execute import execute
-                execute(service=sys.argv[2])
 
             case "stop":
                 from src.commands.stop import stop
