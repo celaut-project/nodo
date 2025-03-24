@@ -42,6 +42,7 @@ def import_bee(path: str) -> Optional[str]:
         
         # Extract the metadata directory and parse the metadata
         metadata_dir = next(it).dir
+        service_dir = next(it).dir
         metadata = celaut_pb2.Metadata()
         metadata.ParseFromString(open(metadata_dir, "rb").read())
         
@@ -52,15 +53,21 @@ def import_bee(path: str) -> Optional[str]:
             break
                 
         if not service_hash:
-            print("Error: The .celaut file does not contain a service hash. Implement the task: https://github.com/celaut-project/nodo/issues/47")
-            return
+            try:
+                print("There is no service hash, try to get it from the service specification")
+                service_hash = validate(service_dir)
+            except Exception as e:
+                print(e)
+                pass
+            if not service_hash:
+                print("Any service hash available")
+                return
         
         # Move metadata to the metadata registry
         metadata_destination = os.path.join(METADATA_REGISTRY, service_hash)
         os.system(f"mv {metadata_dir} {metadata_destination}")
         
         # Move or remove the service file based on whether it's already saved
-        service_dir = next(it).dir
         if not service_saved:
             service_destination = os.path.join(REGISTRY, service_hash)
             os.system(f"mv {service_dir} {service_destination}")
