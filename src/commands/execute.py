@@ -51,6 +51,7 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: 
 
 
 def execute(service: str):
+    print(f"Execute {service}")
     service = get_id(service)
 
     g_stub = gateway_pb2_grpc.GatewayStub(
