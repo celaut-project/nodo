@@ -98,6 +98,7 @@ class AbstractServiceIterable:
                 self.configuration = r
 
             case celaut.Metadata.HashTag.Hash:
+                log.LOGGER("Recived hash")
                 self.hashes.add(Hash(r))
                 if not self.service_hash:
                     self.service_hash, self.service_saved = find_service_hash(_hash=r)

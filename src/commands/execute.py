@@ -43,6 +43,8 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: 
                 type=bytes.fromhex(SHA3_256),
                 value=bytes.fromhex(_hash)
             )
+        
+        print(f"Hash {_hash} sent.")
 
         # Don't need to send metadata or service because it's on local.
 
