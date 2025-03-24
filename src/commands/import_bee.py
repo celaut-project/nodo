@@ -10,6 +10,7 @@ env_manager = EnvManager()
 
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+VALIDATE_ON_IMPORT = env_manager.get_env("VALIDATE_ON_IMPORT")
 
 
 def import_bee(path: str) -> Optional[str]:
@@ -66,6 +67,18 @@ def import_bee(path: str) -> Optional[str]:
             if not service_hash:
                 print("Any service hash available")
                 return
+        
+        elif VALIDATE_ON_IMPORT:
+            from hashlib import sha3_256
+            validate_content = sha3_256()
+            for i in read_multiblock_directory(directory=service_dir):
+                validate_content.update(i)
+            if service_hash != validate_content.hexdigest():
+                print("Hash sha3-256 is on the service, but is not correct.")
+                if input("Do you want to overwrite it? y/n") not in ["y", "Y", "yes", "YES"]:
+                    return
+                service_hash = validate_content.hexdigest()
+        
         
         # Move metadata to the metadata registry
         metadata_destination = os.path.join(METADATA_REGISTRY, service_hash)
