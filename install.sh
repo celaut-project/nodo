@@ -155,36 +155,33 @@ fi
 create_wrapper_script() {
   WRAPPER_SCRIPT="/usr/local/bin/nodo"
 
-  # Check if the wrapper script already exists
+  # Check if the wrapper script already exists and remove it
   if [ -f "$WRAPPER_SCRIPT" ]; then
-    printf "Wrapper script $WRAPPER_SCRIPT already exists. Removing it...\n"
+    printf "Wrapper script %s already exists. Removing it...\n" "$WRAPPER_SCRIPT"
     rm -f "$WRAPPER_SCRIPT"
   fi
 
-  printf "Creating $WRAPPER_SCRIPT...\n"
+  printf "Creating %s...\n" "$WRAPPER_SCRIPT"
 
-  # Create the wrapper script with a here-document, ensuring variables are expanded at runtime
-  cat <<'EOF' > "$WRAPPER_SCRIPT"
+  # Create the wrapper script. Note:
+  # - $TARGET_DIR is not escaped so it is expanded at compile time.
+  # - \$PWD and \$ORIGINAL_DIR are escaped to be evaluated at runtime.
+  cat <<EOF > "$WRAPPER_SCRIPT"
 #!/bin/bash
-# Store the original directory where the script is executed from
-ORIGINAL_DIR="$PWD"
-
-# Change to the target directory (where the script is located)
+# ORIGINAL_DIR is set to the current directory at runtime
+ORIGINAL_DIR="\$PWD"
+# Change directory to TARGET_DIR, which was expanded at compile time
 cd "$TARGET_DIR" || exit
-
-# Activate the virtual environment
+# Activate the virtual environment in TARGET_DIR
 source "$TARGET_DIR/venv/bin/activate"
-
-# Execute the Python script while keeping the original directory
-ORIGINAL_DIR="$ORIGINAL_DIR" python3 "$TARGET_DIR/nodo.py" "$@"
+# Execute the Python script with the runtime ORIGINAL_DIR and passed arguments
+ORIGINAL_DIR="\$ORIGINAL_DIR" python3 "$TARGET_DIR/nodo.py" "\$@"
 EOF
 
   # Make the wrapper script executable
   chmod +x "$WRAPPER_SCRIPT"
 
-  printf "Setting permissions for $TARGET_DIR and wrapper script...\n"
-
-  # Set permissions to allow full access to the target directory and the script
+  printf "Setting permissions for %s and the wrapper script...\n" "$TARGET_DIR"
   chmod -R 777 "$TARGET_DIR"
   chmod +x "$WRAPPER_SCRIPT"
 }
