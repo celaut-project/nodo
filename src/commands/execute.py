@@ -22,8 +22,11 @@ SHA3_256 = SHA3_256_ID.hex()
 def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: int = DEFAULT_INTIAL_GAS_AMOUNT) -> Generator[Any, None, None]:
     clients = get_dev_clients(gas_amount=initial_gas_amount)
     try:
+        print("Send client")
         yield gateway_pb2.Client(client_id=next(clients))
+        print("Client sent")
 
+        print("Send configuration")
         yield gateway_pb2.Configuration(
             config=celaut_pb2.Configuration(),
             resources=gateway_pb2.CombinationResources(
@@ -38,12 +41,13 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: 
             ),
             initial_gas_amount=to_gas_amount(initial_gas_amount)
         )
+        print("Configuration sent")
 
+        print(f"Send hash {_hash}")
         yield celaut_pb2.Metadata.HashTag.Hash(
                 type=bytes.fromhex(SHA3_256),
                 value=bytes.fromhex(_hash)
             )
-        
         print(f"Hash {_hash} sent.")
 
         # Don't need to send metadata or service because it's on local.
