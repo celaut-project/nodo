@@ -158,7 +158,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
 
     def GetService(self, request_iterator, context, **kwargs):
-        log.LOGGER(f"Get service method.")
         yield from GetServiceIterable(request_iterator, context)
 
     def Payable(self, request_iterator, context, **kwargs):
