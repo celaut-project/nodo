@@ -15,7 +15,7 @@ class GetServiceIterable(AbstractServiceIterable):
 
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
         try:
-            yield buffer_pb2.Buffer(signal=True)  # TODO; must be deleted with https://github.com/pee-rpc-protocol/pee-rpc/issues/4 solved.
+            yield buffer_pb2.Buffer(signal=True)
             yield from bee.serialize_to_buffer(
                 message_iterator=service_extended(
                     metadata=read_metadata_from_disk(service_hash=self.service_hash) if not self.metadata else self.metadata,
