@@ -28,7 +28,7 @@ class StartServiceIterable(AbstractServiceIterable):
 
         log.LOGGER('Launch service with configuration')
         yield from bee.serialize_to_buffer(
-            indices={},  # TODO Why indices are not set?  Because StartService returns only one element, an instance.
+            indices={},
             message_iterator=launch_service(
                 service=read_service_from_disk(service_hash=self.service_hash),
                 metadata=self.metadata if self.metadata else read_metadata_from_disk(service_hash=self.service_hash),
