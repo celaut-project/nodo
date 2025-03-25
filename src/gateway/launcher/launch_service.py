@@ -6,7 +6,7 @@ from src.gateway.launcher.delegate_execution.delegate_execution import delegate_
 from src.gateway.launcher.local_execution.local_execution import local_execution
 from src.manager.manager import spend_gas
 from src.utils import utils, logger as log
-from src.utils.env import DOCKER_NETWORK, EnvManager
+from src.utils.env import EnvManager
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_gas_amount
 from src.database.sql_connection import SQLConnection
