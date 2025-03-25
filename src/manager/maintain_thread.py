@@ -3,7 +3,7 @@ from uuid import uuid4
 import os
 
 import grpc
-from bee_rpc import client as peerpc
+from bee_rpc import client as beerpc
 
 import docker as docker_lib
 
@@ -71,7 +71,7 @@ def check_wanted_services():
                 """
                 log.LOGGER(f"Using peer {peer}")
                 try:
-                    for b in peerpc.client_grpc(
+                    for b in beerpc.client_grpc(
                             method=gateway_pb2_grpc.GatewayStub(
                                 grpc.insecure_channel(
                                     next(generate_uris_by_peer_id(peer))
@@ -83,15 +83,17 @@ def check_wanted_services():
                             input=_hash
                     ):
                         log.LOGGER(f"type of chunk -> {type(b)}")
-                        if  type(b) == peerpc.Dir:
+                        if  type(b) == beerpc.Dir:
                             log.LOGGER(f"    type of dir {b.type}")
+                            
                         if type(b) == gateway_pb2.celaut__pb2.Metadata:
                             log.LOGGER("Store the metadata.")
                             with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
                                 f.write(b.SerializeToString())
-                        elif type(b) == peerpc.Dir and b.type == gateway_pb2.celaut__pb2.Service:
+                        elif type(b) == beerpc.Dir and b.type == gateway_pb2.celaut__pb2.Service:
                             log.LOGGER(f"Store the service {b.dir}")
                             os.system(f"mv {b.dir} {REGISTRY}{wanted}")
+                            
                     del wanted_services[wanted]
                     log.LOGGER(f"Wanted service {wanted} stored successfully.")
                 except Exception as e:
@@ -151,7 +153,7 @@ def peer_deposits():
     for peer_id in SQLConnection().get_peers_id(): # TODO async
         if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             try:
-                peer = next(peerpc(
+                peer = next(beerpc(
                     method=gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
                             next(generate_uris_by_peer_id(peer_id=peer_id), "")
