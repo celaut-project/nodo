@@ -72,7 +72,7 @@ def service_balancer(
                         #  si es que se especifica.
                     ))
             except Exception as e:
-                log.LOGGER('Error taking the cost on ' + peer_id + ' : ' + str(e))
+                log.LOGGER('Exception taking the cost on ' + peer_id + ' : ' + str(e))
     except Exception as e:
         log.LOGGER('Error iterating peers on service balancer ->>' + str(e))
 
