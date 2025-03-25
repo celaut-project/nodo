@@ -14,7 +14,7 @@ env_manager = EnvManager()
 
 REGISTRY = env_manager.get_env("REGISTRY")
 
-CONFIGURATION_REQUIRED = False  # TODO add as an environment variable, in case the node needs to be stricter.
+CONFIGURATION_REQUIRED = env_manager.get_env("CONFIGURATION_REQUIRED")  # In case the node needs to be stricter.
 
 
 class StartServiceIterable(AbstractServiceIterable):

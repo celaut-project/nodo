@@ -226,6 +226,7 @@ env_manager.get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR", pow(10, 6))
 env_manager.get_env("MEMSWAP_FACTOR", 0)
 env_manager.get_env("USE_PRINT", False)
 env_manager.get_env("VALIDATE_ON_IMPORT", True)
+env_manager.get_env("CONFIGURATION_REQUIRED", False)
 
 # Hashes
 
