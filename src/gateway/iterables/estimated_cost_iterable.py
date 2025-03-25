@@ -12,7 +12,8 @@ from src.utils.utils import from_gas_amount, get_only_the_ip_from_context
 
 
 class GetServiceEstimatedCostIterable(AbstractServiceIterable):
-    # TODO check cost in other peers (use RecursionGuard to prevent infinite loops).
+    
+    # Actually there is not need to use recursion guard, there are any recursive call pattern here. https://github.com/celaut-project/nodo/issues/70
 
     cost: Optional[int] = None
 
