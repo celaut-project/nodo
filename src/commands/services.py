@@ -38,12 +38,23 @@ def list_services():
         print(f"{service}  {size} {name}")
 
 def inspect(service: str):
+    from google.protobuf import text_format
     service = get_id(service)
+    
     metadata = Metadata()
     
-    # service = Service()  
+    # Path to the metadata file for this service
+    metadata_path = os.path.join(METADATA, service)
     
-    # TODO This should print all the wbp. ... but only when all the filesystem is outside of it, on blocks.
+    # Try to load existing metadata if it exists
+    try:
+        with open(metadata_path, "rb") as f:
+            metadata.ParseFromString(f.read())
+    except Exception as e:
+        print(f"Error reading metadata: {e}")
+        return
+    
+    print(text_format.MessageToString(metadata))
 
 def modify_tag(service: str, tag: str):
     service = get_id(service)
