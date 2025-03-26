@@ -58,6 +58,10 @@ def inspect(service: str):
         print(f"Error reading service: {e}")
         return
     
+    # Clear the filesystem field in the container
+    if service.HasField('container'):
+        service.container.ClearField('filesystem')
+    
     print(text_format.MessageToString(service))
 
 def modify_tag(service: str, tag: str):
