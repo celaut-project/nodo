@@ -38,6 +38,7 @@ def list_services():
         print(f"{service}  {size} {name}")
 
 def inspect(service: str):
+    service = get_id(service)
     metadata = Metadata()
     
     # service = Service()  

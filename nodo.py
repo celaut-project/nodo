@@ -126,8 +126,8 @@ if __name__ == '__main__':
             "\n- increase_gas <instance id> <gas to add>"
             "\n- decrease_gas <instance id> <gas to retire>"
             "\n- services"
-            "\n- service <service id>"
-            "\n- service:modify_tag <service id> <new tag>"
+            "\n- service <service id|tag>"
+            "\n- service:modify_tag <service id|tag> <new tag>"
             "\n- clients"
             "\n- peers"
             "\n- connect <ip:url>"
@@ -308,9 +308,10 @@ if __name__ == '__main__':
                 from src.commands.services import inspect
                 inspect(sys.argv[2])
             
-            case "service:modify_tag":  # TODO add to docs
+            case "service:modify_tag":
                 from src.commands.services import modify_tag
-                modify_tag(service=sys.argv[2], tag=sys.argv[3] if len(sys.argv) == 4 else "")
+                tag = sys.argv[3] if len(sys.argv) == 4 else ""
+                modify_tag(service=sys.argv[2], tag=tag)
                 
             case 'clients':
                 from src.database.sql_connection import SQLConnection
