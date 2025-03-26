@@ -46,6 +46,10 @@ def inspect(service: str):
     # Path to the service file for this service
     path = os.path.join(REGISTRY, service_id)
     
+    # If path is a directory, look for wbp.bin inside it
+    if os.path.isdir(path):
+        path = os.path.join(path, "wbp.bin")
+    
     # Try to load existing service if it exists
     try:
         with open(path, "rb") as f:
