@@ -2,7 +2,7 @@ import os
 from src.commands.__by_tag import get_id
 from src.utils.env import EnvManager
 from bee_rpc.utils import getsize
-from protos.celaut_pb2 import Metadata
+from protos.celaut_pb2 import Metadata, Service
 
 env_manager = EnvManager()
 REGISTRY = env_manager.get_env("REGISTRY")
@@ -39,22 +39,22 @@ def list_services():
 
 def inspect(service: str):
     from google.protobuf import text_format
-    service = get_id(service)
+    service_id = get_id(service)
     
-    metadata = Metadata()
+    service = Service()
     
-    # Path to the metadata file for this service
-    metadata_path = os.path.join(METADATA, service)
+    # Path to the service file for this service
+    path = os.path.join(REGISTRY, service_id)
     
-    # Try to load existing metadata if it exists
+    # Try to load existing service if it exists
     try:
-        with open(metadata_path, "rb") as f:
-            metadata.ParseFromString(f.read())
+        with open(path, "rb") as f:
+            service.ParseFromString(f.read())
     except Exception as e:
-        print(f"Error reading metadata: {e}")
+        print(f"Error reading service: {e}")
         return
     
-    print(text_format.MessageToString(metadata))
+    print(text_format.MessageToString(service))
 
 def modify_tag(service: str, tag: str):
     service = get_id(service)
