@@ -304,7 +304,7 @@ if __name__ == '__main__':
                 from src.commands.services import list_services
                 list_services()
                 
-            case "service":  # TODO add to docs
+            case "service":
                 from src.commands.services import inspect
                 inspect(sys.argv[2])
             
