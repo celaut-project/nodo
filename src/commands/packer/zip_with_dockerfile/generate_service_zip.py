@@ -16,6 +16,7 @@ METADATA_DEPENDENCIES_DIRECTORY = "metadata_dependencies_directory"
 BLOCKS_DIRECTORY = "blocks_directory"
 DEPENDENCIES_DIR = "dependencies"
 SKIP_WBP = "ignore_loadable_protobuf"
+DEPENDENCIES_ENV = "dependencies_env"
 
 
 def __export_registry(project_dir: str, directory: str, pack_config: Dict):
@@ -31,10 +32,17 @@ def __export_registry(project_dir: str, directory: str, pack_config: Dict):
 
     if DEPENDENCIES_DIR in pack_config:
         skip_wbp = pack_config[SKIP_WBP] if SKIP_WBP in pack_config else False  # By default, will be included.
+        write_env = pack_config[DEPENDENCIES_ENV] if DEPENDENCIES_ENV in pack_config else False  # Write a file with the final hashes for the case where some dependencies need to be packed too.
         dest_dir = f"{directory}/{pack_config[SERVICE_DEPENDENCIES_DIRECTORY]}"
-        _dependencies = pack_config[DEPENDENCIES_DIR].values() \
-                if type(pack_config[DEPENDENCIES_DIR]) is dict else pack_config[DEPENDENCIES_DIR]
-        for dependency in _dependencies:
+        
+        if type(pack_config[DEPENDENCIES_DIR]) is dict:
+            dependencies = pack_config[DEPENDENCIES_DIR]
+        else: 
+            dependencies = dict(enumerate(pack_config[DEPENDENCIES_DIR]))
+            if write_env:
+                raise Exception(f"Without keys, write env doesn't have sense. Provide keys for dependencies or make dependencies_env=false: {pack_config}")
+                       
+        for env, dependency in dependencies.items():
 
             # Move dependency service.
             if not os.path.exists(f"{SERVICES}/{dependency}"):
@@ -50,7 +58,7 @@ def __export_registry(project_dir: str, directory: str, pack_config: Dict):
                 if _dir:
                     print(f"Go to pack {dependency}")
                     from src.commands.packer.zip_with_dockerfile.pack import pack
-                    dependency = pack(_dir)  # TODO Avoid cyclic import
+                    dependency = pack(_dir)
                 
                 else:
                     raise Exception(f"Dependency not found. {dependency}")
@@ -79,6 +87,11 @@ def __export_registry(project_dir: str, directory: str, pack_config: Dict):
                             ):
                                 os.system(f"cp -r {BLOCKS}/{block} "
                                           f"{directory}/{pack_config[BLOCKS_DIRECTORY]}")
+
+            # Write env
+            if write_env:
+                with open(os.path.join(directory, ".dependencies"), "a") as f:
+                    f.write(f"{env}={dependency}\n")
 
 def generate_service_zip(project_directory: str) -> str:
     
