@@ -121,11 +121,16 @@ def generate_service_zip(project_directory: str) -> str:
         for item in pack_config['include']:
             src_path = os.path.join(project_directory, item)
             dest_path = os.path.join(complete_source_directory, item)
+            
+            dest_parent = os.path.dirname(dest_path)
+            os.makedirs(dest_parent, exist_ok=True)
+            
             if os.path.isdir(src_path):
                 shutil.copytree(src_path, dest_path, dirs_exist_ok=True)
             else:
                 shutil.copy2(src_path, dest_path)
             print(f"Added file {item}")
+            
     else:
         for item in os.listdir(project_directory):
             src_path = os.path.join(project_directory, item)
