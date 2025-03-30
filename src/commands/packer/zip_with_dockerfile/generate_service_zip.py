@@ -38,6 +38,7 @@ def __export_registry(directory: str, pack_config: Dict):
 
             # Move dependency service.
             if not os.path.exists(f"{SERVICES}/{dependency}"):
+                print(f"The dependency {dependency} does not exists.")
                 # Maybe it's a path or git repo url.
                 if "http" in dependency:
                     _dir = dependency
@@ -47,6 +48,7 @@ def __export_registry(directory: str, pack_config: Dict):
                     _dir = os.path.join(directory, dependency)
                     
                 if _dir:
+                    print(f"Go to pack {dependency}")
                     from src.commands.packer.zip_with_dockerfile.pack import pack
                     dependency = pack(_dir)  # TODO Avoid cyclic import
                 
