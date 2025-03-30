@@ -32,12 +32,25 @@ def __export_registry(directory: str, pack_config: Dict):
     if DEPENDENCIES_DIR in pack_config:
         skip_wbp = pack_config[SKIP_WBP] if SKIP_WBP in pack_config else False  # By default, will be included.
         dest_dir = f"{directory}/{pack_config[SERVICE_DEPENDENCIES_DIRECTORY]}"
-        for dependency in pack_config[DEPENDENCIES_DIR].values() \
-                if type(pack_config[DEPENDENCIES_DIR]) is dict else pack_config[DEPENDENCIES_DIR]:
+        _dependencies = pack_config[DEPENDENCIES_DIR].values() \
+                if type(pack_config[DEPENDENCIES_DIR]) is dict else pack_config[DEPENDENCIES_DIR]
+        for dependency in _dependencies:
 
             # Move dependency service.
             if not os.path.exists(f"{SERVICES}/{dependency}"):
-                raise Exception(f"Dependency not found. {dependency}")
+                # Maybe it's a path or git repo url.
+                if "http" in dependency:
+                    _dir = dependency
+                
+                else:
+                    # Maybe it's a path, in that case, it will be a relative path from the repo root path.
+                    _dir = os.path.join(directory, dependency)
+                    
+                if _dir:
+                    dependency = pack(_dir)  # TODO Avoid cyclic import
+                
+                else:
+                    raise Exception(f"Dependency not found. {dependency}")
             
             os.system(f"cp -R {SERVICES}/{dependency} {dest_dir}")
             
