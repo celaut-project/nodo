@@ -114,7 +114,7 @@ def __remove_path(path):
 
 
 def pack_directory(directory: str):
-    is_remote, directory = prepare_directory(directory)
+    is_remote, directory = prepare_directory(directory)  # TODO Better approach, generator: return only path and finally remove if remote.
     
     service_zip_dir: str = generate_service_zip(
         project_directory=directory
@@ -123,7 +123,7 @@ def pack_directory(directory: str):
     # TODO check if dependencies has directories, and pack them before.
     try:
         ip, port = None, None
-        if False:  # TODO; control exceptions and try others; and enviroment variable COMPILE_LOCAL_FIRST
+        if False:  # TODO; control exceptions and try others; and enviroment variable PACK_LOCAL_FIRST
             for peer_id in list(get_peer_ids()):
                 for _ip, _port in get_peer_directions(peer_id=peer_id):
                     ip, port = _ip, _port
