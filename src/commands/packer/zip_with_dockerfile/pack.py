@@ -59,7 +59,7 @@ def __pack(zip, node: str):
     )
 
 
-def __on_peer(peer: str, service_zip_dir: str):
+def __on_peer(peer: str, service_zip_dir: str) -> str:
     _id: Optional[str] = None
     print(f'Starting compilation on {peer}...')
     
@@ -105,6 +105,8 @@ def __on_peer(peer: str, service_zip_dir: str):
         print("validated service id -> ", validate_id.hexdigest())
     except Exception as e:
         print(f"Maybe it doesn't have blocks? validation will occurr into an error due to https://github.com/celaut-project/nodo/issues/38")
+    
+    return _id
 
 
 def __remove_path(path):
@@ -113,14 +115,13 @@ def __remove_path(path):
         print(f"Removed: '{path}'")
 
 
-def pack_directory(directory: str):
+def pack_directory(directory: str) -> str:
     is_remote, directory = prepare_directory(directory)  # TODO Better approach, generator: return only path and finally remove if remote.
     
     service_zip_dir: str = generate_service_zip(
         project_directory=directory
     )
 
-    # TODO check if dependencies has directories, and pack them before.
     try:
         ip, port = None, None
         if False:  # TODO; control exceptions and try others; and enviroment variable PACK_LOCAL_FIRST
@@ -129,9 +130,18 @@ def pack_directory(directory: str):
                     ip, port = _ip, _port
         if not ip or not port:
             ip, port = 'localhost', GATEWAY_PORT
-        __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
+        _id = __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
+    
+    except Exception as e:
+        print(f"Excepton packing {directory}: {e}")
     finally:
         # __remove_path(service_zip_dir)
         
         if is_remote: 
             __remove_path(directory)
+
+    if not _id: 
+        _msg = f"Any id for {directory}"
+        print(_msg) 
+        raise Exception(_msg)
+    return _id
