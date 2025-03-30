@@ -116,6 +116,7 @@ def __remove_path(path):
 
 
 def pack(directory: str) -> str:
+    _id = None
     is_remote, directory = prepare_directory(directory)  # TODO Better approach, generator: return only path and finally remove if remote.
     
     service_zip_dir: str = generate_service_zip(
