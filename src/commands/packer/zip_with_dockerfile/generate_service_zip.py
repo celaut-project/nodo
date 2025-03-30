@@ -18,7 +18,7 @@ DEPENDENCIES_DIR = "dependencies"
 SKIP_WBP = "ignore_loadable_protobuf"
 
 
-def __export_registry(directory: str, pack_config: Dict):
+def __export_registry(project_dir: str, directory: str, pack_config: Dict):
     list(map(
         lambda _reg: os.makedirs(f"{directory}/{pack_config[_reg]}")
             if _reg in pack_config and type(pack_config[_reg]) is str else 1,
@@ -45,7 +45,7 @@ def __export_registry(directory: str, pack_config: Dict):
                 
                 else:
                     # Maybe it's a path, in that case, it will be a relative path from the repo root path.
-                    _dir = os.path.join(directory, dependency)
+                    _dir = os.path.join(project_dir, dependency)
                     
                 if _dir:
                     print(f"Go to pack {dependency}")
@@ -128,7 +128,7 @@ def generate_service_zip(project_directory: str) -> str:
             os.system(f"cd {complete_source_directory} && rm -rf {file}")
 
     # Add the dependencies
-    __export_registry(directory=complete_source_directory, pack_config=pack_config)
+    __export_registry(project_dir=project_directory, directory=complete_source_directory, pack_config=pack_config)
 
     if 'zip' in pack_config and pack_config['zip']:
         os.system(f'cd {complete_source_directory} && '
