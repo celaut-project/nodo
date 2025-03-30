@@ -44,13 +44,24 @@ This is the main configuration file that controls how the service is built and p
 
 ```json
 {
-    "ignore": [],                           // Files/patterns to exclude
-    "include": [],                          // Optional: Specific files/folders to include
-    "zip": false,                           // Optional: Whether to zip dependencies
-    "service_dependencies_directory": "",    // Directory for service dependencies
-    "metadata_dependencies_directory": "",   // Directory for metadata dependencies
-    "blocks_directory": "",                 // Directory for blocks
-    "dependencies_dir": {}                  // Service dependencies configuration
+    "workdir": "satsorter",
+    "service_dependencies_directory": "__services__",
+    "metadata_dependencies_directory": "__metadata__",
+    "blocks_directory": "__block__",
+    "zip": true,
+    "ignore_loadable_protobuf": true,
+    "dependencies": {
+      "REGRESION": "dependencies/regresion_cnf",
+      "RANDOM": "dependencies/random_cnf_generator"
+    },
+    "dependencies_env": true,
+    "include": [
+      "protos",
+      "src",
+      "__init__.py",
+      "start.sh",
+      ".service/pack-config.json"
+    ]
 }
 ```
 
@@ -61,7 +72,8 @@ This is the main configuration file that controls how the service is built and p
 - `service_dependencies_directory`: Path where service dependencies will be stored
 - `metadata_dependencies_directory`: Path where metadata files will be stored
 - `blocks_directory`: Path where blocks will be stored
-- `dependencies_dir`: Object or array containing service dependencies
+- `dependencies`: Object specifying the dependencies and their paths
+- `dependencies_env`: Boolean flag indicating whether dependencies should be stored in an environment file (`.dependencies`)
 
 ### 2. Dockerfile
 The Dockerfile can be placed either in the root directory or in the `.service` directory. If placed in the root, it will be automatically copied to `.service` during preparation.
@@ -124,7 +136,7 @@ The service preparation happens in two main stages:
 ## Common Issues and Solutions
 
 1. **Missing Dependencies**
-   - Ensure all dependencies are properly listed in dependencies_dir
+   - Ensure all dependencies are properly listed in dependencies
    - Verify paths in dependency directories exist
 
 2. **Build Failures**
@@ -136,4 +148,4 @@ The service preparation happens in two main stages:
    - Review ignore patterns to exclude unnecessary files
    - Consider using include list to limit included files
    - Use appropriate .dockerignore patterns
-   
+
