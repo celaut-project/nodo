@@ -47,6 +47,7 @@ def __export_registry(directory: str, pack_config: Dict):
                     _dir = os.path.join(directory, dependency)
                     
                 if _dir:
+                    from src.commands.packer.zip_with_dockerfile.pack import pack
                     dependency = pack(_dir)  # TODO Avoid cyclic import
                 
                 else:
