@@ -125,9 +125,9 @@ def generate_service_zip(project_directory: str) -> str:
                 shutil.copytree(src_path, dest_path, dirs_exist_ok=True)
             else:
                 shutil.copy2(src_path, dest_path)
+            print(f"Added file {item}")
     else:
         for item in os.listdir(project_directory):
-            if item == ".service": continue # TODO Why is that needed.
             src_path = os.path.join(project_directory, item)
             dest_path = os.path.join(complete_source_directory, item)
             if os.path.isdir(src_path):
