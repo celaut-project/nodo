@@ -109,7 +109,7 @@ def generate_service_zip(project_directory: str) -> str:
     os.system(f"mkdir {complete_source_directory}")
 
     # Read the compilation's config JSON file
-    config_path = f'{project_directory}/.service/pack-config.json'
+    config_path = f'{project_directory}/.service/pack_config.json'
     if os.path.exists(config_path):
         with open(config_path, 'r') as config_file:
             pack_config = json.load(config_file)

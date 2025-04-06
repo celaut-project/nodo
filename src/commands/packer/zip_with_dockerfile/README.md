@@ -9,7 +9,7 @@ my-service/
 ├── .service/
 │   ├── Dockerfile
 │   ├── service.json
-│   ├── pack-config.json
+│   ├── pack_config.json
 │   └── .dockerignore
 ├── src/
 │   └── app.py
@@ -33,13 +33,13 @@ my-service/
 The script will automatically:
 1. Create the `.service` directory
 2. Copy Dockerfile, service.json, and .dockerignore to `.service`
-3. Create a default pack-config.json with `{"ignore": []}`
+3. Create a default pack_config.json with `{"ignore": []}`
 
 This means both structures will end up with everything properly organized in `.service` during the build process.
 
 ## Configuration Files
 
-### 1. pack-config.json
+### 1. pack_config.json
 This is the main configuration file that controls how the service is built and packaged.
 
 ```json
@@ -60,7 +60,7 @@ This is the main configuration file that controls how the service is built and p
       "src",
       "__init__.py",
       "start.sh",
-      ".service/pack-config.json"
+      ".service/pack_config.json"
     ]
 }
 ```
@@ -86,7 +86,7 @@ Important notes about COPY instructions:
 Service metadata file that can be placed either in the root directory or in `.service`. Contains service-specific configuration and metadata.
 
 ### 4. .dockerignore
-Can be placed either in the root directory or in `.service`. Patterns specified here will be automatically added to the `ignore` list in `pack-config.json`.
+Can be placed either in the root directory or in `.service`. Patterns specified here will be automatically added to the `ignore` list in `pack_config.json`.
 
 ## Service Preparation Process
 
@@ -125,11 +125,11 @@ The service preparation happens in two main stages:
 
 3. **Ignore Patterns**
    - Use .dockerignore for Docker-specific exclusions
-   - Use pack-config.json's ignore list for service-specific exclusions
+   - Use pack_config.json's ignore list for service-specific exclusions
    - Avoid duplicating ignore patterns
 
 4. **Build Configuration**
-   - Keep pack-config.json up to date
+   - Keep pack_config.json up to date
    - Use include list when specific files are needed
    - Configure appropriate dependency directories
 
