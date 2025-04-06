@@ -31,7 +31,7 @@ def __ensure_is_correct(directory: str):
     service_dir = os.path.join(directory, ".service")
     dockerfile_path = os.path.join(service_dir, "Dockerfile")
     service_json_path = os.path.join(service_dir, "service.json")
-    pack_config_json_path = os.path.join(service_dir, "pack-config.json")
+    pack_config_json_path = os.path.join(service_dir, "pack_config.json")
 
     root_dockerfile_path = os.path.join(directory, "Dockerfile")
     root_service_json_path = os.path.join(directory, "service.json")
@@ -50,16 +50,16 @@ def __ensure_is_correct(directory: str):
     if not os.path.exists(service_json_path) and os.path.exists(root_service_json_path):
         shutil.copy2(root_service_json_path, service_json_path)
 
-    # Create pack-config.json if it doesn't exist
+    # Create pack_config.json if it doesn't exist
     if not os.path.exists(pack_config_json_path):
         with open(pack_config_json_path, 'w') as f:
             f.write('{"ignore": []}')
 
-    # Read the existing pack-config.json content
+    # Read the existing pack_config.json content
     with open(pack_config_json_path, 'r') as f:
         pack_config_data = json.load(f)
 
-    # Ensure "ignore" key exists in pack-config.json
+    # Ensure "ignore" key exists in pack_config.json
     if "ignore" not in pack_config_data:
         pack_config_data["ignore"] = []
 
@@ -76,7 +76,7 @@ def __ensure_is_correct(directory: str):
     pack_config_data["ignore"] = list(set(pack_config_data["ignore"]))
     print(f"pack configuration {pack_config_data}")
 
-    # Write the updated pack-config.json content back to the file
+    # Write the updated pack_config.json content back to the file
     with open(pack_config_json_path, 'w') as f:
         json.dump(pack_config_data, f, indent=4)
         
