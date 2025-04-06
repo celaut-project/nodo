@@ -98,3 +98,19 @@ def execute(service: str):
         indices_serializer=gateway_pb2_bee.StartService_input_indices
     ))
     print(f'service partition -> {service}')
+    
+    # Indicate http endpoints to allow more friendly usage.
+    for slot in service.instance.api.slot:
+        if "http" in slot.protocol_stack[0].tags: 
+            for _exp in service.instance.uri_slot:
+                if _exp.internal_port == slot.port:
+                    print("\n" + "="*50)
+                    print("="*50 + "\n")
+                    print(f"  🔍 HTTP Service (Port: {slot.port})")
+                    print("="*50)
+                    print("  🌐 Available Endpoints:")
+                    print("-"*50)
+                    for _uri in _exp.uri:
+                        print(f"  • http://{_uri.ip}:{_uri.port}")
+                    print("="*50 + "\n")
+                    break
