@@ -127,7 +127,7 @@ if __name__ == '__main__':
             "\n- decrease_gas <instance id> <gas to retire>"
             "\n- services"
             "\n- service <service id|tag>"
-            "\n- service:modify_tag <service id|tag> <new tag>"
+            "\n- tag <service id|tag> <new tag>"
             "\n- clients"
             "\n- peers"
             "\n- connect <ip:url>"
@@ -308,7 +308,7 @@ if __name__ == '__main__':
                 from src.commands.services import inspect
                 inspect(sys.argv[2])
             
-            case "service:modify_tag":
+            case "tag":
                 from src.commands.services import modify_tag
                 tag = sys.argv[3] if len(sys.argv) == 4 else ""
                 modify_tag(service=sys.argv[2], tag=tag)

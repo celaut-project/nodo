@@ -85,10 +85,10 @@ Además de los comandos básicos, Nodo incluye otros comandos que permiten gesti
   **Ejemplo:**  
   `nodo service 1234567890abcdef`
 
-- **service:modify_tag `<service id | tag> <new tag>`**  
+- **tag `<service id | tag> <new tag>`**  
   Modifica la etiqueta asociada a un servicio.  
   **Ejemplo:**  
-  `nodo service:modify_tag 1234567890abcdef nuevo_etiqueta`
+  `nodo tag 1234567890abcdef nuevo_etiqueta`
 
 - **clients**  
   Lista los clientes conectados al nodo.  
