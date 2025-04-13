@@ -35,7 +35,7 @@ def estimated_cost_sorter(
                     
                     # Minimum maintenance cost
                     vcnorm(
-                        const=nmc(
+                        cost=nmc(
                             cost=from_gas_amount(estimated_cost.min_maintenance_cost),
                             timelapse=estimated_cost.maintenance_seconds_loop
                         ),
