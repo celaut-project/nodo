@@ -7,15 +7,36 @@ from src.reputation_system.contracts.ergo.transaction import submit_reputation_p
 sc = SQLConnection()
 env_manager = EnvManager()
 
-def update_reputation(token: str, amount: int) -> Optional[str]:
-    # Take the peer_id when the token it's external. Do nothing if it's an internal service.
-    peer_id: str = token.split('##')[1] if "##" in token else token
+def update_peer_reputation(peer_id: str, amount: int) -> bool:
+    """_summary_
+
+    Args:
+        peer_id (str): The ID of the peer whose reputation is to be updated
+        amount (int): The amount to add to the reputation score.
+
+    Returns:
+        bool: True if the update was successful, False otherwise.
+    """
     if sc.peer_exists(peer_id=peer_id):
         return sc.update_reputation_peer(peer_id, amount)
 
-    # For services.
-    # For clients.
-    # For ledgers.
+def update_container_reputation(container_id: str, amount: int) -> bool:
+    """Update reputation of the peer where the container is been executed (if it's external) and the reputation of the container' service
+    Args:
+        container_id (str): Container's id
+        amount (int): The amount to add to the reputation score.
+
+    Returns:
+        bool: True if the update was successful, False otherwise.
+    """
+
+    # TODO Add factors to allow different weights.
+
+    if "##" in container_id:
+        peer_id: str = container_id.split('##')[1]
+        update_peer_reputation(peer_id=peer_id, amount=amount)
+    
+    # TODO update the service.
 
 def compute_reputation(peer_id) -> float:
     # TODO Implement a TTL-based (Time-To-Live) caching mechanism.
