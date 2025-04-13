@@ -199,7 +199,7 @@ def spend_gas(
                 is_id = sc.container_exists(id=id) if id else False
 
             if is_id:
-                current_gas = sc.get_internal_service_gas(id=id)
+                current_gas = sc.get_container_gas(id=id)
                 if current_gas >= gas_to_spend or ALLOW_GAS_DEBT:
                     sc.update_gas_to_container(id=id, gas=current_gas - gas_to_spend)
                 
@@ -364,7 +364,7 @@ def get_sysresources(id: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
             mem_limit=sys_req["mem_limit"],
         ),
         gas=to_gas_amount(
-            gas_amount=sc.get_internal_service_gas(id=id)
+            gas_amount=sc.get_container_gas(id=id)
         )
     )
 
@@ -383,7 +383,7 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
         serialized_instance = sc.get_internal_instance(id=token)
         
         try:
-            refund = sc.get_internal_service_gas(id=token)
+            refund = sc.get_container_gas(id=token)
             sc.purge_internal(id=token)
         except Exception as e:
             log.LOGGER('Error purging ' + token + ' ' + str(e))
@@ -464,7 +464,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
         log.LOGGER(f"Add gas to father {father_id}")
         
         if sc.container_exists(id=father_id):
-            _gas = sc.get_internal_service_gas(id=father_id)
+            _gas = sc.get_container_gas(id=father_id)
             _gas += abs(gas_amount)
             sc.update_gas_to_container(id=service_token, gas=_gas)
             
@@ -480,7 +480,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
         return True, '0 gas have no sense'
     
     if is_internal:
-        current_gas = sc.get_internal_service_gas(id=service_token)
+        current_gas = sc.get_container_gas(id=service_token)
         desired_amount = current_gas+gas_amount
         
         if desired_amount < 0:
