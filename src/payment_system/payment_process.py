@@ -12,7 +12,7 @@ from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_IN
 
 from protos import gateway_pb2_grpc, gateway_pb2
 
-from src.reputation_system.interface import update_reputation
+from src.reputation_system.interface import update_container_reputation, update_peer_reputation
 
 from src.manager.manager import get_client_id_on_other_peer, increase_local_gas_for_client
 from src.database.sql_connection import SQLConnection
@@ -106,9 +106,9 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                         contract_address=contract_address
                     )
                     _l.LOGGER(f"Payment processed. Deposit token: {deposit_token}")
-                    if contract_address and ledger:
-                        update_reputation(token=contract_address, amount=10)  # TODO On envs.
-                        update_reputation(token=ledger, amount=1)  # TODO On envs.
+                    # if contract_address and ledger:
+                        # update_reputation(=contract_address, amount=10)  # TODO On envs.
+                        # update_reputation(=ledger, amount=1)  # TODO On envs.
                 except DoubleSpendingAttempt as e:
                     _l.LOGGER(str(e))
                     # Internally, the exception updates the wait time to retry the ledger. 
@@ -128,18 +128,18 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                                 auxiliar_contract_address_reputation[contract_address] = datetime.now()
                             auxiliar_contract_address_reputation[contract_address] += timedelta(seconds=600)  # Adds 10 minutes.
 
-                    if contract_address and ledger:
-                        update_reputation(token=contract_address, amount=-100)  # TODO On envs.
-                        update_reputation(token=ledger, amount=-10)  # TODO On envs.
+                    # if contract_address and ledger:
+                        # update_reputation(=contract_address, amount=-100)  # TODO On envs.
+                        # update_reputation(=ledger, amount=-10)  # TODO On envs.
                     continue
 
 
                 # Handle communication attempts to peer
                 if __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
-                    update_reputation(token=peer_id, amount=10)  # TODO On envs.
+                    update_peer_reputation(peer_id=peer_id, amount=10)  # TODO On envs.
                     return True
                 _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
-                update_reputation(token=peer_id, amount=-100)  # TODO On envs.
+                update_peer_reputation(peer_id=peer_id, amount=-100)  # TODO On envs.
 
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
         except Exception as e:
@@ -172,7 +172,7 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
             _l.LOGGER(f"Payment of {amount} to {peer_id} communicated successfully.")
             return True
         except Exception as e:
-            update_reputation(token=peer_id, amount=-1)  # TODO On envs.
+            update_container_reputation(container_id=peer_id, amount=-1)  # TODO On envs.
             attempt += 1
             _l.LOGGER(f"Communication attempt {attempt} failed: {str(e)}")
             if attempt >= COMMUNICATION_ATTEMPTS:

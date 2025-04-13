@@ -14,7 +14,7 @@ from src.manager.manager import prune_container, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import increase_deposit_on_peer, init_interfaces
-from src.reputation_system.interface import update_reputation, submit_reputation
+from src.reputation_system.interface import update_container_reputation, submit_reputation
 from src.utils import logger as log
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
@@ -103,7 +103,7 @@ def check_wanted_services():
 
 def maintain_containers(debug_mode: bool=False):
     def remove_and_penalize_container(container_id):
-        update_reputation(token=container_id, amount=-100)
+        update_container_reputation(container_id=container_id, amount=-100)
         log.LOGGER(f"Prunning container {container_id} from the registry because the docker container does not exist.")
         try:
             prune_container(token=container_id)
@@ -131,14 +131,14 @@ def maintain_containers(debug_mode: bool=False):
         
         if not spend_gas(id=container_id, gas_to_spend=gas_cost):
             try:
-                update_reputation(token=container_id, amount=-10)  # TODO Needs to update the reputation of the service, not the instance. 
+                update_container_reputation(container_id=container_id, amount=-10)
                 log.LOGGER(f"Pruning container {container_id} due to insufficient gas.")
                 prune_container(token=container_id)
             except Exception as e:
                 log.LOGGER(f'Error purging {container_id}: {str(e)}')
                 raise Exception(f'Error purging {container_id}: {str(e)}')
         else:
-            update_reputation(token=container_id, amount=10)
+            update_container_reputation(container_id=container_id, amount=10)
             if debug_mode: log.LOGGER(f"Updated reputation for {container_id} due to successful maintenance.")
 
 
