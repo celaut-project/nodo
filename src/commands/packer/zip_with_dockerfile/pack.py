@@ -42,7 +42,6 @@ def __spinner(event):
 
         time.sleep(0.1)  # Adjust speed of spinner
 
-    sys.stdout.write('\rProcess complete!   \n')  # Clear spinner after done
     sys.stdout.flush()
 
 
@@ -88,6 +87,9 @@ def __on_peer(peer: str, service_zip_dir: str) -> str:
             else:
                 raise Exception('\nError with the packer output:' + str(b))
 
+    except Exception as e:
+        raise e
+
     finally:
         # Stop the spinner when the process completes
         stop_event.set()
@@ -132,17 +134,19 @@ def pack(directory: str) -> str:
         if not ip or not port:
             ip, port = 'localhost', GATEWAY_PORT
         _id = __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
+        
+        if not _id: 
+            _msg = f"Any id for {directory}"
+            print(_msg) 
+            raise Exception(_msg)
     
     except Exception as e:
         print(f"Excepton packing {directory}: {e}")
+        
     finally:
         # __remove_path(service_zip_dir)
         
         if is_remote: 
             __remove_path(directory)
 
-    if not _id: 
-        _msg = f"Any id for {directory}"
-        print(_msg) 
-        raise Exception(_msg)
     return _id
