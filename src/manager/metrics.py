@@ -51,7 +51,7 @@ def __get_metrics_internal(id: str) -> gateway_pb2.Metrics:
     :raises KeyError: If the provided token does not exist in the cached data.
     """
     return gateway_pb2.Metrics(
-        gas_amount=to_gas_amount(sc.get_internal_service_gas(id=id)),
+        gas_amount=to_gas_amount(sc.get_container_gas(id=id)),
     )
 
 

@@ -299,7 +299,7 @@ class SQLConnection(metaclass=Singleton):
 
     def add_internal_service(self, father_id: str, container_ip: str, container_id: str, gas: int, serialized_instance: str,):
         """
-        Adds an internal service to the database.
+        Adds an internal container to the database.
 
         Args:
             father_id (str): The father ID.
@@ -318,10 +318,10 @@ class SQLConnection(metaclass=Singleton):
 
     def update_sys_req(self, id: str, mem_limit: Optional[int]) -> bool:
         """
-        Updates system requirements for an internal service.
+        Updates system requirements for an internal container.
 
         Args:
-            id (str): The id of the internal service.
+            id (str): The id of the internal container.
             mem_limit (Optional[int]): The new memory limit.
 
         Returns:
@@ -337,10 +337,10 @@ class SQLConnection(metaclass=Singleton):
 
     def get_sys_req(self, id: str) -> dict:
         """
-        Retrieves system requirements for an internal service.
+        Retrieves system requirements for an internal container.
 
         Args:
-            id (str): The id of the internal service.
+            id (str): The id of the internal container.
 
         Returns:
             dict: A dictionary containing the system requirements.
@@ -353,12 +353,12 @@ class SQLConnection(metaclass=Singleton):
             return row
         raise Exception(f'Internal service {id}')
 
-    def get_internal_service_gas(self, id: str) -> int:
+    def get_container_gas(self, id: str) -> int:
         """
-        Retrieves the gas amount for an internal service.
+        Retrieves the gas amount for an internal container.
 
         Args:
-            id (str): The id of the internal service.
+            id (str): The id of the internal container.
 
         Returns:
             int: The gas amount.
@@ -371,9 +371,9 @@ class SQLConnection(metaclass=Singleton):
             return row['gas_mantissa'] * (10 ** row['gas_exponent'])
         raise Exception(f'Internal service {id}')
 
-    def get_all_internal_service_ids(self) -> List[str]:
+    def get_all_internal_containers_ids(self) -> List[str]:
         """
-        Fetches all ids of internal services.
+        Fetches all ids of internal containers.
 
         Returns:
             List[str]: A list of ids.
@@ -416,10 +416,10 @@ class SQLConnection(metaclass=Singleton):
 
     def purge_internal(self, id: str):
         """
-        Purges an internal service
+        Purges an internal container
 
         Args:
-            id (str): The id of the internal service.
+            id (str): The id of the internal container.
 
         """
         self._execute('''
@@ -428,13 +428,13 @@ class SQLConnection(metaclass=Singleton):
 
     def get_internal_father_id(self, id: str) -> str:
         """
-        Retrieves the father_id of an internal service.
+        Retrieves the father_id of an internal container.
 
         Args:
-            id (str): The id of the internal service.
+            id (str): The id of the internal container.
 
         Returns:
-            str: The father_id of the internal service, or an empty string if not found.
+            str: The father_id of the internal container, or an empty string if not found.
         """
         cursor = self._execute('''
             SELECT father_id
@@ -446,13 +446,13 @@ class SQLConnection(metaclass=Singleton):
 
     def get_internal_instance(self, id: str) -> Optional[str]:
         """
-        Retrieves the serialized_instance of an internal service.
+        Retrieves the serialized_instance of an internal container.
 
         Args:
-            id (str): The id of the internal service.
+            id (str): The id of the internal container.
 
         Returns:
-            str: The serialized_instance of the internal service, or None if not found.
+            str: The serialized_instance of the internal container, or None if not found.
         """
         cursor = self._execute('''
             SELECT serialized_instance
@@ -464,13 +464,13 @@ class SQLConnection(metaclass=Singleton):
 
     def get_internal_ip(self, id: str) -> Optional[str]:
         """
-        Retrieves the IP address of an internal service.
+        Retrieves the IP address of an internal container.
 
         Args:
-            id (str): The id of the internal service.
+            id (str): The id of the internal container.
 
         Returns:
-            Optional[str]: The IP address of the internal service, or None if not found.
+            Optional[str]: The IP address of the internal container, or None if not found.
         """
         cursor = self._execute('''
             SELECT ip
@@ -1071,13 +1071,13 @@ class SQLConnection(metaclass=Singleton):
 
     def get_external_father_id(self, token: str) -> str:
         """
-        Retrieves the father_id of an external service based on the token.
+        Retrieves the father_id of an external container based on the token.
 
         Args:
-            token (str): The token of the external service.
+            token (str): The token of the external container.
 
         Returns:
-            str: The father_id of the external service, or an empty string if not found.
+            str: The father_id of the external container, or an empty string if not found.
         """
         cursor = self._execute('''
             SELECT client_id
@@ -1089,13 +1089,13 @@ class SQLConnection(metaclass=Singleton):
 
     def get_external_instance(self, token: str) -> Optional[str]:
         """
-        Retrieves the serialized_service of an external service based on the token.
+        Retrieves the serialized_service of an external container based on the token.
 
         Args:
-            token (str): The token of the external service.
+            token (str): The token of the external container.
 
         Returns:
-            str: The serialized_service of the external service, or None if not found.
+            str: The serialized_service of the external container, or None if not found.
         """
         cursor = self._execute('''
             SELECT serialized_service
@@ -1178,9 +1178,9 @@ class SQLConnection(metaclass=Singleton):
         self._execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
                     (ip, port, slot_id))
 
-    def add_external_service(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str):
+    def add_external_container(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str):
         """
-        Adds an external service to the database.
+        Adds an external container to the database.
 
         Args:
             client_id (str): The client ID.
@@ -1196,10 +1196,10 @@ class SQLConnection(metaclass=Singleton):
 
     def get_token_by_hashed_token(self, hashed_token: str) -> Optional[str]:
         """
-        Retrieves the token associated with a given hashed token for an external service.
+        Retrieves the token associated with a given hashed token for an external container.
 
         Args:
-            hashed_token (str): The hashed token of the external service.
+            hashed_token (str): The hashed token of the external container.
 
         Returns:
             Optional[str]: The token if it exists, or None if not found.
@@ -1213,15 +1213,15 @@ class SQLConnection(metaclass=Singleton):
                 return row['token']
             return None
         except sqlite3.Error as e:
-            logger.LOGGER(f'Failed to retrieve token for hashed external service token {hashed_token}: {e}')
+            logger.LOGGER(f'Failed to retrieve token for hashed external container token {hashed_token}: {e}')
             return None
 
     def get_peer_id_by_external_service(self, token: str) -> Optional[str]:
         """
-        Retrieves the peer id where the external service was requested.
+        Retrieves the peer id where the external container was requested.
 
         Args:
-            token (str): The token of the external service.
+            token (str): The token of the external container.
 
         Returns:
             Optional[str]: The peer id if it exists, or None if not found.
@@ -1235,17 +1235,17 @@ class SQLConnection(metaclass=Singleton):
                 return row['peer_id']
             return None
         except sqlite3.Error as e:
-            logger.LOGGER(f'Failed to retrieve peer_id for external service {token}: {e}')
+            logger.LOGGER(f'Failed to retrieve peer_id for external container {token}: {e}')
             return None
 
     def purge_external(self, agent_id: str, peer_id: str, his_token: str) -> int:
         """
-        Purges an external service and refunds gas.
+        Purges an external container and refunds gas.
 
         Args:
             agent_id (str): The agent ID.
             peer_id (str): The peer ID.
-            his_token (str): The token of the external service.
+            his_token (str): The token of the external container.
 
         Returns:
             int: The gas amount refunded.
@@ -1282,13 +1282,13 @@ class SQLConnection(metaclass=Singleton):
 
     def get_internal_service_id_by_uri(self, uri: str) -> Optional[str]:
         """
-        Retrieves the internal service id for a given URI.
+        Retrieves the internal container id for a given URI.
 
         Args:
             uri (str): The URI to look up.
 
         Returns:
-            str: The associated internal service id.
+            str: The associated internal container id.
         """
         result = self._execute('''
             SELECT id FROM internal_services WHERE ip = ?
@@ -1301,7 +1301,7 @@ class SQLConnection(metaclass=Singleton):
 
     def get_gas_amount_by_father_id(self, id: str) -> int:
         """
-        Retrieves the gas amount for a father ID, checking both clients and internal services.
+        Retrieves the gas amount for a father ID, checking both clients and internal containers.
 
         Args:
             id (str): The father ID.
@@ -1312,7 +1312,7 @@ class SQLConnection(metaclass=Singleton):
         if self.client_exists(client_id=id):
             return self.get_gas_amount_by_client_id(id=id)
         elif self.container_exists(id=id):
-            return self.get_internal_service_gas(id=id)
+            return self.get_container_gas(id=id)
         else:
             return int(DEFAULT_INTIAL_GAS_AMOUNT)
 
