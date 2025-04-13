@@ -18,6 +18,7 @@ def update_reputation(token: str, amount: int) -> Optional[str]:
     # For ledgers.
 
 def compute_reputation(peer_id) -> float:
+    # TODO Implement a TTL-based (Time-To-Live) caching mechanism.
     """
     As an initial implementation, the node will only consider its own observations.
     Therefore, it will not take into account the reputation assigned by other peers for each of the pairs it interacts with.
