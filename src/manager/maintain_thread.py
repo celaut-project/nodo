@@ -102,44 +102,44 @@ def check_wanted_services():
 
 
 def maintain_containers(debug_mode: bool=False):
-    def remove_and_penalize_container(id):
-        update_reputation(token=id, amount=-100)
-        log.LOGGER(f"Prunning container {id} from the registry because the docker container does not exist.")
+    def remove_and_penalize_container(container_id):
+        update_reputation(token=container_id, amount=-100)
+        log.LOGGER(f"Prunning container {container_id} from the registry because the docker container does not exist.")
         try:
-            prune_container(token=id)
+            prune_container(token=container_id)
         except Exception as e:
-            log.LOGGER(f"Error prunning container {id}: {e}")
+            log.LOGGER(f"Error prunning container {container_id}: {e}")
     
-    for id in sc.get_all_internal_containers_ids():
-        if debug_mode: log.LOGGER(f"Checking container: {id}")
+    for container_id in sc.get_all_internal_containers_ids():
+        if debug_mode: log.LOGGER(f"Checking container: {container_id}")
         try:
-            container = DOCKER_CLIENT().containers.get(id)   # TODO refactor with manager.__get_container_by_id()
-            if debug_mode: log.LOGGER(f"Container {id} status: {container.status}")
+            container = DOCKER_CLIENT().containers.get(container_id)   # TODO refactor with manager.__get_container_by_id()
+            if debug_mode: log.LOGGER(f"Container {container_id} status: {container.status}")
             if container.status == 'exited':
-                log.LOGGER(f"Container {id} has exited. Removing and penalizing.")
-                remove_and_penalize_container(id=id)
+                log.LOGGER(f"Container {container_id} has exited. Removing and penalizing.")
+                remove_and_penalize_container(container_id=container_id)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-            log.LOGGER(f"Error fetching container {id}: {str(e)}. Assuming it does not exist.")
-            remove_and_penalize_container(id=id)
+            log.LOGGER(f"Error fetching container {container_id}: {str(e)}. Assuming it does not exist.")
+            remove_and_penalize_container(container_id=container_id)
             
         gas_cost = compute_maintenance_cost(
             system_resources=celaut.Sysresources(
-                mem_limit=sc.get_sys_req(id=id)['mem_limit']
+                mem_limit=sc.get_sys_req(id=container_id)['mem_limit']
             )
         )
-        if debug_mode: log.LOGGER(f"Computed gas cost for {id}: {gas_cost}")
+        if debug_mode: log.LOGGER(f"Computed gas cost for {container_id}: {gas_cost}")
         
-        if not spend_gas(id=id, gas_to_spend=gas_cost):
+        if not spend_gas(id=container_id, gas_to_spend=gas_cost):
             try:
-                update_reputation(token=id, amount=-10)  # TODO Needs to update the reputation of the service, not the instance. 
-                log.LOGGER(f"Pruning container {id} due to insufficient gas.")
-                prune_container(token=id)
+                update_reputation(token=container_id, amount=-10)  # TODO Needs to update the reputation of the service, not the instance. 
+                log.LOGGER(f"Pruning container {container_id} due to insufficient gas.")
+                prune_container(token=container_id)
             except Exception as e:
-                log.LOGGER(f'Error purging {id}: {str(e)}')
-                raise Exception(f'Error purging {id}: {str(e)}')
+                log.LOGGER(f'Error purging {container_id}: {str(e)}')
+                raise Exception(f'Error purging {container_id}: {str(e)}')
         else:
-            update_reputation(token=id, amount=10)
-            if debug_mode: log.LOGGER(f"Updated reputation for {id} due to successful maintenance.")
+            update_reputation(token=container_id, amount=10)
+            if debug_mode: log.LOGGER(f"Updated reputation for {container_id} due to successful maintenance.")
 
 
 def maintain_clients():
