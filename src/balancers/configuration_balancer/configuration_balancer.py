@@ -45,7 +45,7 @@ def configuration_balancer(
         )
 
     if len(posible_clauses) == 0:
-        raise Exception("Any clause supported.")
+        raise Exception("Any configuration is supported.")
 
     return next(estimated_cost_sorter(
         estimated_costs=posible_clauses,
