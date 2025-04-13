@@ -60,6 +60,54 @@ def __build_cost(metadata: celaut.Metadata) -> int:
 
     return COST_OF_BUILD  # Default to return base build cost
 
+def __get_available_supply() -> float:
+    """
+    Calculates the available supply of system resources as a weighted score.
+    
+    Combines available CPU capacity, free memory, and free disk space into a 
+    single normalized supply metric (0-100 scale). Higher values indicate 
+    more available resources.
+    
+    Returns:
+        int: Available supply score (0 = no resources, 100 = fully free).
+    
+    Example:
+        >>> get_available_supply()
+        0.72  # System with 72% of resources available
+    """
+    try:
+        import psutil
+        
+        # Get CPU availability (100% - current usage)
+        cpu_available = max(0, 100 - psutil.cpu_percent(interval=0.1))
+        
+        # Get memory availability
+        mem = psutil.virtual_memory()
+        ram_available = (mem.available / mem.total) * 100  # Percentage
+        
+        # Get disk availability (using root partition)
+        disk = psutil.disk_usage('/')
+        disk_available = (disk.free / disk.total) * 100  # Percentage
+        
+        # Weighted combination TODO based on service system_resources
+        WEIGHTS = {
+            'cpu': 0.4,    # 40% weight to CPU
+            'ram': 0.4,     # 40% to RAM
+            'disk': 0.2     # 20% to disk
+        }
+        
+        # Calculate weighted supply score
+        supply_score = sum([
+            (cpu_available * WEIGHTS['cpu']),
+            (ram_available * WEIGHTS['ram']),
+            (disk_available * WEIGHTS['disk'])
+        ]) / 100
+        
+        return int(max(0, min(1, supply_score)))  # Clamp to 0-1
+        
+    except Exception as e:
+        print(f"Error calculating system supply: {str(e)}")
+        return 0  # Fallback value
 
 def __execution_cost(metadata: celaut.Metadata) -> int:
     """
@@ -82,7 +130,7 @@ def __execution_cost(metadata: celaut.Metadata) -> int:
     log.LOGGER('Get execution cost')
     try:
         return sum([
-            len(DOCKER_CLIENT().containers.list()) * COMPUTE_POWER_RATE,
+            __get_available_supply() * COMPUTE_POWER_RATE,
             __build_cost(metadata=metadata),
             EXECUTION_BENEFIT
         ])
