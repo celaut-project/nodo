@@ -27,20 +27,33 @@ def configuration_balancer(
         if not could_ve_this_sysreq(clause.max_sysreq):
             continue
 
+        # Calculate estimated cost for local execution.
         posible_clauses['local'] = gateway_pb2.EstimatedCost(
+            
+            # Initial cost.
             cost=to_gas_amount(compute_start_service_cost(
                 metadata=metadata,
                 initial_gas_amount=initial_gas_amount,
                 resource=clause
             )),
+            
+            # Minimal maintenance cost.
             min_maintenance_cost=to_gas_amount(compute_maintenance_cost(
                 system_resources=clause.min_sysreq
             )) if clause.HasField('min_sysreq') else to_gas_amount(gas_amount=0),
+            
+            # Maximum maintenance cost.
             max_maintenance_cost=to_gas_amount(compute_maintenance_cost(
                 system_resources=clause.max_sysreq
             )) if clause.HasField('max_sysreq') else to_gas_amount(gas_amount=0),
+            
+            # Maintenance frecuency in seconds.
             maintenance_seconds_loop=MANAGER_ITERATION_TIME,
+            
+            # Variance of the three costs.
             variance=0,  # TODO compute_variance
+            
+            # Index.
             comb_resource_selected=_i
         )
 
