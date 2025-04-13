@@ -60,56 +60,71 @@ def __build_cost(metadata: celaut.Metadata) -> int:
 
     return COST_OF_BUILD  # Default to return base build cost
 
-def __get_available_supply() -> float:
+def __get_available_supply(system_resources: celaut.Sysresources) -> float:
     """
-    Calculates the available supply of system resources as a weighted score.
+    Calculates available resource supply score weighted by service requirements.
     
-    Combines available CPU capacity, free memory, and free disk space into a 
-    single normalized supply metric (0-100 scale). Higher values indicate 
-    more available resources.
+    Dynamically adjusts CPU/RAM/disk weights based on the service's resource demands
+    relative to total system capacity. Returns a normalized score (0.0-1.0) where
+    1.0 = ideal for this service, 0.0 = insufficient resources.
     
+    Args:
+        system_resources: The service's required system resources (cpu/mem/disk)
+        
     Returns:
-        int: Available supply score (0 = no resources, 100 = fully free).
-    
-    Example:
-        >>> get_available_supply()
-        0.72  # System with 72% of resources available
+        float: Availability score between 0.0 (no resources) and 1.0 (ideal)
     """
     try:
         import psutil
-        
-        # Get CPU availability (100% - current usage)
-        cpu_available = max(0, 100 - psutil.cpu_percent(interval=0.1))
-        
-        # Get memory availability
-        mem = psutil.virtual_memory()
-        ram_available = (mem.available / mem.total) * 100  # Percentage
-        
-        # Get disk availability (using root partition)
-        disk = psutil.disk_usage('/')
-        disk_available = (disk.free / disk.total) * 100  # Percentage
-        
-        # Weighted combination TODO based on service system_resources
-        WEIGHTS = {
-            'cpu': 0.4,    # 40% weight to CPU
-            'ram': 0.4,     # 40% to RAM
-            'disk': 0.2     # 20% to disk
-        }
-        
-        # Calculate weighted supply score
-        supply_score = sum([
-            (cpu_available * WEIGHTS['cpu']),
-            (ram_available * WEIGHTS['ram']),
-            (disk_available * WEIGHTS['disk'])
-        ]) / 100
-        
-        return int(max(0, min(1, supply_score)))  # Clamp to 0-1
-        
-    except Exception as e:
-        print(f"Error calculating system supply: {str(e)}")
-        return 0  # Fallback value
 
-def __execution_cost(metadata: celaut.Metadata) -> int:
+        # Get service requirements
+        service_cpu = system_resources.cpu_limit  # Assuming CPU in cores
+        service_mem = system_resources.mem_limit  # In bytes
+        service_disk = system_resources.disk_limit  # In bytes
+
+        # Get system's total capacity
+        system_cpu = psutil.cpu_count(logical=False)  # Physical cores
+        system_mem = psutil.virtual_memory().total
+        system_disk = psutil.disk_usage('/').total
+
+        # Calculate resource demand ratios (service req / system total)
+        demand_ratios = {
+            'cpu': service_cpu / system_cpu if system_cpu else 0,
+            'mem': service_mem / system_mem if system_mem else 0,
+            'disk': service_disk / system_disk if system_disk else 0
+        }
+
+        # Calculate dynamic weights based on relative demand
+        total_demand = sum(demand_ratios.values())
+        if total_demand == 0:
+            # Default equal weights if no significant demand
+            weights = {'cpu': 0.35, 'mem': 0.35, 'disk': 0.3}
+        else:
+            weights = {k: v/total_demand for k,v in demand_ratios.items()}
+
+        # Calculate current resource availability
+        current_available = {
+            'cpu': max(0, 100 - psutil.cpu_percent(interval=0.1)),
+            'mem': (psutil.virtual_memory().available / system_mem) * 100,
+            'disk': (psutil.disk_usage('/').free / system_disk) * 100
+        }
+
+        # Calculate weighted availability score
+        weighted_sum = sum(
+            current_available[res] * weight 
+            for res, weight in weights.items()
+        )
+        
+        log.LOGGER(f"Available compute power of {weighted_sum}%")
+        
+        # Normalize and clamp to 0-1 range
+        return max(0.0, min(weighted_sum / 100, 1.0))
+
+    except Exception as e:
+        log.LOGGER(f"Resource supply calculation error: {str(e)}")
+        return 0.0
+
+def __execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresources) -> int:
     """
     Calculates the execution cost for running a service instance.
     
@@ -130,7 +145,7 @@ def __execution_cost(metadata: celaut.Metadata) -> int:
     log.LOGGER('Get execution cost')
     try:
         return sum([
-            __get_available_supply() * COMPUTE_POWER_RATE,
+            (1 - __get_available_supply(system_resources=system_resources)) * COMPUTE_POWER_RATE,
             __build_cost(metadata=metadata),
             EXECUTION_BENEFIT
         ])
@@ -162,7 +177,8 @@ def compute_start_service_cost(
     """
     return int(sum([
         __execution_cost(
-            metadata=metadata
+            metadata=metadata,
+            system_resources=resource.min_sysreq
         ) * GAS_COST_FACTOR,
         initial_gas_amount,
         compute_maintenance_cost(system_resources=resource.min_sysreq)
