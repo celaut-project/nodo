@@ -90,10 +90,14 @@ else
   cd "$TARGET_DIR" || { printf "Error: Failed to change directory to $TARGET_DIR.\n" >&2; exit 1; }
 fi
 
-if [ "$(uname -m)" = "armv7l" ]; then
+if [ "$(uname -m)" = "arm64" ]; then
   SETUP_SCRIPT="bash/setup_ubuntu_arm.sh"
-else
+
+else if [ "$(uname -m)" = "x86_64" ]; then
   SETUP_SCRIPT="bash/setup_ubuntu_x86.sh"
+
+else
+  exit
 fi
 
 chmod +x "$SETUP_SCRIPT"
