@@ -63,8 +63,6 @@ def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
     protocol_stack: bytes = peer.instance.api.slot[0].SerializeToString()
 
     sc.add_peer(peer_id=peer_id, protocol_stack=protocol_stack)
-    
-    print("Added peer")  # Debug only, must be deleted.
 
     # Slots
     for slot in peer.instance.uri_slot:
