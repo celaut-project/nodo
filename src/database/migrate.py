@@ -27,6 +27,7 @@ def connect_to_database(db_file):
 
 def create_tables(cursor):
     """Create tables in the SQLite database."""
+    # Know that the protocol_stack on the peer table it's a Service.Api.Slot
     tables = {
         "peer": '''
             CREATE TABLE IF NOT EXISTS peer (
