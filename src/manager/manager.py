@@ -60,7 +60,7 @@ def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
     log.LOGGER('Inserting instance on db: ' + str(parsed_instance))
 
     peer_id = str(uuid.uuid4())
-    protocol_stack: bytes = peer.instance.api.slot.SerializeToString()
+    protocol_stack: bytes = peer.instance.api.slot[0].protocol_stack.SerializeToString()
 
     sc.add_peer(peer_id=peer_id, protocol_stack=protocol_stack)
 
