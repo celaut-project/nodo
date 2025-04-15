@@ -600,7 +600,9 @@ class SQLConnection(metaclass=Singleton):
 
                     # Set protocol stack if available
                     if row['protocol_stack']:
-                        instance.api.protocol_stack.ParseFromString(row['protocol_stack'])
+                        slot = celaut_pb2.Api.Slot()
+                        slot.ParseFromString(row['protocol_stack'])
+                        instance.api.slot.append(slot)
 
                     # Store in the dict
                     peers_dict[peer_id] = {
