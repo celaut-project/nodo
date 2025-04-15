@@ -883,7 +883,7 @@ class SQLConnection(metaclass=Singleton):
                     INSERT INTO peer (id, protocol_stack, client_id, gas_mantissa, gas_exponent)
                     VALUES (?, ?, '', 0, 0)  -- Initialize with empty client_id and 0 gas
                 ''', (peer_id, protocol_stack))
-                logger.LOGGER(f'Peer {peer_id} added without client_id')
+                logger.LOGGER(f'Peer {peer_id} added')
                 return True
             except sqlite3.Error as e:
                 logger.LOGGER(f'Failed to add peer {peer_id}: {e}')
