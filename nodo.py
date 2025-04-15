@@ -174,14 +174,14 @@ if __name__ == '__main__':
 
                 print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}", flush=True)
 
+                reputation_proof_id = env_manager.get_env('REPUTATION_PROOF_ID') # TODO ?? if validate_reputation_proof_ownership() else ""
+                
                 try:
                     payment_info = print_payment_info()
                 except Exception as e:
                     log.LOGGER(f"Error getting payment info and reputation proof {e}.")
                     payment_info = "N/A"
-                    
-                reputation_proof_id = env_manager.get_env('REPUTATION_PROOF_ID') if validate_reputation_proof_ownership() else ""
-
+                
                 print(f"Reputation Proof ID: {reputation_proof_id or 'N/A'} \n{payment_info}", flush=True)
                 
                 # dev_client = SQLConnection().get_dev_clients()[0]
