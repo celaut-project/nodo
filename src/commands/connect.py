@@ -22,17 +22,19 @@ def connect(peer: str):
         return
 
     try:
-        # Call the appropriate function to insert the instance into the SQLite database
-        add_peer_instance(
-            next(client(
+        peer_info = next(client(
                 method=gateway_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(peer)
                 ).GetPeerInfo,
                 indices_parser=gateway_pb2.Peer,
                 partitions_message_mode_parser=True
             ))
-        )
-        print('\nAdded peer', peer)
+        
+        peer_id = add_peer_instance(peer_info)
+        if not peer_id:
+            print("Failed to add a peer.")
+            
+        print(f'Added peer {peer} with id {peer_id}')
         
         if SEND_INSTANCE:
             print(f'Sending instance to peer: {peer}')

@@ -62,7 +62,8 @@ def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
     peer_id = str(uuid.uuid4())
     protocol_stack: bytes = peer.instance.api.slot[0].SerializeToString()
 
-    sc.add_peer(peer_id=peer_id, protocol_stack=protocol_stack)
+    if not sc.add_peer(peer_id=peer_id, protocol_stack=protocol_stack):
+        return None
 
     # Slots
     for slot in peer.instance.uri_slot:
@@ -73,7 +74,8 @@ def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
     for contract_ledger in peer.reputation_proofs:
-        add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
+        if not add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id):
+            continue
 
     log.LOGGER(f'Get instance for peer -> {peer_id}')
     return peer_id
@@ -92,7 +94,8 @@ def update_peer_instance(peer: gateway_pb2.Peer, peer_id: str):
         sc.add_contract(contract=contract_ledger, peer_id=peer_id)
 
     for contract_ledger in peer.reputation_proofs:
-        add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
+        if not add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id):
+            continue
 
     log.LOGGER(f"Peer {peer_id} updated.")
 
