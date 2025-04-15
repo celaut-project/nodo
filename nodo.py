@@ -162,7 +162,6 @@ if __name__ == '__main__':
         match sys.argv[1]:
 
             case "info":
-                from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
                 
                 try:
                     status = "running" if is_nodo_service_running() else "not running"
@@ -174,7 +173,7 @@ if __name__ == '__main__':
 
                 print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}", flush=True)
 
-                reputation_proof_id = env_manager.get_env('REPUTATION_PROOF_ID') # TODO ?? if validate_reputation_proof_ownership() else ""
+                reputation_proof_id = env_manager.get_env('REPUTATION_PROOF_ID')
                 
                 try:
                     payment_info = print_payment_info()
