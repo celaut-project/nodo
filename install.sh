@@ -92,12 +92,10 @@ fi
 
 if [ "$(uname -m)" = "arm64" ]; then
   SETUP_SCRIPT="bash/setup_ubuntu_arm.sh"
-
-else if [ "$(uname -m)" = "x86_64" ]; then
+elif [ "$(uname -m)" = "x86_64" ]; then
   SETUP_SCRIPT="bash/setup_ubuntu_x86.sh"
-
 else
-  exit
+  exit 1
 fi
 
 chmod +x "$SETUP_SCRIPT"
