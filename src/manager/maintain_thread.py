@@ -36,69 +36,72 @@ METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 
 sc = SQLConnection()
 
-"""
-It doesn't make sense to store this on disk (DB), as each of the elements in the list (str, bool)
-requires a search in the pairs to obtain a complete service.
-Therefore, the bottleneck is in the number of operations rather than the cost of the object in memory.
-Thus, what would make sense, as a control against attacks, is a maximum number of elements in the list,
-so that if it 'fills up,' no more elements can enter, and they are not searched until requested again
-at some other time when there is space.
-"""
-wanted_services = {}  # str: bool
+# It doesn't make sense to store this on disk (DB), as each of the elements in the set requires a search in the pairs to obtain a complete service. Therefore, the bottleneck is in the number of operations rather than the cost of the object in memory. Thus, what would make sense, as a control against attacks, is a maximum number of elements in the list, so that if it 'fills up,' no more elements can enter, and they are not searched until requested again at some other time when there is space.
 
+# The mechanism uses two in-memory sets to manage service retrieval requests. The primary set, wanted_services, holds new service IDs to be fetched immediately, while the secondary set, wanted_services_retry, collects IDs that failed retrieval attempts so they can be retried later. This dual-set approach ensures that new requests are processed promptly while providing a controlled way to handle and periodically retry failed requests.
 
-def check_wanted_services():
-    for wanted in wanted_services.keys():  # TODO async
-        if not wanted_services[wanted]:
-            wanted_services[wanted] = True
-            log.LOGGER(f"Taking the service {wanted}")
-            _hash = gateway_pb2.celaut__pb2.Metadata.HashTag.Hash(
-                    type=SHA3_256_ID,
-                    value=bytes.fromhex(wanted)
-                )
-            for peer in peers_id_iterator():
-                """  TODO if get_service cost amount > 0
+wanted_services = set()
+wanted_services_retry = set()
 
-                if gas_amount_on_other_peer(
-                        peer_id=peer,
-                ) <= cost and not increase_deposit_on_peer(
-                    peer_id=peer,
-                    amount=cost
-                ):
-                    raise Exception(
-                        'Get service error increasing deposit on ' + peer + 'when it didn\'t have enough '
-                                                                               'gas.')
-                """
-                log.LOGGER(f"Using peer {peer}")
-                try:
-                    for b in beerpc.client_grpc(
-                            method=gateway_pb2_grpc.GatewayStub(
-                                grpc.insecure_channel(
-                                    next(generate_uris_by_peer_id(peer))
-                                )
-                            ).GetService,  # TODO An timeout should be implemented when requesting a service.
-                            indices_serializer=StartService_input_indices,
-                            indices_parser=StartService_input_indices,
-                            partitions_message_mode_parser=StartService_input_message_mode,
-                            input=_hash
-                    ):
-                        log.LOGGER(f"type of chunk -> {type(b)}")
-                        if  type(b) == beerpc.Dir:
-                            log.LOGGER(f"    type of dir {b.type}")
-                            
-                        if type(b) == gateway_pb2.celaut__pb2.Metadata:
-                            log.LOGGER("Store the metadata.")
-                            with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
-                                f.write(b.SerializeToString())
-                        elif type(b) == beerpc.Dir and b.type == gateway_pb2.celaut__pb2.Service:
-                            log.LOGGER(f"Store the service {b.dir}")
-                            os.system(f"mv {b.dir} {REGISTRY}{wanted}")
-                            
-                    del wanted_services[wanted]
-                    log.LOGGER(f"Wanted service {wanted} stored successfully.")
-                except Exception as e:
-                    log.LOGGER(f"Exception on peer {peer} getting a service. {str(e)}. Continue")
-                    wanted_services[wanted] = False
+def add_wanted(service_id: str):
+    if service_id not in wanted_services and service_id not in wanted_services_retry:
+        log.LOGGER(f"Store the service hash on the wanted services set {service_id}")
+        wanted_services.add(service_id)
+
+def check_wanted_service(wanted: str):
+    # Each execution of the function attempts to retrieve one of the services from the set. If the timeout is high or a large number of pairs are being processed, multiple calls might overlap if the function's execution time exceeds MANAGER_ITERATION_TIME; this is not an issue.
+    
+    _hash = gateway_pb2.celaut__pb2.Metadata.HashTag.Hash(
+            type=SHA3_256_ID,
+            value=bytes.fromhex(wanted)
+        )
+    for peer in peers_id_iterator():
+        """  TODO if get_service cost amount > 0
+
+        if gas_amount_on_other_peer(
+                peer_id=peer,
+        ) <= cost and not increase_deposit_on_peer(
+            peer_id=peer,
+            amount=cost
+        ):
+            raise Exception(
+                'Get service error increasing deposit on ' + peer + 'when it didn\'t have enough '
+                                                                        'gas.')
+        """
+        log.LOGGER(f"Taking the service {wanted} using peer {peer}")
+        try:
+            for b in beerpc.client_grpc(
+                    method=gateway_pb2_grpc.GatewayStub(
+                        grpc.insecure_channel(
+                            next(generate_uris_by_peer_id(peer))
+                        )
+                    ).GetService,  # TODO An timeout should be implemented when requesting a service.
+                    indices_serializer=StartService_input_indices,
+                    indices_parser=StartService_input_indices,
+                    partitions_message_mode_parser=StartService_input_message_mode,
+                    input=_hash
+            ):
+                log.LOGGER(f"type of chunk -> {type(b)}")
+                if  type(b) == beerpc.Dir:
+                    log.LOGGER(f"    type of dir {b.type}")
+                    
+                if type(b) == gateway_pb2.celaut__pb2.Metadata:
+                    log.LOGGER("Store the metadata.")
+                    with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
+                        f.write(b.SerializeToString())
+                elif type(b) == beerpc.Dir and b.type == gateway_pb2.celaut__pb2.Service:
+                    log.LOGGER(f"Store the service {b.dir}")
+                    os.system(f"mv {b.dir} {REGISTRY}{wanted}")
+                    
+            log.LOGGER(f"Wanted service {wanted} stored successfully.")
+            break
+        
+        except Exception as e:
+            log.LOGGER(f"Exception on peer {peer} getting the service {wanted}. {str(e)}.")
+            continue
+    log.LOGGER(f"Any peer was able to get the service {wanted}. (maybe there are not peers available)")
+    wanted_services_retry.add(wanted)
+            
 
 
 def maintain_containers(debug_mode: bool=False):
@@ -218,9 +221,10 @@ def manager_thread():
             check_ergo_node_availability()
             submit_reputation()
             check_dev_clients()
+            check_wanted_service(wanted_services_retry.pop())
         
         # Functions to be executed every short interval
-        check_wanted_services()
+        check_wanted_service(wanted_services.pop())
         maintain_containers(debug_mode=False)
         maintain_clients()
         peer_deposits()

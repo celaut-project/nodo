@@ -10,7 +10,7 @@ from protos.gateway_pb2_bee import StartService_input_indices, \
 from src.gateway.utils import save_service
 from src.utils import logger as log
 from src.utils.env import SHA3_256_ID
-from src.manager.maintain_thread import wanted_services
+from src.manager.maintain_thread import add_wanted
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
@@ -163,6 +163,5 @@ class AbstractServiceIterable:
         pass
 
     def final(self):
-        if self.service_hash and not self.service_saved and self.service_hash not in wanted_services:
-            log.LOGGER(f"Store the service hash on the wanted_list {self.service_hash}.  On the list {wanted_services.keys()}")
-            wanted_services[self.service_hash] = False
+        if self.service_hash and not self.service_saved:
+            add_wanted(self.service_hash)
