@@ -71,6 +71,10 @@ def validate_contract_ledger(contract_ledger: celaut.ContractLedger, peer_id: st
         log(f"Contract ledger not compatible: {contract_ledger}")
         return False
     
+    if not contract_ledger.contract_addr:
+        log(f"Incomplete contract ledger, there is no address")
+        return False
+    
     # Generate a random message
     message = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
     log(f"Generated random message: {message}")
