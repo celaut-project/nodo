@@ -880,7 +880,7 @@ class SQLConnection(metaclass=Singleton):
         if not self.peer_exists(peer_id=peer_id):
             try:
                 self._execute('''
-                    INSERT INTO peer (id,, protocol_stack, client_id, gas_mantissa, gas_exponent)
+                    INSERT INTO peer (id, protocol_stack, client_id, gas_mantissa, gas_exponent)
                     VALUES (?, ?, '', 0, 0)  -- Initialize with empty client_id and 0 gas
                 ''', (peer_id, protocol_stack))
                 logger.LOGGER(f'Peer {peer_id} added without client_id')
