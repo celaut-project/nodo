@@ -1,185 +1,198 @@
-# Nodo: Guía de Usuario
+## Nodo: User Guide
 
-Esta guía está diseñada para ayudarte a comprender y utilizar los comandos disponibles en Nodo, una herramienta de orquestación de servicios para redes distribuidas. A continuación se muestra una lista completa de los comandos, junto con ejemplos de uso.
+This guide will help you understand and use the available commands in **Nodo**, a service orchestration tool for distributed networks. Below is a complete list of commands along with usage examples.
 
-## Comandos Básicos
+---
 
-Estos comandos son los más utilizados para tareas cotidianas:
+## Basic Commands
+
+These are the most commonly used commands for daily tasks:
 
 - **execute `<service id | service tag | '.celaut' file path>`**  
-  Ejecuta una instancia de servicio.  
-  **Ejemplo:**  
+  Launches a service instance.  
+  **Example:**  
   `nodo execute 1234567890abcdef`
 
 - **remove `<service id>`**  
-  Elimina un servicio del nodo utilizando su ID.  
-  **Ejemplo:**  
+  Removes a service from the node using its ID.  
+  **Example:**  
   `nodo remove 1234567890abcdef`
 
 - **stop `<instance id>`**  
-  Detiene una instancia de servicio utilizando su ID.  
-  **Ejemplo:**  
+  Stops a running service instance by ID.  
+  **Example:**  
   `nodo stop abcdef1234567890`
 
-- **increase_gas `<instance id> <gas to add>`**  
-  Aumenta la cantidad de gas asignado a una instancia.  
-  **Ejemplo:**  
+- **increase_gas `<instance id> <gas amount>`**  
+  Increases the allocated gas for a service instance.  
+  **Example:**  
   `nodo increase_gas abcdef1234567890 100`
 
-- **decrease_gas `<instance id> <gas to retire>`**  
-  Disminuye la cantidad de gas asignado a una instancia.  
-  **Ejemplo:**  
+- **decrease_gas `<instance id> <gas amount>`**  
+  Decreases the allocated gas for a service instance.  
+  **Example:**  
   `nodo decrease_gas abcdef1234567890 50`
 
 - **services**  
-  Muestra una lista de todos los servicios disponibles en el nodo.  
-  **Ejemplo:**  
+  Lists all available services on the node.  
+  **Example:**  
   `nodo services`
 
-- **connect `<ip:url>`**  
-  Conecta manualmente a un nodo par especificando la IP y el puerto.  
-  **Ejemplo:**  
+- **connect `<ip:port>`**  
+  Manually connects to a peer node.  
+  **Example:**  
   `nodo connect 192.168.1.10:4040`
 
 - **pack `<project directory>`**  
-  Empaqueta un proyecto para crear una especificación de servicio.  
-  **Ejemplo:**  
-  `nodo pack /ruta/al/proyecto`
+  Packages a project to create a service specification.  
+  **Example:**  
+  `nodo pack /path/to/project`
 
 - **config**  
-  Configura variables de entorno y otros ajustes relacionados con la operación de Nodo.  
-  **Ejemplo:**  
+  Opens environment and runtime configuration options.  
+  **Example:**  
   `nodo config`
 
 - **tui**  
-  Lanza la interfaz de usuario en terminal para visualizar y gestionar el nodo y sus servicios.  
-  **Ejemplo:**  
+  Launches the terminal user interface for monitoring and managing the node.  
+  **Example:**  
   `nodo tui`
 
 - **info**  
-  Muestra información sobre el estado del servicio, versión y configuración del nodo.  
-  **Ejemplo:**  
+  Displays service status, version, and configuration details.  
+  **Example:**  
   `nodo info`
 
 - **logs**  
-  Muestra los registros de la aplicación en tiempo real para monitoreo.  
-  **Ejemplo:**  
+  Shows real-time application logs for monitoring.  
+  **Example:**  
   `nodo logs`
 
 - **export `<service> <path>`**  
-  Exporta un servicio a la ruta especificada.  
-  **Ejemplo:**  
-  `nodo export MiServicio /ruta/de/exportacion`
+  Exports a service to a specified path.  
+  **Example:**  
+  `nodo export MyService /export/path`
 
 - **import `<path>`**  
-  Importa un servicio desde la ruta especificada.  
-  **Ejemplo:**  
-  `nodo import /ruta/del/servicio`
+  Imports a service from the specified path.  
+  **Example:**  
+  `nodo import /service/path`
 
-## Comandos Adicionales
+---
 
-Además de los comandos básicos, Nodo incluye otros comandos que permiten gestionar y explorar funcionalidades avanzadas:
+## Additional Commands
+
+These commands offer extended management and exploration features:
 
 - **service `<service id | tag>`**  
-  Muestra detalles o inspecciona un servicio específico.  
-  **Ejemplo:**  
+  Inspects details of a specific service.  
+  **Example:**  
   `nodo service 1234567890abcdef`
 
 - **tag `<service id | tag> <new tag>`**  
-  Modifica la etiqueta asociada a un servicio.  
-  **Ejemplo:**  
-  `nodo tag 1234567890abcdef nuevo_etiqueta`
+  Assigns or updates a tag for a service.  
+  **Example:**  
+  `nodo tag 1234567890abcdef new_tag`
 
 - **clients**  
-  Lista los clientes conectados al nodo.  
-  **Ejemplo:**  
+  Lists clients currently connected to the node.  
+  **Example:**  
   `nodo clients`
 
 - **peers**  
-  Muestra la lista de nodos pares (peers) conectados.  
-  **Ejemplo:**  
+  Displays the list of connected peer nodes.  
+  **Example:**  
   `nodo peers`
 
-## Comandos Avanzados
+---
 
-Estos comandos están destinados para entornos de desarrollo o mantenimiento avanzado:
+## Advanced Commands
+
+These are intended for development or advanced maintenance environments:
 
 - **update**  
-  Actualiza Nodo. Requiere privilegios de superusuario.  
-  **Ejemplo:**  
+  Updates Nodo (requires superuser privileges).  
+  **Example:**  
   `sudo nodo update`
 
 - **serve**  
-  Inicia el servicio de Nodo en modo de desarrollo. Si el servicio ya está corriendo en segundo plano, se notifica que no se puede iniciar nuevamente.  
-  **Ejemplo:**  
+  Starts Nodo in development mode. If already running in the background, an alert will be shown.  
+  **Example:**  
   `nodo serve`
 
 - **migrate**  
-  Actualiza el esquema de la base de datos.  
-  **Ejemplo:**  
+  Updates the database schema.  
+  **Example:**  
   `nodo migrate`
 
 - **storage:prune_blocks**  
-  Limpia el almacenamiento eliminando bloques innecesarios para reducir el uso de disco.  
-  **Ejemplo:**  
+  Cleans up storage by removing unnecessary blocks.  
+  **Example:**  
   `nodo storage:prune_blocks`
 
 - **test `<test name>`**  
-  Ejecuta pruebas específicas para servicios o funcionalidades.  
-  **Ejemplo:**  
-  `nodo test test_nombre`
+  Runs a specific test for a service or feature.  
+  **Example:**  
+  `nodo test test_name`
 
 - **rundev `<repository path>`**  
-  Ejecuta una versión de desarrollo del repositorio especificado.  
-  **Ejemplo:**  
-  `nodo rundev /ruta/al/repositorio`
+  Runs a development version of a specified repository.  
+  **Example:**  
+  `nodo rundev /path/to/repository`
 
 - **submit_reputation**  
-  Envía la información de reputación de forma forzada.  
-  **Ejemplo:**  
+  Forces the submission of reputation information.  
+  **Example:**  
   `nodo submit_reputation`
 
 - **refresh_ergo_nodes**  
-  Actualiza la lista de nodos Ergo, seleccionando uno para utilizarlo como proveedor.  
-  **Ejemplo:**  
+  Refreshes the Ergo nodes list and selects one as a provider.  
+  **Example:**  
   `nodo refresh_ergo_nodes`
 
 - **prune_containers**  
-  Elimina contenedores innecesarios. Requiere privilegios de superusuario.  
-  **Ejemplo:**  
+  Removes unused containers (requires superuser privileges).  
+  **Example:**  
   `sudo nodo prune_containers`
 
 - **daemon**  
-  Inicia Nodo en modo demonio para su ejecución en segundo plano.  
-  **Ejemplo:**  
+  Launches Nodo as a background daemon.  
+  **Example:**  
   `nodo daemon`
 
-## Nota Importante sobre la Gestión de Servicios
+---
 
-### Ejecución Automática mediante systemd
+## Important Notes on Service Management
 
-Si Nodo se instaló con privilegios de superusuario, se configura automáticamente como un servicio `systemd` para funcionar en segundo plano sin intervención manual.
+### Automatic Execution via systemd
 
-### Ejecución Manual en Desarrollo: nodo serve
+If Nodo was installed with superuser privileges, it will be automatically configured as a `systemd` service to run in the background.
 
-Utiliza el comando `nodo serve` para ejecutar el servicio de Nodo en entornos de desarrollo o cuando no se quiera utilizar el modo de servicio en segundo plano.
+### Manual Execution in Development Mode: `nodo serve`
 
-## Interfaz TUI
+Use `nodo serve` to run Nodo in a development environment or when you don’t want to use background service mode.
 
-La interfaz TUI (Terminal User Interface) ofrece una manera gráfica de monitorear y gestionar los nodos y servicios directamente desde la terminal. Algunas funciones incluyen:
+---
 
-- **Navegación:**  
-  - Flechas Izquierda/Derecha: Cambiar entre secciones.
-  - Flechas Arriba/Abajo: Moverse entre filas.
-- **Comandos Rápidos:**  
-  - `o` y `p`: Rotar vistas en una sección.
-  - `m`: Cambiar el layout de vista en bloque.
-  - `c`: Conectar directamente a un par.
+## Terminal User Interface (TUI)
 
-## Obteniendo Ayuda
+The TUI provides a graphical terminal-based interface for managing nodes and services. Key features:
 
-Para ver un resumen de todos los comandos disponibles, simplemente ejecuta:
+- **Navigation:**  
+  - Left/Right Arrows: Switch sections.  
+  - Up/Down Arrows: Move between items.
 
-```
+- **Quick Commands:**  
+  - `o` / `p`: Rotate views in a section.  
+  - `m`: Toggle block view layout.  
+  - `c`: Connect to a peer.
+
+---
+
+## Getting Help
+
+To view a summary of all available commands, simply run:
+
+```bash
 nodo
 ```
