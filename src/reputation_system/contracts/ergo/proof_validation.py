@@ -25,7 +25,7 @@ def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
     url = f"{ergo_node}/blockchain/box/unspent/byTokenId/{token_id}"
     params = {
         "offset": 0,
-        "limit": 100  # Adjust the limit as needed
+        "limit": 100
     }
     
     try:

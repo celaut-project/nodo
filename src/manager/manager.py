@@ -9,7 +9,7 @@ from google.protobuf.json_format import MessageToJson
 
 from src.manager.resources_manager import IOBigData
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
-from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger
+from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_reputation_contract_ledger
 
 from src.database.sql_connection import SQLConnection, _split_gas, is_peer_available
 
@@ -44,7 +44,7 @@ def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
             
 def add_reputation_proof(contract_ledger, peer_id) -> bool:
     # Verify contract and ledger compatibility and ownership
-    if not validate_contract_ledger(contract_ledger, peer_id):
+    if not validate_reputation_contract_ledger(contract_ledger, peer_id):
         log.LOGGER(f"Not supported reputation contract ledger {str(contract_ledger)}")
         return False
     
