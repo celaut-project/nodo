@@ -6,6 +6,7 @@ import jpype
 from enum import Enum
 from typing import List, TypedDict, Optional, Tuple
 
+from src.payment_system.contracts.ergo.interface import get_amount_by_addr
 from src.reputation_system.contracts.ergo.utils import get_public_key
 from src.reputation_system.envs import CONTRACT
 from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
@@ -237,10 +238,15 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
 def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
     try:
+        mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC')
+        if get_amount_by_addr(mnemonic=mnemonic) <= DEFAULT_FEE:
+            LOGGER("There are not enough nanoErgs to upload the reputation proof to the network.")
+            return False
+        
         LOGGER(f"Submitting reputation proof with {len(objects)} objects.")
         tx_id = __create_reputation_proof_tx(
             node_url=ERGO_NODE_URL(),
-            wallet_mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC'),
+            wallet_mnemonic=mnemonic,
             proof_id=env_manager.get_env('REPUTATION_PROOF_ID'),
             objects=objects,
         )

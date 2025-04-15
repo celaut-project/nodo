@@ -97,6 +97,8 @@ def __balance_total(address: Address) -> Optional[dict]:
     # Parse the response from the API
     return response.json()
 
+def get_amount_by_addr(mnemonic: str) -> int:
+    return __balance_total(__get_sender_addr(mnemonic=mnemonic))["confirmed"]["nanoErgs"]
 
 def get_ergo_info() -> Tuple[Tuple[str, float], Tuple[str, float]]:
     _addr = __get_sender_addr(ERGO_WALLET_MNEMONIC())
