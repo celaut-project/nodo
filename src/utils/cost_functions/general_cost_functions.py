@@ -121,7 +121,7 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         return max(0.0, min(weighted_sum / 100, 1.0))
 
     except Exception as e:
-        log.LOGGER(f"Resource supply calculation error: {str(e)}")
+        log.LOGGER(f"Resource supply calculation error: {str(e)}")  # TODO Resource supply calculation error: cpu_limit
         return 0.0
 
 def __execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresources) -> int:
