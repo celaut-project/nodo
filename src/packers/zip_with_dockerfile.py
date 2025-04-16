@@ -248,6 +248,8 @@ class ZipContainerPacker:
                     value=bytes_id
                 )]
             )
+            
+            #  TODO This should not be needed. It's validating itself. But actually seems to fail here.
             from hashlib import sha3_256
             validate_content = sha3_256()
             for i in grpcbb.read_multiblock_directory(directory=service_directory):
