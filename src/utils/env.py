@@ -218,7 +218,7 @@ env_manager.get_env("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME", pow(10, 3)
 
 # Miscellaneous Settings
 env_manager.get_env("COMPUTE_POWER_RATE", 2)
-env_manager.get_env("MIN_BUFFER_BLOCK_SIZE", 10 ** 5)
+env_manager.get_env("MIN_BUFFER_BLOCK_SIZE", 10 ** 7)
 env_manager.get_env("WEIGHT_CONFIGURATION_FACTOR", int(pow(10, 9)))
 env_manager.get_env("SOCIALIZATION_FACTOR", 2)
 env_manager.get_env("INIT_COST_CONFIGURATION_FACTOR", 1)
