@@ -104,9 +104,11 @@ def __on_peer(peer: str, service_zip_dir: str) -> str:
     try:
         for i in grpcbb.read_multiblock_directory(f"{REGISTRY}{_id}/"):
             validate_id.update(i)
-        print("validated service id -> ", validate_id.hexdigest())
+        print("Validated service id -> ", validate_id.hexdigest())
+        if validate_id.hexdigest() != _id:
+            print(f"the reason could be https://github.com/bee-rpc-protocol/bee-rpc/issues/7")
     except Exception as e:
-        print(f"Maybe it doesn't have blocks? validation will occurr into an error due to https://github.com/celaut-project/nodo/issues/38")
+        print(f"Maybe it doesn't have blocks? validation will occurr into an error due to https://github.com/celaut-project/nodo/issues/38 \n Actually throws an exception: {str(e)}.")
     
     return _id
 
