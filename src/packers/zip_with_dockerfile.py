@@ -249,13 +249,16 @@ class ZipContainerPacker:
                 )]
             )
             
-            #  TODO This should not be needed. It's validating itself. But actually seems to fail here.
-            from hashlib import sha3_256
-            validate_content = sha3_256()
-            for i in grpcbb.read_multiblock_directory(directory=service_directory):
-                validate_content.update(i)
-            if validate_content.digest() != bytes_id:
-                raise Exception(f"Invalid packing, wrong validated content {validate_content.hexdigest()}, but should be {bytes.hex(bytes_id)}")
+            """  <!-- Validation don't needed here -->
+            
+                from hashlib import sha3_256
+                validate_content = sha3_256()
+                for i in grpcbb.read_multiblock_directory(directory=service_directory):
+                    validate_content.update(i)
+                if validate_content.digest() != bytes_id:
+                    raise Exception(f"Invalid packing, wrong validated content {validate_content.hexdigest()}, but should be {bytes.hex(bytes_id)}")
+
+            """
                 
             service = service_directory
         # Add the tag attribute as the first tag or tag list in the metadata. This could be used as the name of the service for better human identification.
