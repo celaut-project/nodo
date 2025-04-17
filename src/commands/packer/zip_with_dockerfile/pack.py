@@ -104,9 +104,16 @@ def __on_peer(peer: str, service_zip_dir: str) -> str:
     try:
         for i in grpcbb.read_multiblock_directory(f"{REGISTRY}{_id}/"):
             validate_id.update(i)
-        print("Validated service id -> ", validate_id.hexdigest())
-        if validate_id.hexdigest() != _id:
-            print(f"the reason could be https://github.com/bee-rpc-protocol/bee-rpc/issues/7")
+            
+        if validate_id.hexdigest() == _id:
+            print("Service id validated correctly.")
+        else:
+            print(f"Service id validated correctly. \n (validated result: {validate_id.hexdigest()}) \n the reason could be https://github.com/bee-rpc-protocol/bee-rpc/issues/7")
+            
+        min_block_size = env_manager.get_env("MIN_BUFFER_BLOCK_SIZE")
+        if min_block_size < 10 **6:
+            print(f"\n\n ALERT!! It has been detected that a buffer size that is too small (actual is {min_block_size}) may cause errors when generating the compressed version of the service, even without affecting its identifier and with correct validation of it. \n https://github.com/bee-rpc-protocol/bee-rpc/issues/7#issuecomment-2814172903")
+            
     except Exception as e:
         print(f"Maybe it doesn't have blocks? validation will occurr into an error due to https://github.com/celaut-project/nodo/issues/38 \n Actually throws an exception: {str(e)}.")
     
