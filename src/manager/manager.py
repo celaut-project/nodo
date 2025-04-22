@@ -168,23 +168,28 @@ def spend_gas(
         gas_to_spend: int,
         refund_gas_function_container: list = None
 ) -> bool:
+    """
+    Attempts to deduct gas from a client or container.
+    Returns True if successful, False otherwise (with logging on failures).
+    """
     gas_to_spend = int(gas_to_spend)
     try:
-        # En caso de que sea un peer, el token es el client id.
+        # If the identifier corresponds to a client
         if sc.client_exists(client_id=id):
-            actual_gas = sc.get_client_gas(client_id=id)
-            
-            if not actual_gas: return False
-            actual_gas, last_usage, sci_not = actual_gas
-            
-            if actual_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
-                gas_to_send_mant, gas_to_send_exp = _split_gas(gas_to_spend)
-                
-                log.LOGGER(f"Insufficient amount of gas {sci_not} from {gas_to_send_mant}e{gas_to_send_exp}")
+            client_data = sc.get_client_gas(client_id=id)
+            if not client_data:
+                log.LOGGER(f"No gas record found for client '{id}'.")
                 return False
-            
+
+            actual_gas, last_usage, sci_not = client_data
+
+            if actual_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
+                mant, exp = _split_gas(gas_to_spend)
+                log.LOGGER(f"Insufficient gas for client '{id}': {sci_not} available, needed {mant}e{exp}.")
+                return False
+
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
-            
+
             __refund_gas_function_factory(
                 gas=gas_to_spend,
                 token=id,
@@ -193,30 +198,38 @@ def spend_gas(
             )
             return True
 
-        # En caso de que token_or_container_ip sea el token del contenedor.
+        # If the identifier corresponds to a container (by ID or URI)
         else:
-            # id could be the container id or container ip. So check first if it's an id. If not, check if it's an ip.
             is_id = sc.container_exists(id=id)
             if not is_id:
-                id = sc.get_internal_service_id_by_uri(uri=id)  #  TODO don't should check this at this point.
-                is_id = sc.container_exists(id=id) if id else False
+                resolved_id = sc.get_internal_service_id_by_uri(uri=id)
+                if not resolved_id:
+                    log.LOGGER(f"Container not found with ID or URI: '{id}'.")
+                    return False
+                id = resolved_id
+                is_id = sc.container_exists(id=id)
+                if not is_id:
+                    log.LOGGER(f"Resolved container ID '{id}' does not exist.")
+                    return False
 
-            if is_id:
-                current_gas = sc.get_container_gas(id=id)
-                if current_gas >= gas_to_spend or ALLOW_GAS_DEBT:
-                    sc.update_gas_to_container(id=id, gas=current_gas - gas_to_spend)
-                
-                    __refund_gas_function_factory(
-                        gas=current_gas,
-                        add_function=lambda gas: sc.update_gas_to_container(id=id, gas=gas),  # TODO control race conditions.
-                        token=id,
-                        container=refund_gas_function_container
-                    )
-                    return True
+            current_gas = sc.get_container_gas(id=id)
+            if current_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
+                log.LOGGER(f"Insufficient gas for container '{id}': {current_gas} available, needed {gas_to_spend}.")
+                return False
+
+            sc.update_gas_to_container(id=id, gas=current_gas - gas_to_spend)
+
+            __refund_gas_function_factory(
+                gas=gas_to_spend,
+                add_function=lambda gas: sc.update_gas_to_container(id=id, gas=gas),
+                token=id,
+                container=refund_gas_function_container
+            )
+            return True
 
     except Exception as e:
-        log.LOGGER('Manager error spending gas: ' + str(e))
-    return False
+        log.LOGGER(f"Manager error spending gas for '{id}': {e}")
+        return False
 
 
 def generate_client() -> gateway_pb2.Client:
