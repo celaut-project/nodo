@@ -1,3 +1,4 @@
+import psutil
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.virtualizers.docker import build
 from src.virtualizers.docker.architecture import check_supported_architecture, UnsupportedArchitectureException
@@ -75,53 +76,52 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         float: Availability score between 0.0 (no resources) and 1.0 (ideal)
     """
     try:
-        import psutil
-
-        # Get service requirements
-        service_cpu = system_resources.cpu_limit  # Assuming CPU in cores
-        service_mem = system_resources.mem_limit  # In bytes
-        service_disk = system_resources.disk_limit  # In bytes
+        # Get service requirements, defaulting to None if missing
+        service_cpu  = getattr(system_resources, 'cpu_limit',  None)
+        service_mem  = getattr(system_resources, 'mem_limit',  None)
+        service_disk = getattr(system_resources, 'disk_limit', None)
 
         # Get system's total capacity
-        system_cpu = psutil.cpu_count(logical=False)  # Physical cores
-        system_mem = psutil.virtual_memory().total
+        system_cpu  = psutil.cpu_count(logical=False) or 0
+        system_mem  = psutil.virtual_memory().total
         system_disk = psutil.disk_usage('/').total
 
-        # Calculate resource demand ratios (service req / system total)
-        demand_ratios = {
-            'cpu': service_cpu / system_cpu if system_cpu else 0,
-            'mem': service_mem / system_mem if system_mem else 0,
-            'disk': service_disk / system_disk if system_disk else 0
-        }
+        # Build demand_ratios only for the limits that exist
+        demand_ratios = {}
+        if service_cpu is not None and system_cpu:
+            demand_ratios['cpu'] = service_cpu / system_cpu
+        if service_mem is not None and system_mem:
+            demand_ratios['mem'] = service_mem / system_mem
+        if service_disk is not None and system_disk:
+            demand_ratios['disk'] = service_disk / system_disk
 
-        # Calculate dynamic weights based on relative demand
-        total_demand = sum(demand_ratios.values())
-        if total_demand == 0:
-            # Default equal weights if no significant demand
+        # If no demands specified, fall back to equal weights
+        resources = list(demand_ratios.keys())
+        if not resources:
             weights = {'cpu': 0.35, 'mem': 0.35, 'disk': 0.3}
         else:
-            weights = {k: v/total_demand for k,v in demand_ratios.items()}
+            total_demand = sum(demand_ratios.values())
+            weights = {res: demand_ratios[res] / total_demand for res in resources}
 
-        # Calculate current resource availability
-        current_available = {
-            'cpu': max(0, 100 - psutil.cpu_percent(interval=0.1)),
-            'mem': (psutil.virtual_memory().available / system_mem) * 100,
-            'disk': (psutil.disk_usage('/').free / system_disk) * 100
-        }
+        # Get current availability percentages
+        current = {}
+        if 'cpu' in weights:
+            current['cpu'] = max(0, 100 - psutil.cpu_percent(interval=0.1))
+        if 'mem' in weights:
+            current['mem'] = (psutil.virtual_memory().available / system_mem) * 100
+        if 'disk' in weights:
+            current['disk'] = (psutil.disk_usage('/').free / system_disk) * 100
 
-        # Calculate weighted availability score
-        weighted_sum = sum(
-            current_available[res] * weight 
-            for res, weight in weights.items()
-        )
-        
+        # Weighted sum of available resources
+        weighted_sum = sum(current[res] * weight for res, weight in weights.items())
+
         log.LOGGER(f"Available compute power of {weighted_sum}%")
-        
-        # Normalize and clamp to 0-1 range
+
+        # Normalize to 0–1
         return max(0.0, min(weighted_sum / 100, 1.0))
 
     except Exception as e:
-        log.LOGGER(f"Resource supply calculation error: {str(e)}")  # TODO Resource supply calculation error: cpu_limit
+        log.LOGGER(f"Resource supply calculation error: {e}")
         return 0.0
 
 def __execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresources) -> int:
