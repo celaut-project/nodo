@@ -130,6 +130,7 @@ if __name__ == '__main__':
             "\n- tag <service id|tag> <new tag>"
             "\n- clients"
             "\n- peers"
+            "\n- instances"
             "\n- connect <ip:url>"
             "\n- pack <project directory>"
             "\n- config"
@@ -319,6 +320,11 @@ if __name__ == '__main__':
             case "peers":
                 from src.commands.peers import list_peers
                 list_peers()
+
+            case "instances":
+                from src.commands.instances import list_instances
+                list_instances()
+
 
             case 'connect':
                 from src.commands.connect import connect
