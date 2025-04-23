@@ -25,8 +25,8 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: 
     try:
         client_id = next(clients)
     except Exception:
-        print("There is no dev client available")
-        exit
+        print("There is no dev client available.")
+        exit()
     print(f"Client obtained {str(client_id)}")
     try:
         

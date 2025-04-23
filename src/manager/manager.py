@@ -1,5 +1,5 @@
 import json
-import uuid
+from uuid import uuid4
 from typing import Optional, Generator, Protocol, Tuple
 
 import docker as docker_lib
@@ -33,12 +33,17 @@ DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
 USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get_env("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
 MEMSWAP_FACTOR = env_manager.get_env("MEMSWAP_FACTOR")
 FEE_TRIAL_GAS_AMOUNT = int(env_manager.get_env("FREE_TRIAL_GAS_AMOUNT"))
+DEV_CLIENT_GAS_AMOUNT = env_manager.get_env("DEV_CLIENT_GAS_AMOUNT")
 
 sc = SQLConnection()
 
 
 def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
-    for client_id in sc.get_dev_clients():
+    clients = sc.get_dev_clients()
+    if len(clients) == 0:
+        log.LOGGER("Adds dev client.")
+        sc.add_client(client_id=f"dev-{uuid4()}", gas=DEV_CLIENT_GAS_AMOUNT, last_usage=None)
+    for client_id in clients:
         if sc.get_client_gas(client_id=client_id)[0] > gas_amount:
             yield client_id
             
@@ -59,7 +64,7 @@ def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
     parsed_instance = json.loads(MessageToJson(peer))
     log.LOGGER('Inserting instance on db: ' + str(parsed_instance))
 
-    peer_id = str(uuid.uuid4())
+    peer_id = str(uuid4())
     protocol_stack: bytes = peer.instance.api.slot[0].SerializeToString()
 
     if not sc.add_peer(peer_id=peer_id, protocol_stack=protocol_stack):
@@ -234,7 +239,7 @@ def spend_gas(
 
 def generate_client() -> gateway_pb2.Client:
     # No collisions expected.
-    client_id = uuid.uuid4().hex
+    client_id = uuid4().hex
     sc.add_client(client_id=client_id, gas=FEE_TRIAL_GAS_AMOUNT, last_usage=None)
     log.LOGGER('New client created ' + client_id)
     return gateway_pb2.Client(
