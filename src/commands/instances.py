@@ -42,7 +42,7 @@ def list_instances(groupable: bool = False):
                 gas_str = f"{gm * (10 ** ge):.6e}"
                 instances.append({
                     'id': id_,
-                    'ip': ip or 'N/A',
+                    'ip': 'N/A',  # TODO Get the instance's uris from table.
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
                     'gas': gas_str,
@@ -59,7 +59,7 @@ def list_instances(groupable: bool = False):
                 parent_type = 'client' if client_id in client_ids else 'unknown'
                 instances.append({
                     'id': token,
-                    'ip': 'N/A',
+                    'ip': 'N/A',   # TODO Get the instance's uris from table.
                     'parent_id': client_id or 'None',
                     'parent_type': parent_type,
                     'gas': 'N/A',
