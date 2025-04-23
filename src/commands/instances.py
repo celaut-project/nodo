@@ -11,80 +11,87 @@ def list_instances():
       - ID
       - IP (if available)
       - Parent ID
+      - Parent type ('internal_service' or 'client')
       - Computed gas value (for internal; else 'N/A')
-      - Serialized instance data
-      - Location tag ('local' for internal or peer ID for external)
+      - Location: 'local' for internal or peer ID for external
     If a table does not exist, prints a warning.
     """
-    connection = sqlite3.connect(DATABASE_FILE)
-    cursor = connection.cursor()
+    conn = sqlite3.connect(DATABASE_FILE)
+    cursor = conn.cursor()
 
     instances = []
     try:
-        # Internal services
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='internal_services';"
-        )
+        # Load parent ID sets
+        cursor.execute("SELECT id FROM internal_services;")
+        internal_ids = {row[0] for row in cursor.fetchall()}
+        cursor.execute("SELECT id FROM clients;")
+        client_ids = {row[0] for row in cursor.fetchall()}
+
+        # Fetch internal services
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='internal_services';")
         if cursor.fetchone():
             cursor.execute(
-                '''
-                SELECT id, ip, father_id, gas_mantissa, gas_exponent, serialized_instance
-                FROM internal_services
-                '''
+                "SELECT id, ip, father_id, gas_mantissa, gas_exponent FROM internal_services"
             )
-            for id_, ip, father_id, gas_mantissa, gas_exponent, serialized in cursor.fetchall():
-                gas_value = gas_mantissa * (10 ** gas_exponent)
-                gas_str = f"{gas_value:.6e}"
+            for id_, ip, father_id, gm, ge in cursor.fetchall():
+                parent_type = (
+                    'local instance' if father_id in internal_ids else
+                    'client' if father_id in client_ids else
+                    'unknown'
+                )
+                gas_str = f"{gm * (10 ** ge):.6e}"
                 instances.append({
                     'id': id_,
-                    'ip': ip,
-                    'parent_id': father_id,
+                    'ip': ip or 'N/A',
+                    'parent_id': father_id or 'None',
+                    'parent_type': parent_type,
                     'gas': gas_str,
-                    'serialized': serialized,
                     'location': 'local'
                 })
         else:
-            print("Warning: The 'internal_services' table does not exist in the database.")
+            print("Warning: 'internal_services' table missing.")
 
-        # External services
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='external_services';"
-        )
-        if cursor.fetchone():
-            cursor.execute(
-                '''
-                SELECT token, NULL as ip, NULL as father_id, NULL as gas_mantissa, NULL as gas_exponent, serialized_instance, peer_id
-                FROM external_services
-                '''
-            )
-            for token, ip, father_id, gm, ge, serialized, peer_id in cursor.fetchall():
-                instances.append({
-                    'id': token,
-                    'ip': ip,
-                    'parent_id': father_id,
-                    'gas': 'N/A',
-                    'serialized': serialized,
-                    'location': peer_id
-                })
-        else:
-            print("Warning: The 'external_services' table does not exist in the database.")
-
-        print("Service Instances:\n")
-        if instances:
-            for inst in instances:
-                print(f"""
-ID: {inst['id']}
-IP: {inst['ip'] or 'N/A'}
-Parent ID: {inst['parent_id'] if inst['parent_id'] else 'None'}
-Gas: {inst['gas']}
-Serialized Instance: {inst['serialized']}
-Location: {inst['location']}
-                """
+        # Fetch external services
+        if False:  # TODO Check if there are needed more columns on external_services table.
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='external_services';")
+            if cursor.fetchone():
+                cursor.execute(
+                    "SELECT token, peer_id, client_id FROM external_services"
                 )
-        else:
+                for token, peer_id, client_id in cursor.fetchall():
+                    parent_type = (
+                        'client' if client_id in client_ids else
+                        'unknown'
+                    )
+                    instances.append({
+                        'id': token,
+                        'ip': 'N/A',
+                        'parent_id': client_id or 'None',
+                        'parent_type': parent_type,
+                        'gas': 'N/A',
+                        'location': peer_id or 'N/A'
+                    })
+            else:
+                print("Warning: 'external_services' table missing.")
+
+        # Unified listing
+        print("Service Instances:\n")
+        if not instances:
             print("No service instances found.")
+            return
+
+        for inst in instances:
+            print(f"""
+ID: {inst['id']}
+IP: {inst['ip']}
+Parent ID: {inst['parent_id']}
+Parent Type: {inst['parent_type']}
+Gas: {inst['gas']}
+Location: {inst['location']}
+"""
+            )
 
     except sqlite3.Error as e:
         print(f"An error occurred while listing instances: {e}")
     finally:
-        connection.close()
+        conn.close()
