@@ -1,5 +1,6 @@
 import sqlite3
 from src.utils.env import EnvManager
+from protos import celaut_pb2 as celaut
 
 env_manager = EnvManager()
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
@@ -26,14 +27,25 @@ def list_instances(groupable: bool = False):
         internal_ids = {row[0] for row in cursor.fetchall()}
         cursor.execute("SELECT id FROM clients;")
         client_ids = {row[0] for row in cursor.fetchall()}
-
+        
+        def get_http_ip(serialized_instance: str) -> str:
+            instance = celaut.Instance()
+            instance.ParseFromString(serialized_instance)
+            
+            s = ""
+            for _exp in instance.uri_slot:
+                for _uri in _exp.uri:
+                    s += f"\n  • {_uri.ip}:{_uri.port}  (#{_exp.internal_port})"
+                    
+            return s or "N/A"
+                    
         # Fetch internal services
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='internal_services';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT id, ip, father_id, gas_mantissa, gas_exponent FROM internal_services"
+                "SELECT id, father_id, gas_mantissa, gas_exponent, serialized_instance FROM internal_services"
             )
-            for id_, ip, father_id, gm, ge in cursor.fetchall():
+            for id_, father_id, gm, ge, si in cursor.fetchall():        
                 parent_type = (
                     'internal_service' if father_id in internal_ids else
                     'client' if father_id in client_ids else
@@ -42,7 +54,7 @@ def list_instances(groupable: bool = False):
                 gas_str = f"{gm * (10 ** ge):.6e}"
                 instances.append({
                     'id': id_,
-                    'ip': 'N/A',  # TODO Get the instance's uris from table.
+                    'ip': get_http_ip(si),
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
                     'gas': gas_str,
@@ -53,14 +65,14 @@ def list_instances(groupable: bool = False):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='external_services';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT token, peer_id, client_id FROM external_services"
+                "SELECT token, peer_id, client_id, serialized_instance FROM external_services"
             )
-            for token, peer_id, client_id in cursor.fetchall():
+            for token, peer_id, client_id, si  in cursor.fetchall():               
                 parent_type = 'client' if client_id in client_ids else 'unknown'
                 instances.append({
                     'id': token,
-                    'ip': 'N/A',   # TODO Get the instance's uris from table.
-                    'parent_id': client_id or 'None',
+                    'ip': get_http_ip(si),
+                    'parent_id': client_id or 'N/A',
                     'parent_type': parent_type,
                     'gas': 'N/A',
                     'location': peer_id or 'N/A'
