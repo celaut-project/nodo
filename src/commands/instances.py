@@ -105,9 +105,11 @@ def list_instances(groupable: bool = False):
             format_instance(inst, prefix)
             for child_id in children[node_id]:
                 print_tree(child_id, prefix + "    ")
+                print()
 
         for root_id in roots:
             print_tree(root_id)
+            print("------\n")
     else:
         print("Service Instances:\n")
         for inst in instances:
