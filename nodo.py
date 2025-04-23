@@ -323,7 +323,7 @@ if __name__ == '__main__':
 
             case "instances":
                 from src.commands.instances import list_instances
-                groupable = len(sys.argv) == 3 and sys.argv[2] == "grouped"
+                groupable = len(sys.argv) == 3 and sys.argv[2] == "--grouped"
                 list_instances(groupable=groupable)
 
 

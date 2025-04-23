@@ -14,7 +14,7 @@ def list_instances(groupable: bool = False):
       - Parent type ('internal_service' or 'client' or 'unknown')
       - Gas (computed or 'N/A')
       - Location: 'local' for internal or peer ID for external
-    If groupable=True, displays them in a parent-children tree.
+    If groupable=True, displays them in a parent-children tree with full details.
     """
     conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
@@ -43,14 +43,13 @@ def list_instances(groupable: bool = False):
                 instances.append({
                     'id': id_,
                     'ip': ip or 'N/A',
-                    'parent_id': father_id,
+                    'parent_id': father_id or 'None',
                     'parent_type': parent_type,
                     'gas': gas_str,
                     'location': 'local'
                 })
 
-        # Fetch external services  
-        # TODO check if it's needed to add more columns on external_services DB.   What is exactly the client_id column?  Why is named client and not parent?
+        # Fetch external services
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='external_services';")
         if cursor.fetchone():
             cursor.execute(
@@ -61,7 +60,7 @@ def list_instances(groupable: bool = False):
                 instances.append({
                     'id': token,
                     'ip': 'N/A',
-                    'parent_id': client_id,
+                    'parent_id': client_id or 'None',
                     'parent_type': parent_type,
                     'gas': 'N/A',
                     'location': peer_id or 'N/A'
@@ -77,38 +76,40 @@ def list_instances(groupable: bool = False):
         print("No service instances found.")
         return
 
-    # Helper: build tree if grouping requested
+    def format_instance(inst, prefix=""):
+        lines = [
+            f"ID: {inst['id']}",
+            f"IP: {inst['ip']}",
+            f"Parent ID: {inst['parent_id']}",
+            f"Parent Type: {inst['parent_type']}",
+            f"Gas: {inst['gas']}",
+            f"Location: {inst['location']}"
+        ]
+        for line in lines:
+            print(f"{prefix}{line}")
+
     if groupable:
-        # Map id to instance and build children map
+        # Build tree structure
         inst_map = {inst['id']: inst for inst in instances}
         children = {inst['id']: [] for inst in instances}
         roots = []
         for inst in instances:
             pid = inst['parent_id']
-            if pid and pid in children:
+            if pid != 'None' and pid in children:
                 children[pid].append(inst['id'])
             else:
                 roots.append(inst['id'])
 
         def print_tree(node_id, prefix=""):
             inst = inst_map[node_id]
-            print(f"{prefix}{inst['id']}")
+            format_instance(inst, prefix)
             for child_id in children[node_id]:
-                print_tree(child_id, prefix + "|   ")
+                print_tree(child_id, prefix + "    ")
 
-        # Print each root tree
         for root_id in roots:
             print_tree(root_id)
     else:
-        # Flat listing
         print("Service Instances:\n")
         for inst in instances:
-            print(f"""
-ID: {inst['id']}
-IP: {inst['ip']}
-Parent ID: {inst['parent_id'] or 'None'}
-Parent Type: {inst['parent_type']}
-Gas: {inst['gas']}
-Location: {inst['location']}
-"""
-            )
+            format_instance(inst)
+            print()
