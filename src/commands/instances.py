@@ -103,6 +103,7 @@ def list_instances(groupable: bool = False):
         def print_tree(node_id, prefix=""):
             inst = inst_map[node_id]
             format_instance(inst, prefix)
+            print()
             for child_id in children[node_id]:
                 print_tree(child_id, prefix + "    ")
                 print()
