@@ -17,7 +17,7 @@ def list_services():
         metadata = Metadata()
         
         # Try got get the tag
-        try:
+        try:  # TODO check. Repeated on instances.get_tag function.
             # Attempt to parse the metadata from the binary file
             with open(os.path.join(METADATA, service), "rb") as f:
                 metadata.ParseFromString(f.read())
