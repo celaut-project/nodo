@@ -107,17 +107,24 @@ def list_instances(groupable: bool = False):
         return
 
     def format_instance(inst, prefix=""):
-        lines = [
-            f"ID: {inst['id']}",
-            f"Service: {inst['service']}",
-            f"API: {inst['ip']}",
-            f"Parent ID: {inst['parent_id']}",
-            f"Parent Type: {inst['parent_type']}",
-            f"Gas: {inst['gas']}",
-            f"Location: {inst['location']}"
-        ]
-        for line in lines:
-            print(f"{prefix}{line}")
+        def format_line(label, value):
+            value_str = str(value)
+            lines = value_str.splitlines()
+            if not lines:
+                return [f"{prefix}{label}: "]
+            return [f"{prefix}{label}: {lines[0]}"] + [f"{prefix}    {line}" for line in lines[1:]]
+
+        output_lines = []
+        output_lines += format_line("ID", inst["id"])
+        output_lines += format_line("Service", inst["service"])
+        output_lines += format_line("API", inst["ip"])
+        output_lines += format_line("Parent ID", inst["parent_id"])
+        output_lines += format_line("Parent Type", inst["parent_type"])
+        output_lines += format_line("Gas", inst["gas"])
+        output_lines += format_line("Location", inst["location"])
+
+        for line in output_lines:
+            print(line)
 
     if groupable:
         # Build tree structure
