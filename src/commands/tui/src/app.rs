@@ -170,7 +170,7 @@ fn get_instances() -> Result<Vec<Container>> {
     let conn = Connection::open(DATABASE_FILE)?;
 
     let internal_instances = conn
-        .prepare("SELECT id, ip, gas_mantissa, gas_exponent FROM internal_services")?
+        .prepare("SELECT id, ip, gas_mantissa, gas_exponent FROM local_instances")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
             let ip: String = row.get(1)?;
