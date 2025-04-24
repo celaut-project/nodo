@@ -120,7 +120,7 @@ def create_tables(cursor):
                 token TEXT PRIMARY KEY,
                 token_hash TEXT,
                 peer_id TEXT,
-                client_id TEXT,
+                father_id TEXT,
                 serialized_instance TEXT
             )
         ''',

@@ -1082,7 +1082,7 @@ class SQLConnection(metaclass=Singleton):
             str: The father_id of the external container, or an empty string if not found.
         """
         cursor = self._execute('''
-            SELECT client_id
+            SELECT father_id
             FROM delegated_instances
             WHERE token = ?
         ''', (token,))
@@ -1180,21 +1180,21 @@ class SQLConnection(metaclass=Singleton):
         self._execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
                     (ip, port, slot_id))
 
-    def add_delegated_instance(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str):
+    def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str):
         """
         Adds an external container to the database.
 
         Args:
-            client_id (str): The client ID.
+            father_id (str): The father ID.
             encrypted_external_token (str): The encrypted external token.
             external_token (str): The external token.
             peer_id (str): The peer ID.
             serialized_instance (str): Serialized celaut instance
         """
         self._execute('''
-            INSERT INTO delegated_instances (token, token_hash, peer_id, client_id, serialized_instance)
+            INSERT INTO delegated_instances (token, token_hash, peer_id, father_id, serialized_instance)
             VALUES (?, ?, ?, ?, ?)
-        ''', (external_token, encrypted_external_token, peer_id, client_id, serialized_instance))
+        ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance))
 
     def get_token_by_hashed_token(self, hashed_token: str) -> Optional[str]:
         """
@@ -1240,7 +1240,7 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to retrieve peer_id for external container {token}: {e}')
             return None
 
-    def purge_external(self, agent_id: str, peer_id: str, his_token: str) -> int:
+    def purge_external(self, agent_id: str, peer_id: str, his_token: str) -> int:  # TODO delete?
         """
         Purges an external container and refunds gas.
 
