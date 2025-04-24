@@ -307,6 +307,7 @@ def default_initial_cost(
 
 
 def add_container(
+        service_id: str,
         father_id: str,
         container: docker_lib.models.containers.Container,
         initial_gas_amount: Optional[int],
@@ -324,7 +325,8 @@ def add_container(
         container_id=container.id,
         container_ip=container.attrs['NetworkSettings']['IPAddress'],
         gas=initial_gas_amount,
-        serialized_instance=serialized_instance
+        serialized_instance=serialized_instance,
+        service_id=service_id
     )
     
     if not container_modify_system_params(

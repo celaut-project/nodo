@@ -43,9 +43,9 @@ def list_instances(groupable: bool = False):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT id, father_id, gas_mantissa, gas_exponent, serialized_instance FROM local_instances"
+                "SELECT id, father_id, gas_mantissa, gas_exponent, serialized_instance, service_id FROM local_instances"
             )
-            for id_, father_id, gm, ge, si in cursor.fetchall():        
+            for id_, father_id, gm, ge, si, service in cursor.fetchall():        
                 parent_type = (
                     'internal_service' if father_id in internal_ids else
                     'client' if father_id in client_ids else
@@ -54,7 +54,7 @@ def list_instances(groupable: bool = False):
                 gas_str = f"{gm * (10 ** ge):.6e}"
                 instances.append({
                     'id': id_,
-                    'service': 'N/A',
+                    'service': service,
                     'ip': get_http_ip(si),
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
@@ -66,13 +66,13 @@ def list_instances(groupable: bool = False):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT token, peer_id, father_id, serialized_instance FROM delegated_instances"
+                "SELECT token, peer_id, father_id, serialized_instance, service_id FROM delegated_instances"
             )
-            for token, peer_id, father_id, si  in cursor.fetchall():               
+            for token, peer_id, father_id, si, service  in cursor.fetchall():               
                 parent_type = 'client' if father_id in client_ids else 'unknown'
                 instances.append({
                     'id': token,
-                    'service': 'N/A',
+                    'service': service,
                     'ip': get_http_ip(si),
                     'parent_id': father_id or 'N/A',
                     'parent_type': parent_type,
