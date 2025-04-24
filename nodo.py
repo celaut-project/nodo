@@ -131,6 +131,7 @@ if __name__ == '__main__':
             "\n- clients"
             "\n- peers"
             "\n- instances"
+            "\n- instances --grouped"
             "\n- connect <ip:url>"
             "\n- pack <project directory>"
             "\n- config"

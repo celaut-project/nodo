@@ -78,6 +78,16 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo import /service/path`
 
+- **instances**  
+  Lists all running instances and their details.  
+  **Example:**  
+  `nodo instances`
+
+- **instances --grouped**  
+  Lists running instances grouped by their parent service.  
+  **Example:**  
+  `nodo instances --grouped`
+
 ---
 
 ## Additional Commands
