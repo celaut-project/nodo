@@ -1,9 +1,10 @@
-import sqlite3
+import sqlite3, os
 from src.utils.env import EnvManager
 from protos import celaut_pb2 as celaut
 
 env_manager = EnvManager()
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
+METADATA = env_manager.get_env("METADATA_REGISTRY")
 
 def list_instances(groupable: bool = False):
     """
@@ -38,6 +39,21 @@ def list_instances(groupable: bool = False):
                     s += f"\n  • {_uri.ip}:{_uri.port}  (#{_exp.internal_port})"
                     
             return s or "N/A"
+        
+        def get_tag(service_id: str) -> str:
+            metadata = celaut.Metadata()
+            # Try got get the tag
+            try:
+                # Attempt to parse the metadata from the binary file
+                with open(os.path.join(METADATA, service), "rb") as f:
+                    metadata.ParseFromString(f.read())
+                name = metadata.hashtag.tag[0] if metadata.hashtag.tag else service_id
+                if name:
+                    return name
+                else:
+                    return service_id
+            except FileNotFoundError:
+                return service_id
                     
         # Fetch internal services
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
@@ -54,7 +70,7 @@ def list_instances(groupable: bool = False):
                 gas_str = f"{gm * (10 ** ge):.6e}"
                 instances.append({
                     'id': id_,
-                    'service': service,
+                    'service': get_tag(service),
                     'ip': get_http_ip(si),
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
@@ -72,7 +88,7 @@ def list_instances(groupable: bool = False):
                 parent_type = 'client' if father_id in client_ids else 'unknown'
                 instances.append({
                     'id': token,
-                    'service': service,
+                    'service': get_tag(service),
                     'ip': get_http_ip(si),
                     'parent_id': father_id or 'N/A',
                     'parent_type': parent_type,
@@ -93,7 +109,7 @@ def list_instances(groupable: bool = False):
     def format_instance(inst, prefix=""):
         lines = [
             f"ID: {inst['id']}",
-            f"Service ID: {inst['service']}"
+            f"Service: {inst['service']}"
             f"API: {inst['ip']}",
             f"Parent ID: {inst['parent_id']}",
             f"Parent Type: {inst['parent_type']}",
