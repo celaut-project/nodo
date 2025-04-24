@@ -104,8 +104,8 @@ def create_tables(cursor):
                 UNIQUE (address, ledger_id, contract_hash, peer_id)
             )
         ''',
-        "internal_services": '''
-            CREATE TABLE IF NOT EXISTS internal_services (
+        "local_instances": '''
+            CREATE TABLE IF NOT EXISTS local_instances (
                 id TEXT PRIMARY KEY,
                 ip TEXT,
                 father_id TEXT,

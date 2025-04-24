@@ -37,7 +37,7 @@ def launch_service(
     ) as recursion_guard_token:
 
         if not father_id:
-            father_id = sc.get_internal_service_id_by_uri(father_ip)
+            father_id = sc.get_local_instance_id_by_uri(father_ip)
             if not father_id:
                 raise Exception('Client id not provided.')
             else:

@@ -23,7 +23,7 @@ def list_instances(groupable: bool = False):
     instances = []
     try:
         # Load parent ID sets for resolution
-        cursor.execute("SELECT id FROM internal_services;")
+        cursor.execute("SELECT id FROM local_instances;")
         internal_ids = {row[0] for row in cursor.fetchall()}
         cursor.execute("SELECT id FROM clients;")
         client_ids = {row[0] for row in cursor.fetchall()}
@@ -40,10 +40,10 @@ def list_instances(groupable: bool = False):
             return s or "N/A"
                     
         # Fetch internal services
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='internal_services';")
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT id, father_id, gas_mantissa, gas_exponent, serialized_instance FROM internal_services"
+                "SELECT id, father_id, gas_mantissa, gas_exponent, serialized_instance FROM local_instances"
             )
             for id_, father_id, gm, ge, si in cursor.fetchall():        
                 parent_type = (

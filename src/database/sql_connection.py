@@ -297,7 +297,7 @@ class SQLConnection(metaclass=Singleton):
 
     # Internal Service Methods
 
-    def add_internal_service(self, father_id: str, container_ip: str, container_id: str, gas: int, serialized_instance: str,):
+    def add_local_instance(self, father_id: str, container_ip: str, container_id: str, gas: int, serialized_instance: str,):
         """
         Adds an internal container to the database.
 
@@ -311,7 +311,7 @@ class SQLConnection(metaclass=Singleton):
         gas_mantissa, gas_exponent = _split_gas(gas)
         _validate_gas(gas_mantissa, gas_exponent)
         self._execute('''
-            INSERT INTO internal_services (id, ip, father_id, gas_mantissa, gas_exponent, mem_limit, serialized_instance)
+            INSERT INTO local_instances (id, ip, father_id, gas_mantissa, gas_exponent, mem_limit, serialized_instance)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (container_id, container_ip, father_id, gas_mantissa, gas_exponent, 0, serialized_instance))
         log.LOGGER(f'Saved service {container_id} as dependency of {father_id}')
@@ -329,7 +329,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             self._execute('''
-                UPDATE internal_services SET mem_limit = ? WHERE id = ?
+                UPDATE local_instances SET mem_limit = ? WHERE id = ?
             ''', (mem_limit, id))
             return True
         except:
@@ -346,7 +346,7 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit FROM internal_services WHERE id = ?
+            SELECT mem_limit FROM local_instances WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:
@@ -364,7 +364,7 @@ class SQLConnection(metaclass=Singleton):
             int: The gas amount.
         """
         result = self._execute('''
-            SELECT gas_mantissa, gas_exponent FROM internal_services WHERE id = ?
+            SELECT gas_mantissa, gas_exponent FROM local_instances WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:
@@ -379,7 +379,7 @@ class SQLConnection(metaclass=Singleton):
             List[str]: A list of ids.
         """
         result = self._execute('''
-            SELECT father_id, ip, id FROM internal_services
+            SELECT father_id, ip, id FROM local_instances
         ''')
         return [row['id'] for row in result.fetchall()]
 
@@ -394,7 +394,7 @@ class SQLConnection(metaclass=Singleton):
         gas_mantissa, gas_exponent = _split_gas(gas)
         _validate_gas(gas_mantissa, gas_exponent)
         self._execute('''
-            UPDATE internal_services SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
+            UPDATE local_instances SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
         ''', (gas_mantissa, gas_exponent, id))
 
     def container_exists(self, id: str) -> bool:
@@ -409,7 +409,7 @@ class SQLConnection(metaclass=Singleton):
         """
         result = self._execute('''
             SELECT COUNT(*)
-            FROM internal_services
+            FROM local_instances
             WHERE id = ?
         ''', (id,))
         return result.fetchone()[0] > 0
@@ -423,7 +423,7 @@ class SQLConnection(metaclass=Singleton):
 
         """
         self._execute('''
-            DELETE FROM internal_services WHERE id = ?
+            DELETE FROM local_instances WHERE id = ?
         ''', (id,))
 
     def get_internal_father_id(self, id: str) -> str:
@@ -438,7 +438,7 @@ class SQLConnection(metaclass=Singleton):
         """
         cursor = self._execute('''
             SELECT father_id
-            FROM internal_services
+            FROM local_instances
             WHERE id = ?
         ''', (id,))
         result = cursor.fetchone()
@@ -456,7 +456,7 @@ class SQLConnection(metaclass=Singleton):
         """
         cursor = self._execute('''
             SELECT serialized_instance
-            FROM internal_services
+            FROM local_instances
             WHERE id = ?
         ''', (id,))
         result = cursor.fetchone()
@@ -474,7 +474,7 @@ class SQLConnection(metaclass=Singleton):
         """
         cursor = self._execute('''
             SELECT ip
-            FROM internal_services
+            FROM local_instances
             WHERE id = ?
         ''', (id,))
         result = cursor.fetchone()
@@ -1282,7 +1282,7 @@ class SQLConnection(metaclass=Singleton):
 
     # Common Methods
 
-    def get_internal_service_id_by_uri(self, uri: str) -> Optional[str]:
+    def get_local_instance_id_by_uri(self, uri: str) -> Optional[str]:
         """
         Retrieves the internal container id for a given URI.
 
@@ -1293,7 +1293,7 @@ class SQLConnection(metaclass=Singleton):
             str: The associated internal container id.
         """
         result = self._execute('''
-            SELECT id FROM internal_services WHERE ip = ?
+            SELECT id FROM local_instances WHERE ip = ?
         ''', (uri,))
         row = result.fetchone()
         if row:

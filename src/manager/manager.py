@@ -105,7 +105,7 @@ def update_peer_instance(peer: gateway_pb2.Peer, peer_id: str):
     log.LOGGER(f"Peer {peer_id} updated.")
 
 def get_internal_service_id_by_uri(uri: str) -> str:
-    return sc.get_internal_service_id_by_uri(uri=uri)
+    return sc.get_local_instance_id_by_uri(uri=uri)
 
 
 def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
@@ -207,7 +207,7 @@ def spend_gas(
         else:
             is_id = sc.container_exists(id=id)
             if not is_id:
-                resolved_id = sc.get_internal_service_id_by_uri(uri=id)
+                resolved_id = sc.get_local_instance_id_by_uri(uri=id)
                 if not resolved_id:
                     log.LOGGER(f"Container not found with ID or URI: '{id}'.")
                     return False
@@ -319,7 +319,7 @@ def add_container(
     initial_gas_amount = initial_gas_amount if initial_gas_amount \
         else default_initial_cost(father_id=father_id)
         
-    sc.add_internal_service(
+    sc.add_local_instance(
         father_id=father_id,
         container_id=container.id,
         container_ip=container.attrs['NetworkSettings']['IPAddress'],
