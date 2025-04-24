@@ -109,7 +109,7 @@ def list_instances(groupable: bool = False):
     def format_instance(inst, prefix=""):
         lines = [
             f"ID: {inst['id']}",
-            f"Service: {inst['service']}"
+            f"Service: {inst['service']}",
             f"API: {inst['ip']}",
             f"Parent ID: {inst['parent_id']}",
             f"Parent Type: {inst['parent_type']}",
