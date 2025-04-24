@@ -297,7 +297,7 @@ class SQLConnection(metaclass=Singleton):
 
     # Local instance Methods
 
-    def add_local_instance(self, father_id: str, container_ip: str, container_id: str, gas: int, serialized_instance: str,):
+    def add_local_instance(self, father_id: str, container_ip: str, container_id: str, gas: int, serialized_instance: str, service_id: str):
         """
         Adds an internal container to the database.
 
@@ -307,13 +307,14 @@ class SQLConnection(metaclass=Singleton):
             container_id (str): The container ID.
             gas (int): The gas amount.
             serialized_instance (str): Serialized celaut instance
+            service_id (str): Service id
         """
         gas_mantissa, gas_exponent = _split_gas(gas)
         _validate_gas(gas_mantissa, gas_exponent)
         self._execute('''
-            INSERT INTO local_instances (id, ip, father_id, gas_mantissa, gas_exponent, mem_limit, serialized_instance)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (container_id, container_ip, father_id, gas_mantissa, gas_exponent, 0, serialized_instance))
+            INSERT INTO local_instances (id, ip, father_id, gas_mantissa, gas_exponent, mem_limit, serialized_instance, service_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (container_id, container_ip, father_id, gas_mantissa, gas_exponent, 0, serialized_instance, service_id))
         log.LOGGER(f'Saved service {container_id} as dependency of {father_id}')
 
     def update_sys_req(self, id: str, mem_limit: Optional[int]) -> bool:
@@ -1180,7 +1181,7 @@ class SQLConnection(metaclass=Singleton):
         self._execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
                     (ip, port, slot_id))
 
-    def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str):
+    def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str, service_id: str):
         """
         Adds an external container to the database.
 
@@ -1189,12 +1190,13 @@ class SQLConnection(metaclass=Singleton):
             encrypted_external_token (str): The encrypted external token.
             external_token (str): The external token.
             peer_id (str): The peer ID.
-            serialized_instance (str): Serialized celaut instance
+            serialized_instance (str): Serialized celaut instance.
+            service_id (str): Service id
         """
         self._execute('''
-            INSERT INTO delegated_instances (token, token_hash, peer_id, father_id, serialized_instance)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance))
+            INSERT INTO delegated_instances (token, token_hash, peer_id, father_id, serialized_instance, service_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance, service_id))
 
     def get_token_by_hashed_token(self, hashed_token: str) -> Optional[str]:
         """

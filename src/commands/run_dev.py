@@ -89,6 +89,7 @@ def __interactive_dev_container(service_path: str) -> str:
     print(f"Client id -> {client_id}")
     
     add_container(
+        service_id=f"rundev::{service_path}",
         father_id=client_id,
         container=container,
         initial_gas_amount=None,

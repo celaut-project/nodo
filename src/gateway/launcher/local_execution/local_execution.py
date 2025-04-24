@@ -132,6 +132,7 @@ def local_execution(
     log.LOGGER(f'Thrown out a new instance by {father_id} of the container_id {container.id}')
     return gateway_pb2.Instance(
         token=add_container(
+            service_id=service_id,
             father_id=father_id,
             container=container,
             initial_gas_amount=initial_gas_amount,

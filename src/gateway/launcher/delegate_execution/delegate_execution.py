@@ -18,7 +18,9 @@ env_manager = EnvManager()
 START_SERVICE_ON_PEER_TIMEOUT = int(env_manager.get_env("START_SERVICE_ON_PEER_TIMEOUT"))
 
 def delegate_execution(
-                        peer: str, father_id: str,
+                        service_id: str,
+                        peer: str, 
+                        father_id: str,
                         cost: int, metadata, config,
                         recursion_guard_token,
                         refund_gas: List[Callable]
@@ -58,7 +60,8 @@ def delegate_execution(
             peer_id=peer,  # Add node_uri.
             encrypted_external_token=encrypted_external_token,  # Add token.
             external_token=service_instance.token,
-            serialized_instance=service_instance.instance.SerializeToString()
+            serialized_instance=service_instance.instance.SerializeToString(),
+            service_id=service_id
         )
         service_instance.token = encrypted_external_token
         # TODO adapt for ipv6 too.
