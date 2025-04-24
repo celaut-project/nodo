@@ -295,7 +295,7 @@ class SQLConnection(metaclass=Singleton):
             return row['gas_mantissa'] * (10 ** row['gas_exponent'])
         raise Exception(f'Gas amount not found for ID: {id}')
 
-    # Internal Service Methods
+    # Local instance Methods
 
     def add_local_instance(self, father_id: str, container_ip: str, container_id: str, gas: int, serialized_instance: str,):
         """
@@ -1073,23 +1073,23 @@ class SQLConnection(metaclass=Singleton):
 
     def get_external_father_id(self, token: str) -> str:
         """
-        Retrieves the father_id of an external container based on the token.
+        Retrieves the father_id of an delegated instance based on the token.
 
         Args:
-            token (str): The token of the external container.
+            token (str): The token of the delegated instance.
 
         Returns:
             str: The father_id of the external container, or an empty string if not found.
         """
         cursor = self._execute('''
             SELECT client_id
-            FROM external_services
+            FROM delegated_instances
             WHERE token = ?
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else ""
 
-    def get_external_instance(self, token: str) -> Optional[str]:
+    def get_delegated_instance(self, token: str) -> Optional[str]:
         """
         Retrieves the serialized_service of an external container based on the token.
 
@@ -1101,7 +1101,7 @@ class SQLConnection(metaclass=Singleton):
         """
         cursor = self._execute('''
             SELECT serialized_service
-            FROM external_services
+            FROM delegated_instances
             WHERE token = ?
         ''', (token,))
         result = cursor.fetchone()
@@ -1180,7 +1180,7 @@ class SQLConnection(metaclass=Singleton):
         self._execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
                     (ip, port, slot_id))
 
-    def add_external_container(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str):
+    def add_delegated_instance(self, client_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str):
         """
         Adds an external container to the database.
 
@@ -1192,7 +1192,7 @@ class SQLConnection(metaclass=Singleton):
             serialized_instance (str): Serialized celaut instance
         """
         self._execute('''
-            INSERT INTO external_services (token, token_hash, peer_id, client_id, serialized_instance)
+            INSERT INTO delegated_instances (token, token_hash, peer_id, client_id, serialized_instance)
             VALUES (?, ?, ?, ?, ?)
         ''', (external_token, encrypted_external_token, peer_id, client_id, serialized_instance))
 
@@ -1208,7 +1208,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             result = self._execute('''
-                SELECT token FROM external_services WHERE token_hash = ?
+                SELECT token FROM delegated_instances WHERE token_hash = ?
             ''', (hashed_token,))
             row = result.fetchone()
             if row:
@@ -1230,7 +1230,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             result = self._execute('''
-                SELECT peer_id FROM external_services WHERE token = ?
+                SELECT peer_id FROM delegated_instances WHERE token = ?
             ''', (token,))
             row = result.fetchone()
             if row:
@@ -1255,11 +1255,11 @@ class SQLConnection(metaclass=Singleton):
         refund = 0
 
         hashed_token = self._execute('''
-            SELECT token_hash FROM external_services WHERE token = ?
+            SELECT token_hash FROM delegated_instances WHERE token = ?
         ''', (his_token,)).fetchone()["token_hash"]
 
         self._execute('''
-            DELETE FROM external_services WHERE token = ?
+            DELETE FROM delegated_instances WHERE token = ?
         ''', (his_token,))
 
         try:

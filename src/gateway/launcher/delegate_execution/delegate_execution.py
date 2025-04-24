@@ -54,7 +54,7 @@ def delegate_execution(
             )
         ))
         encrypted_external_token: str = sha256(service_instance.token.encode('utf-8')).hexdigest()
-        SQLConnection().add_external_container(
+        SQLConnection().add_delegated_instance(
             client_id=father_id,  # Client_id  # TODO <-- Could be called father_id too, like on the internal table.
             peer_id=peer,  # Add node_uri.
             encrypted_external_token=encrypted_external_token,  # Add token.

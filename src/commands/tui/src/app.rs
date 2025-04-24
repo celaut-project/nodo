@@ -188,7 +188,7 @@ fn get_instances() -> Result<Vec<Container>> {
         .collect::<Result<Vec<Container>>>()?;
 
     /*let external_instances = conn
-        .prepare("SELECT token FROM external_services")?
+        .prepare("SELECT token FROM delegated_instances")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
             Ok(Container { id })

@@ -62,10 +62,10 @@ def list_instances(groupable: bool = False):
                 })
 
         # Fetch external services
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='external_services';")
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT token, peer_id, client_id, serialized_instance FROM external_services"
+                "SELECT token, peer_id, client_id, serialized_instance FROM delegated_instances"
             )
             for token, peer_id, client_id, si  in cursor.fetchall():               
                 parent_type = 'client' if client_id in client_ids else 'unknown'

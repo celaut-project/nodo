@@ -429,7 +429,7 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
                 )).amount
             )
             father_id = sc.get_external_father_id(token=external_token)
-            serialized_instance = sc.get_external_instance(token=external_token)
+            serialized_instance = sc.get_delegated_instance(token=external_token)
             
         except Exception as e:
             log.LOGGER('Error purging ' + token + ' ' + str(e))

@@ -115,8 +115,8 @@ def create_tables(cursor):
                 serialized_instance TEXT
             )
         ''',
-        "external_services": '''
-            CREATE TABLE IF NOT EXISTS external_services (
+        "delegated_instances": '''
+            CREATE TABLE IF NOT EXISTS delegated_instances (
                 token TEXT PRIMARY KEY,
                 token_hash TEXT,
                 peer_id TEXT,
