@@ -11,7 +11,6 @@ from protos.gateway_pb2_bee import StartService_input_indices
 from src.manager.manager import get_client_id_on_other_peer
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection
-from src.payment_system.payment_process import increase_deposit_on_peer
 from src.utils import utils, logger as log
 
 
