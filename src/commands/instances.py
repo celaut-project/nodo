@@ -54,6 +54,7 @@ def list_instances(groupable: bool = False):
                 gas_str = f"{gm * (10 ** ge):.6e}"
                 instances.append({
                     'id': id_,
+                    'service': 'N/A',
                     'ip': get_http_ip(si),
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
@@ -71,6 +72,7 @@ def list_instances(groupable: bool = False):
                 parent_type = 'client' if father_id in client_ids else 'unknown'
                 instances.append({
                     'id': token,
+                    'service': 'N/A',
                     'ip': get_http_ip(si),
                     'parent_id': father_id or 'N/A',
                     'parent_type': parent_type,
@@ -91,7 +93,8 @@ def list_instances(groupable: bool = False):
     def format_instance(inst, prefix=""):
         lines = [
             f"ID: {inst['id']}",
-            f"IP: {inst['ip']}",
+            f"Service ID: {inst['service']}"
+            f"API: {inst['ip']}",
             f"Parent ID: {inst['parent_id']}",
             f"Parent Type: {inst['parent_type']}",
             f"Gas: {inst['gas']}",
@@ -115,16 +118,17 @@ def list_instances(groupable: bool = False):
         def print_tree(node_id, prefix=""):
             inst = inst_map[node_id]
             format_instance(inst, prefix)
-            print()
-            for child_id in children[node_id]:
-                print_tree(child_id, prefix + "    ")
+            if node_id in children and len(children[node_id]) > 0:
+                print("Dependencies:")
                 print()
+                for child_id in children[node_id]:
+                    print_tree(child_id, prefix + "    ")
+                    print()
 
         for root_id in roots:
             print_tree(root_id)
             print("------\n")
     else:
-        print("Service Instances:\n")
         for inst in instances:
             format_instance(inst)
             print()
