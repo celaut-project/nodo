@@ -65,14 +65,14 @@ def list_instances(groupable: bool = False):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT token, peer_id, client_id, serialized_instance FROM delegated_instances"
+                "SELECT token, peer_id, father_id, serialized_instance FROM delegated_instances"
             )
-            for token, peer_id, client_id, si  in cursor.fetchall():               
-                parent_type = 'client' if client_id in client_ids else 'unknown'
+            for token, peer_id, father_id, si  in cursor.fetchall():               
+                parent_type = 'client' if father_id in client_ids else 'unknown'
                 instances.append({
                     'id': token,
                     'ip': get_http_ip(si),
-                    'parent_id': client_id or 'N/A',
+                    'parent_id': father_id or 'N/A',
                     'parent_type': parent_type,
                     'gas': 'N/A',
                     'location': peer_id or 'N/A'
