@@ -4,6 +4,7 @@ from src.utils import logger as log
 from src.utils.env import DOCKER_CLIENT
 
 def stop_container(container_id: str, timeout: int = 10) -> None:
+    # TODO Maybe the container not exists.
     """
     Stops a running Docker container.
 
