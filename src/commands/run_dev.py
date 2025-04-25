@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import docker as docker_lib
 from protos import gateway_pb2
-from src.gateway.launcher.local_execution.set_config import get_config, write_config
+from src.virtualizers.docker.set_container_config import get_config, write_config
 from src.manager.manager import add_container, get_dev_clients
 from src.utils.env import EnvManager
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
