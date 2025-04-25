@@ -30,16 +30,20 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def StopService(self, request_iterator, context, **kwargs):
         try:
-            log.LOGGER('Stopping service.')
-            yield from bee.serialize_to_buffer(
-                    message_iterator=gateway_pb2.Refund(
-                        amount=to_gas_amount(prune_container(
-                            token=next(bee.parse_from_buffer(
+            log.LOGGER('Stopping instance.')
+            token = next(bee.parse_from_buffer(
                                 request_iterator=request_iterator,
                                 indices=gateway_pb2.TokenMessage,
                                 partitions_message_mode=True
                             ), 0).token
-                        ))
+            log.LOGGER(f'    with id {token}')
+            refunded_amount = prune_container(token=token)
+            if not refunded_amount: refunded_amount = 0
+            
+            log.LOGGER(f'Stopped instance {token}.')
+            yield from bee.serialize_to_buffer(
+                    message_iterator=gateway_pb2.Refund(
+                        amount=to_gas_amount(refunded_amount)
                     )
             )
         except Exception as e:
