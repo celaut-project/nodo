@@ -5,8 +5,8 @@ import docker as docker_lib
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.gateway.utils import GATEWAY_PORT
 from src.virtualizers.docker import build
-from src.gateway.launcher.local_execution.create_container import create_container
-from src.gateway.launcher.local_execution.set_config import set_config
+from src.virtualizers.docker.create_container import create_container
+from src.virtualizers.docker.set_container_config import set_config
 from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.manager import default_initial_cost, add_container
 from src.utils import utils, logger as log
