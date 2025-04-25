@@ -10,6 +10,10 @@ def stop_container(container_id: str, timeout: int = 10) -> None:
     Args:
         container_id (str): ID or name of the container to stop.
         timeout (int): Timeout in seconds to wait before killing the container.
+            - Docker first sends a SIGTERM signal to the container's main process.
+            - If the container does not stop within the given timeout,
+              Docker sends a SIGKILL to forcefully terminate it.
+            - This allows services a chance to gracefully shut down before being killed.
     """
     client = DOCKER_CLIENT()
     try:
