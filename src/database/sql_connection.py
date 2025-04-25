@@ -398,9 +398,9 @@ class SQLConnection(metaclass=Singleton):
             UPDATE local_instances SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
         ''', (gas_mantissa, gas_exponent, id))
 
-    def container_exists(self, id: str) -> bool:
+    def internal_instance_exists(self, id: str) -> bool:
         """
-        Checks if a container exists in the database.
+        Checks if a internal instance exists in the database.
 
         Args:
             id (str): The id of the container.
@@ -1107,6 +1107,18 @@ class SQLConnection(metaclass=Singleton):
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else None
+    
+    def purgue_delegated(self, token: str):
+        """
+        Purges an external container
+
+        Args:
+            token (str): The token of the external container.
+
+        """
+        self._execute('''
+            DELETE FROM delegated_instances WHERE token = ?
+        ''', (token,))
 
     def peer_has_client(self, peer_id: str) -> bool:
         """
@@ -1315,7 +1327,7 @@ class SQLConnection(metaclass=Singleton):
         """
         if self.client_exists(client_id=id):
             return self.get_gas_amount_by_client_id(id=id)
-        elif self.container_exists(id=id):
+        elif self.internal_instance_exists(id=id):
             return self.get_container_gas(id=id)
         else:
             return int(DEFAULT_INTIAL_GAS_AMOUNT)

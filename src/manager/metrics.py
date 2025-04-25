@@ -140,7 +140,7 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
     if sc.client_exists(client_id=token):
         return __get_metrics_client(client_id=token)
 
-    elif sc.container_exists(id=token):
+    elif sc.internal_instance_exists(id=token):
         return __get_metrics_internal(id=token)
     
     elif '##' not in token:

@@ -84,7 +84,7 @@ def launch_service(
                         refund_gas=refund_gas
                     )
 
-                if sc.container_exists(id=father_id):
+                if sc.internal_instance_exists(id=father_id):
                     try:
                         for slot in instance.instance.uri_slot:
                             for uri in slot.uri:
