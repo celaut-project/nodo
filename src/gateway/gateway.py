@@ -9,7 +9,7 @@ from src.reputation_system.contracts.ergo.proof_validation import sign_message
 from src.tunneling_system.rpc_tunnel import service_tunnel
 from src.tunneling_system.tunnels import TunnelSystem
 from src.gateway.utils import generate_gateway_instance
-from src.manager.manager import add_peer_instance, modify_gas_deposit, prune_container, generate_client, get_internal_service_id_by_uri, spend_gas, \
+from src.manager.manager import add_peer_instance, modify_gas_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources
 from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
@@ -37,7 +37,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                                 partitions_message_mode=True
                             ), 0).token
             log.LOGGER(f'    with id {token}')
-            refunded_amount = prune_container(token=token)
+            refunded_amount = stop_instance(token=token)
             if not refunded_amount: refunded_amount = 0
             
             log.LOGGER(f'Stopped instance {token}.')

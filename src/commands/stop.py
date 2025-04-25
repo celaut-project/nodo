@@ -1,5 +1,5 @@
 import os
-from src.manager.manager import prune_container
+from src.manager.manager import stop_instance
 
 
 def stop(instance: str):
@@ -8,7 +8,7 @@ def stop(instance: str):
         print("This script requires superuser privileges. Please run with sudo.")
         return
     
-    if prune_container(token=instance):
+    if stop_instance(token=instance):
         print(f"Service instance {instance} deleted.")
     else:
         print(f"Something was wrong.")

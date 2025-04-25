@@ -10,7 +10,7 @@ import docker as docker_lib
 from protos import celaut_pb2 as celaut, gateway_pb2_grpc, gateway_pb2
 from protos.gateway_pb2_bee import StartService_input_indices, StartService_input_message_mode
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import prune_container, spend_gas, update_peer_instance
+from src.manager.manager import stop_instance, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import increase_deposit_on_peer, init_interfaces
@@ -109,7 +109,7 @@ def maintain_containers(debug_mode: bool=False):
         update_container_reputation(container_id=container_id, amount=-100)
         log.LOGGER(f"Prunning container {container_id} from the registry because the docker container does not exist.")
         try:
-            prune_container(token=container_id)
+            stop_instance(token=container_id)
         except Exception as e:
             log.LOGGER(f"Error prunning container {container_id}: {e}")
     
@@ -136,7 +136,7 @@ def maintain_containers(debug_mode: bool=False):
             try:
                 update_container_reputation(container_id=container_id, amount=-10)
                 log.LOGGER(f"Pruning container {container_id} due to insufficient gas.")
-                prune_container(token=container_id)
+                stop_instance(token=container_id)
             except Exception as e:
                 log.LOGGER(f'Error purging {container_id}: {str(e)}')
                 raise Exception(f'Error purging {container_id}: {str(e)}')

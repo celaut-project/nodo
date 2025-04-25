@@ -22,6 +22,7 @@ from src.utils.utils import (
 )
 from src.utils.env import EnvManager
 from src.virtualizers.docker.firewall import remove_rule
+from src.virtualizers.docker.stop_container import stop_container
 
 env_manager = EnvManager()
 
@@ -109,7 +110,7 @@ def get_internal_service_id_by_uri(uri: str) -> str:
 
 
 def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
-    if not sc.container_exists(id=id):
+    if not sc.internal_instance_exists(id=id):
         log.LOGGER(f'Manager error: container {id} does not exists.')
         return False
     if sys_req.HasField('mem_limit'):
@@ -205,14 +206,14 @@ def spend_gas(
 
         # If the identifier corresponds to a container (by ID or URI)
         else:
-            is_id = sc.container_exists(id=id)
+            is_id = sc.internal_instance_exists(id=id)
             if not is_id:
                 resolved_id = sc.get_local_instance_id_by_uri(uri=id)
                 if not resolved_id:
                     log.LOGGER(f"Container not found with ID or URI: '{id}'.")
                     return False
                 id = resolved_id
-                is_id = sc.container_exists(id=id)
+                is_id = sc.internal_instance_exists(id=id)
                 if not is_id:
                     log.LOGGER(f"Resolved container ID '{id}' does not exist.")
                     return False
@@ -392,11 +393,12 @@ def get_sysresources(id: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
     )
 
 
-def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
+def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     log.LOGGER('Prune container ' + token)
     father_id, serialized_instance = None, None
     
-    if sc.container_exists(id=token):  # Is internal
+    if sc.internal_instance_exists(id=token):  # Is internal
+        log.LOGGER(f"Token {token} is internal; let's stop it.")
         try:
             DOCKER_CLIENT().containers.get(token).remove(force=True)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError):
@@ -408,37 +410,51 @@ def prune_container(token: str) -> Optional[int]:  # TODO Should be divided into
         try:
             refund = sc.get_container_gas(id=token)
             sc.purge_internal(id=token)
-        except Exception as e:
-            log.LOGGER('Error purging ' + token + ' ' + str(e))
-            return None
-
-    else:  # It's external
-        try:
-            external_token = sc.get_token_by_hashed_token(hashed_token=token)
-            peer_id = sc.get_peer_id_by_external_service(token=external_token)
-            refund = utils.from_gas_amount(
-                next(bee.client_grpc(
-                    method=gateway_pb2_grpc.GatewayStub(
-                        grpc.insecure_channel(
-                            next(utils.generate_uris_by_peer_id(peer_id))
-                        )
-                    ).ModifyGasDeposit,  # TODO Verify: Should use StopService instead ??
-                        partitions_message_mode_parser=True,
-                        indices_parser=gateway_pb2.ModifyGasDepositOutput,
-                        input=gateway_pb2.TokenMessage(
-                            token=external_token
-                        )
-                )).amount
-            )
-            father_id = sc.get_external_father_id(token=external_token)
-            serialized_instance = sc.get_delegated_instance(token=external_token)
+            stop_container(container_id=token)
             
         except Exception as e:
             log.LOGGER('Error purging ' + token + ' ' + str(e))
             return None
 
+    else:  # It's external
+        log.LOGGER(f"Token {token} is external; let's stop it.")
+        try:
+            external_token = sc.get_token_by_hashed_token(hashed_token=token)
+            if not external_token:
+                log.LOGGER(f"No external token for the hashed token {token}")
+                return None
+            
+            peer_id = sc.get_peer_id_by_external_service(token=external_token)
+            if not external_token:
+                log.LOGGER(f"No peer for the token {external_token}")
+                return None
+            
+            peer_uri = next(utils.generate_uris_by_peer_id(peer_id))
+            if not external_token:
+                log.LOGGER(f"No peer uri for the peer {peer_id}")
+                return None
+            
+            refund = utils.from_gas_amount(
+                next(bee.client_grpc(
+                    method=gateway_pb2_grpc.GatewayStub(
+                        grpc.insecure_channel(peer_uri)
+                    ).StopService,
+                        partitions_message_mode_parser=True,
+                        indices_parser=gateway_pb2.ModifyGasDepositOutput,
+                        input=gateway_pb2.TokenMessage(token=external_token)
+                )).amount
+            )
+            father_id = sc.get_external_father_id(token=external_token)
+            serialized_instance = sc.get_delegated_instance(token=external_token)
+            
+            sc.purgue_delegated(id=external_token)
+            
+        except Exception as e:
+            log.LOGGER('Error purging external instance with hashed token ' + token + ' ' + str(e))
+            return None
+
     # Block the parent's access to the ports of the removed service.
-    if sc.container_exists(id=father_id):
+    if sc.internal_instance_exists(id=father_id):  # Check if the father is an internal instance.
         try:
             instance = celaut_pb2.Instance()
             instance.ParseFromString(serialized_instance)
@@ -460,7 +476,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
     
     log.LOGGER(f"Modify {gas_amount} gas of the service {service_token}")
     
-    is_internal = sc.container_exists(id=service_token)
+    is_internal = sc.internal_instance_exists(id=service_token)
     
     father_id: str = sc.get_internal_father_id(id=service_token) if is_internal \
         else sc.get_external_father_id(token=sc.get_token_by_hashed_token(hashed_token=service_token))
@@ -486,7 +502,7 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
         # This should be a increase_gas() function, reverse to spend_gas()
         log.LOGGER(f"Add gas to father {father_id}")
         
-        if sc.container_exists(id=father_id):
+        if sc.internal_instance_exists(id=father_id):
             _gas = sc.get_container_gas(id=father_id)
             _gas += abs(gas_amount)
             sc.update_gas_to_container(id=service_token, gas=_gas)
