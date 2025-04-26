@@ -27,21 +27,20 @@ def _tags_from_metadata(metadata: celaut_pb2.Metadata) -> Set[str]:
 
 
 def get_arch_tag(
-    service: Optional[celaut_pb2.Service],
-    metadata: celaut_pb2.Metadata
+    service: celaut_pb2.Service,
+    metadata: Optional[celaut_pb2.Metadata]
 ) -> Optional[str]:
     """
     Returns the supported architecture (canonical form) found in Service or,
     in debug mode, in Metadata. Returns None if none is found.
     """
     # 1) Check in Service
-    if service:
-        for tag in service.container.architecture.tags:
-            if tag in _ARCH_CANONICAL:
-                return _ARCH_CANONICAL[tag]
+    for tag in service.container.architecture.tags:
+        if tag in _ARCH_CANONICAL:
+            return _ARCH_CANONICAL[tag]
 
     # 2) Check in Metadata (only for debug)
-    if TRUST_METADATA_ARCHITECTURE:
+    if TRUST_METADATA_ARCHITECTURE and metadata:
         meta_tags = _tags_from_metadata(metadata)
         for tag in meta_tags:
             if tag in _ARCH_CANONICAL:
@@ -51,8 +50,8 @@ def get_arch_tag(
 
 
 def check_supported_architecture(
-    service: Optional[celaut_pb2.Service],
-    metadata: celaut_pb2.Metadata
+    service: celaut_pb2.Service,
+    metadata: Optional[celaut_pb2.Metadata]
 ) -> bool:
     """
     Returns True if at least one supported architecture is found.
