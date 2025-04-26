@@ -49,6 +49,7 @@ def add_wanted(service_id: str):
         wanted_services.add(service_id)
 
 def check_wanted_service(wanted: str):
+    log.LOGGER(f"Check wanted service {wanted}")
     # Each execution of the function attempts to retrieve one of the services from the set. If the timeout is high or a large number of pairs are being processed, multiple calls might overlap if the function's execution time exceeds MANAGER_ITERATION_TIME; this is not an issue.
     
     _hash = gateway_pb2.celaut__pb2.Metadata.HashTag.Hash(
