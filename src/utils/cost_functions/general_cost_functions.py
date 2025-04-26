@@ -69,9 +69,9 @@ def __build_cost(metadata: celaut.Metadata) -> int:
 
 def __get_available_supply(system_resources: celaut.Sysresources) -> float:
     """
-    Calculates available resource supply score weighted by service requirements.
+    Calculates available resource supply score weighted by instance requirements.
     
-    Dynamically adjusts CPU/RAM/disk weights based on the service's resource demands
+    Dynamically adjusts CPU/RAM/disk weights based on the instance's resource demands
     relative to total system capacity. Returns a normalized score (0.0-1.0) where
     1.0 = ideal for this service, 0.0 = insufficient resources.
     
@@ -121,8 +121,6 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         # Weighted sum of available resources
         weighted_sum = sum(current[res] * weight for res, weight in weights.items())
 
-        log.LOGGER(f"Available compute power of {weighted_sum}%")
-
         # Normalize to 0–1
         return max(0.0, min(weighted_sum / 100, 1.0))
 
@@ -150,8 +148,10 @@ def __execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysreso
     """
     log.LOGGER('Get execution cost')
     try:
+        used_compute_power = 1 - __get_available_supply(system_resources=system_resources)
+        log.LOGGER(f"Current compute power used: {used_compute_power}% (weighted by instance requirements)")
         return sum([
-            (1 - __get_available_supply(system_resources=system_resources)) * COMPUTE_POWER_RATE,
+            used_compute_power * COMPUTE_POWER_RATE,
             __build_cost(metadata=metadata),
             EXECUTION_BENEFIT
         ])
