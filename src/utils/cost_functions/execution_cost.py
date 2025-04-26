@@ -224,7 +224,7 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         return 0.0 # Return 0.0 on error as per original logic
     except Exception as e:
         # Log the full traceback for unexpected errors
-        log(f"[ERROR] General error during resource supply calculation: {e}", exc_info=True)
+        log(f"[ERROR] General error during resource supply calculation: {e}")
         return 0.0 # Return 0.0 on error as per original logic
 
 def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresources) -> int:
@@ -299,7 +299,7 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
         log(f"[ERROR] Build error due to unsupported architecture: {e}")
         raise e # Propagate specific build error
     except Exception as e:
-        log(f"[ERROR] General error calculating execution cost: {e}", exc_info=True)
+        log(f"[ERROR] General error calculating execution cost: {e}")
         raise e # Propagate other errors
 
 # --- Example Usage (for testing) ---
