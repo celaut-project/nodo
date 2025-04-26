@@ -85,17 +85,26 @@ def list_instances(groupable: bool = False):
         return
 
     def format_instance(inst, prefix=""):
-        color = '\033[90m' if inst['location'] != 'local' else ''
-        reset = '\033[0m' if color else ''
+        color = '[90m' if inst['location'] != 'local' else ''
+        reset = '[0m' if color else ''
         def format_line(label, value):
             lines = str(value).splitlines()
             first = f"{prefix}{label}: {lines[0]}" if lines else f"{prefix}{label}: "
             rest = [f"{prefix}    {line}" for line in lines[1:]]
             return [first] + rest
 
+        fields = [
+            ("ID", "id"),
+            ("Service", "service"),
+            ("API", "ip"),
+            ("Parent ID", "parent_id"),
+            ("Parent Type", "parent_type"),
+            ("Gas", "gas"),
+            ("Location", "location"),
+        ]
         output_lines = []
-        for key in ['ID','Service','API','Parent ID','Parent Type','Gas','Location']:
-            output_lines += format_line(key, inst[key.lower().replace(' ', '_')])
+        for label, key in fields:
+            output_lines += format_line(label, inst[key])
         for line in output_lines:
             print(f"{color}{line}{reset}")
 
