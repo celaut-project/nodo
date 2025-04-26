@@ -242,10 +242,12 @@ def manager_thread():
             check_ergo_node_availability()
             submit_reputation()
             check_dev_clients()
-            check_wanted_service(wanted_services_retry.pop())
+            if wanted_services_retry: 
+                check_wanted_service(wanted_services_retry.pop())
         
         # Functions to be executed every short interval
-        check_wanted_service(wanted_services.pop())
+        if wanted_services:
+            check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
         maintain_containers(debug_mode=False)
         maintain_clients(debug_mode=False)
         peer_deposits(debug_mode=False)
