@@ -98,6 +98,7 @@ def check_ergo_node_availability():
     
     current_ergo_node = env_manager.get_env("ERGO_NODE_URL")
     if __available_ergo_node(current_ergo_node):
+        log(f"Ergo node {current_ergo_node} is available.")
         return
     
     log(f"Ergo node {current_ergo_node} is not available.")
