@@ -77,10 +77,10 @@ def check_wanted_service(wanted: str):
                             next(generate_uris_by_peer_id(peer))
                         )
                     ).GetService,  # TODO An timeout should be implemented when requesting a service.
-                    indices_serializer=StartService_input_indices,
-                    indices_parser=StartService_input_indices,
-                    partitions_message_mode_parser=StartService_input_message_mode,
-                    input=_hash
+                    indices_serializer=gateway_pb2.celaut__pb2.Metadata.HashTag.Hash,
+                    input=_hash,
+                    indices_parser=StartService_input_indices,  #  Not used all the indices, but still are the same.
+                    partitions_message_mode_parser=StartService_input_message_mode
             ):
                 log.LOGGER(f"type of chunk -> {type(b)}")
                 if  type(b) == beerpc.Dir:
