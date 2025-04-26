@@ -5,12 +5,13 @@ import grpc
 
 from src.manager.manager import add_peer_instance
 from src.tunneling_system.tunnels import TunnelSystem
-from src.utils import logger as log
 from src.gateway.utils import generate_gateway_instance
 from src.database.sql_connection import SQLConnection
+from src.utils.env import EnvManager
 from src.utils.utils import get_network_name
 
-SEND_INSTANCE = False  # TODO Variable, true only in case of  ERG amount not sufficient to send instance to the reputation system.
+env_manager = EnvManager()
+SEND_INSTANCE = env_manager.get_env("SEND_INSTANCE")
 
 sc = SQLConnection()
 
