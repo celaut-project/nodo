@@ -26,10 +26,7 @@ class GetServiceIterable:
             if type(hash) is not celaut_pb2.Metadata.HashTag.Hash:
                 log(f'The hash provided has wrong type. {type(hash)}')
                 continue
-            _hash, _saved = find_service_hash(hash)
-            if _saved:
-                log(f'The service {_hash} is on registry, so the action is not needed.')
-                break
+            _hash, _ = find_service_hash(hash)
             if _hash:
                 service_hash = _hash
                 break
