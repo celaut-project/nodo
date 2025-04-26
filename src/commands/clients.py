@@ -43,9 +43,6 @@ def list_clients():
 
             # Section: General
             print(f"ID: {client_id}")
-            print("[General]")
-            print(f"  Client ID: {client_id}")
-            print()
 
             # Section: Gas & Usage
             print("[Gas & Usage]")
