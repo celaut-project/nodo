@@ -209,6 +209,7 @@ env_manager.get_env("EXTERNAL_COST_TIMEOUT", 10)
 env_manager.get_env("START_SERVICE_ON_PEER_TIMEOUT", 120)
 
 # Communication Settings
+env_manager.get_env("SEND_INSTANCE", True)
 env_manager.get_env("SEND_ONLY_HASHES_ASKING_COST", True)
 env_manager.get_env("DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH", False)
 
