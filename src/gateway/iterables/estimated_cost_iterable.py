@@ -5,14 +5,14 @@ from bee_rpc import client as bee, buffer_pb2
 from protos import gateway_pb2
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.virtualizers.docker import build
-from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable, BreakIteration
+from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
 from src.manager.manager import default_initial_cost
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.logger import LOGGER as log
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context
 
 
-class GetServiceEstimatedCostIterable(AbstractServiceIterable):
+class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
     
     # https://github.com/celaut-project/nodo/issues/70
     

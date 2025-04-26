@@ -3,7 +3,7 @@ from typing import Optional
 from protos import celaut_pb2
 from bee_rpc.client import read_from_file, read_multiblock_directory
 
-from src.gateway.iterables.abstract_service_iterable import find_service_hash
+from src.gateway.iterables.abstract_input_service_iterable import find_service_hash
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
