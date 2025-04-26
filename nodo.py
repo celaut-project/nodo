@@ -18,16 +18,21 @@ METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 MAIN_DIR = env_manager.get_env("MAIN_DIR")
 
-# Function to check if nodo.service is running
 def is_nodo_service_running():
     try:
-        # Run systemctl status nodo.service and capture output
-        result = subprocess.run(['systemctl', 'status', 'nodo.service'], capture_output=True, text=True)
-        # Check if systemctl command indicates that nodo.service is active (running)
+        result = subprocess.run(
+            ['systemctl', '--no-pager', 'status', 'nodo.service'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
         return "Active: active" in result.stdout
+    except subprocess.TimeoutExpired:
+        print("Error: systemctl status timed out", flush=True)
+        return False
     except Exception as e:
         print(f"Error checking nodo.service status: {e}", flush=True)
-        return False  # Return False to be safe if there's an error
+        return False
 
 def stop_service():
     try:
