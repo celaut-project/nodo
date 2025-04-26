@@ -150,7 +150,6 @@ DOCKER_CLIENT = lambda: docker_lib.from_env(
 )
 env_manager.get_env("CONCURRENT_CONTAINER_CREATIONS", 10)
 env_manager.get_env("REMOVE_CONTAINERS", True)
-env_manager.get_env("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER", True)
 
 # Network and Port Settings
 env_manager.get_env("GATEWAY_PORT", get_free_port())
