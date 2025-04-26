@@ -1,21 +1,47 @@
 from typing import Generator
-
 from bee_rpc import client as bee, buffer_pb2
 
+from protos import celaut_pb2
 from protos.gateway_pb2_bee import StartService_input_indices
+from src.gateway.iterables.abstract_input_service_iterable import find_service_hash
 from src.virtualizers.docker import build
 from src.utils.logger import LOGGER as log
 from src.utils.utils import service_extended, read_metadata_from_disk
 
 
 class GetServiceIterable:
+    
+    def __init__(self, request_iterator, context):
+        self.parser_iterator = bee.parse_from_buffer(
+            request_iterator=request_iterator,
+            indices=celaut_pb2.Metadata.HashTag.Hash,
+            partitions_message_mode=True
+        )
+        self.context = context
 
     def __iter__(self) -> Generator[buffer_pb2.Buffer, None, None]:
         log('Request for a service.')
+        service_hash = None
+        for hash in self.parser_iterator:
+            if type(hash) is not celaut_pb2.Metadata.HashTag.Hash:
+                log(f'The hash provided has wrong type. {type(hash)}')
+                continue
+            _hash, _saved = find_service_hash(hash)
+            if _saved:
+                log(f'The service {_hash} is on registry, so the action is not needed.')
+                break
+            if _hash:
+                service_hash = _hash
+                break
+            
+        if not service_hash:
+            log("Any service hash on the request input.")
+            return
+            
         try:
             yield from bee.serialize_to_buffer(
                 message_iterator=service_extended(
-                    metadata=read_metadata_from_disk(service_hash=self.service_hash) if not self.metadata else self.metadata,
+                    metadata=read_metadata_from_disk(service_hash=service_hash),
                     recursion_guard_token=self.recursion_guard_token
                 ),
                 indices=StartService_input_indices  # Client and configuration not needed.
