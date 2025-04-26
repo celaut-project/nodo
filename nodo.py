@@ -321,8 +321,8 @@ if __name__ == '__main__':
                 modify_tag(service=sys.argv[2], tag=tag)
                 
             case 'clients':
-                from src.database.sql_connection import SQLConnection
-                print("\n".join([str(client) for client in SQLConnection().get_clients()]))
+                from src.commands.clients import list_clients
+                list_clients()
                 
             case "peers":
                 from src.commands.peers import list_peers
