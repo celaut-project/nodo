@@ -55,7 +55,7 @@ def __is_service_built(service_hash: str) -> bool:
                 continue
     except (IndexError, AttributeError) as e:
         # Log the error, handle exceptions for missing attributes or invalid indexing
-        log.LOGGER(f"An error occurred while checking if service is built: {e}")
+        log(f"An error occurred while checking if service is built: {e}")
     return False
 
 
@@ -69,7 +69,7 @@ def __build_cost(metadata: celaut.Metadata) -> int:
         if __is_service_built(service_hash):
             return 0
         
-        log.LOGGER(f"System has no built container to run service {service_hash}.")
+        log(f"System has no built container to run service {service_hash}.")
 
         # Check if the architecture is supported
         if not check_supported_architecture(
@@ -85,7 +85,7 @@ def __build_cost(metadata: celaut.Metadata) -> int:
         ])
 
     except Exception as e:
-        log.LOGGER('Manager - build cost exception: ' + str(e))
+        log('Manager - build cost exception: ' + str(e))
         raise e
 
 def __get_available_supply(system_resources: celaut.Sysresources) -> float:
