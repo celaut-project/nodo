@@ -39,7 +39,7 @@ class GetServiceIterable:
             yield from bee.serialize_to_buffer(
                 message_iterator=service_extended(
                     metadata=read_metadata_from_disk(service_hash=service_hash),
-                    recursion_guard_token=self.recursion_guard_token
+                    recursion_guard_token=None  # TODO: Needed if executing the same RPC to peers as well, in case the service is not available locally.
                 ),
                 indices=StartService_input_indices  # Client and configuration not needed.
             )
