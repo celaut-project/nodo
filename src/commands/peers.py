@@ -43,7 +43,6 @@ def list_peers():
             print("No peers found.")
             return
 
-        print("Peers:\n")
         for peer in peers:
             (
                 peer_id, protocol_stack, client_id,

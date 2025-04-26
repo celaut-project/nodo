@@ -11,7 +11,6 @@ METADATA = env_manager.get_env("METADATA_REGISTRY")
 def list_services():
     # List available services in the specified registry path
     services = os.listdir(REGISTRY)
-    print("Available services:\n")
     for service in services:
         # Initialize metadata for each service
         metadata = Metadata()

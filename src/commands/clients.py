@@ -38,7 +38,6 @@ def list_clients():
             print("No clients found.")
             return
 
-        print("Clients:\n")
         for client in clients:
             client_id, gas_mantissa, gas_exponent, last_usage = client
 
