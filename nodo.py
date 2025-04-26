@@ -330,8 +330,10 @@ if __name__ == '__main__':
 
             case "instances":
                 from src.commands.instances import list_instances
-                groupable = len(sys.argv) == 3 and sys.argv[2] == "--grouped"
-                list_instances(groupable=groupable)
+                args = sys.argv[2:]
+                groupable = "--grouped" in args and not args.remove("--grouped")
+                search = " ".join(args)
+                list_instances(groupable=groupable, search=search)
 
 
             case 'connect':
