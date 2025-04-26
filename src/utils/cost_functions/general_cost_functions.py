@@ -1,5 +1,5 @@
 from protos import celaut_pb2 as celaut, gateway_pb2
-from src.utils.cost_functions import execution_cost
+from src.utils.cost_functions.execution_cost import execution_cost
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
