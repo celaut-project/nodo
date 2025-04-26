@@ -76,6 +76,7 @@ def execution_balancer(
         log.LOGGER('Error iterating peers on service balancer:' + str(e))
 
     try:
+        log.LOGGER(f"Collected costs of execution {peers}")
         return estimated_cost_sorter(
                 estimated_costs=peers,
                 weight_clauses={_id: clause.cost_weight for _id, clause in config.resources.clause.items()}
