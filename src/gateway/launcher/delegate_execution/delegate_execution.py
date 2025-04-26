@@ -26,7 +26,7 @@ def delegate_execution(
                         refund_gas: List[Callable]
                    ) -> gateway_pb2.Instance:
     try:
-        log.LOGGER('El servicio se lanza en el nodo ' + str(peer))
+        log.LOGGER('The service is launched on node ' + str(peer))
 
         if gas_amount_on_other_peer(peer_id=peer) <= cost:
             raise Exception(
