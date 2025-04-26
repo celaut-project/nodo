@@ -85,8 +85,8 @@ def list_instances(groupable: bool = False):
         return
 
     def format_instance(inst, prefix=""):
-        color = '[90m' if inst['location'] != 'local' else ''
-        reset = '[0m' if color else ''
+        color = '\033[37m' if inst['location'] != 'local' else ''
+        reset = '\033[0m' if color else ''
         def format_line(label, value):
             lines = str(value).splitlines()
             first = f"{prefix}{label}: {lines[0]}" if lines else f"{prefix}{label}: "
