@@ -20,7 +20,7 @@ env_manager = EnvManager()
 SEND_ONLY_HASHES_ASKING_COST = env_manager.get_env("SEND_ONLY_HASHES_ASKING_COST")
 EXTERNAL_COST_TIMEOUT = env_manager.get_env("EXTERNAL_COST_TIMEOUT")
 
-def service_balancer(
+def execution_balancer(
         metadata: celaut.Metadata,
         ignore_network: str = None,
         config: Optional[gateway_pb2.Configuration] = None,
