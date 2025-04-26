@@ -3,7 +3,7 @@ from protos import celaut_pb2 as celaut
 from src.utils.utils import read_service_from_disk
 from src.virtualizers.docker import build
 from src.virtualizers.docker.architecture import check_supported_architecture, UnsupportedArchitectureException
-from src.utils import logger as log
+from src.utils.logger import LOGGER as log
 from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.verify import get_service_hex_main_hash
 
