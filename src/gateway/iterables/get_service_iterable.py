@@ -4,16 +4,14 @@ from bee_rpc import client as bee, buffer_pb2
 
 from protos.gateway_pb2_bee import StartService_input_indices
 from src.virtualizers.docker import build
-from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable
 from src.utils.logger import LOGGER as log
 from src.utils.utils import service_extended, read_metadata_from_disk
 
 
-class GetServiceIterable(AbstractServiceIterable):
-    def start(self):
-        log('Request for a service.')
+class GetServiceIterable:
 
-    def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
+    def __iter__(self) -> Generator[buffer_pb2.Buffer, None, None]:
+        log('Request for a service.')
         try:
             yield from bee.serialize_to_buffer(
                 message_iterator=service_extended(
