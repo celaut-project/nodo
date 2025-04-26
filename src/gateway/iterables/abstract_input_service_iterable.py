@@ -142,10 +142,13 @@ class AbstractInputServiceIterable:
                 service_hash=self.service_hash, request_metadata=self.metadata
             )
 
-            try:
-                yield from self.generate()
-            except BreakIteration:
-                raise StopIteration
+            """
+                try:
+                    yield from self.generate()
+                except BreakIteration:
+                    raise StopIteration
+            """
+            yield from self.generate()
 
     def __iter__(self):
         self.start()
