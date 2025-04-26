@@ -45,11 +45,13 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                     ),
                     indices=gateway_pb2.EstimatedCost
                 )
+            
             except build.UnsupportedArchitectureException as e:
                 raise e
+            
             finally:
+                # raise BreakIteration
                 yield buffer_pb2.Buffer(signal=True)
-                raise BreakIteration
 
     def final(self):
         log('End request for the cost of a service.')
