@@ -95,7 +95,7 @@ def check_wanted_service(wanted: str):
                     os.system(f"mv {b.dir} {REGISTRY}{wanted}")
                     
             log.LOGGER(f"Wanted service {wanted} stored successfully.")
-            break
+            return
         
         except Exception as e:
             log.LOGGER(f"Exception on peer {peer} getting the service {wanted}. {str(e)}.")
