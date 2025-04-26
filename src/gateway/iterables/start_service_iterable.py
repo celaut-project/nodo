@@ -3,7 +3,7 @@ from typing import Generator
 
 from bee_rpc import client as bee, buffer_pb2
 
-from src.gateway.iterables.abstract_service_iterable import AbstractServiceIterable
+from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable
 from src.gateway.launcher.launch_service import launch_service
 from src.utils import logger as log
 from src.utils.env import EnvManager
@@ -17,7 +17,7 @@ REGISTRY = env_manager.get_env("REGISTRY")
 CONFIGURATION_REQUIRED = env_manager.get_env("CONFIGURATION_REQUIRED")  # In case the node needs to be stricter.
 
 
-class StartServiceIterable(AbstractServiceIterable):
+class StartServiceIterable(AbstractInputServiceIterable):
 
     def start(self):
         log.LOGGER('Starting service by ' + str(self.context.peer()) + ' ...')

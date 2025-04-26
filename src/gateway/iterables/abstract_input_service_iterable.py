@@ -65,7 +65,7 @@ class Hash:
         )
 
 
-class AbstractServiceIterable:
+class AbstractInputServiceIterable:
     configuration: Optional[gateway_pb2.Configuration] = None
 
     client_id = None
