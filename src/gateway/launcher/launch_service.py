@@ -1,21 +1,17 @@
 from typing import Optional
 
 from protos import celaut_pb2 as celaut, gateway_pb2
-from src.balancers.service_balancer.service_balancer import service_balancer
+from src.balancers.execution_balancer.execution_balancer import execution_balancer
 from src.gateway.launcher.delegate_execution.delegate_execution import delegate_execution
 from src.gateway.launcher.local_execution.local_execution import local_execution
 from src.manager.manager import spend_gas
 from src.utils import utils, logger as log
-from src.utils.env import EnvManager
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_gas_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.docker.firewall import Protocol, allow_connection
 
-env_manager = EnvManager()
 sc = SQLConnection()
-
-IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER = env_manager.get_env("IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER")
 
 
 def launch_service(
@@ -45,11 +41,9 @@ def launch_service(
         else:
             log.LOGGER(f"Service launch request made by the client {father_id}.")
 
-        for peer, estimated_cost in service_balancer(
+        for peer, estimated_cost in execution_balancer(
                 metadata=metadata,
-                ignore_network=utils.get_network_name(
-                    direction=father_ip
-                ) if IGNORE_FATHER_NETWORK_ON_SERVICE_BALANCER else None,
+                ignore_network=utils.get_network_name(direction=father_ip),
                 config=config,
                 recursion_guard_token=recursion_guard_token
         ):
