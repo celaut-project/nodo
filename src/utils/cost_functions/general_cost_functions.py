@@ -15,7 +15,8 @@ EXECUTION_BENEFIT = env_manager.get_env("EXECUTION_BENEFIT")
 GAS_COST_FACTOR = env_manager.get_env("GAS_COST_FACTOR")
 
 
-def __is_service_built(service_hash: str) -> bool:
+def __is_service_built(service_hash: str) -> bool: 
+    # TODO Needs to be on virtualizers/
     """Check if the service is built by comparing the service hash with existing Docker images."""
     try:
         # Get the list of images
@@ -32,7 +33,7 @@ def __is_service_built(service_hash: str) -> bool:
                 continue
     except (IndexError, AttributeError) as e:
         # Log the error, handle exceptions for missing attributes or invalid indexing
-        print(f"An error occurred while checking if service is built: {e}")
+        log.LOGGER(f"An error occurred while checking if service is built: {e}")
     return False
 
 
@@ -43,23 +44,24 @@ def __build_cost(metadata: celaut.Metadata) -> int:
         service_hash = get_service_hex_main_hash(metadata=metadata)
         
         # Check if the service is already built
-        is_built = __is_service_built(service_hash)
+        if __is_service_built(service_hash):
+            return 0
+        
+        log.LOGGER(f"Service {service_hash} doesn't have a container built")
 
         # Check if the architecture is supported
-        if not is_built and not check_supported_architecture(service=None, metadata=metadata):
+        if not check_supported_architecture(service=None, metadata=metadata):
             raise UnsupportedArchitectureException(arch=str(metadata))
 
         # Calculate the total build cost
         return sum([
-            COST_OF_BUILD * (not is_built),  # Add build cost if not already built
+            COST_OF_BUILD,
             # Add any additional costs here (e.g., cost of obtaining the container) # TODO
         ])
 
     except Exception as e:
         log.LOGGER('Manager - build cost exception: ' + str(e))
-        pass  # Optionally, return a default cost or re-raise the exception
-
-    return COST_OF_BUILD  # Default to return base build cost
+        raise e
 
 def __get_available_supply(system_resources: celaut.Sysresources) -> float:
     """
