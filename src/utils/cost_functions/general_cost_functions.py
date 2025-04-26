@@ -1,5 +1,6 @@
 import psutil
 from protos import celaut_pb2 as celaut, gateway_pb2
+from src.utils.utils import read_service_from_disk
 from src.virtualizers.docker import build
 from src.virtualizers.docker.architecture import check_supported_architecture, UnsupportedArchitectureException
 from src.utils import logger as log
@@ -47,10 +48,13 @@ def __build_cost(metadata: celaut.Metadata) -> int:
         if __is_service_built(service_hash):
             return 0
         
-        log.LOGGER(f"Service {service_hash} doesn't have a container built")
+        log.LOGGER(f"System has no built container to run service {service_hash}.")
 
         # Check if the architecture is supported
-        if not check_supported_architecture(service=None, metadata=metadata):
+        if not check_supported_architecture(
+            service=read_service_from_disk(service_hash=service_hash), 
+            metadata=metadata
+        ):
             raise UnsupportedArchitectureException(arch=str(metadata))
 
         # Calculate the total build cost
