@@ -7,23 +7,11 @@ DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 METADATA = env_manager.get_env("METADATA_REGISTRY")
 
 def list_instances(groupable: bool = False):
-    """
-    Lists all service instances (internal and external) stored in the database.
-    Each entry includes:
-      - ID
-      - IP
-      - Parent ID
-      - Parent type ('internal_service' or 'client' or 'unknown')
-      - Gas (computed or 'N/A')
-      - Location: 'local' for internal or peer ID for external
-    If groupable=True, displays them in a parent-children tree with full details.
-    """
     conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
 
     instances = []
     try:
-        # Load parent ID sets for resolution
         cursor.execute("SELECT id FROM local_instances;")
         internal_ids = {row[0] for row in cursor.fetchall()}
         cursor.execute("SELECT id FROM clients;")
@@ -32,30 +20,22 @@ def list_instances(groupable: bool = False):
         def get_http_ip(serialized_instance: str) -> str:
             instance = celaut.Instance()
             instance.ParseFromString(serialized_instance)
-            
             s = ""
             for _exp in instance.uri_slot:
                 for _uri in _exp.uri:
                     s += f"\n  • {_uri.ip}:{_uri.port}  (#{_exp.internal_port})"
-                    
             return s or "N/A"
         
         def get_tag(service_id: str) -> str:
             metadata = celaut.Metadata()
-            # Try got get the tag
             try:
-                # Attempt to parse the metadata from the binary file
                 with open(os.path.join(METADATA, service), "rb") as f:
                     metadata.ParseFromString(f.read())
                 name = metadata.hashtag.tag[0] if metadata.hashtag.tag else service_id
-                if name:
-                    return name
-                else:
-                    return service_id
+                return name or service_id
             except FileNotFoundError:
                 return service_id
                     
-        # Fetch internal services
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
             cursor.execute(
@@ -67,24 +47,22 @@ def list_instances(groupable: bool = False):
                     'client' if father_id in client_ids else
                     'unknown'
                 )
-                gas_str = f"{gm * (10 ** ge):.6e}"
                 instances.append({
                     'id': id_,
                     'service': get_tag(service),
                     'ip': get_http_ip(si),
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
-                    'gas': gas_str,
+                    'gas': f"{gm * (10 ** ge):.6e}",
                     'location': 'local'
                 })
 
-        # Fetch external services
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
         if cursor.fetchone():
             cursor.execute(
                 "SELECT token, peer_id, father_id, serialized_instance, service_id FROM delegated_instances"
             )
-            for token, peer_id, father_id, si, service  in cursor.fetchall():               
+            for token, peer_id, father_id, si, service in cursor.fetchall():               
                 parent_type = 'client' if father_id in client_ids else 'unknown'
                 instances.append({
                     'id': token,
@@ -107,27 +85,21 @@ def list_instances(groupable: bool = False):
         return
 
     def format_instance(inst, prefix=""):
+        color = '\033[90m' if inst['location'] != 'local' else ''
+        reset = '\033[0m' if color else ''
         def format_line(label, value):
-            value_str = str(value)
-            lines = value_str.splitlines()
-            if not lines:
-                return [f"{prefix}{label}: "]
-            return [f"{prefix}{label}: {lines[0]}"] + [f"{prefix}    {line}" for line in lines[1:]]
+            lines = str(value).splitlines()
+            first = f"{prefix}{label}: {lines[0]}" if lines else f"{prefix}{label}: "
+            rest = [f"{prefix}    {line}" for line in lines[1:]]
+            return [first] + rest
 
         output_lines = []
-        output_lines += format_line("ID", inst["id"])
-        output_lines += format_line("Service", inst["service"])
-        output_lines += format_line("API", inst["ip"])
-        output_lines += format_line("Parent ID", inst["parent_id"])
-        output_lines += format_line("Parent Type", inst["parent_type"])
-        output_lines += format_line("Gas", inst["gas"])
-        output_lines += format_line("Location", inst["location"])
-
+        for key in ['ID','Service','API','Parent ID','Parent Type','Gas','Location']:
+            output_lines += format_line(key, inst[key.lower().replace(' ', '_')])
         for line in output_lines:
-            print(line)
+            print(f"{color}{line}{reset}")
 
     if groupable:
-        # Build tree structure
         inst_map = {inst['id']: inst for inst in instances}
         children = {inst['id']: [] for inst in instances}
         roots = []
@@ -139,17 +111,16 @@ def list_instances(groupable: bool = False):
                 roots.append(inst['id'])
 
         def print_tree(node_id, prefix=""):
-            inst = inst_map[node_id]
-            format_instance(inst, prefix)
-            if node_id in children and len(children[node_id]) > 0:
+            format_instance(inst_map[node_id], prefix)
+            if children.get(node_id):
                 print("Dependencies:")
                 print()
-                for child_id in children[node_id]:
-                    print_tree(child_id, prefix + "    ")
+                for cid in children[node_id]:
+                    print_tree(cid, prefix + "    ")
                     print()
 
-        for root_id in roots:
-            print_tree(root_id)
+        for rid in roots:
+            print_tree(rid)
             print("-" * 40 + "\n")
     else:
         for inst in instances:
