@@ -14,7 +14,7 @@ def get_arch_tag(service: celaut_pb2.Service, metadata: celaut_pb2.Metadata) -> 
                 if tag in _l:
                     return tag
     
-    if TRUST_METADATA_ARCHITECTURE:
+    if TRUST_METADATA_ARCHITECTURE:  # Only for debug purposes.
         for _l in SUPPORTED_ARCHITECTURES:
             if any(a in _l for a in {
                 ah.key: ah.value for ah in {
