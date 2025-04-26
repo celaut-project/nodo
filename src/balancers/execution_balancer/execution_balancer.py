@@ -20,6 +20,28 @@ env_manager = EnvManager()
 SEND_ONLY_HASHES_ASKING_COST = env_manager.get_env("SEND_ONLY_HASHES_ASKING_COST")
 EXTERNAL_COST_TIMEOUT = env_manager.get_env("EXTERNAL_COST_TIMEOUT")
 
+def __pretty_format_peers(peers: dict[str, gateway_pb2.EstimatedCost]) -> str:
+    
+    # Formats an EstimatedCost proto directly, no JSON or extra fields.
+    def format_estimated_cost_simple(cost_proto) -> str:
+        fields = []
+        if hasattr(cost_proto, 'cost') and hasattr(cost_proto.cost, 'n'):
+            fields.append(f"cost: {cost_proto.cost.n}")
+        if hasattr(cost_proto, 'min_maintenance_cost') and hasattr(cost_proto.min_maintenance_cost, 'n'):
+            fields.append(f"min_maintenance_cost: {cost_proto.min_maintenance_cost.n}")
+        if hasattr(cost_proto, 'max_maintenance_cost') and hasattr(cost_proto.max_maintenance_cost, 'n'):
+            fields.append(f"max_maintenance_cost: {cost_proto.max_maintenance_cost.n}")
+        fields += [
+            f"maintenance_seconds_loop: {cost_proto.maintenance_seconds_loop}",
+            f"variance: {cost_proto.variance}",
+            f"comb_resource_selected: {cost_proto.comb_resource_selected}"
+        ]
+        return "\n" + "\n".join(f"    {line}" for line in fields)
+    
+    lines = ["Collected execution costs:"]
+    lines += [f"- Peer {peer_id}:{format_estimated_cost_simple(cost_proto)}" for peer_id, cost_proto in peers.items()]
+    return "\n".join(lines)
+
 def execution_balancer(
         metadata: celaut.Metadata,
         ignore_network: str = None,
@@ -76,7 +98,7 @@ def execution_balancer(
         log.LOGGER('Error iterating peers on service balancer:' + str(e))
 
     try:
-        log.LOGGER(f"Collected costs of execution {peers}")
+        log.LOGGER(f"Collected costs of execution {__pretty_format_peers(peers)}")
         return estimated_cost_sorter(
                 estimated_costs=peers,
                 weight_clauses={_id: clause.cost_weight for _id, clause in config.resources.clause.items()}
