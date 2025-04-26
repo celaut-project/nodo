@@ -150,8 +150,8 @@ def list_instances(groupable: bool = False):
 
         for root_id in roots:
             print_tree(root_id)
-            print("------\n")
+            print("-" * 40 + "\n")
     else:
         for inst in instances:
             format_instance(inst)
-            print()
+            print("-" * 40 + "\n")
