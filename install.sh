@@ -151,7 +151,7 @@ if [ ! -f "$SERVICE_FILE" ]; then
   create_service_file
 else
   printf "nodo.service already exists. Checking its status...\n"
-  systemctl status nodo.service || printf "Service is not running or not correctly installed.\n"
+  systemctl --no-pager status nodo.service || printf "Service is not running or not correctly installed.\n"
 fi
 
 create_wrapper_script() {
@@ -200,7 +200,7 @@ if ! ./"$RESTORE_SCRIPT" "$TARGET_DIR"; then
   exit 1
 fi
 
-if systemctl status nodo.service >/dev/null 2>&1; then
+if systemctl --no-pager status nodo.service >/dev/null 2>&1; then
   printf "Restarting nodo.service...\n"
   systemctl restart nodo.service
 else
