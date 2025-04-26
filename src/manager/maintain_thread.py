@@ -145,15 +145,17 @@ def maintain_containers(debug_mode: bool=False):
             if debug_mode: log.LOGGER(f"Updated reputation for {container_id} due to successful maintenance.")
 
 
-def maintain_clients():
+def maintain_clients(debug_mode: bool=False):
     for client_id in SQLConnection().get_clients_id():
+        if debug_mode: log.LOGGER(f"Maintain client {client_id}.")
         if SQLConnection().client_expired(client_id=client_id):
             log.LOGGER('Delete client ' + client_id)
             SQLConnection().delete_client(client_id)
 
 
-def peer_deposits():
+def peer_deposits(debug_mode: bool=False):
     for peer_id in SQLConnection().get_peers_id():
+        if debug_mode: log.LOGGER(f"Check peer deposits {peer_id}.")
         if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             try:
                 peer = next(beerpc(
@@ -224,8 +226,8 @@ def manager_thread():
         # Functions to be executed every short interval
         check_wanted_service(wanted_services.pop())
         maintain_containers(debug_mode=False)
-        maintain_clients()
-        peer_deposits()
+        maintain_clients(debug_mode=False)
+        peer_deposits(debug_mode=False)
         DuplicateGrabber().manager()
         
         sleep(MANAGER_ITERATION_TIME)

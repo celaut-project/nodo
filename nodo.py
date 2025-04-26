@@ -156,6 +156,7 @@ if __name__ == '__main__':
             "\n- submit_reputation"
             "\n- refresh_ergo_nodes"
             "\n- prune_containers"
+            "\n- refresh_clients"
             "\n- daemon"
             "\n\n",
               flush=True)
@@ -399,6 +400,11 @@ if __name__ == '__main__':
                 
                 from src.manager.maintain_thread import maintain_containers
                 maintain_containers(debug_mode=True)
+                
+            case "refresh_clients":
+                from src.manager.maintain_thread import maintain_clients, peer_deposits
+                maintain_clients(debug_mode=True)
+                peer_deposits(debug_mode=True)
 
             case other:
                 print('Unknown command.', flush=True)
