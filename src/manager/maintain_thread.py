@@ -26,11 +26,11 @@ env_manager = EnvManager()
 
 SHORT_INTERVAL_COUNT = env_manager.get_env("SHORT_INTERVAL_COUNT")
 SUBMIT_REPUTATION_AT_INIT = env_manager.get_env("SUBMIT_REPUTATION_AT_INIT")
-MIN_SLOTS_OPEN_PER_PEER = env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER")
-MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
-DEV_CLIENT_GAS_AMOUNT = env_manager.get_env("DEV_CLIENT_GAS_AMOUNT")
-TOTAL_REFILLED_DEPOSIT = env_manager.get_env("TOTAL_REFILLED_DEPOSIT")
-MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
+MIN_SLOTS_OPEN_PER_PEER = int(env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER"))
+MIN_DEPOSIT_PEER = int(env_manager.get_env("MIN_DEPOSIT_PEER"))
+DEV_CLIENT_GAS_AMOUNT = int(env_manager.get_env("DEV_CLIENT_GAS_AMOUNT"))
+TOTAL_REFILLED_DEPOSIT = int(env_manager.get_env("TOTAL_REFILLED_DEPOSIT"))
+MANAGER_ITERATION_TIME = int(env_manager.get_env("MANAGER_ITERATION_TIME"))
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 
@@ -153,7 +153,7 @@ def maintain_clients():
 
 
 def peer_deposits():
-    for peer_id in SQLConnection().get_peers_id(): # TODO async
+    for peer_id in SQLConnection().get_peers_id():
         if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
             try:
                 peer = next(beerpc(
@@ -178,9 +178,7 @@ def peer_deposits():
                 log.LOGGER(f"Exception updating peer {peer_id}: {str(e)}")
                 continue
 
-        peer_gas = gas_amount_on_other_peer(
-                    peer_id=peer_id
-                )
+        peer_gas = gas_amount_on_other_peer(peer_id=peer_id)
         if peer_gas < MIN_DEPOSIT_PEER:
             log.LOGGER(f'\n\n The peer {peer_id} has not enough deposit.   ')
             # f'\n   estimated gas deposit -> {peer["gas"]]} '
