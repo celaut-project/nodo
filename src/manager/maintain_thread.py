@@ -162,7 +162,7 @@ def peer_deposits(debug_mode: bool = False):
             if debug_mode: log.LOGGER(f"[DEBUG] Peer {peer_id} is not available. Attempting to fetch info.")
 
             try:
-                peer = next(beerpc(
+                peer = next(beerpc.client_grpc(
                     method=gateway_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
                             next(generate_uris_by_peer_id(peer_id=peer_id), "")
