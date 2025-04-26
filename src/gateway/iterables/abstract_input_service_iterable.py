@@ -151,8 +151,6 @@ class AbstractInputServiceIterable:
         self.start()
         try:
             yield from (t for r in self.parser_iterator for t in self.__pattern_matching(r))
-        except StopIteration:
-            pass
         finally:
             self.final()
 
