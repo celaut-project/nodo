@@ -68,13 +68,12 @@ def execution_balancer(
                             client_id=get_client_id_on_other_peer(peer_id=peer_id),
                             recursion_guard_token=recursion_guard_token
                         ),
-                        # TODO añadir initial_gas_amount y el resto de la configuracion inicial,
-                        #  si es que se especifica.
+                        # TODO: add initial_gas_amount and the rest of the initial configuration, if it is specified.
                     ))
             except Exception as e:
-                log.LOGGER('Exception taking the cost on ' + peer_id + ' : ' + str(e))
+                log.LOGGER('Exception taking the cost for ' + peer_id + ': ' + str(e) + " (maybe it doesn't have the service)")
     except Exception as e:
-        log.LOGGER('Error iterating peers on service balancer ->>' + str(e))
+        log.LOGGER('Error iterating peers on service balancer:' + str(e))
 
     try:
         return estimated_cost_sorter(
@@ -82,5 +81,5 @@ def execution_balancer(
                 weight_clauses={_id: clause.cost_weight for _id, clause in config.resources.clause.items()}
             )
     except Exception as e:
-        log.LOGGER('Error during balancer, ' + str(e))
+        log.LOGGER('Error during estimated cost sorter on execution balancer:' + str(e))
         raise StopIteration
