@@ -601,7 +601,7 @@ class SQLConnection(metaclass=Singleton):
 
                     # Set protocol stack if available
                     if row['protocol_stack']:
-                        slot = celaut_pb2.Api.Slot()
+                        slot = celaut_pb2.Service.Api.Slot()
                         slot.ParseFromString(row['protocol_stack'])
                         instance.api.slot.append(slot)
 
