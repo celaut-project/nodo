@@ -15,7 +15,7 @@ from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import increase_deposit_on_peer, init_interfaces
 from src.reputation_system.interface import update_container_reputation, submit_reputation
-from src.utils import logger as log
+from src.utils import logger as log, ssformat
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.utils.env import DOCKER_CLIENT, SHA3_256_ID, EnvManager
@@ -195,16 +195,16 @@ def peer_deposits(debug_mode: bool = False):
             if debug_mode: log.LOGGER(f"Peer {peer_id} is available. Skipping info fetch.")
 
         peer_gas = gas_amount_on_other_peer(peer_id=peer_id)
-        if debug_mode: log.LOGGER(f"Peer {peer_id} gas amount: {peer_gas}")
+        if debug_mode: log.LOGGER(f"Peer {peer_id} gas amount: {ssformat(peer_gas)}")
 
         if peer_gas < MIN_DEPOSIT_PEER:
             log.LOGGER(f"[WARNING] The peer {peer_id} has not enough deposit.")
             if debug_mode:
                 log.LOGGER(
                     f"Insufficient gas details for {peer_id}:\n"
-                    f"    - Estimated gas deposit: {peer_gas}\n"
-                    f"    - Minimum required: {MIN_DEPOSIT_PEER}\n"
-                    f"    - Amount to refill: {TOTAL_REFILLED_DEPOSIT - peer_gas}"
+                    f"    - Estimated gas deposit: {ssformat(peer_gas)}\n"
+                    f"    - Minimum required: {ssformat(MIN_DEPOSIT_PEER)}\n"
+                    f"    - Amount to refill: {ssformat(TOTAL_REFILLED_DEPOSIT - peer_gas)}"
                 )
 
             if not increase_deposit_on_peer(peer_id=peer_id, amount=TOTAL_REFILLED_DEPOSIT - peer_gas):
@@ -212,7 +212,7 @@ def peer_deposits(debug_mode: bool = False):
             else:
                 if debug_mode: log.LOGGER(f"Successfully increased deposit for {peer_id}.")
         else:
-            if debug_mode: log.LOGGER(f"Peer {peer_id} has sufficient deposit: {peer_gas}.")
+            if debug_mode: log.LOGGER(f"Peer {peer_id} has sufficient deposit: {ssformat(peer_gas)}.")
 
 
 def check_dev_clients():
