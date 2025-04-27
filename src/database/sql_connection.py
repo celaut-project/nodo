@@ -392,11 +392,11 @@ class SQLConnection(metaclass=Singleton):
             id (str): The id of the container.
             gas (int): The new gas amount.
         """
+        gas_mantissa, gas_exponent = _split_gas(gas)
         
         from src.utils.logger import ssformat 
-        logger.LOGGER(f"    Container  {id} reduce {ssformat(gas)}") # TODO DELETE THAT.
+        logger.LOGGER(f"    Container  {id} reduce {ssformat(gas)}; {gas_mantissa}e{gas_exponent}") # TODO DELETE THAT.
         
-        gas_mantissa, gas_exponent = _split_gas(gas)
         _validate_gas(gas_mantissa, gas_exponent)
         self._execute('''
             UPDATE local_instances SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
