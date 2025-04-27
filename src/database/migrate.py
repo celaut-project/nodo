@@ -34,8 +34,7 @@ def create_tables(cursor):
                 id TEXT PRIMARY KEY,
                 protocol_stack BLOB,
                 client_id TEXT,
-                gas_mantissa INTEGER,
-                gas_exponent INTEGER,
+                gas TEXT,
                 gas_last_update DATETIME DEFAULT NULL,
                 reputation_proof_id TEXT,
                 reputation_score INTEGER,
@@ -46,8 +45,7 @@ def create_tables(cursor):
         "clients": '''
             CREATE TABLE IF NOT EXISTS clients (
                 id TEXT PRIMARY KEY,
-                gas_mantissa INTEGER,
-                gas_exponent INTEGER,
+                gas TEXT,
                 last_usage FLOAT NULL
             )
         ''',
@@ -109,8 +107,7 @@ def create_tables(cursor):
                 id TEXT PRIMARY KEY,
                 ip TEXT,
                 father_id TEXT,
-                gas_mantissa INTEGER,
-                gas_exponent INTEGER,
+                gas TEXT,
                 mem_limit INTEGER,
                 serialized_instance TEXT,
                 service_id TEXT

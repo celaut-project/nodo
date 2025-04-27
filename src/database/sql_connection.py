@@ -31,63 +31,6 @@ STORAGE = env_manager.get_env("STORAGE")
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
 
-# Define a maximum mantissa and exponent
-MAX_MANTISSA = 10**3  # Adjust this limit as needed
-MAX_EXPONENT = 1024  # Adjust this limit as needed
-
-
-def _combine_gas(mantissa: int, exponent: int) -> int:
-    """
-    Combines mantissa and exponent into a single gas amount.
-
-    Args:
-        mantissa (int): The mantissa of the gas amount.
-        exponent (int): The exponent of the gas amount.
-
-    Returns:
-        int: The combined gas amount.
-    """
-    return mantissa * (10 ** exponent)
-
-
-def _validate_gas(mantissa: int, exponent: int):
-    """
-    Validates the gas amount to ensure it is within acceptable limits.
-
-    Args:
-        mantissa (int): The mantissa of the gas amount.
-        exponent (int): The exponent of the gas amount.
-
-    Raises:
-        ValueError: If the gas amount exceeds the maximum limit.
-    """
-    if mantissa < 0 or mantissa > MAX_MANTISSA:
-        raise ValueError(f"Mantissa {mantissa} is out of acceptable range (0 to {MAX_MANTISSA})")
-    if exponent < 0 or exponent > MAX_EXPONENT:
-        raise ValueError(f"Exponent {exponent} is out of acceptable range (0 to {MAX_EXPONENT})")
-
-
-def _split_gas(gas: int) -> Tuple[int, int]:
-    """
-    Splits a gas amount into mantissa and exponent.
-
-    Args:
-        gas (int): The gas amount.
-
-    Returns:
-        Tuple[int, int]: The mantissa and exponent.
-    """
-    exponent = 0
-    while gas >= MAX_MANTISSA and exponent < MAX_EXPONENT:
-        gas //= 10
-        exponent += 1
-
-    # Ensure the mantissa is within range
-    if gas > MAX_MANTISSA:
-        raise ValueError(f"Splitted mantissa {gas} is out of acceptable range (0 to {MAX_MANTISSA})")
-
-    return gas, exponent
-
 
 class SQLConnection(metaclass=Singleton):
     _connection = None
@@ -134,13 +77,11 @@ class SQLConnection(metaclass=Singleton):
             gas (int): The gas amount.
             last_usage (Optional[float]): The last usage time.
         """
-        gas_mantissa, gas_exponent = _split_gas(gas)
-        _validate_gas(gas_mantissa, gas_exponent)
+        gas = str(gas)
         self._execute('''
-            INSERT INTO clients (id, gas_mantissa, gas_exponent, last_usage)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET gas_mantissa=excluded.gas_mantissa, gas_exponent=excluded.gas_exponent, last_usage=excluded.last_usage
-        ''', (client_id, gas_mantissa, gas_exponent, last_usage))
+            INSERT INTO clients (id, gas, last_usage)
+            VALUES (?, ?, ?)
+        ''', (client_id, gas, last_usage))
 
     def get_clients(self) -> List[dict]:
         """
@@ -150,9 +91,8 @@ class SQLConnection(metaclass=Singleton):
             List[dict]: A list of dictionaries containing client details.
         """
         try:
-            result = self._execute("SELECT id, gas_mantissa, gas_exponent, last_usage FROM clients")
-            clients = [{'id': row[0], 'gas_mantissa': row[1], 'gas_exponent': row[2], 'last_usage': row[3]} for row in result.fetchall()]
-            logger.LOGGER(f'Found clients: {clients}')
+            result = self._execute("SELECT id, gas, last_usage FROM clients")
+            clients = [{'id': row[0], 'gas': row[1], 'last_usage': row[2]} for row in result.fetchall()]
             return clients
         except sqlite3.Error as e:
             logger.LOGGER(f'Error fetching clients: {e}')
@@ -206,14 +146,15 @@ class SQLConnection(metaclass=Singleton):
             Tuple[int, float, str]: The gas amount, last usage time and gas in scientific notation.
         """
         result = self._execute('''
-            SELECT gas_mantissa, gas_exponent, last_usage FROM clients WHERE id = ?
+            SELECT gas, last_usage FROM clients WHERE id = ?
         ''', (client_id,))
         row = result.fetchone()
         if row:
+            gas = int(row['gas'])
             return (
-                _combine_gas(mantissa=row['gas_mantissa'], exponent=row['gas_exponent']),
+                gas,
                 row['last_usage'],
-                f"{row['gas_mantissa']}e{row['gas_exponent']}"
+                f"{gas:e}"
             )
                 
         log.LOGGER(f'Client not found: {client_id}')
@@ -235,11 +176,9 @@ class SQLConnection(metaclass=Singleton):
         """
         _gas, _last_usage, _ = self.get_client_gas(client_id)
         total_gas = _gas + gas
-        new_mantissa, new_exponent = _split_gas(total_gas)
-        _validate_gas(new_mantissa, new_exponent)
         if _last_usage and total_gas >= CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME:
             _last_usage = None
-        self.__update_client(client_id, new_mantissa, new_exponent, _last_usage)
+        self.__update_client(client_id, total_gas, _last_usage)
 
     def reduce_gas(self, client_id: str, gas: int):
         """
@@ -251,11 +190,9 @@ class SQLConnection(metaclass=Singleton):
         """
         _gas, _last_usage, _ = self.get_client_gas(client_id)
         total_gas = _gas - gas
-        new_mantissa, new_exponent = _split_gas(total_gas)
-        _validate_gas(new_mantissa, new_exponent)
         if total_gas == 0 and _last_usage is None:
             _last_usage = time.time()
-        self.__update_client(client_id, new_mantissa, new_exponent, _last_usage)
+        self.__update_client(client_id, total_gas, _last_usage)
 
     def client_expired(self, client_id: str) -> bool:
         """
@@ -270,12 +207,12 @@ class SQLConnection(metaclass=Singleton):
         _gas, _last_usage, _ = self.get_client_gas(client_id)
         return _last_usage is not None and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)
 
-    def __update_client(self, client_id: str, mantissa: int, exponent: int, last_usage: float):
+    def __update_client(self, client_id: str, gas: int, last_usage: float):
         """Updates the gas and last usage time for a client."""
-        _validate_gas(mantissa, exponent)
+        gas = str(gas)
         self._execute('''
-            UPDATE clients SET gas_mantissa = ?, gas_exponent = ?, last_usage = ? WHERE id = ?
-        ''', (mantissa, exponent, last_usage, client_id))
+            UPDATE clients SET gas = ?, last_usage = ? WHERE id = ?
+        ''', (gas, last_usage, client_id))
 
     def get_gas_amount_by_client_id(self, id: str) -> int:
         """
@@ -288,11 +225,11 @@ class SQLConnection(metaclass=Singleton):
             int: The gas amount.
         """
         result = self._execute('''
-            SELECT gas_mantissa, gas_exponent FROM clients WHERE id = ?
+            SELECT gas FROM clients WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:
-            return row['gas_mantissa'] * (10 ** row['gas_exponent'])
+            return int(row['gas'])
         raise Exception(f'Gas amount not found for ID: {id}')
 
     # Local instance Methods
@@ -309,12 +246,11 @@ class SQLConnection(metaclass=Singleton):
             serialized_instance (str): Serialized celaut instance
             service_id (str): Service id
         """
-        gas_mantissa, gas_exponent = _split_gas(gas)
-        _validate_gas(gas_mantissa, gas_exponent)
+        gas = str(gas)
         self._execute('''
-            INSERT INTO local_instances (id, ip, father_id, gas_mantissa, gas_exponent, mem_limit, serialized_instance, service_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (container_id, container_ip, father_id, gas_mantissa, gas_exponent, 0, serialized_instance, service_id))
+            INSERT INTO local_instances (id, ip, father_id, gas, mem_limit, serialized_instance, service_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (container_id, container_ip, father_id, gas, 0, serialized_instance, service_id))
         log.LOGGER(f'Saved service {container_id} as dependency of {father_id}')
 
     def update_sys_req(self, id: str, mem_limit: Optional[int]) -> bool:
@@ -365,11 +301,11 @@ class SQLConnection(metaclass=Singleton):
             int: The gas amount.
         """
         result = self._execute('''
-            SELECT gas_mantissa, gas_exponent FROM local_instances WHERE id = ?
+            SELECT gas FROM local_instances WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:
-            return row['gas_mantissa'] * (10 ** row['gas_exponent'])
+            return str(row['gas'])
         raise Exception(f'Internal service {id}')
 
     def get_all_internal_containers_ids(self) -> List[str]:
@@ -392,15 +328,14 @@ class SQLConnection(metaclass=Singleton):
             id (str): The id of the container.
             gas (int): The new gas amount.
         """
-        gas_mantissa, gas_exponent = _split_gas(gas)
         
         from src.utils.logger import ssformat 
-        logger.LOGGER(f"    Container  {id} reduce {ssformat(gas)}; {gas_mantissa}e{gas_exponent}") # TODO DELETE THAT.
+        logger.LOGGER(f"    Container  {id} reduce {ssformat(gas)}; {gas}") # TODO DELETE THAT.
         
-        _validate_gas(gas_mantissa, gas_exponent)
+        gas = str(gas)
         self._execute('''
-            UPDATE local_instances SET gas_mantissa = ?, gas_exponent = ? WHERE id = ?
-        ''', (gas_mantissa, gas_exponent, id))
+            UPDATE local_instances SET gas = ?, WHERE id = ?
+        ''', (gas, id))
 
     def internal_instance_exists(self, id: str) -> bool:
         """
@@ -742,15 +677,13 @@ class SQLConnection(metaclass=Singleton):
             List[dict]: A list of dictionaries containing peer details.
         """
         result = self._execute('''
-            SELECT id, token, client_id, gas_mantissa, gas_exponent FROM peer
+            SELECT id, token, client_id, gas FROM peer
         ''')
 
         peers = []
         for row in result.fetchall():
             peer = dict(row)
-            gas_mantissa = peer.pop('gas_mantissa')
-            gas_exponent = peer.pop('gas_exponent')
-            peer['gas'] = _combine_gas(gas_mantissa, gas_exponent)
+            peer['gas'] = int(peer.pop('gas'))
             peers.append(peer)
 
         return peers
@@ -773,8 +706,7 @@ class SQLConnection(metaclass=Singleton):
             if row:
                 # Convert the row to a dictionary
                 peer_info = dict(row)
-                # Combine gas values into a single 'gas' key
-                peer_info['gas'] = _combine_gas(peer_info.pop('gas_mantissa'), peer_info.pop('gas_exponent'))
+                peer_info['gas'] = str(peer_info.pop('gas'))
                 return peer_info
             else:
                 return {}  # Return empty dict if peer not found
@@ -810,29 +742,22 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             # Retrieve the current gas values from the database.
-            result = self._execute('SELECT gas_mantissa, gas_exponent FROM peer WHERE id = ?', (peer_id,))
+            result = self._execute('SELECT gas FROM peer WHERE id = ?', (peer_id,))
             row = result.fetchone()
 
             if row:
-                # Combine mantissa and exponent to get the current gas amount.
-                current_gas = _combine_gas(row['gas_mantissa'], row['gas_exponent'])
+                current_gas = str(row['gas'])
 
                 # Add the specified gas to the current amount.
-                total_gas = current_gas + gas
-
-                # Split the new total gas into mantissa and exponent.
-                new_mantissa, new_exponent = _split_gas(total_gas)
-
-                # Validate the new mantissa and exponent values.
-                _validate_gas(new_mantissa, new_exponent)
+                total_gas = str(current_gas + gas)
 
                 # Get the current timestamp for gas_last_update.
                 current_time = datetime.datetime.now().isoformat()
 
                 # Update the peer's gas values and gas_last_update in the database.
                 self._execute('''
-                    UPDATE peer SET gas_mantissa = ?, gas_exponent = ?, gas_last_update = ? WHERE id = ?
-                ''', (new_mantissa, new_exponent, current_time, peer_id))
+                    UPDATE peer SET gas = ?, gas_last_update = ? WHERE id = ?
+                ''', (total_gas, current_time, peer_id))
 
                 return True
             else:
@@ -853,19 +778,15 @@ class SQLConnection(metaclass=Singleton):
         - bool: True if the operation was successful, False otherwise.
         """
         try:
-            # Split the provided gas value into mantissa and exponent.
-            new_mantissa, new_exponent = _split_gas(gas)
-
-            # Validate the new gas values.
-            _validate_gas(new_mantissa, new_exponent)
+            gas = str(gas)
 
             # Get the current timestamp for gas_last_update.
             current_time = datetime.datetime.now().isoformat()
 
             # Update the peer's gas and gas_last_update directly in the database.
             self._execute('''
-                UPDATE peer SET gas_mantissa = ?, gas_exponent = ?, gas_last_update = ? WHERE id = ?
-            ''', (new_mantissa, new_exponent, current_time, peer_id))
+                UPDATE peer SET gas = ?, gas_last_update = ? WHERE id = ?
+            ''', (gas, current_time, peer_id))
 
             return True
         except Exception as e:
@@ -887,8 +808,8 @@ class SQLConnection(metaclass=Singleton):
         if not self.peer_exists(peer_id=peer_id):
             try:
                 self._execute('''
-                    INSERT INTO peer (id, protocol_stack, client_id, gas_mantissa, gas_exponent)
-                    VALUES (?, ?, '', 0, 0)  -- Initialize with empty client_id and 0 gas
+                    INSERT INTO peer (id, protocol_stack, client_id, gas)
+                    VALUES (?, ?, '', 0, '0')  -- Initialize with empty client_id and 0 gas
                 ''', (peer_id, protocol_stack))
                 logger.LOGGER(f'Peer {peer_id} added')
                 return True

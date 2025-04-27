@@ -28,7 +28,7 @@ def list_clients():
         # Query the clients table for all columns
         cursor.execute(
             '''
-            SELECT id, gas_mantissa, gas_exponent, last_usage
+            SELECT id, gas, last_usage
             FROM clients
             '''
         )
@@ -39,14 +39,14 @@ def list_clients():
             return
 
         for client in clients:
-            client_id, gas_mantissa, gas_exponent, last_usage = client
+            client_id, gas, last_usage = client
 
             # Section: General
             print(f"ID: {client_id}")
 
             # Section: Gas & Usage
             print("[Gas & Usage]")
-            print(f"  Gas: {gas_mantissa * (10 ** gas_exponent):e}")
+            print(f"  Gas: {int(gas):e}")
             print(f"  Last Usage: {last_usage if last_usage is not None else 'None'}")
             print()
 

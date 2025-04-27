@@ -47,9 +47,9 @@ def list_instances(groupable: bool = False, search: str = ""):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT id, father_id, gas_mantissa, gas_exponent, serialized_instance, service_id FROM local_instances"
+                "SELECT id, father_id, gas, serialized_instance, service_id FROM local_instances"
             )
-            for id_, father_id, gm, ge, si, service in cursor.fetchall():
+            for id_, father_id, gas, si, service in cursor.fetchall():
                 parent_type = (
                     'internal_service' if father_id in internal_ids else
                     'client' if father_id in client_ids else
@@ -58,7 +58,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                 gas_value = 'N/A'
                 if gm is not None and ge is not None:
                    try:
-                       gas_value = f"{float(gm) * (10 ** int(ge)):e}"
+                       gas_value = f"{int(gas):e}"
                    except (ValueError, TypeError):
                        gas_value = "Invalid Gas Data"
 

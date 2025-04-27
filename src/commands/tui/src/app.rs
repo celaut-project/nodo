@@ -121,7 +121,7 @@ impl Identifiable for Tunnel {
 fn get_peers() -> Result<Vec<Peer>> {
     Ok(Connection::open(DATABASE_FILE)?
         .prepare(
-            "SELECT p.id, u.ip, u.port, p.gas_mantissa, p.gas_exponent, p.reputation_proof_id
+            "SELECT p.id, u.ip, u.port, p.gas, p.reputation_proof_id
                 FROM peer p
                 JOIN slot s ON p.id = s.peer_id
                 JOIN uri u ON s.id = u.slot_id",
@@ -130,17 +130,15 @@ fn get_peers() -> Result<Vec<Peer>> {
             let id: String = row.get(0)?;
             let ip: String = row.get(1)?;
             let port: u16 = row.get(2)?;
-            let gas_mantissa: i64 = row.get(3)?;
-            let gas_exponent: i32 = row.get(4)?;
-            let rpi: Option<String> = row.get(5)?;
+            let gas_str: String = row.get(3)?;
+            let rpi: Option<String> = row.get(4)?;
 
-            let gas_value = gas_mantissa as f64 * 10f64.powi(gas_exponent as i32);
-            let gas = format!("{:e}", gas_value);
+            let gas = format!("{:e}", gas_str.parse::<f64>().unwrap());
 
             Ok(Peer {
                 id,
                 uri: format!("{}:{}", ip, port),
-                gas,
+                gas_format,
                 rpi, // Assign the optional reputation_proof_id
             })
         })?
@@ -149,14 +147,12 @@ fn get_peers() -> Result<Vec<Peer>> {
 
 fn get_clients() -> Result<Vec<Client>> {
     Ok(Connection::open(DATABASE_FILE)?
-        .prepare("SELECT id, gas_mantissa, gas_exponent FROM clients")?
+        .prepare("SELECT id, gas FROM clients")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
-            let gas_mantissa: i64 = row.get(1)?;
-            let gas_exponent: i32 = row.get(2)?;
+            let gas_str: String = row.get(1)?;
 
-            let gas_value = gas_mantissa as f64 * 10f64.powi(gas_exponent as i32);
-            let gas = format!("{:e}", gas_value);
+            let gas = format!("{:e}", gas_str.parse::<f64>().unwrap());
 
             Ok(Client {
                 id,
@@ -170,16 +166,13 @@ fn get_instances() -> Result<Vec<Container>> {
     let conn = Connection::open(DATABASE_FILE)?;
 
     let internal_instances = conn
-        .prepare("SELECT id, ip, gas_mantissa, gas_exponent FROM local_instances")?
+        .prepare("SELECT id, ip, gas FROM local_instances")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
             let ip: String = row.get(1)?;
+            let gas_str: String = row.get(2)?;
 
-            let gas_mantissa: i64 = row.get(2)?;
-            let gas_exponent: i32 = row.get(3)?;
-
-            let gas_value = gas_mantissa as f64 * 10f64.powi(gas_exponent as i32);
-            let gas = format!("{:e}", gas_value);
+            let gas = format!("{:e}", gas_str.parse::<f64>().unwrap());
 
             Ok(Container {
                 id, ip, gas 
