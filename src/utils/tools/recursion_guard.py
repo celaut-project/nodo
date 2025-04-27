@@ -22,7 +22,7 @@ class RecursionGuard(object):
             self.token = token if token else uuid.uuid4().hex
 
             if self.token in Registry().tokens:
-                raise Exception('Block recursion loop.')
+                raise Exception(f'Block recursion loop, recursion token: {self.token}')
             else:
                 Registry().add(self.token)
 
