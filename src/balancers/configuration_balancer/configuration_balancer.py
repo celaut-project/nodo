@@ -4,8 +4,7 @@ from protos import celaut_pb2 as celaut
 from protos import gateway_pb2
 from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
 from src.manager.manager import could_ve_this_sysreq
-from src.utils.cost_functions.general_cost_functions import compute_start_service_cost
-from src.utils.cost_functions.execution_cost import compute_maintenance_cost
+from src.utils.cost_functions.general_cost_functions import compute_start_service_cost, compute_maintenance_cost
 from src.utils.utils import to_gas_amount
 from src.utils.env import EnvManager
 
