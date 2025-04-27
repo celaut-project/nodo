@@ -58,7 +58,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                 gas_value = 'N/A'
                 if gm is not None and ge is not None:
                    try:
-                       gas_value = f"{float(gm) * (10 ** int(ge)):.6e}"
+                       gas_value = f"{float(gm) * (10 ** int(ge)):e}"
                    except (ValueError, TypeError):
                        gas_value = "Invalid Gas Data"
 
