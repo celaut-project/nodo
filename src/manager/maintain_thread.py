@@ -33,7 +33,8 @@ TOTAL_REFILLED_DEPOSIT = int(env_manager.get_env("TOTAL_REFILLED_DEPOSIT"))
 MANAGER_ITERATION_TIME = int(env_manager.get_env("MANAGER_ITERATION_TIME"))
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
-DEBUG_MODE = True
+
+DEBUG_MODE = False
 
 sc = SQLConnection()
 
