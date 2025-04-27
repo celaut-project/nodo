@@ -5,7 +5,6 @@ from src.utils.env import EnvManager
 env_manager = EnvManager()
 
 MEMORY_LIMIT_COST_FACTOR = env_manager.get_env("MEMORY_LIMIT_COST_FACTOR")
-GAS_COST_FACTOR = env_manager.get_env("GAS_COST_FACTOR")
 
 
 def compute_start_service_cost(
@@ -31,9 +30,8 @@ def compute_start_service_cost(
         execution_cost(
             metadata=metadata,
             system_resources=resource.min_sysreq
-        ) * GAS_COST_FACTOR,
+        ),
         initial_gas_amount,
-        compute_maintenance_cost(system_resources=resource.min_sysreq)
     ]))
 
 
