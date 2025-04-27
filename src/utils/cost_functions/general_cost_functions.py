@@ -1,10 +1,5 @@
 from protos import celaut_pb2 as celaut, gateway_pb2
-from src.utils.cost_functions.execution_cost import execution_cost
-from src.utils.env import EnvManager
-
-env_manager = EnvManager()
-
-MEMORY_LIMIT_COST_FACTOR = env_manager.get_env("MEMORY_LIMIT_COST_FACTOR")
+from src.utils.cost_functions.execution_cost import execution_cost, maintain_execution_cost
 
 
 def compute_start_service_cost(
@@ -37,7 +32,7 @@ def compute_start_service_cost(
 
 def compute_maintenance_cost(system_resources: celaut.Sysresources) -> int:
     """
-    Calculates the ongoing maintenance cost based on memory allocation.
+    Calculates the ongoing maintenance cost.
     
     Args:
         system_resources: System resources configuration object containing memory limits
@@ -45,8 +40,7 @@ def compute_maintenance_cost(system_resources: celaut.Sysresources) -> int:
     Returns:
         Maintenance cost calculated as memory limit multiplied by cost factor
     """
-    # TODO implement (and update comment) for other parameters.
-    return int(MEMORY_LIMIT_COST_FACTOR * system_resources.mem_limit)
+    return maintain_execution_cost(system_resources=system_resources)
 
 
 def normalized_maintain_cost(cost, timelapse) -> int:
