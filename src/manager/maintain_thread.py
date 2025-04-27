@@ -157,10 +157,10 @@ def maintain_clients(debug_mode: bool=False):
 
 def peer_deposits(debug_mode: bool = False):
     for peer_id in SQLConnection().get_peers_id():
-        if debug_mode: log.LOGGER(f"[DEBUG] Starting check for peer {peer_id}.")
+        if debug_mode: log.LOGGER(f"Starting check for peer {peer_id}.")
 
         if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
-            if debug_mode: log.LOGGER(f"[DEBUG] Peer {peer_id} is not available. Attempting to fetch info.")
+            if debug_mode: log.LOGGER(f"Peer {peer_id} is not available. Attempting to fetch info.")
 
             try:
                 peer = next(beerpc.client_grpc(
@@ -172,13 +172,13 @@ def peer_deposits(debug_mode: bool = False):
                     indices_parser=gateway_pb2.Peer,
                     partitions_message_mode_parser=True
                 ), None)
-                if debug_mode: log.LOGGER(f"[DEBUG] Successfully fetched info for peer {peer_id}.")
+                if debug_mode: log.LOGGER(f"Successfully fetched info for peer {peer_id}.")
             except Exception as fetch_exception:
                 log.LOGGER(f"[ERROR] Exception fetching peer {peer_id} info: {str(fetch_exception)}")
                 continue
 
             if not peer:
-                if debug_mode: log.LOGGER(f"[DEBUG] No peer info found for {peer_id}. Skipping.")
+                if debug_mode: log.LOGGER(f"No peer info found for {peer_id}. Skipping.")
                 continue
 
             try:
@@ -186,21 +186,21 @@ def peer_deposits(debug_mode: bool = False):
                     peer=peer,
                     peer_id=peer_id
                 )
-                if debug_mode: log.LOGGER(f"[DEBUG] Peer {peer_id} instance updated successfully.")
+                if debug_mode: log.LOGGER(f"Peer {peer_id} instance updated successfully.")
             except Exception as update_exception:
                 log.LOGGER(f"[ERROR] Exception updating peer {peer_id}: {str(update_exception)}")
                 continue
         else:
-            if debug_mode: log.LOGGER(f"[DEBUG] Peer {peer_id} is available. Skipping info fetch.")
+            if debug_mode: log.LOGGER(f"Peer {peer_id} is available. Skipping info fetch.")
 
         peer_gas = gas_amount_on_other_peer(peer_id=peer_id)
-        if debug_mode: log.LOGGER(f"[DEBUG] Peer {peer_id} gas amount: {peer_gas}")
+        if debug_mode: log.LOGGER(f"Peer {peer_id} gas amount: {peer_gas}")
 
         if peer_gas < MIN_DEPOSIT_PEER:
             log.LOGGER(f"[WARNING] The peer {peer_id} has not enough deposit.")
             if debug_mode:
                 log.LOGGER(
-                    f"[DEBUG] Insufficient gas details for {peer_id}:\n"
+                    f"Insufficient gas details for {peer_id}:\n"
                     f"    - Estimated gas deposit: {peer_gas}\n"
                     f"    - Minimum required: {MIN_DEPOSIT_PEER}\n"
                     f"    - Amount to refill: {TOTAL_REFILLED_DEPOSIT - peer_gas}"
@@ -209,9 +209,9 @@ def peer_deposits(debug_mode: bool = False):
             if not increase_deposit_on_peer(peer_id=peer_id, amount=TOTAL_REFILLED_DEPOSIT - peer_gas):
                 log.LOGGER(f"[ERROR] Manager error: the peer {peer_id} could not be increased.")
             else:
-                if debug_mode: log.LOGGER(f"[DEBUG] Successfully increased deposit for {peer_id}.")
+                if debug_mode: log.LOGGER(f"Successfully increased deposit for {peer_id}.")
         else:
-            if debug_mode: log.LOGGER(f"[DEBUG] Peer {peer_id} has sufficient deposit: {peer_gas}.")
+            if debug_mode: log.LOGGER(f"Peer {peer_id} has sufficient deposit: {peer_gas}.")
 
 
 def check_dev_clients():
