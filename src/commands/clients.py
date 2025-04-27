@@ -46,8 +46,7 @@ def list_clients():
 
             # Section: Gas & Usage
             print("[Gas & Usage]")
-            print(f"  Gas Mantissa: {gas_mantissa}")
-            print(f"  Gas Exponent: {gas_exponent}")
+            print(f"  Gas: {gas_mantissa * (10 ** gas_exponent):e}")
             print(f"  Last Usage: {last_usage if last_usage is not None else 'None'}")
             print()
 

@@ -67,8 +67,7 @@ def list_peers():
             # Section: Client & Gas
             print("[Client & Gas]")
             print(f"  Client ID: {client_id}")
-            print(f"  Gas Mantissa: {gas_mantissa}")
-            print(f"  Gas Exponent: {gas_exponent}")
+            print(f"  Gas: {gas_mantissa * (10 ** gas_exponent):e}")
             print(f"  Gas Last Update: {gas_last_update or 'None'}")
             print()
 
