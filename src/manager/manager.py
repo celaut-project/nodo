@@ -227,7 +227,9 @@ def spend_gas(
 
             updated_gas = current_gas - gas_to_spend
             if debug_mode: log.LOGGER(f"Container {id} reduced gas from {log.ssformat(current_gas)} to {log.ssformat(updated_gas)} (- {log.ssformat(gas_to_spend)})")
-            log.LOGGER(f"Container {id} reduced gas from {log.ssformat(current_gas)} to {log.ssformat(updated_gas)} (- {log.ssformat(gas_to_spend)})") # TODO DELETE THAT.
+            
+            log.LOGGER(f"Container {id} reduced gas from {log.ssformat(current_gas)} to {log.ssformat(updated_gas)} (- {log.ssformat(gas_to_spend)}) \n ({current_gas} - {gas_to_spend} = {updated_gas})") # TODO DELETE THAT.
+            
             sc.update_gas_to_container(id=id, gas=updated_gas)
 
             __refund_gas_function_factory(
