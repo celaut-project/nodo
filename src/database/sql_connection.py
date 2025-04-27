@@ -393,7 +393,7 @@ class SQLConnection(metaclass=Singleton):
             gas (int): The new gas amount.
         """
         
-        from src.utils import ssformat 
+        from src.utils.logger import ssformat 
         logger.LOGGER(f"    Container  {id} reduce {ssformat(gas)}") # TODO DELETE THAT.
         
         gas_mantissa, gas_exponent = _split_gas(gas)
