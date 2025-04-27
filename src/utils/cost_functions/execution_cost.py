@@ -9,9 +9,10 @@ from src.utils.verify import get_service_hex_main_hash
 
 env_manager = EnvManager()
 
-COST_OF_BUILD = env_manager.get_env("COST_OF_BUILD")
-COMPUTE_POWER_RATE = env_manager.get_env("COMPUTE_POWER_RATE")
+EXECUTION_COST = env_manager.get_env("EXECUTION_COST")
+BUILD_COST = env_manager.get_env("BUILD_COST")
 EXECUTION_BENEFIT = env_manager.get_env("EXECUTION_BENEFIT")
+
 # --- Constants ---
 # Resource type identifiers
 CPU = 'cpu'
@@ -33,7 +34,7 @@ DEFAULT_WEIGHTS = {res: DEFAULT_WEIGHT for res in DEFAULT_RESOURCES}
 # If factor=4, supply=0.5 -> load=0.84; supply=0.1 -> load=0.97. Higher values mean
 # the load factor stays low until supply gets very scarce, then rises sharply.
 # Lower values (closer to 1) approach linear scaling.
-EXPONENTIAL_COST_FACTOR = 2.0 # Needs tuning based on desired economic behavior
+EXPONENTIAL_COST_FACTOR = 1.0 # Needs tuning based on desired economic behavior
 
 # --- Functions ---
 
@@ -80,7 +81,7 @@ def __build_cost(metadata: celaut.Metadata) -> int:
 
         # Calculate the total build cost
         return sum([
-            COST_OF_BUILD,
+            BUILD_COST,
             # Add any additional costs here (e.g., cost of obtaining the container) # TODO
         ])
 
@@ -282,7 +283,7 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
                   f"Exponential Load Factor: {used_compute_power_factor:.4f}")
 
         # Calculate the individual cost components
-        compute_cost = used_compute_power_factor * COMPUTE_POWER_RATE
+        compute_cost = used_compute_power_factor * EXECUTION_COST
         build_c = __build_cost(metadata=metadata)
         benefit = EXECUTION_BENEFIT
 
@@ -290,7 +291,7 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
         total_cost = compute_cost + build_c + benefit
 
         log(f"Execution cost calculated: {int(round(total_cost))} "
-                 f"(Compute: {compute_cost:.2f}, Build: {build_c}, Benefit: {benefit})")
+                 f"(Compute: {compute_cost:e}, Build: {build_c:e}, Benefit: {benefit:e})")
 
         return int(round(total_cost))
 
@@ -300,61 +301,3 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
     except Exception as e:
         log(f"[ERROR] General error calculating execution cost: {e}")
         raise e # Propagate other errors
-
-# --- Example Usage (for testing) ---
-if __name__ == '__main__':
-    # Case 1: Instance with specific requirements (CPU heavy)
-    print("\n--- CASE 1: CPU-Heavy Instance ---")
-    req1 = celaut.Sysresources(cpu=psutil.cpu_count(logical=False) * 0.5, mem=1024*1024*500, disk=1024*1024*1024*1) # Needs 50% CPU, 500MB RAM, 1GB Disk
-    meta1 = celaut.Metadata()
-    try:
-        cost1 = execution_cost(meta1, req1)
-        print(f"Estimated Cost 1: {cost1}")
-    except Exception as e:
-        print(f"Error calculating cost 1: {e}")
-
-    # Case 2: Instance with no requirements (uses default weights)
-    print("\n--- CASE 2: Instance with No Limits ---")
-    req2 = celaut.Sysresources()
-    meta2 = celaut.Metadata()
-    try:
-        cost2 = execution_cost(meta2, req2)
-        print(f"Estimated Cost 2: {cost2}")
-    except Exception as e:
-        print(f"Error calculating cost 2: {e}")
-
-    # Case 3: Simulate very low available supply (e.g., by manually setting supply)
-    print("\n--- CASE 3: Simulating Low Supply (Exponential Cost) ---")
-    # We can't easily force low supply via psutil, so let's patch __get_available_supply temporarily
-    original_get_supply = __get_available_supply
-    def mock_low_supply(system_resources): return 0.1 # Simulate 10% weighted supply
-    __get_available_supply = mock_low_supply
-    try:
-        cost3_low = execution_cost(meta1, req1) # Use req1, doesn't matter for mock
-        print(f"Estimated Cost with 10% Supply: {cost3_low}")
-    except Exception as e:
-        print(f"Error calculating cost 3: {e}")
-    # Restore original function
-    __get_available_supply = original_get_supply
-
-    # Case 4: Simulate almost zero supply
-    print("\n--- CASE 4: Simulating Near-Zero Supply ---")
-    def mock_zero_supply(system_resources): return 0.01 # Simulate 1% weighted supply
-    __get_available_supply = mock_zero_supply
-    try:
-        cost4_zero = execution_cost(meta1, req1)
-        print(f"Estimated Cost with 1% Supply: {cost4_zero}")
-    except Exception as e:
-        print(f"Error calculating cost 4: {e}")
-    __get_available_supply = original_get_supply
-
-    # Case 5: Simulate high supply
-    print("\n--- CASE 5: Simulating High Supply ---")
-    def mock_high_supply(system_resources): return 0.95 # Simulate 95% weighted supply
-    __get_available_supply = mock_high_supply
-    try:
-        cost5_high = execution_cost(meta1, req1)
-        print(f"Estimated Cost with 95% Supply: {cost5_high}")
-    except Exception as e:
-        print(f"Error calculating cost 5: {e}")
-    __get_available_supply = original_get_supply

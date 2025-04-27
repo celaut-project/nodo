@@ -175,25 +175,28 @@ env_manager.get_env("ERGO_DONATION_PERCENTAGE", "0.00")
 env_manager.get_env("SUBMIT_REPUTATION_AT_INIT", False)
 env_manager.get_env("SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", True)
 
-# Logging and Memory Settings
+# Logging Settings
 env_manager.get_env("MEMORY_LOGS", False)
-env_manager.get_env("MEMORY_LIMIT_COST_FACTOR", 1 / pow(10, 6))
 
 # Cost and Deposit Settings
 env_manager.get_env("DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", 1 / pow(10, 6))
 env_manager.get_env("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", False)
+
 env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT", pow(10, 9))
 env_manager.get_env("TOTAL_REFILLED_DEPOSIT", pow(10, 65))
 env_manager.get_env("MIN_DEPOSIT_PEER", pow(10, 64))
 env_manager.get_env("FREE_TRIAL_GAS_AMOUNT",  pow(10, 66))
 env_manager.get_env("INITIAL_PEER_DEPOSIT_FACTOR", 0.5)
-env_manager.get_env("COST_AVERAGE_VARIATION", 1)
-env_manager.get_env("GAS_COST_FACTOR", 1)
-env_manager.get_env("COST_OF_BUILD", 5)
-env_manager.get_env("EXECUTION_BENEFIT", 1)
-env_manager.get_env("MODIFY_SERVICE_SYSTEM_RESOURCES_COST", 1)
-env_manager.get_env("ALLOW_GAS_DEBT", False)
 env_manager.get_env("DEV_CLIENT_GAS_AMOUNT", pow(10, 256))
+
+env_manager.get_env("COST_AVERAGE_VARIATION", 1)
+
+env_manager.get_env("EXECUTION_COST", pow(10, 2))  # Based on the initial minimal resources.
+env_manager.get_env("EXECUTION_BENEFIT", pow(10, 2))  # Constant to add benefit
+env_manager.get_env("BUILD_COST", pow(10, 5))  # Constant if container build is needed.
+env_manager.get_env("MODIFY_RESOURCES_COST", pow(10, 2))  # Constant for modify instance configuration request.
+
+env_manager.get_env("ALLOW_GAS_DEBT", False)
 
 # Timing and Delay Settings
 env_manager.get_env("GENERAL_WAIT_TIME", 2)
@@ -217,7 +220,6 @@ env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER", 1)
 env_manager.get_env("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME", pow(10, 3))
 
 # Miscellaneous Settings
-env_manager.get_env("COMPUTE_POWER_RATE", 2)
 env_manager.get_env("MIN_BUFFER_BLOCK_SIZE", 10 ** 7)
 env_manager.get_env("WEIGHT_CONFIGURATION_FACTOR", int(pow(10, 9)))
 env_manager.get_env("SOCIALIZATION_FACTOR", 2)

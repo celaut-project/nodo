@@ -18,9 +18,7 @@ from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_ga
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
-
-MODIFY_SERVICE_SYSTEM_RESOURCES_COST = env_manager.get_env("MODIFY_SERVICE_SYSTEM_RESOURCES_COST")
-GAS_COST_FACTOR = env_manager.get_env("GAS_COST_FACTOR")
+MODIFY_RESOURCES_COST = env_manager.get_env("MODIFY_RESOURCES_COST")
 
 
 class Gateway(gateway_pb2_grpc.Gateway):
@@ -124,7 +122,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         refund_gas = []
         if not spend_gas(
                 id=token,
-                gas_to_spend=MODIFY_SERVICE_SYSTEM_RESOURCES_COST * GAS_COST_FACTOR,
+                gas_to_spend=MODIFY_RESOURCES_COST,
                 refund_gas_function_container=refund_gas
         ): raise Exception('Launch service error spending gas for ' + context.peer())
         if not container_modify_system_params(
