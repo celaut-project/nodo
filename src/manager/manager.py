@@ -13,7 +13,7 @@ from src.reputation_system.contracts.ergo.proof_validation import validate_contr
 
 from src.database.sql_connection import SQLConnection, _split_gas, is_peer_available
 
-from src.utils import logger as log, ssformat
+from src.utils import logger as log
 from src.utils import utils
 from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.utils import (
@@ -226,8 +226,8 @@ def spend_gas(
                 return False
 
             updated_gas = current_gas - gas_to_spend
-            if debug_mode: log.LOGGER(f"Container {id} reduced gas from {ssformat(current_gas)} to {ssformat(updated_gas)} (- {ssformat(gas_to_spend)})")
-            log.LOGGER(f"Container {id} reduced gas from {ssformat(current_gas)} to {ssformat(updated_gas)} (- {ssformat(gas_to_spend)})") # TODO DELETE THAT.
+            if debug_mode: log.LOGGER(f"Container {id} reduced gas from {log.ssformat(current_gas)} to {log.ssformat(updated_gas)} (- {log.ssformat(gas_to_spend)})")
+            log.LOGGER(f"Container {id} reduced gas from {log.ssformat(current_gas)} to {log.ssformat(updated_gas)} (- {log.ssformat(gas_to_spend)})") # TODO DELETE THAT.
             sc.update_gas_to_container(id=id, gas=updated_gas)
 
             __refund_gas_function_factory(
