@@ -31,7 +31,7 @@ def list_peers():
             '''
             SELECT
                 id, protocol_stack, client_id,
-                gas_mantissa, gas_exponent, gas_last_update,
+                gas, gas_last_update,
                 reputation_proof_id, reputation_score,
                 reputation_index, last_index_on_ledger
             FROM peer
@@ -46,7 +46,7 @@ def list_peers():
         for peer in peers:
             (
                 peer_id, protocol_stack, client_id,
-                gas_mantissa, gas_exponent, gas_last_update,
+                gas, gas_last_update,
                 reputation_proof_id, reputation_score,
                 reputation_index, last_index_on_ledger
             ) = peer
@@ -67,7 +67,7 @@ def list_peers():
             # Section: Client & Gas
             print("[Client & Gas]")
             print(f"  Client ID: {client_id}")
-            print(f"  Gas: {gas_mantissa * (10 ** gas_exponent):e}")
+            print(f"  Gas: {int(gas):e}")
             print(f"  Gas Last Update: {gas_last_update or 'None'}")
             print()
 
