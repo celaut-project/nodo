@@ -33,7 +33,7 @@ DEFAULT_WEIGHTS = {res: DEFAULT_WEIGHT for res in DEFAULT_RESOURCES}
 # If factor=4, supply=0.5 -> load=0.84; supply=0.1 -> load=0.97. Higher values mean
 # the load factor stays low until supply gets very scarce, then rises sharply.
 # Lower values (closer to 1) approach linear scaling.
-EXPONENTIAL_COST_FACTOR = 4.0 # Needs tuning based on desired economic behavior
+EXPONENTIAL_COST_FACTOR = 2.0 # Needs tuning based on desired economic behavior
 
 # --- Functions ---
 
@@ -284,7 +284,7 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
         # Calculate the individual cost components
         compute_cost = used_compute_power_factor * COMPUTE_POWER_RATE
         build_c = __build_cost(metadata=metadata)
-        benefit = EXECUTION_BENEFIT # Typically a negative value if it's a benefit/offset
+        benefit = EXECUTION_BENEFIT
 
         # Calculate total cost
         total_cost = compute_cost + build_c + benefit
@@ -292,7 +292,6 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
         log(f"Execution cost calculated: {int(round(total_cost))} "
                  f"(Compute: {compute_cost:.2f}, Build: {build_c}, Benefit: {benefit})")
 
-        # Return as integer as per original function signature
         return int(round(total_cost))
 
     except build.UnsupportedArchitectureException as e:
