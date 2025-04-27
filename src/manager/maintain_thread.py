@@ -33,6 +33,7 @@ TOTAL_REFILLED_DEPOSIT = int(env_manager.get_env("TOTAL_REFILLED_DEPOSIT"))
 MANAGER_ITERATION_TIME = int(env_manager.get_env("MANAGER_ITERATION_TIME"))
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+DEBUG_MODE = True
 
 sc = SQLConnection()
 
@@ -133,7 +134,7 @@ def maintain_containers(debug_mode: bool=False):
         )
         if debug_mode: log.LOGGER(f"Computed gas cost for {container_id}: {gas_cost:e}")
         
-        if not spend_gas(id=container_id, gas_to_spend=gas_cost):
+        if not spend_gas(id=container_id, gas_to_spend=gas_cost, debug_mode=debug_mode):
             try:
                 update_container_reputation(container_id=container_id, amount=-10)
                 log.LOGGER(f"Pruning container {container_id} due to insufficient gas.")
@@ -249,9 +250,9 @@ def manager_thread():
         # Functions to be executed every short interval
         if wanted_services:
             check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
-        maintain_containers(debug_mode=False)
-        maintain_clients(debug_mode=False)
-        peer_deposits(debug_mode=False)
+        maintain_containers(debug_mode=DEBUG_MODE)
+        maintain_clients(debug_mode=DEBUG_MODE)
+        peer_deposits(debug_mode=DEBUG_MODE)
         DuplicateGrabber().manager()
         
         sleep(MANAGER_ITERATION_TIME)

@@ -172,7 +172,8 @@ def increase_local_gas_for_client(client_id: str, amount: int) -> bool:
 def spend_gas(
         id: str,
         gas_to_spend: int,
-        refund_gas_function_container: list = None
+        refund_gas_function_container: list = None,
+        debug_mode: bool=True
 ) -> bool:
     """
     Attempts to deduct gas from a client or container.
@@ -194,7 +195,7 @@ def spend_gas(
                 log.LOGGER(f"Insufficient gas for client '{id}': {sci_not} available, needed {mant}e{exp}.")
                 return False
 
-            log.LOGGER(f"Reduce {gas_to_spend:e} gas for the client {id}")
+            if debug_mode: log.LOGGER(f"Reduce {gas_to_spend:e} gas for the client {id}")
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
 
             __refund_gas_function_factory(
@@ -225,7 +226,7 @@ def spend_gas(
                 return False
 
             updated_gas = current_gas - gas_to_spend
-            log.LOGGER(f"Container {id} reduced gas from {current_gas:e} to {updated_gas:e} (- {gas_to_spend:e})")
+            if debug_mode: log.LOGGER(f"Container {id} reduced gas from {current_gas:e} to {updated_gas:e} (- {gas_to_spend:e})")
             sc.update_gas_to_container(id=id, gas=updated_gas)
 
             __refund_gas_function_factory(
