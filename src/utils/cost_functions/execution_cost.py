@@ -215,9 +215,9 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         # 7. Normalize the weighted sum (which is 0-100) to a score between 0.0 and 1.0
         normalized_score = max(0.0, min(weighted_sum / 100.0, 1.0))
 
-        log(f"Calculated availability score: {normalized_score:.4f} "
-                  f"(Weights: { {k: f'{v:.2f}' for k, v in weights.items()} }, " # Format weights for readability
-                  f"Availability %: { {k: f'{v:.1f}' for k, v in current_availability_percent.items()} })") # Format availability
+        # log(f"Calculated availability score: {normalized_score:.4f} "
+        #           f"(Weights: { {k: f'{v:.2f}' for k, v in weights.items()} }, " # Format weights for readability
+        #           f"Availability %: { {k: f'{v:.1f}' for k, v in current_availability_percent.items()} })") # Format availability
         return normalized_score
 
     except psutil.Error as pe:
@@ -253,8 +253,7 @@ def maintain_execution_cost(system_resources: celaut.Sysresources) -> int:
             # This maps the curve so it rises steeply near lack=1 (supply=0)
             used_compute_power_factor = lack_of_supply ** (1.0 / EXPONENTIAL_COST_FACTOR)
 
-    log(f"Supply Score: {available_supply:.4f}, Lack of Supply: {lack_of_supply:.4f}, "
-                f"Exponential Load Factor: {used_compute_power_factor:.4f}")
+    # log(f"Supply Score: {available_supply:.4f}, Lack of Supply: {lack_of_supply:.4f}, Exponential Load Factor: {used_compute_power_factor:.4f}")
     
     cost = used_compute_power_factor * EXECUTION_COST
     return int(round(cost))
