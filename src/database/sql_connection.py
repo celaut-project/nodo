@@ -392,6 +392,7 @@ class SQLConnection(metaclass=Singleton):
             id (str): The id of the container.
             gas (int): The new gas amount.
         """
+        logger.LOGGER(f"    Container  {id} reduce {gas:e}") # TODO DELETE THAT.
         gas_mantissa, gas_exponent = _split_gas(gas)
         _validate_gas(gas_mantissa, gas_exponent)
         self._execute('''
