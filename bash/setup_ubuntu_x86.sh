@@ -96,9 +96,8 @@ echo "Installing required system packages for Docker ..."
 sudo apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
 
 echo "Updating package lists..."
-sudo apt-get -y update > /dev/null 2>&1 || {
-    echo "Error updating package lists."
-    exit 1
+sudo apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false update > /dev/null 2>&1 || {
+    handle_update_errors $?
 }
 
 echo "Installing required system packages for Docker..."
