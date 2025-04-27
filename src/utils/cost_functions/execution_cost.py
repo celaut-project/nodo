@@ -228,6 +228,37 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         log(f"[ERROR] General error during resource supply calculation: {e}")
         return 0.0 # Return 0.0 on error as per original logic
 
+def maintain_execution_cost(system_resources: celaut.Sysresources) -> int:
+    # Get the weighted available supply score (0.0 to 1.0)
+    available_supply = __get_available_supply(system_resources=system_resources)
+
+    # Calculate the 'lack of supply' (ranges from 0.0 when supply=1.0, to 1.0 when supply=0.0)
+    lack_of_supply = 1.0 - available_supply
+
+    # Calculate the effective load factor using exponential scaling.
+    # This factor approaches 1.0 much faster than the linear 'lack_of_supply'
+    # as available_supply drops towards 0, thus increasing cost sharply under scarcity.
+    if EXPONENTIAL_COST_FACTOR <= 0:
+            log("EXPONENTIAL_COST_FACTOR must be positive.")
+            # Defaulting to linear factor to avoid math error, but this indicates misconfiguration.
+            used_compute_power_factor = lack_of_supply
+    elif lack_of_supply >= 1.0:
+            # If supply is effectively zero, the factor is maximum (1.0)
+            used_compute_power_factor = 1.0
+    elif lack_of_supply <= 0.0:
+            # If supply is 1.0 or more, factor is minimum (0.0)
+            used_compute_power_factor = 0.0
+    else:
+            # Apply the exponential scaling: factor = lack**(1/exp_factor)
+            # This maps the curve so it rises steeply near lack=1 (supply=0)
+            used_compute_power_factor = lack_of_supply ** (1.0 / EXPONENTIAL_COST_FACTOR)
+
+    log(f"Supply Score: {available_supply:.4f}, Lack of Supply: {lack_of_supply:.4f}, "
+                f"Exponential Load Factor: {used_compute_power_factor:.4f}")
+    
+    cost = used_compute_power_factor * EXECUTION_COST
+    return int(round(cost))
+
 def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresources) -> int:
     """
     Calculates the estimated execution cost for running a service instance.
@@ -255,35 +286,8 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
     """
     log('Calculating execution cost...')
     try:
-        # Get the weighted available supply score (0.0 to 1.0)
-        available_supply = __get_available_supply(system_resources=system_resources)
-
-        # Calculate the 'lack of supply' (ranges from 0.0 when supply=1.0, to 1.0 when supply=0.0)
-        lack_of_supply = 1.0 - available_supply
-
-        # Calculate the effective load factor using exponential scaling.
-        # This factor approaches 1.0 much faster than the linear 'lack_of_supply'
-        # as available_supply drops towards 0, thus increasing cost sharply under scarcity.
-        if EXPONENTIAL_COST_FACTOR <= 0:
-             log("EXPONENTIAL_COST_FACTOR must be positive.")
-             # Defaulting to linear factor to avoid math error, but this indicates misconfiguration.
-             used_compute_power_factor = lack_of_supply
-        elif lack_of_supply >= 1.0:
-             # If supply is effectively zero, the factor is maximum (1.0)
-             used_compute_power_factor = 1.0
-        elif lack_of_supply <= 0.0:
-             # If supply is 1.0 or more, factor is minimum (0.0)
-             used_compute_power_factor = 0.0
-        else:
-             # Apply the exponential scaling: factor = lack**(1/exp_factor)
-             # This maps the curve so it rises steeply near lack=1 (supply=0)
-             used_compute_power_factor = lack_of_supply ** (1.0 / EXPONENTIAL_COST_FACTOR)
-
-        log(f"Supply Score: {available_supply:.4f}, Lack of Supply: {lack_of_supply:.4f}, "
-                  f"Exponential Load Factor: {used_compute_power_factor:.4f}")
-
         # Calculate the individual cost components
-        compute_cost = used_compute_power_factor * EXECUTION_COST
+        compute_cost = maintain_execution_cost(system_resources=system_resources)
         build_c = __build_cost(metadata=metadata)
         benefit = EXECUTION_BENEFIT
 
