@@ -131,7 +131,7 @@ def maintain_containers(debug_mode: bool=False):
                 mem_limit=sc.get_sys_req(id=container_id)['mem_limit']
             )
         )
-        if debug_mode: log.LOGGER(f"Computed gas cost for {container_id}: {gas_cost}")
+        if debug_mode: log.LOGGER(f"Computed gas cost for {container_id}: {gas_cost:e}")
         
         if not spend_gas(id=container_id, gas_to_spend=gas_cost):
             try:

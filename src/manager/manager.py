@@ -194,6 +194,7 @@ def spend_gas(
                 log.LOGGER(f"Insufficient gas for client '{id}': {sci_not} available, needed {mant}e{exp}.")
                 return False
 
+            log.LOGGER(f"Reduce {gas_to_spend:e} gas for the client {id}")
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
 
             __refund_gas_function_factory(
@@ -223,7 +224,9 @@ def spend_gas(
                 log.LOGGER(f"Insufficient gas for container '{id}': {current_gas} available, needed {gas_to_spend}.")
                 return False
 
-            sc.update_gas_to_container(id=id, gas=current_gas - gas_to_spend)
+            updated_gas = current_gas - gas_to_spend
+            log.LOGGER(f"Container {id} reduced gas from {current_gas:e} to {updated_gas:e} (- {gas_to_spend:e})")
+            sc.update_gas_to_container(id=id, gas=updated_gas)
 
             __refund_gas_function_factory(
                 gas=gas_to_spend,
