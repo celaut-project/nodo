@@ -6,7 +6,7 @@ import grpc, json
 from protos import gateway_pb2, gateway_pb2_grpc
 from src.gateway.gateway import Gateway
 from src.tunneling_system.tunnels import TunnelSystem
-from src.manager.maintain_thread import manager_thread
+from src.manager.maintain import manager_thread
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()

@@ -400,11 +400,11 @@ if __name__ == '__main__':
                     print("This script requires superuser privileges. Please run with sudo.")
                     exit()
                 
-                from src.manager.maintain_thread import maintain_containers
+                from src.manager.maintain import maintain_containers
                 maintain_containers(debug_mode=True)
                 
             case "refresh_clients":
-                from src.manager.maintain_thread import maintain_clients, peer_deposits
+                from src.manager.maintain import maintain_clients, peer_deposits
                 maintain_clients(debug_mode=True)
                 peer_deposits(debug_mode=True)
 
