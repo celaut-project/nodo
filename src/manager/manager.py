@@ -7,7 +7,7 @@ import grpc
 from bee_rpc import client as bee
 from google.protobuf.json_format import MessageToJson
 
-from src.manager.resources_manager import IOBigData
+from src.manager.resources import IOBigData
 from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
 from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_reputation_contract_ledger
 

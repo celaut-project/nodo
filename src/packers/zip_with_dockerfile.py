@@ -4,7 +4,7 @@ from typing import Generator, List, Tuple, Union
 from src.utils import logger as log
 import json
 import os, subprocess
-import src.manager.resources_manager as resources_manager
+import src.manager.resources as resources
 from bee_rpc import client as grpcbb
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_pb2_bee
@@ -279,7 +279,7 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]
     
     _memory = int(PACKER_MEMORY_SIZE_FACTOR) * spec_file.buffer_len
     log.LOGGER(f"Try to lock {_memory / (1024**2):.2f} MB")
-    with resources_manager.mem_manager(len=_memory):
+    with resources.mem_manager(len=_memory):
         spec_file.parseContainer()
         spec_file.parseApi()
         spec_file.parseNetwork()

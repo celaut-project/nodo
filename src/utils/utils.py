@@ -10,7 +10,7 @@ from bee_rpc.client import Dir
 from protos import celaut_pb2 as celaut
 from protos import gateway_pb2
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
-from src.manager.resources_manager import mem_manager
+from src.manager.resources import mem_manager
 from src.utils import logger as log
 from src.utils.verify import get_service_hex_main_hash
 from src.utils.env import EnvManager

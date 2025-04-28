@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-import src.manager.resources_manager as resources_manager
+import src.manager.resources as resources
 import threading
 from shutil import rmtree
 from subprocess import check_output, CalledProcessError
@@ -87,7 +87,7 @@ def build_container_from_definition(service: celaut_pb2.Service,
     else:
         biggest_block_size: int = os.path.getsize(f"{REGISTRY}{service_id}")
 
-    with resources_manager.mem_manager(
+    with resources.mem_manager(
             len=sum([
                 service.ByteSize(),
                 biggest_block_size
