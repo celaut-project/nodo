@@ -27,13 +27,6 @@ def get_ledger_and_contract_addr_from_contract(contract_hash: str) -> Generator[
     yield from get_peer_contract_instances(contract_hash=contract_hash)
 
 
-def get_ledger_providers(ledger: str) -> Generator[str, None, None]:
-    yield from (r[0] for r in fetch_query(
-        query="SELECT uri FROM ledger_provider WHERE ledger_id = ?",
-        params=(ledger,)
-    ))
-
-
 class NonUsedLedgerException(Exception):
     pass
 

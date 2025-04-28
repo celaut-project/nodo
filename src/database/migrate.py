@@ -81,14 +81,6 @@ def create_tables(cursor):
                 double_spending_retry_time DATETIME DEFAULT NULL
             )
         ''',
-        "ledger_provider": '''
-            CREATE TABLE IF NOT EXISTS ledger_provider (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                uri TEXT,
-                ledger_id TEXT,
-                FOREIGN KEY (ledger_id) REFERENCES peer (id)
-            )
-        ''',
         "contract_instance": '''
             CREATE TABLE IF NOT EXISTS contract_instance (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
