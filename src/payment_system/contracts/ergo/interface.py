@@ -32,6 +32,7 @@ ERGO_DONATION_PERCENTAGE = lambda: clamp(float(env_manager.get_env('ERGO_DONATIO
 HOT_LIMITS = int(env_manager.get_env("ERGO_ERG_HOT_WALLET_LIMITS"))  # type: ignore
 ERGO_AUXILIAR_MNEMONIC = env_manager.get_env("ERGO_AUXILIAR_MNEMONIC")  # Receiver wallet
 ERGO_WALLET_MNEMONIC = lambda: env_manager.get_env('ERGO_WALLET_MNEMONIC')  # Sender wallet
+ERGO_GAS_COST = lambda: int(env_manager.get_env("ERGO_GAS_COST"))
 WAIT_TX_TIME = 240  # 20 minutes (each 5 seconds)
 WAT_TX_SLEEP_TIME = 5
 
@@ -44,7 +45,7 @@ CLIENT_WALLET -> AUXILIAR_WALLET -> MAIN_WALLET -> COLD_WALLET
 payment_lock = Lock()  # Ensures that the same input box is no spent with more amount that it has. (could be more efficient ...)
 
 def __gas_to_nanoerg(amount: int) -> int:
-    return int(amount/(10**58)) if amount > 10**58 else amount  # type: ignore
+    return int(round(amount*(ERGO_GAS_COST)))
 
 def __nanoerg_to_erg(amount: int) -> float:
     return amount / 1_000_000_000  # type: ignore
