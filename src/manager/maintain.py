@@ -200,14 +200,15 @@ def peer_deposits(debug_mode: bool = False):
         if peer_gas < MIN_DEPOSIT_PEER:
             log.LOGGER(f"[WARNING] The peer {peer_id} has not enough deposit.")
             if debug_mode:
+                to_increase = TOTAL_REFILLED_DEPOSIT - peer_gas
                 log.LOGGER(
                     f"Insufficient gas details for {peer_id}:\n"
                     f"    - Estimated gas deposit: {log.ssformat(peer_gas)}\n"
                     f"    - Minimum required: {log.ssformat(MIN_DEPOSIT_PEER)}\n"
-                    f"    - Amount to refill: {log.ssformat(TOTAL_REFILLED_DEPOSIT - peer_gas)}"
+                    f"    - Amount to refill: {log.ssformat(to_increase)}"
                 )
 
-            if not increase_deposit_on_peer(peer_id=peer_id, amount=TOTAL_REFILLED_DEPOSIT - peer_gas):
+            if not increase_deposit_on_peer(peer_id=peer_id, amount=to_increase):
                 log.LOGGER(f"[ERROR] Manager error: the peer {peer_id} could not be increased.")
             else:
                 if debug_mode: log.LOGGER(f"Successfully increased deposit for {peer_id}.")
