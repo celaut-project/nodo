@@ -30,10 +30,16 @@ COLD_WALLET = lambda: env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')
 ERGO_DONATION_WALLET = lambda: env_manager.get_env('ERGO_DONATION_WALLET')
 ERGO_DONATION_PERCENTAGE = lambda: clamp(float(env_manager.get_env('ERGO_DONATION_PERCENTAGE')), 1.0, 0.0)  # type: ignore
 HOT_LIMITS = int(env_manager.get_env("ERGO_ERG_HOT_WALLET_LIMITS"))  # type: ignore
-ERGO_AUXILIAR_MNEMONIC = env_manager.get_env("ERGO_AUXILIAR_MNEMONIC")
-ERGO_WALLET_MNEMONIC = lambda: env_manager.get_env('ERGO_WALLET_MNEMONIC')
+ERGO_AUXILIAR_MNEMONIC = env_manager.get_env("ERGO_AUXILIAR_MNEMONIC")  # Receiver wallet
+ERGO_WALLET_MNEMONIC = lambda: env_manager.get_env('ERGO_WALLET_MNEMONIC')  # Sender wallet
 WAIT_TX_TIME = 240  # 20 minutes (each 5 seconds)
 WAT_TX_SLEEP_TIME = 5
+
+"""
+
+CLIENT_WALLET -> AUXILIAR_WALLET -> MAIN_WALLET -> COLD_WALLET
+
+"""
 
 payment_lock = Lock()  # Ensures that the same input box is no spent with more amount that it has. (could be more efficient ...)
 
