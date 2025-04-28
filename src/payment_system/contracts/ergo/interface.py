@@ -143,7 +143,7 @@ def init():
 
 def check_sender_balance(amount: int) -> bool:
     try:
-        return self.get_balances(only_sender=True)[0][1] > amount
+        return self.get_balances(only_sender=True)[0][1] > __gas_to_nanoerg(amount)
     except:
         return False
 
