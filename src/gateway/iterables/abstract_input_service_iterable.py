@@ -10,7 +10,7 @@ from protos.gateway_pb2_bee import StartService_input_indices, \
 from src.gateway.utils import save_service
 from src.utils import logger as log
 from src.utils.env import SHA3_256_ID
-from src.manager.maintain_thread import add_wanted
+from src.manager.maintain import add_wanted
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
