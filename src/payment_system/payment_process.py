@@ -8,7 +8,7 @@ from bee_rpc import client as bee
 from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.payment_system.ledger_balancer import ledger_balancer
 
-from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_INTERFACES, MANAGE_INTERFACES, PAYMENT_PROCESS_VALIDATORS, DEMOS
+from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_INTERFACES, MANAGE_INTERFACES, PAYMENT_PROCESS_VALIDATORS, DEMOS, CHECK_SENDER_BALANCE
 from src.payment_systems.contracts.ergo import interface as ergo
 
 from protos import gateway_pb2_grpc, gateway_pb2
@@ -80,17 +80,26 @@ def __obtain_deposit_token(peer_id) -> Optional[str]:
 
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
     
-    if ergo.get_balances(only_sender=True)[0][1] <= amount:
-        _l.LOGGER("Insufficient balance.")
-        return False
-
-    deposit_token = __obtain_deposit_token(peer_id=peer_id)
-    if not deposit_token:
-        _l.LOGGER("No deposit token available.")
-        return False
+    deposit_token = None
 
     # Attempt payment processing for each available payment process
     for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():
+        
+        # In the case where we have different payment methods for the same ledger, ex: other payment method on Ergo, we should reorganize the envs dictionaries to avoid check sender balances multiple times.
+        
+        check_balance = CHECK_SENDER_BALANCE[contract_hash]
+        if not check_balance(amount):
+            _l.LOGGER(f"Insufficient balance for {contract_hash}")
+            continue
+        
+        if not deposit_token:
+            deposit_token = __obtain_deposit_token(peer_id=peer_id)
+            if not deposit_token:
+                _l.LOGGER("No deposit token available.")
+                return False
+            else:
+                _l.LOGGER("Deposit token obtained.")
+        
         try:
             # Get all available ledgers for this peer and contract
             

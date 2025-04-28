@@ -141,6 +141,11 @@ def init():
         contract=CONTRACT
     ))
 
+def check_sender_balance(amount: int) -> bool:
+    try:
+        return self.get_balances(only_sender=True)[0][1] > amount
+    except:
+        return False
 
 def manager():
     LOGGER("Exec ergo interface manager")
