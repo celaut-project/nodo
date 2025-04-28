@@ -23,7 +23,7 @@ from org.ergoplatform.appkit.impl import *
 env_manager = EnvManager()
 DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
 LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.
-CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree script
+CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree template script.    Because the specific script is the address, right? <- TODO check
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 ERGO_NODE_URL = lambda: env_manager.get_env("ERGO_NODE_URL")
 COLD_WALLET = lambda: env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')
