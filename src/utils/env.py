@@ -191,7 +191,7 @@ env_manager.get_env("DEV_CLIENT_GAS_AMOUNT", pow(10, 256))
 
 env_manager.get_env("COST_AVERAGE_VARIATION", 1)
 
-env_manager.get_env("EXECUTION_COST", pow(10, 2))  # Based on the initial minimal resources.
+env_manager.get_env("EXECUTION_COST", pow(10, 2))  # Based on a maximum usage of resources.
 env_manager.get_env("EXECUTION_BENEFIT", pow(10, 2))  # Constant to add benefit
 env_manager.get_env("BUILD_COST", pow(10, 5))  # Constant if container build is needed.
 env_manager.get_env("MODIFY_RESOURCES_COST", pow(10, 2))  # Constant for modify instance configuration request.
