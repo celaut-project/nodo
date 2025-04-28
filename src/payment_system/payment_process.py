@@ -138,8 +138,9 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                 if __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
                     update_peer_reputation(peer_id=peer_id, amount=10)  # TODO On envs.
                     return True
-                _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
-                update_peer_reputation(peer_id=peer_id, amount=-100)  # TODO On envs.
+                else:
+                    _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
+                    update_peer_reputation(peer_id=peer_id, amount=-100)  # TODO On envs.
 
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
         except Exception as e:
