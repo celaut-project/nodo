@@ -9,6 +9,7 @@ from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.payment_system.ledger_balancer import ledger_balancer
 
 from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_INTERFACES, MANAGE_INTERFACES, PAYMENT_PROCESS_VALIDATORS, DEMOS
+from src.payment_systems.contracts.ergo import interface as ergo
 
 from protos import gateway_pb2_grpc, gateway_pb2
 
@@ -52,11 +53,11 @@ def __get_grpc_stub(peer_id):
     return gateway_pb2_grpc.GatewayStub(grpc.insecure_channel(uri))
 
 
-def __peer_payment_process(peer_id: str, amount: int) -> bool:
+def __obtain_deposit_token(peer_id) -> Optional[str]:
     client_id: str = get_client_id_on_other_peer(peer_id=peer_id)
     if not client_id:
         _l.LOGGER("No client available.")
-        return False
+        return
 
     _l.LOGGER(f"Generate deposit token on the peer {peer_id} with client {client_id}")
 
@@ -64,10 +65,10 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
     grpc_stub = __get_grpc_stub(peer_id)
     if not grpc_stub:
         _l.LOGGER("Failed to generate gRPC stub.")
-        return False
+        return
 
     try:
-        deposit_token = next(bee.client_grpc(
+        return next(bee.client_grpc(
             method=grpc_stub.GenerateDepositToken,
             partitions_message_mode_parser=True,
             input=gateway_pb2.Client(client_id=client_id),
@@ -75,8 +76,15 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         ), None).token
     except Exception as e:
         _l.LOGGER(f"Error generating deposit token: {str(e)}")
+        return
+
+def __peer_payment_process(peer_id: str, amount: int) -> bool:
+    
+    if ergo.get_balances(only_sender=True)[0][1] <= amount:
+        _l.LOGGER("Insufficient balance.")
         return False
 
+    deposit_token = __obtain_deposit_token(peer_id=peer_id)
     if not deposit_token:
         _l.LOGGER("No deposit token available.")
         return False
