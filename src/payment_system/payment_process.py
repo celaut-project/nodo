@@ -185,7 +185,7 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
 def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
     if amount < MIN_DEPOSIT_PEER: amount = MIN_DEPOSIT_PEER
     
-    _l.LOGGER('Increase deposit on peer ' + peer_id + ' by ' + str(amount))
+    _l.LOGGER('Increase deposit on peer ' + peer_id + ' by ' + str(_l.ssformat(amount)))
     try:
         if __peer_payment_process(peer_id=peer_id, amount=amount):
             if sc.add_gas_to_peer(peer_id=peer_id, gas=amount):
