@@ -35,8 +35,7 @@ def get_local_ip() -> str:
         s.close()
         return ip_address
     except Exception as e:
-        log(f"Error getting local IP: {e}")
-        return None
+        raise(f"Error getting local IP: {e}")
 
 def internet_available() -> bool:
     """
