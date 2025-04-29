@@ -1,6 +1,7 @@
 import sqlite3
 from src.utils.env import EnvManager
 from protos import celaut_pb2 as celaut
+from src.utils.logger import ssformat
 
 env_manager = EnvManager()
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
@@ -67,7 +68,7 @@ def list_peers():
             # Section: Client & Gas
             print("[Client & Gas]")
             print(f"  Client ID: {client_id}")
-            print(f"  Gas: {int(gas):e}")
+            print(f"  Gas: {ssformat(int(gas))}")
             print(f"  Gas Last Update: {gas_last_update or 'None'}")
             print()
 
