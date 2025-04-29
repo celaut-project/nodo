@@ -334,7 +334,7 @@ class SQLConnection(metaclass=Singleton):
         
         gas = str(gas)
         self._execute('''
-            UPDATE local_instances SET gas = ?, WHERE id = ?
+            UPDATE local_instances SET gas = ? WHERE id = ?
         ''', (gas, id))
 
     def internal_instance_exists(self, id: str) -> bool:
