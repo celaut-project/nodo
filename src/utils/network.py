@@ -1,9 +1,30 @@
-import socket
+import socket, subprocess, os
+from src.utils.logger import LOGGER as log
 
-def get_free_port() -> int:
+def get_free_port(open_port: bool = False) -> int:
+    """
+    Finds a free port on the system. If open_port is True, it attempts to open
+    the found port in the firewall using ufw (Linux).
+
+    Args:
+        open_port (bool): If True, attempts to open the found port in the firewall
+                           using ufw. This might require root privileges on Linux.
+
+    Returns:
+        int: A free port number.
+    """
     with socket.socket() as s:
         s.bind(('', 0))
-        return int(s.getsockname()[1])
+        port = int(s.getsockname()[1])
+        if open_port:
+            try:
+                subprocess.run(['ufw', 'allow', str(port) + '/tcp'], check=True, capture_output=True, text=True)
+                log(f"Attempted to open port {port} in the firewall (ufw).")
+            except subprocess.CalledProcessError as e:
+                log.error(f"Error attempting to open port {port} in the firewall (ufw): {e.stderr}")
+            except FileNotFoundError:
+                log.warning("ufw command not found. Ensure ufw is installed if you intend to open ports.")
+        return port
     
 def get_local_ip() -> str:
     try:
@@ -16,7 +37,7 @@ def get_local_ip() -> str:
         s.close()
         return ip_address
     except Exception as e:
-        print(f"Error getting local IP: {e}")
+        log(f"Error getting local IP: {e}")
         return None
 
 def internet_available() -> bool:
