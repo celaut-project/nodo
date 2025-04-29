@@ -98,7 +98,7 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
     peer = sc.get_peer_by_id(peer_id=peer_id)
     if peer and 'gas_last_update' in peer and peer['gas_last_update']:
         last_update_time = datetime.datetime.fromisoformat(peer['gas_last_update'])
-        if (datetime.datetime.now() - last_update_time).total_seconds() <= min(10, MANAGER_ITERATION_TIME):
+        if (datetime.datetime.now() - last_update_time).total_seconds() <= min(10.0, float(MANAGER_ITERATION_TIME)):
             return peer['gas']
 
     client_id = get_client_id_on_other_peer(peer_id=peer_id)
