@@ -1,5 +1,4 @@
-import socket, subprocess, os
-from src.utils.logger import LOGGER as log
+import socket, subprocess
 
 def get_free_port(open_port: bool = False) -> int:
     """
@@ -19,11 +18,10 @@ def get_free_port(open_port: bool = False) -> int:
         if open_port:
             try:
                 subprocess.run(['ufw', 'allow', str(port) + '/tcp'], check=True, capture_output=True, text=True)
-                log(f"Attempted to open port {port} in the firewall (ufw).")
             except subprocess.CalledProcessError as e:
-                log.error(f"Error attempting to open port {port} in the firewall (ufw): {e.stderr}")
+                raise Exception(f"Error attempting to open port {port} in the firewall (ufw): {e.stderr}")
             except FileNotFoundError:
-                log.warning("ufw command not found. Ensure ufw is installed if you intend to open ports.")
+                raise Exception("ufw command not found. Ensure ufw is installed if you intend to open ports.")
         return port
     
 def get_local_ip() -> str:
