@@ -706,7 +706,7 @@ class SQLConnection(metaclass=Singleton):
             if row:
                 # Convert the row to a dictionary
                 peer_info = dict(row)
-                peer_info['gas'] = str(peer_info.pop('gas'))
+                peer_info['gas'] = int(peer_info.pop('gas'))
                 return peer_info
             else:
                 return {}  # Return empty dict if peer not found
