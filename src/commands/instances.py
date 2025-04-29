@@ -55,10 +55,11 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'client' if father_id in client_ids else
                     'unknown'
                 )
+                gas = int(gas)
                 gas_value = 'N/A'
-                if gm is not None and ge is not None:
+                if gas is not None:
                    try:
-                       gas_value = f"{int(gas):e}"
+                       gas_value = f"{gas:e}"
                    except (ValueError, TypeError):
                        gas_value = "Invalid Gas Data"
 
