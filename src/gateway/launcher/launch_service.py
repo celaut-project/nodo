@@ -65,7 +65,9 @@ def launch_service(
                         service_id=service_id,
                         peer=peer, 
                         father_id=father_id,
-                        cost=from_gas_amount(estimated_cost.cost), metadata=metadata, config=config,
+                        cost=from_gas_amount(estimated_cost.cost), 
+                        metadata=metadata, 
+                        config=config,
                         recursion_guard_token=recursion_guard_token,
                         refund_gas=refund_gas
                     )
