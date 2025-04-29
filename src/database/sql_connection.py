@@ -305,7 +305,7 @@ class SQLConnection(metaclass=Singleton):
         ''', (id,))
         row = result.fetchone()
         if row:
-            return str(row['gas'])
+            return int(row['gas'])
         raise Exception(f'Internal service {id}')
 
     def get_all_internal_containers_ids(self) -> List[str]:
@@ -746,7 +746,7 @@ class SQLConnection(metaclass=Singleton):
             row = result.fetchone()
 
             if row:
-                current_gas = str(row['gas'])
+                current_gas = int(row['gas'])
 
                 # Add the specified gas to the current amount.
                 total_gas = str(current_gas + gas)
