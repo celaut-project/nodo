@@ -809,7 +809,7 @@ class SQLConnection(metaclass=Singleton):
             try:
                 self._execute('''
                     INSERT INTO peer (id, protocol_stack, client_id, gas)
-                    VALUES (?, ?, '', 0, '0')  -- Initialize with empty client_id and 0 gas
+                    VALUES (?, ?, '', '0')  -- Initialize with empty client_id and 0 gas
                 ''', (peer_id, protocol_stack))
                 logger.LOGGER(f'Peer {peer_id} added')
                 return True
