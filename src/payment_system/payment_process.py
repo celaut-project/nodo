@@ -3,6 +3,7 @@ from threading import Thread
 from time import sleep
 from datetime import datetime, timedelta
 from threading import Lock
+from typing import Optional
 import grpc
 from bee_rpc import client as bee
 from src.payment_system.exceptions import DoubleSpendingAttempt
