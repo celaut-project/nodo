@@ -1,4 +1,4 @@
-import socket, subprocess
+import socket, subprocess, os
 
 def get_free_port(open_port: bool = False) -> int:
     """
@@ -15,7 +15,7 @@ def get_free_port(open_port: bool = False) -> int:
     with socket.socket() as s:
         s.bind(('', 0))
         port = int(s.getsockname()[1])
-        if open_port:
+        if open_port and os.geteuid() == 0:
             try:
                 subprocess.run(['ufw', 'allow', str(port) + '/tcp'], check=True, capture_output=True, text=True)
             except subprocess.CalledProcessError as e:
