@@ -2,6 +2,7 @@ import sqlite3
 import os
 from src.utils.env import EnvManager
 from protos import celaut_pb2 as celaut
+from src.utils.logger import ssformat
 
 env_manager = EnvManager()
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
@@ -59,7 +60,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                 gas_value = 'N/A'
                 if gas is not None:
                    try:
-                       gas_value = f"{gas:e}"
+                       gas_value = ssformat(int(gas))
                    except (ValueError, TypeError):
                        gas_value = "Invalid Gas Data"
 

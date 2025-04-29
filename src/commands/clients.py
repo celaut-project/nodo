@@ -1,5 +1,6 @@
 import sqlite3
 from src.utils.env import EnvManager
+from src.utils.logger import ssformat
 
 env_manager = EnvManager()
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
@@ -46,7 +47,7 @@ def list_clients():
 
             # Section: Gas & Usage
             print("[Gas & Usage]")
-            print(f"  Gas: {int(gas):e}")
+            print(f"  Gas: {ssformat(int(gas))}")
             print(f"  Last Usage: {last_usage if last_usage is not None else 'None'}")
             print()
 
