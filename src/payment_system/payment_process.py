@@ -9,7 +9,7 @@ from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.payment_system.ledger_balancer import ledger_balancer
 
 from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_INTERFACES, MANAGE_INTERFACES, PAYMENT_PROCESS_VALIDATORS, DEMOS, CHECK_SENDER_BALANCE
-from src.payment_systems.contracts.ergo import interface as ergo
+from src.payment_system.contracts.ergo import interface as ergo
 
 from protos import gateway_pb2_grpc, gateway_pb2
 
