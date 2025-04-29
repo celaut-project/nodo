@@ -152,7 +152,7 @@ env_manager.get_env("CONCURRENT_CONTAINER_CREATIONS", 10)
 env_manager.get_env("REMOVE_CONTAINERS", True)
 
 # Network and Port Settings
-env_manager.get_env("GATEWAY_PORT", get_free_port())
+env_manager.get_env("GATEWAY_PORT", get_free_port(open_port=True))
 env_manager.get_env("NGROK_TUNNELS_KEY", "")
 DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
