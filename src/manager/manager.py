@@ -189,6 +189,7 @@ def spend_gas(
                 return False
 
             actual_gas, last_usage, sci_not = client_data
+            actual_gas = int(actual_gas)
 
             if actual_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
                 log.LOGGER(f"Insufficient gas for client '{id}': {sci_not} available, needed {gas_to_spend:e}.")
