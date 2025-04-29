@@ -27,7 +27,7 @@ AVAILABLE_PAYMENT_PROCESS: Dict[contract_hash, Callable[[amount, token, ledger, 
     ergo.CONTRACT_HASH: ergo.process_payment
 }
 
-CHECK_SENDER_BALANCE = Dict[contract_hash, Callable[[amount], bool]] = {
+CHECK_SENDER_BALANCE: Dict[contract_hash, Callable[[amount], bool]] = {
     **({simulated.CONTRACT_HASH: simulated.check_sender_balance} if SIMULATED else {}),
     ergo.CONTRACT_HASH: ergo.check_sender_balance
 }
