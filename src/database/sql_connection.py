@@ -329,9 +329,6 @@ class SQLConnection(metaclass=Singleton):
             gas (int): The new gas amount.
         """
         
-        from src.utils.logger import ssformat 
-        logger.LOGGER(f"    Container  {id} reduce {ssformat(gas)}; {gas}") # TODO DELETE THAT.
-        
         gas = str(gas)
         self._execute('''
             UPDATE local_instances SET gas = ? WHERE id = ?
