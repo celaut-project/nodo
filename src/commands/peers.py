@@ -68,7 +68,7 @@ def list_peers():
             # Section: Client & Gas
             print("[Client & Gas]")
             print(f"  Client ID: {client_id}")
-            print(f"  Gas: {ssformat(int(gas))}")
+            print(f"  Gas: {ssformat(float(gas))}")
             print(f"  Gas Last Update: {gas_last_update or 'None'}")
             print()
 
