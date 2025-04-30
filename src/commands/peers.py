@@ -65,7 +65,7 @@ def list_peers():
 
             gas = float(gas)
             gas_price = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_id=ERGO_LEDGER)
-            gas_on_ergs = gas/gas_price if gas_price else 0
+            gas_on_ergs = (gas/gas_price - pow(10, 9)) if gas_price else 0  # 10^9 it's from erg -> nanoerg.
 
             # Section: General
             print(f"ID: {peer_id}")
