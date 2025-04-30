@@ -17,7 +17,7 @@ def local_payment_methods() -> Generator[celaut.GasPrice, None, None]:
 
         gas_price = celaut.GasPrice(
             contract_ledger=contract_ledger,
-            gas_amount=to_gas_amount(ERGO_GAS_COST)
+            gas_amount=celaut.GasAmount(n=str(ERGO_GAS_COST))  # to_gas_amount(ERGO_GAS_COST)
         )
 
         yield gas_price
