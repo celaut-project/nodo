@@ -44,31 +44,19 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Peer:
     uri_slot.internal_port = GATEWAY_PORT
     uri_slot.uri.append(uri)
     instance.uri_slot.append(uri_slot)
-    log.LOGGER('URI slot configured')
 
     slot = celaut.Service.Api.Slot()
     slot.port = GATEWAY_PORT
     instance.api.slot.append(slot)
-    log.LOGGER('API slot configured')
 
     instance.api.payment_contracts.extend(
         [e for e in local_payment_methods()]
     )
-    log.LOGGER('Payment contracts added to API')
 
-    gas_price = gateway_pb2.celaut__pb2.GasPrice(
-        token_ledger=gateway_pb2.celaut__pb2.TokenLedger(
-            token="",  # Empty because the 'ERG' token it's the chain base token, so it doesn't have token id.
-            ledger=ERGO_LEDGER
-        ),
-        gas_amount=to_gas_amount(gas_amount=ERGO_GAS_COST)  # get_env automatically parses to an integer. If not, it could be added directly to the GasAmount class without converting between string and integer.
-    )
-
-    log.LOGGER('Gateway instance generated')
+    log.LOGGER(f'Gateway instance generated: {instance}')
     return gateway_pb2.Peer(
         reputation_proofs=list(local_proofs()),
-        instance=instance,
-        gas_prices=[gas_price]
+        instance=instance
     )
 
 
