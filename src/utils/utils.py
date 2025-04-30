@@ -215,8 +215,8 @@ def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
     return gateway_pb2.GasAmount(n=str(gas_amount))
 
 
-def from_gas_amount(gas_amount: gateway_pb2.GasAmount) -> int:
-    return int(gas_amount.n)
+def from_gas_amount(gas_amount: gateway_pb2.GasAmount) -> float:
+    return float(gas_amount.n)
 
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
