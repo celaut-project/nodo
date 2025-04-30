@@ -50,10 +50,16 @@ message Instance {
     optional string token = 3;
 }
 
+message GasPrice {
+    celaut.TokenLedger token_ledger = 1;
+    GasAmount gas_amount = 2;
+}
+
 message Peer {
     repeated celaut.ContractLedger reputation_proofs = 1;
     celaut.Instance instance = 2;
-    // TODO Should contain gas/ERG and resource/gas.
+    repeated GasPrice gas_prices = 3;
+    // TODO Should contain resources/gas.
 }
 
 message Client {
