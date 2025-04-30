@@ -56,7 +56,7 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Peer:
     )
     log.LOGGER('Payment contracts added to API')
 
-    gas_price = gateway_pb2.GasPrice(
+    gas_price = gateway_pb2.celaut__pb2.GasPrice(
         token_ledger=gateway_pb2.celaut__pb2.TokenLedger(
             token="",  # Empty because the 'ERG' token it's the chain base token, so it doesn't have token id.
             ledger=ERGO_LEDGER
