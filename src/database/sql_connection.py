@@ -710,6 +710,51 @@ class SQLConnection(metaclass=Singleton):
         except Exception as e:
             logger.LOGGER(f'Error fetching peer details for ID {peer_id}: {e}')
             return {}
+        
+    def get_peer_gas_price(self, peer_id: str, contract_hash: str, ledger_id: str) -> Optional[int]:
+        """
+        Fetches the gas price for a specific contract instance, identified by
+        peer, contract hash, and ledger ID.
+
+        Parameters:
+        - peer_id (str): The unique identifier of the peer.
+        - contract_hash (str): The hash of the contract.
+        - ledger_id (str): The unique identifier of the ledger.
+
+        Returns:
+        - int: The gas price as an integer if the specific contract instance is found.
+        - None: If the specific contract instance is not found or an error occurs.
+        """
+        try:
+            # Corrected SQL query with AND conditions
+            result = self._execute('''
+                SELECT gas_price
+                FROM contract_instance
+                WHERE peer_id = ? AND contract_hash = ? AND ledger_id = ?
+            ''', (peer_id, contract_hash, ledger_id))
+
+            # Fetch one row (we expect at most one for this combination)
+            row = result.fetchone()
+
+            # Check if a row was found
+            if row:
+                gas_price_str = row['gas_price']
+                try:
+                    # Convert the string gas_price to an integer
+                    gas_price = int(gas_price_str)
+                    return gas_price
+                except (ValueError, TypeError) as ve:
+                    logger.LOGGER(f'Error converting stored gas_price "{gas_price_str}" to int for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_id}. Error: {ve}')
+                    return None # Return None if conversion fails
+
+            else:
+                # No row found for the given criteria
+                return None # Indicate that the specific instance was not found
+
+        except Exception as e:
+            # Catch potential database errors during execution
+            logger.LOGGER(f'Database error fetching gas price for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_id}. Error: {e}')
+            return None # Return None on database error
 
     def get_peers_id(self) -> List[str]:
         """

@@ -7,6 +7,8 @@ from src.utils.cost_functions.variance_cost_normalization import variance_cost_n
 from src.utils.env import EnvManager
 from src.utils.utils import from_gas_amount
 from src.utils.logger import LOGGER as log
+from src.database.sql_connection import SQLConnection
+from src.payment_system.contracts.ergo.interface import LEDGER as ERGO_LEDGER, CONTRACT_HASH as ERGO_CONTRACT_HASH
 
 env_manager = EnvManager()
 SOCIALIZATION_FACTOR = env_manager.get_env("SOCIALIZATION_FACTOR")
@@ -14,6 +16,8 @@ WEIGHT_CONFIGURATION_FACTOR = env_manager.get_env("WEIGHT_CONFIGURATION_FACTOR")
 INIT_COST_CONFIGURATION_FACTOR = env_manager.get_env("INIT_COST_CONFIGURATION_FACTOR")
 MAINTENANCE_COST_CONFIGURATION_FACTOR = env_manager.get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR")
 ERGO_GAS_COST = env_manager.get_env("ERGO_GAS_COST")
+
+sq = SQLConnection()
 
 def estimated_cost_sorter(
         estimated_costs: Dict[str, gateway_pb2.EstimatedCost],
@@ -57,7 +61,12 @@ def estimated_cost_sorter(
         ])
 
         local_erg_gas: int = ERGO_GAS_COST
-        peer_erg_gas: int = 0 # TODO  Get from Peer protobuf.
+        
+        peer_erg_gas: int = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_id=ERGO_LEDGER)
+        if peer_erg_gas is None:
+            log(f"No ergo gas price on peer {peer_id}, continue.")
+            return 0
+
         cost: int = gas_cost * (peer_erg_gas / local_erg_gas) if local_erg_gas else 0
 
         reputation: float = 1 if peer_id == 'local' else SOCIALIZATION_FACTOR + compute_reputation(peer_id=peer_id)
