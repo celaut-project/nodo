@@ -180,7 +180,7 @@ def spend_gas(
     Attempts to deduct gas from a client or container.
     Returns True if successful, False otherwise (with logging on failures).
     """
-    gas_to_spend = int(gas_to_spend)
+    gas_to_spend = float(gas_to_spend)
     try:
         # If the identifier corresponds to a client
         if sc.client_exists(client_id=id):

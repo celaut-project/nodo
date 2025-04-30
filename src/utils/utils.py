@@ -207,7 +207,7 @@ def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
 
 def from_gas_amount(gas_amount: gateway_pb2.GasAmount) -> int:
     i: int = str(gas_amount.gas_amount)[::-1].find('.')
-    return int(gas_amount.gas_amount * pow(10, i) * pow(10, gas_amount.exponent-i))
+    return float(gas_amount.gas_amount * pow(10, i) * pow(10, gas_amount.exponent-i))
 """
 
 
