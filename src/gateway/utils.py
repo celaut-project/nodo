@@ -4,21 +4,23 @@ from typing import Generator, Optional
 
 import netifaces as ni
 
+from src.payment_system.contracts.ergo.interface import LEDGER as ERGO_LEDGER
 from src.reputation_system.fetch import local_proofs
 from src.payment_system.ledgers import local_payment_methods
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.utils import logger as log
 from src.utils.env import EnvManager
+from src.utils.utils import to_gas_amount
 
 env_manager = EnvManager()
 
 GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+ERGO_GAS_COST = int(env_manager.get_env("ERGO_GAS_COST"))
 
 
-
-def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
+def generate_gateway_instance(network: str) -> gateway_pb2.Peer:
     log.LOGGER(f'Generating gateway instance for the network {network}')
     instance = celaut.Instance()
 
@@ -54,10 +56,19 @@ def generate_gateway_instance(network: str) -> gateway_pb2.Instance:
     )
     log.LOGGER('Payment contracts added to API')
 
+    gas_price = gateway_pb2.GasPrice(
+        token_ledger=gateway_pb2.celaut__pb2.TokenLedger(
+            token="",  # Empty because the 'ERG' token it's the chain base token, so it doesn't have token id.
+            ledger=ERGO_LEDGER
+        ),
+        gas_amount=to_gas_amount(gas_amount=ERGO_GAS_COST)  # get_env automatically parses to an integer. If not, it could be added directly to the GasAmount class without converting between string and integer.
+    )
+
     log.LOGGER('Gateway instance generated')
     return gateway_pb2.Peer(
         reputation_proofs=list(local_proofs()),
-        instance=instance
+        instance=instance,
+        gas_prices=[gas_price]
     )
 
 

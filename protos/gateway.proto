@@ -7,6 +7,11 @@ message GasAmount {
     string n = 1;
 }
 
+message GasPrice {
+    celaut.TokenLedger token_ledger = 1;
+    GasAmount gas_amount = 2;
+}
+
 message TokenMessage {
     string token = 1;
     optional string slot = 2;
@@ -48,11 +53,6 @@ message Instance {
     optional celaut.Metadata metadata = 1;  // TODO Check when is used.
     celaut.Instance instance = 2;
     optional string token = 3;
-}
-
-message GasPrice {
-    celaut.TokenLedger token_ledger = 1;
-    GasAmount gas_amount = 2;
 }
 
 message Peer {
