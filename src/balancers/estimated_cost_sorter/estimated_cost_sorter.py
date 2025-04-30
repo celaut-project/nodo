@@ -1,12 +1,12 @@
 from typing import Dict, Tuple, Generator
-
+from statistics import mean
 from protos import gateway_pb2
 from src.reputation_system.interface import compute_reputation
 from src.utils.cost_functions.general_cost_functions import normalized_maintain_cost as nmc
 from src.utils.cost_functions.variance_cost_normalization import variance_cost_normalization as vcnorm
 from src.utils.env import EnvManager
 from src.utils.utils import from_gas_amount
-from statistics import mean
+from src.utils.logger import LOGGER as log
 
 env_manager = EnvManager()
 SOCIALIZATION_FACTOR = env_manager.get_env("SOCIALIZATION_FACTOR")
@@ -21,6 +21,7 @@ def estimated_cost_sorter(
     
     def __compute_score(peer_id: str, estimated_cost: gateway_pb2.EstimatedCost) -> float:
         priority: int = WEIGHT_CONFIGURATION_FACTOR * max(1, weight_clauses[estimated_cost.comb_resource_selected])  # If the combinational resource clause don't have a cost_weight, it's like equal to 1 cost weight.
+
         cost: int = sum([
             
             # Normaliced initialization cost.
@@ -53,9 +54,10 @@ def estimated_cost_sorter(
                 ])
             )
         ])
+
         reputation: float = 1 if peer_id == 'local' else SOCIALIZATION_FACTOR + compute_reputation(peer_id=peer_id)
 
-        print(f"\nDebug: For peer {peer_id}: priority {priority}, reputation {reputation}, cost {cost} => score {priority * reputation / cost}\n", flush=True)
+        log(f"Computing estimated cost score for peer {peer_id}: priority {priority}, reputation {reputation}, cost {cost} => score {priority * reputation / cost}\n")
 
         return priority * reputation / cost
 
