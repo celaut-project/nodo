@@ -56,7 +56,6 @@ def estimated_cost_sorter(
             )
         ])
 
-
         local_erg_gas: int = ERGO_GAS_COST
         peer_erg_gas: int = 0 # TODO  Get from Peer protobuf.
         cost: int = gas_cost * (peer_erg_gas / local_erg_gas)

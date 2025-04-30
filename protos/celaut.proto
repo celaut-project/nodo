@@ -23,10 +23,16 @@ message DataFormat {
     bytes formal = 3;
 }
 
+// TODO Ledger should follow the tags-prose-formal scheme instead of being a simple string.
 message ContractLedger {
     bytes contract = 1;
     string contract_addr = 2;
     string ledger = 3;
+}
+
+message TokenLedger {
+    string token = 1;
+    string ledger = 2;
 }
 
 message Metadata {
