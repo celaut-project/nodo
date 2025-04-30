@@ -13,6 +13,7 @@ SOCIALIZATION_FACTOR = env_manager.get_env("SOCIALIZATION_FACTOR")
 WEIGHT_CONFIGURATION_FACTOR = env_manager.get_env("WEIGHT_CONFIGURATION_FACTOR")
 INIT_COST_CONFIGURATION_FACTOR = env_manager.get_env("INIT_COST_CONFIGURATION_FACTOR")
 MAINTENANCE_COST_CONFIGURATION_FACTOR = env_manager.get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR")
+ERGO_GAS_COST = env_manager.get_env("ERGO_GAS_COST")
 
 def estimated_cost_sorter(
         estimated_costs: Dict[str, gateway_pb2.EstimatedCost],
@@ -22,7 +23,7 @@ def estimated_cost_sorter(
     def __compute_score(peer_id: str, estimated_cost: gateway_pb2.EstimatedCost) -> float:
         priority: int = WEIGHT_CONFIGURATION_FACTOR * max(1, weight_clauses[estimated_cost.comb_resource_selected])  # If the combinational resource clause don't have a cost_weight, it's like equal to 1 cost weight.
 
-        cost: int = sum([
+        gas_cost: int = sum([
             
             # Normaliced initialization cost.
             INIT_COST_CONFIGURATION_FACTOR * vcnorm(
@@ -54,6 +55,11 @@ def estimated_cost_sorter(
                 ])
             )
         ])
+
+
+        local_erg_gas: int = ERGO_GAS_COST
+        peer_erg_gas: int = 0 # TODO  Get from Peer protobuf.
+        cost: int = gas_cost * (peer_erg_gas / local_erg_gas)
 
         reputation: float = 1 if peer_id == 'local' else SOCIALIZATION_FACTOR + compute_reputation(peer_id=peer_id)
 
