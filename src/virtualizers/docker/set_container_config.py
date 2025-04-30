@@ -3,7 +3,7 @@ import subprocess
 from typing import Optional
 
 from protos import celaut_pb2 as celaut
-from src.gateway.utils import generate_gateway_instance
+from src.gateway.utils import generate_node_peer_info
 from src.utils import logger as log
 from src.utils.env import DOCKER_COMMAND, DOCKER_NETWORK, EnvManager
 
@@ -15,7 +15,7 @@ CACHE = env_manager.get_env("CACHE")
 
 def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysresources) -> celaut.Configuration:
     __config__ = celaut.ConfigurationFile()
-    __config__.gateway.CopyFrom(generate_gateway_instance(network=DOCKER_NETWORK).instance)
+    __config__.gateway.CopyFrom(generate_node_peer_info(network=DOCKER_NETWORK).instance)
     if config: __config__.config.CopyFrom(config)
     if resources: __config__.initial_sysresources.CopyFrom(resources)
     return __config__

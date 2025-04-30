@@ -8,7 +8,7 @@ from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.reputation_system.contracts.ergo.proof_validation import sign_message
 from src.tunneling_system.rpc_tunnel import service_tunnel
 from src.tunneling_system.tunnels import TunnelSystem
-from src.gateway.utils import generate_gateway_instance
+from src.gateway.utils import generate_node_peer_info
 from src.manager.manager import add_peer_instance, modify_gas_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_gas, \
     container_modify_system_params, get_sysresources
 from src.manager.metrics import get_metrics
@@ -79,7 +79,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         if TunnelSystem().from_tunnel(ip=ip):
             gateway_instance = TunnelSystem().get_gateway_tunnel()
         else:
-            gateway_instance = generate_gateway_instance(
+            gateway_instance = generate_node_peer_info(
                 network=get_network_name(direction=ip)
             )
         yield from bee.serialize_to_buffer(gateway_instance)
