@@ -1,5 +1,5 @@
 syntax = "proto3";
-package compile;
+package pack;
 import "celaut.proto";
 
 message Service {
