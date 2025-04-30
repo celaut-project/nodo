@@ -88,6 +88,7 @@ def create_tables(cursor):
                 ledger_id TEXT,
                 contract_hash TEXT,
                 peer_id TEXT NOT NULL,
+                gas_price TEXT,
                 FOREIGN KEY (ledger_id) REFERENCES ledger (id),
                 FOREIGN KEY (contract_hash) REFERENCES contract (hash),
                 FOREIGN KEY (peer_id) REFERENCES peer (id),

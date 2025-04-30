@@ -58,13 +58,13 @@ def estimated_cost_sorter(
 
         local_erg_gas: int = ERGO_GAS_COST
         peer_erg_gas: int = 0 # TODO  Get from Peer protobuf.
-        cost: int = gas_cost * (peer_erg_gas / local_erg_gas)
+        cost: int = gas_cost * (peer_erg_gas / local_erg_gas) if local_erg_gas else 0
 
         reputation: float = 1 if peer_id == 'local' else SOCIALIZATION_FACTOR + compute_reputation(peer_id=peer_id)
 
         log(f"Computing estimated cost score for peer {peer_id}: priority {priority}, reputation {reputation}, cost {cost} => score {priority * reputation / cost}\n")
 
-        return priority * reputation / cost
+        return (priority * reputation / cost) if cost else (priority * reputation)
 
     return (
         (_id, estimated_cost) for _id, estimated_cost in

@@ -835,13 +835,14 @@ class SQLConnection(metaclass=Singleton):
             for uri in slot.uri:
                 self.add_uri(uri, slot_id=slot_id)
 
-    def add_contract(self, contract: celaut_pb2.ContractLedger, peer_id: str = "LOCAL"):
+    def add_contract(self, contract: celaut_pb2.ContractLedger, peer_id: str = "LOCAL", gas_price: int = 0):
         """
         Adds a contract to the database.
 
         Args:
             contract (celaut_pb2.ContractLedger): The contract to add.
             peer_id (Optional[str]): The ID of the peer or None for a self contract (to be send to clients.)
+            gas_price (Int): Gas per unit of the token if the contract represents one, or gas per contract spend/execution/usage.
         """
         contract_content: bytes = contract.contract
         address: str = contract.contract_addr
@@ -850,14 +851,16 @@ class SQLConnection(metaclass=Singleton):
         contract_hash: str = sha3_256(contract_content).hexdigest()
         contract_hash_type: str = SHA3_256_ID.hex()
 
+        gas_str = str(gas_price)
+
         self._execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
                     (contract_hash, contract_hash_type, contract_content))
 
         self._execute("INSERT OR IGNORE INTO ledger (id) VALUES (?)",
                     (ledger,))
 
-        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_id, contract_hash, peer_id) "
-                    "VALUES (?,?,?,?)", (address, ledger, contract_hash, peer_id))
+        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_id, contract_hash, peer_id, gas_price) "
+                    "VALUES (?,?,?,?,?)", (address, ledger, contract_hash, peer_id, gas_str))
 
     def add_reputation_proof(self, contract_ledger: celaut_pb2.ContractLedger, peer_id: str) -> bool:
         """
