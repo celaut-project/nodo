@@ -30,9 +30,13 @@ message ContractLedger {
     string ledger = 3;
 }
 
-message TokenLedger {
-    string token = 1;
-    string ledger = 2;
+message GasAmount {
+    string n = 1;
+}
+
+message GasPrice {
+    celaut.ContractLedger contract_ledger = 1;
+    GasAmount gas_amount = 2;
 }
 
 message Metadata {
@@ -71,8 +75,26 @@ message Service {
             repeated Protocol protocol_stack = 2;
         }
         repeated Slot slot = 2;
-        repeated ContractLedger payment_contracts = 3;
-        // Cost function can be applied. <- must be optional.
+        repeated GasPrice payment_contracts = 3;
+        /*
+The cost of the service must be expressed in terms of "gas," an abstract unit that generally represents the costs associated with the service. This unit, called "gas," enables standardized cost measurement, regardless of the payment method used. The service is designed to accept payments through multiple methods, each with a specific parity to "gas," facilitating the conversion of payments made in different forms into an equivalent amount of this unit.
+
+The service may involve two types of costs:
+
+1. **Initial fixed cost**: A one-time payment, expressed in a specific amount of "gas," required to access the service.  
+2. **Usage-based cost**: A variable cost, also expressed in "gas," which depends on the level of service utilization by the user.
+
+The detailed specification of these costs—including whether a fixed cost, a usage-based cost, or a combination of both applies, as well as the exact values and specific application conditions—is defined within the API protocol. This definition is tailored to the specific nature of the service and integrated into its technical structure.
+
+### Context within the API
+Based on the structure provided in the service message (`message Service`), the elements related to costs and "gas" are primarily linked to the following sections:
+
+- **Api.payment_contracts**: This section details the accepted payment methods and their respective parities with "gas." Each entry in `GasPrice payment_contracts` specifies the conversion rate applicable to a particular payment method, enabling cost calculation in terms of "gas."  
+- **Api.slot.protocol_stack.prose**: This includes a textual description explaining how costs in "gas" are calculated, covering both fixed and variable costs, as applicable.  
+- **Api.slot.protocol_stack.formal**: If a more rigorous specification is required, this section may contain a formal definition of the costs, possibly using mathematical notation or a technical language, to precisely outline the calculation rules based on usage.
+
+Thus, the API protocol provides users with the necessary information to understand and accurately calculate the costs associated with using the service, ensuring clarity and transparency in their interaction with it.
+        */
     }
 
     // Container:  Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.

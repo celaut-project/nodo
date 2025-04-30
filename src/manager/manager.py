@@ -17,6 +17,7 @@ from src.utils import logger as log
 from src.utils import utils
 from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.utils import (
+    from_gas_amount,
     to_gas_amount,
     generate_uris_by_peer_id
 )
@@ -76,8 +77,8 @@ def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
         sc.add_slot(slot=slot, peer_id=peer_id)
 
     # Contracts
-    for contract_ledger in peer.instance.api.payment_contracts:
-        sc.add_contract(contract=contract_ledger, peer_id=peer_id)
+    for gas_price in peer.instance.api.payment_contracts:
+        sc.add_contract(contract=gas_price.contract_ledger, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
 
     for contract_ledger in peer.reputation_proofs:
         if not add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id):
@@ -96,8 +97,8 @@ def update_peer_instance(peer: gateway_pb2.Peer, peer_id: str):
         sc.add_slot(slot=slot, peer_id=peer_id)
 
     # Contracts
-    for contract_ledger in peer.instance.api.payment_contracts:
-        sc.add_contract(contract=contract_ledger, peer_id=peer_id)
+    for gas_price in peer.instance.api.payment_contracts:
+        sc.add_contract(contract=gas_price.contract_ledger, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
 
     for contract_ledger in peer.reputation_proofs:
         if not add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id):

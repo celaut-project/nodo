@@ -7,11 +7,6 @@ message GasAmount {
     string n = 1;
 }
 
-message GasPrice {
-    celaut.TokenLedger token_ledger = 1;
-    GasAmount gas_amount = 2;
-}
-
 message TokenMessage {
     string token = 1;
     optional string slot = 2;
@@ -58,8 +53,6 @@ message Instance {
 message Peer {
     repeated celaut.ContractLedger reputation_proofs = 1;
     celaut.Instance instance = 2;
-    repeated GasPrice gas_prices = 3;
-    // TODO Should contain resources/gas.
 }
 
 message Client {
