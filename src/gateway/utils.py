@@ -20,7 +20,7 @@ METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 ERGO_GAS_COST = int(env_manager.get_env("ERGO_GAS_COST"))
 
 
-def generate_gateway_instance(network: str) -> gateway_pb2.Peer:
+def generate_node_peer_info(network: str) -> gateway_pb2.Peer:
     log.LOGGER(f'Generating gateway instance for the network {network}')
     instance = celaut.Instance()
 

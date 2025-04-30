@@ -3,7 +3,7 @@ from pyngrok import ngrok
 import urllib.parse
 import socket
 
-from src.gateway.utils import generate_gateway_instance
+from src.gateway.utils import generate_node_peer_info
 from src.utils.logger import LOGGER
 from src.utils.singleton import Singleton
 from protos import celaut_pb2 as celaut
@@ -135,7 +135,7 @@ class TunnelSystem(metaclass=Singleton):
         return [f"{ip}:{port}" for ip, port in self.gateway_tunnels]
 
     def get_gateway_tunnel(self) -> Optional[Any]:
-        _gi = generate_gateway_instance(network='localhost')
+        _gi = generate_node_peer_info(network='localhost')
         _gi.instance.uri_slot[0].uri.pop()
 
         if not self.gateway_tunnels:
