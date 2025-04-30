@@ -190,6 +190,11 @@ env_manager.get_env("FREE_TRIAL_GAS_AMOUNT",  pow(10, 66))
 env_manager.get_env("INITIAL_PEER_DEPOSIT_FACTOR", 0.5)
 env_manager.get_env("DEV_CLIENT_GAS_AMOUNT", pow(10, 256))
 
+env_manager.get_env("WEIGHT_CONFIGURATION_FACTOR", int(pow(10, 9)))
+env_manager.get_env("INIT_COST_CONFIGURATION_FACTOR", 1)
+env_manager.get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR", pow(10, 6))
+env_manager.get_env("SOCIALIZATION_FACTOR", 2)
+
 env_manager.get_env("COST_AVERAGE_VARIATION", 1)
 
 env_manager.get_env("EXECUTION_COST", pow(10, 2))  # Based on a maximum usage of resources.
@@ -221,10 +226,6 @@ env_manager.get_env("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME", pow(10, 3)
 
 # Miscellaneous Settings
 env_manager.get_env("MIN_BUFFER_BLOCK_SIZE", 10 ** 7)
-env_manager.get_env("WEIGHT_CONFIGURATION_FACTOR", int(pow(10, 9)))
-env_manager.get_env("SOCIALIZATION_FACTOR", 2)
-env_manager.get_env("INIT_COST_CONFIGURATION_FACTOR", 1)
-env_manager.get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR", pow(10, 6))
 env_manager.get_env("MEMSWAP_FACTOR", 0)
 env_manager.get_env("USE_PRINT", False)
 env_manager.get_env("VALIDATE_ON_IMPORT", True)
