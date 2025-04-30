@@ -53,7 +53,7 @@ message Instance {
 message Peer {
     repeated celaut.ContractLedger reputation_proofs = 1;
     celaut.Instance instance = 2;
-    // Should contain gas/ERG and resource/gas.
+    // TODO Should contain gas/ERG and resource/gas.
 }
 
 message Client {
