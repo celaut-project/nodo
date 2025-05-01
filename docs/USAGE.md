@@ -94,10 +94,10 @@ These are the most commonly used commands for daily tasks:
 
 These commands offer extended management and exploration features:
 
-- **service `<service id | tag>`**  
+- **inspect `<service id | tag>`**  
   Inspects details of a specific service.  
   **Example:**  
-  `nodo service 1234567890abcdef`
+  `nodo inspect 1234567890abcdef`
 
 - **tag `<service id | tag> <new tag>`**  
   Assigns or updates a tag for a service.  
