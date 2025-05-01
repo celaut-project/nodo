@@ -19,11 +19,6 @@ def print_rule(title):
 def inspect(service: str):
     service = get_id(service)
 
-    # Verificar privilegios
-    if os.geteuid() != 0:
-        print("[ERROR] Privilegios de superusuario requeridos. Ejecuta con sudo.")
-        return
-
     # Metadata
     print_rule("📄 Metadata")
     metadata = read_metadata_from_disk(service_hash=service)
