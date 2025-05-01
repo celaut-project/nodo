@@ -84,7 +84,6 @@ def check_wanted_service(wanted: str):
                     indices_parser=StartService_input_indices,  #  Not used all the indices, but still are the same.
                     partitions_message_mode_parser=StartService_input_message_mode
             ):
-                log.LOGGER(f"type of chunk -> {type(b)}")
                 if  type(b) == beerpc.Dir:
                     log.LOGGER(f"    type of dir {b.type}")
                     
