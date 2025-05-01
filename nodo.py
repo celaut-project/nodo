@@ -130,12 +130,12 @@ if __name__ == '__main__':
     if len(sys.argv) == 1:
         print("Command needed: "
             "\n- execute <service id> | <service tag> | <'.celaut' file path>"
-            "\n- remove <service id>"
+            "\n- inspect <service id> | <service tag>"
+            "\n- remove <service id> | <service tag>"
             "\n- stop <instance id>"
             "\n- increase_gas <instance id> <gas to add>"
             "\n- decrease_gas <instance id> <gas to retire>"
             "\n- services"
-            "\n- service <service id|tag>"
             "\n- tag <service id|tag> <new tag>"
             "\n- clients"
             "\n- peers"
@@ -311,13 +311,13 @@ if __name__ == '__main__':
                 from src.commands.remove import remove
                 remove(service=sys.argv[2])
 
+            case "inspect":
+                from src.commands.inspect import inspect
+                inspect(service=sys.argv[2])
+
             case "services":
                 from src.commands.services import list_services
                 list_services()
-                
-            case "service":
-                from src.commands.services import inspect
-                inspect(sys.argv[2])
             
             case "tag":
                 from src.commands.services import modify_tag
