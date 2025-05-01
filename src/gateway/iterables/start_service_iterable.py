@@ -38,7 +38,9 @@ class StartServiceIterable(AbstractInputServiceIterable):
             raise Exception(f"No metadata for the service {self.metadata} on registry")
 
         service_id = get_service_hex_main_hash(metadata=metadata)
-        log.LOGGER(f'Calculating execution cost for the service {service_id}')
+        if service_id != self.service_hash:
+            log.LOGGER(f'There is some problem with the metadata {service_id} != {self.service_hash}. {metadata}')
+            raise Exception(f"Corrupt metadata for the service {self.service_hash}")
 
         yield from bee.serialize_to_buffer(
             indices={},  # Why indices are not set?  Because StartService returns only one element, an instance.
