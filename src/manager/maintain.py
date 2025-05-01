@@ -175,7 +175,7 @@ def peer_deposits(debug_mode: bool = False):
                 ), None)
                 if debug_mode: log.LOGGER(f"Successfully fetched info for peer {peer_id}.")
             except Exception as fetch_exception:
-                log.LOGGER(f"[ERROR] Exception fetching peer {peer_id} info: {str(fetch_exception)}")
+                # TODO update reputation.
                 continue
 
             if not peer:
