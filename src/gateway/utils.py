@@ -53,7 +53,6 @@ def generate_node_peer_info(network: str) -> gateway_pb2.Peer:
         [e for e in local_payment_methods()]
     )
 
-    log.LOGGER(f'Gateway instance generated: {instance}')
     return gateway_pb2.Peer(
         reputation_proofs=list(local_proofs()),
         instance=instance
