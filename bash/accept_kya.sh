@@ -65,18 +65,4 @@ if [[ "${response,,}" == "yes" || "${response,,}" == "y" ]]; then
     echo "Acceptance recorded in '$accepted_marker_file'."
     echo "KyA process completed for '$TARGET_DIR'."
     exit 0
-else
-    echo "You have declined the Know Your Assumptions."
-    echo "Deleting target directory: $TARGET_DIR..."
-    if [[ -z "$TARGET_DIR" || "$TARGET_DIR" == "/" ]]; then
-        echo "Error: Safety check failed. TARGET_DIR is empty or '/'." >&2
-        exit 1
-    fi
-    rm -rf "$TARGET_DIR" && {
-        echo "Directory deleted successfully."
-        exit 0
-    } || {
-        echo "Error: Failed to delete directory '$TARGET_DIR'." >&2
-        exit 1
-    }
 fi
