@@ -42,6 +42,7 @@ def launch_service(
             log.LOGGER(f"Service launch request made by the client {father_id}.")
 
         for peer, estimated_cost in execution_balancer(
+                service_id=service_id,
                 metadata=metadata,
                 ignore_network=utils.get_network_name(direction=father_ip),
                 config=config,
