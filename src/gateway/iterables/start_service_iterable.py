@@ -9,6 +9,7 @@ from src.utils import logger as log
 from src.utils.env import EnvManager
 from src.utils.utils import get_only_the_ip_from_context, read_metadata_from_disk, read_service_from_disk
 from src.utils.env import EnvManager
+from src.utils.verify import get_service_hex_main_hash
 
 env_manager = EnvManager()
 
@@ -31,13 +32,21 @@ class StartServiceIterable(AbstractInputServiceIterable):
             raise Exception(f"No service {self.service_hash} on registry")
 
         log.LOGGER(f'Launch service {self.service_hash}')
+
+        metadata = self.metadata if self.metadata else read_metadata_from_disk(service_hash=self.service_hash)
+        if not metadata:
+            raise Exception(f"No metadata for the service {self.metadata} on registry")
+
+        service_id = get_service_hex_main_hash(metadata=metadata)
+        log.LOGGER(f'Calculating execution cost for the service {service_id}')
+
         yield from bee.serialize_to_buffer(
             indices={},  # Why indices are not set?  Because StartService returns only one element, an instance.
             message_iterator=launch_service(
-                service=service,
-                metadata=self.metadata if self.metadata else read_metadata_from_disk(service_hash=self.service_hash),
-                config=self.configuration,
                 service_id=self.service_hash,
+                service=service,
+                metadata=metadata,
+                config=self.configuration,
                 father_ip=get_only_the_ip_from_context(context_peer=self.context.peer()),
                 father_id=self.client_id,  # Only client, not set the internal_service_id because depends of the recursion guard.
                 recursion_guard_token=self.recursion_guard_token
