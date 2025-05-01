@@ -39,7 +39,6 @@ def generate_node_peer_info(network: str) -> gateway_pb2.Peer:
         raise ValueError('Network interface name cannot be None')
 
     uri.port = GATEWAY_PORT
-    log.LOGGER(f'Setting URI port: {GATEWAY_PORT}')
     uri_slot = celaut.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT
     uri_slot.uri.append(uri)
