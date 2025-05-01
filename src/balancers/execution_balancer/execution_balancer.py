@@ -43,6 +43,7 @@ def __pretty_format_peers(peers: dict[str, gateway_pb2.EstimatedCost]) -> str:
     return "\n".join(lines)
 
 def execution_balancer(
+        service_id: str,
         metadata: celaut.Metadata,
         ignore_network: str = None,
         config: Optional[gateway_pb2.Configuration] = None,

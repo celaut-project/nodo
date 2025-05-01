@@ -26,7 +26,7 @@ class StartServiceIterable(AbstractInputServiceIterable):
         if CONFIGURATION_REQUIRED and not self.configuration.config:
             raise Exception("Client or configuration ")
 
-        log.LOGGER('Launch service with configuration')
+        log.LOGGER(f'Launch service {self.service_hash}')
         yield from bee.serialize_to_buffer(
             indices={},  # Why indices are not set?  Because StartService returns only one element, an instance.
             message_iterator=launch_service(
