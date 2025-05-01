@@ -5,7 +5,7 @@ from datetime import datetime
 import subprocess
 import re
 import ipaddress
-from src.utils.logger import LOGGER as log
+from src.utils.logger import LOGGER as logger
 
 class Protocol(Enum):
     """Supported network protocols."""
@@ -48,7 +48,7 @@ def __validate_ip(ip: str) -> bool:
     try:
         addr = ipaddress.ip_address(ip)
         if addr.is_loopback or addr.is_link_local or addr.is_multicast:
-            log(f"IP {ip} is in a reserved range")
+            logger(f"IP {ip} is in a reserved range")
             return False
         return True
     except ValueError:
@@ -65,7 +65,7 @@ def __validate_port(port: Optional[int]) -> bool:
         return False
         
     if port < 1024:
-        log(f"Port {port} is in privileged range")
+        logger(f"Port {port} is in privileged range")
     elif port > 65535:
         return False
         
@@ -131,13 +131,13 @@ def block_all(container_id: str) -> bool:
                 '-j', 'DROP'
             ])
             if not success:
-                log(f"Failed to block {protocol.value} traffic: {message}")
+                logger(f"Failed to block {protocol.value} traffic: {message}")
                 return False
 
-        log(f"Blocked all outgoing traffic for container {container_id}")
+        logger(f"Blocked all outgoing traffic for container {container_id}")
         return True
     except Exception as e:
-        log(f"Failed to block all traffic: {e}")
+        logger(f"Failed to block all traffic: {e}")
         return False
 
 def allow_connection(container_id: str, ip: str, port: Optional[int] = None, protocol: Protocol = Protocol.TCP) -> bool:
@@ -169,14 +169,14 @@ def allow_connection(container_id: str, ip: str, port: Optional[int] = None, pro
         success, message = __execute_iptables(command, check_exists=True)
         
         if success:
-            log(f"Allowed {protocol.value} connection from {container_id} to {ip}" +
+            logger(f"Allowed {protocol.value} connection from {container_id} to {ip}" +
                 (f":{port}" if port else ""))
         else:
-            log(f"Failed to allow connection: {message}")
+            logger(f"Failed to allow connection: {message}")
             
         return success
     except Exception as e:
-        log(f"Failed to allow connection: {e}")
+        logger(f"Failed to allow connection: {e}")
         return False
 
 def remove_rule(container_id: str, ip: str, port: Optional[int] = None, protocol: Protocol = Protocol.TCP) -> bool:
@@ -208,14 +208,14 @@ def remove_rule(container_id: str, ip: str, port: Optional[int] = None, protocol
         success, message = __execute_iptables(command)
         
         if success:
-            log(f"Removed {protocol.value} rule for {container_id} to {ip}" +
+            logger(f"Removed {protocol.value} rule for {container_id} to {ip}" +
                 (f":{port}" if port else ""))
         else:
-            log(f"Failed to remove rule: {message}")
+            logger(f"Failed to remove rule: {message}")
             
         return success
     except Exception as e:
-        log(f"Failed to remove rule: {e}")
+        logger(f"Failed to remove rule: {e}")
         return False
 
 def list_rules(container_id: str) -> List[NetworkRule]:
@@ -232,7 +232,7 @@ def list_rules(container_id: str) -> List[NetworkRule]:
         for protocol in Protocol:
             success, output = __execute_iptables(['-L', 'FORWARD', '-n', '--line-numbers'])
             if not success:
-                log(f"Failed to list {protocol.value} rules: {output}")
+                logger(f"Failed to list {protocol.value} rules: {output}")
                 continue
                 
             for line in output.splitlines():
@@ -255,5 +255,5 @@ def list_rules(container_id: str) -> List[NetworkRule]:
         
         return rules
     except Exception as e:
-        log(f"Failed to list rules: {e}")
+        logger(f"Failed to list rules: {e}")
         return []

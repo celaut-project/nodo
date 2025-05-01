@@ -11,7 +11,7 @@ from src.reputation_system.contracts.ergo.utils import get_public_key, addr_to_p
 from src.reputation_system.envs import CONTRACT, LEDGER
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_verify, bip_ecdsa_sign
 from src.database.access_functions.peers import get_peer_directions
-from src.utils.logger import LOGGER as log
+from src.utils.logger import LOGGER as logger
 from src.utils.env import EnvManager
 
 from typing import Optional
@@ -19,7 +19,7 @@ from typing import Optional
 def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
     ergo_node = EnvManager().get_env("ERGO_NODE_URL")
     if not ergo_node:
-        log("No ergo node available.")
+        logger("No ergo node available.")
         return None
 
     url = f"{ergo_node}/blockchain/box/unspent/byTokenId/{token_id}"
@@ -31,14 +31,14 @@ def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
     try:
         response = requests.get(url, params=params)
         if response.status_code != 200:
-            log(f"Failed to fetch data from API for token_id {token_id}. Status code: {response.status_code}")
+            logger(f"Failed to fetch data from API for token_id {token_id}. Status code: {response.status_code}")
             return None
         
         data = response.json()
 
         # Ensure data is a list of boxes
         if not isinstance(data, list):
-            log(f"Unexpected response structure: {data}")
+            logger(f"Unexpected response structure: {data}")
             return None
 
         # Extract addresses from all boxes
@@ -49,14 +49,14 @@ def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
             pub_key_hex = addresses.pop()
             return pub_key_hex  #pub_key_hex_to_addr(pub_key_hex)
 
-        log(f"Multiple or no addresses found for token_id {token_id}.")
+        logger(f"Multiple or no addresses found for token_id {token_id}.")
         return None
 
     except requests.RequestException as e:
-        log(f"HTTP request failed: {e}")
+        logger(f"HTTP request failed: {e}")
         return None
     except ValueError as e:
-        log(f"Failed to parse JSON response for token_id {token_id}: {e}")
+        logger(f"Failed to parse JSON response for token_id {token_id}: {e}")
         return None
 
 def validate_contract_ledger(contract_ledger: celaut.ContractLedger, peer_id: str) -> bool:
@@ -68,27 +68,27 @@ def validate_contract_ledger(contract_ledger: celaut.ContractLedger, peer_id: st
     compatibility = contract_ledger.ledger == LEDGER and contract_ledger.contract == CONTRACT.encode("utf-8")
     
     if not compatibility: 
-        log(f"Contract ledger not compatible: {contract_ledger}")
+        logger(f"Contract ledger not compatible: {contract_ledger}")
         return False
     
     if not contract_ledger.contract_addr:
-        log(f"Incomplete contract ledger, there is no address")
+        logger(f"Incomplete contract ledger, there is no address")
         return False
     
     # Generate a random message
     message = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
-    log(f"Generated random message: {message}")
+    logger(f"Generated random message: {message}")
     
     # Get public key from explorer
     public_key = __get_single_address_with_all_tokens(contract_ledger.contract_addr)
     if not public_key:
-        log("Failed to obtain public key.")
+        logger("Failed to obtain public key.")
         return False
     
     try:
         # Get peer directions
         ip, port = next(get_peer_directions(peer_id=peer_id))
-        log(f"Connecting to peer at {ip}:{port} to validate reputation proof.")
+        logger(f"Connecting to peer at {ip}:{port} to validate reputation proof.")
         
         # Request signature of the message
         sign_response = next(client_grpc(
@@ -103,15 +103,15 @@ def validate_contract_ledger(contract_ledger: celaut.ContractLedger, peer_id: st
             )
         )).signed
         
-        log(f"Peer {ip}:{port} sign response {sign_response}")
+        logger(f"Peer {ip}:{port} sign response {sign_response}")
         
         # Verify the signature
         is_valid = bip_ecdsa_verify(message=message, signature_hex=sign_response, public_key_hex=public_key)
-        log(f"Signature verification: {'successful' if is_valid else 'failed'}")
+        logger(f"Signature verification: {'successful' if is_valid else 'failed'}")
         return is_valid
     
     except Exception as e:
-        log(f"Error during contract validation: {e}")
+        logger(f"Error during contract validation: {e}")
         return False
 
 def sign_message(public_key, message) -> str | None:
@@ -135,10 +135,10 @@ def sign_message(public_key, message) -> str | None:
     if public_key == address:
         # Sign the message using the mnemonic phrase
         signed_msg = bip_ecdsa_sign(mnemonic_phrase=mnemonic_phrase, message=message)
-        log(f"Message signed successfully for public key: {public_key}")
+        logger(f"Message signed successfully for public key: {public_key}")
         return signed_msg
     else:
-        log(f"Public key mismatch: provided {public_key}, expected {address}")
+        logger(f"Public key mismatch: provided {public_key}, expected {address}")
         return None
 
 def validate_reputation_proof_ownership() -> bool:
@@ -157,7 +157,7 @@ def validate_reputation_proof_ownership() -> bool:
     valid = addr_pk == proof_owner_pk
     
     if not valid: 
-        log((
+        logger((
             f"Validation failed: The derived public key ({addr_pk}) does not match "
             f"the proof owner's public key ({proof_owner_pk})."
         ))

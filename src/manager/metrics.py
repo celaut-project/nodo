@@ -11,7 +11,7 @@ from src.database.sql_connection import SQLConnection, is_peer_available
 from src.utils.env import DOCKER_NETWORK
 from src.utils.utils import from_gas_amount, get_network_name, to_gas_amount, \
     generate_uris_by_peer_id
-from src.utils.logger import LOGGER as log
+from src.utils.logger import LOGGER as logger
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
@@ -112,9 +112,9 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
         sc.refresh_gas_for_peer(peer_id=peer_id, gas=gas)
         return gas
     except:
-        log('Error getting gas amount from ' + peer_id + '.')
+        logger('Error getting gas amount from ' + peer_id + '.')
         if is_peer_available(peer_id=peer_id):
-            log('It is assumed that the client was invalid on peer ' + peer_id)
+            logger('It is assumed that the client was invalid on peer ' + peer_id)
             sc.delete_external_client(peer_id=peer_id)
         return 0
 

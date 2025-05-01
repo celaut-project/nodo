@@ -5,7 +5,7 @@ from typing import Dict, Generator
 
 from src.database.sql_connection import SQLConnection
 from src.utils.env import EnvManager
-from src.utils.logger import LOGGER as log
+from src.utils.logger import LOGGER as logger
 
 env_manager = EnvManager()
 sc = SQLConnection()
@@ -76,7 +76,7 @@ class EnergyCostMonitor:
                 cost=cost
             )
             
-            log(
+            logger(
                 f"Metrics recorded: CPU: {metrics['cpu_percent']}%, "
                 f"Memory: {metrics['memory_usage']}%, "
                 f"Power: {metrics['power_consumption']:.2f}W, "
@@ -84,20 +84,20 @@ class EnergyCostMonitor:
             )
                            
         except Exception as e:
-            log(f"Error recording metrics: {e}")
+            logger(f"Error recording metrics: {e}")
 
     def monitor(self, interval: int = None):
         """Start continuous monitoring"""
         if interval is None:
             interval = DEFAULT_MONITOR_INTERVAL
             
-        log(f"Starting monitoring every {interval} seconds...")
+        logger(f"Starting monitoring every {interval} seconds...")
         try:
             while True:
                 self.record_metrics()
                 time.sleep(interval)
         except KeyboardInterrupt:
-            log("Monitoring stopped by user")
+            logger("Monitoring stopped by user")
             
 
     def get_historical_data(self, limit: int = 100) -> Generator[Dict, None, None]:

@@ -2,7 +2,7 @@ from typing import Optional, List, Dict
 import os, json, requests
 
 from src.utils.env import EnvManager
-from src.utils.logger import LOGGER as log
+from src.utils.logger import LOGGER as logger
 from concurrent.futures import ThreadPoolExecutor
 
 from src.utils.network import internet_available
@@ -27,10 +27,10 @@ def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
                 "appVersion": data.get("appVersion", "unknown")
             }
         else:
-            log(f"Ergo node {ergo_node_url} is not on the mainnet or has an incorrect genesis block ID.")
+            logger(f"Ergo node {ergo_node_url} is not on the mainnet or has an incorrect genesis block ID.")
             return None
     except requests.exceptions.RequestException as e:
-        log(f"Error connecting to Ergo node: {e}")
+        logger(f"Error connecting to Ergo node: {e}")
         return None
 
 def get_refresh_peers() -> Dict[str, Dict]:
@@ -63,10 +63,10 @@ def get_refresh_peers() -> Dict[str, Dict]:
                     node_info = __available_ergo_node(rest_api_url)
                     if node_info:
                         available_peers[rest_api_url] = node_info
-                        log(f"Found available Ergo node: {rest_api_url}")
+                        logger(f"Found available Ergo node: {rest_api_url}")
                         fetch_peers(rest_api_url)
         except requests.RequestException as e:
-            log(f"Error fetching peers from {url}: {e}")
+            logger(f"Error fetching peers from {url}: {e}")
     
     with ThreadPoolExecutor(max_workers=10) as executor:
         executor.map(fetch_peers, peers.keys())
@@ -94,21 +94,21 @@ def check_ergo_node_availability():
     if not internet_available():
         return
     
-    log("Checking Ergo node availability...")
+    logger("Checking Ergo node availability...")
     
     current_ergo_node = env_manager.get_env("ERGO_NODE_URL")
     if __available_ergo_node(current_ergo_node):
-        log(f"Ergo node {current_ergo_node} is available.")
+        logger(f"Ergo node {current_ergo_node} is available.")
         return
     
-    log(f"Ergo node {current_ergo_node} is not available.")
+    logger(f"Ergo node {current_ergo_node} is not available.")
     availables = get_refresh_peers()  # New refreshed available peers.
     
     if not availables and current_ergo_node == env_manager.get_env("ERGO_NODE_URL"): 
-        log("No available Ergo nodes found.")
+        logger("No available Ergo nodes found.")
         env_manager.write_env("ERGO_NODE_URL", "")
         return
     
     new_ergo_node_url = next(iter(availables))
     env_manager.write_env("ERGO_NODE_URL", new_ergo_node_url)
-    log(f"ERGO_NODE_URL has been updated to {new_ergo_node_url}")
+    logger(f"ERGO_NODE_URL has been updated to {new_ergo_node_url}")
