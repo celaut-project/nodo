@@ -46,7 +46,8 @@ def inspect(service: str):
     service_obj = read_service_from_disk(service_hash=service)
     print(f"Prose          : {service_obj.prose}\n")
     print("Service Interface (Protobuf):")
-    print(service_obj.api + "\n")
+    print(service_obj.api)
+    print("\n")
 
     # Container Configuration
     print_rule("⚙ Container Configuration")
