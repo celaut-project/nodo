@@ -137,7 +137,6 @@ class AbstractInputServiceIterable:
                 )
 
         if self.service_saved:
-            log.LOGGER("ENTER ON THE SERVICE SAVED ZONE.")
             yield buffer_pb2.Buffer(signal=True)
             self.metadata = combine_metadata(
                 service_hash=self.service_hash, request_metadata=self.metadata
@@ -150,13 +149,12 @@ class AbstractInputServiceIterable:
                     raise StopIteration
             """
             yield from self.generate()
+            # STOP ALL THE MAIN ITERATION.
 
     def __iter__(self):
         self.start()
         try:
-            log.LOGGER("INIT ITER.")
             yield from (t for r in self.parser_iterator for t in self.__pattern_matching(r))
-            log.LOGGER("END ITER.")
         finally:
             self.final()
 
