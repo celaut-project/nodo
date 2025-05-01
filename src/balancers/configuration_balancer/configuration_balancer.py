@@ -4,6 +4,7 @@ from protos import celaut_pb2 as celaut
 from protos import gateway_pb2
 from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
 from src.manager.manager import could_ve_this_sysreq
+from src.utils.cost_functions.execution_cost import is_free_gas
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost, compute_maintenance_cost
 from src.utils.utils import to_gas_amount
 from src.utils.env import EnvManager
@@ -27,15 +28,20 @@ def configuration_balancer(
         if not could_ve_this_sysreq(clause.max_sysreq):
             continue
 
+        if is_free_gas():
+            initial_gas = 0
+        else:
+            initial_gas = compute_start_service_cost(
+                    metadata=metadata,
+                    initial_gas_amount=initial_gas_amount,
+                    resource=clause
+                )
+
         # Calculate estimated cost for local execution.
         posible_clauses['local'] = gateway_pb2.EstimatedCost(
             
             # Initial cost.
-            cost=to_gas_amount(compute_start_service_cost(
-                metadata=metadata,
-                initial_gas_amount=initial_gas_amount,
-                resource=clause
-            )),
+            cost=to_gas_amount(initial_gas),
             
             # Minimal maintenance cost.
             min_maintenance_cost=to_gas_amount(compute_maintenance_cost(
