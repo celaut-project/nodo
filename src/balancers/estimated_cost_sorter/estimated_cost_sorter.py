@@ -81,7 +81,7 @@ def estimated_cost_sorter(
         
         score = priority + reputation - log(norm_gas_cost)  # TODO Could have weights on envs.
         
-        logger(f"Computing estimated cost score for peer {peer_id}: priority {priority}, reputation {reputation}, cost {norm_gas_cost} => score {score}\n")
+        logger(f"Computing estimated cost score for peer {peer_id}: priority {priority}, reputation {reputation}, cost {log(norm_gas_cost)} => score {score}\n")
         return score
 
     return (
