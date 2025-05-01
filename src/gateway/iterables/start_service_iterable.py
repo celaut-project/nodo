@@ -39,7 +39,9 @@ class StartServiceIterable(AbstractInputServiceIterable):
 
         service_id = get_service_hex_main_hash(metadata=metadata)
         if service_id != self.service_hash:
-            log.LOGGER(f'There is some problem with the metadata {service_id} != {self.service_hash}. {metadata}')
+            log.LOGGER(f'There is some problem with the metadata {service_id} != {self.service_hash}')
+            for hash in list(metadata.hashtag.hash):
+                log.LOGGER(f"-  {hash.type.hex()}: {hash.value.hex()}")
             raise Exception(f"Corrupt metadata for the service {self.service_hash}")
 
         yield from bee.serialize_to_buffer(
