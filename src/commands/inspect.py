@@ -60,5 +60,7 @@ def inspect(service: str):
 
     # Network Settings
     print_rule("🌐 Network Settings")
-    print(f"Tags         : {', '.join([tag for tag in service_obj.network.tags])}")
-    print(f"Descripción  : {service_obj.network.prose}\n")
+    for network in service_obj.network:
+        print(f"Tags         : {', '.join([tag for tag in network.tags])}")
+        print(f"Descripción  : {service_obj.network.prose}\n")
+        print("\n")
