@@ -235,7 +235,7 @@ display_summary() {
 
     local max_len=0
     # List of variables to display in the summary (add new ones here)
-    local vars_to_display=("ERGO_NODE_URL" "ERGO_WALLET_MNEMONIC" "REPUTATION_PROOF_ID" "ERGO_PAYMENTS_RECIVER_WALLET" "NGROK_TUNNELS_KEY" "SOCIALIZATION_FACTOR" "ERGO_DONATION_PERCENTAGE")
+    local vars_to_display=("ERGO_NODE_URL" "ERGO_WALLET_MNEMONIC" "REPUTATION_PROOF_ID" "ERGO_PAYMENTS_RECIVER_WALLET" "NGROK_TUNNELS_KEY" "FREE_GAS_THRESHOLD" "SOCIALIZATION_FACTOR" "ERGO_DONATION_PERCENTAGE")
 
     # Calculate the maximum length of variable names for alignment
     for var_name in "${vars_to_display[@]}"; do
@@ -333,6 +333,7 @@ handle_variable "ERGO_WALLET_MNEMONIC" validate_wallet_address # No specific val
 handle_variable "REPUTATION_PROOF_ID" validate_reputation_id
 handle_variable "ERGO_PAYMENTS_RECIVER_WALLET" validate_wallet_address
 handle_variable "NGROK_TUNNELS_KEY" # No specific validation needed
+handle_variable "FREE_GAS_THRESHOLD" validate_integer
 handle_variable "SOCIALIZATION_FACTOR" validate_integer
 
 # Handle donation setup separately
