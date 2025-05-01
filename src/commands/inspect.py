@@ -9,43 +9,60 @@ METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 REGISTRY = env_manager.get_env("REGISTRY")
 
 
+def print_rule(title):
+    width = 60
+    print(f"\n{'=' * width}")
+    print(f"= {title.center(width - 4)} =")
+    print(f"{'=' * width}\n")
+
+
 def inspect(service: str):
     service = get_id(service)
 
-    # Check if script is run as root
+    # Verificar privilegios
     if os.geteuid() != 0:
-        print("This script requires superuser privileges. Please run with sudo.")
+        print("[ERROR] Privilegios de superusuario requeridos. Ejecuta con sudo.")
         return
 
-    print("# Metadata")
+    # Metadata
+    print_rule("📄 Metadata")
     metadata = read_metadata_from_disk(service_hash=service)
 
-    for hash in list(metadata.hashtag.hash):
-        _type = hash.type.hex()[:6]
-        if SHA3_256_ID == hash.type:
-            _type = f"(SHA3) {_type}"
-        elif SHAKE_256_ID == hash.type:
-            _type = f"(SHAKE) {_type}"
+    # Tabla de hashes
+    print(f"{'Hash Type':<15} | Value")
+    print(f"{'-'*15}-+-{'-'*40}")
+    for h in metadata.hashtag.hash:
+        _type = h.type.hex()[:6]
+        if SHA3_256_ID == h.type:
+            _type = f"SHA3:{_type}"
+        elif SHAKE_256_ID == h.type:
+            _type = f"SHAKE:{_type}"
+        print(f"{_type:<15} | {h.value.hex()}")
 
-        print(f"-  {_type}: {hash.value.hex()}")
+    # Reputation Proofs
+    print_rule("🔍 Reputation Proofs")
+    for c in metadata.reputation_proofs:
+        print(f"Ledger  : {c.ledger}")
+        print(f"Script  : {c.contract.hex()}")
+        print(f"Address : {c.contract_addr}\n")
 
-    print("Reputation proofs:")
-    for contract in metadata.reputation_proofs:
-        print(f"Ledger: {contract.ledger}")
-        print(f"Script: {contract.contract}")  # <- This is bytes.
-        print(f"Address: {contract.contract_addr}")
-        print("\n")
-
-    print("# Service")
+    # Service Definition
+    print_rule("🛠 Service Definition")
     service_obj = read_service_from_disk(service_hash=service)
+    print(f"Prose          : {service_obj.prose}\n")
+    print("Service Interface (Protobuf):")
+    print(service_obj.api + "\n")
 
-    print(f"Prose: {service_obj.prose}")
-    print(f"Service Interface: {service_obj.api}")
-    print("Service container:")
-    print(f"    - Architecture {service.container.architecture.tags}\n{service.container.architecture.prose}")
-    print(f"    - Envirment variables {service.container.enviroment_variables}")
-    print(f"    - Entrypoint {service.container.entrypoint}")
-    print("    - Node compatibility:")
-    print(f"        - Configuration expected on: {service.container.config}")
-    print(f"        - Node protocol stack: {service.container.node_protocol_stack}")
-    print(f"Service network {service.network.tags}\n{service.network.prose}")
+    # Container Configuration
+    print_rule("⚙ Container Configuration")
+    print(f"Architecture : {', '.join(service_obj.container.architecture.tags)}")
+    print(f"Descripción  : {service_obj.container.architecture.prose}")
+    print(f"Env Vars     : {service_obj.container.enviroment_variables}")
+    print(f"Entrypoint   : {service_obj.container.entrypoint}")
+    print(f"Config File  : {service_obj.container.config}")
+    print(f"Protocols    : {', '.join(service_obj.container.node_protocol_stack)}\n")
+
+    # Network Settings
+    print_rule("🌐 Network Settings")
+    print(f"Tags         : {', '.join(service_obj.network.tags)}")
+    print(f"Descripción  : {service_obj.network.prose}\n")
