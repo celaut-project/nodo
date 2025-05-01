@@ -180,6 +180,7 @@ env_manager.get_env("SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", True)
 env_manager.get_env("MEMORY_LOGS", False)
 
 # Cost and Deposit Settings
+
 env_manager.get_env("DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", 1 / pow(10, 6))
 env_manager.get_env("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR", False)
 
@@ -196,6 +197,7 @@ env_manager.get_env("SOCIALIZATION_FACTOR", 2)
 
 env_manager.get_env("COST_AVERAGE_VARIATION", 1)
 
+env_manager.get_env("FREE_GAS_THRESHOLD", 30)  # Over the execution cost, so if FREE_GAS_THRESHOLD >= EXECUTION_COST gas will be always free!
 env_manager.get_env("EXECUTION_COST", pow(10, 2))  # Based on a maximum usage of resources.
 env_manager.get_env("EXECUTION_BENEFIT", pow(10, 2))  # Constant to add benefit
 env_manager.get_env("BUILD_COST", pow(10, 5))  # Constant if container build is needed.
