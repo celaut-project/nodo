@@ -482,6 +482,15 @@ class SQLConnection(metaclass=Singleton):
         except Exception as e:
             logger.LOGGER(f'Error fetching reputation for peer {peer_id}: {e}')
             return None
+        
+    def total_peer_reputation(self) -> float:
+        """
+        Fetch the total sum of the reputation of all the peers
+        """
+        total_amount_result = self._execute('SELECT SUM(reputation_score) AS total_amount FROM peer')
+        total_amount_row = total_amount_result.fetchone()
+        total_amount = total_amount_row['total_amount'] or 0
+        return total_amount
 
     def submit_to_ledger(self, submit: Callable[[List[Tuple[str, int, str]]], bool], force_submit: bool = False) -> bool:
         """
@@ -523,9 +532,7 @@ class SQLConnection(metaclass=Singleton):
                 return True
 
             # Fetch the total sum of all reputation amounts from the table
-            total_amount_result = self._execute('SELECT SUM(reputation_score) AS total_amount FROM peer')
-            total_amount_row = total_amount_result.fetchone()
-            total_amount = total_amount_row['total_amount'] or 0
+            total_amount = self.total_peer_reputation()
 
             # Dictionary to store instance data (for peers with multiple slots or contracts)
             peers_dict = {}
@@ -581,13 +588,13 @@ class SQLConnection(metaclass=Singleton):
                         if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
                             logger.LOGGER(f'Peer {peer_id} with proof {reputation_proof_id} meets the submission threshold.')
                             needs_submit = True
-                            percentage_amount = (reputation_score / total_amount) * token_amount if total_amount else 0
+                            percentage_amount = ((reputation_score / total_amount) * token_amount) if total_amount else 0
                             to_submit.append((reputation_proof_id, percentage_amount, instance_json))
 
                         # Proof percentage doesn't need to be changed itself, but needs to be updated if others do.
                         elif last_index_on_ledger > 0:
                             logger.LOGGER(f'Peer {peer_id} with proof {reputation_proof_id} does not meet the submission threshold, but is included in the proof.')
-                            percentage_amount = (reputation_score / total_amount) * token_amount if total_amount else 0
+                            percentage_amount = ((reputation_score / total_amount) * token_amount) if total_amount else 0
                             to_submit.append((reputation_proof_id, percentage_amount, instance_json))
 
                 to_submit.append((None, 1, None))  # This will be treated as a pointer to itself, used to include the node instance in the proof
