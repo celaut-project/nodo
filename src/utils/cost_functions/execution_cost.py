@@ -285,8 +285,6 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
     """
     try:
         service_id = get_service_hex_main_hash(metadata=metadata)
-        logger(f'Calculating execution cost for the service {service_id}')
-
 
         # Calculate the individual cost components
         compute_cost = maintain_execution_cost(system_resources=system_resources)
@@ -296,7 +294,7 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
         # Calculate total cost
         total_cost = compute_cost + build_c + benefit
 
-        logger(f"Execution cost for {service_id[:6]} calculated: {int(round(total_cost))} "
+        logger(f"Execution cost for the service {service_id[:6]} calculated: {int(round(total_cost))} "
                  f"(Compute: {compute_cost:e}, Build: {build_c:e}, Benefit: {benefit:e})")
 
         return int(round(total_cost))
