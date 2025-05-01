@@ -79,7 +79,7 @@ def estimated_cost_sorter(
         else:
             reputation: float = ((compute_reputation(peer_id=peer_id) / total_reputation) if total_reputation else 0 ) * SOCIALIZATION_FACTOR
         
-        score = log(priority) + reputation - log(norm_gas_cost)
+        score = priority + reputation - log(norm_gas_cost)  # TODO Could have weights on envs.
         
         logger(f"Computing estimated cost score for peer {peer_id}: priority {priority}, reputation {reputation}, cost {norm_gas_cost} => score {score}\n")
         return score
