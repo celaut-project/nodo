@@ -51,14 +51,14 @@ def inspect(service: str):
 
     # Container Configuration
     print_rule("⚙ Container Configuration")
-    print(f"Architecture : {', '.join(service_obj.container.architecture.tags)}")
+    print(f"Architecture : {', '.join([tag for tag in service_obj.container.architecture.tags])}")
     print(f"Descripción  : {service_obj.container.architecture.prose}")
     print(f"Env Vars     : {service_obj.container.enviroment_variables}")
     print(f"Entrypoint   : {service_obj.container.entrypoint}")
     print(f"Config File  : {service_obj.container.config}")
-    print(f"Protocols    : {', '.join(service_obj.container.node_protocol_stack)}\n")
+    print(f"Protocols    : {service_obj.container.node_protocol_stack}\n")
 
     # Network Settings
     print_rule("🌐 Network Settings")
-    print(f"Tags         : {', '.join(service_obj.network.tags)}")
+    print(f"Tags         : {', '.join([tag for tag in service_obj.network.tags])}")
     print(f"Descripción  : {service_obj.network.prose}\n")
