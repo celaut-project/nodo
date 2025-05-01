@@ -112,7 +112,6 @@ def service_extended(
         yield metadata
 
         # 6
-        log.LOGGER(f"Send the service {REGISTRY + get_service_hex_main_hash(metadata=metadata)} using utils.service_extended.")
         yield Dir(
             dir=REGISTRY + get_service_hex_main_hash(metadata=metadata),
             _type=celaut.Service
