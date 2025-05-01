@@ -14,7 +14,7 @@ from src.manager.manager import stop_instance, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import increase_deposit_on_peer, init_interfaces
-from src.reputation_system.interface import update_container_reputation, submit_reputation
+from src.reputation_system.interface import update_container_reputation, submit_reputation, update_peer_reputation
 from src.utils import logger as log
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
@@ -175,7 +175,7 @@ def peer_deposits(debug_mode: bool = False):
                 ), None)
                 if debug_mode: log.LOGGER(f"Successfully fetched info for peer {peer_id}.")
             except Exception as fetch_exception:
-                # TODO update reputation.
+                update_peer_reputation(peer_id=peer_id, amount=-100)
                 continue
 
             if not peer:
