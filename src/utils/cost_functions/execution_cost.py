@@ -12,6 +12,7 @@ env_manager = EnvManager()
 EXECUTION_COST = env_manager.get_env("EXECUTION_COST")
 BUILD_COST = env_manager.get_env("BUILD_COST")
 EXECUTION_BENEFIT = env_manager.get_env("EXECUTION_BENEFIT")
+FREE_GAS_THRESHOLD = int(env_manager.get_env("FREE_GAS_THRESHOLD"))
 
 # --- Constants ---
 # Resource type identifiers
@@ -227,6 +228,11 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         # Log the full traceback for unexpected errors
         logger(f"[ERROR] General error during resource supply calculation: {e}")
         return 0.0 # Return 0.0 on error as per original logic
+
+def is_free_gas() -> bool:
+     #  Check that  Over the execution cost, so if FREE_GAS_THRESHOLD >= EXECUTION_COST gas will be always free!
+    available = __get_available_supply(celaut.Sysresources) * EXECUTION_COST
+    return available < FREE_GAS_THRESHOLD
 
 def maintain_execution_cost(system_resources: celaut.Sysresources) -> int:
     # Get the weighted available supply score (0.0 to 1.0)
