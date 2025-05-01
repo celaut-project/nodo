@@ -62,10 +62,13 @@ def estimated_cost_sorter(
 
         local_erg_gas: int = ERGO_GAS_COST
         
-        peer_erg_gas: int = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_id=ERGO_LEDGER)
-        if peer_erg_gas is None:
-            log(f"No ergo gas price on peer {peer_id}, continue.")
-            return 0
+        if peer_id != "local":
+            peer_erg_gas: int = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_id=ERGO_LEDGER)
+            if peer_erg_gas is None:
+                log(f"No ergo gas price on peer {peer_id}, continue.")
+                return 0
+        else:
+            peer_erg_gas = ERGO_GAS_COST
 
         cost: int = gas_cost * (peer_erg_gas / local_erg_gas) if local_erg_gas else 0
 
