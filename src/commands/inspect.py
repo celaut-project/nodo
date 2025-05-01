@@ -61,7 +61,11 @@ def inspect(service: str):
     # Network Settings
     print_rule("🌐 Network Settings")
     if not service_obj.network:
-        print("🔒 This service is completely isolated.\n It cannot connect to external networks. It can only receive requests from the user but cannot send data to external endpoints.\n")
+        print("🔒 This service is completely isolated.\n"
+      "It cannot connect to any external endpoints.\n"
+      "The user may connect to it through the ports exposed by its interface.\n"
+      "It can only initiate connections to its own dependencies (child services it may deploy).\n"
+      "All of its dependencies will follow the same restrictions.\n")
     for network in service_obj.network:
         print(f"Tags         : {', '.join([tag for tag in network.tags])}")
         print(f"Descripción  : {service_obj.network.prose}\n")
