@@ -283,8 +283,11 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
         build.UnsupportedArchitectureException: If build cost calculation fails due to architecture.
         Exception: Propagates errors from supply calculation or other unexpected issues.
     """
-    log('Calculating execution cost...')
     try:
+        service_id = get_service_hex_main_hash(metadata=metadata)
+        log(f'Calculating execution cost for the service {service_id}')
+
+
         # Calculate the individual cost components
         compute_cost = maintain_execution_cost(system_resources=system_resources)
         build_c = __build_cost(metadata=metadata)
@@ -293,7 +296,7 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
         # Calculate total cost
         total_cost = compute_cost + build_c + benefit
 
-        log(f"Execution cost calculated: {int(round(total_cost))} "
+        log(f"Execution cost for {service_id[:6]} calculated: {int(round(total_cost))} "
                  f"(Compute: {compute_cost:e}, Build: {build_c:e}, Benefit: {benefit:e})")
 
         return int(round(total_cost))
