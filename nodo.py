@@ -92,6 +92,10 @@ def check_rust_installation():
             print("Error installing Rust:", e, flush=True)
 
 if __name__ == '__main__':
+
+    if not os.path.exists(os.path.join(MAIN_DIR, "storage", ".acceptedkya")):
+        os.system("./bash/accpet_kya.sh")
+
     os.umask(0o002)
 
     # Create __cache__ if it does not exist.
