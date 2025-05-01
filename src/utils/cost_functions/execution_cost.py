@@ -3,7 +3,7 @@ from protos import celaut_pb2 as celaut
 from src.utils.utils import read_service_from_disk
 from src.virtualizers.docker import build
 from src.virtualizers.docker.architecture import check_supported_architecture, UnsupportedArchitectureException
-from src.utils.logger import LOGGER as log
+from src.utils.logger import LOGGER as logger
 from src.utils.env import DOCKER_CLIENT, EnvManager
 from src.utils.verify import get_service_hex_main_hash
 
@@ -56,7 +56,7 @@ def __is_service_built(service_hash: str) -> bool:
                 continue
     except (IndexError, AttributeError) as e:
         # Log the error, handle exceptions for missing attributes or invalid indexing
-        log(f"An error occurred while checking if service is built: {e}")
+        logger(f"An error occurred while checking if service is built: {e}")
     return False
 
 
@@ -70,7 +70,7 @@ def __build_cost(metadata: celaut.Metadata) -> int:
         if __is_service_built(service_hash):
             return 0
         
-        log(f"System has no built container to run service {service_hash}.")
+        logger(f"System has no built container to run service {service_hash}.")
 
         # Check if the architecture is supported
         if not check_supported_architecture(
@@ -86,7 +86,7 @@ def __build_cost(metadata: celaut.Metadata) -> int:
         ])
 
     except Exception as e:
-        log('Manager - build cost exception: ' + str(e))
+        logger('Manager - build cost exception: ' + str(e))
         raise e
 
 def __get_available_supply(system_resources: celaut.Sysresources) -> float:
@@ -144,7 +144,7 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
 
         # Check for zero capacity to avoid division by zero errors later
         if not system_cpu or not system_mem or not system_disk:
-            log(f"[WARNING] System reported zero capacity for CPU ({system_cpu}), "
+            logger(f"[WARNING] System reported zero capacity for CPU ({system_cpu}), "
                         f"Memory ({system_mem}) or Disk ({system_disk}). Cannot calculate supply.")
             return 0.0
 
@@ -162,7 +162,7 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         resources_with_demand = list(demand_ratios.keys())
         if not resources_with_demand:
             # No specific positive demands provided. Fall back to equal default weights.
-            log("No positive resource limits specified by instance. Using default equal weights.")
+            logger("No positive resource limits specified by instance. Using default equal weights.")
             weights = DEFAULT_WEIGHTS
             # Check availability for all default resources in this case.
             resources_to_check = DEFAULT_RESOURCES
@@ -172,7 +172,7 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
 
             # Check if total_demand_ratio is positive to avoid division by zero or negative weights
             if total_demand_ratio <= 0:
-                 log(f"[WARNING] Total demand ratio is zero or negative ({total_demand_ratio}). "
+                 logger(f"[WARNING] Total demand ratio is zero or negative ({total_demand_ratio}). "
                              "Falling back to default weights.")
                  weights = DEFAULT_WEIGHTS
                  resources_to_check = DEFAULT_RESOURCES
@@ -221,11 +221,11 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         return normalized_score
 
     except psutil.Error as pe:
-        log(f"[ERROR] psutil error during resource supply calculation: {pe}")
+        logger(f"[ERROR] psutil error during resource supply calculation: {pe}")
         return 0.0 # Return 0.0 on error as per original logic
     except Exception as e:
         # Log the full traceback for unexpected errors
-        log(f"[ERROR] General error during resource supply calculation: {e}")
+        logger(f"[ERROR] General error during resource supply calculation: {e}")
         return 0.0 # Return 0.0 on error as per original logic
 
 def maintain_execution_cost(system_resources: celaut.Sysresources) -> int:
@@ -239,7 +239,7 @@ def maintain_execution_cost(system_resources: celaut.Sysresources) -> int:
     # This factor approaches 1.0 much faster than the linear 'lack_of_supply'
     # as available_supply drops towards 0, thus increasing cost sharply under scarcity.
     if EXPONENTIAL_COST_FACTOR <= 0:
-            log("EXPONENTIAL_COST_FACTOR must be positive.")
+            logger("EXPONENTIAL_COST_FACTOR must be positive.")
             # Defaulting to linear factor to avoid math error, but this indicates misconfiguration.
             used_compute_power_factor = lack_of_supply
     elif lack_of_supply >= 1.0:
@@ -285,7 +285,7 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
     """
     try:
         service_id = get_service_hex_main_hash(metadata=metadata)
-        log(f'Calculating execution cost for the service {service_id}')
+        logger(f'Calculating execution cost for the service {service_id}')
 
 
         # Calculate the individual cost components
@@ -296,14 +296,14 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
         # Calculate total cost
         total_cost = compute_cost + build_c + benefit
 
-        log(f"Execution cost for {service_id[:6]} calculated: {int(round(total_cost))} "
+        logger(f"Execution cost for {service_id[:6]} calculated: {int(round(total_cost))} "
                  f"(Compute: {compute_cost:e}, Build: {build_c:e}, Benefit: {benefit:e})")
 
         return int(round(total_cost))
 
     except build.UnsupportedArchitectureException as e:
-        log(f"[ERROR] Build error due to unsupported architecture: {e}")
+        logger(f"[ERROR] Build error due to unsupported architecture: {e}")
         raise e # Propagate specific build error
     except Exception as e:
-        log(f"[ERROR] General error calculating execution cost: {e}")
+        logger(f"[ERROR] General error calculating execution cost: {e}")
         raise e # Propagate other errors

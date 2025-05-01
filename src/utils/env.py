@@ -190,7 +190,6 @@ env_manager.get_env("FREE_TRIAL_GAS_AMOUNT",  pow(10, 66))
 env_manager.get_env("INITIAL_PEER_DEPOSIT_FACTOR", 0.5)
 env_manager.get_env("DEV_CLIENT_GAS_AMOUNT", pow(10, 256))
 
-env_manager.get_env("WEIGHT_CONFIGURATION_FACTOR", int(pow(10, 9)))
 env_manager.get_env("INIT_COST_CONFIGURATION_FACTOR", 1)
 env_manager.get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR", pow(10, 6))
 env_manager.get_env("SOCIALIZATION_FACTOR", 2)
