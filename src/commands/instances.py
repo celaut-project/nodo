@@ -1,8 +1,10 @@
 import sqlite3
 import os
+from src.manager.metrics import __get_metrics_external, get_metrics
 from src.utils.env import EnvManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
+from src.utils.utils import from_gas_amount
 
 env_manager = EnvManager()
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
@@ -79,15 +81,23 @@ def list_instances(groupable: bool = False, search: str = ""):
             cursor.execute(
                 "SELECT token, peer_id, father_id, serialized_instance, service_id FROM delegated_instances"
             )
-            for token, peer_id, father_id, si, service in cursor.fetchall():
+            for token, token_hash, peer_id, father_id, si, service in cursor.fetchall():
                 parent_type = 'client' if father_id in client_ids else 'unknown'
+
+                try:
+                    metrics = __get_metrics_external(token=token, peer_id=peer_id)
+                    gas = ssformat(from_gas_amount(metrics.gas_amount))
+                except:
+                    gas = "N/A"
+                
                 instances.append({
                     'id': token or 'N/A',
+                    'encrypted_token': token_hash,
                     'service': get_tag(service),
                     'ip': get_http_ip(si) if si else "N/A",
                     'parent_id': father_id or 'N/A',
                     'parent_type': parent_type,
-                    'gas': 'N/A',
+                    'gas': gas,
                     'location': peer_id or 'Unknown Peer'
                 })
 
