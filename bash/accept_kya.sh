@@ -67,7 +67,7 @@ echo "------------------------------------------------------------"
 # --- Ask for acceptance ---
 while true; do
     # Use -p for prompt, -r to handle backslashes literally
-    read -p "Do you accept the Know Your Assumptions? (yes/no): " response
+    read -n 1 -r -p "Do you accept the Know Your Assumptions? (yes/no): " response
 
     # Convert response to lowercase for case-insensitive comparison
     response_lower=$(echo "$response" | tr '[:upper:]' '[:lower:]')
