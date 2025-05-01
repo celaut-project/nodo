@@ -24,14 +24,14 @@ def inspect(service: str):
     metadata = read_metadata_from_disk(service_hash=service)
 
     # Tabla de hashes
-    print(f"{'Hash Type':<15} | Value")
+    print(f"{'Hash type':<15} | Value")
     print(f"{'-'*15}-+-{'-'*40}")
     for h in metadata.hashtag.hash:
         _type = h.type.hex()[:6]
         if SHA3_256_ID == h.type:
-            _type = f"SHA3:{_type}"
+            _type = f"(SHA3) {_type}"
         elif SHAKE_256_ID == h.type:
-            _type = f"SHAKE:{_type}"
+            _type = f"(SHAKE) {_type}"
         print(f"{_type:<15} | {h.value.hex()}")
 
     # Reputation Proofs
@@ -60,6 +60,8 @@ def inspect(service: str):
 
     # Network Settings
     print_rule("🌐 Network Settings")
+    if not service_obj.network:
+        print("🔒 This service is completely isolated.\n It cannot connect to external networks. It can only receive requests from the user but cannot send data to external endpoints.\n")
     for network in service_obj.network:
         print(f"Tags         : {', '.join([tag for tag in network.tags])}")
         print(f"Descripción  : {service_obj.network.prose}\n")
