@@ -126,6 +126,8 @@ def block_all(container_id: str) -> bool:
                 '-I', 'FORWARD',
                 '-s', container_ip,
                 '-p', protocol.value,
+                '-m', 'conntrack',
+                '--ctstate', 'NEW',
                 '-j', 'DROP'
             ])
             if not success:
