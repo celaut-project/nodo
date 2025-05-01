@@ -24,7 +24,6 @@ class StartServiceIterable(AbstractInputServiceIterable):
         log.LOGGER('Starting service by ' + str(self.context.peer()) + ' ...')
 
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
-        log.LOGGER("START GENERATION")
         if CONFIGURATION_REQUIRED and not self.configuration.config:
             raise Exception("Client or configuration ")
         
@@ -57,7 +56,6 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 recursion_guard_token=self.recursion_guard_token
             )
         )
-        log.LOGGER("END GENERATION")
 
     def final(self):
         if not self.service_saved:
