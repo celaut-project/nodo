@@ -44,7 +44,6 @@ def compute_reputation(peer_id) -> float:
     Therefore, it will not take into account the reputation assigned by other peers for each of the pairs it interacts with.
     """
     _result: float = sc.get_reputation(peer_id)
-    LOGGER(f"Computed reputation: {_result}")
     return _result
 
 def submit_reputation(force_submit: bool = False):
