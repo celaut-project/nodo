@@ -229,14 +229,14 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         logger(f"[ERROR] General error during resource supply calculation: {e}")
         return 0.0 # Return 0.0 on error as per original logic
 
-def is_free_gas() -> bool:
+def is_free_gas(system_resources: celaut.Sysresources) -> bool:
      #  Check that  Over the execution cost, so if FREE_GAS_THRESHOLD >= EXECUTION_COST gas will be always free!
-    available = __get_available_supply(celaut.Sysresources) * EXECUTION_COST
+    available = __get_available_supply(system_resources) * EXECUTION_COST
     return available < FREE_GAS_THRESHOLD
 
 def maintain_execution_cost(system_resources: celaut.Sysresources) -> int:
     # Get the weighted available supply score (0.0 to 1.0)
-    available_supply = __get_available_supply(system_resources=system_resources)
+    available_supply = __get_available_supply(system_resources)
 
     # Calculate the 'lack of supply' (ranges from 0.0 when supply=1.0, to 1.0 when supply=0.0)
     lack_of_supply = 1.0 - available_supply

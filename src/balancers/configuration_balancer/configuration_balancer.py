@@ -28,7 +28,7 @@ def configuration_balancer(
         if not could_ve_this_sysreq(clause.max_sysreq):
             continue
 
-        if is_free_gas():
+        if is_free_gas(system_resources=clause.min_sysreq):
             initial_gas = 0
         else:
             initial_gas = compute_start_service_cost(
