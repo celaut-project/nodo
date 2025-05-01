@@ -73,6 +73,7 @@ class AbstractInputServiceIterable:
 
     service_hash: Optional[str] = None
     service_saved = False
+    generated = False
 
     hashes: Set[Hash] = set()
     metadata: Optional[gateway_pb2.celaut__pb2.Metadata] = None
@@ -86,6 +87,7 @@ class AbstractInputServiceIterable:
         self.context = context
 
     def __pattern_matching(self, r) -> Generator[buffer_pb2.Buffer, None, None]:
+
         match type(r):
             case gateway_pb2.Client:
                 
@@ -136,20 +138,14 @@ class AbstractInputServiceIterable:
                     service_hash=self.service_hash
                 )
 
-        if self.service_saved:
+        if self.service_saved and not self.generated:
             yield buffer_pb2.Buffer(signal=True)
             self.metadata = combine_metadata(
                 service_hash=self.service_hash, request_metadata=self.metadata
             )
 
-            """
-                try:
-                    yield from self.generate()
-                except BreakIteration:
-                    raise StopIteration
-            """
             yield from self.generate()
-            # STOP ALL THE MAIN ITERATION.
+            self.generated = True
 
     def __iter__(self):
         self.start()
