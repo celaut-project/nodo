@@ -24,6 +24,8 @@ def estimated_cost_sorter(
         weight_clauses: Dict[int, int]
 ) -> Generator[Tuple[str, gateway_pb2.EstimatedCost], None, None]:
     
+    total_reputation: float = sq.total_peer_reputation()
+    
     def __compute_score(peer_id: str, estimated_cost: gateway_pb2.EstimatedCost) -> float:
         priority: int = WEIGHT_CONFIGURATION_FACTOR * max(1, weight_clauses[estimated_cost.comb_resource_selected])  # If the combinational resource clause don't have a cost_weight, it's like equal to 1 cost weight.
 
@@ -72,7 +74,7 @@ def estimated_cost_sorter(
 
         cost: int = gas_cost * (peer_erg_gas / local_erg_gas) if local_erg_gas else 0
 
-        reputation: float = 1 if peer_id == 'local' else SOCIALIZATION_FACTOR + compute_reputation(peer_id=peer_id)
+        reputation: float = 1 if peer_id == 'local' else (compute_reputation(peer_id=peer_id) / total_reputation) * SOCIALIZATION_FACTOR
 
         log(f"Computing estimated cost score for peer {peer_id}: priority {priority}, reputation {reputation}, cost {cost} => score {priority * reputation / cost}\n")
 
