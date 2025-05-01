@@ -82,7 +82,7 @@ message CombinationResources {
             Attribute attribute = 1;
             int32 weight = 2;
         }
-        int32 cost_weight = 1; //    Execution balancer will compute score = weight / cost * RELATION_FACTOR
+        int32 cost_weight = 1;
         optional celaut.Sysresources min_sysreq = 2;  // init system specs.
         optional celaut.Sysresources max_sysreq = 3;  // minimum system specs that the node needs to 've for it sometime.
         optional int32 start_service_time = 4;
