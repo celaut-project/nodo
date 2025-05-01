@@ -94,7 +94,7 @@ def check_rust_installation():
 if __name__ == '__main__':
 
     if not os.path.exists(os.path.join(MAIN_DIR, "storage", ".acceptedkya")):
-        os.system(MAIN_DIR+"/bash/accept_kya.sh")
+        os.system(MAIN_DIR+"/bash/accept_kya.sh "+MAIN_DIR)
 
     os.umask(0o002)
 

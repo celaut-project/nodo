@@ -207,5 +207,7 @@ else
   printf "Error: nodo.service does not exist or cannot be restarted. Please check the service creation process.\n" >&2
 fi
 
+chmod +x bash/accept_kya.sh
+
 printf "Installation and service setup completed successfully. The repository is located at $TARGET_DIR.\n"
 printf "********** You can now use the 'nodo' command. **********\n"
