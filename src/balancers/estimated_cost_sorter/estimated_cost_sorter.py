@@ -74,7 +74,7 @@ def estimated_cost_sorter(
 
         cost: int = gas_cost * (peer_erg_gas / local_erg_gas) if local_erg_gas else 0
 
-        reputation: float = 1 if peer_id == 'local' else (compute_reputation(peer_id=peer_id) / total_reputation) * SOCIALIZATION_FACTOR
+        reputation: float = 1 if peer_id == 'local' else ((compute_reputation(peer_id=peer_id) / total_reputation) if total_reputation else 0 ) * SOCIALIZATION_FACTOR
 
         log(f"Computing estimated cost score for peer {peer_id}: priority {priority}, reputation {reputation}, cost {cost} => score {priority * reputation / cost}\n")
 
