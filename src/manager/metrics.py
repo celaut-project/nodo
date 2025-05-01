@@ -120,10 +120,6 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
 
 
 def get_metrics(token: str) -> gateway_pb2.Metrics:
-    class InvalidTokenException(Exception):
-        def __str__(self):
-            return 'Invalid token, it should be a client_id or a token with ##.'
-
     """
     Retrieve metrics based on the provided token.
 
@@ -144,7 +140,7 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
         return __get_metrics_internal(id=token)
     
     elif '##' not in token:
-        raise InvalidTokenException()
+        raise Exception(f'Invalid token, it should be a client_id or a token with ##.  token: {token}')
 
     else:
         token = sc.get_token_by_hashed_token(hashed_token=token)
