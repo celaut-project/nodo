@@ -25,12 +25,16 @@ class StartServiceIterable(AbstractInputServiceIterable):
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
         if CONFIGURATION_REQUIRED and not self.configuration.config:
             raise Exception("Client or configuration ")
+        
+        service = read_service_from_disk(service_hash=self.service_hash)
+        if not service:
+            raise Exception(f"No service {self.service_hash} on registry")
 
         log.LOGGER(f'Launch service {self.service_hash}')
         yield from bee.serialize_to_buffer(
             indices={},  # Why indices are not set?  Because StartService returns only one element, an instance.
             message_iterator=launch_service(
-                service=read_service_from_disk(service_hash=self.service_hash),
+                service=service,
                 metadata=self.metadata if self.metadata else read_metadata_from_disk(service_hash=self.service_hash),
                 config=self.configuration,
                 service_id=self.service_hash,

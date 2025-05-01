@@ -23,9 +23,6 @@ def launch_service(
         config: Optional[gateway_pb2.Configuration] = None,
         recursion_guard_token: str = None,
 ) -> gateway_pb2.Instance:
-    log.LOGGER('Go to launch a service. ')
-    if service is None:
-        raise Exception("Service object can't be None")
 
     with RecursionGuard(
             token=recursion_guard_token,
