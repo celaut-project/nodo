@@ -251,7 +251,7 @@ class SQLConnection(metaclass=Singleton):
             INSERT INTO local_instances (id, ip, father_id, gas, mem_limit, serialized_instance, service_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (container_id, container_ip, father_id, gas, 0, serialized_instance, service_id))
-        log.LOGGER(f'Saved service {container_id} as dependency of {father_id}')
+        log.LOGGER(f'Saved instance {container_id} as dependency of {father_id}')
 
     def update_sys_req(self, id: str, mem_limit: Optional[int]) -> bool:
         """
