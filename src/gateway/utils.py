@@ -65,6 +65,7 @@ def save_service(
         service_hash: str
 ) -> bool:
     def __save():
+        log.LOGGER('Save service on disk')
         try:
             shutil.move(service_dir, REGISTRY + service_hash)
             return True

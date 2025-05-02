@@ -126,11 +126,10 @@ class AbstractInputServiceIterable:
                 if r.type != gateway_pb2.celaut__pb2.Service:
                     raise Exception('Incorrect service message.')
 
-                log.LOGGER('Save service on disk')
                 # Take it from metadata.
                 if not self.service_hash:
                     # TODO  compute the hash of r.dir.
-                    raise Exception("Not registry hash.")
+                    raise Exception("No service hash to allow service to be stored.")
 
                 self.service_saved = save_service(
                     metadata=self.metadata,
