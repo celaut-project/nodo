@@ -82,18 +82,18 @@ def list_instances(groupable: bool = False, search: str = ""):
             cursor.execute(
                 "SELECT token, token_hash, peer_id, father_id, serialized_instance, service_id FROM delegated_instances"
             )
-            for token, token_hash, peer_id, father_id, si, service in cursor.fetchall():
+            for external_token, token_hash, peer_id, father_id, si, service in cursor.fetchall():
                 parent_type = 'client' if father_id in client_ids else 'unknown'
 
                 try:
-                    metrics = __get_metrics_external(token=token, peer_id=peer_id)
+                    metrics = __get_metrics_external(token=external_token, peer_id=peer_id)
                     gas = ssformat(from_gas_amount(metrics.gas_amount))
                 except:
                     gas = "N/A"
                 
                 instances.append({
-                    'id': token or 'N/A',
-                    'external_token': token_hash,
+                    'id': token_hash or 'N/A',
+                    'external_token': external_token,
                     'service': get_tag(service),
                     'ip': get_http_ip(si) if si else "N/A",
                     'parent_id': father_id or 'N/A',
