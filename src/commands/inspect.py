@@ -12,9 +12,14 @@ REGISTRY = env_manager.get_env("REGISTRY")
 
 def print_rule(title, borders=False):
     width = 60
-    if borders: print(f"\n{'=' * width}")
-    print(f"= {title.center(width - 4)} =")
-    if borders: print(f"{'=' * width}\n")
+    if borders:
+        print(f"\n{'=' * width}")
+        print(f"= {title.center(width - 4)} =")
+        print(f"{'=' * width}\n")
+    else:
+        adjusted_title = f' {title} '
+        line = adjusted_title.center(width, '-')
+        print(line)
 
 
 def inspect(service: str):
