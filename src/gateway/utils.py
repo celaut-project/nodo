@@ -80,4 +80,4 @@ def save_service(
                 except Exception as e:
                     log.LOGGER(f'Exception writing metadata of {service_hash}: ' + str(e))
 
-    return os.path.isdir(REGISTRY + service_hash) or __save()
+    return os.path.exists(os.path.join(METADATA_REGISTRY, service_hash)) or __save()
