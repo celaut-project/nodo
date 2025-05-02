@@ -68,6 +68,7 @@ def list_instances(groupable: bool = False, search: str = ""):
 
                 instances.append({
                     'id': id_ or 'N/A',
+                    'encrypted_token': 'N/A',
                     'service': get_tag(service),
                     'ip': get_http_ip(si) if si else "N/A",
                     'parent_id': father_id or 'None',
@@ -138,6 +139,7 @@ def list_instances(groupable: bool = False, search: str = ""):
         fields = [
             ("ID", "id"),
             ("Service", "service"),
+            ("Encrypted token", "encrypted_token"),
             ("API", "ip"),
             ("Parent ID", "parent_id"),
             ("Parent Type", "parent_type"),
