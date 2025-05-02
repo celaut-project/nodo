@@ -68,7 +68,7 @@ def list_instances(groupable: bool = False, search: str = ""):
 
                 instances.append({
                     'id': id_ or 'N/A',
-                    'encrypted_token': 'N/A',
+                    'external_token': 'N/A',
                     'service': get_tag(service),
                     'ip': get_http_ip(si) if si else "N/A",
                     'parent_id': father_id or 'None',
@@ -93,7 +93,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                 
                 instances.append({
                     'id': token or 'N/A',
-                    'encrypted_token': token_hash,
+                    'external_token': token_hash,
                     'service': get_tag(service),
                     'ip': get_http_ip(si) if si else "N/A",
                     'parent_id': father_id or 'N/A',
@@ -139,7 +139,7 @@ def list_instances(groupable: bool = False, search: str = ""):
         fields = [
             ("ID", "id"),
             ("Service", "service"),
-            ("Encrypted token", "encrypted_token"),
+            ("External token", "external_token"),
             ("API", "ip"),
             ("Parent ID", "parent_id"),
             ("Parent Type", "parent_type"),
