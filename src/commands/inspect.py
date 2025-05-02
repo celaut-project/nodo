@@ -48,12 +48,12 @@ def inspect(service: str):
         print(f"Address : {c.contract_addr}\n")
 
     # Service Definition
-    print_rule("🛠 Service Definition", borders=True)
+    print_rule("📦 Service Definition", borders=True)
     service_obj = read_service_from_disk(service_hash=service)
     print(f"Size:          : {getsize(os.path.join(REGISTRY, service)) / (1024 * 1024)} MB")
     print(f"Prose          : {service_obj.prose}\n")
 
-    print_rule("Service Interface")
+    print_rule("🔌 Service Interface")
     print("(Protobuf):")
     print(service_obj.api)
     print("\n")
