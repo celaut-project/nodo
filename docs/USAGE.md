@@ -172,7 +172,7 @@ These are intended for development or advanced maintenance environments:
 
 ---
 
-## Important Notes on Service Management
+## Daemon execution
 
 ### Automatic Execution via systemd
 
