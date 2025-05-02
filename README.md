@@ -55,3 +55,9 @@ For detailed usage instructions, please refer to the [User Guide](docs/USAGE.md)
 
 Before using **Nodo**, it's essential to understand the assumptions and risks involved. Please review the [Know Your Assumptions (KyA)](docs/KyA.md)
 document to ensure you are fully aware of your responsibilities and the limitations of the software.
+
+
+## About trust between peers
+
+All payments, reputation submissions, and service remunerations are handled decentralized on the Ergo blockchain.
+Check how and why Nodo uses [Ergo](ERGO.md).
