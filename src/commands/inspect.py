@@ -9,21 +9,21 @@ METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 REGISTRY = env_manager.get_env("REGISTRY")
 
 
-def print_rule(title):
+def print_rule(title, borders=False):
     width = 60
-    print(f"\n{'=' * width}")
+    if borders: print(f"\n{'=' * width}")
     print(f"= {title.center(width - 4)} =")
-    print(f"{'=' * width}\n")
+    if borders: print(f"{'=' * width}\n")
 
 
 def inspect(service: str):
     service = get_id(service)
 
     # Metadata
-    print_rule("📄 Metadata")
+    print_rule("📄 Metadata", borders=True)
     metadata = read_metadata_from_disk(service_hash=service)
 
-    # Tabla de hashes
+    # Hash table
     print(f"{'Hash type':<15} | Value")
     print(f"{'-'*15}-+-{'-'*40}")
     for h in metadata.hashtag.hash:
@@ -42,21 +42,24 @@ def inspect(service: str):
         print(f"Address : {c.contract_addr}\n")
 
     # Service Definition
-    print_rule("🛠 Service Definition")
+    print_rule("🛠 Service Definition", borders=True)
     service_obj = read_service_from_disk(service_hash=service)
     print(f"Prose          : {service_obj.prose}\n")
-    print("Service Interface (Protobuf):")
+
+    print_rule("Service Interface")
+    print("(Protobuf):")
     print(service_obj.api)
     print("\n")
 
     # Container Configuration
     print_rule("⚙ Container Configuration")
     print(f"Architecture : {', '.join([tag for tag in service_obj.container.architecture.tags])}")
-    print(f"Descripción  : {service_obj.container.architecture.prose}")
+    print(f"Prose  : {service_obj.container.architecture.prose}")
     print(f"Env Vars     : {service_obj.container.enviroment_variables}")
     print(f"Entrypoint   : {service_obj.container.entrypoint}")
-    print(f"Config File  : {service_obj.container.config}")
-    print(f"Protocols    : {service_obj.container.node_protocol_stack}\n")
+    print(f"Node compatibility")  # how he expects to communicate with the node, if he expects to communicate with it at all.
+    print(f"- Config File  : {service_obj.container.config}")
+    print(f"- Protocols    : {service_obj.container.node_protocol_stack}\n")
 
     # Network Settings
     print_rule("🌐 Network Settings")
@@ -68,5 +71,5 @@ def inspect(service: str):
       "- All of its dependencies will follow the same restrictions.\n")
     for network in service_obj.network:
         print(f"Tags         : {', '.join([tag for tag in network.tags])}")
-        print(f"Descripción  : {service_obj.network.prose}\n")
+        print(f"Prose  : {service_obj.network.prose}\n")
         print("\n")
