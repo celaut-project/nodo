@@ -34,7 +34,7 @@ def delegate_execution(
                 'Current gas: ' + str(gas_amount_on_other_peer(peer_id=peer)) + ', required: ' + str(cost) + '.'
             )
 
-        log.LOGGER('Spent gas, go to launch the service on ' + str(peer))
+        log.LOGGER('Go to launch the service on ' + str(peer))
         service_instance = next(bee.client_grpc(
             method=gateway_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
