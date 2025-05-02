@@ -1,4 +1,5 @@
 import os
+from bee_rpc.utils import getsize
 from src.commands.__by_tag import get_id
 from src.utils.env import SHA3_256_ID, SHAKE_256_ID, EnvManager
 from src.utils.utils import read_metadata_from_disk, read_service_from_disk
@@ -44,6 +45,7 @@ def inspect(service: str):
     # Service Definition
     print_rule("🛠 Service Definition", borders=True)
     service_obj = read_service_from_disk(service_hash=service)
+    print(f"Size:          : {getsize(os.path.join(REGISTRY, service)) / (1024 * 1024)} MB")
     print(f"Prose          : {service_obj.prose}\n")
 
     print_rule("Service Interface")
