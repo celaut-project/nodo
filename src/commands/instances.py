@@ -79,7 +79,7 @@ def list_instances(groupable: bool = False, search: str = ""):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT token, peer_id, father_id, serialized_instance, service_id FROM delegated_instances"
+                "SELECT token, token_hash, peer_id, father_id, serialized_instance, service_id FROM delegated_instances"
             )
             for token, token_hash, peer_id, father_id, si, service in cursor.fetchall():
                 parent_type = 'client' if father_id in client_ids else 'unknown'
