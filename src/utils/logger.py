@@ -1,4 +1,5 @@
-import logging, os, math
+import logging, os
+from decimal import Decimal, getcontext
 
 from src.utils.env import EnvManager
 
@@ -21,41 +22,50 @@ LOGGER = (
 )
 
 
-def ssformat(number):
+def ssformat(number, sig_digits=3):
     """
-    Smart Scientific Format.
-    Formats a number in scientific notation, removing redundant zeros
-    while preserving significant digits.
+    Smart Scientific Format with residual using Decimal.
 
     Args:
-        number: The number (int or float) to format.
+      number: Decimal or str (e.g., "12.0000000...00748")
+      sig_digits: number of significant digits in the main mantissa.
 
     Returns:
-        A string with the number in smart scientific notation (e.g., 9e+4, 9.0002e+4).
-        Returns '0' for the number 0.
+      '1.2e+1 + 7.48e-34' or just '1.20e+1' if there's no residual.
     """
+    # 1) Ensure we're working with Decimal constructed from a string
+    if not isinstance(number, Decimal):
+        number = Decimal(str(number))
     if number == 0:
-        return "0" # Or you could return "0e+0" if you prefer
+        return "0"
 
-    # Handle negative numbers
-    sign = ""
-    if number < 0:
-        sign = "-"
-        number = abs(number)
+    # 2) Set context precision to avoid losing digits in the residual
+    #    Set high precision: all digits + margin
+    total_digits = len(number.as_tuple().digits)
+    getcontext().prec = max(total_digits + 5, sig_digits + 5)
 
-    # Calculate the exponent (base 10)
-    exponent = math.floor(math.log10(number))
+    # 3) Decompose into mantissa and exponent:
+    #    number = mantissa * 10**exponent, with mantissa in [1,10)
+    exp = number.normalize().as_tuple().exponent
+    digits = number.normalize().as_tuple().digits
+    # The true exponent is:
+    exponent = exp + len(digits) - 1
+    # Build the full mantissa as a Decimal
+    mant_full = number.scaleb(-exponent)
 
-    # Calculate the mantissa
-    mantissa = number / (10**exponent)
+    # 4) Round main mantissa to sig_digits
+    mant_main = mant_full.quantize(Decimal(1).scaleb(-(sig_digits-1)))
+    # Format by removing trailing zeros
+    mant_str = format(mant_main.normalize(), 'f').rstrip('0').rstrip('.') 
 
-    # Format the mantissa using 'g' to remove '.0' if it's an integer
-    # and preserve decimals if they exist.
-    mantissa_str = f"{mantissa:g}"
-
-    # Build the final string
-    # We use {exponent:+d} to ensure the sign of the exponent always appears (+4, -3)
-    # If you prefer not to show the '+' for positive exponents, just use {exponent}
-    result = f"{sign}{mantissa_str}e{exponent:+d}"
-
-    return result
+    # 5) Calculate residual
+    residual = number - mant_main * (Decimal(10) ** exponent)
+    if residual == 0:
+        return f"{mant_str}e{exponent:+d}"
+    else:
+        # Exponent and mantissa of the residual
+        r_norm = residual.normalize()
+        r_exp = r_norm.as_tuple().exponent + len(r_norm.as_tuple().digits) - 1
+        r_mant = r_norm.scaleb(-r_exp)
+        r_str = format(r_mant.normalize(), 'f').rstrip('0').rstrip('.')
+        return f"{mant_str}e{exponent:+d} + {r_str}e{r_exp:+d}"
