@@ -51,7 +51,7 @@ def list_peers():
         for peer in peers:
             (
                 peer_id, protocol_stack, client_id,
-                gas, gas_last_update,
+                gas_str, gas_last_update,
                 reputation_proof_id, reputation_score,
                 reputation_index, last_index_on_ledger
             ) = peer
@@ -63,7 +63,7 @@ def list_peers():
             else:
                 protocol_stack_tags = "N/A"
 
-            gas = float(gas)
+            gas = float(gas_str)
             gas_price = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_id=ERGO_LEDGER)
             gas_on_ergs = (gas/gas_price - pow(10, 9)) if gas_price else 0  # 10^9 it's from erg -> nanoerg.
 
@@ -78,8 +78,9 @@ def list_peers():
             print(f"  Client ID: {client_id}")
             print(f"  Gas/ERG: {ssformat(gas_price)}")
             print(f"  Gas: {ssformat(gas)}")
-            print(gas)
+            print(gas_str)
             print(f"       {ssformat(gas_on_ergs)} ERG")
+            print(f"")
             print(f"  Gas Last Update: {gas_last_update or 'None'}")
             print()
 
