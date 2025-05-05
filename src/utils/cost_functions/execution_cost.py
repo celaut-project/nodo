@@ -230,7 +230,9 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         return 0.0 # Return 0.0 on error as per original logic
 
 def is_free_gas(system_resources: celaut.Sysresources) -> bool:
-     #  Check that  Over the execution cost, so if FREE_GAS_THRESHOLD >= EXECUTION_COST gas will be always free!
+    # Check that  Over the execution cost, so if FREE_GAS_THRESHOLD >= EXECUTION_COST gas will be always free!
+
+    # It should be considered that the initial amount of gas is also added free of charge, meaning it is not deducted from the customer.
 
     # Get the weighted available supply score (0.0 to 1.0)
     available_supply = __get_available_supply(system_resources)
