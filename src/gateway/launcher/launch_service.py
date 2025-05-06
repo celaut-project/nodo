@@ -42,7 +42,7 @@ def launch_service(
                 service_id=service_id,
                 metadata=metadata,
                 ignore_network=utils.get_network_name(direction=father_ip),
-                config=config,
+                configuration=config,
                 recursion_guard_token=recursion_guard_token
         ):
             try:
