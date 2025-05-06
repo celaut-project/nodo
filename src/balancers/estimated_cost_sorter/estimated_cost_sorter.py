@@ -41,7 +41,7 @@ def estimated_cost_sorter(
             MAINTENANCE_COST_CONFIGURATION_FACTOR * int(
                 mean([
                     
-                    # Minimum maintenance cost
+                    # Initial maintenance cost
                     vcnorm(
                         cost=nmc(
                             cost=from_gas_amount(estimated_cost.min_maintenance_cost),
