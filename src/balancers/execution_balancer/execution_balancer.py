@@ -46,7 +46,7 @@ def execution_balancer(
         service_id: str,
         metadata: celaut.Metadata,
         ignore_network: str = None,
-        config: Optional[gateway_pb2.Configuration]=None,
+        configuration: Optional[gateway_pb2.Configuration]=None,
         recursion_guard_token: str = None,
 ) -> Generator[tuple[str, gateway_pb2.EstimatedCost], None, None]:
     
@@ -67,7 +67,7 @@ def execution_balancer(
     try:
         peers['local'] = generate_estimated_cost(
                 metadata=metadata,
-                config=config
+                config=configuration
             )
     except build.UnsupportedArchitectureException as e:
         log.LOGGER(e.__str__())
@@ -92,7 +92,7 @@ def execution_balancer(
                         partitions_message_mode_parser=True,
                         indices_serializer=StartService_input_indices,
                         input=service_extended(
-                            config=config,
+                            config=configuration,
                             metadata=metadata,
                             send_only_hashes=SEND_ONLY_HASHES_ASKING_COST,
                             client_id=get_client_id_on_other_peer(peer_id=peer_id),
@@ -109,7 +109,7 @@ def execution_balancer(
         log.LOGGER(f"Collected costs of execution {__pretty_format_peers(peers)}")
         return estimated_cost_sorter(
                 estimated_costs=peers,
-                weight_clauses={_id: clause.cost_weight for _id, clause in config.resources.clause.items()}
+                weight_clauses={_id: clause.cost_weight for _id, clause in configuration.resources.clause.items()}
             )
     except Exception as e:
         log.LOGGER('Error during estimated cost sorter on execution balancer:' + str(e))
