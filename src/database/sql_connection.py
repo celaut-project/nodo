@@ -748,7 +748,7 @@ class SQLConnection(metaclass=Singleton):
                 gas_price_str = row['gas_price']
                 try:
                     # Convert the string gas_price to an integer
-                    gas_price = int(float(gas_price_str))
+                    gas_price = int(gas_price_str)
                     return gas_price
                 except (ValueError, TypeError) as ve:
                     logger.LOGGER(f'Error converting stored gas_price "{gas_price_str}" to int for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_id}. Error: {ve}')

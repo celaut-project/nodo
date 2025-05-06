@@ -58,11 +58,11 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'client' if father_id in client_ids else
                     'unknown'
                 )
-                gas = float(gas)
+                gas = int(gas)
                 gas_value = 'N/A'
                 if gas is not None:
                    try:
-                       gas_value = ssformat(float(gas))
+                       gas_value = ssformat(int(gas))
                    except (ValueError, TypeError):
                        gas_value = "Invalid Gas Data"
 
