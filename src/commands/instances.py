@@ -1,6 +1,6 @@
 import sqlite3
 import os
-from src.manager.metrics import __get_metrics_external, get_metrics
+from src.manager.metrics import __get_metrics_external
 from src.utils.env import EnvManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
