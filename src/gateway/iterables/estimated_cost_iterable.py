@@ -35,13 +35,13 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                     self.configuration = gateway_pb2.Configuration(config=gateway_pb2.celaut__pb2.Configuration())
 
                 if not self.configuration.HasField('initial_gas_amount') or not self.configuration.initial_gas_amount:
-                    self.configuration.initial_gas_amount = to_gas_amount(default_initial_cost(
+                    self.configuration.initial_gas_amount.CopyFrom(to_gas_amount(default_initial_cost(
                         father_id=self.client_id if self.client_id
                             else get_only_the_ip_from_context(context_peer=self.context.peer())
-                        ))
+                        )))
                     
                 if not self.configuration.HasField('resources') or not self.configuration.resources:
-                    self.configuration.resources = default_initial_combinational_resources()
+                    self.configuration.resources.CopyFrom(default_initial_combinational_resources())
 
                 yield from bee.serialize_to_buffer(
                     message_iterator=generate_estimated_cost(
