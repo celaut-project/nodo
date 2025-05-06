@@ -25,7 +25,7 @@ def configuration_balancer(
 
     # TODO PARTE DE LOS CALCULOS INTERNOS DEL COMPUTO DE COSTES SON LOS MISMOS (EL COSTE DE CONSTRUCCIÓN DEL SERVICIO, ETC ...)
     for _i, clause in clauses.items():
-        if not could_ve_this_sysreq(clause.max_sysreq):
+        if clause.max_sysreq and not could_ve_this_sysreq(clause.max_sysreq):
             continue
 
         if is_free_gas(system_resources=clause.min_sysreq):
