@@ -78,8 +78,6 @@ def list_peers():
             print(f"  Client ID: {client_id}")
             print(f"  Gas/ERG: {ssformat(gas_price)}")
             print(f"  Gas: {ssformat(gas)}")
-            print(gas_str)
-            print(int(gas_str))
             print(f"       {ssformat(gas_on_ergs)} nanoERG")
             print(f"  Gas Last Update: {gas_last_update or 'None'}")
             print()
