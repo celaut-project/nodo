@@ -63,7 +63,7 @@ def list_peers():
             else:
                 protocol_stack_tags = "N/A"
 
-            gas = float(gas_str)
+            gas = int(gas_str)
             gas_price = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_id=ERGO_LEDGER)
             gas_on_ergs = (gas/gas_price) if gas_price else 0
 
@@ -79,7 +79,7 @@ def list_peers():
             print(f"  Gas/ERG: {ssformat(gas_price)}")
             print(f"  Gas: {ssformat(gas)}")
             print(gas_str)
-            print(float(gas_str))
+            print(int(gas_str))
             print(f"       {ssformat(gas_on_ergs)} nanoERG")
             print(f"  Gas Last Update: {gas_last_update or 'None'}")
             print()
