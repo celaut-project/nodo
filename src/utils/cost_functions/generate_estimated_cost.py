@@ -1,4 +1,4 @@
-from typing import Optional, Callable
+from typing import Optional
 
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.balancers.configuration_balancer.configuration_balancer import configuration_balancer
