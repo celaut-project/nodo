@@ -53,7 +53,7 @@ def execution_balancer(
     peers: Dict[str, gateway_pb2.EstimatedCost] = {}
 
     initial_gas_amount: int = from_gas_amount(config.initial_gas_amount) \
-        if config and config.config.HasField("initial_gas_amount") else default_initial_cost()
+        if config and config.HasField("initial_gas_amount") else default_initial_cost()
     
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
 
