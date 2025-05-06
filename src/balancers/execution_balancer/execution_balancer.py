@@ -56,10 +56,10 @@ def execution_balancer(
     if not configuration:
         configuration = gateway_pb2.Configuration(config=gateway_pb2.celaut__pb2.Configuration())
 
-    if not configuration.HasField('initial_gas_amount') or not self.configuration.initial_gas_amount:
+    if not configuration.HasField('initial_gas_amount') or not configuration.initial_gas_amount:
         configuration.initial_gas_amount = to_gas_amount(default_initial_cost())
         
-    if not configuration.HasField('resources') or not self.configuration.resources:
+    if not configuration.HasField('resources') or not configuration.resources:
         configuration.resources = default_initial_combinational_resources()
     
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
