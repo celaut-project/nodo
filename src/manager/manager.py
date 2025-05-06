@@ -355,7 +355,7 @@ def container_modify_system_params(
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
 
-    system_requeriments = system_requeriments_range.max_sysreq  # TODO implement the use of min_sysreq, in case there are no sufficient max_sysreq, could be lower siempre y cuando no se reduzca por debajo del umbral minimo
+    system_requeriments = system_requeriments_range.max_sysreq # TODO: Implement the use of min_sysreq in case there are not enough max_sysreq, it can be lower as long as it does not go below the minimum threshold
     if not system_requeriments: return False
 
     # TODO Docker has a minimum of 6Mb of mem limit. It should be parametrize on .env and controlled here.
