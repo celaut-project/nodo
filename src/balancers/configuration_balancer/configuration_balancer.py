@@ -21,10 +21,13 @@ def configuration_balancer(
         metadata: celaut.Metadata,
         initial_gas_amount: int
 ) -> Tuple[str, gateway_pb2.EstimatedCost]:
+    
     posible_clauses: Dict[str, gateway_pb2.EstimatedCost] = {}
 
     # TODO PARTE DE LOS CALCULOS INTERNOS DEL COMPUTO DE COSTES SON LOS MISMOS (EL COSTE DE CONSTRUCCIÓN DEL SERVICIO, ETC ...)
+
     for _i, clause in clauses.items():
+
         if clause.max_sysreq and not could_ve_this_sysreq(clause.max_sysreq):
             continue
 

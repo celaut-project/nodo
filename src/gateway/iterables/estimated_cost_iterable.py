@@ -6,10 +6,10 @@ from protos import gateway_pb2
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.virtualizers.docker import build
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
-from src.manager.manager import default_initial_cost
+from src.manager.manager import default_initial_combinational_resources, default_initial_cost
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.logger import LOGGER as logger
-from src.utils.utils import from_gas_amount, get_only_the_ip_from_context
+from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount
 
 
 class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
@@ -30,17 +30,22 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 generate=True
         ) as recursion_guard_token:
             try:
-                initial_gas_amount: int = from_gas_amount(self.configuration.initial_gas_amount) \
-                    if self.configuration.HasField('initial_gas_amount') \
-                    else default_initial_cost(
+
+                if not self.configuration:
+                    self.configuration = gateway_pb2.Configuration(config=gateway_pb2.celaut__pb2.Configuration())
+
+                if not self.configuration.HasField('initial_gas_amount') or not self.configuration.initial_gas_amount:
+                    self.configuration.initial_gas_amount = to_gas_amount(default_initial_cost(
                         father_id=self.client_id if self.client_id
                             else get_only_the_ip_from_context(context_peer=self.context.peer())
-                        )
+                        ))
+                    
+                if not self.configuration.HasField('resources') or not self.configuration.resources:
+                    self.configuration.resources = default_initial_combinational_resources()
 
                 yield from bee.serialize_to_buffer(
                     message_iterator=generate_estimated_cost(
                         metadata=self.metadata,
-                        initial_gas_amount=initial_gas_amount,
                         config=self.configuration
                     ),
                     indices=gateway_pb2.EstimatedCost
