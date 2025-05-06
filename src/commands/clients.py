@@ -48,7 +48,8 @@ def list_clients():
             # Section: Gas & Usage
             print("[Gas & Usage]")
             print(f"  Gas: {ssformat(float(gas))}")
-            print(gas)
+            print((gas))
+            print(float(gas))
             print(f"  Last Usage: {last_usage if last_usage is not None else 'None'}")
             print()
 
