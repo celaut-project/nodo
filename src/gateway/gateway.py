@@ -140,9 +140,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             raise Exception('Exception on service modify method.')
 
         yield from bee.serialize_to_buffer(
-                message_iterator=get_sysresources(
-                    id=token
-                )
+                message_iterator=get_sysresources(id=token)
         )
 
     def Pack(self, request_iterator, context, **kwargs):
