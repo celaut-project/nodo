@@ -50,7 +50,7 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 service_id=self.service_hash,
                 service=service,
                 metadata=metadata,
-                config=self.configuration,
+                configuration=self.configuration,
                 father_ip=get_only_the_ip_from_context(context_peer=self.context.peer()),
                 father_id=self.client_id,  # Only client, not set the internal_service_id because depends of the recursion guard.
                 recursion_guard_token=self.recursion_guard_token
