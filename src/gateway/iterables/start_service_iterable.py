@@ -58,7 +58,6 @@ class StartServiceIterable(AbstractInputServiceIterable):
         )
 
     def final(self):
-        log.LOGGER(f"Final of tart service iterable.")  # TODO aux log.
         if not self.service_saved:
             log.LOGGER(
                 f"\n"
