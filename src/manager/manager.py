@@ -406,7 +406,6 @@ def container_modify_system_params(
 
 def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
     return IOBigData().prevent_kill(len=sysreq.mem_limit)  # Prevent kill says that is not actually possible.
-    # TODO It's not possible local, but other pair can, returns True.
 
 
 def get_sysresources(id: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
