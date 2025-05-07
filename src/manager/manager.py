@@ -196,7 +196,7 @@ def spend_gas(
                 log.LOGGER(f"Insufficient gas for client '{id}': {sci_not} available, needed {log.ssformat(gas_to_spend)}.")
                 return False
 
-            if debug_mode: log.LOGGER(f"Reduce {ssformat(gas_to_spend)} gas for the client {id}")
+            if debug_mode: log.LOGGER(f"Reduce {log.ssformat(gas_to_spend)} gas for the client {id}")
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
 
             __refund_gas_function_factory(
