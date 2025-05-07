@@ -193,10 +193,10 @@ def spend_gas(
             actual_gas = int(actual_gas)
 
             if actual_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
-                log.LOGGER(f"Insufficient gas for client '{id}': {sci_not} available, needed {gas_to_spend:e}.")
+                log.LOGGER(f"Insufficient gas for client '{id}': {sci_not} available, needed {log.ssformat(gas_to_spend)}.")
                 return False
 
-            if debug_mode: log.LOGGER(f"Reduce {gas_to_spend:e} gas for the client {id}")
+            if debug_mode: log.LOGGER(f"Reduce {ssformat(gas_to_spend)} gas for the client {id}")
             sc.reduce_gas(client_id=id, gas=gas_to_spend)
 
             __refund_gas_function_factory(
@@ -223,7 +223,7 @@ def spend_gas(
 
             current_gas = sc.get_container_gas(id=id)
             if current_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
-                log.LOGGER(f"Insufficient gas for container '{id}': {current_gas} available, needed {gas_to_spend}.")
+                log.LOGGER(f"Insufficient gas for container '{id}': {log.ssformat(current_gas)} available, needed {log.ssformat(gas_to_spend)}.")
                 return False
 
             updated_gas = current_gas - gas_to_spend
