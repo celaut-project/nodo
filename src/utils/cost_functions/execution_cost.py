@@ -164,7 +164,7 @@ def __get_available_supply(system_resources: celaut.Sysresources) -> float:
         if not resources_with_demand:
             # No specific positive demands provided. Fall back to equal default weights.
             logger("No positive resource limits specified by instance. Using default equal weights.")
-            logger(system_resources)
+            logger(f"{system_resources}")
             weights = DEFAULT_WEIGHTS
             # Check availability for all default resources in this case.
             resources_to_check = DEFAULT_RESOURCES
