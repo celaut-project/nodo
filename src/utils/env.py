@@ -197,10 +197,10 @@ env_manager.get_env("SOCIALIZATION_FACTOR", 2)
 
 env_manager.get_env("COST_AVERAGE_VARIATION", 1)
 
-env_manager.get_env("FREE_GAS_THRESHOLD", 30)  # Over the execution cost, so if FREE_GAS_THRESHOLD >= EXECUTION_COST gas will be always free!
+env_manager.get_env("FREE_GAS_THRESHOLD", 0)  # Over the execution cost, so if FREE_GAS_THRESHOLD >= EXECUTION_COST gas will be always free!
 env_manager.get_env("EXECUTION_COST", pow(10, 2))  # Based on a maximum usage of resources.
 env_manager.get_env("EXECUTION_BENEFIT", pow(10, 2))  # Constant to add benefit
-env_manager.get_env("BUILD_COST", pow(10, 5))  # Constant if container build is needed.
+env_manager.get_env("BUILD_COST", pow(10, 3))  # Constant if container build is needed.
 env_manager.get_env("MODIFY_RESOURCES_COST", pow(10, 2))  # Constant for modify instance configuration request.
 
 env_manager.get_env("ALLOW_GAS_DEBT", False)
