@@ -365,18 +365,21 @@ def container_modify_system_params(
     # Set system requeriments parameters.
 
     system_requeriments = system_requeriments_range.max_sysreq # TODO: Implement the use of min_sysreq in case there are not enough max_sysreq, it can be lower as long as it does not go below the minimum threshold
-    if not system_requeriments: return False
+    if not system_requeriments: 
+        log.LOGGER(f"No system requeriments for {_id}")
+        return False
 
     # TODO Docker has a minimum of 6Mb of mem limit. It should be parametrize on .env and controlled here.
     if __modify_sysreq(
             id=id,
             sys_req=system_requeriments
     ):
+        log.LOGGER(f"Modified io manager {_id}")  # TODO aux log
         try:
             # Memory limit should be smaller than already set memoryswap limit, update the memoryswap at the same time
-            __get_container_by_id(
-                id=id
-            ).update(
+            container = __get_container_by_id(id=id)
+            log.LOGGER("Get docker container obj")  # TODO aux log
+            container.update(
                 mem_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR == 0 \
                     else system_requeriments.mem_limit - MEMSWAP_FACTOR * system_requeriments.mem_limit,
                 memswap_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR > 0 else -1
