@@ -377,7 +377,10 @@ def container_modify_system_params(
         log.LOGGER(f"No system requeriments for {_id}")
         return False
 
-    # TODO Docker has a minimum of 6Mb of mem limit. It should be parametrize on .env and controlled here.
+    # Docker has a minimum of 6Mb of mem limit.
+    if system_requeriments.mem_limit < 6*10**6:
+        system_requeriments.mem_limit = 6*10**6
+        
     if __modify_sysreq(
             id=id,
             sys_req=system_requeriments

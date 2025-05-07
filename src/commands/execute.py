@@ -95,7 +95,7 @@ def execute(service: str):
         input=generator(
             _hash=service,
             initial_gas_amount=10**16,
-            mem_limit=50*10**4
+            mem_limit=10**7
         ),
         indices_parser=gateway_pb2.Instance,
         partitions_message_mode_parser=True,
