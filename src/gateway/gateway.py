@@ -23,6 +23,9 @@ MODIFY_RESOURCES_COST = env_manager.get_env("MODIFY_RESOURCES_COST")
 
 class Gateway(gateway_pb2_grpc.Gateway):
 
+    def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
+        yield from GetServiceEstimatedCostIterable(request_iterator, context)
+
     def StartService(self, request_iterator, context, **kwargs):
         yield from StartServiceIterable(request_iterator, context)
 
@@ -153,9 +156,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
         if _d.type != bytes:
             raise Exception("Incorrect input on Pack grpc method. Should be bytes")
         yield from pack_zip(zip=_d.dir)
-
-    def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
-        yield from GetServiceEstimatedCostIterable(request_iterator, context)
 
     def GetService(self, request_iterator, context, **kwargs):
         yield from GetServiceIterable(request_iterator, context)
