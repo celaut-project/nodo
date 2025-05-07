@@ -92,7 +92,11 @@ def execute(service: str):
     print(f"Execute {service}")
     service = next(client_grpc(
         method=g_stub.StartService,
-        input=generator(_hash=service),
+        input=generator(
+            _hash=service,
+            initial_gas_amount=10**16,
+            mem_limit=50*10**4
+        ),
         indices_parser=gateway_pb2.Instance,
         partitions_message_mode_parser=True,
         indices_serializer=gateway_pb2_bee.StartService_input_indices
