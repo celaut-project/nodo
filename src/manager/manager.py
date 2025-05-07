@@ -116,12 +116,15 @@ def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
         return False
     if sys_req.HasField('mem_limit'):
         variation = sc.get_sys_req(id=id)['mem_limit'] - sys_req.mem_limit
+        log.LOGGER(f"Variation of {variation}") # TODO aux log
         if variation < 0:
             IOBigData().lock_ram(ram_amount=abs(variation))
         elif variation > 0:
             IOBigData().unlock_ram(ram_amount=variation)
         if variation != 0:
             sc.update_sys_req(id=id, mem_limit=sys_req.mem_limit)
+
+    log.LOGGER("modifie sys req done ") # TODO aux log
     return True
 
 
