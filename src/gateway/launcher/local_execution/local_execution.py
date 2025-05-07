@@ -129,16 +129,20 @@ def local_execution(
             uri_slot=[uri_slot]
         )
     
-    log.LOGGER(f'Thrown out a new instance by {father_id} of the container_id {container.id}')
-    return gateway_pb2.Instance(
-        token=add_container(
+    log.LOGGER(f"Add container with initial system resources {initial_system_resources}")
+
+    token = add_container(
             service_id=service_id,
             father_id=father_id,
             container=container,
             initial_gas_amount=initial_gas_amount,
             serialized_instance=instance.SerializeToString(),
             system_requirements_range=gateway_pb2.ModifyServiceSystemResourcesInput(
-                min_sysreq=initial_system_resources, max_sysreq=initial_system_resources)  # TODO ??
-            ),
+                min_sysreq=initial_system_resources, max_sysreq=initial_system_resources)
+            )
+    
+    log.LOGGER(f'Thrown out a new instance by {father_id} of the container_id {container.id}')
+    return gateway_pb2.Instance(
+        token=token,
         instance=instance
     )
