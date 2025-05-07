@@ -241,8 +241,9 @@ def is_free_gas(system_resources: celaut.Sysresources) -> bool:
     lack_of_supply = 1.0 - available_supply
 
     norm_lack_of_supply = lack_of_supply * EXECUTION_COST
-    is_free = norm_lack_of_supply < FREE_GAS_THRESHOLD
-    logger(f"Free gas for this resources: {is_free}; because available: {available_supply*100}%")
+    if FREE_GAS_THRESHOLD:
+        is_free = norm_lack_of_supply < FREE_GAS_THRESHOLD
+        logger(f"Free gas for this resources: {is_free}; because available: {available_supply*100}%")
     return is_free
 
 def maintain_execution_cost(system_resources: celaut.Sysresources) -> int:
