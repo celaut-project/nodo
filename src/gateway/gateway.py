@@ -25,7 +25,6 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def StartService(self, request_iterator, context, **kwargs):
         yield from StartServiceIterable(request_iterator, context)
-        log.LOGGER(f"End of start service")  # TODO aux log.
 
     def StopService(self, request_iterator, context, **kwargs):
         try:

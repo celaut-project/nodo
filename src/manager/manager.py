@@ -129,7 +129,6 @@ def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
         if variation != 0:
             sc.update_sys_req(id=id, mem_limit=sys_req.mem_limit)
 
-    log.LOGGER("modifie sys req done ") # TODO aux log
     return True
 
 
@@ -380,16 +379,14 @@ def container_modify_system_params(
     # Docker has a minimum of 6Mb of mem limit.
     if system_requeriments.mem_limit < 6*10**6:
         system_requeriments.mem_limit = 6*10**6
-        
+
     if __modify_sysreq(
             id=id,
             sys_req=system_requeriments
     ):
-        log.LOGGER(f"Modified io manager {_id}")  # TODO aux log
         try:
             # Memory limit should be smaller than already set memoryswap limit, update the memoryswap at the same time
             container = __get_container_by_id(id=id)
-            log.LOGGER("Get docker container obj")  # TODO aux log
             container.update(
                 mem_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR == 0 \
                     else system_requeriments.mem_limit - MEMSWAP_FACTOR * system_requeriments.mem_limit,
