@@ -4,10 +4,10 @@ from protos import celaut_pb2 as celaut, gateway_pb2
 from src.balancers.execution_balancer.execution_balancer import execution_balancer
 from src.gateway.launcher.delegate_execution.delegate_execution import delegate_execution
 from src.gateway.launcher.local_execution.local_execution import local_execution
-from src.manager.manager import spend_gas
+from src.manager.manager import default_initial_combinational_resources, default_initial_cost, spend_gas
 from src.utils import utils, logger as log
 from src.utils.tools.recursion_guard import RecursionGuard
-from src.utils.utils import from_gas_amount
+from src.utils.utils import from_gas_amount, to_gas_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.docker.firewall import Protocol, allow_connection
 
@@ -20,7 +20,7 @@ def launch_service(
         father_ip: str,
         father_id: Optional[str] = None,
         service_id: str = None,
-        config: Optional[gateway_pb2.Configuration] = None,
+        configuration: Optional[gateway_pb2.Configuration] = None,
         recursion_guard_token: str = None,
 ) -> gateway_pb2.Instance:
 
@@ -29,6 +29,7 @@ def launch_service(
             generate=bool(father_id)  # Use only if is from outside.
     ) as recursion_guard_token:
 
+        # Check father id.
         if not father_id:
             father_id = sc.get_local_instance_id_by_uri(father_ip)
             if not father_id:
@@ -38,11 +39,21 @@ def launch_service(
         else:
             log.LOGGER(f"Service launch request made by the client {father_id}.")
 
+        # Check configuration
+        if not configuration:
+            configuration = gateway_pb2.Configuration(config=gateway_pb2.celaut__pb2.Configuration())
+
+        if not configuration.HasField('initial_gas_amount') or not configuration.initial_gas_amount:
+            configuration.initial_gas_amount.CopyFrom(to_gas_amount(default_initial_cost()))
+            
+        if not configuration.HasField('resources') or not configuration.resources:
+            configuration.resources.CopyFrom(default_initial_combinational_resources())
+
         for peer, estimated_cost in execution_balancer(
                 service_id=service_id,
                 metadata=metadata,
                 ignore_network=utils.get_network_name(direction=father_ip),
-                configuration=config,
+                configuration=configuration,
                 recursion_guard_token=recursion_guard_token
         ):
             try:
@@ -65,14 +76,20 @@ def launch_service(
                         father_id=father_id,
                         cost=from_gas_amount(estimated_cost.cost), 
                         metadata=metadata, 
-                        config=config,
+                        config=configuration,
                         recursion_guard_token=recursion_guard_token,
                         refund_gas=refund_gas
                     )
 
                 else:
+                    if estimated_cost.comb_resource_selected not in configuration.resources.clause:
+                        raise Exception("Resource configuration clauses are misconfigured.")
+                    
+                    resources_clause: gateway_pb2.CombinationResources.Clause = configuration.resources.clause[estimated_cost.comb_resource_selected]
+
                     instance = local_execution(
-                        config=config, resources=config.resources.clause[estimated_cost.comb_resource_selected],
+                        config=configuration,
+                        resources=resources_clause,
                         father_id=father_id, father_ip=father_ip,
                         metadata=metadata, service=service, service_id=service_id,
                         refund_gas=refund_gas
