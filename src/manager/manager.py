@@ -358,7 +358,8 @@ def container_modify_system_params(
         id: str,
         system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput
 ) -> bool:
-    log.LOGGER(f'Modify params of {id} with {system_requeriments_range}')
+    _id = id[:6]
+    log.LOGGER(f'Modify params of {_id} with {system_requeriments_range}')
 
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
@@ -381,9 +382,11 @@ def container_modify_system_params(
                 memswap_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR > 0 else -1
             )
         except Exception as e:
-            log.LOGGER(f"Docker container for {id} fail with e: {str(e)}")
+            log.LOGGER(f"Docker container for {_id} fail with e: {str(e)}")
             # TODO reset modified system req.  Maybe the __get_container_by_id should be inside of __modify_sysreq.
             return False
+        
+        log.LOGGER(f"System params modified correctly for {_id}.")
         return True
 
     log.LOGGER(f"System req could not be modified for {id}: mem limit {system_requeriments.mem_limit}")
