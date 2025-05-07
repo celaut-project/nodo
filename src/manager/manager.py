@@ -114,13 +114,18 @@ def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
     if not sc.internal_instance_exists(id=id):
         log.LOGGER(f'Manager error: container {id} does not exists.')
         return False
+    
     if sys_req.HasField('mem_limit'):
-        variation = sc.get_sys_req(id=id)['mem_limit'] - sys_req.mem_limit
-        log.LOGGER(f"Variation of {variation}") # TODO aux log
-        if variation < 0:
+        current_mem_limit = sc.get_sys_req(id=id)['mem_limit']
+        variation = sys_req.mem_limit - current_mem_limit
+        log.LOGGER(f"Modify memory with variation of {variation}: {current_mem_limit} -> {sys_req.mem_limit}")
+        
+        if variation > 0:
             IOBigData().lock_ram(ram_amount=abs(variation))
-        elif variation > 0:
+
+        elif variation < 0:
             IOBigData().unlock_ram(ram_amount=variation)
+
         if variation != 0:
             sc.update_sys_req(id=id, mem_limit=sys_req.mem_limit)
 
@@ -362,7 +367,7 @@ def container_modify_system_params(
         system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput
 ) -> bool:
     _id = id[:6]
-    log.LOGGER(f'Modify params of {_id} with {system_requeriments_range}')
+    log.LOGGER(f'Modify params of {_id}')
 
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
