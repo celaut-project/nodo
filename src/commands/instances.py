@@ -46,13 +46,26 @@ def list_instances(groupable: bool = False, search: str = ""):
                 return service_id
             except Exception:
                 return f"{service_id} (Metadata Error)"
+            
+        def bytes_to_readable(bytes_value):
+            # Define units and their thresholds (using 1024-based units)
+            units = [(1024**3, "GB"), (1024**2, "MB"), (1024, "KB"), (1, "bytes")]
+            
+            # Find the appropriate unit
+            for threshold, unit in units:
+                if bytes_value >= threshold:
+                    value = bytes_value / threshold
+                    # Return formatted string (2 decimal places unless it's bytes)
+                    return f"{value:.2f} {unit}" if unit != "bytes" else f"{int(value)} {unit}"
+            
+            return "0 bytes"  # Fallback for zero bytes
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT id, father_id, gas, serialized_instance, service_id FROM local_instances"
+                "SELECT id, father_id, gas, serialized_instance, service_id, mem_limit FROM local_instances"
             )
-            for id_, father_id, gas, si, service in cursor.fetchall():
+            for id_, father_id, gas, si, service, mem_limit in cursor.fetchall():
                 parent_type = (
                     'internal_service' if father_id in internal_ids else
                     'client' if father_id in client_ids else
@@ -74,7 +87,8 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
                     'gas': gas_value,
-                    'location': 'local'
+                    'location': 'local',
+                    'mem_limit': bytes_to_readable(mem_limit)
                 })
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
@@ -99,7 +113,8 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'parent_id': father_id or 'N/A',
                     'parent_type': parent_type,
                     'gas': gas,
-                    'location': peer_id or 'Unknown Peer'
+                    'location': peer_id or 'Unknown Peer',
+                    'mem_limit': 'N/A'
                 })
 
     except sqlite3.Error as e:
@@ -145,6 +160,7 @@ def list_instances(groupable: bool = False, search: str = ""):
             ("Parent Type", "parent_type"),
             ("Gas", "gas"),
             ("Location", "location"),
+            ("Memory limit", "mem_limit")
         ]
         output_lines = []
         for label, key in fields:
