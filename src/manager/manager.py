@@ -356,9 +356,9 @@ def add_container(
 
 def container_modify_system_params(
         id: str,
-        system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
+        system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput
 ) -> bool:
-    log.LOGGER(f'Modify params of {id}.')
+    log.LOGGER(f'Modify params of {id} with {system_requeriments_range}')
 
     # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
     # Set system requeriments parameters.
