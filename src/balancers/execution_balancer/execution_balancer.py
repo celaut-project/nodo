@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Generator
+from typing import Dict, Generator
 
 import grpc
 from bee_rpc import client as bee
@@ -8,11 +8,11 @@ from protos import gateway_pb2, gateway_pb2_grpc
 from protos.gateway_pb2_bee import StartService_input_indices
 from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
 from src.virtualizers.docker import build
-from src.manager.manager import default_initial_combinational_resources, default_initial_cost, get_client_id_on_other_peer
+from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
-from src.utils.utils import from_gas_amount, service_extended, peers_id_iterator, \
-    generate_uris_by_peer_id, to_gas_amount
+from src.utils.utils import service_extended, peers_id_iterator, \
+    generate_uris_by_peer_id
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
@@ -45,22 +45,13 @@ def __pretty_format_peers(peers: dict[str, gateway_pb2.EstimatedCost]) -> str:
 def execution_balancer(
         service_id: str,
         metadata: celaut.Metadata,
+        configuration: gateway_pb2.Configuration,
         ignore_network: str = None,
-        configuration: Optional[gateway_pb2.Configuration]=None,
         recursion_guard_token: str = None,
 ) -> Generator[tuple[str, gateway_pb2.EstimatedCost], None, None]:
     
     # sorted by cost, tuple of celaut.Instances or 'local' , cost and clause of combination resources selected
     peers: Dict[str, gateway_pb2.EstimatedCost] = {}
-    
-    if not configuration:
-        configuration = gateway_pb2.Configuration(config=gateway_pb2.celaut__pb2.Configuration())
-
-    if not configuration.HasField('initial_gas_amount') or not configuration.initial_gas_amount:
-        configuration.initial_gas_amount.CopyFrom(to_gas_amount(default_initial_cost()))
-        
-    if not configuration.HasField('resources') or not configuration.resources:
-        configuration.resources.CopyFrom(default_initial_combinational_resources())
     
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
 
