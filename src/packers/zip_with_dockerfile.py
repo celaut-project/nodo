@@ -215,7 +215,11 @@ class ZipContainerPacker:
             
     def parseNetwork(self):
         if self.json.get('network'):
-            self.service.network.tags.extend([self.json.get("network")])
+            for json_network in self.json.get("network", []):
+                network = celaut.Service.Network()
+                network.tags.extends(json_network['tags'])
+                network.prose = json_network['prose']
+                self.service.network.append(network)
             
             
     def save(self) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
