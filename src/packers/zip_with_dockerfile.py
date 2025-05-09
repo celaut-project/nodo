@@ -217,7 +217,7 @@ class ZipContainerPacker:
         if self.json.get('network'):
             for json_network in self.json.get("network", []):
                 network = celaut.Service.Network()
-                network.tags.extends(json_network['tags'])
+                network.tags.extend(json_network['tags'])
                 network.prose = json_network['prose']
                 self.service.network.append(network)
             
