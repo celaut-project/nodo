@@ -109,6 +109,7 @@ def local_execution(
 
         # Simple mecanism
         for tag in network.tags:
+            log.LOGGER(f"Tag: {tag}")  # TODO aux log
             if is_valid_ip_or_domain(tag):
                 if not allow_connection(container_id=container.id, ip='172.17.0.1', port=GATEWAY_PORT, protocol=Protocol.TCP):
                     log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
