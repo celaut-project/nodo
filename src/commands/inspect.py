@@ -78,5 +78,5 @@ def inspect(service: str):
       "- All of its dependencies will follow the same restrictions.\n")
     for network in service_obj.network:
         print(f"Tags         : {', '.join([tag for tag in network.tags])}")
-        print(f"Prose  : {service_obj.network.prose}\n")
+        print(f"Prose  : {network.prose}\n")
         print("\n")
