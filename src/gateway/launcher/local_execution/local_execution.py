@@ -88,6 +88,35 @@ def local_execution(
     if not allow_connection(container_id=container.id, ip='172.17.0.1', port=GATEWAY_PORT, protocol=Protocol.TCP):
         log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
 
+    for network in service.network:
+        def is_valid_ip_or_domain(input_str):
+            import ipaddress
+            import socket
+            
+            # IP address check
+            try:
+                ipaddress.ip_address(input_str)
+                return True
+            except ValueError:
+                pass
+            
+            # Try DNS resolution
+            try:
+                socket.gethostbyname(input_str)
+                return True
+            except (socket.gaierror, UnicodeError):
+                return False
+
+        # Simple mecanism
+        for tag in network.tags:
+            if is_valid_ip_or_domain(tag):
+                if not allow_connection(container_id=container.id, ip='172.17.0.1', port=GATEWAY_PORT, protocol=Protocol.TCP):
+                    log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
+                
+                else:
+                    log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
+                    break
+
     # TODO END OF virtualizers.docker.execute.py
 
     try:
