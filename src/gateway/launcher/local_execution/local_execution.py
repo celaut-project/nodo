@@ -82,8 +82,8 @@ def local_execution(
     # Reload this object from the server again and update attrs with the new data.
     container.reload()
 
-    if not block_all(container_id=container.id):
-        log.LOGGER(f"Docker firewall block all function failed for {container.id}")
+    # if not block_all(container_id=container.id):
+    #     log.LOGGER(f"Docker firewall block all function failed for {container.id}")
 
     if not allow_connection(container_id=container.id, ip='172.17.0.1', port=GATEWAY_PORT, protocol=Protocol.TCP):
         log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
