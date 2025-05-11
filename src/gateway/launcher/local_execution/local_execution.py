@@ -91,14 +91,14 @@ def local_execution(
     for network in service.network:
         log.LOGGER("Try to connect into a network ...")
 
-        # Simple mecanism, only for https connections
+        # Simple mecanism
         for tag in network.tags:
             log.LOGGER(f" ... with the tag {tag} ...")
 
             if not tag.islower() or '.' not in tag:
                 continue
             
-            if allow_connection_to_domain(container_id=container.id, domain=tag, port=443, protocol=Protocol.TCP):
+            if allow_connection_to_domain(container_id=container.id, domain=tag, protocol=Protocol.TCP):
                 log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
                 break
 
