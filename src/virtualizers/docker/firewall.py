@@ -62,24 +62,6 @@ def block_all(container_id: str) -> bool:
     """
     try:
         container_ip = __get_container_ip(container_id)
-        
-        """  <!-- Commented because the instance must to request the ip's directly to the gatway. -->
-        # Allow DNS queries (UDP and TCP) so domain names can be resolved
-        __execute_iptables([
-            '-I', 'FORWARD',
-            '-s', container_ip,
-            '-p', Protocol.UDP.value,
-            '--dport', '53',
-            '-j', 'ACCEPT'
-        ])
-        __execute_iptables([
-            '-I', 'FORWARD',
-            '-s', container_ip,
-            '-p', Protocol.TCP.value,
-            '--dport', '53',
-            '-j', 'ACCEPT'
-        ])
-        """
 
         # Now drop all other NEW connections
         for protocol in Protocol:
@@ -95,7 +77,7 @@ def block_all(container_id: str) -> bool:
                 logger(f"Failed to block {protocol.value} traffic: {message}")
                 return False
 
-        logger(f"Blocked all outgoing traffic for container {container_id}, DNS remains allowed")
+        logger(f"Blocked all outgoing traffic for container {container_id}")
         return True
     except Exception as e:
         logger(f"Failed to block all traffic: {e}")
