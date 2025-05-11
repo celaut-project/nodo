@@ -24,54 +24,6 @@ class NetworkRule:
     created_at: datetime
     rule_number: Optional[int] = None
 
-def __validate_container_id(container_id: str) -> bool:
-    """
-    Validate if the provided container ID exists and is running.
-    """
-    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]+$', container_id):
-        raise ValueError("Invalid container ID format - potential security risk")
-        
-    try:
-        result = subprocess.run(
-            ['docker', 'inspect', '--format', '{{.State.Running}}', container_id],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return result.stdout.strip() == 'true'
-    except subprocess.CalledProcessError:
-        return False
-
-def __validate_ip(ip: str) -> bool:
-    """
-    Validate if the provided IP address is valid and not in reserved ranges.
-    """
-    try:
-        addr = ipaddress.ip_address(ip)
-        if addr.is_loopback or addr.is_link_local or addr.is_multicast:
-            logger(f"IP {ip} is in a reserved range")
-            return False
-        return True
-    except ValueError:
-        return False
-
-def __validate_port(port: Optional[int]) -> bool:
-    """
-    Validate if the provided port number is valid and not in restricted range.
-    """
-    if port is None:
-        return True
-        
-    if not isinstance(port, int):
-        return False
-        
-    if port < 1024:
-        logger(f"Port {port} is in privileged range")
-    elif port > 65535:
-        return False
-        
-    return 1 <= port <= 65535
-
 def __get_container_ip(container_id: str) -> str:
     """
     Get the IP address of a Docker container.
@@ -84,41 +36,74 @@ def __get_container_ip(container_id: str) -> str:
             check=True
         )
         ip = result.stdout.strip()
-        if not ip or not __validate_ip(ip):
+        if not ip:
             raise RuntimeError(f"Invalid IP address found for container {container_id}: {ip}")
         return ip
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Failed to get container IP: {e}")
 
-def __execute_iptables(command: List[str], check_exists: bool = False) -> Tuple[bool, str]:
+def __execute_iptables(
+    command: List[str],
+    check_exists: bool = False
+) -> Tuple[bool, str]:
     """
-    Execute an iptables command with additional security checks.
+    Execute an iptables (or ip6tables) command.
+    Automatically selects iptables for IPv4 and ip6tables for IPv6.
+
+    Args:
+        command: List of iptables arguments (e.g., ['-I', 'FORWARD', ...]).
+        check_exists: If True, adds '-C' instead of '-I' to check for existing rule.
+    Returns:
+        Tuple of (success: bool, message: str).
     """
-    for arg in command:
-        if not re.match(r'^[a-zA-Z0-9_\-.:/@]+$', str(arg)):
-            raise ValueError(f"Invalid iptables argument format: {arg}")
+    # Determine if the destination IP in the command is IPv6
+    is_ipv6 = False
+    try:
+        for idx, arg in enumerate(command):
+            if arg in ('-d', '--destination') and idx + 1 < len(command):
+                dest = command[idx + 1]
+                ip_obj = ipaddress.ip_address(dest)
+                is_ipv6 = (ip_obj.version == 6)
+                break
+    except ValueError:
+        # If dest isn't a valid IP, assume IPv4 (iptables)
+        is_ipv6 = False
+
+    # Select appropriate binary
+    binary = 'ip6tables' if is_ipv6 else 'iptables'
+
+    # Adjust action flag if checking existence
+    cmd = command.copy()
+    if check_exists:
+        # Replace first occurrence of '-I' with '-C'
+        for i, token in enumerate(cmd):
+            if token == '-I':
+                cmd[i] = '-C'
+                break
+
+    full_cmd = [binary] + cmd + ['-j', 'ACCEPT'] if '-j' not in cmd else [binary] + cmd
 
     try:
-        if check_exists:
-            check_command = ['iptables', '-C'] + command[1:]
-            try:
-                subprocess.run(check_command, capture_output=True, check=True)
-                return False, "Rule already exists"
-            except subprocess.CalledProcessError:
-                pass
-
-        result = subprocess.run(['iptables'] + command, capture_output=True, text=True, check=True)
-        return True, result.stdout
+        result = subprocess.run(
+            full_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=not check_exists
+        )
+        if result.returncode == 0:
+            return True, result.stdout.decode().strip()
+        else:
+            return False, result.stderr.decode().strip()
     except subprocess.CalledProcessError as e:
-        return False, e.stderr
+        return False, e.stderr.decode().strip()
+    except FileNotFoundError:
+        return False, f"{binary} not found on system"
 
 def block_all(container_id: str) -> bool:
     """
     Block all outgoing traffic from a specific container.
     """
     try:
-        if not __validate_container_id(container_id):
-            raise ValueError(f"Invalid or non-running container: {container_id}")
 
         container_ip = __get_container_ip(container_id)
         
@@ -146,13 +131,6 @@ def allow_connection(container_id: str, ip: str, port: Optional[int] = None, pro
     Allow outgoing traffic from container to specific IP and optional port.
     """
     try:
-        if not __validate_container_id(container_id):
-            raise ValueError(f"Invalid or non-running container: {container_id}")
-        if not __validate_ip(ip):
-            raise ValueError(f"Invalid IP address: {ip}")
-        if not __validate_port(port):
-            raise ValueError(f"Invalid port number: {port}")
-
         container_ip = __get_container_ip(container_id)
         
         command = [
@@ -210,13 +188,6 @@ def remove_rule(container_id: str, ip: str, port: Optional[int] = None, protocol
     Remove a previously created rule for a specific IP and port.
     """
     try:
-        if not __validate_container_id(container_id):
-            raise ValueError(f"Invalid or non-running container: {container_id}")
-        if not __validate_ip(ip):
-            raise ValueError(f"Invalid IP address: {ip}")
-        if not __validate_port(port):
-            raise ValueError(f"Invalid port number: {port}")
-
         container_ip = __get_container_ip(container_id)
         
         command = [
@@ -249,9 +220,6 @@ def list_rules(container_id: str) -> List[NetworkRule]:
     List all iptables rules for a specific container.
     """
     try:
-        if not __validate_container_id(container_id):
-            raise ValueError(f"Invalid or non-running container: {container_id}")
-
         container_ip = __get_container_ip(container_id)
         rules = []
         
