@@ -60,5 +60,6 @@ def set_config(container_id: str,
         except subprocess.CalledProcessError as e:
             log.LOGGER(e.output)
 
-    os.remove(CACHE + container_id + '/__config__')
-    os.rmdir(CACHE + container_id)
+    # TODO auxiliar commented.
+    # os.remove(CACHE + container_id + '/__config__')
+    # os.rmdir(CACHE + container_id)
