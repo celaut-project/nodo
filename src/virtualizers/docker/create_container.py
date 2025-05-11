@@ -9,7 +9,8 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
         return DOCKER_CLIENT().containers.create(
             image=id + '.docker',  # https://github.com/moby/moby/issues/20972#issuecomment-193381422
             entrypoint=' '.join(entrypoint),
-            ports=use_other_ports
+            ports=use_other_ports,
+            dns="127.0.0.1"
         )
     except docker_lib.errors.ImageNotFound as e:
         log.LOGGER('CONTAINER IMAGE NOT FOUND')
