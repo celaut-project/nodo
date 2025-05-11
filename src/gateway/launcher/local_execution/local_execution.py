@@ -93,6 +93,8 @@ def local_execution(
 
         # Simple mecanism, only for https connections
         for tag in network.tags:
+            log.LOGGER(f" ... with the tag {tag} ...")
+
             if not tag.islower() or '.' not in tag:
                 continue
             
