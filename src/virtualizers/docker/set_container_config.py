@@ -42,7 +42,7 @@ def set_config(container_id: str,
             ):
     
     __config__ = get_config(config=config, resources=resources, network_resolution=network_resolution)
-    log.LOGGER(f"Configuration file for the container {container_id}: {__config__}")
+    log.LOGGER(f"Configuration file for the container {container_id}: \n {__config__}")
 
     os.mkdir(CACHE + container_id)
 
