@@ -146,7 +146,7 @@ def resolve_domain(domain: str) -> List[str]:
     except socket.gaierror:
         raise ValueError(f"Cannot resolve domain: {domain}")
     
-def allow_connection_to_domain(container_id: str, domain: str, port: Optional[int] = None, protocol: Protocol = Protocol.TCP) -> bool:
+def allow_connection_to_domain(container_id: str, domain: str) -> bool:
     """
     Allow outgoing traffic from container to all IPs of a domain.
     """
@@ -154,8 +154,11 @@ def allow_connection_to_domain(container_id: str, domain: str, port: Optional[in
         ips = resolve_domain(domain)
         results = []
         for ip in ips:
-            result = allow_connection(container_id, ip, port, protocol)
-            results.append(result)
+            _r = []
+            for protocol in Protocol:
+                result = allow_connection(container_id, ip, None, protocol.value)
+                _r.append(result)
+            results.append(all(_r))
         return any(results)
     except Exception as e:
         logger(f"Failed to allow connection to domain {domain}: {e}")

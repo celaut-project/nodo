@@ -98,7 +98,7 @@ def local_execution(
             if not tag.islower() or '.' not in tag:
                 continue
             
-            if allow_connection_to_domain(container_id=container.id, domain=tag, protocol=Protocol.TCP):
+            if allow_connection_to_domain(container_id=container.id, domain=tag):
                 log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
                 break
 
