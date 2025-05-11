@@ -110,7 +110,7 @@ def local_execution(
         tag = network_resolution.tags[0]
         log.LOGGER(f"Try to connect into the network {tag}")
 
-        for instance in network_resolution.instances:
+        for instance in network_resolution.peer_instances:
             if allow_connection_to_instance(container_id=container.id, instance=instance):
                 log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
                 break
