@@ -67,10 +67,10 @@ def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
             )],
             payment_contracts=[]
         ),
-        uri_slot=celaut.Instance.Uri_Slot(
+        uri_slot=[celaut.Instance.Uri_Slot(
             internal_port = i_slot,
             uri=uris
-        )
+        )]
     )
 
     return [instance]
