@@ -1,4 +1,4 @@
-from typing import Optional, Callable, List, Dict
+from typing import Optional, Callable, List, Dict, Tuple
 
 import docker as docker_lib
 
@@ -89,28 +89,32 @@ def local_execution(
         log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
 
     for network in service.network:
-        def is_valid_ip_or_domain(input_str):
-            import ipaddress
-            import socket
+        import socket
+    
             
-            # IP address check
+        def resolve_dns_and_detect_port(domain: str, timeout: float = 2.0) -> Tuple[str, int]|None:
             try:
-                ipaddress.ip_address(input_str)
-                return True
-            except ValueError:
-                pass
+                ip = socket.gethostbyname(domain)
+            except socket.gaierror:
+                # raise ValueError(f"No se pudo resolver el dominio: {domain}")
+                return
             
-            # Try DNS resolution
-            try:
-                socket.gethostbyname(input_str)
-                return True
-            except (socket.gaierror, UnicodeError):
-                return False
+            for port in [443, 80]:
+                try:
+                    with socket.create_connection((ip, port), timeout=timeout):
+                        return ip, port
+                except (socket.timeout, ConnectionRefusedError, OSError):
+                    continue
+
+            # raise ValueError(f"{domain} ({ip}) no responde en los puertos 443 ni 80.")
+            return
 
         # Simple mecanism
         for tag in network.tags:
-            if is_valid_ip_or_domain(tag):
-                if not allow_connection(container_id=container.id, ip='172.17.0.1', port=GATEWAY_PORT, protocol=Protocol.TCP):
+            pair = resolve_dns_and_detect_port(tag)
+            if pair:
+                ip, port = pair
+                if not allow_connection(container_id=container.id, ip=ip, port=port, protocol=Protocol.TCP):
                     log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
                 
                 else:
