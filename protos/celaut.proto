@@ -135,6 +135,7 @@ Thus, the API protocol provides users with the necessary information to understa
         repeated string tags = 1;
         string prose = 2;
         bytes formal = 3;
+        repeated Api.Protocol client_protocol_stack = 4;
     }
 
     string prose = 1;
@@ -173,9 +174,14 @@ message Configuration {
 }
 
 message ConfigurationFile {
+    message NetworkResolution {
+        repeated string tags = 1;
+        Instance network_client = 2;
+    }
     Instance gateway = 1;
     Configuration config = 2;
-    Sysresources initial_sysresources = 3;
+    repeated NetworkResolution network_resolution = 3;
+    Sysresources initial_sysresources = 4;
 }
 
 //  ------------------------
