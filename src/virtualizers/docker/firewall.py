@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import subprocess
 import re
-import ipaddress
+from protos import celaut_pb2 as celaut
 from src.utils.logger import LOGGER as logger
 
 class Protocol(Enum):
@@ -133,35 +133,41 @@ def allow_connection(container_id: str, ip: str, port: Optional[int] = None, pro
         logger(f"Failed to allow connection: {e}")
         return False
     
-def resolve_domain(domain: str) -> List[str]:
-    """
-    Resolve a domain to its associated IPv4 addresses.
-    """
-    try:
-        return list({
-            info[4][0]
-            for info in socket.getaddrinfo(domain, None)
-            if info[0] == socket.AF_INET
-        })
-    except socket.gaierror:
-        raise ValueError(f"Cannot resolve domain: {domain}")
-    
-def allow_connection_to_domain(container_id: str, domain: str) -> bool:
+def allow_connection_to_instance(container_id: str, instance: celaut.Instance) -> bool:
     """
     Allow outgoing traffic from container to all IPs of a domain.
     """
     try:
-        ips = resolve_domain(domain)
+        slot_protocol = {}
+        for slot in instance.api.slot:
+            i_slot = slot.port
+            stack = slot.protocol_stack
+
+            # Auxiliar policy  <- TODO check
+            if "udp" in str(stack):
+                protocol = Protocol.UDP
+            else:
+                protocol = Protocol.TCP
+
+            slot_protocol[i_slot] = protocol
+
         results = []
-        for ip in ips:
-            _r = []
-            for protocol in Protocol:
-                result = allow_connection(container_id, ip, None, protocol.value)
-                _r.append(result)
-            results.append(all(_r))
+        for slot in instance.uri_slot:
+            i_slot = slot.internal_port
+
+            if i_slot not in slot_protocol:
+                logger(f"Internal slot {i_slot} was not defined on api protocol stack. Continue.")
+                continue
+
+            for uri in slot.uri:
+                ip, port = uri.ip, uri.port
+                protocol = slot_protocol[i_slot]
+                result = allow_connection(container_id, ip, port, protocol)
+                results.append(result)
+
         return any(results)
     except Exception as e:
-        logger(f"Failed to allow connection to domain {domain}: {e}")
+        logger(f"Failed to allow connection to an instance: {e}")
         return False
 
 

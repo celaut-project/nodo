@@ -176,7 +176,7 @@ message Configuration {
 message ConfigurationFile {
     message NetworkResolution {
         repeated string tags = 1;
-        Instance network_client = 2;
+        repeated Instance peer_instances = 2;
     }
     Instance gateway = 1;
     Configuration config = 2;

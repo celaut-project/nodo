@@ -1,6 +1,6 @@
 import os
 import subprocess
-from typing import Optional
+from typing import List, Optional, Set, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.gateway.utils import generate_node_peer_info
@@ -13,22 +13,38 @@ env_manager = EnvManager()
 
 CACHE = env_manager.get_env("CACHE")
 
-def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysresources) -> celaut.Configuration:
+def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysresources,  network_resolution: List[celaut.ConfigurationFile.NetworkResolution]) -> celaut.ConfigurationFile:
+
     __config__ = celaut.ConfigurationFile()
+
     __config__.gateway.CopyFrom(generate_node_peer_info(network=DOCKER_NETWORK).instance)
-    if config: __config__.config.CopyFrom(config)
-    if resources: __config__.initial_sysresources.CopyFrom(resources)
+    
+    if config: 
+        __config__.config.CopyFrom(config)
+    
+    if network_resolution:
+        __config__.network_resolution.extend(network_resolution)
+
+    if resources: 
+        __config__.initial_sysresources.CopyFrom(resources)
+
     return __config__
 
-def write_config(path: str, config: celaut.Configuration):
+def write_config(path: str, config: celaut.ConfigurationFile):
     with open(f'{path}/__config__', 'wb') as file:
         file.write(config.SerializeToString())
 
-def set_config(container_id: str, config: Optional[celaut.Configuration], resources: celaut.Sysresources,
-               api: celaut.Service.Container.Config):
-    __config__ = get_config(config=config, resources=resources)
+def set_config(container_id: str, 
+               config: Optional[celaut.Configuration], 
+               resources: celaut.Sysresources,
+               api: celaut.Service.Container.Config,
+               network_resolution: List[celaut.ConfigurationFile.NetworkResolution]
+            ):
+    
+    __config__ = get_config(config=config, resources=resources, network_resolution=network_resolution)
 
     os.mkdir(CACHE + container_id)
+
     # TODO: Check if api.format is valid or make the serializer for it.
 
     write_config(path=CACHE + container_id, config=__config__)
