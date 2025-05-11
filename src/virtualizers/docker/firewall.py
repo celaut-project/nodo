@@ -151,7 +151,7 @@ def allow_connection(container_id: str, ip: str, port: Optional[int] = None, pro
             logger(f"Allowed {protocol.value} connection from {container_id} to {ip}" +
                 (f":{port}" if port else ""))
         else:
-            logger(f"Failed to allow connection: {message}")
+            logger(f"Failed to allow connection from {container_id} to {ip}: {message}")
             
         return success
     except Exception as e:
