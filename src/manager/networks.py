@@ -1,7 +1,9 @@
-import socket
-from typing import List, Tuple
+import socket, os, json
+from typing import List
 from protos import celaut_pb2 as celaut
+from src.utils.env import EnvManager
 
+env_manager = EnvManager()
 
 def resolve_domain(domain: str) -> List[celaut.Instance.Uri]:
     """
@@ -15,14 +17,38 @@ def resolve_domain(domain: str) -> List[celaut.Instance.Uri]:
         })
 
         return [
-            celaut.Instance.Uri(ip=ip, port=80)
+            celaut.Instance.Uri(ip=ip, port=80)  # TODO Must be based on the network client protocol stack
             for ip in ips
         ]
     except socket.gaierror:
         raise ValueError(f"Cannot resolve domain: {domain}")
 
+def resolve_ergo_network() -> List[celaut.Instance.Uri]:
+    return []
+
+    # TODO Needs to get the ip and port from the data, actually is the restApiUrl.
+    try:
+        http_peers_file = env_manager.get_env("ERGO_HTTP_PEERS")
+        if os.path.exists(http_peers_file):         
+            with open(http_peers_file, 'r') as f:
+                ergo_peers = json.load(f)
+
+            result=[]
+            for uri in ergo_peers.keys():
+                ip, port = uri.split(":")
+                result.append(celaut.Instance.Uri(ip=ip, port=int(port)))
+            
+            return result
+    except:
+        return []
+
 def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
     for tag in network.tags:
+        if "ergo" in tag:
+            uris = resolve_ergo_network()
+            if uris:
+                break
+
         if not tag.islower() or '.' not in tag:
             continue
 
