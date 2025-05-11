@@ -1,6 +1,6 @@
 import os
 import subprocess
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional
 
 from protos import celaut_pb2 as celaut
 from src.gateway.utils import generate_node_peer_info
@@ -42,6 +42,7 @@ def set_config(container_id: str,
             ):
     
     __config__ = get_config(config=config, resources=resources, network_resolution=network_resolution)
+    log.LOGGER(f"Configuration file for the container {container_id}: {__config__}")
 
     os.mkdir(CACHE + container_id)
 
@@ -58,5 +59,6 @@ def set_config(container_id: str,
             break
         except subprocess.CalledProcessError as e:
             log.LOGGER(e.output)
+
     os.remove(CACHE + container_id + '/__config__')
     os.rmdir(CACHE + container_id)
