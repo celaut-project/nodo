@@ -42,7 +42,7 @@ def __get_container_ip(container_id: str) -> str:
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Failed to get container IP: {e}")
 
-def __execute_iptables(command: List[str], check_exists: bool = False) -> Tuple[bool, str]:
+def __execute_iptables(command: List[str]) -> Tuple[bool, str]:
     """
     Execute an iptables command with additional security checks.
     """
@@ -51,14 +51,6 @@ def __execute_iptables(command: List[str], check_exists: bool = False) -> Tuple[
             raise ValueError(f"Invalid iptables argument format: {arg}")
 
     try:
-        if check_exists:
-            check_command = ['iptables', '-C'] + command[1:]
-            try:
-                subprocess.run(check_command, capture_output=True, check=True)
-                return False, "Rule already exists"
-            except subprocess.CalledProcessError:
-                pass
-
         result = subprocess.run(['iptables'] + command, capture_output=True, text=True, check=True)
         return True, result.stdout
     except subprocess.CalledProcessError as e:
@@ -109,7 +101,7 @@ def allow_connection(container_id: str, ip: str, port: Optional[int] = None, pro
             
         command.extend(['-j', 'ACCEPT'])
         
-        success, message = __execute_iptables(command, check_exists=True)
+        success, message = __execute_iptables(command)
         
         if success:
             logger(f"Allowed {protocol.value} connection from {container_id} to {ip}" +
