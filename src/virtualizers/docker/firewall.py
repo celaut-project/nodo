@@ -124,10 +124,14 @@ def allow_connection(container_id: str, ip: str, port: Optional[int] = None, pro
     
 def resolve_domain(domain: str) -> List[str]:
     """
-    Resolve a domain to its associated IP addresses.
+    Resolve a domain to its associated IPv4 addresses.
     """
     try:
-        return list({info[4][0] for info in socket.getaddrinfo(domain, None)})
+        return list({
+            info[4][0]
+            for info in socket.getaddrinfo(domain, None)
+            if info[0] == socket.AF_INET
+        })
     except socket.gaierror:
         raise ValueError(f"Cannot resolve domain: {domain}")
     
