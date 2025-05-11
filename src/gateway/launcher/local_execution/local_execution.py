@@ -1,9 +1,10 @@
-from typing import Optional, Callable, List, Dict, Tuple
+from typing import Optional, Callable, List, Dict, Set, Tuple
 
 import docker as docker_lib
 
 from protos import celaut_pb2 as celaut, gateway_pb2
 from src.gateway.utils import GATEWAY_PORT
+from src.manager.networks import resolve_network
 from src.virtualizers.docker import build
 from src.virtualizers.docker.create_container import create_container
 from src.virtualizers.docker.set_container_config import set_config
@@ -13,7 +14,7 @@ from src.utils import utils, logger as log
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
-from src.virtualizers.docker.firewall import allow_connection_to_domain, block_all, allow_connection, Protocol
+from src.virtualizers.docker.firewall import allow_connection_to_domain, allow_connection_to_instance, block_all, allow_connection, Protocol
 
 
 def local_execution(
@@ -67,8 +68,21 @@ def local_execution(
         entrypoint=service.container.entrypoint
     )
 
-    set_config(container_id=container.id, config=config.config, resources=initial_system_resources,
-               api=service.container.config)
+    networks: List[celaut.ConfigurationFile.NetworkResolution] = [
+        celaut.ConfigurationFile.NetworkResolution(
+            tags=network.tags, 
+            peer_instances=resolve_network(network)
+        )
+        for network in service.networks if len(network.tags) > 0
+    ]
+
+    set_config(
+        container_id=container.id, 
+        config=config.config, 
+        resources=initial_system_resources,
+        api=service.container.config,
+        network_resolution=networks
+    )
 
     # The container must be started after adding the configuration file and
     #  before requiring its IP address, since docker assigns it at startup.
@@ -85,20 +99,19 @@ def local_execution(
     if not block_all(container_id=container.id):
         log.LOGGER(f"Docker firewall block all function failed for {container.id}")
 
-    if not allow_connection(container_id=container.id, ip='172.17.0.1', port=GATEWAY_PORT, protocol=Protocol.TCP):
+    if not allow_connection(
+        container_id=container.id, 
+        ip='172.17.0.1', port=GATEWAY_PORT, # Gateway internal endpoint.
+        protocol=Protocol.TCP # Gateway communication is with TCP
+    ):
         log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
 
-    for network in service.network:
-        log.LOGGER("Try to connect into a network ...")
+    for network_resolution in networks:
+        tag = network_resolution.tags[0]
+        log.LOGGER(f"Try to connect into the network {tag}")
 
-        # Simple mecanism
-        for tag in network.tags:
-            log.LOGGER(f" ... with the tag {tag} ...")
-
-            if not tag.islower() or '.' not in tag:
-                continue
-            
-            if allow_connection_to_domain(container_id=container.id, domain=tag):
+        for instance in network_resolution.instances:
+            if allow_connection_to_instance(container_id=container.id, instance=instance):
                 log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
                 break
 
