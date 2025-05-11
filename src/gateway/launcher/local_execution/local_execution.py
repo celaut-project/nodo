@@ -93,6 +93,9 @@ def local_execution(
 
         # Simple mecanism, only for https connections
         for tag in network.tags:
+            if not tag.islower() or '.' not in tag:
+                continue
+            
             if allow_connection_to_domain(container_id=container.id, domain=tag, port=443, protocol=Protocol.TCP):
                 log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
                 break
