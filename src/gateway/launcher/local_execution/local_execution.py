@@ -73,7 +73,7 @@ def local_execution(
             tags=network.tags, 
             peer_instances=resolve_network(network)
         )
-        for network in service.networks if len(network.tags) > 0
+        for network in service.network if len(network.tags) > 0
     ]
 
     set_config(
