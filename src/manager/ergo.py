@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 import os, json, requests
 
 from src.utils.env import EnvManager
