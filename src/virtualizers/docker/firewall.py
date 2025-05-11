@@ -42,69 +42,33 @@ def __get_container_ip(container_id: str) -> str:
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Failed to get container IP: {e}")
 
-def __execute_iptables(
-    command: List[str],
-    check_exists: bool = False
-) -> Tuple[bool, str]:
+def __execute_iptables(command: List[str], check_exists: bool = False) -> Tuple[bool, str]:
     """
-    Execute an iptables (or ip6tables) command.
-    Automatically selects iptables for IPv4 and ip6tables for IPv6.
-
-    Args:
-        command: List of iptables arguments (e.g., ['-I', 'FORWARD', ...]).
-        check_exists: If True, adds '-C' instead of '-I' to check for existing rule.
-    Returns:
-        Tuple of (success: bool, message: str).
+    Execute an iptables command with additional security checks.
     """
-    # Determine if the destination IP in the command is IPv6
-    is_ipv6 = False
-    try:
-        for idx, arg in enumerate(command):
-            if arg in ('-d', '--destination') and idx + 1 < len(command):
-                dest = command[idx + 1]
-                ip_obj = ipaddress.ip_address(dest)
-                is_ipv6 = (ip_obj.version == 6)
-                break
-    except ValueError:
-        # If dest isn't a valid IP, assume IPv4 (iptables)
-        is_ipv6 = False
-
-    # Select appropriate binary
-    binary = 'ip6tables' if is_ipv6 else 'iptables'
-
-    # Adjust action flag if checking existence
-    cmd = command.copy()
-    if check_exists:
-        # Replace first occurrence of '-I' with '-C'
-        for i, token in enumerate(cmd):
-            if token == '-I':
-                cmd[i] = '-C'
-                break
-
-    full_cmd = [binary] + cmd + ['-j', 'ACCEPT'] if '-j' not in cmd else [binary] + cmd
+    for arg in command:
+        if not re.match(r'^[a-zA-Z0-9_\-.:/@]+$', str(arg)):
+            raise ValueError(f"Invalid iptables argument format: {arg}")
 
     try:
-        result = subprocess.run(
-            full_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=not check_exists
-        )
-        if result.returncode == 0:
-            return True, result.stdout.decode().strip()
-        else:
-            return False, result.stderr.decode().strip()
+        if check_exists:
+            check_command = ['iptables', '-C'] + command[1:]
+            try:
+                subprocess.run(check_command, capture_output=True, check=True)
+                return False, "Rule already exists"
+            except subprocess.CalledProcessError:
+                pass
+
+        result = subprocess.run(['iptables'] + command, capture_output=True, text=True, check=True)
+        return True, result.stdout
     except subprocess.CalledProcessError as e:
-        return False, e.stderr.decode().strip()
-    except FileNotFoundError:
-        return False, f"{binary} not found on system"
+        return False, e.stderr
 
 def block_all(container_id: str) -> bool:
     """
     Block all outgoing traffic from a specific container.
     """
     try:
-
         container_ip = __get_container_ip(container_id)
         
         for protocol in Protocol:
