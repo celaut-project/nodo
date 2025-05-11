@@ -14,7 +14,7 @@ from src.utils import utils, logger as log
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
-from src.virtualizers.docker.firewall import allow_connection_to_domain, allow_connection_to_instance, block_all, allow_connection, Protocol
+from src.virtualizers.docker.firewall import allow_connection_to_instance, block_all, allow_connection, Protocol
 
 
 def local_execution(
