@@ -58,11 +58,28 @@ def __execute_iptables(command: List[str]) -> Tuple[bool, str]:
 
 def block_all(container_id: str) -> bool:
     """
-    Block all outgoing traffic from a specific container.
+    Block all outgoing traffic from a specific container, except DNS.
     """
     try:
         container_ip = __get_container_ip(container_id)
-        
+
+        # Allow DNS queries (UDP and TCP) so domain names can be resolved
+        __execute_iptables([
+            '-I', 'FORWARD',
+            '-s', container_ip,
+            '-p', Protocol.UDP.value,
+            '--dport', '53',
+            '-j', 'ACCEPT'
+        ])
+        __execute_iptables([
+            '-I', 'FORWARD',
+            '-s', container_ip,
+            '-p', Protocol.TCP.value,
+            '--dport', '53',
+            '-j', 'ACCEPT'
+        ])
+
+        # Now drop all other NEW connections
         for protocol in Protocol:
             success, message = __execute_iptables([
                 '-I', 'FORWARD',
@@ -76,7 +93,7 @@ def block_all(container_id: str) -> bool:
                 logger(f"Failed to block {protocol.value} traffic: {message}")
                 return False
 
-        logger(f"Blocked all outgoing traffic for container {container_id}")
+        logger(f"Blocked all outgoing traffic for container {container_id}, DNS remains allowed")
         return True
     except Exception as e:
         logger(f"Failed to block all traffic: {e}")
