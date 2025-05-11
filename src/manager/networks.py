@@ -52,7 +52,7 @@ def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
         if not tag.islower() or '.' not in tag:
             continue
 
-        uris = resolve_domain(network)
+        uris = resolve_domain(tag)
         if uris:
             break
 
