@@ -13,7 +13,7 @@ from src.utils import utils, logger as log
 from src.utils.env import DEFAULT_SYSTEM_RESOURCES
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
-from src.virtualizers.docker.firewall import block_all, allow_connection, Protocol
+from src.virtualizers.docker.firewall import allow_connection_to_domain, block_all, allow_connection, Protocol
 
 
 def local_execution(
@@ -89,37 +89,16 @@ def local_execution(
         log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
 
     for network in service.network:
-        import socket
-    
-            
-        def resolve_dns_and_detect_port(domain: str, timeout: float = 2.0) -> Tuple[str, int]|None:
-            try:
-                ip = socket.gethostbyname(domain)
-            except socket.gaierror:
-                # raise ValueError(f"No se pudo resolver el dominio: {domain}")
-                return
-            
-            for port in [443, 80]:
-                try:
-                    with socket.create_connection((ip, port), timeout=timeout):
-                        return ip, port
-                except (socket.timeout, ConnectionRefusedError, OSError):
-                    continue
+        log.LOGGER("Try to connect into a network ...")
 
-            # raise ValueError(f"{domain} ({ip}) no responde en los puertos 443 ni 80.")
-            return
-
-        # Simple mecanism
+        # Simple mecanism, only for https connections
         for tag in network.tags:
-            pair = resolve_dns_and_detect_port(tag)
-            if pair:
-                ip, port = pair
-                if not allow_connection(container_id=container.id, ip=ip, port=port, protocol=Protocol.TCP):
-                    log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
-                
-                else:
-                    log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
-                    break
+            if not allow_connection_to_domain(container_id=container.id, domain=tag, port=443, protocol=Protocol.TCP):
+                log.LOGGER(f" - Docker firewall allow connection function failed for {container.id} ...")
+            
+            else:
+                log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
+                break
 
     # TODO END OF virtualizers.docker.execute.py
 

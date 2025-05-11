@@ -1,4 +1,5 @@
 from enum import Enum
+import socket
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
 from datetime import datetime
@@ -178,6 +179,31 @@ def allow_connection(container_id: str, ip: str, port: Optional[int] = None, pro
     except Exception as e:
         logger(f"Failed to allow connection: {e}")
         return False
+    
+def resolve_domain(domain: str) -> List[str]:
+    """
+    Resolve a domain to its associated IP addresses.
+    """
+    try:
+        return list({info[4][0] for info in socket.getaddrinfo(domain, None)})
+    except socket.gaierror:
+        raise ValueError(f"Cannot resolve domain: {domain}")
+    
+def allow_connection_to_domain(container_id: str, domain: str, port: Optional[int] = None, protocol: Protocol = Protocol.TCP) -> bool:
+    """
+    Allow outgoing traffic from container to all IPs of a domain.
+    """
+    try:
+        ips = resolve_domain(domain)
+        results = []
+        for ip in ips:
+            result = allow_connection(container_id, ip, port, protocol)
+            results.append(result)
+        return any(results)
+    except Exception as e:
+        logger(f"Failed to allow connection to domain {domain}: {e}")
+        return False
+
 
 def remove_rule(container_id: str, ip: str, port: Optional[int] = None, protocol: Protocol = Protocol.TCP) -> bool:
     """
