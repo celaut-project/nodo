@@ -269,6 +269,15 @@ class ZipContainerPacker:
             self.metadata.hashtag.tag.extend([self.tag])
         elif self.tag and type(self.tag) is list: 
             self.metadata.hashtag.tag.extend(self.tag)
+
+        # Metadata integrity validation.
+        metadata_integrity_validation = [hash.type for hash in self.metadata.hastag.hash]
+        if len(metadata_integrity_validation) != len(set(metadata_integrity_validation)):
+            _msg = "Metadata integrity validation exception.\n"
+            for hash in list(self.metadata.hashtag.hash):
+                _msg += f"-  {hash.type.hex()}: {hash.value.hex()}\n"
+            log.LOGGER(_msg)
+            raise Exception(_msg)
             
         return service_id, self.metadata, service
 
