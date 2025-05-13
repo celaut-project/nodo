@@ -76,6 +76,15 @@ def __on_peer(peer: str, service_zip_dir: str) -> str:
                 if not _id:
                     _id = b.id.hex()
             elif type(b) == celaut_pb2.Metadata and _id:
+                # Metadata integrity validation.
+                metadata_integrity_validation = [hash.type for hash in b.hastag.hash]
+                if len(metadata_integrity_validation) != len(set(metadata_integrity_validation)):
+                    _msg = "Metadata integrity validation exception on pack command.\n"
+                    for hash in list(b.hashtag.hash):
+                        _msg += f"-  {hash.type.hex()}: {hash.value.hex()}\n"
+                    print(_msg)
+                    raise Exception(_msg)
+
                 with open(f"{METADATA_REGISTRY}{_id}", "wb") as f:
                     f.write(b.SerializeToString())
             elif type(b) == grpcbb.Dir and b.type == pack_pb2.Service and _id:
