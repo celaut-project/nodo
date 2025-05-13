@@ -271,7 +271,7 @@ class ZipContainerPacker:
             self.metadata.hashtag.tag.extend(self.tag)
 
         # Metadata integrity validation.
-        metadata_integrity_validation = [hash.type for hash in self.metadata.hastag.hash]
+        metadata_integrity_validation = [hash.type for hash in self.metadata.hashtag.hash]
         if len(metadata_integrity_validation) != len(set(metadata_integrity_validation)):
             _msg = "Metadata integrity validation exception.\n"
             for hash in list(self.metadata.hashtag.hash):

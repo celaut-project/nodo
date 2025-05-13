@@ -77,7 +77,7 @@ def __on_peer(peer: str, service_zip_dir: str) -> str:
                     _id = b.id.hex()
             elif type(b) == celaut_pb2.Metadata and _id:
                 # Metadata integrity validation.
-                metadata_integrity_validation = [hash.type for hash in b.hastag.hash]
+                metadata_integrity_validation = [hash.type for hash in b.hashtag.hash]
                 if len(metadata_integrity_validation) != len(set(metadata_integrity_validation)):
                     _msg = "Metadata integrity validation exception on pack command.\n"
                     for hash in list(b.hashtag.hash):
