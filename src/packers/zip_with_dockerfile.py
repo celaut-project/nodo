@@ -200,6 +200,7 @@ class ZipContainerPacker:
                 ]
             )
         )
+    
     def parseApi(self):
         if not self.json.get('api'): return
         
@@ -220,8 +221,7 @@ class ZipContainerPacker:
                 network.tags.extend(json_network['tags'])
                 network.prose = json_network['prose']
                 self.service.network.append(network)
-            
-            
+
     def save(self) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
         service: Union[str, pack_pb2.Service]
         if not self.blocks:
