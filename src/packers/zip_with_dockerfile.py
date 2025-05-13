@@ -23,7 +23,6 @@ MIN_BUFFER_BLOCK_SIZE = env_manager.get_env("MIN_BUFFER_BLOCK_SIZE")
 
 class ZipContainerPacker:
     def __init__(self, path, aux_id):
-        super().__init__()
         self.blocks: List[bytes] = []
         self.service = pack_pb2.Service()
         self.metadata = celaut.Metadata()
