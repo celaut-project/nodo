@@ -16,10 +16,16 @@ def resolve_domain(domain: str) -> List[celaut.Instance.Uri]:
             if info[0] == socket.AF_INET
         })
 
+
+        # TODO Must be based on the network client protocol stack. ¿?
+
+        # Auxiliar, only http and https
         return [
-            celaut.Instance.Uri(ip=ip, port=80)  # TODO Must be based on the network client protocol stack
+            celaut.Instance.Uri(ip=ip, port=port)
             for ip in ips
+            for port in [80, 443]  # Ports should be based on the protocol stack ¿?
         ]
+    
     except socket.gaierror:
         raise ValueError(f"Cannot resolve domain: {domain}")
 
