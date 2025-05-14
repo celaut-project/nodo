@@ -80,8 +80,7 @@ def local_execution(
 
     #  Filter networks if ancestors do not explicitly allow them.
     if sc.internal_instance_exists(id=father_id):
-        ancestor_id = sc.get_service_id_by_container_id(id=father_id)
-        networks_resolved = filter_networks_with_ancestors(networks=networks_resolved, ancestor_service_id=ancestor_id)
+        networks_resolved = filter_networks_with_ancestors(networks=networks_resolved, father_id=father_id)
 
     #  Set the configuration file into the instance file system root.
     set_config(
