@@ -86,9 +86,12 @@ class AbstractInputServiceIterable:
 
             case celaut.Metadata.HashTag.Hash:
                 
-                print(f"Hash recibida: {r.type.hex()}  :   {r.value.hex()}\n")
+                print(f"Hash recibida: {r.type.hex()}  :   {r.value.hex()}")
 
                 self.hashes.add(Hash(r))
+                
+                print(f"Actual hashes set: {[h.type.hex()+"  "+h.value.hex() for h in self.hashes]}\n\n")
+                
                 if not self.service_hash:
                     self.service_hash, self.service_saved = find_service_hash(_hash=r)
 
@@ -105,9 +108,12 @@ class AbstractInputServiceIterable:
                     # TODO se podría realizar junto con la iteració siguiente:
 
                 # Combine the hash list with the metadata hashes.
+                print(f"Actual hashes set: {[h.type.hex()+"  "+h.value.hex() for h in self.hashes]}. Realiza union....")
                 self.hashes: Set[Hash] = self.hashes.union({
                     Hash(_e) for _e in self.metadata.hashtag.hash
                 })
+
+                print(f"Actual hashes set despues de union: {[h.type.hex()+"  "+h.value.hex() for h in self.hashes]}\n\n")
 
                 self.metadata.hashtag.ClearField("hash")
                 self.metadata.hashtag.hash.extend([_e.proto() for _e in self.hashes])
