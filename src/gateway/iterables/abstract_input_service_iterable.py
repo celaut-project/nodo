@@ -76,7 +76,6 @@ class AbstractInputServiceIterable:
 
         match type(r):
             case gateway_pb2.Client:
-                
                 self.client_id = r.client_id
 
             case gateway_pb2.RecursionGuard:
