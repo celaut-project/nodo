@@ -95,6 +95,7 @@ def launch_service(
                         refund_gas=refund_gas
                     )
 
+                #  If the service was from an internal instance, allow it to connect to it's new dependency.
                 if sc.internal_instance_exists(id=father_id):
                     try:
                         for slot in instance.instance.uri_slot:

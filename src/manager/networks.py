@@ -80,3 +80,13 @@ def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
     )
 
     return [instance]
+
+def filter_networks_with_ancestors(networks: List[celaut.ConfigurationFile.NetworkResolution], father_id: str) -> List[celaut.ConfigurationFile.NetworkResolution]:
+    filtered = []
+
+    # TODO.
+
+    for network in networks:
+        filtered.append(network)
+
+    return filtered

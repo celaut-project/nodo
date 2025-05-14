@@ -3,8 +3,9 @@ from typing import Optional, Callable, List, Dict
 import docker as docker_lib
 
 from protos import celaut_pb2 as celaut, gateway_pb2
+from src.database.sql_connection import SQLConnection
 from src.gateway.utils import GATEWAY_PORT
-from src.manager.networks import resolve_network
+from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.virtualizers.docker import build
 from src.virtualizers.docker.create_container import create_container
 from src.virtualizers.docker.set_container_config import set_config
@@ -16,6 +17,7 @@ from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
 from src.virtualizers.docker.firewall import allow_connection_to_instance, block_all, allow_connection, Protocol
 
+sc = SQLConnection()
 
 def local_execution(
         config: Optional[gateway_pb2.Configuration],
@@ -68,7 +70,7 @@ def local_execution(
         entrypoint=service.container.entrypoint
     )
 
-    networks: List[celaut.ConfigurationFile.NetworkResolution] = [
+    networks_resolved: List[celaut.ConfigurationFile.NetworkResolution] = [
         celaut.ConfigurationFile.NetworkResolution(
             tags=network.tags, 
             peer_instances=resolve_network(network)
@@ -76,12 +78,18 @@ def local_execution(
         for network in service.network if len(network.tags) > 0
     ]
 
+    #  Filter networks if ancestors do not explicitly allow them.
+    if sc.internal_instance_exists(id=father_id):
+        ancestor_id = sc.get_service_id_by_container_id(id=father_id)
+        networks_resolved = filter_networks_with_ancestors(networks=networks_resolved, ancestor_service_id=ancestor_id)
+
+    #  Set the configuration file into the instance file system root.
     set_config(
         container_id=container.id, 
         config=config.config, 
         resources=initial_system_resources,
         api=service.container.config,
-        network_resolution=networks
+        network_resolution=networks_resolved
     )
 
     # The container must be started after adding the configuration file and
@@ -99,6 +107,7 @@ def local_execution(
     if not block_all(container_id=container.id):
         log.LOGGER(f"Docker firewall block all function failed for {container.id}")
 
+    # Allow connection to the node gateway.
     if not allow_connection(
         container_id=container.id, 
         ip='172.17.0.1', port=GATEWAY_PORT, # Gateway internal endpoint.
@@ -106,7 +115,7 @@ def local_execution(
     ):
         log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
 
-    for network_resolution in networks:
+    for network_resolution in networks_resolved:
         tag = network_resolution.tags[0]
         log.LOGGER(f"Try to connect into the network {tag}")
 
