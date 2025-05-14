@@ -70,17 +70,20 @@ def local_execution(
         entrypoint=service.container.entrypoint
     )
 
+    networks = service.network
+
+    #  Filter networks if ancestors do not explicitly allow them.
+    if sc.internal_instance_exists(id=father_id):
+        networks = filter_networks_with_ancestors(networks=networks, father_id=father_id)
+
+    # Obtain instances to connect to the available networks.
     networks_resolved: List[celaut.ConfigurationFile.NetworkResolution] = [
         celaut.ConfigurationFile.NetworkResolution(
             tags=network.tags, 
             peer_instances=resolve_network(network)
         )
-        for network in service.network if len(network.tags) > 0
+        for network in networks if len(network.tags) > 0
     ]
-
-    #  Filter networks if ancestors do not explicitly allow them.
-    if sc.internal_instance_exists(id=father_id):
-        networks_resolved = filter_networks_with_ancestors(networks=networks_resolved, father_id=father_id)
 
     #  Set the configuration file into the instance file system root.
     set_config(

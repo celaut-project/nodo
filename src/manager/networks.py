@@ -3,6 +3,7 @@ from typing import List
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.utils.env import EnvManager
+from src.utils.utils import read_service_from_disk
 
 env_manager = EnvManager()
 sc = SQLConnection()
@@ -83,12 +84,25 @@ def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
 
     return [instance]
 
-def filter_networks_with_ancestors(networks: List[celaut.ConfigurationFile.NetworkResolution], father_id: str) -> List[celaut.ConfigurationFile.NetworkResolution]:
+def match_networks(a: celaut.Service.Network, b: celaut.Service.Network) -> bool:
+    # TODO Could be more powerfull
+    return set(a.tags) & set(b.tags)  # There is at least one common tag
+
+def filter_networks_with_ancestors(networks: List[celaut.Service.Network], father_id: str) -> List[celaut.Service.Network]:
     filtered = []
     service_id = sc.get_service_id_by_container_id(id=father_id)
 
+    spec = read_service_from_disk(service_hash=service_id)
+    if not spec:
+        return networks
+    
+    spec.networks
+
     for network in networks:
-        filtered.append(network)
+        for spec_net in spec.networks:
+            if match_networks(network, spec_net):
+                filtered.append(network)
+                break  # Exit the inner loop
 
     ancestor_id = sc.get_internal_father_id(id=father_id)
     if sc.internal_instance_exists(id=ancestor_id):
