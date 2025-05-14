@@ -115,6 +115,7 @@ class AbstractInputServiceIterable:
                     self.service_hash, self.service_saved = find_service_hash(_hash=r)
 
             case celaut.Metadata:
+                print("\nRUN THIS.")
                 self.metadata = r
                 for _hash in self.metadata.hashtag.hash:  # TODO nos podríamos ahorrar esta iteración
                     if not self.service_hash:
@@ -130,6 +131,9 @@ class AbstractInputServiceIterable:
                 })
 
                 print(f"Hashes after union, len: {len(self.hashes)} {len(set([h.type for h in self.hashes]))}")   # TODO aux log
+
+                for hash in list(self.hashes):
+                    print(f"-  {hash.type.hex()}: {hash.value.hex()}")
 
                 self.metadata.hashtag.ClearField("hash")
                 self.metadata.hashtag.hash.extend([_e.proto() for _e in self.hashes])
