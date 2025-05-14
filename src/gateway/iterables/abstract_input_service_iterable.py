@@ -52,17 +52,6 @@ class Hash:
 
 
 class AbstractInputServiceIterable:
-    configuration: Optional[gateway_pb2.Configuration] = None
-
-    client_id = None
-    recursion_guard_token = None
-
-    service_hash: Optional[str] = None
-    service_saved = False
-    generated = False
-
-    hashes: Set[Hash] = set()
-    metadata: Optional[celaut.Metadata] = None
 
     def __init__(self, request_iterator, context):
         self.parser_iterator = bee.parse_from_buffer(
@@ -70,7 +59,20 @@ class AbstractInputServiceIterable:
             indices=StartService_input_indices,
             partitions_message_mode=StartService_input_message_mode
         )
+        
         self.context = context
+
+        self.configuration: Optional[gateway_pb2.Configuration] = None
+
+        self.client_id = None
+        self.recursion_guard_token = None
+
+        self.service_hash: Optional[str] = None
+        self.service_saved = False
+        self.generated = False
+
+        self.hashes: Set[Hash] = set()
+        self.metadata: Optional[celaut.Metadata] = None
 
     def __pattern_matching(self, r) -> Generator[buffer_pb2.Buffer, None, None]:
 
