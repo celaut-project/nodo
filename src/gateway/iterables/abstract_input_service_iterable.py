@@ -42,9 +42,19 @@ def combine_metadata(service_hash: str, request_metadata: Optional[celaut.Metada
         combined_metadata = celaut.Metadata()
         combined_metadata.MergeFrom(disk_metadata)
         combined_metadata.MergeFrom(request_metadata)
-        return combined_metadata
+        metadata = combined_metadata
     else:
-        return disk_metadata
+        metadata = disk_metadata
+
+    # Validate hash integrity.
+    integrity_list = [h.type for h in metadata.hashtag.hash]
+    if len(integrity_list) != len(set(integrity_list)):
+        log.LOGGER(f"There is an issue with the metadata during the transfer from memory to disk for service {service_hash}.")
+        for hash in list(metadata.hashtag.hash):
+            log.LOGGER(f"-  {hash.type.hex()}: {hash.value.hex()}")
+        raise Exception("Metadata hash integrity error.")
+
+    return metadata
 
 
 class Hash:
