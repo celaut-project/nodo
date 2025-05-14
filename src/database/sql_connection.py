@@ -272,6 +272,60 @@ class SQLConnection(metaclass=Singleton):
         except:
             return False
 
+    def get_internal_father_id(self, id: str) -> str:
+        """
+        Retrieves the father_id of an internal container.
+
+        Args:
+            id (str): The id of the internal container.
+
+        Returns:
+            str: The father_id of the internal container, or an empty string if not found.
+        """
+        cursor = self._execute('''
+            SELECT father_id
+            FROM local_instances
+            WHERE id = ?
+        ''', (id,))
+        result = cursor.fetchone()
+        return result[0] if result else ""
+
+    def get_internal_instance(self, id: str) -> Optional[str]:
+        """
+        Retrieves the serialized_instance of an internal container.
+
+        Args:
+            id (str): The id of the internal container.
+
+        Returns:
+            str: The serialized_instance of the internal container, or None if not found.
+        """
+        cursor = self._execute('''
+            SELECT serialized_instance
+            FROM local_instances
+            WHERE id = ?
+        ''', (id,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+    def get_internal_ip(self, id: str) -> Optional[str]:
+        """
+        Retrieves the IP address of an internal container.
+
+        Args:
+            id (str): The id of the internal container.
+
+        Returns:
+            Optional[str]: The IP address of the internal container, or None if not found.
+        """
+        cursor = self._execute('''
+            SELECT ip
+            FROM local_instances
+            WHERE id = ?
+        ''', (id,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
     def get_sys_req(self, id: str) -> dict:
         """
         Retrieves system requirements for an internal container.
@@ -383,60 +437,6 @@ class SQLConnection(metaclass=Singleton):
         self._execute('''
             DELETE FROM local_instances WHERE id = ?
         ''', (id,))
-
-    def get_internal_father_id(self, id: str) -> str:
-        """
-        Retrieves the father_id of an internal container.
-
-        Args:
-            id (str): The id of the internal container.
-
-        Returns:
-            str: The father_id of the internal container, or an empty string if not found.
-        """
-        cursor = self._execute('''
-            SELECT father_id
-            FROM local_instances
-            WHERE id = ?
-        ''', (id,))
-        result = cursor.fetchone()
-        return result[0] if result else ""
-
-    def get_internal_instance(self, id: str) -> Optional[str]:
-        """
-        Retrieves the serialized_instance of an internal container.
-
-        Args:
-            id (str): The id of the internal container.
-
-        Returns:
-            str: The serialized_instance of the internal container, or None if not found.
-        """
-        cursor = self._execute('''
-            SELECT serialized_instance
-            FROM local_instances
-            WHERE id = ?
-        ''', (id,))
-        result = cursor.fetchone()
-        return result[0] if result else None
-
-    def get_internal_ip(self, id: str) -> Optional[str]:
-        """
-        Retrieves the IP address of an internal container.
-
-        Args:
-            id (str): The id of the internal container.
-
-        Returns:
-            Optional[str]: The IP address of the internal container, or None if not found.
-        """
-        cursor = self._execute('''
-            SELECT ip
-            FROM local_instances
-            WHERE id = ?
-        ''', (id,))
-        result = cursor.fetchone()
-        return result[0] if result else None
 
     # Peer Methods
 

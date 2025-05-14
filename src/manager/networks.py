@@ -1,9 +1,11 @@
 import socket, os, json
 from typing import List
 from protos import celaut_pb2 as celaut
+from src.database.sql_connection import SQLConnection
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
+sc = SQLConnection()
 
 def resolve_domain(domain: str) -> List[celaut.Instance.Uri]:
     """
@@ -83,10 +85,13 @@ def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
 
 def filter_networks_with_ancestors(networks: List[celaut.ConfigurationFile.NetworkResolution], father_id: str) -> List[celaut.ConfigurationFile.NetworkResolution]:
     filtered = []
-
-    # TODO.
+    service_id = sc.get_service_id_by_container_id(id=father_id)
 
     for network in networks:
         filtered.append(network)
+
+    ancestor_id = sc.get_internal_father_id(id=father_id)
+    if sc.internal_instance_exists(id=ancestor_id):
+        filtered = filter_networks_with_ancestors(networks=filtered, father_id=ancestor_id)
 
     return filtered
