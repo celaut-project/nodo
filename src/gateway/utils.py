@@ -74,6 +74,12 @@ def save_service(
             return False
         finally:
             if metadata:
+                integrity_list = [h.type for h in metadata.hashtag.hash]
+                if len(integrity_list) != len(set(integrity_list)):
+                    log.LOGGER(f"There is an issue with the metadata before save it for service {service_hash}.")
+                    for hash in list(metadata.hashtag.hash):
+                        log.LOGGER(f"-  {hash.type.hex()}: {hash.value.hex()}")
+                    raise Exception("Metadata hash integrity error before save it.")
                 try:
                     with open(METADATA_REGISTRY + service_hash, "wb") as f:
                         f.write(metadata.SerializeToString())
