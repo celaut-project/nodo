@@ -85,12 +85,20 @@ class AbstractInputServiceIterable:
                 self.configuration = r
 
             case celaut.Metadata.HashTag.Hash:
+                
+                print(f"Hash recibida: {r.type.hex()}  :   {r.value.hex()}\n")
+
                 self.hashes.add(Hash(r))
                 if not self.service_hash:
                     self.service_hash, self.service_saved = find_service_hash(_hash=r)
 
             case celaut.Metadata:
                 self.metadata = r
+
+                print("Metadatos recibidos.")
+                for hash in list(self.metadata.hashtag.hash):
+                        print(f"-  {hash.type.hex()}: {hash.value.hex()}")
+
                 for _hash in self.metadata.hashtag.hash:  # TODO nos podríamos ahorrar esta iteración
                     if not self.service_hash:
                         self.service_hash, self.service_saved = find_service_hash(_hash=_hash)
