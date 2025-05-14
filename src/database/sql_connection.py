@@ -307,6 +307,27 @@ class SQLConnection(metaclass=Singleton):
         if row:
             return int(row['gas'])
         raise Exception(f'Internal service {id}')
+    
+    def get_service_id_by_container_id(self, id: str) -> str:
+        """
+        Retrieves the service ID for a given container ID.
+
+        Args:
+            id (str): The container ID.
+
+        Returns:
+            str: The associated service ID.
+
+        Raises:
+            Exception: If no service is found for the given container ID.
+        """
+        result = self._execute('''
+            SELECT service_id FROM local_instances WHERE id = ?
+        ''', (id,))
+        row = result.fetchone()
+        if row:
+            return row['service_id']
+        raise Exception(f'No service found for container ID {id}')
 
     def get_all_internal_containers_ids(self) -> List[str]:
         """
