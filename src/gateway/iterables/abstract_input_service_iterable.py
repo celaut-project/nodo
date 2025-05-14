@@ -137,7 +137,7 @@ class AbstractInputServiceIterable:
                     log.LOGGER(f"There is an issue with the metadata received for the service {self.service_hash} (contains the individual hashes sent too).")
                     for hash in list(self.metadata.hashtag.hash):
                         log.LOGGER(f"-  {hash.type.hex()}: {hash.value.hex()}")
-                    raise Exception("Metadata hash integrity error before save it.")
+                    raise Exception("Metadata hash integrity error after receive it.")
                 
                 # Service specification format could be great to be checked.
 
@@ -149,6 +149,14 @@ class AbstractInputServiceIterable:
                 if not self.service_hash:
                     # TODO  compute the hash of r.dir.
                     raise Exception("No service hash to allow service to be stored.")
+
+                if self.metadata:
+                    integrity_list = [h.type for h in self.metadata.hashtag.hash]
+                    if len(integrity_list) != len(set(integrity_list)):
+                        log.LOGGER(f"There is an issue with the metadata before save the service {self.service_hash} (contains the individual hashes sent too).")
+                        for hash in list(self.metadata.hashtag.hash):
+                            log.LOGGER(f"-  {hash.type.hex()}: {hash.value.hex()}")
+                        raise Exception("Metadata hash integrity error before save it.")
 
                 self.service_saved = save_service(
                     metadata=self.metadata,
