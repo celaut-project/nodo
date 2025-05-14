@@ -128,6 +128,9 @@ class AbstractInputServiceIterable:
                 self.hashes: Set[Hash] = self.hashes.union({
                     Hash(_e) for _e in self.metadata.hashtag.hash
                 })
+
+                print(f"Hashes after union, len: {len(self.hashes)} {len(set([h.type for h in self.hashes]))}")   # TODO aux log
+
                 self.metadata.hashtag.ClearField("hash")
                 self.metadata.hashtag.hash.extend([_e.proto() for _e in self.hashes])
                 self.hashes.clear()
