@@ -121,8 +121,8 @@ class AbstractInputServiceIterable:
                         self.service_hash, self.service_saved = find_service_hash(_hash=_hash)
                     # TODO se podría realizar junto con la iteració siguiente:
 
-                print(f"Metadata len: {len(self.metadata.hashtag.hash)}")  # TODO aux log
-                print(f"Hashes len: {len(self.hashes)}")   # TODO aux log
+                print(f"Metadata len: {len(self.metadata.hashtag.hash)} {len(set([h.type for h in self.metadata.hashtag.hash]))}")  # TODO aux log
+                print(f"Hashes len: {len(self.hashes)} {len(set([h.type for h in self.hashes]))}")   # TODO aux log
 
                 # Combine the hash list with the metadata hashes.
                 self.hashes: Set[Hash] = self.hashes.union({
