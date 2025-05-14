@@ -96,10 +96,8 @@ def filter_networks_with_ancestors(networks: List[celaut.Service.Network], fathe
     if not spec:
         return networks
     
-    spec.networks
-
     for network in networks:
-        for spec_net in spec.networks:
+        for spec_net in spec.network:
             if match_networks(network, spec_net):
                 filtered.append(network)
                 break  # Exit the inner loop
