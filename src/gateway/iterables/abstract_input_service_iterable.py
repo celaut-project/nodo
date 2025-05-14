@@ -121,6 +121,9 @@ class AbstractInputServiceIterable:
                         self.service_hash, self.service_saved = find_service_hash(_hash=_hash)
                     # TODO se podría realizar junto con la iteració siguiente:
 
+                print(f"Metadata len: {len(self.metadata.hashtag.hash)}")  # TODO aux log
+                print(f"Hashes len: {len(self.hashes)}")   # TODO aux log
+
                 # Combine the hash list with the metadata hashes.
                 self.hashes: Set[Hash] = self.hashes.union({
                     Hash(_e) for _e in self.metadata.hashtag.hash
@@ -128,6 +131,13 @@ class AbstractInputServiceIterable:
                 self.metadata.hashtag.ClearField("hash")
                 self.metadata.hashtag.hash.extend([_e.proto() for _e in self.hashes])
                 self.hashes.clear()
+
+                integrity_list = [h.type for h in self.metadata.hashtag.hash]
+                if len(integrity_list) != len(set(integrity_list)):
+                    log.LOGGER(f"There is an issue with the metadata received for the service {self.service_hash} (contains the individual hashes sent too).")
+                    for hash in list(self.metadata.hashtag.hash):
+                        log.LOGGER(f"-  {hash.type.hex()}: {hash.value.hex()}")
+                    raise Exception("Metadata hash integrity error before save it.")
                 
                 # Service specification format could be great to be checked.
 
