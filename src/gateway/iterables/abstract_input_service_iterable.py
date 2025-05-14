@@ -23,7 +23,7 @@ class BreakIteration(Exception):
     pass
 
 
-def find_service_hash(_hash: gateway_pb2.celaut__pb2.Metadata.HashTag.Hash) \
+def find_service_hash(_hash: celaut.Metadata.HashTag.Hash) \
         -> Tuple[Optional[str], bool]:
     if SHA3_256_ID == _hash.type:
         value = _hash.value.hex()
@@ -33,32 +33,8 @@ def find_service_hash(_hash: gateway_pb2.celaut__pb2.Metadata.HashTag.Hash) \
         return (None, False)
 
 
-def combine_metadata(service_hash: str, request_metadata: Optional[celaut.Metadata]) -> celaut.Metadata:
-    disk_metadata = celaut.Metadata()
-    with open(METADATA_REGISTRY + service_hash, 'rb') as f:
-        disk_metadata.ParseFromString(f.read())
-
-    if request_metadata:
-        combined_metadata = celaut.Metadata()
-        combined_metadata.MergeFrom(disk_metadata)
-        combined_metadata.MergeFrom(request_metadata)
-        metadata = combined_metadata
-    else:
-        metadata = disk_metadata
-
-    # Validate hash integrity.
-    integrity_list = [h.type for h in metadata.hashtag.hash]
-    if len(integrity_list) != len(set(integrity_list)):
-        log.LOGGER(f"There is an issue with the metadata during the transfer from memory to disk for service {service_hash}.")
-        for hash in list(metadata.hashtag.hash):
-            log.LOGGER(f"-  {hash.type.hex()}: {hash.value.hex()}")
-        raise Exception("Metadata hash integrity error.")
-
-    return metadata
-
-
 class Hash:
-    def __init__(self, _hash: gateway_pb2.celaut__pb2.Metadata.HashTag.Hash):
+    def __init__(self, _hash: celaut.Metadata.HashTag.Hash):
         self.type = _hash.type
         self.value = _hash.value
 
@@ -68,8 +44,8 @@ class Hash:
     def __eq__(self, other):
         return (self.type, self.value) == (other.type, other.value)
 
-    def proto(self) -> gateway_pb2.celaut__pb2.Metadata.HashTag.Hash:
-        return gateway_pb2.celaut__pb2.Metadata.HashTag.Hash(
+    def proto(self) -> celaut.Metadata.HashTag.Hash:
+        return celaut.Metadata.HashTag.Hash(
             type=self.type,
             value=self.value
         )
@@ -86,7 +62,7 @@ class AbstractInputServiceIterable:
     generated = False
 
     hashes: Set[Hash] = set()
-    metadata: Optional[gateway_pb2.celaut__pb2.Metadata] = None
+    metadata: Optional[celaut.Metadata] = None
 
     def __init__(self, request_iterator, context):
         self.parser_iterator = bee.parse_from_buffer(
@@ -115,25 +91,16 @@ class AbstractInputServiceIterable:
                     self.service_hash, self.service_saved = find_service_hash(_hash=r)
 
             case celaut.Metadata:
-                print("\nRUN THIS.")
                 self.metadata = r
                 for _hash in self.metadata.hashtag.hash:  # TODO nos podríamos ahorrar esta iteración
                     if not self.service_hash:
                         self.service_hash, self.service_saved = find_service_hash(_hash=_hash)
                     # TODO se podría realizar junto con la iteració siguiente:
 
-                print(f"Metadata len: {len(self.metadata.hashtag.hash)} {len(set([h.type for h in self.metadata.hashtag.hash]))}")  # TODO aux log
-                print(f"Hashes len: {len(self.hashes)} {len(set([h.type for h in self.hashes]))}")   # TODO aux log
-
                 # Combine the hash list with the metadata hashes.
                 self.hashes: Set[Hash] = self.hashes.union({
                     Hash(_e) for _e in self.metadata.hashtag.hash
                 })
-
-                print(f"Hashes after union, len: {len(self.hashes)} {len(set([h.type for h in self.hashes]))}")   # TODO aux log
-
-                for hash in list(self.hashes):
-                    print(f"-  {hash.type.hex()}: {hash.value.hex()}")
 
                 self.metadata.hashtag.ClearField("hash")
                 self.metadata.hashtag.hash.extend([_e.proto() for _e in self.hashes])
@@ -149,7 +116,7 @@ class AbstractInputServiceIterable:
                 # Service specification format could be great to be checked.
 
             case bee.Dir:
-                if r.type != gateway_pb2.celaut__pb2.Service:
+                if r.type != celaut.Service:
                     raise Exception('Incorrect service message.')
 
                 # Take it from metadata.
@@ -173,10 +140,11 @@ class AbstractInputServiceIterable:
 
         if self.service_saved and not self.generated:
             yield buffer_pb2.Buffer(signal=True)
-            self.metadata = combine_metadata(
-                service_hash=self.service_hash, 
-                request_metadata=self.metadata
-            )
+
+            if not self.metadata:
+                with open(METADATA_REGISTRY + self.service_hash, 'rb') as f:
+                    self.metadata = celaut.Metadata()
+                    self.metadata.ParseFromString(f.read())
 
             yield from self.generate()
             self.generated = True
