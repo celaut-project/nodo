@@ -130,7 +130,6 @@ class AbstractInputServiceIterable:
                 self.hashes.clear()
                 
                 # Service specification format could be great to be checked.
-                # Service reputation proofs are not needed to be stored, that's because the node doesn't have any interest on store them.
 
             case bee.Dir:
                 if r.type != gateway_pb2.celaut__pb2.Service:
@@ -150,7 +149,8 @@ class AbstractInputServiceIterable:
         if self.service_saved and not self.generated:
             yield buffer_pb2.Buffer(signal=True)
             self.metadata = combine_metadata(
-                service_hash=self.service_hash, request_metadata=self.metadata
+                service_hash=self.service_hash, 
+                request_metadata=self.metadata
             )
 
             yield from self.generate()
