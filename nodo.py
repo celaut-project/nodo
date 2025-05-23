@@ -388,7 +388,30 @@ if __name__ == '__main__':
 
             case 'pack':
                 from src.commands.packer.zip_with_dockerfile.pack import pack
-                pack(directory=sys.argv[2])
+
+                import os
+                import sys
+
+                # Get the original directory where the command was executed
+                original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
+
+                # Get the path provided by the user
+                user_path = sys.argv[2]
+
+                # Determine if the path is absolute or relative
+                if os.path.isabs(user_path):
+                    # If it's absolute, use it directly
+                    absolute_path = user_path
+                else:
+                    # If it's relative, combine it with the original directory
+                    absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+
+                # Check if the directory exists
+                if not os.path.exists(absolute_path):
+                    print(f"Error: The directory {absolute_path} does not exist")
+                    sys.exit(1)
+
+                pack(directory=absolute_path)
 
             case "tui":
                 check_rust_installation()
