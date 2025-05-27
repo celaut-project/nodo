@@ -13,7 +13,7 @@ env_manager = EnvManager()
 
 CACHE = env_manager.get_env("CACHE")
 
-def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysresources,  network_resolution: List[celaut.ConfigurationFile.NetworkResolution]) -> celaut.ConfigurationFile:
+def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysresources,  network_resolution: List[celaut.ConfigurationFile.NetworkResolution]=[]) -> celaut.ConfigurationFile:
 
     __config__ = celaut.ConfigurationFile()
 
