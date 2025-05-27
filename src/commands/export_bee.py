@@ -67,7 +67,7 @@ def export_bee(service: str, path: str):
         output_file = write_to_file(
             path=path,
             file_name=file_name,
-            extension="celaut",
+            extension="celaut.bee",
             input=__generator(service=service_id), 
             indices={
                 1: celaut_pb2.Metadata,
