@@ -44,13 +44,15 @@ def export_raw(service: str, path: str):
     file_name = service if service != service_id else service_id[:6]
     file_name = file_name.replace("-", "_")  # Replace hyphens with underscores
     
+    output_file = f"{path}/{file_name}.celaut"
+
     try:
         # Write the service data to the output file
-        with open(f"{path}/{file_name}.celaut", "wb+") as file:
+        with open(output_file, "wb+") as file:
             for chunk in read_from_registry(filename=os.path.join(REGISTRY, service_id)):
                 file.write(chunk.chunk)
 
-        print
+        print(f"Export completed: {output_file}")
     
     except Exception as e:
         print(f"Error exporting service {service[:6]}: {e}")
