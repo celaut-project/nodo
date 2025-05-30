@@ -205,8 +205,8 @@ if __name__ == '__main__':
                 os.system(f"tail -f {MAIN_DIR}/storage/app.log")
 
             case "export":
-                
-                if len(sys.argv) > 3 and sys.argv[3] == "--raw":
+
+                if len(sys.argv) > 4 and sys.argv[4] == "--raw":
 
                     from src.commands.export_raw import export_raw
                     import os
