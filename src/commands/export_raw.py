@@ -46,9 +46,11 @@ def export_raw(service: str, path: str):
     
     try:
         # Write the service data to the output file
-        with open(f"{file_name}.celaut", "wb+") as file:
+        with open(f"{path}/{file_name}.celaut", "wb+") as file:
             for chunk in read_from_registry(filename=os.path.join(REGISTRY, service_id)):
                 file.write(chunk.chunk)
+
+        print
     
     except Exception as e:
         print(f"Error exporting service {service[:6]}: {e}")
