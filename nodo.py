@@ -205,32 +205,9 @@ if __name__ == '__main__':
                 os.system(f"tail -f {MAIN_DIR}/storage/app.log")
 
             case "export":
+                
                 if len(sys.argv) > 3 and sys.argv[3] == "--raw":
-                    from src.commands.export_bee import export_bee
-                    import os
-                    import sys
 
-                    # Get the original directory where the command was executed
-                    original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
-
-                    # Get the path provided by the user
-                    user_path = sys.argv[3]
-
-                    # Determine if the path is absolute or relative
-                    if os.path.isabs(user_path):
-                        # If it's absolute, use it directly
-                        absolute_path = user_path
-                    else:
-                        # If it's relative, combine it with the original directory
-                        absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
-
-                    # Create the directory structure if it doesn't exist
-                    os.makedirs(os.path.dirname(absolute_path), exist_ok=True)
-
-                    # Call the export_bee function
-                    export_bee(service=sys.argv[2], path=absolute_path)
-
-                else:
                     from src.commands.export_raw import export_raw
                     import os
                     import sys
@@ -254,6 +231,31 @@ if __name__ == '__main__':
 
                     # Call the export_raw function
                     export_raw(service=sys.argv[2], path=absolute_path)
+                
+                else:
+                    from src.commands.export_bee import export_bee
+                    import os
+                    import sys
+
+                    # Get the original directory where the command was executed
+                    original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
+
+                    # Get the path provided by the user
+                    user_path = sys.argv[3]
+
+                    # Determine if the path is absolute or relative
+                    if os.path.isabs(user_path):
+                        # If it's absolute, use it directly
+                        absolute_path = user_path
+                    else:
+                        # If it's relative, combine it with the original directory
+                        absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+
+                    # Create the directory structure if it doesn't exist
+                    os.makedirs(os.path.dirname(absolute_path), exist_ok=True)
+
+                    # Call the export_bee function
+                    export_bee(service=sys.argv[2], path=absolute_path)
 
             case "import":
                 from src.commands.import_bee import import_bee
