@@ -7,7 +7,7 @@ from bee_rpc import client as bee
 from src.utils.env import EnvManager
 
 from protos import gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_bee import StartService_input_indices
+from protos.gateway_bee import StartService_input_indices
 from src.manager.manager import get_client_id_on_other_peer
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection

@@ -5,7 +5,7 @@ from bee_rpc import client as bee
 
 import protos.celaut_pb2 as celaut
 from protos import gateway_pb2, gateway_pb2_grpc
-from protos.gateway_pb2_bee import StartService_input_indices
+from protos.gateway_bee import StartService_input_indices
 from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
 from src.virtualizers.docker import build
 from src.manager.manager import get_client_id_on_other_peer

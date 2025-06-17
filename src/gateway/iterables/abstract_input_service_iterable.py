@@ -5,7 +5,7 @@ from bee_rpc import client as bee, buffer_pb2
 
 from protos import celaut_pb2 as celaut
 from protos import gateway_pb2
-from protos.gateway_pb2_bee import StartService_input_indices, \
+from protos.gateway_bee import StartService_input_indices, \
     StartService_input_message_mode
 from src.gateway.utils import save_service
 from src.utils import logger as log

@@ -7,7 +7,7 @@ import os, subprocess
 import src.manager.resources as resources
 from bee_rpc import client as grpcbb
 from bee_rpc import buffer_pb2, block_builder
-from protos import celaut_pb2 as celaut, pack_pb2, gateway_pb2_bee
+from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.env import EnvManager, SHA3_256_ID, DOCKER_COMMAND, PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
@@ -330,7 +330,7 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
                     message=error_msg
                 )
             ],
-            indices=gateway_pb2_bee.PackOutput_indices
+            indices=gateway_bee.PackOutput_indices
         )
         
     else:
@@ -343,7 +343,7 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
                     grpcbb.Dir(dir=service, _type=pack_pb2.Service)
                     if type(service) is str else service
                 ],
-                indices=gateway_pb2_bee.PackOutput_indices
+                indices=gateway_bee.PackOutput_indices
         )
 
     # shutil.rmtree(service_with_meta.name)
