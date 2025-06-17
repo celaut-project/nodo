@@ -2,7 +2,7 @@ from typing import Generator
 from bee_rpc import client as bee, buffer_pb2
 
 from protos import celaut_pb2
-from protos.gateway_pb2_bee import StartService_input_indices
+from protos.gateway_bee import StartService_input_indices
 from src.gateway.iterables.abstract_input_service_iterable import find_service_hash
 from src.virtualizers.docker import build
 from src.utils.logger import LOGGER as logger
