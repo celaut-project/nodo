@@ -2,11 +2,13 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-from bee_rpc import buffer_pb2 as buffer__pb2
+import buffer_pb2 as buffer__pb2
 
 
 class GatewayStub(object):
-    """GRPC.
+    """-----------------------
+    GATEWAY SERVICE DEFINITION
+    -----------------------
 
     """
 
@@ -17,84 +19,86 @@ class GatewayStub(object):
             channel: A grpc.Channel.
         """
         self.StartService = channel.stream_stream(
-                '/gateway.Gateway/StartService',
+                '/celaut.Gateway/StartService',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.StopService = channel.stream_stream(
-                '/gateway.Gateway/StopService',
+                '/celaut.Gateway/StopService',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.ModifyGasDeposit = channel.stream_stream(
-                '/gateway.Gateway/ModifyGasDeposit',
+                '/celaut.Gateway/ModifyGasDeposit',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.GetPeerInfo = channel.stream_stream(
-                '/gateway.Gateway/GetPeerInfo',
+                '/celaut.Gateway/GetPeerInfo',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.IntroducePeer = channel.stream_stream(
-                '/gateway.Gateway/IntroducePeer',
+                '/celaut.Gateway/IntroducePeer',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.GenerateClient = channel.stream_stream(
-                '/gateway.Gateway/GenerateClient',
+                '/celaut.Gateway/GenerateClient',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.GenerateDepositToken = channel.stream_stream(
-                '/gateway.Gateway/GenerateDepositToken',
+                '/celaut.Gateway/GenerateDepositToken',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.Payable = channel.stream_stream(
-                '/gateway.Gateway/Payable',
+                '/celaut.Gateway/Payable',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.SignPublicKey = channel.stream_stream(
-                '/gateway.Gateway/SignPublicKey',
+                '/celaut.Gateway/SignPublicKey',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.ModifyServiceSystemResources = channel.stream_stream(
-                '/gateway.Gateway/ModifyServiceSystemResources',
+                '/celaut.Gateway/ModifyServiceSystemResources',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.Pack = channel.stream_stream(
-                '/gateway.Gateway/Pack',
+                '/celaut.Gateway/Pack',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.GetServiceEstimatedCost = channel.stream_stream(
-                '/gateway.Gateway/GetServiceEstimatedCost',
+                '/celaut.Gateway/GetServiceEstimatedCost',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.GetService = channel.stream_stream(
-                '/gateway.Gateway/GetService',
+                '/celaut.Gateway/GetService',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.GetMetrics = channel.stream_stream(
-                '/gateway.Gateway/GetMetrics',
+                '/celaut.Gateway/GetMetrics',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
         self.ServiceTunnel = channel.stream_stream(
-                '/gateway.Gateway/ServiceTunnel',
+                '/celaut.Gateway/ServiceTunnel',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
 
 
 class GatewayServicer(object):
-    """GRPC.
+    """-----------------------
+    GATEWAY SERVICE DEFINITION
+    -----------------------
 
     """
 
@@ -268,13 +272,15 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'gateway.Gateway', rpc_method_handlers)
+            'celaut.Gateway', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
 
 
  # This class is part of an EXPERIMENTAL API.
 class Gateway(object):
-    """GRPC.
+    """-----------------------
+    GATEWAY SERVICE DEFINITION
+    -----------------------
 
     """
 
@@ -289,7 +295,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/StartService',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/StartService',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -306,7 +312,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/StopService',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/StopService',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -323,7 +329,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/ModifyGasDeposit',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/ModifyGasDeposit',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -340,7 +346,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GetPeerInfo',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetPeerInfo',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -357,7 +363,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/IntroducePeer',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/IntroducePeer',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -374,7 +380,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GenerateClient',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GenerateClient',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -391,7 +397,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GenerateDepositToken',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GenerateDepositToken',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -408,7 +414,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/Payable',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/Payable',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -425,7 +431,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/SignPublicKey',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/SignPublicKey',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -442,7 +448,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/ModifyServiceSystemResources',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/ModifyServiceSystemResources',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -459,7 +465,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/Pack',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/Pack',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -476,7 +482,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GetServiceEstimatedCost',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetServiceEstimatedCost',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -493,7 +499,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GetService',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetService',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -510,7 +516,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/GetMetrics',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetMetrics',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -527,7 +533,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/gateway.Gateway/ServiceTunnel',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/ServiceTunnel',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
