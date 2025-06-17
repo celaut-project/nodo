@@ -12,16 +12,16 @@ env_manager = EnvManager()
 MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
 
 ClauseResource = celaut.CombinationResources.Clause
-#  TODO make from protos.celaut_pb2.CombinationResource.Clause as ClauseResource
+#  TODO make from protos.celaut.CombinationResource.Clause as ClauseResource
 
 
 def configuration_balancer(
         clauses: Dict[int, ClauseResource],
         metadata: celaut.Metadata,
         initial_gas_amount: int
-) -> Tuple[str, celaut_pb2.EstimatedCost]:
+) -> Tuple[str, celaut.EstimatedCost]:
     
-    posible_clauses: Dict[str, celaut_pb2.EstimatedCost] = {}
+    posible_clauses: Dict[str, celaut.EstimatedCost] = {}
 
     # TODO PARTE DE LOS CALCULOS INTERNOS DEL COMPUTO DE COSTES SON LOS MISMOS (EL COSTE DE CONSTRUCCIÓN DEL SERVICIO, ETC ...)
 
@@ -40,7 +40,7 @@ def configuration_balancer(
                 )
 
         # Calculate estimated cost for local execution.
-        posible_clauses['local'] = celaut_pb2.EstimatedCost(
+        posible_clauses['local'] = celaut.EstimatedCost(
             
             # Initial cost.
             cost=to_gas_amount(initial_gas),
