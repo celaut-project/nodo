@@ -7,7 +7,7 @@ import netifaces as ni
 from src.payment_system.contracts.ergo.interface import LEDGER as ERGO_LEDGER
 from src.reputation_system.fetch import local_proofs
 from src.payment_system.ledgers import local_payment_methods
-from protos import celaut_pb2 as celaut, gateway_pb2
+from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
 from src.utils.env import EnvManager
 from src.utils.utils import to_gas_amount
@@ -20,7 +20,7 @@ METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 ERGO_GAS_COST = int(env_manager.get_env("ERGO_GAS_COST"))
 
 
-def generate_node_peer_info(network: str) -> gateway_pb2.Peer:
+def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
     log.LOGGER(f'Generating gateway instance for the network {network}')
     instance = celaut.Instance()
 
@@ -52,7 +52,7 @@ def generate_node_peer_info(network: str) -> gateway_pb2.Peer:
         [e for e in local_payment_methods()]
     )
 
-    return gateway_pb2.Peer(
+    return celaut_pb2.Peer(
         reputation_proofs=list(local_proofs()),
         instance=instance
     )

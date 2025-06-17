@@ -24,7 +24,7 @@ class StartServiceIterable(AbstractInputServiceIterable):
         log.LOGGER('Starting service by ' + str(self.context.peer()) + ' ...')
 
     def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
-        if CONFIGURATION_REQUIRED and not self.configuration.config:
+        if CONFIGURATION_REQUIRED and not self.configuration:
             raise Exception("Client or configuration ")
         
         service = read_service_from_disk(service_hash=self.service_hash)

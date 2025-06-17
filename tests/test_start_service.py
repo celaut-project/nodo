@@ -6,7 +6,7 @@ from bee_rpc.client import Dir, client_grpc
 from src.utils.logger import LOGGER
 
 from tests.main import *
-from protos import gateway_pb2, celaut_pb2, gateway_pb2_grpc, gateway_bee
+from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc, gateway_bee
 from src.utils.env import EnvManager
 
 env_manager = EnvManager()
@@ -25,12 +25,12 @@ def test_start_service():
 
     def service_extended():
         # Send partition model.
-        yield gateway_pb2.Client(client_id='dev')
-        yield gateway_pb2.Configuration(
+        yield celaut_pb2.Client(client_id='dev')
+        yield celaut_pb2.Configuration(
             config=celaut_pb2.Configuration(),
-            resources=gateway_pb2.CombinationResources(
+            resources=celaut_pb2.CombinationResources(
                 clause={
-                    1: gateway_pb2.CombinationResources.Clause(
+                    1: celaut_pb2.CombinationResources.Clause(
                         cost_weight=1,
                         min_sysreq=celaut_pb2.Sysresources(
                             mem_limit=50 * pow(10, 6)
@@ -47,14 +47,14 @@ def test_start_service():
         yield Dir(dir=REGISTRY + SERVICE, _type=celaut_pb2.Service)
 
 
-    g_stub = gateway_pb2_grpc.GatewayStub(
+    g_stub = celaut_pb2_grpc.GatewayStub(
         grpc.insecure_channel(GATEWAY),
     )
 
     service = next(client_grpc(
         method=g_stub.StartService,
         input=service_extended(),
-        indices_parser=gateway_pb2.Instance,
+        indices_parser=celaut_pb2.Instance,
         partitions_message_mode_parser=True,
         indices_serializer=gateway_bee.StartService_input_indices
     ))

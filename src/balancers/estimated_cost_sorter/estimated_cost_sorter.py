@@ -1,7 +1,7 @@
 from math import log
 from typing import Dict, Tuple, Generator
 from statistics import mean
-from protos import gateway_pb2
+from protos import celaut_pb2
 from src.reputation_system.interface import compute_reputation
 from src.utils.cost_functions.general_cost_functions import normalized_maintain_cost as nmc
 from src.utils.cost_functions.variance_cost_normalization import variance_cost_normalization as vcnorm
@@ -20,13 +20,13 @@ ERGO_GAS_COST = env_manager.get_env("ERGO_GAS_COST")
 sq = SQLConnection()
 
 def estimated_cost_sorter(
-        estimated_costs: Dict[str, gateway_pb2.EstimatedCost],
+        estimated_costs: Dict[str, celaut_pb2.EstimatedCost],
         weight_clauses: Dict[int, int]
-) -> Generator[Tuple[str, gateway_pb2.EstimatedCost], None, None]:
+) -> Generator[Tuple[str, celaut_pb2.EstimatedCost], None, None]:
     
     total_reputation: float = sq.total_peer_reputation()
     
-    def __compute_score(peer_id: str, estimated_cost: gateway_pb2.EstimatedCost) -> float:
+    def __compute_score(peer_id: str, estimated_cost: celaut_pb2.EstimatedCost) -> float:
         priority: int = max(1, weight_clauses[estimated_cost.comb_resource_selected])  # If the combinational resource clause don't have a cost_weight, it's like equal to 1 cost weight.
 
         gas_cost: int = sum([

@@ -12,7 +12,7 @@ from src.payment_system.ledger_balancer import ledger_balancer
 from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_INTERFACES, MANAGE_INTERFACES, PAYMENT_PROCESS_VALIDATORS, DEMOS, CHECK_SENDER_BALANCE
 from src.payment_system.contracts.ergo import interface as ergo
 
-from protos import gateway_pb2_grpc, gateway_pb2
+from protos import celaut_pb2_grpc, celaut_pb2
 
 from src.reputation_system.interface import update_container_reputation, update_peer_reputation
 
@@ -51,7 +51,7 @@ def __get_grpc_stub(peer_id):
     uri = next(generate_uris_by_peer_id(peer_id=peer_id), None)
     if uri is None:
         return None
-    return gateway_pb2_grpc.GatewayStub(grpc.insecure_channel(uri))
+    return celaut_pb2_grpc.GatewayStub(grpc.insecure_channel(uri))
 
 
 def __obtain_deposit_token(peer_id) -> Optional[str]:
@@ -72,8 +72,8 @@ def __obtain_deposit_token(peer_id) -> Optional[str]:
         return next(bee.client_grpc(
             method=grpc_stub.GenerateDepositToken,
             partitions_message_mode_parser=True,
-            input=gateway_pb2.Client(client_id=client_id),
-            indices_parser=gateway_pb2.TokenMessage
+            input=celaut_pb2.Client(client_id=client_id),
+            indices_parser=celaut_pb2.TokenMessage
         ), None).token
     except Exception as e:
         _l.LOGGER(f"Error generating deposit token: {str(e)}")
@@ -173,7 +173,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 
 
 # Helper function for payment communication retries
-def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: str, contract_ledger: gateway_pb2.celaut__pb2.ContractLedger) -> bool:
+def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: str, contract_ledger: celaut_pb2.ContractLedger) -> bool:
     attempt = 0
     while attempt < COMMUNICATION_ATTEMPTS:
         try:
@@ -185,7 +185,7 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
             next(bee.client_grpc(
                 method=grpc_stub.Payable,
                 partitions_message_mode_parser=True,
-                input=gateway_pb2.Payment(
+                input=celaut_pb2.Payment(
                     gas_amount=to_gas_amount(amount),
                     deposit_token=deposit_token,
                     contract_ledger=contract_ledger,

@@ -1,7 +1,7 @@
 import requests
 from protos import celaut_pb2 as celaut
 
-from protos import gateway_pb2_grpc, gateway_pb2
+from protos import celaut_pb2_grpc, celaut_pb2
 from bee_rpc.client import client_grpc
 import grpc
 import random
@@ -92,12 +92,12 @@ def validate_contract_ledger(contract_ledger: celaut.ContractLedger, peer_id: st
         
         # Request signature of the message
         sign_response = next(client_grpc(
-            method=gateway_pb2_grpc.GatewayStub(
+            method=celaut_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(f"{ip}:{str(port)}")
             ).SignPublicKey,
-            indices_parser=gateway_pb2.SignResponse,
+            indices_parser=celaut_pb2.SignResponse,
             partitions_message_mode_parser=True,
-            input=gateway_pb2.SignRequest(
+            input=celaut_pb2.SignRequest(
                 public_key=public_key,
                 to_sign=message
             )

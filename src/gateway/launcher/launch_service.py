@@ -1,6 +1,6 @@
 from typing import Optional
 
-from protos import celaut_pb2 as celaut, gateway_pb2
+from protos import celaut_pb2 as celaut, celaut_pb2
 from src.balancers.execution_balancer.execution_balancer import execution_balancer
 from src.gateway.launcher.delegate_execution.delegate_execution import delegate_execution
 from src.gateway.launcher.local_execution.local_execution import local_execution
@@ -20,9 +20,9 @@ def launch_service(
         father_ip: str,
         father_id: Optional[str] = None,
         service_id: str = None,
-        configuration: Optional[gateway_pb2.Configuration] = None,
+        configuration: Optional[celaut_pb2.Configuration] = None,
         recursion_guard_token: str = None,
-) -> gateway_pb2.Instance:
+) -> celaut_pb2.Instance:
 
     with RecursionGuard(
             token=recursion_guard_token,
@@ -41,7 +41,7 @@ def launch_service(
 
         # Check configuration
         if not configuration:
-            configuration = gateway_pb2.Configuration(config=gateway_pb2.celaut__pb2.Configuration())
+            configuration = celaut_pb2.Configuration(config=celaut_pb2.Configuration())
 
         if not configuration.HasField('initial_gas_amount') or not configuration.initial_gas_amount:
             configuration.initial_gas_amount.CopyFrom(to_gas_amount(default_initial_cost()))
@@ -85,7 +85,7 @@ def launch_service(
                     if estimated_cost.comb_resource_selected not in configuration.resources.clause:
                         raise Exception("Resource configuration clauses are misconfigured.")
                     
-                    resources_clause: gateway_pb2.CombinationResources.Clause = configuration.resources.clause[estimated_cost.comb_resource_selected]
+                    resources_clause: celaut_pb2.CombinationResources.Clause = configuration.resources.clause[estimated_cost.comb_resource_selected]
 
                     instance = local_execution(
                         config=configuration,

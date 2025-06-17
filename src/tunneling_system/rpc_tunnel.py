@@ -3,7 +3,7 @@ from typing import Generator, Optional
 
 from src.database.sql_connection import SQLConnection
 from src.utils.logger import LOGGER as logger
-from protos.gateway_pb2 import TokenMessage
+from protos.celaut_pb2 import TokenMessage
 
 sc = SQLConnection()
 

@@ -2,7 +2,7 @@ from typing import Optional, Generator
 
 from bee_rpc import client as bee, buffer_pb2
 
-from protos import gateway_pb2
+from protos import celaut_pb2
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.virtualizers.docker import build
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
@@ -32,7 +32,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
             try:
 
                 if not self.configuration:
-                    self.configuration = gateway_pb2.Configuration(config=gateway_pb2.celaut__pb2.Configuration())
+                    self.configuration = celaut_pb2.Configuration(config=celaut_pb2.Configuration())
 
                 if not self.configuration.HasField('initial_gas_amount') or not self.configuration.initial_gas_amount:
                     self.configuration.initial_gas_amount.CopyFrom(to_gas_amount(default_initial_cost(
@@ -48,7 +48,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                         metadata=self.metadata,
                         config=self.configuration
                     ),
-                    indices=gateway_pb2.EstimatedCost
+                    indices=celaut_pb2.EstimatedCost
                 )
             
             except build.UnsupportedArchitectureException as e:

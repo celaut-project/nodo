@@ -13,7 +13,7 @@ from typing import Tuple, Optional, Set
 from bee_rpc.client import copy_block_if_exists
 
 import src.utils.logger as l
-from protos import celaut_pb2, gateway_pb2
+from protos import celaut_pb2, celaut_pb2
 from src.utils.env import DOCKER_COMMAND, EnvManager
 from src.utils.verify import get_service_hex_main_hash
 from src.virtualizers.docker.architecture import UnsupportedArchitectureException, get_arch_tag, check_supported_architecture
@@ -41,7 +41,7 @@ actual_building_processes: Set[str] = set()  # list of hexadecimal string sha256
 
 
 def build_container_from_definition(service: celaut_pb2.Service,
-                                    metadata: gateway_pb2.celaut__pb2.Metadata,
+                                    metadata: celaut_pb2.Metadata,
                                     service_id: str):
     # Build the container from filesystem definition.
     def write_item(b: celaut_pb2.Service.Container.Filesystem.ItemBranch, dir_element: str, symlinks_element):
@@ -162,7 +162,7 @@ def build_container_from_definition(service: celaut_pb2.Service,
 
 def build(
         service: celaut_pb2.Service,
-        metadata: gateway_pb2.celaut__pb2.Metadata,
+        metadata: celaut_pb2.Metadata,
         service_id: Optional[str] = None,
 ) -> str:
     if not service_id:

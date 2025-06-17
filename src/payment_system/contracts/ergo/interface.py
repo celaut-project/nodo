@@ -1,5 +1,5 @@
 from typing import Optional, List, Tuple
-from protos import celaut_pb2, gateway_pb2
+from protos import celaut_pb2, celaut_pb2
 import requests
 from hashlib import sha3_256
 from ergpy import appkit
@@ -136,7 +136,7 @@ def get_balances(only_sender: bool=False) -> Tuple[Tuple[str, float], Tuple[str,
 def init():
     sender_addr = str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString())
     sql = sql_connection.SQLConnection()
-    sql.add_contract(contract=gateway_pb2.celaut__pb2.ContractLedger(
+    sql.add_contract(contract=celaut_pb2.ContractLedger(
         ledger=LEDGER,
         contract_addr=sender_addr,
         contract=CONTRACT
@@ -267,7 +267,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
                 obj = response.json()
                 if obj["numConfirmations"] > 1:
                     LOGGER(f"Tx {tx_id} verified.")
-                    return gateway_pb2.celaut__pb2.ContractLedger(
+                    return celaut_pb2.ContractLedger(
                         ledger=ledger,
                         contract_addr=contract_address,
                         contract=CONTRACT

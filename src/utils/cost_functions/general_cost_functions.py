@@ -1,11 +1,11 @@
-from protos import celaut_pb2 as celaut, gateway_pb2
+from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils.cost_functions.execution_cost import execution_cost, maintain_execution_cost
 
 
 def compute_start_service_cost(
         metadata: celaut.Metadata,
         initial_gas_amount: int,
-        resource: gateway_pb2.CombinationResources.Clause
+        resource: celaut_pb2.CombinationResources.Clause
 ) -> int:
     """
     Computes the total initial cost to start a service instance.

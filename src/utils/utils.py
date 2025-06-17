@@ -8,7 +8,7 @@ from bee_rpc.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
 from bee_rpc.client import Dir
 
 from protos import celaut_pb2 as celaut
-from protos import gateway_pb2
+from protos import celaut_pb2
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.manager.resources import mem_manager
 from src.utils import logger as log
@@ -40,7 +40,7 @@ def get_grpc_uri(instance: celaut.Instance) -> celaut.Instance.Uri:
 
 
 def service_hashes(
-        hashes: typing.List[gateway_pb2.celaut__pb2.Metadata.HashTag.Hash]
+        hashes: typing.List[celaut_pb2.Metadata.HashTag.Hash]
 ) -> Generator[celaut.Metadata.HashTag.Hash, None, None]:
     for _hash in hashes:
         yield _hash
@@ -83,20 +83,20 @@ def read_metadata_from_disk(service_hash: str) -> Optional[celaut.Metadata]:
 
 def service_extended(
         metadata: celaut.Metadata,
-        config: typing.Optional[gateway_pb2.Configuration] = None,
+        config: typing.Optional[celaut_pb2.Configuration] = None,
         send_only_hashes: typing.Optional[bool] = False,
         client_id: typing.Optional[str] = None,
         recursion_guard_token: typing.Optional[str] = None
 ) -> Generator[object, None, None]:
     # 1
     if client_id:
-        yield gateway_pb2.Client(
+        yield celaut_pb2.Client(
             client_id=client_id
         )
 
     # 2
     if recursion_guard_token:
-        yield gateway_pb2.RecursionGuard(
+        yield celaut_pb2.RecursionGuard(
             token=recursion_guard_token
         )
 
@@ -196,25 +196,25 @@ def get_network_name(direction: str) -> str:
 """
 Gas Amount implementation using float and exponent.  (Currently it's using string)
 
-def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
+def to_gas_amount(gas_amount: int) -> celaut_pb2.GasAmount:
     if gas_amount is None: return None
     s: str =  "{:e}".format(gas_amount)
-    return gateway_pb2.GasAmount(
+    return celaut_pb2.GasAmount(
         gas_amount = float(s.split('e+')[0]),
         exponent = int(s.split('e+')[1])
     )
 
-def from_gas_amount(gas_amount: gateway_pb2.GasAmount) -> int:
+def from_gas_amount(gas_amount: celaut_pb2.GasAmount) -> int:
     i: int = str(gas_amount.gas_amount)[::-1].find('.')
     return int(gas_amount.gas_amount * pow(10, i) * pow(10, gas_amount.exponent-i))
 """
 
 
-def to_gas_amount(gas_amount: int) -> gateway_pb2.GasAmount:
-    return gateway_pb2.GasAmount(n=str(gas_amount))
+def to_gas_amount(gas_amount: int) -> celaut_pb2.GasAmount:
+    return celaut_pb2.GasAmount(n=str(gas_amount))
 
 
-def from_gas_amount(gas_amount: gateway_pb2.GasAmount) -> int:
+def from_gas_amount(gas_amount: celaut_pb2.GasAmount) -> int:
     return int(gas_amount.n)
 
 

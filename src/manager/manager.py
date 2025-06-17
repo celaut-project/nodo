@@ -8,7 +8,7 @@ from bee_rpc import client as bee
 from google.protobuf.json_format import MessageToJson
 
 from src.manager.resources import IOBigData
-from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc
+from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc
 from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_reputation_contract_ledger
 
 from src.database.sql_connection import SQLConnection, is_peer_available
@@ -59,7 +59,7 @@ def add_reputation_proof(contract_ledger, peer_id) -> bool:
     return sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
 
 # Insert the instance if it does not exist.
-def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
+def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
     if sc.instance_exists(peer.instance):
         return None
     
@@ -87,7 +87,7 @@ def add_peer_instance(peer: gateway_pb2.Peer) -> Optional[str]:
     log.LOGGER(f'Get instance for peer -> {peer_id}')
     return peer_id
 
-def update_peer_instance(peer: gateway_pb2.Peer, peer_id: str):
+def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str):
     log.LOGGER(f"Updating peer {peer_id}")
     # parsed_peer = json.loads(MessageToJson(peer))
     # It is assumed that protocol stack and metadata have not been modified.
@@ -255,12 +255,12 @@ def spend_gas(
         return False
 
 
-def generate_client() -> gateway_pb2.Client:
+def generate_client() -> celaut_pb2.Client:
     # No collisions expected.
     client_id = uuid4().hex
     sc.add_client(client_id=client_id, gas=FEE_TRIAL_GAS_AMOUNT, last_usage=None)
     log.LOGGER('New client created ' + client_id)
-    return gateway_pb2.Client(
+    return celaut_pb2.Client(
         client_id=client_id,
     )
 
@@ -298,12 +298,12 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
 
     log.LOGGER('Generate new client for peer ' + peer_id)
     client_msg = next(bee.client_grpc(
-        method=gateway_pb2_grpc.GatewayStub(
+        method=celaut_pb2_grpc.GatewayStub(
             grpc.insecure_channel(
                 next(generate_uris_by_peer_id(peer_id=peer_id), "")
             )
         ).GenerateClient,
-        indices_parser=gateway_pb2.Client,
+        indices_parser=celaut_pb2.Client,
         partitions_message_mode_parser=True
     ), "")
     if not client_msg:
@@ -323,9 +323,9 @@ def default_initial_cost(
         sc.get_gas_amount_by_father_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
     ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
-def default_initial_combinational_resources() -> gateway_pb2.CombinationResources:
-    return gateway_pb2.CombinationResources(clause={
-                    1: gateway_pb2.CombinationResources.Clause(
+def default_initial_combinational_resources() -> celaut_pb2.CombinationResources:
+    return celaut_pb2.CombinationResources(clause={
+                    1: celaut_pb2.CombinationResources.Clause(
                         min_sysreq=celaut_pb2.Sysresources(
                             mem_limit=7 * pow(10, 6)
                         )
@@ -338,7 +338,7 @@ def add_container(
         container: docker_lib.models.containers.Container,
         initial_gas_amount: Optional[int],
         serialized_instance: str,
-        system_requirements_range: gateway_pb2.ModifyServiceSystemResourcesInput = None
+        system_requirements_range: celaut_pb2.ModifyServiceSystemResourcesInput = None
 ) -> str:
     
     id: str = container.id
@@ -367,7 +367,7 @@ def add_container(
 
 def container_modify_system_params(
         id: str,
-        system_requeriments_range: gateway_pb2.ModifyServiceSystemResourcesInput
+        system_requeriments_range: celaut_pb2.ModifyServiceSystemResourcesInput
 ) -> bool:
     _id = id[:6]
     log.LOGGER(f'Modify params of {_id}')
@@ -412,9 +412,9 @@ def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
     return IOBigData().prevent_kill(len=sysreq.mem_limit)  # Prevent kill says that is not actually possible.
 
 
-def get_sysresources(id: str) -> gateway_pb2.ModifyServiceSystemResourcesOutput:
+def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     sys_req = sc.get_sys_req(id=id)
-    return gateway_pb2.ModifyServiceSystemResourcesOutput(
+    return celaut_pb2.ModifyServiceSystemResourcesOutput(
         sysreq=celaut_pb2.Sysresources(
             mem_limit=sys_req["mem_limit"],
         ),
@@ -467,12 +467,12 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
             
             refund = utils.from_gas_amount(
                 next(bee.client_grpc(
-                    method=gateway_pb2_grpc.GatewayStub(
+                    method=celaut_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(peer_uri)
                     ).StopService,
                         partitions_message_mode_parser=True,
-                        indices_parser=gateway_pb2.ModifyGasDepositOutput,
-                        input=gateway_pb2.TokenMessage(token=external_token)
+                        indices_parser=celaut_pb2.ModifyGasDepositOutput,
+                        input=celaut_pb2.TokenMessage(token=external_token)
                 )).amount
             )
             father_id = sc.get_external_father_id(token=external_token)
@@ -562,14 +562,14 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
             external_token = sc.get_token_by_hashed_token(hashed_token=service_token)
             peer_id = sc.get_peer_id_by_external_service(token=external_token)
             _output = next(bee.client_grpc(
-                method=gateway_pb2_grpc.GatewayStub(
+                method=celaut_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(
                         next(utils.generate_uris_by_peer_id(peer_id))
                     )
                 ).ModifyGasDeposit,
                 partitions_message_mode_parser=True,
-                indices_parser=gateway_pb2.ModifyGasDepositOutput,
-                input=gateway_pb2.ModifyGasDepositInput(
+                indices_parser=celaut_pb2.ModifyGasDepositOutput,
+                input=celaut_pb2.ModifyGasDepositInput(
                     gas_difference=utils.to_gas_amount(gas_amount),
                     service_token=external_token
                 )
