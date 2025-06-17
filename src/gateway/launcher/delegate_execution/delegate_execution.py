@@ -44,7 +44,7 @@ def delegate_execution(
             timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
             partitions_message_mode_parser=True,
             indices_serializer=StartService_input_indices,
-            indices_parser=celaut_pb2.Instance,
+            indices_parser=celaut_pb2.GatewayInstance,
             input=utils.service_extended(
                 metadata=metadata,
                 config=config,

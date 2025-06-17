@@ -180,7 +180,7 @@ def local_execution(
             )
     
     log.LOGGER(f'Thrown out a new instance by {father_id} of the container_id {container.id}')
-    return celaut_pb2.Instance(
+    return celaut_pb2.GatewayInstance(
         token=token,
         instance=instance
     )
