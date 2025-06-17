@@ -254,9 +254,8 @@ message Metrics {
 }
 
 message GatewayInstance {
-    optional Metadata metadata = 1;  // When and where metadata is used.
-    Instance instance = 2;
-    optional string token = 3;      // Authentication token for tunnels.
+    Instance instance = 1;
+    optional string token = 2;      // Authentication token for tunnels.
 }
 
 message Peer {
