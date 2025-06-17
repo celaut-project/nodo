@@ -7,7 +7,7 @@ from bee_rpc import client as beerpc
 
 import docker as docker_lib
 
-from protos import celaut_pb2 as celaut, gateway_pb2_grpc, gateway_pb2
+from protos import celaut_pb2 as celaut, celaut_pb2_grpc, celaut_pb2
 from protos.gateway_bee import StartService_input_indices, StartService_input_message_mode
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import stop_instance, spend_gas, update_peer_instance
@@ -54,7 +54,7 @@ def check_wanted_service(wanted: str):
     log.LOGGER(f"Check wanted service {wanted}")
     # Each execution of the function attempts to retrieve one of the services from the set. If the timeout is high or a large number of pairs are being processed, multiple calls might overlap if the function's execution time exceeds MANAGER_ITERATION_TIME; this is not an issue.
     
-    _hash = gateway_pb2.celaut__pb2.Metadata.HashTag.Hash(
+    _hash = celaut_pb2.Metadata.HashTag.Hash(
             type=SHA3_256_ID,
             value=bytes.fromhex(wanted)
         )
@@ -74,12 +74,12 @@ def check_wanted_service(wanted: str):
         log.LOGGER(f"Taking the service {wanted} using peer {peer}")
         try:
             for b in beerpc.client_grpc(
-                    method=gateway_pb2_grpc.GatewayStub(
+                    method=celaut_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
                             next(generate_uris_by_peer_id(peer))
                         )
                     ).GetService,  # TODO An timeout should be implemented when requesting a service.
-                    indices_serializer=gateway_pb2.celaut__pb2.Metadata.HashTag.Hash,
+                    indices_serializer=celaut_pb2.Metadata.HashTag.Hash,
                     input=_hash,
                     indices_parser=StartService_input_indices,  #  Not used all the indices, but still are the same.
                     partitions_message_mode_parser=StartService_input_message_mode
@@ -87,11 +87,11 @@ def check_wanted_service(wanted: str):
                 if  type(b) == beerpc.Dir:
                     log.LOGGER(f"    type of dir {b.type}")
                     
-                if type(b) == gateway_pb2.celaut__pb2.Metadata:
+                if type(b) == celaut_pb2.Metadata:
                     log.LOGGER("Store the metadata.")
                     with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
                         f.write(b.SerializeToString())
-                elif type(b) == beerpc.Dir and b.type == gateway_pb2.celaut__pb2.Service:
+                elif type(b) == beerpc.Dir and b.type == celaut_pb2.Service:
                     log.LOGGER(f"Store the service {b.dir}")
                     os.system(f"mv {b.dir} {REGISTRY}{wanted}")
                     
@@ -164,12 +164,12 @@ def peer_deposits(debug_mode: bool = False):
 
             try:
                 peer = next(beerpc.client_grpc(
-                    method=gateway_pb2_grpc.GatewayStub(
+                    method=celaut_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(
                             next(generate_uris_by_peer_id(peer_id=peer_id), "")
                         )
                     ).GetPeerInfo,
-                    indices_parser=gateway_pb2.Peer,
+                    indices_parser=celaut_pb2.Peer,
                     partitions_message_mode_parser=True
                 ), None)
                 if debug_mode: log.LOGGER(f"Successfully fetched info for peer {peer_id}.")

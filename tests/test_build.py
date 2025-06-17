@@ -1,6 +1,6 @@
 import threading
 
-from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc, gateway_bee
+from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc, gateway_bee
 import grpc
 from bee_rpc.client import Dir, client_grpc
 
@@ -11,11 +11,11 @@ def test_build():
     # Get solver cnf
     def build_method(hash: str):
         service = next(client_grpc(
-            method=gateway_pb2_grpc.GatewayStub(
+            method=celaut_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(GATEWAY ),
             ).StartService,
             input=generator(_hash=hash),
-            indices_parser=gateway_pb2.Instance,
+            indices_parser=celaut_pb2.Instance,
             partitions_message_mode_parser=True,
             indices_serializer=gateway_bee.StartService_input_indices
         ))

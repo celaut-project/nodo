@@ -4,7 +4,7 @@ from typing import Optional
 import grpc
 from bee_rpc import client as grpcbb
 
-from protos import celaut_pb2, pack_pb2, gateway_bee, gateway_pb2_grpc
+from protos import celaut_pb2, pack_pb2, gateway_bee, celaut_pb2_grpc
 from src.commands.packer.zip_with_dockerfile.prepare_directory import prepare_directory
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import generate_service_zip
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
@@ -48,7 +48,7 @@ def __spinner(event):
 
 def __pack(zip, node: str):
     yield from grpcbb.client_grpc(
-        method=gateway_pb2_grpc.GatewayStub(
+        method=celaut_pb2_grpc.GatewayStub(
             grpc.insecure_channel(node)
         ).Pack,
         input=grpcbb.Dir(dir=zip, _type=bytes),

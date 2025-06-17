@@ -1,4 +1,4 @@
-from protos import gateway_pb2_grpc, gateway_pb2
+from protos import celaut_pb2_grpc, celaut_pb2
 from bee_rpc.client import client_grpc as client
 
 import grpc
@@ -24,10 +24,10 @@ def connect(peer: str):
 
     try:
         peer_info = next(client(
-                method=gateway_pb2_grpc.GatewayStub(
+                method=celaut_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(peer)
                 ).GetPeerInfo,
-                indices_parser=gateway_pb2.Peer,
+                indices_parser=celaut_pb2.Peer,
                 partitions_message_mode_parser=True
             ))
         
@@ -54,12 +54,12 @@ def connect(peer: str):
             
             try:
                 _result = next(client(
-                    method=gateway_pb2_grpc.GatewayStub(
+                    method=celaut_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(peer)
                     ).IntroducePeer,
-                    indices_serializer=gateway_pb2.Peer,
+                    indices_serializer=celaut_pb2.Peer,
                     input=gateway_instance,
-                    indices_parser=gateway_pb2.RecursionGuard,  # Recursion guard shouldn't be used here, another message should be used. TODO
+                    indices_parser=celaut_pb2.RecursionGuard,  # Recursion guard shouldn't be used here, another message should be used. TODO
                     partitions_message_mode_parser=True
                 ))
                 

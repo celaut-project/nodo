@@ -20,7 +20,7 @@ def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysreso
     __config__.gateway.CopyFrom(generate_node_peer_info(network=DOCKER_NETWORK).instance)
     
     if config: 
-        __config__.config.CopyFrom(config)
+        __config__.CopyFrom(config)
     
     if network_resolution:
         __config__.network_resolution.extend(network_resolution)

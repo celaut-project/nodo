@@ -3,7 +3,7 @@ from concurrent import futures
 
 import grpc, json
 
-from protos import gateway_pb2, gateway_pb2_grpc
+from protos import celaut_pb2, celaut_pb2_grpc
 from src.gateway.gateway import Gateway
 from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.maintain import manager_thread
@@ -22,12 +22,12 @@ def serve():
 
     # create a gRPC server
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=30))
-    gateway_pb2_grpc.add_GatewayServicer_to_server(
+    celaut_pb2_grpc.add_GatewayServicer_to_server(
         Gateway(), server=server
     )
 
     SERVICE_NAMES = (
-        gateway_pb2.DESCRIPTOR.services_by_name['Gateway'].full_name,
+        celaut_pb2.DESCRIPTOR.services_by_name['Gateway'].full_name,
     )
 
     server.add_insecure_port('[::]:' + str(GATEWAY_PORT))

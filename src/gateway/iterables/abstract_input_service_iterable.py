@@ -4,7 +4,7 @@ from typing import Optional, Generator, Set, Tuple
 from bee_rpc import client as bee, buffer_pb2
 
 from protos import celaut_pb2 as celaut
-from protos import gateway_pb2
+from protos import celaut_pb2
 from protos.gateway_bee import StartService_input_indices, \
     StartService_input_message_mode
 from src.gateway.utils import save_service
@@ -62,7 +62,7 @@ class AbstractInputServiceIterable:
 
         self.context = context
 
-        self.configuration: Optional[gateway_pb2.Configuration] = None
+        self.configuration: Optional[celaut_pb2.Configuration] = None
 
         self.client_id = None
         self.recursion_guard_token = None
@@ -77,13 +77,13 @@ class AbstractInputServiceIterable:
     def __pattern_matching(self, r) -> Generator[buffer_pb2.Buffer, None, None]:
 
         match type(r):
-            case gateway_pb2.Client:
+            case celaut_pb2.Client:
                 self.client_id = r.client_id
 
-            case gateway_pb2.RecursionGuard:
+            case celaut_pb2.RecursionGuard:
                 self.recursion_guard_token = r.token
 
-            case gateway_pb2.Configuration:
+            case celaut_pb2.Configuration:
                 self.configuration = r
 
             case celaut.Metadata.HashTag.Hash:

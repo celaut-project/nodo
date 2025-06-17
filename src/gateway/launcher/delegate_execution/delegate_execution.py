@@ -6,7 +6,7 @@ from bee_rpc import client as bee
 
 from src.utils.env import EnvManager
 
-from protos import gateway_pb2, gateway_pb2_grpc
+from protos import celaut_pb2, celaut_pb2_grpc
 from protos.gateway_bee import StartService_input_indices
 from src.manager.manager import get_client_id_on_other_peer
 from src.manager.metrics import gas_amount_on_other_peer
@@ -24,7 +24,7 @@ def delegate_execution(
                         cost: int, metadata, config,
                         recursion_guard_token,
                         refund_gas: List[Callable]
-                   ) -> gateway_pb2.Instance:
+                   ) -> celaut_pb2.Instance:
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
 
@@ -36,7 +36,7 @@ def delegate_execution(
 
         log.LOGGER('Go to launch the service on ' + str(peer))
         service_instance = next(bee.client_grpc(
-            method=gateway_pb2_grpc.GatewayStub(
+            method=celaut_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
                     next(utils.generate_uris_by_peer_id(peer))
                 )
@@ -44,7 +44,7 @@ def delegate_execution(
             timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
             partitions_message_mode_parser=True,
             indices_serializer=StartService_input_indices,
-            indices_parser=gateway_pb2.Instance,
+            indices_parser=celaut_pb2.Instance,
             input=utils.service_extended(
                 metadata=metadata,
                 config=config,

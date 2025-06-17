@@ -3,7 +3,7 @@ from bee_rpc import client as bee
 
 import datetime
 
-from protos import gateway_pb2, gateway_pb2_grpc
+from protos import celaut_pb2, celaut_pb2_grpc
 
 from src.manager.manager import get_client_id_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
@@ -20,7 +20,7 @@ sc = SQLConnection()
 
 MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
 
-def __get_metrics_client(client_id: str) -> gateway_pb2.Metrics:
+def __get_metrics_client(client_id: str) -> celaut_pb2.Metrics:
     """
     Retrieve metrics for a specific client from cached data.
 
@@ -29,16 +29,16 @@ def __get_metrics_client(client_id: str) -> gateway_pb2.Metrics:
     :param client_id: The ID of the client for which to retrieve metrics.
     :type client_id: str
     :return: A protobuf object containing the metrics for the specified client.
-    :rtype: gateway_pb2.Metrics
+    :rtype: celaut_pb2.Metrics
     :raises KeyError: If the provided client ID does not exist in the cached data.
     """
     client_gas, _, _ = sc.get_client_gas(client_id=client_id)
-    return gateway_pb2.Metrics(
+    return celaut_pb2.Metrics(
         gas_amount=to_gas_amount(client_gas),
     )
 
 
-def __get_metrics_internal(id: str) -> gateway_pb2.Metrics:
+def __get_metrics_internal(id: str) -> celaut_pb2.Metrics:
     """
     Retrieve internal metrics from DB
 
@@ -47,15 +47,15 @@ def __get_metrics_internal(id: str) -> gateway_pb2.Metrics:
     :param id: The id used to identify the source of internal metrics.
     :type token: str
     :return: A protobuf object containing the internal metrics retrieved.
-    :rtype: gateway_pb2.Metrics
+    :rtype: celaut_pb2.Metrics
     :raises KeyError: If the provided token does not exist in the cached data.
     """
-    return gateway_pb2.Metrics(
+    return celaut_pb2.Metrics(
         gas_amount=to_gas_amount(sc.get_container_gas(id=id)),
     )
 
 
-def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
+def __get_metrics_external(peer_id: str, token: str) -> celaut_pb2.Metrics:
     """
     Retrieve external metrics using gRPC communication.
 
@@ -66,18 +66,18 @@ def __get_metrics_external(peer_id: str, token: str) -> gateway_pb2.Metrics:
     :param token: The token used to authenticate the request and retrieve the metrics.
     :type token: str
     :return: A protobuf object containing the external metrics retrieved.
-    :rtype: gateway_pb2.Metrics
+    :rtype: celaut_pb2.Metrics
     """
     return next(bee.client_grpc(
-        method=gateway_pb2_grpc.GatewayStub(
+        method=celaut_pb2_grpc.GatewayStub(
             grpc.insecure_channel(
                 next(generate_uris_by_peer_id(peer_id=peer_id))
             )
         ).GetMetrics,
-        input=gateway_pb2.TokenMessage(
+        input=celaut_pb2.TokenMessage(
             token=token
         ),
-        indices_parser=gateway_pb2.Metrics,
+        indices_parser=celaut_pb2.Metrics,
         partitions_message_mode_parser=True
     ))
 
@@ -119,7 +119,7 @@ def gas_amount_on_other_peer(peer_id: str) -> int:
         return 0
 
 
-def get_metrics(token: str) -> gateway_pb2.Metrics:
+def get_metrics(token: str) -> celaut_pb2.Metrics:
     """
     Retrieve metrics based on the provided token.
 
@@ -129,7 +129,7 @@ def get_metrics(token: str) -> gateway_pb2.Metrics:
     :param token: The token used to identify the source of metrics.
     :type token: str
     :return: A protobuf object containing the metrics retrieved.
-    :rtype: gateway_pb2.Metrics
+    :rtype: celaut_pb2.Metrics
     :raises InvalidTokenException: If the token format is invalid.
     :raises Exception: If an error occurs during the metric retrieval process.
     """

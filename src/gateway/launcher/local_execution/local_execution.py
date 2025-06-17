@@ -2,7 +2,7 @@ from typing import Optional, Callable, List, Dict
 
 import docker as docker_lib
 
-from protos import celaut_pb2 as celaut, gateway_pb2
+from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.gateway.utils import GATEWAY_PORT
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
@@ -20,15 +20,15 @@ from src.virtualizers.docker.firewall import allow_connection_to_instance, block
 sc = SQLConnection()
 
 def local_execution(
-        config: Optional[gateway_pb2.Configuration],
-        resources: gateway_pb2.CombinationResources.Clause,
+        config: Optional[celaut_pb2.Configuration],
+        resources: celaut_pb2.CombinationResources.Clause,
         father_id: Optional[str],
         father_ip: Optional[str],
         metadata: celaut.Metadata,
         service: celaut.Service,
         service_id: Optional[str],
         refund_gas: List[Callable]
-) -> gateway_pb2.Instance:
+) -> celaut_pb2.Instance:
 
     #  TODO check this.
     father_id = father_id if father_id else ""
@@ -88,7 +88,7 @@ def local_execution(
     #  Set the configuration file into the instance file system root.
     set_config(
         container_id=container.id, 
-        config=config.config, 
+        config=config, 
         resources=initial_system_resources,
         api=service.container.config,
         network_resolution=networks_resolved
@@ -175,12 +175,12 @@ def local_execution(
             container=container,
             initial_gas_amount=initial_gas_amount,
             serialized_instance=instance.SerializeToString(),
-            system_requirements_range=gateway_pb2.ModifyServiceSystemResourcesInput(
+            system_requirements_range=celaut_pb2.ModifyServiceSystemResourcesInput(
                 min_sysreq=initial_system_resources, max_sysreq=initial_system_resources)
             )
     
     log.LOGGER(f'Thrown out a new instance by {father_id} of the container_id {container.id}')
-    return gateway_pb2.Instance(
+    return celaut_pb2.Instance(
         token=token,
         instance=instance
     )

@@ -1,6 +1,6 @@
 from bee_rpc import client as bee
 
-from protos import gateway_pb2_grpc, gateway_pb2
+from protos import celaut_pb2_grpc, celaut_pb2
 from src.packers.zip_with_dockerfile import pack_zip
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
@@ -21,7 +21,7 @@ env_manager = EnvManager()
 MODIFY_RESOURCES_COST = env_manager.get_env("MODIFY_RESOURCES_COST")
 
 
-class Gateway(gateway_pb2_grpc.Gateway):
+class Gateway(celaut_pb2_grpc.Gateway):
 
     def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
@@ -34,7 +34,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             log.LOGGER('Stopping instance.')
             token = next(bee.parse_from_buffer(
                                 request_iterator=request_iterator,
-                                indices=gateway_pb2.TokenMessage,
+                                indices=celaut_pb2.TokenMessage,
                                 partitions_message_mode=True
                             ), 0).token
             log.LOGGER(f'    with id {token}')
@@ -43,7 +43,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             
             log.LOGGER(f'Stopped instance {token}.')
             yield from bee.serialize_to_buffer(
-                    message_iterator=gateway_pb2.Refund(
+                    message_iterator=celaut_pb2.Refund(
                         amount=to_gas_amount(refunded_amount)
                     )
             )
@@ -56,7 +56,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
             _input = next(bee.parse_from_buffer(
                                 request_iterator=request_iterator,
-                                indices=gateway_pb2.ModifyGasDepositInput,
+                                indices=celaut_pb2.ModifyGasDepositInput,
                                 partitions_message_mode=True
                             ), 0)
 
@@ -68,7 +68,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             log.LOGGER(f"Message on modify gas deposit: {message}")
 
             yield from bee.serialize_to_buffer(
-                    message_iterator=gateway_pb2.ModifyGasDepositOutput(
+                    message_iterator=celaut_pb2.ModifyGasDepositOutput(
                         success=success,
                         message=message
                     )
@@ -93,12 +93,12 @@ class Gateway(gateway_pb2_grpc.Gateway):
         add_peer_instance(
                 peer=next(bee.parse_from_buffer(
                 request_iterator=request_iterator,
-                indices=gateway_pb2.Peer,
+                indices=celaut_pb2.Peer,
                 partitions_message_mode=True
             ), None)
         )
 
-        yield from bee.serialize_to_buffer(gateway_pb2.RecursionGuard(token="OK"))  # Recursion guard shouldn't be used here, another message should be used. TODO
+        yield from bee.serialize_to_buffer(celaut_pb2.RecursionGuard(token="OK"))  # Recursion guard shouldn't be used here, another message should be used. TODO
 
     def GenerateClient(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?
@@ -108,11 +108,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
 
     def GenerateDepositToken(self, request_iterator, context, *kwargs):
         yield from bee.serialize_to_buffer(
-                message_iterator=gateway_pb2.TokenMessage(
+                message_iterator=celaut_pb2.TokenMessage(
                     token=generate_deposit_token(
                         client_id=next(bee.parse_from_buffer(
                             request_iterator=request_iterator,
-                            indices=gateway_pb2.Client,
+                            indices=celaut_pb2.Client,
                             partitions_message_mode=True
                         ), 0).client_id
                     )
@@ -132,7 +132,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 id=token,
                 system_requeriments_range=next(bee.parse_from_buffer(
                     request_iterator=request_iterator,
-                    indices=gateway_pb2.ModifyServiceSystemResourcesInput,
+                    indices=celaut_pb2.ModifyServiceSystemResourcesInput,
                     partitions_message_mode=True
                 ), None)
         ):
@@ -164,7 +164,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
         log.LOGGER('Request for payment.')
         payment = next(bee.parse_from_buffer(
             request_iterator=request_iterator,
-            indices=gateway_pb2.Payment,
+            indices=celaut_pb2.Payment,
             partitions_message_mode=True
         ), None)
         if not validate_payment_process(
@@ -183,11 +183,11 @@ class Gateway(gateway_pb2_grpc.Gateway):
                 message_iterator=get_metrics(
                     token=next(bee.parse_from_buffer(
                         request_iterator=request_iterator,
-                        indices=gateway_pb2.TokenMessage,
+                        indices=celaut_pb2.TokenMessage,
                         partitions_message_mode=True
                     ), None).token
                 ),
-                indices=gateway_pb2.Metrics,
+                indices=celaut_pb2.Metrics,
         )
 
     def ServiceTunnel(self, request_iterator, context, **kwargs):
@@ -199,7 +199,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
                         partitions_message_mode={0: False}
                     )
                 ),
-                indices=gateway_pb2.Metrics,
+                indices=celaut_pb2.Metrics,
         )
 
     def SignPublicKey(self, request_iterator, context, **kwargs):
@@ -209,7 +209,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             # Parse the input from the request iterator
             sign_request = next(bee.parse_from_buffer(
                 request_iterator=request_iterator,
-                indices=gateway_pb2.SignRequest,
+                indices=celaut_pb2.SignRequest,
                 partitions_message_mode=True
             ), None)
             
@@ -223,7 +223,7 @@ class Gateway(gateway_pb2_grpc.Gateway):
             )
             
             # Create the response
-            sign_response = gateway_pb2.SignResponse(
+            sign_response = celaut_pb2.SignResponse(
                 signed=signed_message
             )
             

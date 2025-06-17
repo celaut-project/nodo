@@ -1,6 +1,6 @@
 import grpc
 from typing import Final, Generator
-from protos import gateway_pb2, gateway_pb2_grpc
+from protos import celaut_pb2, celaut_pb2_grpc
 from src.utils.logger import LOGGER
 from src.utils.env import EnvManager
 from tests.main import sc, service_tunnel
@@ -25,11 +25,11 @@ def test_service_tunnel():
 
     # Mock an iterator to simulate the input stream
     def input_stream() -> Generator:
-        yield gateway_pb2.TokenMessage(token=TOKEN_ID, slot=str(SLOT_ID))
+        yield celaut_pb2.TokenMessage(token=TOKEN_ID, slot=str(SLOT_ID))
         yield TEST_DATA
 
     # Create a gRPC channel and stub for the Gateway service
-    g_stub = gateway_pb2_grpc.GatewayStub(
+    g_stub = celaut_pb2_grpc.GatewayStub(
         grpc.insecure_channel(env_manager.get_env("GATEWAY"))
     )
 

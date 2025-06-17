@@ -12,7 +12,7 @@ from google.protobuf.json_format import MessageToJson
 import grpc
 from bee_rpc import client as bee
 
-from protos import gateway_pb2_grpc, gateway_pb2, celaut_pb2
+from protos import celaut_pb2_grpc, celaut_pb2, celaut_pb2
 from src.utils import logger as log, logger
 from src.utils.env import (
     SHA3_256_ID,
@@ -1276,15 +1276,15 @@ class SQLConnection(metaclass=Singleton):
 
         try:
             refund = from_gas_amount(next(bee.client_grpc(
-                method=gateway_pb2_grpc.GatewayStub(
+                method=celaut_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(
                         next(generate_uris_by_peer_id(peer_id=peer_id))
                     )
                 ).StopService,
-                input=gateway_pb2.TokenMessage(
+                input=celaut_pb2.TokenMessage(
                     token=hashed_token
                 ),
-                indices_parser=gateway_pb2.Refund,
+                indices_parser=celaut_pb2.Refund,
                 partitions_message_mode_parser=True
             )).amount)
         except grpc.RpcError as e:

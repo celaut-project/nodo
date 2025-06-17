@@ -1,12 +1,12 @@
-from protos import celaut_pb2 as celaut, gateway_pb2
+from protos import celaut_pb2 as celaut, celaut_pb2
 from src.balancers.configuration_balancer.configuration_balancer import configuration_balancer
 from src.utils.utils import from_gas_amount
 
 
 def generate_estimated_cost(
         metadata: celaut.Metadata,
-        config: gateway_pb2.Configuration
-) -> gateway_pb2.EstimatedCost:
+        config: celaut_pb2.Configuration
+) -> celaut_pb2.EstimatedCost:
     
     if not config.resources or not config.resources.clause:
         raise Exception("Can't generate estimated cost without any configuration defined.")

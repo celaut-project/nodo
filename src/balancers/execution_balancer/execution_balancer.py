@@ -4,7 +4,7 @@ import grpc
 from bee_rpc import client as bee
 
 import protos.celaut_pb2 as celaut
-from protos import gateway_pb2, gateway_pb2_grpc
+from protos import celaut_pb2, celaut_pb2_grpc
 from protos.gateway_bee import StartService_input_indices
 from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
 from src.virtualizers.docker import build
@@ -20,7 +20,7 @@ env_manager = EnvManager()
 SEND_ONLY_HASHES_ASKING_COST = env_manager.get_env("SEND_ONLY_HASHES_ASKING_COST")
 EXTERNAL_COST_TIMEOUT = env_manager.get_env("EXTERNAL_COST_TIMEOUT")
 
-def __pretty_format_peers(peers: dict[str, gateway_pb2.EstimatedCost]) -> str:
+def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
     
     # Formats an EstimatedCost proto directly, no JSON or extra fields.
     def format_estimated_cost_simple(cost_proto) -> str:
@@ -45,13 +45,13 @@ def __pretty_format_peers(peers: dict[str, gateway_pb2.EstimatedCost]) -> str:
 def execution_balancer(
         service_id: str,
         metadata: celaut.Metadata,
-        configuration: gateway_pb2.Configuration,
+        configuration: celaut_pb2.Configuration,
         ignore_network: str = None,
         recursion_guard_token: str = None,
-) -> Generator[tuple[str, gateway_pb2.EstimatedCost], None, None]:
+) -> Generator[tuple[str, celaut_pb2.EstimatedCost], None, None]:
     
     # sorted by cost, tuple of celaut.Instances or 'local' , cost and clause of combination resources selected
-    peers: Dict[str, gateway_pb2.EstimatedCost] = {}
+    peers: Dict[str, celaut_pb2.EstimatedCost] = {}
     
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
 
@@ -73,12 +73,12 @@ def execution_balancer(
             # TODO could use async or concurrency
             try:
                 peers[peer_id] = next(bee.client_grpc(
-                        method=gateway_pb2_grpc.GatewayStub(
+                        method=celaut_pb2_grpc.GatewayStub(
                             grpc.insecure_channel(
                                 next(generate_uris_by_peer_id(peer_id))
                             )
                         ).GetServiceEstimatedCost,
-                        indices_parser=gateway_pb2.EstimatedCost,
+                        indices_parser=celaut_pb2.EstimatedCost,
                         timeout=EXTERNAL_COST_TIMEOUT,
                         partitions_message_mode_parser=True,
                         indices_serializer=StartService_input_indices,

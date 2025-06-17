@@ -21,7 +21,7 @@ with open('tests/.services', 'r') as file:
             # Create constants dynamically using globals()
             globals()[variable] = value
 
-from protos import celaut_pb2, gateway_pb2
+from protos import celaut_pb2, celaut_pb2
 from bee_rpc.client import Dir
 
 
@@ -36,13 +36,13 @@ SHA3_256 = SHA3_256_ID.hex()
 
 def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: Optional[int] = None):
     try:
-        yield gateway_pb2.Client(client_id='dev')
+        yield celaut_pb2.Client(client_id='dev')
 
-        yield gateway_pb2.Configuration(
+        yield celaut_pb2.Configuration(
             config=celaut_pb2.Configuration(),
-            resources=gateway_pb2.CombinationResources(
+            resources=celaut_pb2.CombinationResources(
                 clause={
-                    1: gateway_pb2.CombinationResources.Clause(
+                    1: celaut_pb2.CombinationResources.Clause(
                         cost_weight=1,
                         min_sysreq=celaut_pb2.Sysresources(
                                 mem_limit=mem_limit

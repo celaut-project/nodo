@@ -2,7 +2,7 @@ from typing import Any, Generator
 import grpc
 import os
 
-from protos import celaut_pb2, gateway_pb2, gateway_pb2_grpc, gateway_bee
+from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc, gateway_bee
 from bee_rpc.client import client_grpc
 
 from src.utils.env import SHA3_256_ID, EnvManager
@@ -31,19 +31,18 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 4), initial_gas_amount: 
     try:
         
         print("Send client")
-        yield gateway_pb2.Client(client_id=client_id)
+        yield celaut_pb2.Client(client_id=client_id)
         print("Client sent")
 
         print("Send configuration")
-        yield gateway_pb2.Configuration(
-            config=celaut_pb2.Configuration(),
-            resources=gateway_pb2.CombinationResources(
+        yield celaut_pb2.Configuration(
+            resources=celaut_pb2.CombinationResources(
                 clause={
-                    1: gateway_pb2.CombinationResources.Clause(
+                    1: celaut_pb2.CombinationResources.Clause(
                         cost_weight=1,
                         min_sysreq=celaut_pb2.Sysresources(
-                                mem_limit=mem_limit
-                            )
+                            mem_limit=mem_limit
+                        )
                     )
                 }
             ),
@@ -67,7 +66,7 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 4), initial_gas_amount: 
 def execute(service: str):
     service = get_id(service)
 
-    g_stub = gateway_pb2_grpc.GatewayStub(
+    g_stub = celaut_pb2_grpc.GatewayStub(
         grpc.insecure_channel(f"localhost:{GATEWAY_PORT}"),
     )
     
@@ -97,7 +96,7 @@ def execute(service: str):
             initial_gas_amount=10**16,
             mem_limit=10**9
         ),
-        indices_parser=gateway_pb2.Instance,
+        indices_parser=celaut_pb2.GatewayInstance,
         partitions_message_mode_parser=True,
         indices_serializer=gateway_bee.StartService_input_indices
     ))
