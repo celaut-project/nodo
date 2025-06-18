@@ -17,7 +17,6 @@ env_manager = EnvManager()
 GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
-ERGO_GAS_COST = int(env_manager.get_env("ERGO_GAS_COST"))
 
 
 def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
