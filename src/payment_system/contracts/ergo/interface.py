@@ -205,7 +205,7 @@ def manager():
 
 
 # Function to process the payment, generating a transaction with the token in register R4
-def process_payment(amount: int, deposit_token: str, ledger: str, contract_address: str) -> celaut_pb2.ContractLedger:
+def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.ContractLedger.Ledger, contract_address: str) -> celaut_pb2.ContractLedger:
     with payment_lock:
         amount = __gas_to_nanoerg(amount)
         LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount}")
@@ -280,9 +280,9 @@ def process_payment(amount: int, deposit_token: str, ledger: str, contract_addre
 
 
 # Function to validate the payment process by checking if there is an unspent box with the token in register R4
-def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str) -> bool:
+def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.ContractLedger.Ledger, contract_addr: str) -> bool:
     try:
-        assert ledger == LEDGER, "Ledger does not match"
+        assert LEDGER in ledger.tags, "Ledger does not match"
         assert contract_addr == str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString()), "Contract address does not match"
 
         # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address

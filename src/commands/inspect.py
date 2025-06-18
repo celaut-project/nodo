@@ -43,7 +43,7 @@ def inspect(service: str):
     # Reputation Proofs
     print_rule("🔍 Reputation Proofs")
     for c in metadata.reputation_proofs:
-        print(f"Ledger  : {c.ledger}")
+        print(f"Ledger  : {", ".join(c.ledger.tags)}")
         print(f"Script  : {c.contract.hex()}")
         print(f"Address : {c.contract_addr}\n")
 

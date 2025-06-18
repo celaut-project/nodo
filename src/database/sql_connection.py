@@ -908,6 +908,69 @@ class SQLConnection(metaclass=Singleton):
             for uri in slot.uri:
                 self.add_uri(uri, slot_id=slot_id)
 
+    def check_if_ledger_exists(self, ledger_to_check: celaut_pb2.ContractLedger.Ledger) -> celaut_pb2.ContractLedger.Ledger:
+        """
+        Checks if a logically equivalent ledger already exists in the database.
+
+        This method defines an inner comparison function to determine ledger equivalence
+        by prioritizing the 'formal' and 'prose' fields over 'tags'. It then iterates
+        through all ledgers in the 'ledger' table, deserializes them, and uses this
+        comparison logic.
+
+        Args:
+            ledger_to_check: The Ledger object to check for.
+
+        Returns:
+            The complete Ledger object from the database if a match is found.  The same if not exists.
+        """
+        
+        def _compare_ledgers(ledger_a: celaut_pb2.ContractLedger.Ledger, ledger_b: celaut_pb2.ContractLedger.Ledger) -> bool:
+            """
+            Inner function to compare two Ledger objects for logical equivalence.
+            """
+            if not ledger_a or not ledger_b:
+                return False
+
+            # 1. Highest priority: the 'formal' field. It's the strictest identifier.
+            if ledger_a.formal and ledger_b.formal and ledger_a.formal == ledger_b.formal:
+                return True
+
+            # 2. Second priority: the 'prose' field.
+            if ledger_a.prose and ledger_b.prose and ledger_a.prose == ledger_b.prose:
+                return True
+
+            # 3. If neither formal nor prose are present, check for common tags.
+            #    If there's at least one common tag, they match.
+            if not ledger_a.prose and not ledger_b.prose and not ledger_a.formal and not ledger_b.formal:
+                # Convert tag lists to sets for efficient intersection checking
+                tags_a_set = set(ledger_a.tags)
+                tags_b_set = set(ledger_b.tags)
+                
+                # Check if the intersection of the two sets is not empty
+                if tags_a_set.intersection(tags_b_set):
+                    return True
+                
+            return False
+
+        # Fetch all stored ledgers. The 'ledger_id' column contains the serialized ledger.
+        cursor = self._execute("SELECT ledger_id FROM ledger")
+        
+        for row in cursor.fetchall():
+            # The ledger from the DB is in a serialized byte format.
+            db_ledger_bytes = row['id']
+            
+            # Deserialize the bytes to reconstruct the Ledger object.
+            db_ledger = celaut_pb2.ContractLedger.Ledger()
+            db_ledger.ParseFromString(db_ledger_bytes)
+            
+            # Use the inner comparison logic.
+            if _compare_ledgers(ledger_to_check, db_ledger):
+                # If they match, return the full object from the database.
+                return db_ledger
+        
+        # If the loop finishes without finding a match, return None.
+        return None
+
     def add_contract(self, contract: celaut_pb2.ContractLedger, peer_id: str = "LOCAL", gas_price: int = 0):
         """
         Adds a contract to the database.
@@ -919,7 +982,9 @@ class SQLConnection(metaclass=Singleton):
         """
         contract_content: bytes = contract.contract
         address: str = contract.contract_addr
-        ledger: str = contract.ledger
+
+        ledger = self.check_if_ledger_exists(ledger_to_check=ledger)
+        ledger_str: str = contract.ledger.SerializeToString()  # tag-prose-formal serialized
 
         contract_hash: str = sha3_256(contract_content).hexdigest()
         contract_hash_type: str = SHA3_256_ID.hex()
@@ -930,10 +995,30 @@ class SQLConnection(metaclass=Singleton):
                     (contract_hash, contract_hash_type, contract_content))
 
         self._execute("INSERT OR IGNORE INTO ledger (id) VALUES (?)",
-                    (ledger,))
+                    (ledger_str,))
 
-        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_id, contract_hash, peer_id, gas_price) "
-                    "VALUES (?,?,?,?,?)", (address, ledger, contract_hash, peer_id, gas_str))
+        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_id, contract_hash, peer_id, gas_price) "  # TODO Should store the id from ledgers, not the parsed ledger object.
+                    "VALUES (?,?,?,?,?)", (address, ledger_str, contract_hash, peer_id, gas_str))
+
+    def get_peer_contract_instances(self, contract_hash: str, peer_id: str = "LOCAL") -> Generator[Tuple[str, celaut_pb2.ContractLedger.Ledger], None, None]:
+        """
+        Recupera las instancias de contrato de un peer (dirección y ledger) para un hash de contrato específico.
+
+        Args:
+            contract_hash (str): El hash del contrato.
+            peer_id (str): El ID del peer. Por defecto es "LOCAL".
+
+        Yields:
+            Un generador de tuplas (address, ledger_id).
+        """
+        cursor = self._execute(
+            "SELECT address, ledger_id FROM contract_instance WHERE contract_hash = ? AND peer_id = ?",
+            (contract_hash, peer_id)
+        )
+        for row in cursor.fetchall():
+            ledger = celaut_pb2.ContractLedger.Ledger()
+            ledger.ParseFromString(row['ledger_id'])
+            yield row['address'], ledger
 
     def add_reputation_proof(self, contract_ledger: celaut_pb2.ContractLedger, peer_id: str) -> bool:
         """
