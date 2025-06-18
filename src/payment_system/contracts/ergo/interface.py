@@ -22,7 +22,7 @@ from org.ergoplatform.appkit.impl import *
 # Initialize environment and global variables
 env_manager = EnvManager()
 DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
-LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.
+LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.  TODO Ergo ledger actually should be the serialized protobuf.  -> But must be an id, and be defined on a yalm config file with the rest of envs. 
 CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree template script.    Because the specific script is the address, right? <- TODO check
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 ERGO_NODE_URL = lambda: env_manager.get_env("ERGO_NODE_URL")
@@ -32,7 +32,7 @@ ERGO_DONATION_PERCENTAGE = lambda: clamp(float(env_manager.get_env('ERGO_DONATIO
 HOT_LIMITS = int(env_manager.get_env("ERGO_ERG_HOT_WALLET_LIMITS"))  # type: ignore
 ERGO_AUXILIAR_MNEMONIC = env_manager.get_env("ERGO_AUXILIAR_MNEMONIC")  # Receiver wallet
 ERGO_WALLET_MNEMONIC = lambda: env_manager.get_env('ERGO_WALLET_MNEMONIC')  # Sender wallet
-ERGO_GAS_COST = lambda: int(env_manager.get_env("ERGO_GAS_COST"))
+GAS_PER_ERG_L = lambda: int(env_manager.get_env("GAS_PER_ERG"))
 WAIT_TX_TIME = 240  # 20 minutes (each 5 seconds)
 WAT_TX_SLEEP_TIME = 5
 
@@ -45,7 +45,8 @@ CLIENT_WALLET -> AUXILIAR_WALLET -> MAIN_WALLET -> COLD_WALLET
 payment_lock = Lock()  # Ensures that the same input box is no spent with more amount that it has. (could be more efficient ...)
 
 def __gas_to_nanoerg(amount: int) -> int:
-    return int(round(amount*(ERGO_GAS_COST)))
+    gas_price = 1/GAS_PER_ERG_L()
+    return int(round(amount*gas_price))
 
 def __nanoerg_to_erg(amount: int) -> float:
     return amount / 1_000_000_000  # type: ignore

@@ -158,7 +158,7 @@ DOCKER_NETWORK = 'docker0'
 LOCAL_NETWORK = 'lo'
 
 # Ledger Settings
-env_manager.get_env("ERGO_GAS_COST", pow(10, 58))  # gas per nanoerg
+env_manager.get_env("GAS_PER_ERG", pow(10, 58))  # gas per nanoerg
 env_manager.get_env("ERGO_NODE_URL", "https://node.sigmaspace.io")
 env_manager.get_env("ERGO_HTTP_PEERS", f'{env_manager.env_vars["STORAGE"]}/ergo_http_peers.json')
 env_manager.get_env("ERGO_GENESIS_BLOCK_ID", "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b")

@@ -15,7 +15,7 @@ env_manager = EnvManager()
 SOCIALIZATION_FACTOR = float(env_manager.get_env("SOCIALIZATION_FACTOR"))
 INIT_COST_CONFIGURATION_FACTOR = env_manager.get_env("INIT_COST_CONFIGURATION_FACTOR")
 MAINTENANCE_COST_CONFIGURATION_FACTOR = env_manager.get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR")
-ERGO_GAS_COST = env_manager.get_env("ERGO_GAS_COST")
+GAS_PER_ERG = int(env_manager.get_env("GAS_PER_ERG"))
 
 sq = SQLConnection()
 
@@ -62,26 +62,32 @@ def estimated_cost_sorter(
             )
         ])
 
-        local_erg_gas: int = ERGO_GAS_COST
+        local_gas_per_erg: int = GAS_PER_ERG
         
-        if peer_id != "local":
-            peer_erg_gas: int = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_id=ERGO_LEDGER)
-            if peer_erg_gas is None:
-                logger(f"No ergo gas price on peer {peer_id}, continue.")
-                return 0
-        else:
-            peer_erg_gas = ERGO_GAS_COST
+        if local_gas_per_erg:
 
-        norm_gas_cost: int = gas_cost * (peer_erg_gas / local_erg_gas) if local_erg_gas else 0
+            if peer_id != "local":
+                peer_gas_per_erg: int = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_id=ERGO_LEDGER)
+                if peer_gas_per_erg is None:
+                    logger(f"No ergo gas price on peer {peer_id}, continue.")
+                    return 0
+            else:
+                peer_gas_per_erg = local_gas_per_erg
+
+            erg_per_gas_unit = 1 / (peer_gas_per_erg / local_gas_per_erg)
+            normalized_cost_in_ergs = gas_cost * erg_per_gas_unit
+        
+        else:
+            normalized_cost_in_ergs = 0.0
         
         if peer_id == 'local':
             reputation: float = 1 
         else:
             reputation: float = ((compute_reputation(peer_id=peer_id) / total_reputation) if total_reputation else 0 ) * SOCIALIZATION_FACTOR  # TODO Should be improved, because should not be relation on how many peers are.
         
-        score = priority + reputation - log(norm_gas_cost)  # TODO Could have weights on envs.
+        score = priority + reputation - log(normalized_cost_in_ergs)  # TODO Could have weights on envs.
         
-        logger(f"Computing estimated cost score for peer {peer_id}: priority {priority}, reputation {reputation}, cost {log(norm_gas_cost)} => score {score}\n")
+        logger(f"Computing estimated cost score for peer {peer_id}: priority {priority}, reputation {reputation}, cost {log(normalized_cost_in_ergs)} => score {score}\n")
         return score
 
     return (
