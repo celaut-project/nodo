@@ -224,7 +224,7 @@ def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
         return False
 
 
-def validate_payment_process(amount: int, ledger: str, contract: bytes, contract_addr: str, token: str) -> bool:
+def validate_payment_process(amount: int, ledger: celaut_pb2.ContractLedger.Ledger, contract: bytes, contract_addr: str, token: str) -> bool:
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         raise Exception(f"Deposit token {token} doesn't exists.")
     try:
@@ -238,7 +238,7 @@ def validate_payment_process(amount: int, ledger: str, contract: bytes, contract
     return _r
 
 
-def __check_payment_process(amount: int, ledger: str, token: str, contract: bytes, contract_addr: str) -> bool:
+def __check_payment_process(amount: int, ledger: celaut_pb2.ContractLedger.Ledger, token: str, contract: bytes, contract_addr: str) -> bool:
     _l.LOGGER('Check payment process to ' + token + ' of ' + str(amount))
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         _l.LOGGER(f"No token {token} in pending deposit_tokens")

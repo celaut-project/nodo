@@ -56,7 +56,7 @@ CONTRACT = """
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 
 
-def process_payment(amount: int, deposit_token: str, ledger: str,
+def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.ContractLedger.Ledger,
                     contract_address: str) -> celaut_pb2.ContractLedger:
     LOGGER(f"Process simulated payment for token {deposit_token} of {amount}")
     return celaut_pb2.ContractLedger(
@@ -66,5 +66,5 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
             )
 
 
-def payment_process_validator(amount: int, token: str, ledger: str, contract_addr: str) -> bool:
+def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.ContractLedger.Ledger, contract_addr: str) -> bool:
     return True

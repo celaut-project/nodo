@@ -2,6 +2,7 @@ import typing
 from typing import Generator
 
 from src.database.query_interface import fetch_query
+from src.database.sql_connection import SQLConnection
 
 
 def get_ledgers() -> Generator[typing.Tuple[str, str], None, None]:
@@ -13,14 +14,8 @@ def get_peer_contract_instances(contract_hash: str, peer_id: str = "LOCAL") \
     """
         get_ledger_and_contract_address_from_peer_id_and_contract_hash
     """
-    yield from fetch_query(
-        query="SELECT address, ledger_id "
-              "FROM contract_instance "
-              "WHERE contract_hash = ? "
-              "AND peer_id = ?",
-        params=(contract_hash, peer_id)
-
-    )
+    db_connection = SQLConnection()
+    yield from db_connection.get_peer_contract_instances(contract_hash, peer_id)
 
 
 def get_ledger_and_contract_addr_from_contract(contract_hash: str) -> Generator[typing.Tuple[str, str], None, None]:

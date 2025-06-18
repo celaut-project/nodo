@@ -16,9 +16,14 @@ message DataFormat {
 
 // Ledger representation including contract bytes, contract address, and ledger string.
 message ContractLedger {
+    message Ledger {
+        repeated string tags = 1;
+        string prose = 2;
+        bytes formal = 3;
+    }
     bytes contract = 1;
     string contract_addr = 2;
-    string ledger = 3;
+    Ledger ledger = 3;
 }
 
 // Defines an abstract amount of gas (cost unit) as a numeric string.

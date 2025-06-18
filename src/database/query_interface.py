@@ -30,19 +30,3 @@ def fetch_query(query: str, params: tuple = ()):
         print(f'EXCEPCION NO CONTROLADA {str(e)} en fetch_query')
         pass
 
-
-def commit_query(query: str, params: tuple = ()):
-    try:
-        # Connect to the database
-        conn = sqlite3.connect(DATABASE_FILE)
-        cursor = conn.cursor()
-
-        # Execute the query
-        cursor.execute(query, params)
-
-        conn.commit()
-        conn.close()
-
-    except Exception as e:
-        print(f'EXCEPCION NO CONTROLADA {str(e)} en commit_query')
-        pass
