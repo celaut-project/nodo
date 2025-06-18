@@ -46,6 +46,22 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 - **Docker Containers**: The system will create and remove Docker containers as part of its operations.
 
 
+## Platform Compatibility
+
+Below is a breakdown of **Nodo** feature support across different operating systems. Since the project is still under development, most capabilities are currently available only on Linux, with varying levels of maturity.
+
+| Functionality         | Linux    | Mac              | Windows          |
+| --------------------- | -------- | ---------------- | ---------------- |
+| Local execution       | 🟢 Beta  | 🔴 Not supported | 🔴 Not supported |
+| Packaging             | 🟢 Beta  | 🔴 Not supported | 🔴 Not supported |
+| Local network support | 🟡 Alpha | 🔴 Not supported | 🔴 Not supported |
+| Trustless connection  | 🟡 Alpha | 🔴 Not supported | 🔴 Not supported |
+
+* 🟢 **Beta**: Functionality implemented and relatively stable.
+* 🟡 **Alpha**: Functionality under active development and subject to change.
+* 🔴 **Not supported**: Functionality not available on this platform.
+
+
 ## Usage
 
 For detailed usage instructions, please refer to the [User Guide](docs/USAGE.md).
