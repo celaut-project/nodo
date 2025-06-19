@@ -39,17 +39,6 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: 
         yield celaut_pb2.Client(client_id='dev')
 
         yield celaut_pb2.Configuration(
-            config=celaut_pb2.Configuration(),
-            resources=celaut_pb2.CombinationResources(
-                clause={
-                    1: celaut_pb2.CombinationResources.Clause(
-                        cost_weight=1,
-                        min_sysreq=celaut_pb2.Sysresources(
-                                mem_limit=mem_limit
-                            )
-                    )
-                }
-            ),
             initial_gas_amount=to_gas_amount(initial_gas_amount) if initial_gas_amount else None
         )
 

@@ -41,15 +41,13 @@ def launch_service(
 
         # Check configuration
         if not configuration:
-            configuration = celaut_pb2.Configuration(config=celaut_pb2.Configuration())
+            configuration = celaut_pb2.Configuration()
 
         if not configuration.HasField('initial_gas_amount') or not configuration.initial_gas_amount:
             configuration.initial_gas_amount.CopyFrom(to_gas_amount(default_initial_cost()))
-            
-        if not configuration.HasField('resources') or not configuration.resources:
-            configuration.resources.CopyFrom(default_initial_combinational_resources())
 
         for peer, estimated_cost in execution_balancer(
+                resources=service.resources,
                 service_id=service_id,
                 metadata=metadata,
                 ignore_network=utils.get_network_name(direction=father_ip),
@@ -82,10 +80,10 @@ def launch_service(
                     )
 
                 else:
-                    if estimated_cost.comb_resource_selected not in configuration.resources.clause:
+                    if estimated_cost.comb_resource_selected not in service.container.resources.clause:
                         raise Exception("Resource configuration clauses are misconfigured.")
                     
-                    resources_clause: celaut_pb2.CombinationResources.Clause = configuration.resources.clause[estimated_cost.comb_resource_selected]
+                    resources_clause: celaut_pb2.Service.Container.CombinationResources.Clause = service.container.resources.clause[estimated_cost.comb_resource_selected]
 
                     instance = local_execution(
                         config=configuration,

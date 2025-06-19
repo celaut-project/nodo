@@ -44,6 +44,7 @@ def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
 
 def execution_balancer(
         service_id: str,
+        resources,
         metadata: celaut.Metadata,
         configuration: celaut_pb2.Configuration,
         ignore_network: str = None,
@@ -57,9 +58,10 @@ def execution_balancer(
 
     try:
         peers['local'] = generate_estimated_cost(
-                metadata=metadata,
-                config=configuration
-            )
+            resources=resources,
+            metadata=metadata,
+            config=configuration
+        )
     except build.UnsupportedArchitectureException as e:
         log.LOGGER(e.__str__())
         pass

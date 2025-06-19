@@ -323,15 +323,6 @@ def default_initial_cost(
         sc.get_gas_amount_by_father_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
     ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
 
-def default_initial_combinational_resources() -> celaut_pb2.CombinationResources:
-    return celaut_pb2.CombinationResources(clause={
-                    1: celaut_pb2.CombinationResources.Clause(
-                        min_sysreq=celaut_pb2.Sysresources(
-                            mem_limit=7 * pow(10, 6)
-                        )
-                    )
-                })
-
 def add_container(
         service_id: str,
         father_id: str,
