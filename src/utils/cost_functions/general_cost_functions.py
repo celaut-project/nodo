@@ -5,7 +5,7 @@ from src.utils.cost_functions.execution_cost import execution_cost, maintain_exe
 def compute_start_service_cost(
         metadata: celaut.Metadata,
         initial_gas_amount: int,
-        resource: celaut_pb2.CombinationResources.Clause
+        resource: celaut_pb2.Service.Container.CombinationResources.Clause
 ) -> int:
     """
     Computes the total initial cost to start a service instance.

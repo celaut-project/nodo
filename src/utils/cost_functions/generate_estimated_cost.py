@@ -5,14 +5,15 @@ from src.utils.utils import from_gas_amount
 
 def generate_estimated_cost(
         metadata: celaut.Metadata,
-        config: celaut_pb2.Configuration
+        config: celaut_pb2.Configuration,
+        resources
 ) -> celaut_pb2.EstimatedCost:
     
-    if not config.resources or not config.resources.clause:
+    if not resources or not resources.clause:
         raise Exception("Can't generate estimated cost without any configuration defined.")
 
     return configuration_balancer(
-        clauses=dict(config.resources.clause),
+        clauses=dict(resources.clause),
         metadata=metadata,
         initial_gas_amount=from_gas_amount(config.initial_gas_amount)
     )[1]
