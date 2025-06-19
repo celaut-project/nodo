@@ -149,7 +149,7 @@ class ZipContainerPacker:
                     filesystem.branch.append(branch)
                 return filesystem
             self.service.container.filesystem.CopyFrom(recursive_parsing(directory="/"))
-            
+
             return celaut.Metadata.HashTag(
                 hash=calculate_hashes(
                     value=self.service.container.filesystem.SerializeToString()
@@ -165,16 +165,7 @@ class ZipContainerPacker:
                     )
                 )
             )
-        
-        # Envs
-        if self.json.get('envs'):
-            for env in self.json.get('envs'):
-                try:
-                    with open(self.path + env + ".field", "rb") as env_desc:
-                        self.service.api.enviroment_variables[env].ParseFromString(env_desc.read())
-                except FileNotFoundError:
-                    pass
-        
+    
         # Entrypoint
         if self.json.get('entrypoint'):
             self.service.container.entrypoint.append(self.json.get('entrypoint'))
@@ -204,6 +195,16 @@ class ZipContainerPacker:
         )
     
     def parseApi(self):
+        
+        # Envs
+        if self.json.get('envs'):
+            for env in self.json.get('envs'):
+                try:
+                    with open(self.path + env + ".field", "rb") as env_desc:
+                        self.service.api.enviroment_variables[env].ParseFromString(env_desc.read())
+                except FileNotFoundError:
+                    pass
+
         if not self.json.get('api'): return
         
         for item in self.json.get('api'):  # iterate slots.
