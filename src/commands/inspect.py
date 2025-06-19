@@ -62,7 +62,7 @@ def inspect(service: str):
     print_rule("⚙ Container Configuration")
     print(f"Architecture : {', '.join([tag for tag in service_obj.container.architecture.tags])}")
     print(f"Prose  : {service_obj.container.architecture.prose}")
-    print(f"Env Vars     : {service_obj.container.enviroment_variables}")
+    print(f"Env Vars     : {service_obj.api.enviroment_variables}")
     print(f"Entrypoint   : {service_obj.container.entrypoint}")
     print(f"Node compatibility")  # how he expects to communicate with the node, if he expects to communicate with it at all.
     print(f"- Config File  : {service_obj.container.config}")
