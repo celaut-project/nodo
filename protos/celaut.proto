@@ -124,44 +124,15 @@ message Service {
             DataFormat format = 2;
         }
 
-        message CombinationResources {
-            message Clause {
-                message Priority {
-                    enum Attribute {
-                        START_SERVICE_TIME = 0;
-                        COST_BLKIO_WEIGHT = 1;
-                        COST_CPU_PERIOD = 2;
-                        COST_CPU_QUOTA = 3;
-                        COST_MEM_LIMIT = 4;
-                        COST_DISK_SPACE = 5;
-                        VARIANCE_BLKIO_WEIGHT = 6;
-                        VARIANCE_CPU_PERIOD = 7;
-                        VARIANCE_CPU_QUOTA = 8;
-                        VARIANCE_MEM_LIMIT = 9;
-                        VARIANCE_DISK_SPACE = 10;
-                    }
-                    // Resource attribute to prioritize.
-                    Attribute attribute = 1;
-                    // Weight for this priority.
-                    int32 weight = 2;
-                }
-                
-                // Overall weight for cost in this clause.
-                int32 cost_weight = 1;
-                
-                // Initial system requirements.
-                optional Sysresources init_sysreq = 2;
+        message Resources {
+            // Initial system requirements.
+            Sysresources at_init = 1;
 
-                // Maximum system requirements.
-                optional Sysresources max_sysreq = 3;
-                
-                // Desired start service time.
-                optional int32 start_service_time_miliseconds = 4;
-                
-                // List of priority attributes.
-                repeated Priority priorities = 5;
-            }
-            map<int32, Clause> clause = 1;
+            // Maximum system requirements.
+            Sysresources at_most = 2;
+            
+            // Desired start time miliseconds.
+            optional int32 start_time_ms = 3;
         }
         
         // CPU architecture and environment description.
@@ -177,7 +148,7 @@ message Service {
         repeated string entrypoint = 4;
         
         // Container resource 
-        optional CombinationResources resources = 5;
+        optional Resources resources = 5;
 
         Config config = 6;
         
