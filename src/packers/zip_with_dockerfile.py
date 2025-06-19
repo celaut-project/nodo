@@ -166,17 +166,44 @@ class ZipContainerPacker:
                 )
             )
     
+        # Resources
+        if self.json.get('resources'):
+            res = self.json.get('resources', {})
+
+            # start_time_ms es opcional
+            self.service.container.resources.start_time_ms = res.get("start_time_ms")
+
+            # at_init
+            at_init = res.get("at_init", {})
+            self.service.container.resources.at_init.blkio_weight = at_init.get("blkio_weight")
+            self.service.container.resources.at_init.cpu_period = at_init.get("cpu_period")
+            self.service.container.resources.at_init.cpu_quota = at_init.get("cpu_quota")
+            self.service.container.resources.at_init.mem_limit = at_init.get("mem_limit")
+            self.service.container.resources.at_init.disk_space = at_init.get("disk_space")
+
+            # at_most
+            at_most = res.get("at_most", {})
+            self.service.container.resources.at_most.blkio_weight = at_most.get("blkio_weight")
+            self.service.container.resources.at_most.cpu_period = at_most.get("cpu_period")
+            self.service.container.resources.at_most.cpu_quota = at_most.get("cpu_quota")
+            self.service.container.resources.at_most.mem_limit = at_most.get("mem_limit")
+            self.service.container.resources.at_most.disk_space = at_most.get("disk_space")
+
         # Entrypoint
         if self.json.get('entrypoint'):
             self.service.container.entrypoint.append(self.json.get('entrypoint'))
+        
         # Arch
+        
         # Config file spec.
         self.service.container.config.path.append('__config__')
         self.service.container.config.format.CopyFrom(
             celaut.DataFormat()  # celaut.ConfigFile definition.
         )
         self.service.container.architecture.tags.extend([self.json.get('architecture')])
+        
         # Expected Gateway.
+        
         # Add container metadata to the global metadata.
         self.metadata.hashtag.attr_hashtag.append(
             celaut.Metadata.HashTag.AttrHashTag(
