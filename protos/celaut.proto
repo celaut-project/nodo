@@ -92,11 +92,13 @@ message Service {
     }
 
     message Container {
+        
         message Architecture {
             repeated string tags = 1;
             string prose = 2;
             bytes formal = 3;
         }
+        
         message Filesystem {
             message ItemBranch {
                 message Link {
@@ -116,37 +118,91 @@ message Service {
             }
             repeated ItemBranch branch = 1;
         }
+        
         message Config {
             repeated string path = 1;
             DataFormat format = 2;
         }
+
+        message CombinationResources {
+            message Clause {
+                message Priority {
+                    enum Attribute {
+                        START_SERVICE_TIME = 0;
+                        COST_BLKIO_WEIGHT = 1;
+                        COST_CPU_PERIOD = 2;
+                        COST_CPU_QUOTA = 3;
+                        COST_MEM_LIMIT = 4;
+                        COST_DISK_SPACE = 5;
+                        VARIANCE_BLKIO_WEIGHT = 6;
+                        VARIANCE_CPU_PERIOD = 7;
+                        VARIANCE_CPU_QUOTA = 8;
+                        VARIANCE_MEM_LIMIT = 9;
+                        VARIANCE_DISK_SPACE = 10;
+                    }
+                    // Resource attribute to prioritize.
+                    Attribute attribute = 1;
+                    // Weight for this priority.
+                    int32 weight = 2;
+                }
+                
+                // Overall weight for cost in this clause.
+                int32 cost_weight = 1;
+                
+                // Initial system requirements.
+                optional Sysresources init_sysreq = 2;
+
+                // Maximum system requirements.
+                optional Sysresources max_sysreq = 3;
+                
+                // Desired start service time.
+                optional int32 start_service_time_miliseconds = 4;
+                
+                // List of priority attributes.
+                repeated Priority priorities = 5;
+            }
+            map<int32, Clause> clause = 1;
+        }
+        
         // CPU architecture and environment description.
         Architecture architecture = 1;
-        // Serialized filesystem (e.g., TAR/Git DAG).
+        
+        // Serialized filesystem.
         bytes filesystem = 2;
+        
         // Environment variables for the container.
         map<string, DataFormat> enviroment_variables = 3;
+        
         // Entrypoint command(s) for the container.
         repeated string entrypoint = 4;
-        Config config = 5;
+        
+        // Container resource 
+        optional CombinationResources resources = 5;
+
+        Config config = 6;
+        
         // Expected node protocol stack for internal node logic.
-        repeated Api.Protocol node_protocol_stack = 6;
+        repeated Api.Protocol node_protocol_stack = 7;
     }
 
     message Network {
         repeated string tags = 1;
         string prose = 2;
         bytes formal = 3;
+
         // Protocol stack for external clients.
         repeated Api.Protocol client_protocol_stack = 4;
     }
 
-    // Human-readable description of the service.
+    // Natural language description.
     string prose = 1;
+
     // Container configuration.
     Container container = 2;
+    
     // API definition.
     Api api = 3;
+    
     // Network definitions.
     repeated Network network = 4;
 }
@@ -167,36 +223,18 @@ message Instance {
 }
 
 // -----------------------
-// CONFIGURATION (Merged)
-// Contains environment, resource clauses, and initial gas deposit.
+// SERVICE INSTANCE CONFIGURATION
 // -----------------------
 
 message Configuration {
     // Environment variables for gateway services.
     map<string, bytes> enviroment_variables = 1;
+
     // Service specification slots.
     repeated int32 spec_slot = 2;
 
-    // Optional combination resource clauses for service selection.
-    optional CombinationResources resources = 3;
-
     // Optional initial gas deposit for service execution.
-    optional GasAmount initial_gas_amount = 4;
-}
-
-message ConfigurationFile {
-    message NetworkResolution {
-        repeated string tags = 1;
-        repeated Instance peer_instances = 2;
-    }
-    // Gateway instance settings.
-    Instance gateway = 1;
-    // Combined configuration options.
-    Configuration config = 2;
-    // Network discovery of peers.
-    repeated NetworkResolution network_resolution = 3;
-    // Initial system resource allocation for services.
-    Sysresources initial_sysresources = 4;
+    optional GasAmount initial_gas_amount = 3;
 }
 
 // -----------------------
@@ -274,42 +312,6 @@ message Client {
 
 message RecursionGuard {
     string token = 1;
-}
-
-// Defines clauses and priorities for resource-based service selection.
-message CombinationResources {
-    message Clause {
-        message Priority {
-            enum Attribute {
-                START_SERVICE_TIME = 0;
-                COST_BLKIO_WEIGHT = 1;
-                COST_CPU_PERIOD = 2;
-                COST_CPU_QUOTA = 3;
-                COST_MEM_LIMIT = 4;
-                COST_DISK_SPACE = 5;
-                VARIANCE_BLKIO_WEIGHT = 6;
-                VARIANCE_CPU_PERIOD = 7;
-                VARIANCE_CPU_QUOTA = 8;
-                VARIANCE_MEM_LIMIT = 9;
-                VARIANCE_DISK_SPACE = 10;
-            }
-            // Resource attribute to prioritize.
-            Attribute attribute = 1;
-            // Weight for this priority.
-            int32 weight = 2;
-        }
-        // Overall weight for cost in this clause.
-        int32 cost_weight = 1;
-        // Minimum system requirements.
-        optional Sysresources min_sysreq = 2;
-        // Maximum system requirements.
-        optional Sysresources max_sysreq = 3;
-        // Desired start service time condition.
-        optional int32 start_service_time = 4;
-        // List of priority attributes.
-        repeated Priority priorities = 5;
-    }
-    map<int32, Clause> clause = 1;
 }
 
 message ModifyServiceSystemResourcesOutput {
