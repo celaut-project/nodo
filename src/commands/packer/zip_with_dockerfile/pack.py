@@ -145,7 +145,7 @@ def pack(directory: str) -> str:
 
     try:
         ip, port = None, None
-        if False:  # TODO; control exceptions and try others; and enviroment variable PACK_LOCAL_FIRST
+        if False:  # TODO; control exceptions and try others; and environment variable PACK_LOCAL_FIRST
             for peer_id in list(get_peer_ids()):
                 for _ip, _port in get_peer_directions(peer_id=peer_id):
                     ip, port = _ip, _port

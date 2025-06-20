@@ -17,7 +17,7 @@ message Service {
         }
         celaut.Service.Container.Architecture architecture = 1;
         celaut.Service.Container.Filesystem filesystem = 2;
-        map<string, celaut.DataFormat> enviroment_variables = 3;
+        map<string, celaut.DataFormat> environment_variables = 3;
         repeated string entrypoint = 4;
         optional celaut.Service.Container.Resources resources = 5;
         celaut.Service.Container.Config config = 6;

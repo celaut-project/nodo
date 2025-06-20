@@ -82,7 +82,7 @@ message Service {
         }
 
         // Environment variables for the container.
-        map<string, DataFormat> enviroment_variables = 3;
+        map<string, DataFormat> environment_variables = 3;
 
         repeated Slot slot = 2;
 
@@ -202,7 +202,7 @@ message Instance {
 
 message Configuration {
     // Environment variables for gateway services.
-    map<string, bytes> enviroment_variables = 1;
+    map<string, bytes> environment_variables = 1;
 
     // Service specification slots.
     repeated int32 spec_slot = 2;

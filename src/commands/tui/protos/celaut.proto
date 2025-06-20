@@ -97,7 +97,7 @@ message Service {
         }
         Architecture architecture = 1;
         bytes filesystem = 2;
-        map<string, DataFormat> enviroment_variables = 3;
+        map<string, DataFormat> environment_variables = 3;
         repeated string entrypoint = 4;
         Config config = 5;
         repeated Api.Protocol node_protocol_stack = 6;  // Expected node protocol stack
@@ -140,7 +140,7 @@ message Instance {
 // The __config__ file is mounted on each service on the filesystem's root.
 
 message Configuration {
-    map<string, bytes> enviroment_variables = 1;
+    map<string, bytes> environment_variables = 1;
     repeated int32 spec_slot = 2;
 }
 

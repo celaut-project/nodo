@@ -228,7 +228,7 @@ class ZipContainerPacker:
             for env in self.json.get('envs'):
                 try:
                     with open(self.path + env + ".field", "rb") as env_desc:
-                        self.service.api.enviroment_variables[env].ParseFromString(env_desc.read())
+                        self.service.api.environment_variables[env].ParseFromString(env_desc.read())
                 except FileNotFoundError:
                     pass
 
