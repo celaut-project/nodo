@@ -83,9 +83,8 @@ def __ensure_is_correct(directory: str):
     __dockerfile_copy_from(directory=directory)
 
 def prepare_directory(directory: str) -> Tuple[bool, str]:
-    print(f"Prepare directory {directory}")
     # Check if the directory is a remote Git repository (contains both https:// and .git)
-    if "https://" in directory:
+    if "http" in directory[:4]:
         # If the directory URL doesn't end with ".git", append it
         if not directory.endswith(".git"):
             directory += ".git"

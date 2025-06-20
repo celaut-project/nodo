@@ -427,18 +427,23 @@ if __name__ == '__main__':
                 # Get the path provided by the user
                 user_path = sys.argv[2]
 
-                # Determine if the path is absolute or relative
-                if os.path.isabs(user_path):
-                    # If it's absolute, use it directly
-                    absolute_path = user_path
-                else:
-                    # If it's relative, combine it with the original directory
-                    absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+                if "http" not in user_path[:4]:
 
-                # Check if the directory exists
-                if not os.path.exists(absolute_path):
-                    print(f"Error: The directory {absolute_path} does not exist")
-                    sys.exit(1)
+                    # Determine if the path is absolute or relative
+                    if os.path.isabs(user_path):
+                        # If it's absolute, use it directly
+                        absolute_path = user_path
+                    else:
+                        # If it's relative, combine it with the original directory
+                        absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+
+                    # Check if the directory exists
+                    if not os.path.exists(absolute_path):
+                        print(f"Error: The directory {absolute_path} does not exist")
+                        sys.exit(1)
+
+                else:
+                    absolute_path = user_path  # In case it's an external git repository
 
                 pack(directory=absolute_path)
 
