@@ -54,6 +54,9 @@ def inspect(service: str):
     print(f"Prose          : {service_obj.prose}\n")
 
     print_rule("🔌 Service Interface")
+    print("Env Vars:")
+    for var, df in service_obj.api.enviroment_variables.items():
+        print(f"  - {var}: tags={df.tags}, prose='{df.prose}'")
     print("(Protobuf):")
     print(service_obj.api)
     print("\n")
@@ -61,12 +64,42 @@ def inspect(service: str):
     # Container Configuration
     print_rule("⚙ Container Configuration")
     print(f"Architecture : {', '.join([tag for tag in service_obj.container.architecture.tags])}")
+    
     print(f"Prose  : {service_obj.container.architecture.prose}")
-    print(f"Env Vars     : {service_obj.api.enviroment_variables}")
     print(f"Entrypoint   : {service_obj.container.entrypoint}")
+
+    if service_obj.container.resources:
+        print("Resources:")
+        resources = service_obj.container.resources
+
+        def print_sysresources(label, sysres):
+            if not sysres:
+                return
+            print(f"  {label}:")
+            if sysres.blkio_weight:
+                print(f"    - blkio_weight : {sysres.blkio_weight}")
+            if sysres.cpu_period:
+                print(f"    - cpu_period   : {sysres.cpu_period}")
+            if sysres.cpu_quota:
+                print(f"    - cpu_quota    : {sysres.cpu_quota}")
+            if sysres.mem_limit:
+                print(f"    - mem_limit    : {sysres.mem_limit} bytes")
+            if sysres.disk_space:
+                print(f"    - disk_space   : {sysres.disk_space} bytes")
+
+        print_sysresources("At Init", resources.at_init)
+        print_sysresources("At Most", resources.at_most)
+
+        if resources.start_time_ms:
+            print(f"  Start Time (ms): {resources.start_time_ms}")
+        print("")
+
     print(f"Node compatibility")  # how he expects to communicate with the node, if he expects to communicate with it at all.
     print(f"- Config File  : {service_obj.container.config}")
-    print(f"- Protocols    : {service_obj.container.node_protocol_stack}\n")
+    print("- Protocols    :")
+    for proto in service_obj.container.node_protocol_stack:
+        print(f"    * Tags: {proto.tags}")
+        print(f"      Prose: {proto.prose}")
 
     # Network Settings
     print_rule("🌐 Network Settings")
