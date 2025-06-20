@@ -38,7 +38,7 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 4), initial_gas_amount: 
         yield celaut_pb2.Configuration(
             resources=celaut_pb2.Service.Container.CombinationResources(
                 clause={
-                    1: celaut_pb2.Service.Container.CombinationResources.Clause(
+                    1: celaut_pb2.Service.Container.Resource(
                         cost_weight=1,
                         min_sysreq=celaut_pb2.Sysresources(
                             mem_limit=mem_limit

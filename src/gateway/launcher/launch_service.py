@@ -83,7 +83,7 @@ def launch_service(
                     if estimated_cost.comb_resource_selected not in service.container.resources.clause:
                         raise Exception("Resource configuration clauses are misconfigured.")
                     
-                    resources_clause: celaut_pb2.Service.Container.CombinationResources.Clause = service.container.resources.clause[estimated_cost.comb_resource_selected]
+                    resources_clause: celaut_pb2.Service.Container.Resource = service.container.resources.clause[estimated_cost.comb_resource_selected]
 
                     instance = local_execution(
                         config=configuration,

@@ -21,7 +21,7 @@ sc = SQLConnection()
 
 def local_execution(
         config: Optional[celaut_pb2.Configuration],
-        resources: celaut_pb2.Service.Container.CombinationResources.Clause,
+        resources: celaut_pb2.Service.Container.Resource,
         father_id: Optional[str],
         father_ip: Optional[str],
         metadata: celaut.Metadata,
