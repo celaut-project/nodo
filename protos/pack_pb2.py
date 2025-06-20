@@ -10,10 +10,10 @@ from google.protobuf.internal import builder as _builder
 
 _sym_db = _symbol_database.Default()
 
-from protos import celaut_pb2 as celaut__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\npack.proto\x12\x04pack\x1a\x0c\x63\x65laut.proto\"\xd0\x06\n\x07Service\x12\r\n\x05prose\x18\x01 \x01(\t\x12*\n\tcontainer\x18\x02 \x01(\x0b\x32\x17.pack.Service.Container\x12 \n\x03\x61pi\x18\x03 \x01(\x0b\x32\x13.celaut.Service.Api\x12(\n\x07network\x18\x04 \x03(\x0b\x32\x17.celaut.Service.Network\x1a\xbd\x05\n\tContainer\x12<\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32&.celaut.Service.Container.Architecture\x12\x38\n\nfilesystem\x18\x02 \x01(\x0b\x32$.celaut.Service.Container.Filesystem\x12N\n\x14\x65nviroment_variables\x18\x03 \x03(\x0b\x32\x30.pack.Service.Container.environmentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x03(\t\x12;\n\tresources\x18\x05 \x01(\x0b\x32#.celaut.Service.Container.ResourcesH\x00\x88\x01\x01\x12\x30\n\x06\x63onfig\x18\x06 \x01(\x0b\x32 .celaut.Service.Container.Config\x12\x39\n\x13node_protocol_stack\x18\x07 \x03(\x0b\x32\x1c.celaut.Service.Api.Protocol\x1a\xcb\x01\n\nFilesystem\x12=\n\x06\x62ranch\x18\x01 \x03(\x0b\x32-.pack.Service.Container.Filesystem.ItemBranch\x1a~\n\nItemBranch\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0e\n\x04\x66ile\x18\x02 \x01(\x0cH\x00\x12\x0e\n\x04link\x18\x03 \x01(\tH\x00\x12:\n\nfilesystem\x18\x04 \x01(\x0b\x32$.celaut.Service.Container.FilesystemH\x00\x42\x06\n\x04item\x1aN\n\x18\x45nviromentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.celaut.DataFormat:\x02\x38\x01\x42\x0c\n\n_resources\"!\n\x13PackOutputServiceId\x12\n\n\x02id\x18\x01 \x01(\x0c\"\"\n\x0fPackOutputError\x12\x0f\n\x07message\x18\x01 \x01(\tb\x06proto3')
+
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\npack.proto\x12\x04pack\x1a\x0c\x63\x65laut.proto\"\xd3\x06\n\x07Service\x12\r\n\x05prose\x18\x01 \x01(\t\x12*\n\tcontainer\x18\x02 \x01(\x0b\x32\x17.pack.Service.Container\x12 \n\x03\x61pi\x18\x03 \x01(\x0b\x32\x13.celaut.Service.Api\x12(\n\x07network\x18\x04 \x03(\x0b\x32\x17.celaut.Service.Network\x1a\xc0\x05\n\tContainer\x12<\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32&.celaut.Service.Container.Architecture\x12\x38\n\nfilesystem\x18\x02 \x01(\x0b\x32$.celaut.Service.Container.Filesystem\x12P\n\x15\x65nvironment_variables\x18\x03 \x03(\x0b\x32\x31.pack.Service.Container.EnvironmentVariablesEntry\x12\x12\n\nentrypoint\x18\x04 \x03(\t\x12;\n\tresources\x18\x05 \x01(\x0b\x32#.celaut.Service.Container.ResourcesH\x00\x88\x01\x01\x12\x30\n\x06\x63onfig\x18\x06 \x01(\x0b\x32 .celaut.Service.Container.Config\x12\x39\n\x13node_protocol_stack\x18\x07 \x03(\x0b\x32\x1c.celaut.Service.Api.Protocol\x1a\xcb\x01\n\nFilesystem\x12=\n\x06\x62ranch\x18\x01 \x03(\x0b\x32-.pack.Service.Container.Filesystem.ItemBranch\x1a~\n\nItemBranch\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0e\n\x04\x66ile\x18\x02 \x01(\x0cH\x00\x12\x0e\n\x04link\x18\x03 \x01(\tH\x00\x12:\n\nfilesystem\x18\x04 \x01(\x0b\x32$.celaut.Service.Container.FilesystemH\x00\x42\x06\n\x04item\x1aO\n\x19\x45nvironmentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.celaut.DataFormat:\x02\x38\x01\x42\x0c\n\n_resources\"!\n\x13PackOutputServiceId\x12\n\n\x02id\x18\x01 \x01(\x0c\"\"\n\x0fPackOutputError\x12\x0f\n\x07message\x18\x01 \x01(\tb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -21,20 +21,20 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'pack_pb2', _globals)
 if _descriptor._USE_C_DESCRIPTORS == False:
 
   DESCRIPTOR._options = None
-  _SERVICE_CONTAINER_environmentVARIABLESENTRY._options = None
-  _SERVICE_CONTAINER_environmentVARIABLESENTRY._serialized_options = b'8\001'
+  _SERVICE_CONTAINER_ENVIRONMENTVARIABLESENTRY._options = None
+  _SERVICE_CONTAINER_ENVIRONMENTVARIABLESENTRY._serialized_options = b'8\001'
   _globals['_SERVICE']._serialized_start=35
-  _globals['_SERVICE']._serialized_end=883
+  _globals['_SERVICE']._serialized_end=886
   _globals['_SERVICE_CONTAINER']._serialized_start=182
-  _globals['_SERVICE_CONTAINER']._serialized_end=883
-  _globals['_SERVICE_CONTAINER_FILESYSTEM']._serialized_start=586
-  _globals['_SERVICE_CONTAINER_FILESYSTEM']._serialized_end=789
-  _globals['_SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH']._serialized_start=663
-  _globals['_SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH']._serialized_end=789
-  _globals['_SERVICE_CONTAINER_environmentVARIABLESENTRY']._serialized_start=791
-  _globals['_SERVICE_CONTAINER_environmentVARIABLESENTRY']._serialized_end=869
-  _globals['_PACKOUTPUTSERVICEID']._serialized_start=885
-  _globals['_PACKOUTPUTSERVICEID']._serialized_end=918
-  _globals['_PACKOUTPUTERROR']._serialized_start=920
-  _globals['_PACKOUTPUTERROR']._serialized_end=954
+  _globals['_SERVICE_CONTAINER']._serialized_end=886
+  _globals['_SERVICE_CONTAINER_FILESYSTEM']._serialized_start=588
+  _globals['_SERVICE_CONTAINER_FILESYSTEM']._serialized_end=791
+  _globals['_SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH']._serialized_start=665
+  _globals['_SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH']._serialized_end=791
+  _globals['_SERVICE_CONTAINER_ENVIRONMENTVARIABLESENTRY']._serialized_start=793
+  _globals['_SERVICE_CONTAINER_ENVIRONMENTVARIABLESENTRY']._serialized_end=872
+  _globals['_PACKOUTPUTSERVICEID']._serialized_start=888
+  _globals['_PACKOUTPUTSERVICEID']._serialized_end=921
+  _globals['_PACKOUTPUTERROR']._serialized_start=923
+  _globals['_PACKOUTPUTERROR']._serialized_end=957
 # @@protoc_insertion_point(module_scope)
