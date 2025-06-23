@@ -44,7 +44,7 @@ def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
 
 def execution_balancer(
         service_id: str,
-        resources,
+        resources: celaut.Service.Container.Resources,
         metadata: celaut.Metadata,
         configuration: celaut_pb2.Configuration,
         ignore_network: str = None,

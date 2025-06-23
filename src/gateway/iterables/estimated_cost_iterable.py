@@ -1,3 +1,4 @@
+from src.utils.utils import read_service_from_disk
 from typing import Optional, Generator
 
 from bee_rpc import client as bee, buffer_pb2
@@ -32,21 +33,30 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
             try:
 
                 if not self.configuration:
-                    self.configuration = celaut_pb2.Configuration(config=celaut_pb2.Configuration())
+                    self.configuration = celaut_pb2.Configuration()
 
                 if not self.configuration.HasField('initial_gas_amount') or not self.configuration.initial_gas_amount:
                     self.configuration.initial_gas_amount.CopyFrom(to_gas_amount(default_initial_cost(
                         father_id=self.client_id if self.client_id
                             else get_only_the_ip_from_context(context_peer=self.context.peer())
                         )))
-                    
-                if not self.configuration.HasField('resources') or not self.configuration.resources:
-                    self.configuration.resources.CopyFrom(default_initial_combinational_resources())
+
+                if not self.service_hash:
+                    raise Exception("No service hash provided.")
+
+                service = read_service_from_disk(service_hash=self.service_hash)
+
+                if not service:
+                    raise Exception(f"Service {self.service_hash} not on local registry.")
+
+                resources = service.container.resources
+                del service
 
                 yield from bee.serialize_to_buffer(
                     message_iterator=generate_estimated_cost(
                         metadata=self.metadata,
-                        config=self.configuration
+                        config=self.configuration,
+                        resources=resources
                     ),
                     indices=celaut_pb2.EstimatedCost
                 )
