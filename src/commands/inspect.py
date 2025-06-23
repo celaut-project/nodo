@@ -54,9 +54,10 @@ def inspect(service: str):
     print(f"Prose          : {service_obj.prose}\n")
 
     print_rule("🔌 Service Interface")
-    print("Env Vars:")
-    for var, df in service_obj.api.enviroment_variables.items():
-        print(f"  - {var}: tags={df.tags}, prose='{df.prose}'")
+    if service_obj.api.enviroment_variables:
+        print("Env Vars:")
+        for var, df in service_obj.api.enviroment_variables.items():
+            print(f"  - {var}: tags={df.tags}, prose='{df.prose}'")
     print("(Protobuf):")
     print(service_obj.api)
     print("\n")
