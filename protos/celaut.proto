@@ -211,6 +211,21 @@ message Configuration {
     optional GasAmount initial_gas_amount = 3;
 }
 
+message ConfigurationFile {
+    message NetworkResolution {
+        repeated string tags = 1;
+        repeated Instance peer_instances = 2;
+    }
+    // Gateway instance settings.
+    Instance gateway = 1;
+    // Combined configuration options.
+    Configuration config = 2;
+    // Network discovery of peers.
+    repeated NetworkResolution network_resolution = 3;
+    // Initial system resource allocation for services.
+    Sysresources initial_sysresources = 4;
+}
+
 // -----------------------
 // SYSTEM RESOURCES
 // Defines resource limits and weights for container updates.
