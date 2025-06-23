@@ -4,7 +4,7 @@ from protos import celaut_pb2 as celaut, celaut_pb2
 from src.balancers.execution_balancer.execution_balancer import execution_balancer
 from src.gateway.launcher.delegate_execution.delegate_execution import delegate_execution
 from src.gateway.launcher.local_execution.local_execution import local_execution
-from src.manager.manager import default_initial_combinational_resources, default_initial_cost, spend_gas
+from src.manager.manager import default_initial_cost, spend_gas
 from src.utils import utils, logger as log
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_gas_amount, to_gas_amount
