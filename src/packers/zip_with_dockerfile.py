@@ -189,6 +189,10 @@ class ZipContainerPacker:
             self.service.container.resources.at_most.mem_limit = at_most.get("mem_limit", 10e7)  # 100Mb by default
             self.service.container.resources.at_most.disk_space = at_most.get("disk_space", 10e9)  # 2Gb by default
 
+
+            print(f"Resources at_init: {self.service.container.resources.at_init}")
+            print(f"Resources at_most: {self.service.container.resources.at_most}")
+
         # Entrypoint
         if self.json.get('entrypoint'):
             self.service.container.entrypoint.append(self.json.get('entrypoint'))
@@ -231,6 +235,8 @@ class ZipContainerPacker:
                         self.service.api.environment_variables[env].ParseFromString(env_desc.read())
                 except FileNotFoundError:
                     pass
+        
+        print(f"API Envs: {self.service.api.environment_variables}")
 
         if not self.json.get('api'): return
         
