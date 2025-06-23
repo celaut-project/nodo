@@ -167,31 +167,26 @@ class ZipContainerPacker:
             )
     
         # Resources
-        if self.json.get('resources'):
-            res = self.json.get('resources', {})
+        res = self.json.get('resources', {})
 
-            # start_time_ms es opcional
-            self.service.container.resources.start_time_ms = res.get("start_time_ms")
+        # start_time_ms es opcional
+        self.service.container.resources.start_time_ms = res.get("start_time_ms")
 
-            # at_init
-            at_init = res.get("at_init", {})
-            self.service.container.resources.at_init.blkio_weight = at_init.get("blkio_weight")
-            self.service.container.resources.at_init.cpu_period = at_init.get("cpu_period")
-            self.service.container.resources.at_init.cpu_quota = at_init.get("cpu_quota")
-            self.service.container.resources.at_init.mem_limit = at_init.get("mem_limit", 10e7)  # 10Mb by default
-            self.service.container.resources.at_init.disk_space = at_init.get("disk_space", 2e9)  # 2Gb by default
+        # at_init
+        at_init = res.get("at_init", {})
+        self.service.container.resources.at_init.blkio_weight = at_init.get("blkio_weight")
+        self.service.container.resources.at_init.cpu_period = at_init.get("cpu_period")
+        self.service.container.resources.at_init.cpu_quota = at_init.get("cpu_quota")
+        self.service.container.resources.at_init.mem_limit = at_init.get("mem_limit", 10e7)  # 10Mb by default
+        self.service.container.resources.at_init.disk_space = at_init.get("disk_space", 2e9)  # 2Gb by default
 
-            # at_most
-            at_most = res.get("at_most", {})
-            self.service.container.resources.at_most.blkio_weight = at_most.get("blkio_weight")
-            self.service.container.resources.at_most.cpu_period = at_most.get("cpu_period")
-            self.service.container.resources.at_most.cpu_quota = at_most.get("cpu_quota")
-            self.service.container.resources.at_most.mem_limit = at_most.get("mem_limit", 10e7)  # 100Mb by default
-            self.service.container.resources.at_most.disk_space = at_most.get("disk_space", 10e9)  # 2Gb by default
-
-
-            log.LOGGER(f"Resources at_init: {self.service.container.resources.at_init}")
-            log.LOGGER(f"Resources at_most: {self.service.container.resources.at_most}")
+        # at_most
+        at_most = res.get("at_most", {})
+        self.service.container.resources.at_most.blkio_weight = at_most.get("blkio_weight")
+        self.service.container.resources.at_most.cpu_period = at_most.get("cpu_period")
+        self.service.container.resources.at_most.cpu_quota = at_most.get("cpu_quota")
+        self.service.container.resources.at_most.mem_limit = at_most.get("mem_limit", 10e7)  # 100Mb by default
+        self.service.container.resources.at_most.disk_space = at_most.get("disk_space", 10e9)  # 2Gb by default
 
         # Entrypoint
         if self.json.get('entrypoint'):
@@ -235,8 +230,6 @@ class ZipContainerPacker:
                         self.service.api.environment_variables[env].ParseFromString(env_desc.read())
                 except FileNotFoundError:
                     pass
-        
-        log.LOGGER(f"API Envs: {self.service.api.environment_variables}")
 
         if not self.json.get('api'): return
         
