@@ -190,8 +190,8 @@ class ZipContainerPacker:
             self.service.container.resources.at_most.disk_space = at_most.get("disk_space", 10e9)  # 2Gb by default
 
 
-            print(f"Resources at_init: {self.service.container.resources.at_init}")
-            print(f"Resources at_most: {self.service.container.resources.at_most}")
+            log.LOGGER(f"Resources at_init: {self.service.container.resources.at_init}")
+            log.LOGGER(f"Resources at_most: {self.service.container.resources.at_most}")
 
         # Entrypoint
         if self.json.get('entrypoint'):
@@ -236,7 +236,7 @@ class ZipContainerPacker:
                 except FileNotFoundError:
                     pass
         
-        print(f"API Envs: {self.service.api.environment_variables}")
+        log.LOGGER(f"API Envs: {self.service.api.environment_variables}")
 
         if not self.json.get('api'): return
         
