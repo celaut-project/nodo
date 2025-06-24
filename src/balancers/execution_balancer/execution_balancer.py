@@ -27,8 +27,8 @@ def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
         fields = []
         if hasattr(cost_proto, 'cost') and hasattr(cost_proto.cost, 'n'):
             fields.append(f"cost: {cost_proto.cost.n}")
-        if hasattr(cost_proto, 'min_maintenance_cost') and hasattr(cost_proto.min_maintenance_cost, 'n'):
-            fields.append(f"min_maintenance_cost: {cost_proto.min_maintenance_cost.n}")
+        if hasattr(cost_proto, 'init_maintenance_cost') and hasattr(cost_proto.init_maintenance_cost, 'n'):
+            fields.append(f"init_maintenance_cost: {cost_proto.init_maintenance_cost.n}")
         if hasattr(cost_proto, 'max_maintenance_cost') and hasattr(cost_proto.max_maintenance_cost, 'n'):
             fields.append(f"max_maintenance_cost: {cost_proto.max_maintenance_cost.n}")
         fields += [
@@ -51,7 +51,7 @@ def execution_balancer(
         recursion_guard_token: str = None,
 ) -> Generator[tuple[str, celaut_pb2.EstimatedCost], None, None]:
     
-    # sorted by cost, tuple of celaut.Instances or 'local' , cost and clause of combination resources selected
+    # sorted by cost, tuple of celaut.Instances or 'local' and cost
     peers: Dict[str, celaut_pb2.EstimatedCost] = {}
     
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
