@@ -47,7 +47,7 @@ def launch_service(
             configuration.initial_gas_amount.CopyFrom(to_gas_amount(default_initial_cost()))
 
         for peer, estimated_cost in execution_balancer(
-                resources=service.resources,
+                resources=service.container.resources,
                 service_id=service_id,
                 metadata=metadata,
                 ignore_network=utils.get_network_name(direction=father_ip),
