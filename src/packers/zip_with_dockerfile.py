@@ -173,21 +173,38 @@ class ZipContainerPacker:
         # start_time_ms es opcional
         self.service.container.resources.start_time_ms = int(res.get("start_time_ms", 0))
 
-        # at_init
+        # Extract at_init and at_most resource configurations
         at_init = res.get("at_init", {})
-        self.service.container.resources.at_init.blkio_weight = int(at_init.get("blkio_weight", 0))
-        self.service.container.resources.at_init.cpu_period = int(at_init.get("cpu_period", 0))
-        self.service.container.resources.at_init.cpu_quota = int(at_init.get("cpu_quota", 0))
-        self.service.container.resources.at_init.mem_limit = int(at_init.get("mem_limit", 10_000_000))  # 10Mb by default
-        self.service.container.resources.at_init.disk_space = int(at_init.get("disk_space", 2_000_000_000))  # 2Gb by default
-
-        # at_most
         at_most = res.get("at_most", {})
-        self.service.container.resources.at_most.blkio_weight = int(at_most.get("blkio_weight", 0))
-        self.service.container.resources.at_most.cpu_period = int(at_most.get("cpu_period", 0))
-        self.service.container.resources.at_most.cpu_quota = int(at_most.get("cpu_quota", 0))
-        self.service.container.resources.at_most.mem_limit = int(at_most.get("mem_limit", 10_000_000))  # 10Mb by default
-        self.service.container.resources.at_most.disk_space = int(at_most.get("disk_space", 2_000_000_000))  # 2Gb by default
+
+        # Extract initial values with defaults
+        init_blkio_weight = int(at_init.get("blkio_weight", 0))
+        init_cpu_period   = int(at_init.get("cpu_period", 0))
+        init_cpu_quota    = int(at_init.get("cpu_quota", 0))
+        init_mem_limit    = int(at_init.get("mem_limit", 10_000_000))       # 10MB by default
+        init_disk_space   = int(at_init.get("disk_space", 2_000_000_000))   # 2GB by default
+
+        # Ensure at_most values are at least as high as at_init
+        most_blkio_weight = max(init_blkio_weight, int(at_most.get("blkio_weight", 0)))
+        most_cpu_period   = max(init_cpu_period, int(at_most.get("cpu_period", 0)))
+        most_cpu_quota    = max(init_cpu_quota, int(at_most.get("cpu_quota", 0)))
+        most_mem_limit    = max(init_mem_limit, int(at_most.get("mem_limit", 10_000_000)))       # 10MB by default
+        most_disk_space   = max(init_disk_space, int(at_most.get("disk_space", 2_000_000_000)))   # 2GB by default
+
+        # Assign values to the container resources
+        r = self.service.container.resources
+        r.at_init.blkio_weight = init_blkio_weight
+        r.at_init.cpu_period = init_cpu_period
+        r.at_init.cpu_quota = init_cpu_quota
+        r.at_init.mem_limit = init_mem_limit
+        r.at_init.disk_space = init_disk_space
+
+        r.at_most.blkio_weight = most_blkio_weight
+        r.at_most.cpu_period = most_cpu_period
+        r.at_most.cpu_quota = most_cpu_quota
+        r.at_most.mem_limit = most_mem_limit
+        r.at_most.disk_space = most_disk_space
+
 
         # Entrypoint
         if self.json.get('entrypoint'):
