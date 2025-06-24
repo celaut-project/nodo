@@ -41,7 +41,7 @@ def generate_estimated_cost(
         cost=to_gas_amount(initial_gas),
         
         # Minimal maintenance cost.
-        min_maintenance_cost=to_gas_amount(compute_maintenance_cost(
+        init_maintenance_cost=to_gas_amount(compute_maintenance_cost(
             system_resources=resources.at_init
         )) if resources.HasField('at_init') else to_gas_amount(gas_amount=0),
         
