@@ -9,6 +9,18 @@ env_manager = EnvManager()
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 REGISTRY = env_manager.get_env("REGISTRY")
 
+def format_size(bytes):
+    """Convert bytes to a human-readable format (B, KB, MB, GB, TB)."""
+    if bytes < 1024:
+        return f"{bytes} B"
+    elif bytes < 1024 ** 2:
+        return f"{bytes / 1024:.2f} KB"
+    elif bytes < 1024 ** 3:
+        return f"{bytes / (1024 ** 2):.2f} MB"
+    elif bytes < 1024 ** 4:
+        return f"{bytes / (1024 ** 3):.2f} GB"
+    else:
+        return f"{bytes / (1024 ** 4):.2f} TB"
 
 def print_rule(title, borders=False):
     width = 60
@@ -20,7 +32,6 @@ def print_rule(title, borders=False):
         adjusted_title = f' {title} '
         line = adjusted_title.center(width, '-')
         print(line)
-
 
 def inspect(service: str):
     service = get_id(service)
@@ -43,21 +54,23 @@ def inspect(service: str):
     # Reputation Proofs
     print_rule("🔍 Reputation Proofs")
     for c in metadata.reputation_proofs:
-        print(f"Ledger  : {', '.join(c.ledger.tags)}")
-        print(f"Script  : {c.contract.hex()}")
-        print(f"Address : {c.contract_addr}\n")
+        print(f"{'Ledger':<10}: {', '.join(c.ledger.tags)}")
+        print(f"{'Script':<10}: {c.contract.hex()}")
+        print(f"{'Address':<10}: {c.contract_addr}\n")
 
     # Service Definition
     print_rule("📦 Service Definition", borders=True)
     service_obj = read_service_from_disk(service_hash=service)
-    print(f"Size:          : {getsize(os.path.join(REGISTRY, service)) / (1024 * 1024)} MB")
-    print(f"Prose          : {service_obj.prose}\n")
+    service_path = os.path.join(REGISTRY, service)
+    service_size = getsize(service_path)
+    print(f"Size: {format_size(service_size)}")
+    print(f"Prose: {service_obj.prose}\n")
 
     print_rule("🔌 Service Interface")
     try:
-        if service_obj.api.enviroment_variables:
+        if service_obj.api.environment_variables:  # Corrected typo
             print("Env Vars:")
-            for var, df in service_obj.api.enviroment_variables.items():
+            for var, df in service_obj.api.environment_variables.items():
                 print(f"  - {var}: tags={df.tags}, prose='{df.prose}'")
     except Exception as e:
         print(f"Error reading environment variables: {e}")
@@ -68,10 +81,9 @@ def inspect(service: str):
 
     # Container Configuration
     print_rule("⚙ Container Configuration")
-    print(f"Architecture : {', '.join([tag for tag in service_obj.container.architecture.tags])}")
-    
-    print(f"Prose  : {service_obj.container.architecture.prose}")
-    print(f"Entrypoint   : {service_obj.container.entrypoint}")
+    print(f"Architecture: {', '.join([tag for tag in service_obj.container.architecture.tags])}")
+    print(f"Prose: {service_obj.container.architecture.prose}")
+    print(f"Entrypoint: {service_obj.container.entrypoint}")
 
     if service_obj.container.resources:
         print("Resources:")
@@ -82,15 +94,15 @@ def inspect(service: str):
                 return
             print(f"  {label}:")
             if sysres.blkio_weight:
-                print(f"    - blkio_weight : {sysres.blkio_weight}")
+                print(f"    - blkio_weight: {sysres.blkio_weight}")
             if sysres.cpu_period:
-                print(f"    - cpu_period   : {sysres.cpu_period}")
+                print(f"    - cpu_period: {sysres.cpu_period}")
             if sysres.cpu_quota:
-                print(f"    - cpu_quota    : {sysres.cpu_quota}")
+                print(f"    - cpu_quota: {sysres.cpu_quota}")
             if sysres.mem_limit:
-                print(f"    - mem_limit    : {sysres.mem_limit} bytes")
+                print(f"    - mem_limit: {format_size(sysres.mem_limit)}")
             if sysres.disk_space:
-                print(f"    - disk_space   : {sysres.disk_space} bytes")
+                print(f"    - disk_space: {format_size(sysres.disk_space)}")
 
         print_sysresources("At Init", resources.at_init)
         print_sysresources("At Most", resources.at_most)
@@ -99,9 +111,9 @@ def inspect(service: str):
             print(f"  Start Time (ms): {resources.start_time_ms}")
         print("")
 
-    print(f"Node compatibility")  # how he expects to communicate with the node, if he expects to communicate with it at all.
-    print(f"- Config File  : {service_obj.container.config}")
-    print("- Protocols    :")
+    print("Node compatibility")
+    print(f"- Config File: {service_obj.container.config}")
+    print("- Protocols:")
     for proto in service_obj.container.node_protocol_stack:
         print(f"    * Tags: {proto.tags}")
         print(f"      Prose: {proto.prose}")
@@ -110,11 +122,11 @@ def inspect(service: str):
     print_rule("🌐 Network Settings")
     if not service_obj.network:
         print("🔒 This service is completely isolated.\n\n"
-      "- It cannot connect to any external endpoints.\n"
-      "- The user may connect to it through the ports exposed by its interface.\n"
-      "- It can only initiate connections to its own dependencies (child services it may deploy).\n"
-      "- All of its dependencies will follow the same restrictions.\n")
+              "- It cannot connect to any external endpoints.\n"
+              "- The user may connect to it through the ports exposed by its interface.\n"
+              "- It can only initiate connections to its own dependencies (child services it may deploy).\n"
+              "- All of its dependencies will follow the same restrictions.\n")
     for network in service_obj.network:
-        print(f"Tags         : {', '.join([tag for tag in network.tags])}")
-        print(f"Prose  : {network.prose}\n")
+        print(f"Tags: {', '.join([tag for tag in network.tags])}")
+        print(f"Prose: {network.prose}\n")
         print("\n")
