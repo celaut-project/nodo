@@ -100,10 +100,7 @@ def execution_balancer(
 
     try:
         log.LOGGER(f"Collected costs of execution {__pretty_format_peers(peers)}")
-        return estimated_cost_sorter(
-                estimated_costs=peers,
-                weight_clauses={_id: clause.cost_weight for _id, clause in configuration.resources.clause.items()}
-            )
+        return estimated_cost_sorter(estimated_costs=peers)
     except Exception as e:
         log.LOGGER('Error during estimated cost sorter on execution balancer:' + str(e))
         raise StopIteration
