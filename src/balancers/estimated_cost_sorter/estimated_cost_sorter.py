@@ -35,7 +35,7 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
                 mean([
                     vcnorm(
                         cost=nmc(
-                            cost=from_gas_amount(estimated_cost.min_maintenance_cost),
+                            cost=from_gas_amount(estimated_cost.init_maintenance_cost),
                             timelapse=estimated_cost.maintenance_seconds_loop
                         ),
                         variance=estimated_cost.variance
