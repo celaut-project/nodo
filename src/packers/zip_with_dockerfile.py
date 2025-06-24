@@ -186,8 +186,8 @@ class ZipContainerPacker:
         self.service.container.resources.at_most.blkio_weight = int(at_most.get("blkio_weight", 0))
         self.service.container.resources.at_most.cpu_period = int(at_most.get("cpu_period", 0))
         self.service.container.resources.at_most.cpu_quota = int(at_most.get("cpu_quota", 0))
-        self.service.container.resources.at_most.mem_limit = int(at_most.get("mem_limit", 100_000_000))  # 100Mb by default
-        self.service.container.resources.at_most.disk_space = int(at_most.get("disk_space", 10_000_000_000))  # 10Gb by default
+        self.service.container.resources.at_most.mem_limit = int(at_most.get("mem_limit", 10_000_000))  # 10Mb by default
+        self.service.container.resources.at_most.disk_space = int(at_most.get("disk_space", 2_000_000_000))  # 2Gb by default
 
         # Entrypoint
         if self.json.get('entrypoint'):
