@@ -33,8 +33,7 @@ def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
             fields.append(f"max_maintenance_cost: {cost_proto.max_maintenance_cost.n}")
         fields += [
             f"maintenance_seconds_loop: {cost_proto.maintenance_seconds_loop}",
-            f"variance: {cost_proto.variance}",
-            f"comb_resource_selected: {cost_proto.comb_resource_selected}"
+            f"variance: {cost_proto.variance}"
         ]
         return "\n" + "\n".join(f"    {line}" for line in fields)
     
