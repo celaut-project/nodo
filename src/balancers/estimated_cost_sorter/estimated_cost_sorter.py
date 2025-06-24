@@ -19,29 +19,20 @@ GAS_PER_ERG = int(env_manager.get_env("GAS_PER_ERG"))
 
 sq = SQLConnection()
 
-def estimated_cost_sorter(
-        estimated_costs: Dict[str, celaut_pb2.EstimatedCost],
-        weight_clauses: Dict[int, int]
-) -> Generator[Tuple[str, celaut_pb2.EstimatedCost], None, None]:
+def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) -> Generator[Tuple[str, celaut_pb2.EstimatedCost], None, None]:
     
     total_reputation: float = sq.total_peer_reputation()
     
     def __compute_score(peer_id: str, estimated_cost: celaut_pb2.EstimatedCost) -> float:
-        priority: int = max(1, weight_clauses[estimated_cost.comb_resource_selected])  # If the combinational resource clause don't have a cost_weight, it's like equal to 1 cost weight.
 
-        gas_cost: int = sum([
-            
-            # Normaliced initialization cost.
+        gas_cost: int = int(
             INIT_COST_CONFIGURATION_FACTOR * vcnorm(
                 cost=from_gas_amount(estimated_cost.cost),
                 variance=estimated_cost.variance
-            ),
-            
-            # Normalized maintenance cost.
+            )
+            +
             MAINTENANCE_COST_CONFIGURATION_FACTOR * int(
                 mean([
-                    
-                    # Initial maintenance cost
                     vcnorm(
                         cost=nmc(
                             cost=from_gas_amount(estimated_cost.min_maintenance_cost),
@@ -49,8 +40,6 @@ def estimated_cost_sorter(
                         ),
                         variance=estimated_cost.variance
                     ),
-                    
-                    # Maximum maintenance cost
                     vcnorm(
                         cost=nmc(
                             cost=from_gas_amount(estimated_cost.max_maintenance_cost),
@@ -60,14 +49,15 @@ def estimated_cost_sorter(
                     )
                 ])
             )
-        ])
+        )
 
         local_gas_per_erg: int = GAS_PER_ERG
         
         if local_gas_per_erg:
 
             if peer_id != "local":
-                peer_gas_per_erg: int = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_id=ERGO_LEDGER)
+                from typing import Optional
+                peer_gas_per_erg: Optional[int] = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_id=ERGO_LEDGER)
                 if peer_gas_per_erg is None:
                     logger(f"No ergo gas price on peer {peer_id}, continue.")
                     return 0
@@ -85,9 +75,9 @@ def estimated_cost_sorter(
         else:
             reputation: float = ((compute_reputation(peer_id=peer_id) / total_reputation) if total_reputation else 0 ) * SOCIALIZATION_FACTOR  # TODO Should be improved, because should not be relation on how many peers are.
         
-        score = priority + reputation - log(normalized_cost_in_ergs)  # TODO Could have weights on envs.
+        score = reputation - log(normalized_cost_in_ergs)  # TODO Could have weights on envs.
         
-        logger(f"Computing estimated cost score for peer {peer_id}: priority {priority}, reputation {reputation}, cost {log(normalized_cost_in_ergs)} => score {score}\n")
+        logger(f"Computing estimated cost score for peer {peer_id}: reputation {reputation}, cost {log(normalized_cost_in_ergs)} => score {score}\n")
         return score
 
     return (
