@@ -37,8 +37,7 @@ def local_execution(
     initial_gas_amount: int = from_gas_amount(config.initial_gas_amount) \
         if config.HasField("initial_gas_amount") else default_initial_cost(father_id=father_id)
 
-    initial_system_resources: celaut.Sysresources = resources.min_sysreq \
-        if resources.HasField('min_sysreq') and resources.min_sysreq else DEFAULT_SYSTEM_RESOURCES
+    initial_system_resources: celaut.Sysresources = resources.at_init
 
     try:
         service_id = build.build(

@@ -24,7 +24,7 @@ def compute_start_service_cost(
     return int(sum([
         execution_cost(
             metadata=metadata,
-            system_resources=resource.min_sysreq
+            system_resources=resource.at_init
         ),
         initial_gas_amount,
     ]))
