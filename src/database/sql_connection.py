@@ -1289,30 +1289,30 @@ class SQLConnection(metaclass=Singleton):
             service_id (str): Service id
         """
         self._execute('''
-            INSERT INTO delegated_instances (token, token_hash, peer_id, father_id, serialized_instance, service_id)
+            INSERT INTO delegated_instances (token_delegation, id, peer_id, father_id, serialized_instance, service_id)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance, service_id))
 
-    def get_token_by_hashed_token(self, hashed_token: str) -> Optional[str]:
+    def get_delegated_token_by_id(self, id: str) -> Optional[str]:
         """
         Retrieves the token associated with a given hashed token for an external container.
 
         Args:
-            hashed_token (str): The hashed token of the external container.
+            id (str): The hashed token of the external container.
 
         Returns:
             Optional[str]: The token if it exists, or None if not found.
         """
         try:
             result = self._execute('''
-                SELECT token FROM delegated_instances WHERE token_hash = ?
-            ''', (hashed_token,))
+                SELECT token_delegation FROM delegated_instances WHERE id = ?
+            ''', (id,))
             row = result.fetchone()
             if row:
                 return row['token']
             return None
         except sqlite3.Error as e:
-            logger.LOGGER(f'Failed to retrieve token for hashed external container token {hashed_token}: {e}')
+            logger.LOGGER(f'Failed to retrieve token for hashed external container token {id}: {e}')
             return None
 
     def get_peer_id_by_external_service(self, token: str) -> Optional[str]:
@@ -1352,8 +1352,8 @@ class SQLConnection(metaclass=Singleton):
         refund = 0
 
         hashed_token = self._execute('''
-            SELECT token_hash FROM delegated_instances WHERE token = ?
-        ''', (his_token,)).fetchone()["token_hash"]
+            SELECT id FROM delegated_instances WHERE token = ?
+        ''', (his_token,)).fetchone()["id"]
 
         self._execute('''
             DELETE FROM delegated_instances WHERE token = ?

@@ -108,8 +108,8 @@ def create_tables(cursor):
         ''',
         "delegated_instances": '''
             CREATE TABLE IF NOT EXISTS delegated_instances (
-                token TEXT PRIMARY KEY,
-                token_hash TEXT,
+                token_delegation TEXT PRIMARY KEY,
+                id TEXT,
                 peer_id TEXT,
                 father_id TEXT,
                 serialized_instance TEXT,

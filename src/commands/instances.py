@@ -94,9 +94,9 @@ def list_instances(groupable: bool = False, search: str = ""):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT token, token_hash, peer_id, father_id, serialized_instance, service_id FROM delegated_instances"
+                "SELECT token_delegation, id, peer_id, father_id, serialized_instance, service_id FROM delegated_instances"
             )
-            for external_token, token_hash, peer_id, father_id, si, service in cursor.fetchall():
+            for external_token, id, peer_id, father_id, si, service in cursor.fetchall():
                 parent_type = 'client' if father_id in client_ids else 'unknown'
 
                 try:
@@ -106,7 +106,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                     gas = "N/A"
                 
                 instances.append({
-                    'id': token_hash or 'N/A',
+                    'id': id or 'N/A',
                     'external_token': external_token,
                     'service': get_tag(service),
                     'ip': get_http_ip(si) if si else "N/A",
