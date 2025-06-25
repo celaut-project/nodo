@@ -150,6 +150,12 @@ These are intended for development or advanced maintenance environments:
   **Example:**  
   `nodo rundev /path/to/repository`
 
+- **ggconf `<repository path>`**  
+  "generate_gateway_config_dev"
+ Generates the files needed to run the specified repository locally.
+  **Example:**  
+  `nodo ggconf /path/to/repository`
+
 - **submit_reputation**  
   Forces the submission of reputation information.  
   **Example:**  
