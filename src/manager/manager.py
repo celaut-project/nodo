@@ -441,9 +441,9 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
     else:  # It's external
         log.LOGGER(f"Token {token} is external; let's stop it.")
         try:
-            external_token = sc.get_token_by_hashed_token(hashed_token=token)
+            external_token = sc.get_delegated_token_by_id(id=token)
             if not external_token:
-                log.LOGGER(f"No external token for the hashed token {token}")
+                log.LOGGER(f"No external token for the token {token}")
                 return None
             
             peer_id = sc.get_peer_id_by_external_service(token=external_token)
@@ -500,8 +500,15 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
     
     is_internal = sc.internal_instance_exists(id=service_token)
     
-    father_id: str = sc.get_internal_father_id(id=service_token) if is_internal \
-        else sc.get_external_father_id(token=sc.get_token_by_hashed_token(hashed_token=service_token))
+    if is_internal:
+        father_id = sc.get_internal_father_id(id=service_token)
+    else:
+        external_token = sc.get_delegated_token_by_id(id=service_token)
+        if not external_token:
+            log.LOGGER(f"ERROR: The service {service_token} is not a valid external service.")
+            return False, 'Invalid external service token' 
+
+        father_id = sc.get_external_father_id(token=external_token)
         
     if not father_id:
         log.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
@@ -550,8 +557,16 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
     
     else:
         try:
-            external_token = sc.get_token_by_hashed_token(hashed_token=service_token)
+            external_token = sc.get_delegated_token_by_id(id=service_token)
+            if not external_token:
+                log.LOGGER(f"No external token for the token {external_token}")
+                return False, "No external token found."
+
             peer_id = sc.get_peer_id_by_external_service(token=external_token)
+            if not peer_id:
+                log.LOGGER(f"No peer for the token {external_token}")
+                return False, "No peer found for the external service."
+                
             _output = next(bee.client_grpc(
                 method=celaut_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(

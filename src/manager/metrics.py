@@ -143,7 +143,10 @@ def get_metrics(token: str) -> celaut_pb2.Metrics:
         raise Exception(f'Invalid token, it should be a client_id or a token with ##.  token: {token}')
 
     else:
-        token = sc.get_token_by_hashed_token(hashed_token=token)
+        token = sc.get_delegated_token_by_id(id=token)
+        if not token:
+            raise Exception(f'Invalid token: {token}')
+            
         return __get_metrics_external(
             peer_id=sc.get_peer_id_by_external_service(token),  # peer_id
             token=token  # If the token starts with ## ...
