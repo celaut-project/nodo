@@ -58,6 +58,16 @@ def _generate_dev_dependencies(path: str):
     dependencies = pack_config[DEPENDENCIES_DIR]
     resolved_deps = {}
 
+    list(map(
+        lambda _reg: os.makedirs(f"{path}/{pack_config[_reg]}")
+            if _reg in pack_config and type(pack_config[_reg]) is str else 1,
+        [
+            SERVICE_DEPENDENCIES_DIRECTORY,
+            METADATA_DEPENDENCIES_DIRECTORY,
+            BLOCKS_DIRECTORY
+        ]
+    ))
+
     skip_wbp = pack_config[SKIP_WBP] if SKIP_WBP in pack_config else False  # By default, will be included.
     write_env = pack_config[DEPENDENCIES_ENV] if DEPENDENCIES_ENV in pack_config else False  # Write a file with the final hashes for the case where some dependencies need to be packed too.
     dest_dir = f"{path}/{pack_config[SERVICE_DEPENDENCIES_DIRECTORY]}"
