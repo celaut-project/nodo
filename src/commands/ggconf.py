@@ -1,6 +1,6 @@
+from src.virtualizers.docker.set_container_config import write_config
+from src.virtualizers.docker.set_container_config import get_config
 from src.commands.__by_tag import get_id
-from src.commands.ggconf import write_config
-from src.commands.ggconf import get_config
 import json
 import os
 import shutil
