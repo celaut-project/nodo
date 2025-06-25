@@ -97,6 +97,7 @@ def generate_gateway_config_dev(path: str):
         print("Creating configuration file for development...")
         os.makedirs(path, exist_ok=True)
         config= get_config(config=None, resources=None)
+        print(f"Writing the configuration {config} to the path: '{path}'")
         write_config(path=path, config=config)
     else:
         print("INFO: The '__config__' file already exists.")

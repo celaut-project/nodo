@@ -17,7 +17,8 @@ def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysreso
 
     __config__ = celaut.ConfigurationFile()
 
-    __config__.gateway.CopyFrom(generate_node_peer_info(network=DOCKER_NETWORK).instance)
+    local_peer = generate_node_peer_info(network=DOCKER_NETWORK)
+    __config__.gateway.CopyFrom(local_peer.instance)
     
     if config: 
         __config__.config.CopyFrom(config)
