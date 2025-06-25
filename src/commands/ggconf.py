@@ -58,6 +58,10 @@ def _generate_dev_dependencies(path: str):
     dependencies = pack_config[DEPENDENCIES_DIR]
     resolved_deps = {}
 
+    skip_wbp = pack_config[SKIP_WBP] if SKIP_WBP in pack_config else False  # By default, will be included.
+    write_env = pack_config[DEPENDENCIES_ENV] if DEPENDENCIES_ENV in pack_config else False  # Write a file with the final hashes for the case where some dependencies need to be packed too.
+    dest_dir = f"{path}/{pack_config[SERVICE_DEPENDENCIES_DIRECTORY]}"
+
     print("Resolving dependencies...")
     for env, dependency in dependencies.items():
         dependency = get_id(dependency)
@@ -72,6 +76,29 @@ def _generate_dev_dependencies(path: str):
             # The dependency already exists in the registry, use its name/hash
             print(f"OK: Dependency '{dependency}' found in registry.")
             resolved_deps[env] = dependency
+
+        if skip_wbp:
+            wbp_path = os.path.join(dest_dir, dependency, "wbp.bin")
+            if os.path.exists(wbp_path):
+                os.remove(wbp_path)
+
+        # Move dependency's metadata
+        if os.path.exists(f"{METADATA}/{dependency}"):
+            os.system(f"cp -R {METADATA}/{dependency} "
+                        f"{path}/{pack_config[METADATA_DEPENDENCIES_DIRECTORY]}")
+
+        # Move dependency's blocks.
+        if os.path.isdir(f"{SERVICES}/{dependency}"):
+            with open(f"{SERVICES}/{dependency}/_.json", 'r') as dependency_json_file:
+                dependency_json = json.load(dependency_json_file)
+                for _e in dependency_json:
+                    if type(_e) == list:
+                        block: str = _e[0]
+                        if not os.path.exists(
+                                f'{path}/{pack_config[BLOCKS_DIRECTORY]}/{block}'
+                        ):
+                            os.system(f"cp -r {BLOCKS}/{block} "
+                                        f"{path}/{pack_config[BLOCKS_DIRECTORY]}")
 
     # Write the .dependencies file in the service's root directory
     dependencies_file_path = Path(path) / ".dependencies"
