@@ -77,6 +77,8 @@ def _generate_dev_dependencies(path: str):
             print(f"OK: Dependency '{dependency}' found in registry.")
             resolved_deps[env] = dependency
 
+        os.system(f"cp -R {SERVICES}/{dependency} {dest_dir}")
+
         if skip_wbp:
             wbp_path = os.path.join(dest_dir, dependency, "wbp.bin")
             if os.path.exists(wbp_path):
