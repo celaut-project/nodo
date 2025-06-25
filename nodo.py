@@ -158,6 +158,7 @@ if __name__ == '__main__':
             "\n- storage:prune_blocks"
             "\n- test <test name>"
             "\n- rundev <repository path>"
+            "\n- ggconf <repository path>"
             "\n- submit_reputation"
             "\n- refresh_ergo_nodes"
             "\n- prune_containers"
@@ -454,6 +455,10 @@ if __name__ == '__main__':
             case "rundev":
                 from src.commands.run_dev import run_dev
                 run_dev(path=sys.argv[2])
+
+            case "ggconf":
+                from src.commands.ggconf import generate_gateway_config_dev
+                generate_gateway_config_dev(path=sys.argv[2])
                 
             case "prune_containers":
                 # Check if script is run as root
