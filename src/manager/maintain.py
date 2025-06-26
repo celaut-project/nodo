@@ -119,7 +119,7 @@ def maintain_containers(debug_mode: bool=False):
 
         # Skip development containers from the ggconf command
         if "rundev" in container_id:
-            log.LOGGER(f"Skipping development container {container_id}.")
+            if debug_mode: log.LOGGER(f"Skipping development container {container_id}.")
             continue
 
         if debug_mode: log.LOGGER(f"Checking container: {container_id}")
