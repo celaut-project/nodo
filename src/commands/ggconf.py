@@ -163,7 +163,7 @@ def generate_gateway_config_dev(path: str):
 
     # Add local instance into the DB
 
-    gas_amount = 10*30
+    gas_amount = 10**30
 
     client_id = next(get_dev_clients(gas_amount=gas_amount))
 
