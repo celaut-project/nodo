@@ -116,6 +116,12 @@ def maintain_containers(debug_mode: bool=False):
             log.LOGGER(f"Error prunning container {container_id}: {e}")
     
     for container_id in sc.get_all_internal_containers_ids():
+
+        # Skip development containers from the ggconf command
+        if "rundev" in container_id:
+            log.LOGGER(f"Skipping development container {container_id}.")
+            continue
+
         if debug_mode: log.LOGGER(f"Checking container: {container_id}")
         try:
             container = DOCKER_CLIENT().containers.get(container_id)   # TODO refactor with manager.__get_container_by_id()
