@@ -25,8 +25,6 @@ METADATA = env_manager.get_env("METADATA_REGISTRY")
 SERVICES = env_manager.get_env("REGISTRY")
 BLOCKS = env_manager.get_env("BLOCKDIR")
 
-DEFAULT_INTIAL_GAS_AMOUNT = int(env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT"))
-
 sc = SQLConnection()
 
 
@@ -165,13 +163,15 @@ def generate_gateway_config_dev(path: str):
 
     # Add local instance into the DB
 
-    client_id = next(get_dev_clients(gas_amount=DEFAULT_INTIAL_GAS_AMOUNT))
+    gas_amount = 10*30
+
+    client_id = next(get_dev_clients(gas_amount=gas_amount))
 
     sc.add_local_instance(
         father_id=client_id,
         container_id="rundev::" + path + "::" + str(os.getpid()),
         container_ip=get_local_ip(),  # localhost
-        gas=DEFAULT_INTIAL_GAS_AMOUNT,
+        gas=gas_amount,
         serialized_instance="",
         service_id="rundev::" + path,
     )
