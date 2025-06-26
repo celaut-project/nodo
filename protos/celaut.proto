@@ -284,9 +284,9 @@ message Metrics {
     GasAmount gas_amount = 1;
 }
 
-message GatewayInstance {
-    Instance instance = 1;
-    optional string token = 2;      // Authentication token for tunnels.
+message ServiceInstance {
+    string token = 1;
+    Instance instance = 2;
 }
 
 message Peer {

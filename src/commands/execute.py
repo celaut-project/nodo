@@ -86,7 +86,7 @@ def execute(service: str):
             initial_gas_amount=10**16,
             mem_limit=10**9
         ),
-        indices_parser=celaut_pb2.GatewayInstance,
+        indices_parser=celaut_pb2.ServiceInstance,
         partitions_message_mode_parser=True,
         indices_serializer=gateway_bee.StartService_input_indices
     ))
