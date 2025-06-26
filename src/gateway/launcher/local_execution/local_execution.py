@@ -28,7 +28,7 @@ def local_execution(
         service: celaut.Service,
         service_id: Optional[str],
         refund_gas: List[Callable]
-) -> celaut_pb2.Instance:
+) -> celaut_pb2.ServiceInstance:
 
     #  TODO check this.
     father_id = father_id if father_id else ""

@@ -22,7 +22,7 @@ def launch_service(
         service_id: str = None,
         configuration: Optional[celaut_pb2.Configuration] = None,
         recursion_guard_token: str = None,
-) -> celaut_pb2.Instance:
+) -> celaut_pb2.ServiceInstance:
 
     with RecursionGuard(
             token=recursion_guard_token,
