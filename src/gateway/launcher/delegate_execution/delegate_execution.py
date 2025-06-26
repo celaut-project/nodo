@@ -24,7 +24,7 @@ def delegate_execution(
                         cost: int, metadata, config,
                         recursion_guard_token,
                         refund_gas: List[Callable]
-                   ) -> celaut_pb2.Instance:
+                   ) -> celaut_pb2.ServiceInstance:
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
 
