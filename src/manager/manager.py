@@ -45,6 +45,7 @@ def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
     if len(clients) == 0:
         log.LOGGER("Adds dev client.")
         sc.add_client(client_id=f"dev-{uuid4()}", gas=DEV_CLIENT_GAS_AMOUNT, last_usage=None)
+        clients = sc.get_dev_clients()
     for client_id in clients:
         if sc.get_client_gas(client_id=client_id)[0] > gas_amount:
             yield client_id
