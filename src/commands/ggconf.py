@@ -5,7 +5,7 @@ from src.virtualizers.docker.set_container_config import get_config
 from src.commands.__by_tag import get_id
 import json
 import os
-import shutil
+import socket
 from typing import Dict
 from pathlib import Path
 from src.utils.env import EnvManager
@@ -127,6 +127,16 @@ def _generate_dev_dependencies(path: str):
             
     print("INFO: Development .dependencies file generated successfully.")
 
+def get_local_ip():
+    # Creates an UDP socket to determine the local IP address.
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # Not needed that 8.8.8.8 is reachable, just to get the local IP
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+    finally:
+        s.close()
+    return ip
 
 def generate_gateway_config_dev(path: str):
     """
@@ -160,7 +170,7 @@ def generate_gateway_config_dev(path: str):
     sc.add_local_instance(
         father_id=client_id,
         container_id="rundev::" + path + "::" + str(os.getpid()),
-        container_ip="127.0.0.1",  # localhost
+        container_ip=get_local_ip(),  # localhost
         gas=DEFAULT_INTIAL_GAS_AMOUNT,
         serialized_instance="",
         service_id="rundev::" + path,
