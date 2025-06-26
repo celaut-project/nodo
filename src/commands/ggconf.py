@@ -1,3 +1,5 @@
+from src.database.sql_connection import SQLConnection
+from src.manager.manager import get_dev_clients
 from src.virtualizers.docker.set_container_config import write_config
 from src.virtualizers.docker.set_container_config import get_config
 from src.commands.__by_tag import get_id
@@ -22,6 +24,10 @@ env_manager = EnvManager()
 METADATA = env_manager.get_env("METADATA_REGISTRY")
 SERVICES = env_manager.get_env("REGISTRY")
 BLOCKS = env_manager.get_env("BLOCKDIR")
+
+DEFAULT_INTIAL_GAS_AMOUNT = int(env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT"))
+
+sc = SQLConnection()
 
 
 def _generate_dev_dependencies(path: str):
@@ -131,6 +137,7 @@ def generate_gateway_config_dev(path: str):
     """
     path = path.rstrip('/')
 
+    # Add the configuration file
     config_dir_path = Path(path) / "__config__"
     if not config_dir_path.exists():
         print("Creating configuration file for development...")
@@ -141,6 +148,22 @@ def generate_gateway_config_dev(path: str):
     else:
         print("INFO: The '__config__' file already exists.")
 
+
+    # Generate dependencies
     _generate_dev_dependencies(path)
+
+
+    # Add local instance into the DB
+
+    client_id = next(get_dev_clients(gas_amount=DEFAULT_INTIAL_GAS_AMOUNT))
+
+    sc.add_local_instance(
+        father_id=client_id,
+        container_id="rundev::" + path + "::" + str(os.getpid()),
+        container_ip="127.0.0.1",  # localhost
+        gas=DEFAULT_INTIAL_GAS_AMOUNT,
+        serialized_instance="",
+        service_id="rundev::" + path,
+    )
     
     print(f"\nDevelopment environment setup finished for the service at: '{path}'")
