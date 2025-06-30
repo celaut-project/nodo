@@ -1,3 +1,4 @@
+from src.database.sql_connection import TOTAL_REPUTATION_TOKEN_AMOUNT
 import json
 from google.protobuf.json_format import MessageToJson
 from ergpy import appkit
@@ -31,12 +32,11 @@ SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF = env_manager.get_env('SUBMIT_NETWORK
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
 DEFAULT_TOKEN_AMOUNT = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
-DEFAULT_TOKEN_LABEL = "celaut-node"
 
 # Enum definitions
 class ProofObjectType(Enum):
-    PlainText = "plain/txt-utf8"
-    ProofByToken = "token-proof"
+    PlainText = "8299d98e15ebee7fa39ad716de7c8bb191790a1bf4b7c3f91af35a0e36187706"
+    CelautNode = "64060577c3393e0e3cf8938ec8e6a2002ded27ece17750aa5add7d5c3e1227ba"
 
 # TypedDict definitions
 class ProofObject(TypedDict):
@@ -53,12 +53,11 @@ def __build_proof_box(
     proof_id: str,
     sender_address: Address,
     token_amount: int = DEFAULT_TOKEN_AMOUNT,
-    reputation_token_label: str = DEFAULT_TOKEN_LABEL,
     assigned_object: Optional[ProofObject] = None,
     data: str = ""
 ):
-    LOGGER(f"Building proof box with token amount {token_amount} and reputation token label {reputation_token_label}")
-    object_type_to_assign = assigned_object['type'] if assigned_object else ProofObjectType.PlainText
+    LOGGER(f"Building proof box with token amount {token_amount}")
+    type_nft_id = assigned_object['type'] if assigned_object else ProofObjectType.PlainText
     object_to_assign = assigned_object['value'] if assigned_object else ""
 
     # ergoTree = sender_address.getErgoAddress().script()
@@ -71,12 +70,12 @@ def __build_proof_box(
                 .value(SAFE_MIN_BOX_VALUE) \
                 .tokens([ErgoToken(proof_id, jpype.JLong(abs(token_amount)))]) \
                 .registers([
-                    ErgoValue.of(jpype.JString(reputation_token_label).getBytes("utf-8")),         # R4
-                    ErgoValue.of(jpype.JString(object_type_to_assign.value).getBytes("utf-8")),    # R5
-                    ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),               # R6
-                    ErgoValue.of(sender_address_proposition),                                      # R7
-                    ErgoValue.of(jpype.JBoolean(token_amount >= 0)),                               # R8
-                    ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                            # R9   JSON celaut.Instance
+                    ErgoValue.of(jpype.JString(type_nft_id.value).getBytes("utf-8")),                                   # R4
+                    ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),                                    # R5
+                    ErgoValue.of(jpype.JClass("scala.Tuple2")(False, TOTAL_REPUTATION_TOKEN_AMOUNT)),                   # R6
+                    ErgoValue.of(sender_address_proposition),                                                           # R7
+                    ErgoValue.of(jpype.JBoolean(token_amount >= 0)),                                                    # R8
+                    ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                                                 # R9   JSON celaut.Instance
                 ]) \
                 .contract(ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)) \
                 .build()
@@ -197,7 +196,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             proof_id=proof_id,
             sender_address=sender_address,
             assigned_object=ProofObject(
-                type=ProofObjectType.ProofByToken,
+                type=ProofObjectType.CelautNode,
                 value=obj[0] if not self_info else proof_id
             ),
             token_amount=obj[1],
