@@ -78,7 +78,7 @@ def __build_proof_box(
                 .registers([
                     ErgoValue.of(jpype.JString(type_nft_id.value).getBytes("utf-8")),                                   # R4
                     ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),                                    # R5
-                    ErgoValue.of(ErgoValue.of(java_array, tuple_type)),                                                 # R6
+                    ErgoValue.of(java_array, tuple_type),                                                 # R6
                     ErgoValue.of(sender_address_proposition),                                                           # R7
                     ErgoValue.of(jpype.JBoolean(token_amount >= 0)),                                                    # R8
                     ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                                                 # R9   JSON celaut.Instance
