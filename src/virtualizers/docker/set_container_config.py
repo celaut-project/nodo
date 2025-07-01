@@ -18,8 +18,13 @@ def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysreso
     __config__ = celaut.ConfigurationFile()
 
     local_peer = generate_node_peer_info(network=DOCKER_NETWORK)
-    __config__.gateway.CopyFrom(local_peer.instance)
+    try:
+        __config__.gateway.CopyFrom(local_peer.instance)
     
+    except Exception as e:
+        log.LOGGER(f"Error generating gateway instance on get config: {e}")
+        raise e
+
     if config: 
         __config__.config.CopyFrom(config)
     
