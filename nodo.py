@@ -142,6 +142,7 @@ if __name__ == '__main__':
             "\n- instances"
             "\n- instances --grouped"
             "\n- connect <ip:url>"
+            "\n- disconnect <peer_id>"
             "\n- pack <project directory>"
             "\n- config"
             "\n- tui"
@@ -369,10 +370,13 @@ if __name__ == '__main__':
                 search = " ".join(args)
                 list_instances(groupable=groupable, search=search)
 
-
             case 'connect':
                 from src.commands.connect import connect
                 connect(sys.argv[2])
+
+            case 'disconnect':
+                from src.commands.disconnect import disconnect
+                disconnect(sys.argv[2])
 
             case 'submit_reputation':
                 from src.reputation_system.interface import submit_reputation
