@@ -18,16 +18,20 @@ def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysreso
     __config__ = celaut.ConfigurationFile()
 
     local_peer = generate_node_peer_info(network=DOCKER_NETWORK)
+    log.LOGGER(f"Local peer generated: \n {local_peer}")
     __config__.gateway.CopyFrom(local_peer.instance)
 
     if config: 
         __config__.config.CopyFrom(config)
+        log.LOGGER(f"Configuration loaded: \n {__config__.config}")
     
     if network_resolution:
         __config__.network_resolution.extend(network_resolution)
+        log.LOGGER(f"Network resolution loaded: \n {__config__.network_resolution}")
 
     if resources: 
         __config__.initial_sysresources.CopyFrom(resources)
+        log.LOGGER(f"Initial system resources loaded: \n {__config__.initial_sysresources}")
 
     log.LOGGER(f"Configuration file generated: \n {__config__}")
     return __config__
