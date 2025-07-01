@@ -194,6 +194,7 @@ def spend_gas(
     """
     gas_to_spend = int(gas_to_spend)
     try:
+        log.LOGGER(f"Spending {log.ssformat(gas_to_spend)} gas for '{id}'")
         # If the identifier corresponds to a client
         if sc.client_exists(client_id=id):
             log.LOGGER(f"Spending gas for client '{id}'")
