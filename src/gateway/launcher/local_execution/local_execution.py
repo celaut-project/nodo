@@ -85,6 +85,7 @@ def local_execution(
     ]
 
     #  Set the configuration file into the instance file system root.
+    log.LOGGER(f"Setting configuration for the container {container.id} with father_id {father_id} and father_ip {father_ip}")
     set_config(
         container_id=container.id, 
         config=config, 
@@ -92,6 +93,7 @@ def local_execution(
         api=service.container.config,
         network_resolution=networks_resolved
     )
+    log.LOGGER(f"Configuration set for the container {container.id} with father_id {father_id} and father_ip {father_ip}")
 
     # The container must be started after adding the configuration file and
     #  before requiring its IP address, since docker assigns it at startup.
@@ -105,10 +107,12 @@ def local_execution(
     # Reload this object from the server again and update attrs with the new data.
     container.reload()
 
+    log.LOGGER(f"Container {container.id} started with IP {container.attrs['NetworkSettings']['IPAddress']}")
     if not block_all(container_id=container.id):
         log.LOGGER(f"Docker firewall block all function failed for {container.id}")
 
     # Allow connection to the node gateway.
+    log.LOGGER(f"Allow connection to the gateway for the container {container.id} with father_id {father_id} and father_ip {father_ip}")
     if not allow_connection(
         container_id=container.id, 
         ip='172.17.0.1', port=GATEWAY_PORT, # Gateway internal endpoint.
@@ -128,6 +132,7 @@ def local_execution(
     # TODO END OF virtualizers.docker.execute.py
 
     try:
+        log.LOGGER(f"Setting uri_slot for the container {container.id} with father_id {father_id} and father_ip {father_ip}")
         for internal, external in assigment_ports.items():
             uri_slot = celaut.Instance.Uri_Slot()
             uri_slot.internal_port = internal
