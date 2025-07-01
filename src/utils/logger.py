@@ -22,6 +22,8 @@ LOGGER = (
 )
 
 
+from decimal import Decimal, getcontext, InvalidOperation
+
 def ssformat(number, sig_digits=3):
     """
     Smart Scientific Format with residual using Decimal.
