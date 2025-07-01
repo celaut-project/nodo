@@ -42,7 +42,7 @@ def ssformat(number, sig_digits=3):
         try:
             number = Decimal(cleaned)
         except InvalidOperation:
-            raise ValueError(f"ssformat: could not parse '{number}' as Decimal")
+            return str(number)
     elif not isinstance(number, Decimal):
         # ints/floats → via str() to avoid binary‑float junk
         number = Decimal(str(number))
