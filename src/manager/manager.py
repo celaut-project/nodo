@@ -225,7 +225,6 @@ def spend_gas(
             if not is_id:
                 resolved_id = sc.get_local_instance_id_by_uri(uri=id)
                 if not resolved_id:
-                    log.LOGGER(f"Container not found with ID or URI: '{id}'.")
                     return False
                 id = resolved_id
                 is_id = sc.internal_instance_exists(id=id)

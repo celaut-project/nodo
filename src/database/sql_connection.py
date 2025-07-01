@@ -1480,7 +1480,7 @@ class SQLConnection(metaclass=Singleton):
         if row:
             return row['id']
         
-        log.LOGGER(f'Internal service not found for URI: {uri}')
+        log.LOGGER(f'Container not found for URI: {uri}')
 
     def get_gas_amount_by_father_id(self, id: str) -> int:
         """
