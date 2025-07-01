@@ -18,7 +18,7 @@ from src.utils.env import EnvManager
 from jpype import *
 import java.lang
 
-from java.lang import Boolean
+from java.lang import Boolean, Long
 from java.math import BigInteger
 
 from org.ergoplatform.sdk import *
@@ -70,7 +70,7 @@ def __build_proof_box(
 
     tuple_values = jpype.JClass("scala.Tuple2")(
         Boolean.FALSE,
-        BigInteger.valueOf(TOTAL_REPUTATION_TOKEN_AMOUNT)
+        Long.valueOf(TOTAL_REPUTATION_TOKEN_AMOUNT)
     )
     pair_type = ErgoType.pairType(ErgoType.booleanType(), ErgoType.longType())
 
