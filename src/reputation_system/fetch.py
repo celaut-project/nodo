@@ -1,7 +1,7 @@
 from typing import Generator
 
 from protos import celaut_pb2 as celaut
-from src.reputation_system.envs import CONTRACT, LEDGER
+from src.reputation_system.envs import CONTRACT, ergo_ledger
 from src.utils.env import EnvManager
 
 
@@ -13,7 +13,7 @@ def local_proofs() -> Generator[celaut.ContractLedger, None, None]:
         yield celaut.ContractLedger(
             contract=CONTRACT.encode("utf-8"),
             contract_addr=proof_id,
-            ledger=LEDGER
+            ledger=ergo_ledger
         )
     
 def get_reputation_proofs_by_hash() -> Generator[celaut.ContractLedger, None, None]:
