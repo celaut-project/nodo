@@ -16,3 +16,4 @@ def disconnect(peer_id: str):
     print(f"Disconnecting from peer with ID {peer_id}...")
 
     sc.remove_peer(peer_id)
+    print(f"Successfully disconnected from peer with ID {peer_id}.")
