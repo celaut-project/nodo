@@ -44,24 +44,46 @@ class SQLConnection(metaclass=Singleton):
             SQLConnection._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
             SQLConnection._connection.row_factory = sqlite3.Row
 
-    def _execute(self, query: str, params=()) -> sqlite3.Cursor:
+    def _execute(self, query_or_queries, params=()) -> sqlite3.Cursor:
         """
-        Executes a query with the given parameters, ensuring thread safety.
+        Executes a query or a list of queries with the given parameters, ensuring thread safety.
 
         Args:
-            query (str): The SQL query to execute.
-            params (tuple): The parameters to bind to the query.
+            query_or_queries: Either a single SQL query string or a list of (query, params) tuples
+            params (tuple): The parameters to bind to the query (only used for single query)
 
         Returns:
-            sqlite3.Cursor: The cursor for the executed query.
+            sqlite3.Cursor: The cursor for the executed query(ies).
         """
         with SQLConnection._lock:
             try:
-                # Create a new cursor for each execution
                 cursor = SQLConnection._connection.cursor()
-                cursor.execute(query, params)
+                
+                # Check if it's a single query or multiple queries
+                if isinstance(query_or_queries, str):
+                    # Single query execution
+                    cursor.execute(query_or_queries, params)
+                elif isinstance(query_or_queries, list):
+                    # Multiple queries execution (batch)
+                    cursor.execute('BEGIN TRANSACTION')
+                    try:
+                        for query_item in query_or_queries:
+                            if isinstance(query_item, tuple):
+                                query, query_params = query_item
+                                cursor.execute(query, query_params)
+                            else:
+                                # Assume it's just a query string without parameters
+                                cursor.execute(query_item, ())
+                        cursor.execute('COMMIT')
+                    except sqlite3.Error as batch_error:
+                        cursor.execute('ROLLBACK')
+                        raise batch_error
+                else:
+                    raise ValueError("query_or_queries must be either a string or a list of (query, params) tuples")
+                
                 SQLConnection._connection.commit()
                 return cursor
+                
             except sqlite3.Error as e:
                 SQLConnection._connection.rollback()
                 raise e
@@ -1069,6 +1091,46 @@ class SQLConnection(metaclass=Singleton):
             WHERE id = ?
         ''', (peer_id,))
         return result.fetchone()[0] > 0
+
+    def remove_peer(self, peer_id: str) -> bool:
+        """
+        Removes a peer from the database along with all related records.
+        This includes contract_instances, slots, and URIs associated with the peer.
+
+        Args:
+            peer_id (str): The ID of the peer to remove.
+
+        Returns:
+            bool: True if the peer was successfully removed, False otherwise.
+        """
+        try:
+            # Define all deletion queries in proper order
+            deletion_queries = [
+                # Delete URIs related to slots that belong to this peer
+                ('''DELETE FROM uri 
+                    WHERE slot_id IN (
+                        SELECT id FROM slot WHERE peer_id = ?
+                    )''', (peer_id,)),
+                
+                # Delete slots related to this peer
+                ('DELETE FROM slot WHERE peer_id = ?', (peer_id,)),
+                
+                # Delete contract instances related to this peer
+                ('DELETE FROM contract_instance WHERE peer_id = ?', (peer_id,)),
+                
+                # Delete the peer itself
+                ('DELETE FROM peer WHERE id = ?', (peer_id,))
+            ]
+            
+            # Execute all deletions in a single transaction
+            self._execute(deletion_queries)
+            
+            logger.LOGGER(f'Peer {peer_id} and all related records removed from the database')
+            return True
+            
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to remove peer {peer_id}: {e}')
+            return False
 
     def instance_exists(self, instance: celaut_pb2.Instance) -> bool:
         """
