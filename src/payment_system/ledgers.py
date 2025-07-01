@@ -10,14 +10,21 @@ GAS_PER_ERG = int(EnvManager().get_env("GAS_PER_ERG"))
 def local_payment_methods() -> Generator[celaut.GasPrice, None, None]:
 
     for address, ledger in get_ledger_and_contract_addr_from_contract(CONTRACT_HASH):
+        
+        print("POINT TO DEBUG")
+        try:
+            
+            contract_ledger = celaut.ContractLedger()
+            contract_ledger.contract = CONTRACT
+            contract_ledger.contract_addr, contract_ledger.ledger = address, ledger
 
-        contract_ledger = celaut.ContractLedger()
-        contract_ledger.contract = CONTRACT
-        contract_ledger.contract_addr, contract_ledger.ledger = address, ledger
+            gas_price = celaut.GasPrice(
+                contract_ledger=contract_ledger,
+                gas_amount=to_gas_amount(GAS_PER_ERG)
+            )
 
-        gas_price = celaut.GasPrice(
-            contract_ledger=contract_ledger,
-            gas_amount=to_gas_amount(GAS_PER_ERG)
-        )
+            yield gas_price
 
-        yield gas_price
+        except Exception as e:
+            print(f"Error processing ledger {ledger} for contract {address}: {e}")
+            continue
