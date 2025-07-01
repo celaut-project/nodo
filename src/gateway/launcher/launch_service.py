@@ -80,7 +80,6 @@ def launch_service(
                     )
 
                 else:
-                    
                     instance = local_execution(
                         config=configuration,
                         resources=service.container.resources,
