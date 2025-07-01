@@ -49,7 +49,8 @@ def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
 
     payment_contracts = [e for e in local_payment_methods()]
     log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
-    instance.api.payment_contracts.extend(payment_contracts)
+    if payment_contracts:
+        instance.api.payment_contracts.extend(payment_contracts)
 
     return celaut_pb2.Peer(
         reputation_proofs=list(local_proofs()),
