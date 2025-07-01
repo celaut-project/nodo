@@ -44,7 +44,29 @@ class SQLConnection(metaclass=Singleton):
             SQLConnection._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
             SQLConnection._connection.row_factory = sqlite3.Row
 
-    def _execute(self, query_or_queries, params=()) -> sqlite3.Cursor:
+    def _execute(self, query: str, params=()) -> sqlite3.Cursor:
+        """
+        Executes a query with the given parameters, ensuring thread safety.
+
+        Args:
+            query (str): The SQL query to execute.
+            params (tuple): The parameters to bind to the query.
+
+        Returns:
+            sqlite3.Cursor: The cursor for the executed query.
+        """
+        with SQLConnection._lock:
+            try:
+                # Create a new cursor for each execution
+                cursor = SQLConnection._connection.cursor()
+                cursor.execute(query, params)
+                SQLConnection._connection.commit()
+                return cursor
+            except sqlite3.Error as e:
+                SQLConnection._connection.rollback()
+                raise e
+
+    def _execute2(self, query_or_queries, params=()) -> sqlite3.Cursor:
         """
         Executes a query or a list of queries with the given parameters, ensuring thread safety.
 
@@ -1123,7 +1145,7 @@ class SQLConnection(metaclass=Singleton):
             ]
             
             # Execute all deletions in a single transaction
-            self._execute(deletion_queries)
+            self._execute2(deletion_queries)
             
             logger.LOGGER(f'Peer {peer_id} and all related records removed from the database')
             return True
