@@ -45,7 +45,10 @@ def ssformat(number, sig_digits=3):
             return str(number)
     elif not isinstance(number, Decimal):
         # ints/floats → via str() to avoid binary‑float junk
-        number = Decimal(str(number))
+        try:
+            number = Decimal(str(number))
+        except InvalidOperation:
+            return str(number)
 
     # zero shortcut
     if number == 0:
