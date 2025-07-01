@@ -68,10 +68,10 @@ def __build_proof_box(
     p2pkAddres = sender_address.asP2PK()
     sender_address_proposition = p2pkAddres.pubkey()
 
-    tuple_values = jpype.JArray(jpype.JObject)([
+    tuple_values = jpype.JClass("scala.Tuple2")(
         Boolean.FALSE,
         BigInteger.valueOf(TOTAL_REPUTATION_TOKEN_AMOUNT)
-    ])
+    )
     pair_type = ErgoType.pairType(ErgoType.booleanType(), ErgoType.longType())
 
     return ergo._ctx.newTxBuilder() \
