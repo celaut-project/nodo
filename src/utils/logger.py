@@ -21,9 +21,6 @@ LOGGER = (
     lambda message: logging.getLogger(__name__).info(message + '\n')
 )
 
-
-from decimal import Decimal, getcontext, InvalidOperation
-
 def ssformat(number, sig_digits=3):
     """
     Smart Scientific Format with residual using Decimal.
