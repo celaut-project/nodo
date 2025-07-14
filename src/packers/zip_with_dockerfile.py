@@ -7,7 +7,6 @@ import os, subprocess
 import src.manager.resources as resources
 from bee_rpc import client as grpcbb
 from bee_rpc import buffer_pb2, block_builder
-from bee_rpc.reader import read_from_registry
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.env import EnvManager, SHA3_256_ID, DOCKER_COMMAND, PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.utils import get_service_hex_main_hash
@@ -25,7 +24,7 @@ MIN_BUFFER_BLOCK_SIZE = env_manager.get_env("MIN_BUFFER_BLOCK_SIZE")
 class ZipContainerPacker:
     def __init__(self, path, aux_id):
         self.blocks: List[bytes] = []
-        self.service = celaut.Service()
+        self.service = pack_pb2.Service()
         self.metadata = celaut.Metadata()
         self.path = path
         self.json = json.load(open(self.path + "service.json", "r"))
@@ -104,7 +103,7 @@ class ZipContainerPacker:
         self.tag = self.json["tag"] if "tag" in self.json else None
         
     def parseContainer(self):
-        def parseFilesys() -> None:
+        def parseFilesys() -> celaut.Metadata.HashTag:
             # Save his filesystem on cache.
             for layer in os.listdir(CACHE + self.aux_id + "/building/"):
                 if os.path.isdir(CACHE + self.aux_id + "/building/" + layer):
@@ -149,30 +148,23 @@ class ZipContainerPacker:
                         )
                     filesystem.branch.append(branch)
                 return filesystem
+            self.service.container.filesystem.CopyFrom(recursive_parsing(directory="/"))
 
-            filesystem = recursive_parsing(directory="/")
-            
-            # Create a filesystem directory with a structure with all blocks of the filesystem.
-            _, fs_blocked_filename = block_builder.build_multiblock(pf_object_with_block_pointers=filesystem, blocks=self.blocks)
-            
-            # Save the filesystem binary.
-            fs_bin_filename = CACHE + self.aux_id + '/filesystem_binary.bin'
-            with open(fs_bin_filename, "wb+") as file:
-                for chunk in read_from_registry(filename=fs_blocked_filename):
-                    file.write(chunk.chunk)
-
-            os.system(fs_blocked_filename)
-        
-            block_hash, block = block_builder.create_block(
-                file_path=fs_bin_filename,
-                copy=False  # We don't copy the file, it's temporary and would be deleted.
+            return celaut.Metadata.HashTag(
+                hash=calculate_hashes(
+                    value=self.service.container.filesystem.SerializeToString()
+                ) if not self.blocks else
+                calculate_hashes_by_stream(
+                    value=grpcbb.read_multiblock_directory(
+                        directory=block_builder.build_multiblock(
+                            pf_object_with_block_pointers=self.service.container.filesystem,
+                            blocks=self.blocks
+                        )[1],
+                        delete_directory=True,
+                        ignore_blocks=True
+                    )
+                )
             )
-
-            if block_hash not in self.blocks:
-                self.blocks.append(block_hash)
-            
-            self.service.container.filesystem = block.SerializeToString()
-
     
         res = self.json.get('resources', {})
 
@@ -227,11 +219,24 @@ class ZipContainerPacker:
         )
         self.service.container.architecture.tags.extend([self.json.get('architecture')])
         
-        # Expected Node gateway interface
-        # pass
-
-        # Filesystem
-        parseFilesys()
+        # Expected Gateway.
+        
+        # Add container metadata to the global metadata.
+        self.metadata.hashtag.attr_hashtag.append(
+            celaut.Metadata.HashTag.AttrHashTag(
+                key=1,  # Container attr.
+                value=[
+                    celaut.Metadata.HashTag(
+                        attr_hashtag=[
+                            celaut.Metadata.HashTag.AttrHashTag(
+                                key=2,  # Filesystem
+                                value=[parseFilesys()]
+                            )
+                        ]
+                    )
+                ]
+            )
+        )
     
     def parseApi(self):
         
@@ -264,25 +269,49 @@ class ZipContainerPacker:
                 network.prose = json_network['prose']
                 self.service.network.append(network)
 
-    def save(self) -> Tuple[str, celaut.Metadata, Union[str, celaut.Service]]:
-
-        service: Union[str, celaut.Service]
-
-        # Generate the hashes.
-        bytes_id, service_directory = block_builder.build_multiblock_fractal(
-            pf_object_with_block_pointers=self.service,
-            blocks=self.blocks
-        )
-        service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
-        self.metadata.hashtag.hash.extend(
-            [celaut.Metadata.HashTag.Hash(
-                type=SHA3_256_ID,
-                value=bytes_id
-            )]
-        )
+    def save(self) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
+        service: Union[str, pack_pb2.Service]
+        if not self.blocks:
+            service_buffer = self.service.SerializeToString()  # 2*len
+            self.metadata.hashtag.hash.extend(
+                get_service_list_of_hashes(
+                    service_buffer=service_buffer
+                )
+            )
+            service_id: str = get_service_hex_main_hash(
+                metadata=self.metadata
+            )
+            # Once service hashes are calculated, we prune the filesystem for save storage.
+            # self.service.container.filesystem.ClearField('branch')
+            # https://github.com/moby/moby/issues/20972#issuecomment-193381422
+            del service_buffer  # -len
+            service = self.service
+        else:
+            # Generate the hashes.
+            bytes_id, service_directory = block_builder.build_multiblock(
+                pf_object_with_block_pointers=self.service,
+                blocks=self.blocks
+            )
+            service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
+            self.metadata.hashtag.hash.extend(
+                [celaut.Metadata.HashTag.Hash(
+                    type=SHA3_256_ID,
+                    value=bytes_id
+                )]
+            )
             
-        service = service_directory
+            """  <!-- Validation don't needed here -->
+            
+                from hashlib import sha3_256
+                validate_content = sha3_256()
+                for i in grpcbb.read_multiblock_directory(directory=service_directory):
+                    validate_content.update(i)
+                if validate_content.digest() != bytes_id:
+                    raise Exception(f"Invalid packing, wrong validated content {validate_content.hexdigest()}, but should be {bytes.hex(bytes_id)}")
 
+            """
+                
+            service = service_directory
         # Add the tag attribute as the first tag or tag list in the metadata. This could be used as the name of the service for better human identification.
         if self.tag and type(self.tag) is str: 
             self.metadata.hashtag.tag.extend([self.tag])
@@ -300,7 +329,7 @@ class ZipContainerPacker:
             
         return service_id, self.metadata, service
 
-def ok(path, aux_id) -> Tuple[str, celaut.Metadata, Union[str, celaut.Service]]:
+def ok(path, aux_id) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
     spec_file = ZipContainerPacker(path=path, aux_id=aux_id)
     
     # Check if there was an error during initialization
@@ -323,7 +352,7 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, Union[str, celaut.Service]]:
     return identifier, metadata, service
 
 
-def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, Union[str, celaut.Service]]:
+def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
     import random
     aux_id = str(random.random())
     os.system('mkdir ' + CACHE + aux_id)
@@ -359,7 +388,7 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
                         id=bytes.fromhex(service_id)
                     ),
                     metadata,
-                    grpcbb.Dir(dir=service, _type=celaut.Service)
+                    grpcbb.Dir(dir=service, _type=pack_pb2.Service)
                     if type(service) is str else service
                 ],
                 indices=gateway_bee.PackOutput_indices
