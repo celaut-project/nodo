@@ -181,7 +181,11 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     outputs = []
 
     # Check reputation proof id.
-    proof_id = proof_id if proof_id else java_input_boxes.get(0).getId().toString()  # Assume that, if it is not an empty string, the proof ID corresponds to an existing token ID.
+    try:
+        proof_id = proof_id if proof_id else java_input_boxes.get(0).getId().toString()  # Assume that, if it is not an empty string, the proof ID corresponds to an existing token ID.
+    except Exception as e:
+        LOGGER(f"Exception getting proof id: {str(e)}.")
+        raise e
 
     LOGGER(f"proof id -> {proof_id}")
 
@@ -231,8 +235,17 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         sender_address=sender_address
     )
 
-    mnemonic = ergo.getMnemonic(wallet_mnemonic=wallet_mnemonic, mnemonic_password=None)
-    signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
+    try:
+        mnemonic = ergo.getMnemonic(wallet_mnemonic=wallet_mnemonic, mnemonic_password=None)
+    except Exception as e:
+        LOGGER(f"Error getting mnemonic {wallet_mnemonic}\n {str(e)}")
+        raise e
+    
+    try:
+        signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
+    except Exception as e:
+        LOGGER(f"Error signing transaction: {str(e)}\n Unsigned transaction: {unsigned_tx} \n mnemonic: {mnemonic}")
+        raise e
 
     # 5. Submit the transaction and return the ID
     tx_id = ergo.txId(signed_tx)
