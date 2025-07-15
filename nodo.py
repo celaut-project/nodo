@@ -161,6 +161,7 @@ if __name__ == '__main__':
             "\n- rundev <repository path>"
             "\n- ggconf <repository path>"
             "\n- submit_reputation"
+            "\n- validate_reputation_proof_ownership"
             "\n- refresh_ergo_nodes"
             "\n- prune_containers"
             "\n- refresh_clients"
@@ -385,6 +386,14 @@ if __name__ == '__main__':
                     print("Reputation proof submitted successfully.", flush=True)
                 else:
                     print("Failed to submit reputation proof.", flush=True)
+
+            case 'validate_reputation_proof_ownership':
+                from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
+                is_valid = validate_reputation_proof_ownership()
+                if is_valid:
+                    print("Reputation proof ownership is valid.", flush=True)
+                else:
+                    print("Reputation proof ownership is invalid. Please check your environment variables.", flush=True)
                 
             case 'refresh_ergo_nodes':
                 from src.manager.ergo import get_refresh_peers
