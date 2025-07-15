@@ -46,8 +46,8 @@ def compute_reputation(peer_id) -> float:
     _result: float = sc.get_reputation(peer_id)
     return _result
 
-def submit_reputation(force_submit: bool = False):
-    sc.submit_to_ledger(
+def submit_reputation(force_submit: bool = False) -> bool:
+    return sc.submit_to_ledger(
         submit=lambda objects: submit_reputation_proof(objects=objects),
         force_submit=force_submit
     )

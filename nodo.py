@@ -380,7 +380,11 @@ if __name__ == '__main__':
 
             case 'submit_reputation':
                 from src.reputation_system.interface import submit_reputation
-                submit_reputation(force_submit=True)
+                result: bool = submit_reputation(force_submit=True)
+                if result:
+                    print("Reputation proof submitted successfully.", flush=True)
+                else:
+                    print("Failed to submit reputation proof.", flush=True)
                 
             case 'refresh_ergo_nodes':
                 from src.manager.ergo import get_refresh_peers
