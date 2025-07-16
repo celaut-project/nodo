@@ -8,7 +8,7 @@ import random
 import string
 
 from src.reputation_system.contracts.ergo.utils import get_public_key, addr_to_pub_key_hex  #, pub_key_hex_to_addr
-from src.reputation_system.envs import CONTRACT, LEDGER
+from src.reputation_system.envs import CONTRACT, ergo_ledger
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_verify, bip_ecdsa_sign
 from src.database.access_functions.peers import get_peer_directions
 from src.utils.logger import LOGGER as logger
@@ -65,7 +65,7 @@ def validate_contract_ledger(contract_ledger: celaut.ContractLedger, peer_id: st
     generating a random message, signing it using the peer's public key, and verifying the signature.
     """
     # Check compatibility of the contract ledger
-    compatibility = contract_ledger.ledger == LEDGER and contract_ledger.contract == CONTRACT.encode("utf-8")
+    compatibility = contract_ledger.ledger == ergo_ledger and contract_ledger.contract == CONTRACT.encode("utf-8")
     
     if not compatibility: 
         logger(f"Contract ledger not compatible: {contract_ledger}")
