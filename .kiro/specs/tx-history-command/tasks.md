@@ -14,7 +14,7 @@
     - Parse JSON response and return transaction list
     - _Requirements: 1.1, 1.4, 4.1, 4.2, 4.3_
 
-  - [ ] 2.2 Implement wallet address retrieval
+  - [-] 2.2 Implement wallet address retrieval
     - Create helper function to get both wallet addresses using existing `__get_sender_addr()` function
     - Handle cases where wallet configuration is missing or invalid
     - Return tuple of (sending_address, receiver_address) with proper error handling
