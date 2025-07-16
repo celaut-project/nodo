@@ -65,7 +65,7 @@ def validate_contract_ledger(contract_ledger: celaut.ContractLedger, peer_id: st
     generating a random message, signing it using the peer's public key, and verifying the signature.
     """
     # Check compatibility of the contract ledger
-    compatibility = contract_ledger.ledger == ergo_ledger and contract_ledger.contract == CONTRACT.encode("utf-8")
+    compatibility = contract_ledger.ledger.formal == ergo_ledger.formal and contract_ledger.contract == CONTRACT.encode("utf-8")
     
     if not compatibility: 
         logger(f"Contract ledger not compatible: {contract_ledger}")
