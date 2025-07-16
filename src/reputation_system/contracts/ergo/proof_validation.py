@@ -68,7 +68,7 @@ def validate_contract_ledger(contract_ledger: celaut.ContractLedger, peer_id: st
     compatibility = contract_ledger.ledger.formal == ergo_ledger.formal and contract_ledger.contract == CONTRACT.encode("utf-8")
     
     if not compatibility: 
-        logger(f"Contract ledger not compatible: {contract_ledger}")
+        logger(f"Contract ledger not compatible: {contract_ledger.ledger.formal == ergo_ledger.formal} | {contract_ledger.contract == CONTRACT.encode('utf-8')}")
         return False
     
     if not contract_ledger.contract_addr:
