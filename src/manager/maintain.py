@@ -249,7 +249,7 @@ def manager_thread():
             
             # Functions to be executed every long interval
             check_ergo_node_availability()
-            submit_reputation()
+            # submit_reputation()    TODO  https://github.com/celaut-project/nodo/issues/80
             check_dev_clients()
             if wanted_services_retry: 
                 check_wanted_service(wanted_services_retry.pop())
