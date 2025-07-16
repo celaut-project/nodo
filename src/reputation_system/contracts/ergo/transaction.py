@@ -229,6 +229,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     # 4. Build and sign the transaction
     unsigned_tx = ergo.buildUnsignedTransaction(
+        # TODO: Add dataInputs [typeNftBox, rest of the proof boxes ...]
         input_box=java_input_boxes,
         outBox=outputs,
         fee=fee / 10**9,
@@ -259,7 +260,13 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
 def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
     try:
+        proof_id = env_manager.get_env('REPUTATION_PROOF_ID')
         mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC')
+
+        if proof_id:
+            LOGGER(f"Not supported update reputation proofs (https://github.com/celaut-project/nodo/issues/80)")
+            return False
+
         if get_amount_by_addr(mnemonic=mnemonic) <= DEFAULT_FEE:
             LOGGER("There are not enough nanoErgs to upload the reputation proof to the network.")
             return False
@@ -268,7 +275,7 @@ def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
         tx_id = __create_reputation_proof_tx(
             node_url=ERGO_NODE_URL(),
             wallet_mnemonic=mnemonic,
-            proof_id=env_manager.get_env('REPUTATION_PROOF_ID'),
+            proof_id=,
             objects=objects,
         )
         LOGGER(f"Submited tx -> {tx_id}")
