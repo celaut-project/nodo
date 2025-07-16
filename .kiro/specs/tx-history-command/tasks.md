@@ -1,12 +1,12 @@
 # Implementation Plan
 
-- [ ] 1. Create core transaction history command module
+- [x] 1. Create core transaction history command module
   - Create `src/commands/tx_history.py` file with main command function
   - Import required dependencies (requests, datetime, existing Ergo utilities)
   - Define main `tx_history()` function that will be called from nodo.py
   - _Requirements: 1.1, 2.1_
 
-- [ ] 2. Implement transaction fetching functionality
+- [-] 2. Implement transaction fetching functionality
   - [ ] 2.1 Create API client function for fetching address transactions
     - Write `get_address_transactions(address: str, limit: int = 10) -> List[dict]` function
     - Implement HTTP request to Ergo Explorer API endpoint `/api/v1/addresses/{address}/transactions`
