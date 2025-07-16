@@ -68,6 +68,8 @@ def __build_proof_box(
     p2pkAddres = sender_address.asP2PK()
     sender_address_proposition = p2pkAddres.pubkey()
 
+    LOGGER(f"Sender address proposition: {sender_address_proposition}")
+
     tuple_values = jpype.JClass("scala.Tuple2")(
         Boolean.FALSE,
         Long.valueOf(TOTAL_REPUTATION_TOKEN_AMOUNT)
