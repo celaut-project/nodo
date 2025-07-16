@@ -275,7 +275,7 @@ def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
         tx_id = __create_reputation_proof_tx(
             node_url=ERGO_NODE_URL(),
             wallet_mnemonic=mnemonic,
-            proof_id=,
+            proof_id=proof_id,
             objects=objects,
         )
         LOGGER(f"Submited tx -> {tx_id}")
