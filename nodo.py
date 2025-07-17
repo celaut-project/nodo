@@ -491,5 +491,9 @@ if __name__ == '__main__':
                 maintain_clients(debug_mode=True)
                 peer_deposits(debug_mode=True)
 
+            case "tx_history":
+                from src.commands.tx_history import tx_history
+                tx_history()
+
             case other:
                 print('Unknown command.', flush=True)
