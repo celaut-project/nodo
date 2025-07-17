@@ -2,9 +2,9 @@ import json
 import os
 from typing import List
 
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 REGISTRY = env_manager.get_env("REGISTRY")
 BLOCKDIR = env_manager.get_env("BLOCKDIR")

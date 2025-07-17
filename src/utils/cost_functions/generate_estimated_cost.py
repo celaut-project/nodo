@@ -9,9 +9,9 @@ from src.manager.manager import could_ve_this_sysreq
 from src.utils.cost_functions.execution_cost import is_free_gas
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost, compute_maintenance_cost
 from src.utils.utils import to_gas_amount
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
 
 def generate_estimated_cost(

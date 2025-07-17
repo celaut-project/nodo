@@ -4,7 +4,7 @@ from src.utils.utils import read_service_from_disk
 from src.virtualizers.docker import build
 from src.virtualizers.docker.architecture import check_supported_architecture, UnsupportedArchitectureException
 from src.utils.logger import LOGGER as logger
-from src.utils.env import DOCKER_CLIENT, EnvManager
+from src.utils.config import DOCKER_CLIENT, ConfigManager
 from src.utils.verify import get_service_hex_main_hash
 from src.utils.cost_functions.execution_cost import execution_cost
 

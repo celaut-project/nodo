@@ -1,13 +1,13 @@
 from typing import Optional, Dict
 import os, json, requests
 
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
 from concurrent.futures import ThreadPoolExecutor
 
 from src.utils.network import internet_available
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 
 def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:

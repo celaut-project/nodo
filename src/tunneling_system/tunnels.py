@@ -8,9 +8,9 @@ from src.utils.logger import LOGGER
 from src.utils.singleton import Singleton
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 NGROK_TUNNELS_KEY = env_manager.get_env("NGROK_TUNNELS_KEY")

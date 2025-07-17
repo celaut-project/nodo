@@ -2,10 +2,10 @@ from typing import Generator
 
 from protos import celaut_pb2 as celaut
 from src.reputation_system.envs import CONTRACT, ergo_ledger
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 def local_proofs() -> Generator[celaut.Contract, None, None]:
     proof_id = env_manager.get_env('REPUTATION_PROOF_ID')

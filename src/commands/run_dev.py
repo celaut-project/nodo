@@ -4,12 +4,12 @@ import docker as docker_lib
 from protos import celaut_pb2
 from src.virtualizers.docker.set_container_config import get_config, write_config
 from src.manager.manager import add_container, get_dev_clients
-from src.utils.env import EnvManager
-from src.utils.env import DEFAULT_SYSTEM_RESOURCES
+from src.utils.config import ConfigManager
+from src.utils.config import DEFAULT_SYSTEM_RESOURCES
 
 # Crear cliente Docker
 client = docker_lib.from_env()
-env_manager = EnvManager()
+env_manager = ConfigManager()
 DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
 
 

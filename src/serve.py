@@ -7,9 +7,9 @@ from protos import celaut_pb2, celaut_pb2_grpc
 from src.gateway.gateway import Gateway
 from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.maintain import manager_thread
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 
 def serve():

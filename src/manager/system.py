@@ -4,10 +4,10 @@ import time
 from typing import Dict, Generator
 
 from src.database.sql_connection import SQLConnection
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 sc = SQLConnection()
 
 # Database Configuration

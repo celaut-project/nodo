@@ -2,14 +2,14 @@ import grpc
 from typing import Final, Generator
 from protos import celaut_pb2, celaut_pb2_grpc
 from src.utils.logger import LOGGER
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from tests.main import sc, service_tunnel
 
 """
     ¡¡¡NOT TESTED!!!
 """
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 def test_service_tunnel():
     """

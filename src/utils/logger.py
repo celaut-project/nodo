@@ -1,9 +1,9 @@
 import logging, os
 from decimal import Decimal, getcontext, InvalidOperation
 
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 STORAGE, USE_PRINT = env_manager.get_env("STORAGE"), env_manager.get_env("USE_PRINT")
 
 if not os.path.exists(STORAGE):

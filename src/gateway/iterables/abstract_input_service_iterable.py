@@ -9,11 +9,11 @@ from protos.gateway_bee import StartService_input_indices, \
     StartService_input_message_mode
 from src.gateway.utils import save_service
 from src.utils import logger as log
-from src.utils.env import SHA3_256_ID
+from src.utils.config import SHA3_256_ID
 from src.manager.maintain import add_wanted
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")

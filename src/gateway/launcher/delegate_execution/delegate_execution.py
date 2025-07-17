@@ -4,7 +4,7 @@ from typing import Callable, List
 import grpc
 from bee_rpc import client as bee
 
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
 from protos import celaut_pb2, celaut_pb2_grpc
 from protos.gateway_bee import StartService_input_indices
@@ -14,7 +14,7 @@ from src.database.sql_connection import SQLConnection
 from src.utils import utils, logger as log
 
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 START_SERVICE_ON_PEER_TIMEOUT = int(env_manager.get_env("START_SERVICE_ON_PEER_TIMEOUT"))
 
 def delegate_execution(

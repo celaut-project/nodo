@@ -22,9 +22,9 @@ from src.database.sql_connection import SQLConnection
 from src.utils import logger as _l
 from src.utils.utils import to_gas_amount, generate_uris_by_peer_id
 from src.database.access_functions.ledgers import get_peer_contract_instances
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 COMMUNICATION_ATTEMPTS = int(env_manager.get_env("COMMUNICATION_ATTEMPTS"))
 COMMUNICATION_ATTEMPTS_DELAY = int(env_manager.get_env("COMMUNICATION_ATTEMPTS_DELAY"))

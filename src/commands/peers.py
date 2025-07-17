@@ -1,11 +1,11 @@
 import sqlite3
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
 from src.database.sql_connection import SQLConnection
 from src.payment_system.contracts.ergo.interface import LEDGER as ERGO_LEDGER, CONTRACT_HASH as ERGO_CONTRACT_HASH
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 
 sq = SQLConnection()

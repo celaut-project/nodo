@@ -14,15 +14,15 @@ from bee_rpc import client as bee
 
 from protos import celaut_pb2_grpc, celaut_pb2, celaut_pb2
 from src.utils import logger as log, logger
-from src.utils.env import (
+from src.utils.config import (
     SHA3_256_ID,
     DOCKER_CLIENT,
-    EnvManager
+    ConfigManager
 )
 from src.utils.singleton import Singleton
 from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = env_manager.get_env("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME")
 TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get_env("TOTAL_REPUTATION_TOKEN_AMOUNT"))

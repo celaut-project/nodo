@@ -4,10 +4,10 @@ from psutil import virtual_memory
 from src.utils import logger as log
 import src.manager.resources as iobd
 from src.payment_system.contracts.envs import print_payment_info
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from src.utils.network import get_local_ip
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 MEMORY_LOGS = env_manager.get_env("MEMORY_LOGS")

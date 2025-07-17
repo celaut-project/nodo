@@ -1,7 +1,7 @@
 import docker as docker_lib
 
 from src.utils import logger as log
-from src.utils.env import DOCKER_CLIENT
+from src.utils.config import DOCKER_CLIENT
 
 
 def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:

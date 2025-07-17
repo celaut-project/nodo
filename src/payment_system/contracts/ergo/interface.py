@@ -8,7 +8,7 @@ from ergpy.helper_functions import simple_send
 from src.database import sql_connection
 from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.utils.logger import LOGGER
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from threading import Lock
 from time import sleep
 
@@ -21,7 +21,7 @@ from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
 
 # Initialize environment and global variables
-env_manager = EnvManager()
+env_manager = ConfigManager()
 DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
 LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.  TODO Ergo ledger actually should be the serialized protobuf.  -> But must be an id, and be defined on a yalm config file with the rest of envs. 
 CONTRACT = "proveDlog(decodePoint())"  # Ergo tree template script

@@ -8,7 +8,7 @@ import os
 import socket
 from typing import Dict
 from pathlib import Path
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import (
     SERVICE_DEPENDENCIES_DIRECTORY,
@@ -19,7 +19,7 @@ from src.commands.packer.zip_with_dockerfile.generate_service_zip import (
     DEPENDENCIES_ENV
 )
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 METADATA = env_manager.get_env("METADATA_REGISTRY")
 SERVICES = env_manager.get_env("REGISTRY")

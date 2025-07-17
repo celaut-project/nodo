@@ -1,8 +1,8 @@
 import os
 from src.commands.__by_tag import get_id
-from src.utils.env import EnvManager, DOCKER_COMMAND
+from src.utils.config import ConfigManager, DOCKER_COMMAND
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 REGISTRY = env_manager.get_env("REGISTRY")

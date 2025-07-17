@@ -9,10 +9,10 @@ from src.reputation_system.fetch import local_proofs
 from src.payment_system.ledgers import local_payment_methods
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from src.utils.utils import to_gas_amount
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 REGISTRY = env_manager.get_env("REGISTRY")

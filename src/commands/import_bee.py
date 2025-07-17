@@ -4,9 +4,9 @@ from protos import celaut_pb2
 from bee_rpc.client import read_from_file, read_multiblock_directory
 
 from src.gateway.iterables.abstract_input_service_iterable import find_service_hash
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")

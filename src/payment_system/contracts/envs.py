@@ -4,9 +4,9 @@ from protos import celaut_pb2
 
 from src.payment_system.contracts.simulator import interface as simulated
 from src.payment_system.contracts.ergo import interface as ergo
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-SIMULATED = EnvManager().get_env("SIMULATE_PAYMENTS")
+SIMULATED = ConfigManager().get_env("SIMULATE_PAYMENTS")
 
 contract_hash = str
 script = bytes

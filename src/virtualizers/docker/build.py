@@ -14,11 +14,11 @@ from bee_rpc.client import copy_block_if_exists
 
 import src.utils.logger as l
 from protos import celaut_pb2, celaut_pb2
-from src.utils.env import DOCKER_COMMAND, EnvManager
+from src.utils.config import DOCKER_COMMAND, ConfigManager
 from src.utils.verify import get_service_hex_main_hash
 from src.virtualizers.docker.architecture import UnsupportedArchitectureException, get_arch_tag, check_supported_architecture
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 BUILD_CONTAINER_MEMORY_SIZE_FACTOR = env_manager.get_env("BUILD_CONTAINER_MEMORY_SIZE_FACTOR")
 WAIT_FOR_CONTAINER = int(env_manager.get_env("WAIT_FOR_CONTAINER"))

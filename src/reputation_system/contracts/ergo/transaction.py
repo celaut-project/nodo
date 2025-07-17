@@ -13,7 +13,7 @@ from src.reputation_system.envs import CONTRACT
 from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
 from src.tunneling_system.tunnels import TunnelSystem
 from src.utils.logger import LOGGER
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
 from jpype import *
 import java.lang
@@ -29,7 +29,7 @@ sigmastate = JPackage('sigmastate')
 
 
 # Constants
-env_manager = EnvManager()
+env_manager = ConfigManager()
 ERGO_NODE_URL = lambda: env_manager.get_env("ERGO_NODE_URL")
 SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF = env_manager.get_env('SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF')
 DEFAULT_FEE = 1_000_000

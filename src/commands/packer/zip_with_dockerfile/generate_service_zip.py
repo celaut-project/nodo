@@ -2,9 +2,9 @@ import json
 import os
 import shutil
 from typing import Dict
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 METADATA = env_manager.get_env("METADATA_REGISTRY")
 SERVICES = env_manager.get_env("REGISTRY")
