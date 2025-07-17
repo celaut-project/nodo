@@ -57,7 +57,7 @@ def add_reputation_proof(contract_ledger, peer_id) -> bool:
         return False
     
     # Stores on DB
-    return sc.add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id)
+    return sc.add_reputation_proof(contract=contract_ledger, peer_id=peer_id)
 
 # Insert the instance if it does not exist.
 def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:

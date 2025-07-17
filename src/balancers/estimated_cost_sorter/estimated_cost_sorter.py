@@ -57,7 +57,7 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
 
             if peer_id != "local":
                 from typing import Optional
-                peer_gas_per_erg: Optional[int] = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_id=ERGO_LEDGER)
+                peer_gas_per_erg: Optional[int] = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_hash=ERGO_LEDGER)
                 if peer_gas_per_erg is None:
                     logger(f"No ergo gas price on peer {peer_id}, continue.")
                     return 0

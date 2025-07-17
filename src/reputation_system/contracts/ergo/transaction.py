@@ -147,10 +147,10 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         try:
             _contract = ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)
             _ergo_tree = _contract.getErgoTree()
-            _contract_addr = Address.fromErgoTree(_ergo_tree, NetworkType.MAINNET)
+            _token_id = Address.fromErgoTree(_ergo_tree, NetworkType.MAINNET)
             input_list = ergo.getInputBoxCovering(
                 amount_list=[SAFE_MIN_BOX_VALUE],
-                sender_address=_contract_addr,
+                sender_address=_token_id,
                 tokenList=[[proof_id]], amount_tokens=[[total_token_value]]  # TODO this filter don't work. (Where proof_id is a token_id)  https://discord.com/channels/668903786361651200/669989266478202917/1283108062324064256
             )
             input_boxes.extend([

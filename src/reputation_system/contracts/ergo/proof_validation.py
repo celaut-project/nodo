@@ -69,19 +69,19 @@ def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
         logger(f"Failed to parse JSON response for token_id {token_id}: {e}")
         return None
 
-def validate_contract_ledger(contract_ledger: celaut.ContractLedger, peer_id: str) -> bool:
+def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> bool:
     """
     Validates the contract ledger by checking compatibility with predefined contract and ledger,
     generating a random message, signing it using the peer's public key, and verifying the signature.
     """
     # Check compatibility of the contract ledger
-    compatibility = contract_ledger.ledger.formal == ergo_ledger.formal and contract_ledger.contract == CONTRACT.encode("utf-8")
+    compatibility = contract_ledger.ledger.formal == ergo_ledger.formal and contract_ledger.template.formal == CONTRACT.encode("utf-8")
     
     if not compatibility: 
-        logger(f"Contract ledger not compatible: {contract_ledger.ledger.formal == ergo_ledger.formal} | {contract_ledger.contract == CONTRACT.encode('utf-8')}")
+        logger(f"Contract ledger not compatible: ledger: {contract_ledger.ledger.formal == ergo_ledger.formal} | template: {contract_ledger.contract.formal == CONTRACT.encode('utf-8')}")
         return False
     
-    if not contract_ledger.contract_addr:
+    if not contract_ledger.token_id:
         logger(f"Incomplete contract ledger, there is no address")
         return False
     
@@ -90,7 +90,7 @@ def validate_contract_ledger(contract_ledger: celaut.ContractLedger, peer_id: st
     logger(f"Generated random message: {message}")
     
     # Get public key from explorer
-    public_key = __get_single_address_with_all_tokens(contract_ledger.contract_addr)
+    public_key = __get_single_address_with_all_tokens(contract_ledger.token_id)
     if not public_key:
         logger("Failed to obtain public key.")
         return False

@@ -23,8 +23,8 @@ from org.ergoplatform.appkit.impl import *
 env_manager = EnvManager()
 DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
 LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.  TODO Ergo ledger actually should be the serialized protobuf.  -> But must be an id, and be defined on a yalm config file with the rest of envs. 
-CONTRACT = "proveDlog(decodePoint())".encode('utf-8')  # Ergo tree template script.    Because the specific script is the address, right? <- TODO check
-CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
+CONTRACT = "proveDlog(decodePoint())"  # Ergo tree template script
+CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 ERGO_NODE_URL = lambda: env_manager.get_env("ERGO_NODE_URL")
 COLD_WALLET = lambda: env_manager.get_env('ERGO_PAYMENTS_RECIVER_WALLET')
 ERGO_DONATION_WALLET = lambda: env_manager.get_env('ERGO_DONATION_WALLET')
@@ -137,10 +137,14 @@ def get_balances(only_sender: bool=False) -> Tuple[Tuple[str, float], Tuple[str,
 def init():
     sender_addr = str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString())
     sql = sql_connection.SQLConnection()
-    sql.add_contract(contract=celaut_pb2.ContractLedger(
+    sql.add_contract(contract=celaut_pb2.Contract(
         ledger=LEDGER,
-        contract_addr=sender_addr,
-        contract=CONTRACT
+        token_id="ERG",
+        script=sender_addr.encode("utf-8"),
+        template=celaut_pb2.Contract.ScriptTemplate(
+            prose="",
+            formal=CONTRACT.encode("utf-8")
+        )
     ))
 
 def check_sender_balance(amount: int) -> bool:
@@ -206,7 +210,7 @@ def manager():
 
 
 # Function to process the payment, generating a transaction with the token in register R4
-def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.ContractLedger.Ledger, contract_address: str) -> celaut_pb2.ContractLedger:
+def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes) -> celaut_pb2.Contract:
     with payment_lock:
         amount = __gas_to_nanoerg(amount)
         LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount}")
@@ -232,7 +236,7 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
                         .registers([
                             ErgoValue.of(jpype.JString(deposit_token).getBytes("utf-8"))  # Store token in R4
                         ]) \
-                        .contract(Address.create(contract_address).toErgoContract()) \
+                        .contract(Address.create(script.decode('utf-8')).toErgoContract()) \
                         .build()  # Build the output box
 
             # Create the unsigned transaction
@@ -268,10 +272,14 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
                 obj = response.json()
                 if obj["numConfirmations"] > 1:
                     LOGGER(f"Tx {tx_id} verified.")
-                    return celaut_pb2.ContractLedger(
+                    return celaut_pb2.Contract(
                         ledger=ledger,
-                        contract_addr=contract_address,
-                        contract=CONTRACT
+                        token_id="ERG",
+                        template=celaut_pb2.Contract.ScriptTemplate(
+                            prose="",
+                            formal=CONTRACT.encode("utf-8")
+                        ),
+                        script=script
                     )
 
             raise Exception(f"Can't verify the tx {tx_id}")
@@ -281,17 +289,18 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
 
 
 # Function to validate the payment process by checking if there is an unspent box with the token in register R4
-def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.ContractLedger.Ledger, contract_addr: str) -> bool:
+def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes) -> bool:
     try:
+        address = script.decode("utf-8")
         assert LEDGER in ledger.tags, "Ledger does not match"
-        assert contract_addr == str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString()), "Contract address does not match"
+        assert address == str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString()), "Contract address does not match"
 
         # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
         ergo = __init_ergo()
         explorer_api = ergo.get_api_url()
 
         # Construct the API URL to fetch unspent UTXOs for the contract address
-        url = f"{explorer_api}/api/v1/boxes/unspent/unconfirmed/byAddress/{contract_addr}"
+        url = f"{explorer_api}/api/v1/boxes/unspent/unconfirmed/byAddress/{address}"
         response = requests.get(url)
 
         if response.status_code != 200:

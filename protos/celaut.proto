@@ -14,17 +14,28 @@ message DataFormat {
     bytes formal = 3;
 }
 
-// Ledger representation including contract bytes, contract address, and ledger string.
-message ContractLedger {
+// Represents both, payment contracts and reputation proofs.
+message Contract {
+    message ScriptTemplate {
+        repeated string tags = 1;
+        string prose = 2;
+        bytes formal = 3;
+    }
     message Ledger {
         repeated string tags = 1;
         string prose = 2;
         bytes formal = 3;
     }
-    bytes contract = 1;
-    string contract_addr = 2;
-    Ledger ledger = 3;
+    ScriptTemplate template = 1;
+    bytes script = 2;  // Or Contract address on Ethereum-like networks.
+    string token_id = 3;
+    Ledger ledger = 4;
 }
+
+// Contract -> Contract
+// bytes contract -> ScriptTemplate template
+// bytes script
+// string token_idess -> string token_id
 
 // Defines an abstract amount of gas (cost unit) as a numeric string.
 message GasAmount {
@@ -33,7 +44,7 @@ message GasAmount {
 
 // Associates a payment contract ledger with a gas amount (price).
 message GasPrice {
-    ContractLedger contract_ledger = 1;
+    Contract contract = 1;
     GasAmount gas_amount = 2;
 }
 
@@ -58,7 +69,7 @@ message Metadata {
     }
     optional HashTag hashtag = 1;
     optional DataFormat format = 2;
-    repeated ContractLedger reputation_proofs = 3;
+    repeated Contract reputation_proofs = 3;
 }
 
 // -----------------------
@@ -276,7 +287,7 @@ message SignResponse {
 
 message Payment {
     string deposit_token = 1;
-    ContractLedger contract_ledger = 2;
+    Contract contract = 2;
     GasAmount gas_amount = 3;
 }
 
@@ -290,7 +301,7 @@ message ServiceInstance {
 }
 
 message Peer {
-    repeated ContractLedger reputation_proofs = 1;
+    repeated Contract reputation_proofs = 1;
     Instance instance = 2;
 }
 
