@@ -139,19 +139,17 @@ def sign_message(public_key, message) -> str | None:
     mnemonic_phrase = EnvManager().get_env("ERGO_WALLET_MNEMONIC")
     
     # Get the public key associated with the mnemonic phrase
-    address: Address = get_public_key(mnemonic_phrase=mnemonic_phrase)
-    p2pkAddres = address.asP2PK()
-    sender_address_proposition = p2pkAddres.pubkey()
-    local_public_key = ErgoValue.of(sender_address_proposition)
+    local_address: Address = get_public_key(mnemonic_phrase=mnemonic_phrase)
+    local_address_hex = local_address.asP2PK().pubkey().sigma_serialize().hex()
     
     # Check if the provided public key matches the wallet's public key
-    if public_key == local_public_key:
+    if public_key == local_address_hex:
         # Sign the message using the mnemonic phrase
         signed_msg = bip_ecdsa_sign(mnemonic_phrase=mnemonic_phrase, message=message)
         logger(f"Message signed successfully for public key: {public_key}")
         return signed_msg
     else:
-        logger(f"Public key mismatch: provided {public_key}, expected {local_public_key}")
+        logger(f"Public key mismatch: provided {public_key}, expected {local_address_hex}")
         return None
 
 def validate_reputation_proof_ownership() -> bool:
