@@ -140,7 +140,7 @@ def sign_message(public_key, message) -> str | None:
     
     # Get the public key associated with the mnemonic phrase
     local_address: Address = get_public_key(mnemonic_phrase=mnemonic_phrase)
-    local_address_hex = local_address.asP2PK().pubkey().h.to_byte_array().hex()
+    local_address_hex = local_address.asP2PK().pubkey().value.to_byte_array().hex()
     
     # Check if the provided public key matches the wallet's public key
     if public_key == local_address_hex:
