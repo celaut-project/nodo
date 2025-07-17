@@ -193,20 +193,3 @@ DOCKER_CLIENT = lambda: docker_lib.from_env(
 DEFAULT_SYSTEM_RESOURCES: celaut_pb2.Sysresources = celaut_pb2.Sysresources(
     mem_limit=50 * pow(10, 6),
 )
-
-# ------------------------------
-# ----------- USAGE EXAMPLE ----
-# ------------------------------
-
-print("\n--- Example Configuration Values ---")
-print(f"Main Directory: {config.get('main.MAIN_DIR')}")
-print(f"Storage Path: {config.get('main.STORAGE')}")
-print(f"Database File: {config.get('main.DATABASE_FILE')}")
-print(f"Gateway Port: {config.get('network.GATEWAY_PORT')}")
-print(f"Docker Timeout: {config.get('docker.DOCKER_CLIENT_TIMEOUT')}")
-print(f"Ergo Node URL: {config.get('ledgers.0.NODE_URL')}") # Accessing list elements
-print(f"Ergo Mnemonic: {config.get('ledgers.0.WALLET_MNEMONIC')[:15]}...") # Showing a snippet
-
-# Example of changing a value and saving it
-# config.set('misc.USE_PRINT', True)
-# print(f"\nUpdated 'misc.USE_PRINT' to: {config.get('misc.USE_PRINT')}")
