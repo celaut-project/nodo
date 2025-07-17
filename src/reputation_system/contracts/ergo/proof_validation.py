@@ -140,7 +140,7 @@ def sign_message(public_key, message) -> str | None:
     
     # Get the public key associated with the mnemonic phrase
     local_address: Address = get_public_key(mnemonic_phrase=mnemonic_phrase)
-    local_address_hex = public_key  # TODO How to obtain the public key in hex format?
+    local_address_hex = public_key  # TODO How to obtain the public key in hex format?  https://github.com/celaut-project/nodo/issues/81
 
     # Check if the provided public key matches the wallet's public key
     if public_key == local_address_hex:
