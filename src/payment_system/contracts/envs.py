@@ -9,20 +9,20 @@ from src.utils.env import EnvManager
 SIMULATED = EnvManager().get_env("SIMULATE_PAYMENTS")
 
 contract_hash = str
-contract_addr = str
+script = bytes
 token = str
 ledger = str
 tx_id = str
 amount = int
 validate_token = Callable[[token], bool]
-contract_ledger = celaut_pb2.ContractLedger
+contract_ledger = celaut_pb2.Contract
 
 PAYMENT_PROCESS_VALIDATORS = {
     **({simulated.CONTRACT_HASH: simulated.payment_process_validator} if SIMULATED else {}),
     ergo.CONTRACT_HASH: ergo.payment_process_validator
 }
 
-AVAILABLE_PAYMENT_PROCESS: Dict[contract_hash, Callable[[amount, token, ledger, contract_addr], contract_ledger]] = {
+AVAILABLE_PAYMENT_PROCESS: Dict[contract_hash, Callable[[amount, token, ledger, script], contract_ledger]] = {
     **({simulated.CONTRACT_HASH: simulated.process_payment} if SIMULATED else {}),
     ergo.CONTRACT_HASH: ergo.process_payment
 }

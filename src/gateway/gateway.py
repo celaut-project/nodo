@@ -169,9 +169,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
         ), None)
         if not validate_payment_process(
                 amount=from_gas_amount(payment.gas_amount),
-                ledger=payment.contract_ledger.ledger,
-                contract=payment.contract_ledger.contract,
-                contract_addr=payment.contract_ledger.contract_addr,
+                ledger=payment.contract.ledger,
+                contract=payment.contract.template.formal,
+                script=payment.contract.script,
                 token=payment.deposit_token,
         ):
             raise Exception('Error: payment not valid.')

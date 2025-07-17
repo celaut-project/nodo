@@ -783,7 +783,7 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error fetching peer details for ID {peer_id}: {e}')
             return {}
         
-    def get_peer_gas_price(self, peer_id: str, contract_hash: str, ledger_id: str) -> Optional[int]:
+    def get_peer_gas_price(self, peer_id: str, contract_hash: str, ledger_hash: str) -> Optional[int]:
         """
         Fetches the gas price for a specific contract instance, identified by
         peer, contract hash, and ledger ID.
@@ -791,7 +791,7 @@ class SQLConnection(metaclass=Singleton):
         Parameters:
         - peer_id (str): The unique identifier of the peer.
         - contract_hash (str): The hash of the contract.
-        - ledger_id (str): The unique identifier of the ledger.
+        - ledger_hash (str): The unique identifier of the ledger.
 
         Returns:
         - int: The gas price as an integer if the specific contract instance is found.
@@ -802,8 +802,8 @@ class SQLConnection(metaclass=Singleton):
             result = self._execute('''
                 SELECT gas_price
                 FROM contract_instance
-                WHERE peer_id = ? AND contract_hash = ? AND ledger_id = ?
-            ''', (peer_id, contract_hash, ledger_id))
+                WHERE peer_id = ? AND contract_hash = ? AND ledger_hash = ?
+            ''', (peer_id, contract_hash, ledger_hash))
 
             # Fetch one row (we expect at most one for this combination)
             row = result.fetchone()
@@ -816,7 +816,7 @@ class SQLConnection(metaclass=Singleton):
                     gas_price = int(gas_price_str)
                     return gas_price
                 except (ValueError, TypeError) as ve:
-                    logger.LOGGER(f'Error converting stored gas_price "{gas_price_str}" to int for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_id}. Error: {ve}')
+                    logger.LOGGER(f'Error converting stored gas_price "{gas_price_str}" to int for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {ve}')
                     return None # Return None if conversion fails
 
             else:
@@ -825,7 +825,7 @@ class SQLConnection(metaclass=Singleton):
 
         except Exception as e:
             # Catch potential database errors during execution
-            logger.LOGGER(f'Database error fetching gas price for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_id}. Error: {e}')
+            logger.LOGGER(f'Database error fetching gas price for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {e}')
             return None # Return None on database error
 
     def get_peers_id(self) -> List[str]:
@@ -952,7 +952,7 @@ class SQLConnection(metaclass=Singleton):
             for uri in slot.uri:
                 self.add_uri(uri, slot_id=slot_id)
 
-    def check_if_ledger_exists(self, ledger_to_check: celaut_pb2.ContractLedger.Ledger) -> celaut_pb2.ContractLedger.Ledger:
+    def check_if_ledger_exists(self, ledger_to_check: celaut_pb2.Contract.Ledger) -> celaut_pb2.Contract.Ledger:
         """
         Checks if a logically equivalent ledger already exists in the database.
 
@@ -968,7 +968,7 @@ class SQLConnection(metaclass=Singleton):
             The complete Ledger object from the database if a match is found.  The same if not exists.
         """
         
-        def _compare_ledgers(ledger_a: celaut_pb2.ContractLedger.Ledger, ledger_b: celaut_pb2.ContractLedger.Ledger) -> bool:
+        def _compare_ledgers(ledger_a: celaut_pb2.Contract.Ledger, ledger_b: celaut_pb2.Contract.Ledger) -> bool:
             """
             Inner function to compare two Ledger objects for logical equivalence.
             """
@@ -996,15 +996,15 @@ class SQLConnection(metaclass=Singleton):
                 
             return False
 
-        # Fetch all stored ledgers. The 'ledger_id' column contains the serialized ledger.
-        cursor = self._execute("SELECT ledger_id FROM ledger")
+        # Fetch all stored ledgers. The 'ledger_hash' column contains the serialized ledger.
+        cursor = self._execute("SELECT ledger_hash FROM ledger")
         
         for row in cursor.fetchall():
             # The ledger from the DB is in a serialized byte format.
             db_ledger_bytes = row['id']
             
             # Deserialize the bytes to reconstruct the Ledger object.
-            db_ledger = celaut_pb2.ContractLedger.Ledger()
+            db_ledger = celaut_pb2.Contract.Ledger()
             db_ledger.ParseFromString(db_ledger_bytes)
             
             # Use the inner comparison logic.
@@ -1015,73 +1015,79 @@ class SQLConnection(metaclass=Singleton):
         # If the loop finishes without finding a match, return None.
         return None
 
-    def add_contract(self, contract: celaut_pb2.ContractLedger, peer_id: str = "LOCAL", gas_price: int = 0):
+    def add_contract(self, contract: celaut_pb2.Contract, peer_id: str = "LOCAL", gas_price: int = 0):
         """
         Adds a contract to the database.
 
         Args:
-            contract (celaut_pb2.ContractLedger): The contract to add.
+            contract (celaut_pb2.Contract): The contract to add.
             peer_id (Optional[str]): The ID of the peer or None for a self contract (to be send to clients.)
             gas_price (Int): Gas per unit of the token if the contract represents one, or gas per contract spend/execution/usage.
         """
-        contract_content: bytes = contract.contract
-        address: str = contract.contract_addr
+        contract_str: bytes = contract.ScriptTemplate.SerializeToString()
+        address: str = contract.script.decode('utf-8')
 
-        ledger = self.check_if_ledger_exists(ledger_to_check=ledger)
-        ledger_str: str = contract.ledger.SerializeToString()  # tag-prose-formal serialized
+        ledger = self.check_if_ledger_exists(ledger_to_check=contract.ledger)
+        ledger_str: bytes = contract.ledger.SerializeToString()
 
-        contract_hash: str = sha3_256(contract_content).hexdigest()
-        contract_hash_type: str = SHA3_256_ID.hex()
+        contract_hash: str = sha3_256(contract_str).hexdigest()
+        ledger_hash: str = sha3_256(ledger_str).hexdigest()
 
         gas_str = str(gas_price)
 
-        self._execute("INSERT OR IGNORE INTO contract (hash, hash_type, contract) VALUES (?,?,?)",
-                    (contract_hash, contract_hash_type, contract_content))
+        self._execute("INSERT OR IGNORE INTO contract (hash, content) VALUES (?,?)",
+                    (contract_hash, contract_str))
 
-        self._execute("INSERT OR IGNORE INTO ledger (id) VALUES (?)",
-                    (ledger_str,))
+        self._execute("INSERT OR IGNORE INTO ledger (hash, content) VALUES (?)",
+                    (ledger_hash, ledger_str))
 
-        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_id, contract_hash, peer_id, gas_price) "  # TODO Should store the id from ledgers, not the parsed ledger object.
-                    "VALUES (?,?,?,?,?)", (address, ledger_str, contract_hash, peer_id, gas_str))
+        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_hash, contract_hash, peer_id, gas_price) "
+                    "VALUES (?,?,?,?,?)", (address, ledger_hash, contract_hash, peer_id, gas_str))
 
-    def get_peer_contract_instances(self, contract_hash: str, peer_id: str = "LOCAL") -> Generator[Tuple[str, celaut_pb2.ContractLedger.Ledger], None, None]:
+    def get_peer_contract_instances(self, contract_hash: str, peer_id: str = "LOCAL") -> Generator[Tuple[bytes, celaut_pb2.Contract.Ledger], None, None]:
         """
-        Recupera las instancias de contrato de un peer (dirección y ledger) para un hash de contrato específico.
+        Retrieves all contract instances for a given contract hash and peer ID.
 
         Args:
-            contract_hash (str): El hash del contrato.
-            peer_id (str): El ID del peer. Por defecto es "LOCAL".
+            contract_hash (str): Contract hash
+            peer_id (str): Peer ID, defaults to "LOCAL".
 
         Yields:
-            Un generador de tuplas (address, ledger_id).
+            Tuple[bytes, celaut_pb2.Contract.Ledger]: A tuple containing the address and the ledger of the contract instance.
         """
         cursor = self._execute(
-            "SELECT address, ledger_id FROM contract_instance WHERE contract_hash = ? AND peer_id = ?",
+            "SELECT address, ledger_hash FROM contract_instance WHERE contract_hash = ? AND peer_id = ?",
             (contract_hash, peer_id)
         )
         for row in cursor.fetchall():
-            ledger = celaut_pb2.ContractLedger.Ledger()
-            ledger.ParseFromString(row['ledger_id'])
-            yield row['address'], ledger
+            cursor = self._execute("SELECT content FROM ledger WHERE hash = ?", (row['ledger_hash'],))
+            ledger_str = cursor.fetchone()['content']
 
-    def add_reputation_proof(self, contract_ledger: celaut_pb2.ContractLedger, peer_id: str) -> bool:
+            ledger = celaut_pb2.Contract.Ledger()
+            ledger.ParseFromString(ledger_str)
+
+            script: bytes = row['address'].encode('utf-8')
+
+            yield script, ledger
+
+    def add_reputation_proof(self, contract: celaut_pb2.Contract, peer_id: str) -> bool:
         """
         Add or update the reputation_proof_id for a peer.
 
         Args:
             peer_id (str): The ID of the peer whose reputation_proof_id is to be updated.
-            contract_ledger (celaut_pb2.ContractLedger): The reputation proof contract ledger.
+            contract (celaut_pb2.Contract): The reputation proof contract ledger.
 
         Returns:
             bool: True if the update was successful, False otherwise.
         """
 
         try:
-            new_proof_id = contract_ledger.contract_addr
+            new_proof_id = contract.token_id
 
             # Fetch the peer to ensure it exists
             result = self._execute('SELECT id FROM peer WHERE id = ?', (peer_id,))
-            row = result.fetchone()
+            row: Any = result.fetchone()
 
             if row:
                 # Update the reputation_proof_id for the peer

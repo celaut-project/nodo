@@ -56,7 +56,7 @@ def inspect(service: str):
     for c in metadata.reputation_proofs:
         print(f"{'Ledger':<10}: {', '.join(c.ledger.tags)}")
         print(f"{'Script':<10}: {c.contract.hex()}")
-        print(f"{'Address':<10}: {c.contract_addr}\n")
+        print(f"{'Address':<10}: {c.token_id}\n")
 
     # Service Definition
     print_rule("📦 Service Definition", borders=True)

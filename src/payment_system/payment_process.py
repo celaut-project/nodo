@@ -26,16 +26,16 @@ from src.utils.env import EnvManager
 
 env_manager = EnvManager()
 
-COMMUNICATION_ATTEMPTS = env_manager.get_env("COMMUNICATION_ATTEMPTS")
-COMMUNICATION_ATTEMPTS_DELAY = env_manager.get_env("COMMUNICATION_ATTEMPTS_DELAY")
-MIN_DEPOSIT_PEER = env_manager.get_env("MIN_DEPOSIT_PEER")
+COMMUNICATION_ATTEMPTS = int(env_manager.get_env("COMMUNICATION_ATTEMPTS"))
+COMMUNICATION_ATTEMPTS_DELAY = int(env_manager.get_env("COMMUNICATION_ATTEMPTS_DELAY"))
+MIN_DEPOSIT_PEER = int(env_manager.get_env("MIN_DEPOSIT_PEER"))
 PAYMENT_MANAGER_ITERATION_TIME = int(env_manager.get_env("PAYMENT_MANAGER_ITERATION_TIME"))
 
 sc = SQLConnection()
 deposit_generation_locked = False
 
-auxiliar_contract_address_reputation = {}
-auxiliar_contract_address_reputation_lock = Lock()
+auxiliar_script_reputation = {}
+auxiliar_script_reputation_lock = Lock()
 
 def generate_deposit_token(client_id: str) -> str:
     if deposit_generation_locked:
@@ -72,9 +72,9 @@ def __obtain_deposit_token(peer_id) -> Optional[str]:
         return next(bee.client_grpc(
             method=grpc_stub.GenerateDepositToken,
             partitions_message_mode_parser=True,
-            input=celaut_pb2.Client(client_id=client_id),
-            indices_parser=celaut_pb2.TokenMessage
-        ), None).token
+            input=celaut_pb2.Client(client_id=client_id),  # type: ignore
+            indices_parser=celaut_pb2.TokenMessage  # type: ignore
+        ), None).token  # type: ignore
     except Exception as e:
         _l.LOGGER(f"Error generating deposit token: {str(e)}")
         return
@@ -84,7 +84,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
     deposit_token = None
 
     # Attempt payment processing for each available payment process
-    for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():
+    for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():  # type: ignore
         
         # In the case where we have different payment methods for the same ledger, ex: other payment method on Ergo, we should reorganize the envs dictionaries to avoid check sender balances multiple times.
         
@@ -104,32 +104,31 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         try:
             # Get all available ledgers for this peer and contract
             
-            ledgers = ledger_balancer(ledger_generator=get_peer_contract_instances(contract_hash, peer_id)) \
-                if contract_hash not in DEMOS else [("", "")]
+            ledgers = ledger_balancer(ledger_generator=get_peer_contract_instances(contract_hash, peer_id)) if contract_hash not in DEMOS else [("", "")]
             
-            for contract_address, ledger in ledgers:
+            for script, ledger in ledgers:
                 
-                with auxiliar_contract_address_reputation_lock:
+                with auxiliar_script_reputation_lock:
                     # Check if contract address is in the auxiliar dictionary        TODO use reputation instead.
-                    if contract_address in auxiliar_contract_address_reputation:
-                        if auxiliar_contract_address_reputation[contract_address] > datetime.now():
+                    if script in auxiliar_script_reputation:
+                        if auxiliar_script_reputation[script] > datetime.now():
                             continue
                         else:
-                            del auxiliar_contract_address_reputation[contract_address]
+                            del auxiliar_script_reputation[script]
 
-                _l.LOGGER(f"Processing payment: Deposit token: {deposit_token}. Ledger: {ledger}. Contract address: {contract_address}")
+                _l.LOGGER(f"Processing payment: Deposit token: {deposit_token}. Ledger: {ledger}. Contract address: {script}")
 
                 # Process the payment
                 try:
                     contract_ledger = process_payment(
                         amount=amount,
-                        deposit_token=deposit_token,
+                        token=deposit_token,
                         ledger=ledger,
-                        contract_address=contract_address
+                        script=script
                     )
                     _l.LOGGER(f"Payment processed. Deposit token: {deposit_token}")
-                    # if contract_address and ledger:
-                        # update_reputation(=contract_address, amount=10)  # TODO On envs.
+                    # if token_idess and ledger:
+                        # update_reputation(=token_idess, amount=10)  # TODO On envs.
                         # update_reputation(=ledger, amount=1)  # TODO On envs.
                 except DoubleSpendingAttempt as e:
                     _l.LOGGER(str(e))
@@ -144,14 +143,14 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
                     # and if it still fails, leave it until after x time or something similar.
                     # This is auxiliary because ideally, it would be based on its reputation.
 
-                    if contract_address:
-                        with auxiliar_contract_address_reputation_lock:  # TODO use reputation instead.
-                            if contract_address not in auxiliar_contract_address_reputation:
-                                auxiliar_contract_address_reputation[contract_address] = datetime.now()
-                            auxiliar_contract_address_reputation[contract_address] += timedelta(seconds=600)  # Adds 10 minutes.
+                    if script:
+                        with auxiliar_script_reputation_lock:  # TODO use reputation instead.
+                            if script not in auxiliar_script_reputation:
+                                auxiliar_script_reputation[script] = datetime.now()
+                            auxiliar_script_reputation[script] += timedelta(seconds=600)  # Adds 10 minutes.
 
-                    # if contract_address and ledger:
-                        # update_reputation(=contract_address, amount=-100)  # TODO On envs.
+                    # if token_idess and ledger:
+                        # update_reputation(=token_idess, amount=-100)  # TODO On envs.
                         # update_reputation(=ledger, amount=-10)  # TODO On envs.
                     continue
 
@@ -173,7 +172,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 
 
 # Helper function for payment communication retries
-def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: str, contract_ledger: celaut_pb2.ContractLedger) -> bool:
+def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: str, contract_ledger: celaut_pb2.Contract) -> bool:
     attempt = 0
     while attempt < COMMUNICATION_ATTEMPTS:
         try:
@@ -224,13 +223,13 @@ def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
         return False
 
 
-def validate_payment_process(amount: int, ledger: celaut_pb2.ContractLedger.Ledger, contract: bytes, contract_addr: str, token: str) -> bool:
+def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, contract: bytes, script: bytes, token: str) -> bool:
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         raise Exception(f"Deposit token {token} doesn't exists.")
     try:
         _r = __check_payment_process(
             amount=amount, ledger=ledger, token=token,
-            contract=contract, contract_addr=contract_addr
+            contract=contract, script=script
         ) and increase_local_gas_for_client(client_id=sc.client_id_from_deposit_token(token_id=token), amount=amount)  # TODO allow for containers too.
     except: _r = False
     sc.update_deposit_token(token_id=token, status="payed" if _r else "rejected")
@@ -238,7 +237,7 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.ContractLedger.Ledg
     return _r
 
 
-def __check_payment_process(amount: int, ledger: celaut_pb2.ContractLedger.Ledger, token: str, contract: bytes, contract_addr: str) -> bool:
+def __check_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, token: str, contract: bytes, script: bytes) -> bool:
     _l.LOGGER('Check payment process to ' + token + ' of ' + str(amount))
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         _l.LOGGER(f"No token {token} in pending deposit_tokens")
@@ -250,7 +249,7 @@ def __check_payment_process(amount: int, ledger: celaut_pb2.ContractLedger.Ledge
         return False
 
     _validator = PAYMENT_PROCESS_VALIDATORS[sha3_256(contract).hexdigest()]
-    return _validator(amount, token, ledger, contract_addr)
+    return _validator(amount, token, ledger, script)
 
 
 def __manage_interfaces():

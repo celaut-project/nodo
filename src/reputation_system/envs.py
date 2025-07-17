@@ -197,7 +197,7 @@ $$
 > This fully decentralized, proof‑based governance model ensures that Ergo evolves strictly by actual network consensus, with no reliance on privileged actors or treasury funds.
 """
 
-ergo_ledger = celaut_pb2.ContractLedger.Ledger(
+ergo_ledger = celaut_pb2.Contract.Ledger(
     tags=[LEDGER],
     prose=PROSE,
     formal=FORMAL.encode("utf-8"),

@@ -1,3 +1,4 @@
+from ast import Return
 from protos import celaut_pb2, celaut_pb2
 from hashlib import sha3_256
 from src.utils.logger import LOGGER
@@ -56,15 +57,18 @@ CONTRACT = """
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 
 
-def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.ContractLedger.Ledger,
-                    contract_address: str) -> celaut_pb2.ContractLedger:
+def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes) -> celaut_pb2.Contract:
     LOGGER(f"Process simulated payment for token {deposit_token} of {amount}")
-    return celaut_pb2.ContractLedger(
+    return celaut_pb2.Contract(
                 ledger=ledger,
-                contract_addr=contract_address,
+                token_id="",
+                script=script,
                 contract=CONTRACT
             )
 
 
-def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.ContractLedger.Ledger, contract_addr: str) -> bool:
+def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes) -> bool:
+    return True
+
+def check_sender_balance(amount: int) -> bool:
     return True

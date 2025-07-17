@@ -70,13 +70,13 @@ def create_tables(cursor):
         "contract": '''
             CREATE TABLE IF NOT EXISTS contract (
                 hash TEXT PRIMARY KEY,
-                hash_type TEXT,
-                contract BLOB
+                content BLOB
             )
         ''',
         "ledger": '''
             CREATE TABLE IF NOT EXISTS ledger (
-                id TEXT PRIMARY KEY,
+                hash TEXT PRIMARY KEY,
+                content BLOB,
                 private_key TEXT NULL,
                 double_spending_retry_time DATETIME DEFAULT NULL
             )
@@ -85,14 +85,14 @@ def create_tables(cursor):
             CREATE TABLE IF NOT EXISTS contract_instance (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 address TEXT,
-                ledger_id TEXT,
+                ledger_hash TEXT,
                 contract_hash TEXT,
                 peer_id TEXT NOT NULL,
                 gas_price TEXT,
-                FOREIGN KEY (ledger_id) REFERENCES ledger (id),
+                FOREIGN KEY (ledger_hash) REFERENCES ledger (id),
                 FOREIGN KEY (contract_hash) REFERENCES contract (hash),
                 FOREIGN KEY (peer_id) REFERENCES peer (id),
-                UNIQUE (address, ledger_id, contract_hash, peer_id)
+                UNIQUE (address, ledger_hash, contract_hash, peer_id)
             )
         ''',
         "local_instances": '''

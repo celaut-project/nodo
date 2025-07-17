@@ -1,59 +1,79 @@
-//  -----------------------
-//  -----------------------
-//       CEL•AUT•WEB
-//  -----------------------
-//  -----------------------
 syntax = "proto3";
 package celaut;
 
+import "buffer.proto";
 
-/*
-    The formats that have bytes type, such as "formal," will continue to be that way; 
-    nodes that have a specific format will be able to add it to their celaut.proto files without any issue... 
-    It makes no sense for the message to self-define in those parts, as it goes against the philosophy behind protobuf.
-*/
+// -----------------------
+// CEL•AUT MESSAGES
+// -----------------------
 
-//  -----------------------
-//  DEFINITIONS.
-//  -----------------------
-
+// Describes available data formats with optional tags, human-readable prose, and binary representation.
 message DataFormat {
     repeated string tags = 1;
     string prose = 2;
     bytes formal = 3;
 }
 
-message ContractLedger {
-    bytes contract = 1;
-    string contract_addr = 2;
-    string ledger = 3;
+// Represents both, payment contracts and reputation proofs.
+message Contract {
+    message ScriptTemplate {
+        repeated string tags = 1;
+        string prose = 2;
+        bytes formal = 3;
+    }
+    message Ledger {
+        repeated string tags = 1;
+        string prose = 2;
+        bytes formal = 3;
+    }
+    ScriptTemplate template = 1;
+    bytes script = 2;  // Or Contract address on Ethereum-like networks.
+    string token_id = 3;
+    Ledger ledger = 4;
 }
 
+// Defines an abstract amount of gas (cost unit) as a numeric string.
+message GasAmount {
+    string n = 1;
+}
+
+// Associates a payment contract ledger with a gas amount (price).
+message GasPrice {
+    Contract contract_ledger = 1;
+    GasAmount gas_amount = 2;
+}
+
+// Metadata structure with optional hashtags, data format, and reputation proofs.
 message Metadata {
     message HashTag {
         message Hash {
+            // Type of hash (e.g., SHA256).
             bytes type = 1;
+            // Hash value bytes.
             bytes value = 2;
         }
         message AttrHashTag {
-            int32 key = 1;  // the attribute's index.
-            repeated HashTag value = 2;  // HashTag, if it's a repeated field, the HashTags of every one.
+            // Field index for repeated attributes.
+            int32 key = 1;
+            // List of hashtags for each element in a repeated field.
+            repeated HashTag value = 2;
         }
         repeated Hash hash = 1;
         repeated string tag = 2;
-        repeated AttrHashTag attr_hashtag = 3; // List of metadata fields. Ordened by indexes defined on format.
+        repeated AttrHashTag attr_hashtag = 3;
     }
     optional HashTag hashtag = 1;
     optional DataFormat format = 2;
-    repeated ContractLedger reputation_proofs = 3;
+    repeated Contract reputation_proofs = 3;
 }
 
+// -----------------------
+// SERVICE SPECIFICATION
+// Defines how a service is described: API, container, network.
+// -----------------------
 
-//  -----------------------
-//  SERVICE SPECIFICATION.
-//  -----------------------
 message Service {
-    // API: Defines how you can interact with the service, the ports where it listens, the communication protocols that it supports, methods and the different errors and responses that it can give.
+    // API: Defines service ports, protocols, payment contracts, and cost model.
     message Api {
         message Protocol {
             repeated string tags = 1;
@@ -61,65 +81,112 @@ message Service {
             bytes formal = 3;
         }
         message Slot {
+            // Port number for this slot.
             int32 port = 1;
+            // Protocol stack definitions for this slot.
             repeated Protocol protocol_stack = 2;
         }
-        repeated Slot slot = 2;
-        repeated ContractLedger payment_contracts = 3;
-        // Cost function can be applied. <- must be optional.
+
+        // Environment variables for the container.
+        map<string, DataFormat> environment_variables = 3;
+
+        repeated Slot slot = 4;
+
+        // Accepted payment contracts with conversion to gas.
+        repeated GasPrice payment_contracts = 5;
+        
+        /*
+         The cost of the service is measured in "gas":
+           1. Initial fixed cost (one-time).
+           2. Usage-based cost (variable).
+         Detailed cost rules are specified within the API protocol.
+        */
     }
 
-    // Container:  Specifies the container where the service runs, microarchitecture, entry point and filesystem (DAG?), and environment variables.
     message Container {
+        
         message Architecture {
             repeated string tags = 1;
             string prose = 2;
             bytes formal = 3;
         }
+        
         message Filesystem {
             message ItemBranch {
                 message Link {
                     string src = 1;
                     string dst = 2;
                 }
-                string name = 1; // id for path
+                // Identifier for the file or folder name.
+                string name = 1;
                 oneof item {
+                    // Raw file bytes.
                     bytes file = 2;
+                    // Symbolic link.
                     Link link = 3;
+                    // Nested filesystem tree.
                     Filesystem filesystem = 4;
                 }
             }
             repeated ItemBranch branch = 1;
         }
+        
         message Config {
             repeated string path = 1;
             DataFormat format = 2;
         }
+
+        message Resources {
+            // Initial system requirements.
+            Sysresources at_init = 1;
+
+            // Maximum system requirements.
+            Sysresources at_most = 2;
+            
+            // Desired start time miliseconds.
+            optional int32 start_time_ms = 3;
+        }
+        
+        // CPU architecture and environment description.
         Architecture architecture = 1;
+        
+        // Serialized filesystem.
         bytes filesystem = 2;
-        map<string, DataFormat> environment_variables = 3;
-        repeated string entrypoint = 4;
+        
+        // Entrypoint command(s) for the container.
+        repeated string entrypoint = 3;
+        
+        // Container resource 
+        optional Resources resources = 4;
+
         Config config = 5;
-        repeated Api.Protocol node_protocol_stack = 6;  // Expected node protocol stack
+        
+        // Expected node protocol stack for internal node logic.
+        repeated Api.Protocol node_protocol_stack = 6;
     }
 
     message Network {
         repeated string tags = 1;
         string prose = 2;
         bytes formal = 3;
+
+        // Protocol stack for external clients.
+        repeated Api.Protocol client_protocol_stack = 4;
     }
 
+    // Natural language description.
     string prose = 1;
+
+    // Container configuration.
     Container container = 2;
+    
+    // API definition.
     Api api = 3;
+    
+    // Network definitions.
     repeated Network network = 4;
 }
 
-
-//  ------------------------
-//  INSTANCE SPECIFICATION.
-//  ------------------------
-// Used for specify node peers, node-host instancies, ledger-nodes instancies
 message Instance {
     message Uri {
         string ip = 1;
@@ -129,38 +196,157 @@ message Instance {
         int32 internal_port = 1;
         repeated Uri uri = 2;
     }
+    // API endpoints exposed by this instance.
     Service.Api api = 1;
-    repeated Uri_Slot uri_slot = 2; // map like [ 8080 -> 192.17.0.4:6899],
+    // Mapping of internal ports to external URIs.
+    repeated Uri_Slot uri_slot = 2;
 }
 
-
-//  -------------------------------
-//  SERVICE INITIAL CONFIGURATION.
-//  -------------------------------
-// The __config__ file is mounted on each service on the filesystem's root.
+// -----------------------
+// SERVICE INSTANCE CONFIGURATION
+// -----------------------
 
 message Configuration {
+    // Environment variables for gateway services.
     map<string, bytes> environment_variables = 1;
+
+    // Service specification slots.
     repeated int32 spec_slot = 2;
+
+    // Optional initial gas deposit for service execution.
+    optional GasAmount initial_gas_amount = 3;
 }
 
 message ConfigurationFile {
+    message NetworkResolution {
+        repeated string tags = 1;
+        repeated Instance peer_instances = 2;
+    }
+    // Gateway instance settings.
     Instance gateway = 1;
+    // Combined configuration options.
     Configuration config = 2;
-    Sysresources initial_sysresources = 3;
+    // Network discovery of peers.
+    repeated NetworkResolution network_resolution = 3;
+    // Initial system resource allocation for services.
+    Sysresources initial_sysresources = 4;
 }
 
-//  ------------------------
-//  SYSTEM RESOURCES.
-//  ------------------------
-message Sysresources {                           //  https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
-    optional uint64 blkio_weight = 1;
-    optional uint64 cpu_period = 2;
-    optional uint64 cpu_quota = 3;  // https://wbhegedus.me/understanding-kubernetes-cpu-limits/
-    optional uint64 mem_limit = 4;
-    optional uint64 disk_space = 5;
+// -----------------------
+// SYSTEM RESOURCES
+// Defines resource limits and weights for container updates.
+// -----------------------
 
-    // optional double disk_failure_tolerance = 10;
-    // optional double process_failure_tolerance = 11;
-    // optional double network_failure_tolerance = 12;
+message Sysresources {
+    // Block I/O weight (relative), 10–1000.
+    optional uint64 blkio_weight = 1;
+    // CFS CPU period in microseconds.
+    optional uint64 cpu_period = 2;
+    // CFS CPU quota in microseconds.
+    optional uint64 cpu_quota = 3;
+    // Memory limit in bytes.
+    optional uint64 mem_limit = 4;
+    // Disk space limit in bytes.
+    optional uint64 disk_space = 5;
+}
+
+// -----------------------
+// GATEWAY MESSAGES
+// -----------------------
+
+message TokenMessage {
+    string token = 1;
+    optional string slot = 2;
+}
+
+message EstimatedCost {
+    GasAmount cost = 1;
+    GasAmount init_maintenance_cost = 2;
+    GasAmount max_maintenance_cost = 3;
+    int32 maintenance_seconds_loop = 4;
+    float variance = 5;
+}
+
+message Refund {
+    GasAmount amount = 1;
+}
+
+message SignRequest {
+    string public_key = 1;
+    string to_sign = 2;
+}
+
+message SignResponse {
+    string signed = 1;
+}
+
+message Payment {
+    string deposit_token = 1;
+    Contract contract_ledger = 2;
+    GasAmount gas_amount = 3;
+}
+
+message Metrics {
+    GasAmount gas_amount = 1;
+}
+
+message ServiceInstance {
+    string token = 1;
+    Instance instance = 2;
+}
+
+message Peer {
+    repeated Contract reputation_proofs = 1;
+    Instance instance = 2;
+}
+
+message Client {
+    string client_id = 1;
+}
+
+message RecursionGuard {
+    string token = 1;
+}
+
+message ModifyServiceSystemResourcesOutput {
+    Sysresources sysreq = 1;
+    GasAmount gas = 2;
+}
+
+message ModifyServiceSystemResourcesInput {
+    Sysresources min_sysreq = 1;
+    Sysresources max_sysreq = 2;
+}
+
+message ModifyGasDepositInput {
+    GasAmount gas_difference = 1;
+    string service_token = 2;
+}
+
+message ModifyGasDepositOutput {
+    bool success = 1;
+    string message = 2;
+}
+
+// -----------------------
+// GATEWAY SERVICE DEFINITION
+// -----------------------
+
+service Gateway {
+    rpc StartService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Configuration | Hash | Client | RecursionGuard | Service -> Instance
+    rpc StopService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Refund
+    rpc ModifyGasDeposit(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyGasDepositInput -> ModifyGasDepositOutput
+
+    rpc GetPeerInfo(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  -> Peer
+    rpc IntroducePeer(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Peer -> 
+    rpc GenerateClient(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  -> Client
+    rpc GenerateDepositToken(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client -> TokenMessage
+    rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Payment -> Empty
+    rpc SignPublicKey(stream buffer.Buffer) returns (stream buffer.Buffer) {} // SignRequest -> SignResponse
+    rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput -> ModifyServiceSystemResourcesOutput
+    rpc Pack(stream buffer.Buffer) returns (stream buffer.Buffer) {} // bytes -> PackOutputServiceId | Service | Metadata | PackOutputError
+    rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash & Service -> EstimatedCost
+    rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash -> Service
+    rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
+    rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage | bytes -> bytes
 }
