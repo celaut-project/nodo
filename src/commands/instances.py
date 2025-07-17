@@ -1,12 +1,12 @@
 import sqlite3
 import os
 from src.manager.metrics import __get_metrics_external
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
 from src.utils.utils import from_gas_amount
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 METADATA = env_manager.get_env("METADATA_REGISTRY")
 

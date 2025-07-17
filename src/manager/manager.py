@@ -15,17 +15,17 @@ from src.database.sql_connection import SQLConnection, is_peer_available
 
 from src.utils import logger as log
 from src.utils import utils
-from src.utils.env import DOCKER_CLIENT, EnvManager
+from src.utils.config import DOCKER_CLIENT, ConfigManager
 from src.utils.utils import (
     from_gas_amount,
     to_gas_amount,
     generate_uris_by_peer_id
 )
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from src.virtualizers.docker.firewall import remove_rule
 from src.virtualizers.docker.stop_container import stop_container
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 ALLOW_GAS_DEBT = env_manager.get_env("ALLOW_GAS_DEBT")
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
@@ -65,7 +65,6 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
         return None
     
     parsed_instance = json.loads(MessageToJson(peer))
-    log.LOGGER('Inserting instance on db: ' + str(parsed_instance))
 
     peer_id = str(uuid4())
     protocol_stack: bytes = peer.instance.api.slot[0].SerializeToString()

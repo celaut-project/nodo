@@ -13,9 +13,9 @@ from src.database.access_functions.peers import get_peer_ids, get_peer_direction
 from src.manager.resources import mem_manager
 from src.utils import logger as log
 from src.utils.verify import get_service_hex_main_hash
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")

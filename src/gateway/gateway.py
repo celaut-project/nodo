@@ -15,9 +15,9 @@ from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import logger as log
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 MODIFY_RESOURCES_COST = env_manager.get_env("MODIFY_RESOURCES_COST")
 
 

@@ -1,10 +1,10 @@
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from src.database.sql_connection import SQLConnection
 from src.utils.logger import LOGGER
 from src.reputation_system.contracts.ergo.transaction import submit_reputation_proof
 
 sc = SQLConnection()
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 def update_peer_reputation(peer_id: str, amount: int) -> bool:
     """_summary_

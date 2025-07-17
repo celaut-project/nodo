@@ -5,12 +5,12 @@ import os
 from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc, gateway_bee
 from bee_rpc.client import client_grpc
 
-from src.utils.env import SHA3_256_ID, EnvManager
+from src.utils.config import SHA3_256_ID, ConfigManager
 from src.utils.utils import to_gas_amount
 from src.manager.manager import get_dev_clients
 from src.commands.__by_tag import get_id
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")

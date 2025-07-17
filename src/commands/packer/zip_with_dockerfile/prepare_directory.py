@@ -5,9 +5,9 @@ import uuid
 import shutil
 import json
 
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 CACHE = env_manager.get_env("CACHE")
 

@@ -2,10 +2,10 @@ import os.path
 from typing import Optional
 
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
-from src.utils.env import SHA3_256_ID, EnvManager
+from src.utils.config import SHA3_256_ID, ConfigManager
 from src.utils.utils import to_gas_amount
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 REGISTRY = env_manager.get_env("REGISTRY")

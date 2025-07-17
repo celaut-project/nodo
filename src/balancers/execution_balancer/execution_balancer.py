@@ -13,9 +13,9 @@ from src.utils import logger as log
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.utils import service_extended, peers_id_iterator, \
     generate_uris_by_peer_id
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 SEND_ONLY_HASHES_ASKING_COST = env_manager.get_env("SEND_ONLY_HASHES_ASKING_COST")
 EXTERNAL_COST_TIMEOUT = env_manager.get_env("EXTERNAL_COST_TIMEOUT")

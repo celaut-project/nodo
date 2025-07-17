@@ -12,7 +12,7 @@ from src.virtualizers.docker.set_container_config import set_config
 from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.manager import default_initial_cost, add_container
 from src.utils import utils, logger as log
-from src.utils.env import DEFAULT_SYSTEM_RESOURCES
+from src.utils.config import DEFAULT_SYSTEM_RESOURCES
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
 from src.virtualizers.docker.firewall import allow_connection_to_instance, block_all, allow_connection, Protocol

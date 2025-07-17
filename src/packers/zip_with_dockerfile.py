@@ -8,12 +8,12 @@ import src.manager.resources as resources
 from bee_rpc import client as grpcbb
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
-from src.utils.env import EnvManager, SHA3_256_ID, DOCKER_COMMAND, PACKER_SUPPORTED_ARCHITECTURES
+from src.utils.config import ConfigManager, SHA3_256_ID, DOCKER_COMMAND, PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 CACHE = env_manager.get_env("CACHE")
 PACKER_MEMORY_SIZE_FACTOR = env_manager.get_env("PACKER_MEMORY_SIZE_FACTOR")

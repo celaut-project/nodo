@@ -18,11 +18,11 @@ from src.reputation_system.interface import update_container_reputation, submit_
 from src.utils import logger as log
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
-from src.utils.env import DOCKER_CLIENT, SHA3_256_ID, EnvManager
+from src.utils.config import DOCKER_CLIENT, SHA3_256_ID, ConfigManager
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 SHORT_INTERVAL_COUNT = env_manager.get_env("SHORT_INTERVAL_COUNT")
 SUBMIT_REPUTATION_AT_INIT = env_manager.get_env("SUBMIT_REPUTATION_AT_INIT")

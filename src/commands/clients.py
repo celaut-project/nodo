@@ -1,8 +1,8 @@
 import sqlite3
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from src.utils.logger import ssformat
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
 
 

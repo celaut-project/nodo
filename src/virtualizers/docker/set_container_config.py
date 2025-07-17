@@ -5,11 +5,11 @@ from typing import List, Optional
 from protos import celaut_pb2 as celaut
 from src.gateway.utils import generate_node_peer_info
 from src.utils import logger as log
-from src.utils.env import DOCKER_COMMAND, DOCKER_NETWORK, EnvManager
+from src.utils.config import DOCKER_COMMAND, DOCKER_NETWORK, ConfigManager
 
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 CACHE = env_manager.get_env("CACHE")
 

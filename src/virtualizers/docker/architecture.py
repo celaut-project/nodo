@@ -1,9 +1,9 @@
 from typing import Optional, Set
 from protos import celaut_pb2
-from src.utils.env import SUPPORTED_ARCHITECTURES, EnvManager
+from src.utils.config import SUPPORTED_ARCHITECTURES, ConfigManager
 
 # Load environment configuration
-env_manager = EnvManager()
+env_manager = ConfigManager()
 TRUST_METADATA_ARCHITECTURE = env_manager.get_env("TRUST_METADATA_ARCHITECTURE")
 
 # Build a mapping from architecture aliases to their canonical form (first element of each list)

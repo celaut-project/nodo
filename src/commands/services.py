@@ -1,10 +1,10 @@
 import os
 from src.commands.__by_tag import get_id
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from bee_rpc.utils import getsize
 from protos.celaut_pb2 import Metadata
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA = env_manager.get_env("METADATA_REGISTRY")
 

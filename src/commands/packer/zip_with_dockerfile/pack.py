@@ -8,9 +8,9 @@ from protos import celaut_pb2, pack_pb2, gateway_bee, celaut_pb2_grpc
 from src.commands.packer.zip_with_dockerfile.prepare_directory import prepare_directory
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import generate_service_zip
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")

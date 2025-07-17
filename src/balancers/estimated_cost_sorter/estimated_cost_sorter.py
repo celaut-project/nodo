@@ -5,13 +5,13 @@ from protos import celaut_pb2
 from src.reputation_system.interface import compute_reputation
 from src.utils.cost_functions.general_cost_functions import normalized_maintain_cost as nmc
 from src.utils.cost_functions.variance_cost_normalization import variance_cost_normalization as vcnorm
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from src.utils.utils import from_gas_amount
 from src.utils.logger import LOGGER as logger
 from src.database.sql_connection import SQLConnection
 from src.payment_system.contracts.ergo.interface import LEDGER as ERGO_LEDGER, CONTRACT_HASH as ERGO_CONTRACT_HASH
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 SOCIALIZATION_FACTOR = float(env_manager.get_env("SOCIALIZATION_FACTOR"))
 INIT_COST_CONFIGURATION_FACTOR = env_manager.get_env("INIT_COST_CONFIGURATION_FACTOR")
 MAINTENANCE_COST_CONFIGURATION_FACTOR = env_manager.get_env("MAINTENANCE_COST_CONFIGURATION_FACTOR")

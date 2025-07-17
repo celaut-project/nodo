@@ -6,12 +6,12 @@ from bee_rpc import client as bee, buffer_pb2
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable
 from src.gateway.launcher.launch_service import launch_service
 from src.utils import logger as log
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from src.utils.utils import get_only_the_ip_from_context, read_metadata_from_disk, read_service_from_disk
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from src.utils.verify import get_service_hex_main_hash
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 REGISTRY = env_manager.get_env("REGISTRY")
 

@@ -2,10 +2,10 @@ import socket, os, json
 from typing import List
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from src.utils.utils import read_service_from_disk
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 sc = SQLConnection()
 
 def resolve_domain(domain: str) -> List[celaut.Instance.Uri]:

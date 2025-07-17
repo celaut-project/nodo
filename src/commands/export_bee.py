@@ -2,11 +2,11 @@ import os
 from typing import Generator, Any
 from bee_rpc.client import write_to_file, Dir
 from src.commands.__by_tag import get_id
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 from protos import celaut_pb2
 
 # Initialize the environment manager and get the REGISTRY environment variable
-env_manager = EnvManager()
+env_manager = ConfigManager()
 REGISTRY = env_manager.get_env("REGISTRY")
 METADATA = env_manager.get_env("METADATA_REGISTRY")
 

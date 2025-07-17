@@ -1,6 +1,6 @@
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 def variance_cost_normalization(cost: int, variance: float) -> int:
     """
     Applies a normalization factor to a given cost based on its variance and a global environment setting.

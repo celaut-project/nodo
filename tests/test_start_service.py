@@ -7,9 +7,9 @@ from src.utils.logger import LOGGER
 
 from tests.main import *
 from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc, gateway_bee
-from src.utils.env import EnvManager
+from src.utils.config import ConfigManager
 
-env_manager = EnvManager()
+env_manager = ConfigManager()
 
 METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
 REGISTRY = env_manager.get_env("REGISTRY")
