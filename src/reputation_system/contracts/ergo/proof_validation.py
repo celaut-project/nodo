@@ -16,6 +16,16 @@ from src.utils.env import EnvManager
 
 from typing import Optional
 
+from jpype import *
+import java.lang
+
+from java.lang import Boolean, Long
+from java.math import BigInteger
+
+from org.ergoplatform.sdk import *
+from org.ergoplatform.appkit import *
+from org.ergoplatform.appkit.impl import *
+
 def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
     ergo_node = EnvManager().get_env("ERGO_NODE_URL")
     if not ergo_node:
