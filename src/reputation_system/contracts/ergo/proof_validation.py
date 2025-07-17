@@ -27,7 +27,7 @@ from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
 
 def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
-    ergo_node = ConfigManager().get_env("ERGO_NODE_URL")
+    ergo_node = ConfigManager().get("ERGO_NODE_URL")
     if not ergo_node:
         logger("No ergo node available.")
         return None
@@ -136,7 +136,7 @@ def sign_message(public_key, message) -> str | None:
         str | None: The signed message if the public key matches the wallet's public key, otherwise None.
     """
     # Retrieve the mnemonic phrase from environment variables
-    mnemonic_phrase = ConfigManager().get_env("ERGO_WALLET_MNEMONIC")
+    mnemonic_phrase = ConfigManager().get("ERGO_WALLET_MNEMONIC")
     
     # Get the public key associated with the mnemonic phrase
     local_address: Address = get_public_key(mnemonic_phrase=mnemonic_phrase)
@@ -154,8 +154,8 @@ def sign_message(public_key, message) -> str | None:
 
 def validate_reputation_proof_ownership() -> bool:
     # Retrieve the mnemonic phrase from environment variables
-    mnemonic_phrase = ConfigManager().get_env("ERGO_WALLET_MNEMONIC")
-    proof_id = ConfigManager().get_env("REPUTATION_PROOF_ID")
+    mnemonic_phrase = ConfigManager().get("ERGO_WALLET_MNEMONIC")
+    proof_id = ConfigManager().get("REPUTATION_PROOF_ID")
     
     # Get the public key associated with the mnemonic phrase
     address = get_public_key(mnemonic_phrase=mnemonic_phrase)

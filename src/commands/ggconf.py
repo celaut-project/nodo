@@ -21,9 +21,9 @@ from src.commands.packer.zip_with_dockerfile.generate_service_zip import (
 
 env_manager = ConfigManager()
 
-METADATA = env_manager.get_env("METADATA_REGISTRY")
-SERVICES = env_manager.get_env("REGISTRY")
-BLOCKS = env_manager.get_env("BLOCKDIR")
+METADATA = env_manager.get("METADATA_REGISTRY")
+SERVICES = env_manager.get("REGISTRY")
+BLOCKS = env_manager.get("BLOCKDIR")
 
 sc = SQLConnection()
 

@@ -17,8 +17,8 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-REGISTRY = env_manager.get_env("REGISTRY")
-METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
+METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 
 def read_file(filename) -> bytes:
     def generator(file):

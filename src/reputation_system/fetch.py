@@ -8,7 +8,7 @@ from src.utils.config import ConfigManager
 env_manager = ConfigManager()
 
 def local_proofs() -> Generator[celaut.Contract, None, None]:
-    proof_id = env_manager.get_env('REPUTATION_PROOF_ID')
+    proof_id = env_manager.get('REPUTATION_PROOF_ID')
     if proof_id:
         yield celaut.Contract(
             template=celaut.Contract.ScriptTemplate(

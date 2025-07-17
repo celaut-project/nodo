@@ -30,11 +30,11 @@ sigmastate = JPackage('sigmastate')
 
 # Constants
 env_manager = ConfigManager()
-ERGO_NODE_URL = lambda: env_manager.get_env("ERGO_NODE_URL")
-SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF = env_manager.get_env('SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF')
+ERGO_NODE_URL = lambda: env_manager.get("ERGO_NODE_URL")
+SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF = env_manager.get('SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF')
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
-DEFAULT_TOKEN_AMOUNT = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
+DEFAULT_TOKEN_AMOUNT = env_manager.get('TOTAL_REPUTATION_TOKEN_AMOUNT')
 
 # Enum definitions
 class ProofObjectType(Enum):
@@ -116,7 +116,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         raise Exception("No input box available.")
 
     external_token_value = int(sum([obj[1] for obj in objects if obj[0]])) # type: ignore  # In case of self reputation, the value is not divided.
-    _expected_total_reputation = env_manager.get_env('TOTAL_REPUTATION_TOKEN_AMOUNT')
+    _expected_total_reputation = env_manager.get('TOTAL_REPUTATION_TOKEN_AMOUNT')
     
     if not external_token_value:
         # If all the objects have a percentage of 0, then the total reputation value must be divided equally.  This is because division by zero was avoided on the sql function.
@@ -253,17 +253,17 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     # 5. Submit the transaction and return the ID
     tx_id = ergo.txId(signed_tx)
 
-    if env_manager.get_env('REPUTATION_PROOF_ID') != proof_id:
+    if env_manager.get('REPUTATION_PROOF_ID') != proof_id:
         LOGGER(f"Store reputation proof id {proof_id} on .env file.")
         env_manager.write_env("REPUTATION_PROOF_ID", proof_id)
-        if env_manager.get_env('REPUTATION_PROOF_ID') != proof_id:
-            LOGGER(f"Proof ID was not stored correctly: {env_manager.get_env('REPUTATION_PROOF_ID')} != {proof_id}")
+        if env_manager.get('REPUTATION_PROOF_ID') != proof_id:
+            LOGGER(f"Proof ID was not stored correctly: {env_manager.get('REPUTATION_PROOF_ID')} != {proof_id}")
     return tx_id
 
 def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
     try:
-        proof_id = env_manager.get_env('REPUTATION_PROOF_ID')
-        mnemonic=env_manager.get_env('ERGO_WALLET_MNEMONIC')
+        proof_id = env_manager.get('REPUTATION_PROOF_ID')
+        mnemonic=env_manager.get('ERGO_WALLET_MNEMONIC')
 
         if proof_id:
             LOGGER(f"Not supported update reputation proofs (https://github.com/celaut-project/nodo/issues/80)")

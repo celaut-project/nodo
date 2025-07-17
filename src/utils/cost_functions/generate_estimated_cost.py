@@ -12,7 +12,7 @@ from src.utils.utils import to_gas_amount
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
-MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
+MANAGER_ITERATION_TIME = env_manager.get("MANAGER_ITERATION_TIME")
 
 def generate_estimated_cost(
         metadata: celaut.Metadata,

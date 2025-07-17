@@ -4,7 +4,7 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
+DATABASE_FILE = env_manager.get("DATABASE_FILE")
 
 def fetch_query(query: str, params: tuple = ()):
     # -> Generator[

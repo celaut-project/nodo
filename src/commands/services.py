@@ -5,8 +5,8 @@ from bee_rpc.utils import getsize
 from protos.celaut_pb2 import Metadata
 
 env_manager = ConfigManager()
-REGISTRY = env_manager.get_env("REGISTRY")
-METADATA = env_manager.get_env("METADATA_REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
+METADATA = env_manager.get("METADATA_REGISTRY")
 
 def list_services():
     # List available services in the specified registry path

@@ -7,9 +7,9 @@ from src.utils.utils import to_gas_amount
 
 env_manager = ConfigManager()
 
-METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
-REGISTRY = env_manager.get_env("REGISTRY")
-GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
+METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
+GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 
 # Read the .services file and populate the constants dynamically
 with open('tests/.services', 'r') as file:

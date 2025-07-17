@@ -7,8 +7,8 @@ from src.utils.logger import ssformat
 from src.utils.utils import from_gas_amount
 
 env_manager = ConfigManager()
-DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
-METADATA = env_manager.get_env("METADATA_REGISTRY")
+DATABASE_FILE = env_manager.get("DATABASE_FILE")
+METADATA = env_manager.get("METADATA_REGISTRY")
 
 def list_instances(groupable: bool = False, search: str = ""):
     conn = sqlite3.connect(DATABASE_FILE)

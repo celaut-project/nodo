@@ -30,7 +30,7 @@ def test_service_tunnel():
 
     # Create a gRPC channel and stub for the Gateway service
     g_stub = celaut_pb2_grpc.GatewayStub(
-        grpc.insecure_channel(env_manager.get_env("GATEWAY"))
+        grpc.insecure_channel(env_manager.get("GATEWAY"))
     )
 
     # Simulate the ServiceTunnel call

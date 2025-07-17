@@ -24,12 +24,12 @@ from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
 
 env_manager = ConfigManager()
 
-CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = env_manager.get_env("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME")
-TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get_env("TOTAL_REPUTATION_TOKEN_AMOUNT"))
-CLIENT_EXPIRATION_TIME = env_manager.get_env("CLIENT_EXPIRATION_TIME")
-STORAGE = env_manager.get_env("STORAGE")
-DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
-DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
+CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = env_manager.get("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME")
+TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get("TOTAL_REPUTATION_TOKEN_AMOUNT"))
+CLIENT_EXPIRATION_TIME = env_manager.get("CLIENT_EXPIRATION_TIME")
+STORAGE = env_manager.get("STORAGE")
+DATABASE_FILE = env_manager.get("DATABASE_FILE")
+DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INTIAL_GAS_AMOUNT")
 
 
 class SQLConnection(metaclass=Singleton):
@@ -650,7 +650,7 @@ class SQLConnection(metaclass=Singleton):
                         instance_json = MessageToJson(data['instance'])
 
                         # Calculate the percentage of the total reputation token amount
-                        if reputation_index - last_index_on_ledger >= env_manager.get_env("LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
+                        if reputation_index - last_index_on_ledger >= env_manager.get("LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
                             logger.LOGGER(f'Peer {peer_id} with proof {reputation_proof_id} meets the submission threshold.')
                             needs_submit = True
                             percentage_amount = ((reputation_score / total_amount) * token_amount) if total_amount else 0

@@ -24,15 +24,15 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-SHORT_INTERVAL_COUNT = env_manager.get_env("SHORT_INTERVAL_COUNT")
-SUBMIT_REPUTATION_AT_INIT = env_manager.get_env("SUBMIT_REPUTATION_AT_INIT")
-MIN_SLOTS_OPEN_PER_PEER = int(env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER"))
-MIN_DEPOSIT_PEER = int(env_manager.get_env("MIN_DEPOSIT_PEER"))
-DEV_CLIENT_GAS_AMOUNT = int(env_manager.get_env("DEV_CLIENT_GAS_AMOUNT"))
-TOTAL_REFILLED_DEPOSIT = int(env_manager.get_env("TOTAL_REFILLED_DEPOSIT"))
-MANAGER_ITERATION_TIME = int(env_manager.get_env("MANAGER_ITERATION_TIME"))
-REGISTRY = env_manager.get_env("REGISTRY")
-METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
+SHORT_INTERVAL_COUNT = env_manager.get("SHORT_INTERVAL_COUNT")
+SUBMIT_REPUTATION_AT_INIT = env_manager.get("SUBMIT_REPUTATION_AT_INIT")
+MIN_SLOTS_OPEN_PER_PEER = int(env_manager.get("MIN_SLOTS_OPEN_PER_PEER"))
+MIN_DEPOSIT_PEER = int(env_manager.get("MIN_DEPOSIT_PEER"))
+DEV_CLIENT_GAS_AMOUNT = int(env_manager.get("DEV_CLIENT_GAS_AMOUNT"))
+TOTAL_REFILLED_DEPOSIT = int(env_manager.get("TOTAL_REFILLED_DEPOSIT"))
+MANAGER_ITERATION_TIME = int(env_manager.get("MANAGER_ITERATION_TIME"))
+REGISTRY = env_manager.get("REGISTRY")
+METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 
 DEBUG_MODE = False
 

@@ -17,8 +17,8 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-SEND_ONLY_HASHES_ASKING_COST = env_manager.get_env("SEND_ONLY_HASHES_ASKING_COST")
-EXTERNAL_COST_TIMEOUT = env_manager.get_env("EXTERNAL_COST_TIMEOUT")
+SEND_ONLY_HASHES_ASKING_COST = env_manager.get("SEND_ONLY_HASHES_ASKING_COST")
+EXTERNAL_COST_TIMEOUT = env_manager.get("EXTERNAL_COST_TIMEOUT")
 
 def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
     

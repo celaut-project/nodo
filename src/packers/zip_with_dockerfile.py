@@ -15,10 +15,10 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-CACHE = env_manager.get_env("CACHE")
-PACKER_MEMORY_SIZE_FACTOR = env_manager.get_env("PACKER_MEMORY_SIZE_FACTOR")
-SAVE_ALL = env_manager.get_env("SAVE_ALL")
-MIN_BUFFER_BLOCK_SIZE = env_manager.get_env("MIN_BUFFER_BLOCK_SIZE")
+CACHE = env_manager.get("CACHE")
+PACKER_MEMORY_SIZE_FACTOR = env_manager.get("PACKER_MEMORY_SIZE_FACTOR")
+SAVE_ALL = env_manager.get("SAVE_ALL")
+MIN_BUFFER_BLOCK_SIZE = env_manager.get("MIN_BUFFER_BLOCK_SIZE")
 
 
 class ZipContainerPacker:

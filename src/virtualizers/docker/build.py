@@ -20,11 +20,11 @@ from src.virtualizers.docker.architecture import UnsupportedArchitectureExceptio
 
 env_manager = ConfigManager()
 
-BUILD_CONTAINER_MEMORY_SIZE_FACTOR = env_manager.get_env("BUILD_CONTAINER_MEMORY_SIZE_FACTOR")
-WAIT_FOR_CONTAINER = int(env_manager.get_env("WAIT_FOR_CONTAINER"))
-BLOCKDIR = env_manager.get_env("BLOCKDIR")
-CACHE = env_manager.get_env("CACHE")
-REGISTRY = env_manager.get_env("REGISTRY")
+BUILD_CONTAINER_MEMORY_SIZE_FACTOR = env_manager.get("BUILD_CONTAINER_MEMORY_SIZE_FACTOR")
+WAIT_FOR_CONTAINER = int(env_manager.get("WAIT_FOR_CONTAINER"))
+BLOCKDIR = env_manager.get("BLOCKDIR")
+CACHE = env_manager.get("CACHE")
+REGISTRY = env_manager.get("REGISTRY")
 
 
 class WaitBuildException(Exception):

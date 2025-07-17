@@ -11,7 +11,7 @@ env_manager = ConfigManager()
 
 
 def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
-    ergo_node_url = env_manager.get_env("ERGO_NODE_URL") if not url else url
+    ergo_node_url = env_manager.get("ERGO_NODE_URL") if not url else url
     try:
         info_url = f"{ergo_node_url}/info"
         response = requests.get(info_url)
@@ -19,7 +19,7 @@ def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
 
         data = response.json()
 
-        if data.get("network") == "mainnet" and data.get("genesisBlockId") == env_manager.get_env("ERGO_GENESIS_BLOCK_ID"):
+        if data.get("network") == "mainnet" and data.get("genesisBlockId") == env_manager.get("ERGO_GENESIS_BLOCK_ID"):
             return {
                 "isMining": data.get("isMining", False),
                 "parameters": data.get("parameters", {}),
@@ -34,7 +34,7 @@ def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
         return None
 
 def get_refresh_peers() -> Dict[str, Dict]:
-    http_peers_file = env_manager.get_env("ERGO_HTTP_PEERS")
+    http_peers_file = env_manager.get("ERGO_HTTP_PEERS")
     if not os.path.exists(http_peers_file):
         with open(http_peers_file, 'w') as f:
             f.write("{}")
@@ -42,7 +42,7 @@ def get_refresh_peers() -> Dict[str, Dict]:
     with open(http_peers_file, 'r') as f:
         peers = json.load(f)
         
-    current_node = env_manager.get_env("ERGO_NODE_URL")
+    current_node = env_manager.get("ERGO_NODE_URL")
     if current_node not in peers:
         peers[current_node] = {}
     
@@ -96,7 +96,7 @@ def check_ergo_node_availability():
     
     logger("Checking Ergo node availability...")
     
-    current_ergo_node = env_manager.get_env("ERGO_NODE_URL")
+    current_ergo_node = env_manager.get("ERGO_NODE_URL")
     if __available_ergo_node(current_ergo_node):
         logger(f"Ergo node {current_ergo_node} is available.")
         return
@@ -104,7 +104,7 @@ def check_ergo_node_availability():
     logger(f"Ergo node {current_ergo_node} is not available.")
     availables = get_refresh_peers()  # New refreshed available peers.
     
-    if not availables and current_ergo_node == env_manager.get_env("ERGO_NODE_URL"): 
+    if not availables and current_ergo_node == env_manager.get("ERGO_NODE_URL"): 
         logger("No available Ergo nodes found.")
         env_manager.write_env("ERGO_NODE_URL", "")
         return

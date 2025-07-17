@@ -37,7 +37,7 @@ def resolve_ergo_network() -> List[celaut.Instance.Uri]:
 
     # TODO Needs to get the ip and port from the data, actually is the restApiUrl.
     try:
-        http_peers_file = env_manager.get_env("ERGO_HTTP_PEERS")
+        http_peers_file = env_manager.get("ERGO_HTTP_PEERS")
         if os.path.exists(http_peers_file):         
             with open(http_peers_file, 'r') as f:
                 ergo_peers = json.load(f)

@@ -26,10 +26,10 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-COMMUNICATION_ATTEMPTS = int(env_manager.get_env("COMMUNICATION_ATTEMPTS"))
-COMMUNICATION_ATTEMPTS_DELAY = int(env_manager.get_env("COMMUNICATION_ATTEMPTS_DELAY"))
-MIN_DEPOSIT_PEER = int(env_manager.get_env("MIN_DEPOSIT_PEER"))
-PAYMENT_MANAGER_ITERATION_TIME = int(env_manager.get_env("PAYMENT_MANAGER_ITERATION_TIME"))
+COMMUNICATION_ATTEMPTS = int(env_manager.get("COMMUNICATION_ATTEMPTS"))
+COMMUNICATION_ATTEMPTS_DELAY = int(env_manager.get("COMMUNICATION_ATTEMPTS_DELAY"))
+MIN_DEPOSIT_PEER = int(env_manager.get("MIN_DEPOSIT_PEER"))
+PAYMENT_MANAGER_ITERATION_TIME = int(env_manager.get("PAYMENT_MANAGER_ITERATION_TIME"))
 
 sc = SQLConnection()
 deposit_generation_locked = False

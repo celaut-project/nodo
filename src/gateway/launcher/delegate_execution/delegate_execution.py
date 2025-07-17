@@ -15,7 +15,7 @@ from src.utils import utils, logger as log
 
 
 env_manager = ConfigManager()
-START_SERVICE_ON_PEER_TIMEOUT = int(env_manager.get_env("START_SERVICE_ON_PEER_TIMEOUT"))
+START_SERVICE_ON_PEER_TIMEOUT = int(env_manager.get("START_SERVICE_ON_PEER_TIMEOUT"))
 
 def delegate_execution(
                         service_id: str,

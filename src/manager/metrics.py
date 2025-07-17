@@ -18,7 +18,7 @@ env_manager = ConfigManager()
 
 sc = SQLConnection()
 
-MANAGER_ITERATION_TIME = env_manager.get_env("MANAGER_ITERATION_TIME")
+MANAGER_ITERATION_TIME = env_manager.get("MANAGER_ITERATION_TIME")
 
 def __get_metrics_client(client_id: str) -> celaut_pb2.Metrics:
     """

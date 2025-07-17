@@ -9,14 +9,14 @@ from src.utils.network import get_local_ip
 
 env_manager = ConfigManager()
 
-GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
-MEMORY_LOGS = env_manager.get_env("MEMORY_LOGS")
-REGISTRY = env_manager.get_env("REGISTRY")
-CACHE = env_manager.get_env("CACHE")
-BLOCKDIR = env_manager.get_env("BLOCKDIR")
-METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
-DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
-MAIN_DIR = env_manager.get_env("MAIN_DIR")
+GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
+MEMORY_LOGS = env_manager.get("MEMORY_LOGS")
+REGISTRY = env_manager.get("REGISTRY")
+CACHE = env_manager.get("CACHE")
+BLOCKDIR = env_manager.get("BLOCKDIR")
+METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+DATABASE_FILE = env_manager.get("DATABASE_FILE")
+MAIN_DIR = env_manager.get("MAIN_DIR")
 
 def is_nodo_service_running():
     try:
@@ -189,7 +189,7 @@ if __name__ == '__main__':
 
                 print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}", flush=True)
 
-                reputation_proof_id = env_manager.get_env('REPUTATION_PROOF_ID')
+                reputation_proof_id = env_manager.get('REPUTATION_PROOF_ID')
                 
                 try:
                     payment_info = print_payment_info()

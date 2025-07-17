@@ -7,8 +7,8 @@ from protos import celaut_pb2
 
 # Initialize the environment manager and get the REGISTRY environment variable
 env_manager = ConfigManager()
-REGISTRY = env_manager.get_env("REGISTRY")
-METADATA = env_manager.get_env("METADATA_REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
+METADATA = env_manager.get("METADATA_REGISTRY")
 
 def __generator(service: str) -> Generator[Any, None, None]:
     try:

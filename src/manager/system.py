@@ -11,19 +11,19 @@ env_manager = ConfigManager()
 sc = SQLConnection()
 
 # Database Configuration
-DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
+DATABASE_FILE = env_manager.get("DATABASE_FILE")
 
 # API Configuration
-ENERGY_API_URL = env_manager.get_env("ENERGY_API_URL")
-ENERGY_API_KEY = env_manager.get_env("ENERGY_API_KEY")
+ENERGY_API_URL = env_manager.get("ENERGY_API_URL")
+ENERGY_API_KEY = env_manager.get("ENERGY_API_KEY")
 
 # Monitoring Configuration
-DEFAULT_MONITOR_INTERVAL = int(env_manager.get_env("MONITOR_INTERVAL"))
-DEFAULT_POWER_RATE = float(env_manager.get_env("DEFAULT_POWER_RATE"))
+DEFAULT_MONITOR_INTERVAL = int(env_manager.get("MONITOR_INTERVAL"))
+DEFAULT_POWER_RATE = float(env_manager.get("DEFAULT_POWER_RATE"))
 
 # Hardware Limits
-MAX_POWER_CONSUMPTION = float(env_manager.get_env("MAX_POWER_CONSUMPTION"))
-MIN_MEMORY_LIMIT = int(env_manager.get_env("MIN_MEMORY_LIMIT"))
+MAX_POWER_CONSUMPTION = float(env_manager.get("MAX_POWER_CONSUMPTION"))
+MIN_MEMORY_LIMIT = int(env_manager.get("MIN_MEMORY_LIMIT"))
 
 
 class EnergyCostMonitor:

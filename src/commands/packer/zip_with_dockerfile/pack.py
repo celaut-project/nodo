@@ -12,9 +12,9 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
-METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
-REGISTRY = env_manager.get_env("REGISTRY")
+GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
+METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
 
 def __spinner(event):
     """Spinner function to show progress while the main task runs."""
@@ -119,7 +119,7 @@ def __on_peer(peer: str, service_zip_dir: str) -> str:
         else:
             print(f"Service id validated correctly. \n (validated result: {validate_id.hexdigest()}) \n the reason could be https://github.com/bee-rpc-protocol/bee-rpc/issues/7")
             
-        min_block_size = env_manager.get_env("MIN_BUFFER_BLOCK_SIZE")
+        min_block_size = env_manager.get("MIN_BUFFER_BLOCK_SIZE")
         if min_block_size < 10 **6:
             print(f"\n\n ALERT!! It has been detected that a buffer size that is too small (actual is {min_block_size}) may cause errors when generating the compressed version of the service, even without affecting its identifier and with correct validation of it. \n https://github.com/bee-rpc-protocol/bee-rpc/issues/7#issuecomment-2814172903")
             

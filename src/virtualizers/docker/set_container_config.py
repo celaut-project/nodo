@@ -11,7 +11,7 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-CACHE = env_manager.get_env("CACHE")
+CACHE = env_manager.get("CACHE")
 
 def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysresources,  network_resolution: List[celaut.ConfigurationFile.NetworkResolution]=[]) -> celaut.ConfigurationFile:
 

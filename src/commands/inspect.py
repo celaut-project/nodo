@@ -6,8 +6,8 @@ from src.utils.utils import read_metadata_from_disk, read_service_from_disk
 
 env_manager = ConfigManager()
 
-METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
-REGISTRY = env_manager.get_env("REGISTRY")
+METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
 
 def format_size(bytes):
     """Convert bytes to a human-readable format (B, KB, MB, GB, TB)."""

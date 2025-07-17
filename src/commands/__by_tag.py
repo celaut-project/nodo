@@ -3,7 +3,7 @@ from protos.celaut_pb2 import Metadata
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
-METADATA = env_manager.get_env("METADATA_REGISTRY")
+METADATA = env_manager.get("METADATA_REGISTRY")
 
 def get_id(param: str) -> str:
     """

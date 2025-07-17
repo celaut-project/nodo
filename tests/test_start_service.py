@@ -11,8 +11,8 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
-REGISTRY = env_manager.get_env("REGISTRY")
+METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
 
 def test_start_service():
 

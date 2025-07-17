@@ -6,7 +6,7 @@ from src.payment_system.contracts.simulator import interface as simulated
 from src.payment_system.contracts.ergo import interface as ergo
 from src.utils.config import ConfigManager
 
-SIMULATED = ConfigManager().get_env("SIMULATE_PAYMENTS")
+SIMULATED = ConfigManager().get("SIMULATE_PAYMENTS")
 
 contract_hash = str
 script = bytes

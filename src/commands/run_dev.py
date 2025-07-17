@@ -10,7 +10,7 @@ from src.utils.config import DEFAULT_SYSTEM_RESOURCES
 # Crear cliente Docker
 client = docker_lib.from_env()
 env_manager = ConfigManager()
-DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
+DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INTIAL_GAS_AMOUNT")
 
 
 def __cleanup_existing_container(container_name: str) -> None:
