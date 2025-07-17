@@ -6,8 +6,8 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-REGISTRY = env_manager.get_env("REGISTRY")
-BLOCKDIR = env_manager.get_env("BLOCKDIR")
+REGISTRY = env_manager.get("REGISTRY")
+BLOCKDIR = env_manager.get("BLOCKDIR")
 
 
 # It will delete all unused cache and blocks.

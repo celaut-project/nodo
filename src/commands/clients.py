@@ -3,7 +3,7 @@ from src.utils.config import ConfigManager
 from src.utils.logger import ssformat
 
 env_manager = ConfigManager()
-DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
+DATABASE_FILE = env_manager.get("DATABASE_FILE")
 
 
 def list_clients():

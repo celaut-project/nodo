@@ -12,8 +12,8 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
-NGROK_TUNNELS_KEY = env_manager.get_env("NGROK_TUNNELS_KEY")
+GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
+NGROK_TUNNELS_KEY = env_manager.get("NGROK_TUNNELS_KEY")
 NUM_GATEWAY_TUNNELS = 1
 
 """

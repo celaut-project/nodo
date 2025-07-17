@@ -7,7 +7,7 @@ from protos import celaut_pb2
 
 # Initialize the environment manager and get the REGISTRY environment variable
 env_manager = ConfigManager()
-REGISTRY = env_manager.get_env("REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
 
 def export_raw(service: str, path: str):
     """

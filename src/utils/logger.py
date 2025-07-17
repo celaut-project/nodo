@@ -4,7 +4,7 @@ from decimal import Decimal, getcontext, InvalidOperation
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
-STORAGE, USE_PRINT = env_manager.get_env("STORAGE"), env_manager.get_env("USE_PRINT")
+STORAGE, USE_PRINT = env_manager.get("STORAGE"), env_manager.get("USE_PRINT")
 
 if not os.path.exists(STORAGE):
     os.makedirs(STORAGE)

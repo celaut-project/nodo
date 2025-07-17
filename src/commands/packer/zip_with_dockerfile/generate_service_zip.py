@@ -6,9 +6,9 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-METADATA = env_manager.get_env("METADATA_REGISTRY")
-SERVICES = env_manager.get_env("REGISTRY")
-BLOCKS = env_manager.get_env("BLOCKDIR")
+METADATA = env_manager.get("METADATA_REGISTRY")
+SERVICES = env_manager.get("REGISTRY")
+BLOCKS = env_manager.get("BLOCKDIR")
 
 # Pack-config json keys of service storage directories.
 SERVICE_DEPENDENCIES_DIRECTORY = "service_dependencies_directory"

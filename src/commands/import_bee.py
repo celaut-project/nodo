@@ -8,9 +8,9 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-REGISTRY = env_manager.get_env("REGISTRY")
-METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
-VALIDATE_ON_IMPORT = env_manager.get_env("VALIDATE_ON_IMPORT")
+REGISTRY = env_manager.get("REGISTRY")
+METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+VALIDATE_ON_IMPORT = env_manager.get("VALIDATE_ON_IMPORT")
 
 
 def import_bee(path: str) -> Optional[str]:

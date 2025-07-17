@@ -12,10 +12,10 @@ from src.commands.__by_tag import get_id
 
 env_manager = ConfigManager()
 
-GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
-METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
-REGISTRY = env_manager.get_env("REGISTRY")
-DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
+GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
+METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
+DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INTIAL_GAS_AMOUNT")
 
 SHA3_256 = SHA3_256_ID.hex()
 

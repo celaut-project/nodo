@@ -27,15 +27,15 @@ from src.virtualizers.docker.stop_container import stop_container
 
 env_manager = ConfigManager()
 
-ALLOW_GAS_DEBT = env_manager.get_env("ALLOW_GAS_DEBT")
-DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
-MIN_SLOTS_OPEN_PER_PEER = env_manager.get_env("MIN_SLOTS_OPEN_PER_PEER")
-DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get_env("DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
-DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
-USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get_env("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
-MEMSWAP_FACTOR = env_manager.get_env("MEMSWAP_FACTOR")
-FEE_TRIAL_GAS_AMOUNT = int(env_manager.get_env("FREE_TRIAL_GAS_AMOUNT"))
-DEV_CLIENT_GAS_AMOUNT = env_manager.get_env("DEV_CLIENT_GAS_AMOUNT")
+ALLOW_GAS_DEBT = env_manager.get("ALLOW_GAS_DEBT")
+DATABASE_FILE = env_manager.get("DATABASE_FILE")
+MIN_SLOTS_OPEN_PER_PEER = env_manager.get("MIN_SLOTS_OPEN_PER_PEER")
+DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
+DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INTIAL_GAS_AMOUNT")
+USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
+MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
+FEE_TRIAL_GAS_AMOUNT = int(env_manager.get("FREE_TRIAL_GAS_AMOUNT"))
+DEV_CLIENT_GAS_AMOUNT = env_manager.get("DEV_CLIENT_GAS_AMOUNT")
 
 sc = SQLConnection()
 

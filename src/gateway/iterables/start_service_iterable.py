@@ -13,9 +13,9 @@ from src.utils.verify import get_service_hex_main_hash
 
 env_manager = ConfigManager()
 
-REGISTRY = env_manager.get_env("REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
 
-CONFIGURATION_REQUIRED = env_manager.get_env("CONFIGURATION_REQUIRED")  # In case the node needs to be stricter.
+CONFIGURATION_REQUIRED = env_manager.get("CONFIGURATION_REQUIRED")  # In case the node needs to be stricter.
 
 
 class StartServiceIterable(AbstractInputServiceIterable):

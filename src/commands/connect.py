@@ -11,7 +11,7 @@ from src.utils.config import ConfigManager
 from src.utils.utils import get_network_name
 
 env_manager = ConfigManager()
-SEND_INSTANCE = env_manager.get_env("SEND_INSTANCE")
+SEND_INSTANCE = env_manager.get("SEND_INSTANCE")
 
 sc = SQLConnection()
 

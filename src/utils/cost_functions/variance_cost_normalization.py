@@ -19,4 +19,4 @@ def variance_cost_normalization(cost: int, variance: float) -> int:
         int: The normalized cost value, rounded to the nearest integer.
 
     """
-    return int(cost * (1 + variance * env_manager.get_env("COST_AVERAGE_VARIATION")))
+    return int(cost * (1 + variance * env_manager.get("COST_AVERAGE_VARIATION")))

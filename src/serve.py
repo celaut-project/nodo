@@ -10,7 +10,7 @@ from src.manager.maintain import manager_thread
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
-GATEWAY_PORT = env_manager.get_env("GATEWAY_PORT")
+GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 
 def serve():
 

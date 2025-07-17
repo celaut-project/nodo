@@ -9,7 +9,7 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-CACHE = env_manager.get_env("CACHE")
+CACHE = env_manager.get("CACHE")
 
 def __dockerfile_copy_from(directory: str):
     dockerfile_path = os.path.join(directory, ".service", "Dockerfile")

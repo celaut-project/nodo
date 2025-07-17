@@ -4,7 +4,7 @@ from src.utils.config import SUPPORTED_ARCHITECTURES, ConfigManager
 
 # Load environment configuration
 env_manager = ConfigManager()
-TRUST_METADATA_ARCHITECTURE = env_manager.get_env("TRUST_METADATA_ARCHITECTURE")
+TRUST_METADATA_ARCHITECTURE = env_manager.get("TRUST_METADATA_ARCHITECTURE")
 
 # Build a mapping from architecture aliases to their canonical form (first element of each list)
 _ARCH_CANONICAL = {

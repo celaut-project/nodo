@@ -18,7 +18,7 @@ from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_ga
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
-MODIFY_RESOURCES_COST = env_manager.get_env("MODIFY_RESOURCES_COST")
+MODIFY_RESOURCES_COST = env_manager.get("MODIFY_RESOURCES_COST")
 
 
 class Gateway(celaut_pb2_grpc.Gateway):

@@ -4,8 +4,8 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
-STORAGE = env_manager.get_env("STORAGE")
+DATABASE_FILE = env_manager.get("DATABASE_FILE")
+STORAGE = env_manager.get("STORAGE")
 
 def create_directory(path):
     """Ensure the storage directory exists."""

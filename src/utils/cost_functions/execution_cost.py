@@ -9,10 +9,10 @@ from src.utils.verify import get_service_hex_main_hash
 
 env_manager = ConfigManager()
 
-EXECUTION_COST = env_manager.get_env("EXECUTION_COST")
-BUILD_COST = env_manager.get_env("BUILD_COST")
-EXECUTION_BENEFIT = env_manager.get_env("EXECUTION_BENEFIT")
-FREE_GAS_THRESHOLD = int(env_manager.get_env("FREE_GAS_THRESHOLD"))
+EXECUTION_COST = env_manager.get("EXECUTION_COST")
+BUILD_COST = env_manager.get("BUILD_COST")
+EXECUTION_BENEFIT = env_manager.get("EXECUTION_BENEFIT")
+FREE_GAS_THRESHOLD = int(env_manager.get("FREE_GAS_THRESHOLD"))
 
 # --- Constants ---
 # Resource type identifiers

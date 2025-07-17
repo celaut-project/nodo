@@ -6,7 +6,7 @@ from src.database.sql_connection import SQLConnection
 from src.payment_system.contracts.ergo.interface import LEDGER as ERGO_LEDGER, CONTRACT_HASH as ERGO_CONTRACT_HASH
 
 env_manager = ConfigManager()
-DATABASE_FILE = env_manager.get_env("DATABASE_FILE")
+DATABASE_FILE = env_manager.get("DATABASE_FILE")
 
 sq = SQLConnection()
 

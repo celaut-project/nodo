@@ -4,9 +4,9 @@ from src.utils.config import ConfigManager, DOCKER_COMMAND
 
 env_manager = ConfigManager()
 
-METADATA_REGISTRY = env_manager.get_env("METADATA_REGISTRY")
-REGISTRY = env_manager.get_env("REGISTRY")
-DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get_env("DEFAULT_INTIAL_GAS_AMOUNT")
+METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
+DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INTIAL_GAS_AMOUNT")
 
 
 def remove(service: str):
