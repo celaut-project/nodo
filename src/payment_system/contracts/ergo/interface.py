@@ -1,3 +1,4 @@
+from src.reputation_system.envs import ergo_ledger
 from typing import Optional, List, Tuple
 from protos import celaut_pb2, celaut_pb2
 import requests
@@ -137,15 +138,17 @@ def get_balances(only_sender: bool=False) -> Tuple[Tuple[str, float], Tuple[str,
 def init():
     sender_addr = str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString())
     sql = sql_connection.SQLConnection()
-    sql.add_contract(contract=celaut_pb2.Contract(
-        ledger=LEDGER,
-        token_id="ERG",
-        script=sender_addr.encode("utf-8"),
-        template=celaut_pb2.Contract.ScriptTemplate(
-            prose="",
-            formal=CONTRACT.encode("utf-8")
+    sql.add_contract(
+        contract=celaut_pb2.Contract(
+           ledger=ergo_ledger,
+           token_id="ERG",
+           script=sender_addr.encode("utf-8"),
+           template=celaut_pb2.Contract.ScriptTemplate(
+               prose="",
+               formal=CONTRACT.encode("utf-8")
+           )
         )
-    ))
+    )
 
 def check_sender_balance(amount: int) -> bool:
     try:
