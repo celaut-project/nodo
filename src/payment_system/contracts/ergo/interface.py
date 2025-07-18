@@ -26,14 +26,14 @@ DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
 LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.  TODO Ergo ledger actually should be the serialized protobuf.  -> But must be an id, and be defined on a yalm config file with the rest of envs. 
 CONTRACT = "proveDlog(decodePoint())"  # Ergo tree template script
 CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
-ERGO_NODE_URL = lambda: env_manager.get("ERGO_NODE_URL")
-COLD_WALLET = lambda: env_manager.get('ERGO_PAYMENTS_RECIVER_WALLET')
-ERGO_DONATION_WALLET = lambda: env_manager.get('ERGO_DONATION_WALLET')
-ERGO_DONATION_PERCENTAGE = lambda: clamp(float(env_manager.get('ERGO_DONATION_PERCENTAGE')), 1.0, 0.0)  # type: ignore
-HOT_LIMITS = int(env_manager.get("ERGO_ERG_HOT_WALLET_LIMITS"))  # type: ignore
-ERGO_AUXILIAR_MNEMONIC = env_manager.get("ERGO_AUXILIAR_MNEMONIC")  # Receiver wallet
-ERGO_WALLET_MNEMONIC = lambda: env_manager.get('ERGO_WALLET_MNEMONIC')  # Sender wallet
-GAS_PER_ERG_L = lambda: int(env_manager.get("GAS_PER_ERG"))
+ERGO_NODE_URL = lambda: env_manager.get("ledgers.ergo.NODE_URL")
+COLD_WALLET = lambda: env_manager.get('PAYMENTS_RECIVER_WALLET')
+ERGO_DONATION_WALLET = lambda: env_manager.get('ledgers.ergo.DONATION_WALLET')
+DONATION_PERCENTAGE = lambda: clamp(float(env_manager.get('ledgers.ergo.DONATION_PERCENTAGE')), 1.0, 0.0)  # type: ignore
+HOT_LIMITS = int(env_manager.get("ledgers.ergo.HOT_WALLET_LIMITS"))  # type: ignore
+AUXILIAR_MNEMONIC = env_manager.get("ledgers.ergo.AUXILIAR_MNEMONIC")  # Receiver wallet
+WALLET_MNEMONIC = lambda: env_manager.get('ledgers.ergo.WALLET_MNEMONIC')  # Sender wallet
+GAS_PER_ERG_L = lambda: int(env_manager.get("ledgers.ergo.GAS_PER_ERG"))
 WAIT_TX_TIME = 240  # 20 minutes (each 5 seconds)
 WAT_TX_SLEEP_TIME = 5
 
@@ -69,7 +69,7 @@ def __get_sender_addr(mnemonic: str) -> Address:
 def __get_input_boxes(amount: int) -> List[dict]:
     ergo = __init_ergo()
     explorer_api = ergo.get_api_url()
-    sender_address = __get_sender_addr(ERGO_WALLET_MNEMONIC())
+    sender_address = __get_sender_addr(WALLET_MNEMONIC())
 
     url = f"{explorer_api}/api/v1/boxes/unspent/unconfirmed/byAddress/{sender_address}"
     response = requests.get(url)
@@ -112,7 +112,7 @@ def get_amount_by_addr(mnemonic: str) -> int:
 def get_balances(only_sender: bool=False) -> Tuple[Tuple[str, float], Tuple[str, float]]:
     
     # Sender wallet
-    _addr = __get_sender_addr(ERGO_WALLET_MNEMONIC())
+    _addr = __get_sender_addr(WALLET_MNEMONIC())
     _amount = __balance_total(address=_addr)["confirmed"]["nanoErgs"]
 
     if only_sender:
@@ -123,7 +123,7 @@ def get_balances(only_sender: bool=False) -> Tuple[Tuple[str, float], Tuple[str,
         
         
     # Receiver wallet
-    _aux_addr = __get_sender_addr(ERGO_AUXILIAR_MNEMONIC)
+    _aux_addr = __get_sender_addr(AUXILIAR_MNEMONIC)
     _aux_amount = __balance_total(address=_aux_addr)["confirmed"]["nanoErgs"]
     
     return (
@@ -136,7 +136,7 @@ def get_balances(only_sender: bool=False) -> Tuple[Tuple[str, float], Tuple[str,
 
 
 def init():
-    sender_addr = str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString())
+    sender_addr = str(__get_sender_addr(AUXILIAR_MNEMONIC).toString())
     sql = sql_connection.SQLConnection()
     sql.add_contract(
         contract=celaut_pb2.Contract(
@@ -158,24 +158,24 @@ def check_sender_balance(amount: int) -> bool:
 
 def manager():
     LOGGER("Exec ergo interface manager")
-    # Move the available outputs from ERGO_AUXILIAR_MNEMONIC to ERGO_WALLET_MNEMONIC.
+    # Move the available outputs from AUXILIAR_MNEMONIC to WALLET_MNEMONIC.
     try:
-        aux_confirmed_amount = __balance_total(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC))["confirmed"]["nanoErgs"]
+        aux_confirmed_amount = __balance_total(__get_sender_addr(AUXILIAR_MNEMONIC))["confirmed"]["nanoErgs"]
         # Funds that may have been sent in the iteration prior to the main wallet but have not yet been confirmed on the network are taken into account.
-        wallet_unconfirmed_amount = __balance_total(__get_sender_addr(ERGO_WALLET_MNEMONIC()))["unconfirmed"]["nanoErgs"]
+        wallet_unconfirmed_amount = __balance_total(__get_sender_addr(WALLET_MNEMONIC()))["unconfirmed"]["nanoErgs"]
         # Check if send is needed.
         if aux_confirmed_amount - wallet_unconfirmed_amount > 2*DEFAULT_FEE:
             # Normalize to ergs.
             aux_confirmed_amount = __nanoerg_to_erg(aux_confirmed_amount)
             fee = __nanoerg_to_erg(DEFAULT_FEE)
-            wallet_confirmed_amount = __nanoerg_to_erg(__balance_total(__get_sender_addr(ERGO_WALLET_MNEMONIC()))["confirmed"]["nanoErgs"])
+            wallet_confirmed_amount = __nanoerg_to_erg(__balance_total(__get_sender_addr(WALLET_MNEMONIC()))["confirmed"]["nanoErgs"])
 
             aux_total = aux_confirmed_amount - fee
             amounts = [aux_total]
-            receiver_addresses = [str(__get_sender_addr(ERGO_WALLET_MNEMONIC()).toString())]
+            receiver_addresses = [str(__get_sender_addr(WALLET_MNEMONIC()).toString())]
             # Check if send to cold wallet is need.
             cold_wallet = COLD_WALLET()
-            donation_percentage = ERGO_DONATION_PERCENTAGE()
+            donation_percentage = DONATION_PERCENTAGE()
             donation_wallet = ERGO_DONATION_WALLET()
             if cold_wallet and aux_total + wallet_confirmed_amount > HOT_LIMITS:
                 to_hot_amount = min(aux_total, max(0, HOT_LIMITS - wallet_confirmed_amount))
@@ -205,7 +205,7 @@ def manager():
             tx = simple_send(
                 ergo=__init_ergo(),
                 amount=amounts, receiver_addresses=receiver_addresses,
-                wallet_mnemonic=ERGO_AUXILIAR_MNEMONIC, fee=fee
+                wallet_mnemonic=AUXILIAR_MNEMONIC, fee=fee
             )
             LOGGER(f"Simple send tx -> {tx}")
     except Exception as e:
@@ -221,7 +221,7 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
         try:
             # Initialize ErgoAppKit and get the sender's address
             ergo = __init_ergo()
-            sender_address = __get_sender_addr(ERGO_WALLET_MNEMONIC())
+            sender_address = __get_sender_addr(WALLET_MNEMONIC())
 
             # Fetch UTXO from the contract's address
             input_utxo = ergo.getInputBoxCovering(
@@ -251,7 +251,7 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
             )
 
             # Sign the transaction
-            w_mnemonic = ergo.getMnemonic(wallet_mnemonic=ERGO_WALLET_MNEMONIC(), mnemonic_password=None)[0]
+            w_mnemonic = ergo.getMnemonic(wallet_mnemonic=WALLET_MNEMONIC(), mnemonic_password=None)[0]
             signed_tx = ergo.signTransaction(unsigned_tx, w_mnemonic, prover_index=0)
 
             # Submit the transaction and get the transaction ID
@@ -296,7 +296,7 @@ def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contra
     try:
         address = script.decode("utf-8")
         assert LEDGER in ledger.tags, "Ledger does not match"
-        assert address == str(__get_sender_addr(ERGO_AUXILIAR_MNEMONIC).toString()), "Contract address does not match"
+        assert address == str(__get_sender_addr(AUXILIAR_MNEMONIC).toString()), "Contract address does not match"
 
         # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
         ergo = __init_ergo()
