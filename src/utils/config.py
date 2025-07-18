@@ -58,6 +58,8 @@ class ConfigManager(metaclass=Singleton):
         with open(self.config_path, 'w') as f:
             yaml.dump(self._config, f, indent=2, default_flow_style=False)
 
+        os.chmod(self.config_path, 0o666)  # To allow sudo nodo update and still be writable
+
     def get(self, key: str, default: Any = None) -> Any:
         """
         Retrieves a configuration value.
