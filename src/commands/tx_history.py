@@ -5,8 +5,8 @@ from src.payment_system.contracts.ergo.interface import (
     __get_sender_addr, 
     __init_ergo, 
     __nanoerg_to_erg,
-    ERGO_WALLET_MNEMONIC,
-    ERGO_AUXILIAR_MNEMONIC
+    WALLET_MNEMONIC,
+    AUXILIAR_MNEMONIC
 )
 from src.utils.logger import LOGGER
 
@@ -45,11 +45,11 @@ def _get_wallet_addresses() -> Tuple[str, str]:
     """
     try:
         # Get sending wallet address
-        sending_addr = __get_sender_addr(ERGO_WALLET_MNEMONIC())
+        sending_addr = __get_sender_addr(WALLET_MNEMONIC())
         sending_address = str(sending_addr.toString())
         
         # Get receiving wallet address  
-        receiving_addr = __get_sender_addr(ERGO_AUXILIAR_MNEMONIC)
+        receiving_addr = __get_sender_addr(AUXILIAR_MNEMONIC)
         receiving_address = str(receiving_addr.toString())
         
         return sending_address, receiving_address

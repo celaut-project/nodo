@@ -263,7 +263,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
     try:
         proof_id = env_manager.get('REPUTATION_PROOF_ID')
-        mnemonic=env_manager.get('ERGO_WALLET_MNEMONIC')
+        mnemonic=env_manager.get('WALLET_MNEMONIC')
 
         if proof_id:
             LOGGER(f"Not supported update reputation proofs (https://github.com/celaut-project/nodo/issues/80)")

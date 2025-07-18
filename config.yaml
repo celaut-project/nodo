@@ -99,12 +99,12 @@ payments:
   DONATION_PERCENTAGE: "0.00"
 
 ledgers:
-  - name: ergo
+  ergo:
     tags: [ ergo ]
     GAS_PER_ERG: 1.0e+58
     NODE_URL: "https://node.sigmaspace.io"
     GENESIS_BLOCK_ID: "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
-    ERG_HOT_WALLET_LIMITS: 100
+    HOT_WALLET_LIMITS: 100
     WALLET_MNEMONIC: auto
     AUXILIARY_MNEMONIC: auto
     HTTP_PEERS_PATH: "${main.STORAGE}/ergo_http_peers.json"

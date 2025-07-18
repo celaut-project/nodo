@@ -46,7 +46,7 @@ The node uses two wallets to manage its funds and transactions:
 
 - **Public wallet** (also called *hot wallet*): This is the address where clients send their payments. The node cannot spend directly from this wallet, but a **maintenance thread** transfers processed funds to the **sending wallet** or to a **cold address**.
 
-- **Sending wallet** (also hot): This is the wallet the node uses to pay and increase its gas on other nodes. It has a funds limit defined by **ERGO_ERG_HOT_WALLET_LIMITS**. If the node operator has configured a **cold address**, the excess funds are sent to that address.
+- **Sending wallet** (also hot): This is the wallet the node uses to pay and increase its gas on other nodes. It has a funds limit defined by **HOT_WALLET_LIMITS**. If the node operator has configured a **cold address**, the excess funds are sent to that address.
 
 #### 5. Cold Address
 
@@ -55,7 +55,7 @@ The node uses two wallets to manage its funds and transactions:
 #### 6. Maintenance and Transfers
 
 - The **maintenance thread** moves funds from the **public wallet** to the **sending wallet** only when the deposit tokens have been verified and approved.
-- Funds are transferred to the **sending wallet** until it reaches the **ERGO_ERG_HOT_WALLET_LIMITS**.
+- Funds are transferred to the **sending wallet** until it reaches the **HOT_WALLET_LIMITS**.
 - If this limit is exceeded, the excess ERGs are sent to the **cold address** provided by the node operator.
 - Additionally, a configurable percentage (default set to 0%) is transferred to a **donation wallet** for the **celaut-project/node** to support project development.
 
