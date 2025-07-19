@@ -5,13 +5,14 @@ from typing import List, Optional
 from protos import celaut_pb2 as celaut
 from src.gateway.utils import generate_node_peer_info
 from src.utils import logger as log
-from src.utils.config import DOCKER_COMMAND, DOCKER_NETWORK, ConfigManager
+from src.utils.config import DOCKER_COMMAND, ConfigManager
 
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
 CACHE = env_manager.get("CACHE")
+DOCKER_NETWORK = env_manager.get("DOCKER_NETWORK")
 
 def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysresources,  network_resolution: List[celaut.ConfigurationFile.NetworkResolution]=[]) -> celaut.ConfigurationFile:
 
