@@ -1001,7 +1001,7 @@ class SQLConnection(metaclass=Singleton):
             return False
 
         # Fetch all stored ledgers. The 'ledger_hash' column contains the serialized ledger.
-        cursor = self._execute("SELECT ledger_hash FROM ledger")
+        cursor = self._execute("SELECT hash FROM ledger")
         
         for row in cursor.fetchall():
             # The ledger from the DB is in a serialized byte format.
