@@ -95,6 +95,7 @@ if [ ! -f "$TARGET_DIR/config.yaml" ]; then
   printf "Creating configuration file $TARGET_DIR/config.yaml...\n"
   cp "$TARGET_DIR/config.example.yaml" "$TARGET_DIR/config.yaml"
   chmod a+w "$TARGET_DIR/config.yaml"
+fi
 
 # Apply custom architecture-specific setup
 if [ "$(uname -m)" = "arm64" ]; then
