@@ -105,7 +105,7 @@ ledgers:
     tags: [ ergo ]
     GAS_PER_ERG: 1.0e+58
     NODE_URL: "https://node.sigmaspace.io"
-    GENESIS_BLOCK_ID: "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
+    GENESIS_BLOCK_ID: "3ab9da11fc216660e974842cc3b7705e62ebb9e0bf5ff78e53f9cd40abadd117"
     HOT_WALLET_LIMITS: 100
     WALLET_MNEMONIC: ""
     AUXILIARY_MNEMONIC: ""
