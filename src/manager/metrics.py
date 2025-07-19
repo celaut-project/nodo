@@ -8,7 +8,6 @@ from protos import celaut_pb2, celaut_pb2_grpc
 from src.manager.manager import get_client_id_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 
-from src.utils.config import DOCKER_NETWORK
 from src.utils.utils import from_gas_amount, get_network_name, to_gas_amount, \
     generate_uris_by_peer_id
 from src.utils.logger import LOGGER as logger
