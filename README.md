@@ -54,8 +54,8 @@ Below is a breakdown of **Nodo** feature support across different operating syst
 | --------------------- | -------- | ---------------- | ---------------- |
 | Local execution       | 🟢 Beta  | 🔴 Not supported | 🔴 Not supported |
 | Packaging             | 🟢 Beta  | 🔴 Not supported | 🔴 Not supported |
-| Local network support | 🟡 Alpha | 🔴 Not supported | 🔴 Not supported |
-| Trustless connection  | 🟡 Alpha | 🔴 Not supported | 🔴 Not supported |
+| Local network         | 🟡 Alpha | 🔴 Not supported | 🔴 Not supported |
+| Trustless network     | 🟡 Alpha | 🔴 Not supported | 🔴 Not supported |
 
 * 🟢 **Beta**: Functionality implemented and relatively stable.
 * 🟡 **Alpha**: Functionality under active development and subject to change.
