@@ -29,7 +29,7 @@ TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get("TOTAL_REPUTATION_TOKEN_AMOU
 CLIENT_EXPIRATION_TIME = env_manager.get("CLIENT_EXPIRATION_TIME")
 STORAGE = env_manager.get("STORAGE")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
-DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INTIAL_GAS_AMOUNT")
+DEFAULT_INITIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT")
 
 
 class SQLConnection(metaclass=Singleton):
@@ -1503,7 +1503,7 @@ class SQLConnection(metaclass=Singleton):
         elif self.internal_instance_exists(id=id):
             return self.get_container_gas(id=id)
         else:
-            return int(DEFAULT_INTIAL_GAS_AMOUNT)
+            return int(DEFAULT_INITIAL_GAS_AMOUNT)
 
     # Tunnel system
 

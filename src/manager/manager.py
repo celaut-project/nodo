@@ -31,7 +31,7 @@ ALLOW_GAS_DEBT = env_manager.get("ALLOW_GAS_DEBT")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MIN_SLOTS_OPEN_PER_PEER = env_manager.get("MIN_SLOTS_OPEN_PER_PEER")
 DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
-DEFAULT_INTIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INTIAL_GAS_AMOUNT")
+DEFAULT_INITIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT")
 USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
 MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
 FEE_TRIAL_GAS_AMOUNT = int(env_manager.get("FREE_TRIAL_GAS_AMOUNT"))
@@ -321,7 +321,7 @@ def default_initial_cost(
     log.LOGGER('Default cost for ' + (father_id if father_id else 'local'))
     return (int(
         sc.get_gas_amount_by_father_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
-    ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INTIAL_GAS_AMOUNT)
+    ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INITIAL_GAS_AMOUNT)
 
 def add_container(
         service_id: str,
