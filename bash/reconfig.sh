@@ -39,7 +39,13 @@ get_yaml_variable() {
 update_yaml_variable() {
     local key=$1
     local new_value=$2
-    yq e -i ".$key = \"$new_value\"" "$CONFIG_FILE"
+
+    # Write boolean as-is, strings with quotes
+    if [[ "$new_value" == "true" || "$new_value" == "false" ]]; then
+        yq e -i ".$key = $new_value" "$CONFIG_FILE"
+    else
+        yq e -i ".$key = \"$new_value\"" "$CONFIG_FILE"
+    fi
 }
 
 # --- Validation Functions ---
