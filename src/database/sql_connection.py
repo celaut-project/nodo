@@ -194,7 +194,11 @@ class SQLConnection(metaclass=Singleton):
         ''', (client_id,))
         row = result.fetchone()
         if row:
-            gas = int(row['gas'])
+            try:
+                gas = int(row['gas'])
+            except ValueError:
+                logger.LOGGER(f'Invalid gas value for client {client_id}: {row["gas"]}')
+                return None
             return (
                 gas,
                 row['last_usage'],
