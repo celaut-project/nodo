@@ -6,8 +6,8 @@ from src.utils.config import ConfigManager
 from src.utils.utils import to_gas_amount
 from src.utils.logger import LOGGER
 
-GAS_PER_ERG = int(ConfigManager().get("GAS_PER_ERG"))
-
+GAS_PER_ERG = int(ConfigManager().get("ledgers.ergo.GAS_PER_ERG"))
+ 
 def local_payment_methods() -> Generator[celaut.GasPrice, None, None]:
     for script, ledger in get_peer_contract_instances(CONTRACT_HASH): 
 
