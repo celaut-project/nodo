@@ -41,7 +41,7 @@ ALL_VARIABLES=(
     "network.NGROK_TUNNELS_KEY"
     "costs.FREE_GAS_THRESHOLD" "costs.SOCIALIZATION_FACTOR" "costs.ALLOW_GAS_DEBT"
     "packer.SAVE_ALL"
-    "communication.SEND_INSTANCE" "communication.SEND_ONLY_HASHES_ASKING_COST" "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH"
+    "communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS" "communication.SEND_ONLY_HASHES_ASKING_COST" "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH"
     "misc.VALIDATE_ON_IMPORT"
     "logs.DEBUG_MODE"
 )
@@ -142,7 +142,7 @@ configure_packer() {
     handle_variable "packer.SAVE_ALL" "Packer: Save all items (true/false)" validate_boolean
 }
 configure_communication() {
-    handle_variable "communication.SEND_INSTANCE" "Communication: Announce instance to connecting peers"
+    handle_variable "communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS" "Communication: Announce instance to connecting peers"
     handle_variable "communication.SEND_ONLY_HASHES_ASKING_COST" "Communication: Send only hashes when asking for cost"
     handle_variable "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH" "Communication: Deny cost request if hash is not available"
 }
@@ -198,7 +198,7 @@ while true; do
     cat_network_vars=("network.NGROK_TUNNELS_KEY")
     cat_costs_vars=("costs.FREE_GAS_THRESHOLD" "costs.SOCIALIZATION_FACTOR" "costs.ALLOW_GAS_DEBT")
     cat_packer_vars=("packer.SAVE_ALL")
-    cat_comm_vars=("communication.SEND_INSTANCE" "communication.SEND_ONLY_HASHES_ASKING_COST" "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH")
+    cat_comm_vars=("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS" "communication.SEND_ONLY_HASHES_ASKING_COST" "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH")
     cat_misc_vars=("misc.VALIDATE_ON_IMPORT")
     cat_logs_vars=("logs.DEBUG_MODE")
 
