@@ -138,7 +138,7 @@ handle_variable "network.NGROK_TUNNELS_KEY" "NGROK Tunnels Key"
 handle_variable "costs.FREE_GAS_THRESHOLD" "Free Gas Threshold" validate_integer
 handle_variable "costs.SOCIALIZATION_FACTOR" "Socialization Factor" validate_integer
 handle_variable "payments.DONATION_PERCENTAGE" "Donation Percentage (e.g. 5.5)" validate_percentage
-handle_variable "DEBUG_MODE" "Debug Mode (true/false)" validate_boolean
+handle_variable "logs.DEBUG_MODE" "Debug Mode (true/false)" validate_boolean
 
 # --- Completion ---
 printf "\n"
