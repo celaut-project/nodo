@@ -27,7 +27,7 @@ from org.ergoplatform.appkit import *
 from org.ergoplatform.appkit.impl import *
 
 def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
-    ergo_node = ConfigManager().get("ERGO_NODE_URL")
+    ergo_node = ConfigManager().get("ledgers.ergo.NODE_URL")
     if not ergo_node:
         logger("No ergo node available.")
         return None

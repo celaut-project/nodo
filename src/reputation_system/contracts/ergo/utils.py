@@ -20,7 +20,7 @@ def get_public_key(mnemonic_phrase: str) -> str:
     :param mnemonic_phrase: BIP-39 mnemonic phrase.
     :return: Public key in hexadecimal format.
     """
-    ergo = ergpy.ErgoAppKit(node_url=ConfigManager().get("ERGO_NODE_URL"))
+    ergo = ergpy.ErgoAppKit(node_url=ConfigManager().get("ledgers.ergo.NODE_URL"))
     mnemonic = ergo.getMnemonic(wallet_mnemonic=mnemonic_phrase, mnemonic_password=None)
     return ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
 
