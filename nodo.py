@@ -145,6 +145,7 @@ if __name__ == '__main__':
             "\n- disconnect <peer_id>"
             "\n- pack <project directory>"
             "\n- config"
+            "\n- envs"
             "\n- tui"
             "\n- info"
             "\n- logs"
@@ -418,6 +419,9 @@ if __name__ == '__main__':
                     log.LOGGER(_msg)
                     print(_msg)
                     env_manager.set("REPUTATION_PROOF_ID", "")
+
+            case 'envs':
+                os.system(f"yq . {MAIN_DIR}/config.yaml")
 
             case 'migrate':
                 import os
