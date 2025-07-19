@@ -30,7 +30,7 @@ sigmastate = JPackage('sigmastate')
 
 # Constants
 env_manager = ConfigManager()
-ledgers.ergo.NODE_URL = lambda: env_manager.get("ledgers.ergo.NODE_URL")
+ERGO_NODE_URL lambda: env_manager.get("ledgers.ergo.NODE_URL")
 SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF = env_manager.get('SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF')
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
