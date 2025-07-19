@@ -53,7 +53,7 @@ def __nanoerg_to_erg(amount: int) -> float:
     return amount / 1_000_000_000  # type: ignore
 
 def __init_ergo():
-    node_url = ledgers.ergo.NODE_URL()
+    node_url = ERGO_NODE_URL()
     if not node_url.endswith('/'):
         node_url += '/'
     return appkit.ErgoAppKit(node_url=node_url)
