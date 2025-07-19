@@ -263,6 +263,8 @@ def manager_thread():
         DuplicateGrabber().manager()
         
         sleep(MANAGER_ITERATION_TIME)
-        if DEBUG_MODE():
+        _deb = DEBUG_MODE()
+        log.LOGGER(f"DEbug mode is {'on' if _deb else 'off'}.")
+        if _deb:
             log.LOGGER(f"Long interval count: {short_interval_count}/{SHORT_INTERVAL_COUNT}.")
         short_interval_count += 1
