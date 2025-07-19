@@ -90,6 +90,13 @@ else
   cd "$TARGET_DIR" || { printf "Error: Failed to change directory to $TARGET_DIR.\n" >&2; exit 1; }
 fi
 
+# Create configuration file if it does not exist
+if [ ! -f "$TARGET_DIR/config.yaml" ]; then
+  printf "Creating configuration file $TARGET_DIR/config.yaml...\n"
+  cp "$TARGET_DIR/config.example.yaml" "$TARGET_DIR/config.yaml"
+  chmod a+w "$TARGET_DIR/config.yaml"
+
+# Apply custom architecture-specific setup
 if [ "$(uname -m)" = "arm64" ]; then
   SETUP_SCRIPT="bash/setup_ubuntu_arm.sh"
 elif [ "$(uname -m)" = "x86_64" ]; then
@@ -202,9 +209,6 @@ fi
 
 ACCEPT_KYA_SCRIPT="bash/accept_kya.sh"
 chmod +x "$ACCEPT_KYA_SCRIPT"
-
-cp "$TARGET_DIR/config.example.yaml" "$TARGET_DIR/config.yaml"
-chmod a+w "$TARGET_DIR/config.yaml"
 
 printf "Installation and service setup completed successfully. The repository is located at $TARGET_DIR.\n"
 printf "********** You can now use the 'nodo' command. **********\n"
