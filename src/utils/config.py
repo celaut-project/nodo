@@ -71,7 +71,7 @@ class ConfigManager(metaclass=Singleton):
         """
 
         # First reload config
-        self.load_config()
+        self.load_config()  # TODO : This might not be necessary every time, consider caching if performance is an issue.
 
         # 1. Try to get the value using nested key resolution
         value = self._get_nested(self._config, key.split('.'))
