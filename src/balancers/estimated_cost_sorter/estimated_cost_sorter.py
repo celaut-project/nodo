@@ -15,7 +15,7 @@ env_manager = ConfigManager()
 SOCIALIZATION_FACTOR = float(env_manager.get("SOCIALIZATION_FACTOR"))
 INIT_COST_CONFIGURATION_FACTOR = env_manager.get("INIT_COST_CONFIGURATION_FACTOR")
 MAINTENANCE_COST_CONFIGURATION_FACTOR = env_manager.get("MAINTENANCE_COST_CONFIGURATION_FACTOR")
-GAS_PER_ERG = int(env_manager.get("GAS_PER_ERG"))
+GAS_PER_ERG = int(env_manager.get("ledgers.ergo.GAS_PER_ERG"))
 
 sq = SQLConnection()
 
