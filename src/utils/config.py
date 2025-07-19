@@ -3,6 +3,8 @@ import yaml
 import hashlib
 import subprocess
 import time
+import copy
+import threading
 from functools import reduce
 from typing import Final, Dict, Callable, Any
 import docker as docker_lib
@@ -29,6 +31,7 @@ class ConfigManager(metaclass=Singleton):
         self.cache_duration = cache_duration
         self._config = {}
         self._last_load_time = 0
+        self._lock = threading.RLock()  # Reentrant lock for nested calls
         self.load_config()
 
     def _get_nested(self, data: Dict, keys: list) -> Any:
@@ -53,31 +56,31 @@ class ConfigManager(metaclass=Singleton):
 
     def load_config(self):
         """Loads the YAML file, processes dynamic values, and interpolates paths."""
-        if not os.path.exists(self.config_path):
-            raise FileNotFoundError(f"Configuration file not found at: {self.config_path}")
+        with self._lock:
+            if not os.path.exists(self.config_path):
+                raise FileNotFoundError(f"Configuration file not found at: {self.config_path}")
 
-        with open(self.config_path, 'r') as f:
-            self._config = yaml.safe_load(f)
+            with open(self.config_path, 'r') as f:
+                self._config = yaml.safe_load(f)
 
-        # Track if we need to save changes
-        config_changed = False
-        
-        # Process dynamic values
-        original_config = self._config.copy()
-        self._process_dynamic_values()
-        if self._config != original_config:
-            config_changed = True
+            # Track if we need to save changes - use deep copy for nested structures
+            original_config = copy.deepcopy(self._config)
             
-        # Interpolate paths
-        self._interpolate_paths(self._config)
-        self._last_load_time = time.time()
-        
-        # Save if dynamic processing made changes
-        if config_changed:
-            self.save_config()
+            # Process dynamic values
+            self._process_dynamic_values()
+            config_changed = (self._config != original_config)
+                
+            # Interpolate paths
+            self._interpolate_paths(self._config)
+            self._last_load_time = time.time()
+            
+            # Save if dynamic processing made changes
+            if config_changed:
+                print("Dynamic values were processed, saving configuration...")
+                self._save_config_unlocked()  # Use internal method to avoid double locking
 
-    def save_config(self):
-        """Saves the current configuration back to the YAML file."""
+    def _save_config_unlocked(self):
+        """Internal save method without locking (assumes caller holds lock)."""
         # Note: Using standard yaml.dump will lose comments and formatting.
         # For preserving them, consider using a library like `ruamel.yaml`.
         with open(self.config_path, 'w') as f:
@@ -91,6 +94,11 @@ class ConfigManager(metaclass=Singleton):
         # Update the last load time since we just saved (config is fresh)
         self._last_load_time = time.time()
 
+    def save_config(self):
+        """Saves the current configuration back to the YAML file."""
+        with self._lock:
+            self._save_config_unlocked()
+
     def get(self, key: str, default: Any = None) -> Any:
         """
         Retrieves a configuration value.
@@ -99,42 +107,45 @@ class ConfigManager(metaclass=Singleton):
         
         Reloads config from disk only if cache_duration has expired.
         """
-        # Reload config only if cache has expired
-        if self._should_reload_config():
-            self.load_config()
+        with self._lock:
+            # Reload config only if cache has expired
+            if self._should_reload_config():
+                self.load_config()
 
-        # 1. Try to get the value using nested key resolution
-        value = self._get_nested(self._config, key.split('.'))
-        if value is not None:
-            return value
+            # 1. Try to get the value using nested key resolution
+            value = self._get_nested(self._config, key.split('.'))
+            if value is not None:
+                return value
 
-        # 2. If the key is not nested, check top-level sections
-        if '.' not in key:
-            # 2a. Direct top-level key
-            if key in self._config:
-                return self._config[key]
-            # 2b. Search within each top-level section (if it's a dict)
-            for section in self._config.values():
-                if isinstance(section, dict) and key in section:
-                    return section[key]
+            # 2. If the key is not nested, check top-level sections
+            if '.' not in key:
+                # 2a. Direct top-level key
+                if key in self._config:
+                    return self._config[key]
+                # 2b. Search within each top-level section (if it's a dict)
+                for section in self._config.values():
+                    if isinstance(section, dict) and key in section:
+                        return section[key]
 
-        # 3. Return the default if the key wasn't found
-        return default
+            # 3. Return the default if the key wasn't found
+            return default
 
     def set(self, key: str, value: Any):
         """
         Sets a configuration value and saves it to the file.
         Nested values can be accessed using dot notation.
         """
-        self._set_nested(self._config, key.split('.'), value)
-        self.save_config()
+        with self._lock:
+            self._set_nested(self._config, key.split('.'), value)
+            self._save_config_unlocked()
 
     def force_reload(self):
         """
         Forces a reload of the configuration from disk, ignoring cache.
         Useful when you know the file has been modified externally.
         """
-        self.load_config()
+        with self._lock:
+            self.load_config()
 
     def _interpolate_paths(self, data: Any, context: Dict = None):
         """
@@ -172,9 +183,9 @@ class ConfigManager(metaclass=Singleton):
         """Handles special 'auto' values for dynamic configuration."""
         # Handle auto gateway port - use direct config access to avoid recursion
         gateway_port = self._get_nested(self._config, ['network', 'GATEWAY_PORT'])
-        if gateway_port == 'auto' and self._config.get('network', {}).get('GATEWAY_PORT') is None:
+        if gateway_port == 'auto':
             port = get_free_port(open_port=True)
-            self.set("network.GATEWAY_PORT", port)
+            self._set_nested(self._config, ['network', 'GATEWAY_PORT'], port)
             print(f"Dynamically assigned Gateway Port: {port}")
 
         # Handle auto mnemonics in ledgers
