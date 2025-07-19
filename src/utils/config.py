@@ -174,7 +174,7 @@ class ConfigManager(metaclass=Singleton):
         gateway_port = self._get_nested(self._config, ['network', 'GATEWAY_PORT'])
         if gateway_port == 'auto' and self._config.get('network', {}).get('GATEWAY_PORT') is None:
             port = get_free_port(open_port=True)
-            self._set_nested(self._config, ['network', 'GATEWAY_PORT'], port)
+            self.set("network.GATEWAY_PORT", port)
             print(f"Dynamically assigned Gateway Port: {port}")
 
         # Handle auto mnemonics in ledgers
