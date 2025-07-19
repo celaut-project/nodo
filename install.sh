@@ -210,7 +210,7 @@ fi
 ACCEPT_KYA_SCRIPT="bash/accept_kya.sh"
 chmod +x "$ACCEPT_KYA_SCRIPT"
 
-chmod +x "$TARGET_DIR/config.yaml"
+chmod a+w "$TARGET_DIR/config.yaml"
 
 printf "Installation and service setup completed successfully. The repository is located at $TARGET_DIR.\n"
 printf "********** You can now use the 'nodo' command. **********\n"
