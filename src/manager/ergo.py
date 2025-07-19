@@ -107,9 +107,9 @@ def check_ergo_node_availability():
     
     if not availables and current_ergo_node == env_manager.get("ledgers.ergo.NODE_URL"): 
         logger("No available Ergo nodes found.")
-        env_manager.write_env("ledgers.ergo.NODE_URL", "")
+        env_manager.set("ledgers.ergo.NODE_URL", "")
         return
     
     new_ergo_node_url = next(iter(availables))
-    env_manager.write_env("ledgers.ergo.NODE_URL", new_ergo_node_url)
+    env_manager.set("ledgers.ergo.NODE_URL", new_ergo_node_url)
     logger(f"ledgers.ergo.NODE_URL has been updated to {new_ergo_node_url}")

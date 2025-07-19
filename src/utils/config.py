@@ -172,7 +172,7 @@ class ConfigManager(metaclass=Singleton):
         """Handles special 'auto' values for dynamic configuration."""
         # Handle auto gateway port - use direct config access to avoid recursion
         gateway_port = self._get_nested(self._config, ['network', 'GATEWAY_PORT'])
-        if gateway_port == 'auto':
+        if gateway_port == 'auto' and self._config.get('network', {}).get('GATEWAY_PORT') is None:
             port = get_free_port(open_port=True)
             self._set_nested(self._config, ['network', 'GATEWAY_PORT'], port)
             print(f"Dynamically assigned Gateway Port: {port}")
