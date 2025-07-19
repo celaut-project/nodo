@@ -136,8 +136,8 @@ printf "%b\n" "${CYAN}Starting interactive configuration for '$CONFIG_FILE'...${
 printf "\n"
 
 # Interactive configuration of each variable
-handle_variable "ledgers.0.NODE_URL" "Ergo Node URL" validate_url
-handle_variable "ledgers.0.WALLET_MNEMONIC" "Ergo Wallet Mnemonic" validate_wallet_address
+handle_variable "ledgers.ergo.NODE_URL" "Ergo Node URL" validate_url
+handle_variable "ledgers.ergo.WALLET_MNEMONIC" "Ergo Wallet Mnemonic" validate_wallet_address
 handle_variable "reputation.REPUTATION_PROOF_ID" "Reputation Proof ID" validate_reputation_id
 handle_variable "payments.PAYMENTS_RECEIVER_WALLET" "Payment Receiver Wallet" validate_wallet_address
 handle_variable "network.NGROK_TUNNELS_KEY" "NGROK Tunnels Key"
