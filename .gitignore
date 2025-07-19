@@ -9,7 +9,7 @@ reputation.db
 dataset.bin
 *.log
 app.log
-config.yalm
+config.yaml
 venv
 .venv
 tests/script_data.json
