@@ -59,9 +59,22 @@ class ConfigManager(metaclass=Singleton):
         with open(self.config_path, 'r') as f:
             self._config = yaml.safe_load(f)
 
+        # Track if we need to save changes
+        config_changed = False
+        
+        # Process dynamic values
+        original_config = self._config.copy()
         self._process_dynamic_values()
+        if self._config != original_config:
+            config_changed = True
+            
+        # Interpolate paths
         self._interpolate_paths(self._config)
         self._last_load_time = time.time()
+        
+        # Save if dynamic processing made changes
+        if config_changed:
+            self.save_config()
 
     def save_config(self):
         """Saves the current configuration back to the YAML file."""
@@ -157,8 +170,9 @@ class ConfigManager(metaclass=Singleton):
 
     def _process_dynamic_values(self):
         """Handles special 'auto' values for dynamic configuration."""
-        # Handle auto gateway port
-        if self.get('network.GATEWAY_PORT') == 'auto':
+        # Handle auto gateway port - use direct config access to avoid recursion
+        gateway_port = self._get_nested(self._config, ['network', 'GATEWAY_PORT'])
+        if gateway_port == 'auto':
             port = get_free_port(open_port=True)
             self._set_nested(self._config, ['network', 'GATEWAY_PORT'], port)
             print(f"Dynamically assigned Gateway Port: {port}")
@@ -175,8 +189,8 @@ class ConfigManager(metaclass=Singleton):
                     self._config['ledgers'][i]['AUXILIARY_MNEMONIC'] = mnemonic
                     print(f"Generated new auxiliary mnemonic for ledger '{ledger.get('name', i)}'")
         
-        # Save changes made by dynamic processing
-        self.save_config()
+        # DON'T save here to avoid recursion - let load_config handle the timing
+        # The save will happen when set() is called from outside
 
 
 # ---------------------------------------------------------------------------
