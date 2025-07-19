@@ -34,7 +34,7 @@ def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
         return None
 
 def get_refresh_peers() -> Dict[str, Dict]:
-    http_peers_file = env_manager.get("ERGO_HTTP_PEERS")
+    http_peers_file = env_manager.get("ledgers.ergo.HTTP_PEERS_PATH")
     if not os.path.exists(http_peers_file):
         with open(http_peers_file, 'w') as f:
             f.write("{}")
