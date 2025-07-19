@@ -11,7 +11,7 @@ from src.utils.config import ConfigManager
 from src.utils.utils import get_network_name
 
 env_manager = ConfigManager()
-SEND_INSTANCE = env_manager.get("SEND_INSTANCE")
+SELF_ANNOUNCE_TO_CONNECTING_PEERS = env_manager.get("SELF_ANNOUNCE_TO_CONNECTING_PEERS")
 
 sc = SQLConnection()
 
@@ -37,7 +37,7 @@ def connect(peer: str):
             
         print(f'Added peer {peer} with id {peer_id}')
         
-        if SEND_INSTANCE:
+        if SELF_ANNOUNCE_TO_CONNECTING_PEERS:
             print(f'Sending instance to peer: {peer}')
             
             try:
