@@ -87,6 +87,7 @@ general_flags:
   SUBMIT_REPUTATION_AT_INIT: false
   SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF: true
 
+# Reputation and payments configuration should be set in the ledgers section, depending on the ledger being used.
 reputation:
   LEDGER_REPUTATION_SUBMISSION_THRESHOLD: 10
   TOTAL_REPUTATION_TOKEN_AMOUNT: 1000000000
@@ -105,6 +106,6 @@ ledgers:
     NODE_URL: "https://node.sigmaspace.io"
     GENESIS_BLOCK_ID: "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
     HOT_WALLET_LIMITS: 100
-    WALLET_MNEMONIC: auto
-    AUXILIARY_MNEMONIC: auto
-    HTTP_PEERS_PATH: "${main.STORAGE}/ergo_http_peers.json"
+    WALLET_MNEMONIC: ""
+    AUXILIARY_MNEMONIC: ""
+    HTTP_PEERS_PATH: "/node/storage/ergo_http_peers.json"

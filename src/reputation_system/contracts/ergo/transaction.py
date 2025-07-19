@@ -30,7 +30,7 @@ sigmastate = JPackage('sigmastate')
 
 # Constants
 env_manager = ConfigManager()
-ERGO_NODE_URL = lambda: env_manager.get("ERGO_NODE_URL")
+ledgers.ergo.NODE_URL = lambda: env_manager.get("ledgers.ergo.NODE_URL")
 SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF = env_manager.get('SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF')
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
@@ -275,7 +275,7 @@ def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
         
         LOGGER(f"Submitting reputation proof with {len(objects)} objects.")
         tx_id = __create_reputation_proof_tx(
-            node_url=ERGO_NODE_URL(),
+            node_url=ledgers.ergo.NODE_URL(),
             wallet_mnemonic=mnemonic,
             proof_id=proof_id,
             objects=objects,

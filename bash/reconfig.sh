@@ -32,7 +32,7 @@ NC='\033[0m' # No Color
 # --- Utility Functions (based on yq) ---
 
 # Read a value from the YAML file.
-# $1: Key in dot notation (e.g., ledgers.0.NODE_URL)
+# $1: Key in dot notation (e.g., ledgers.ergo.NODE_URL)
 get_yaml_variable() {
     local key=$1
     yq e ".$key" "$CONFIG_FILE" || echo ""
