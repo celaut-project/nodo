@@ -237,6 +237,7 @@ def check_dev_clients():
 def manager_thread():
 
     log.LOGGER("Starting manager thread...")
+    print("Starting manager thread...")
     
     # Functions to be executed at the beginning
     init_interfaces()
