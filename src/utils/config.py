@@ -69,6 +69,10 @@ class ConfigManager(metaclass=Singleton):
         Nested values can be accessed using dot notation (e.g., 'docker.DOCKER_CLIENT_TIMEOUT').
         Also allows top-level lookups (e.g., 'DOCKER_CLIENT_TIMEOUT').
         """
+
+        # First reload config
+        self.load_config()
+
         # 1. Try to get the value using nested key resolution
         value = self._get_nested(self._config, key.split('.'))
         if value is not None:
