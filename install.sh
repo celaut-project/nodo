@@ -193,13 +193,6 @@ create_wrapper_script
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
 chmod -R 777 "$TARGET_DIR"
 
-RESTORE_SCRIPT="$TARGET_DIR/bash/restore_src.sh"
-chmod +x "$RESTORE_SCRIPT"
-if ! ./"$RESTORE_SCRIPT" "$TARGET_DIR"; then
-  printf "Error: The script $RESTORE_SCRIPT failed to execute.\n" >&2
-  exit 1
-fi
-
 if systemctl --no-pager status nodo.service >/dev/null 2>&1; then
   printf "Restarting nodo.service...\n"
   systemctl restart nodo.service
@@ -210,6 +203,7 @@ fi
 ACCEPT_KYA_SCRIPT="bash/accept_kya.sh"
 chmod +x "$ACCEPT_KYA_SCRIPT"
 
+cp "$TARGET_DIR/config.example.yaml" "$TARGET_DIR/config.yaml"
 chmod a+w "$TARGET_DIR/config.yaml"
 
 printf "Installation and service setup completed successfully. The repository is located at $TARGET_DIR.\n"
