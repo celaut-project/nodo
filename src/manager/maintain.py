@@ -247,7 +247,6 @@ def manager_thread():
     
     short_interval_count = 0
     while True:
-        log.LOGGER("Manager thread iteration started.")
         if short_interval_count == int(SHORT_INTERVAL_COUNT):
             short_interval_count = 0
             
@@ -267,8 +266,6 @@ def manager_thread():
         DuplicateGrabber().manager()
         
         sleep(MANAGER_ITERATION_TIME)
-        _deb = DEBUG_MODE()
-        log.LOGGER(f"DEbug mode is {'on' if _deb else 'off'}.")
-        if _deb:
+        if DEBUG_MODE():
             log.LOGGER(f"Long interval count: {short_interval_count}/{SHORT_INTERVAL_COUNT}.")
         short_interval_count += 1
