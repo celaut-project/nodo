@@ -160,7 +160,6 @@ class ConfigManager(metaclass=Singleton):
 # This will load 'config.yaml', process dynamic values, and interpolate paths.
 try:
     config = ConfigManager()
-    print("Configuration loaded successfully from config.yaml")
 except FileNotFoundError as e:
     print(f"ERROR: {e}")
     # Handle error appropriately, maybe exit or create a default config
