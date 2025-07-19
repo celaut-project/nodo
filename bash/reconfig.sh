@@ -31,16 +31,11 @@ NC='\033[0m' # No Color
 
 # --- Utility Functions (based on yq) ---
 
-# Read a value from the YAML file.
-# $1: Key in dot notation (e.g., ledgers.ergo.NODE_URL)
 get_yaml_variable() {
     local key=$1
     yq e ".$key" "$CONFIG_FILE" || echo ""
 }
 
-# Update or add a value in the YAML file.
-# $1: Key in dot notation.
-# $2: New value.
 update_yaml_variable() {
     local key=$1
     local new_value=$2
@@ -74,12 +69,13 @@ validate_integer() {
         printf "%b\n" "${RED}   -> Invalid input. Enter an integer number.${NC}"; return 1; fi
 }
 
-# --- Main Logic ---
+validate_boolean() {
+    if [[ "$1" == "true" || "$1" == "false" ]]; then return 0; else
+        printf "%b\n" "${RED}   -> Invalid input. Enter 'true' or 'false'.${NC}"; return 1; fi
+}
 
-# Enhanced function to handle a variable interactively.
-# $1: YAML Key (e.g., 'network.NGROK_TUNNELS_KEY')
-# $2: Description for the user (e.g., 'NGROK Tunnels Key')
-# $3: Validation function (optional)
+# --- Interactive Input Handler ---
+
 handle_variable() {
     local key=$1
     local description=$2
@@ -89,7 +85,6 @@ handle_variable() {
     printf "%b\n" "${MAGENTA}-----------------------------------------------------${NC}"
     printf "%b\n" "${CYAN}Configuring: ${YELLOW}${description}${NC}"
 
-    # Show current value, masking sensitive data
     if [[ "$current_value" == "null" || -z "$current_value" ]]; then
         printf "   Current value: ${YELLOW}(not set)${NC}\n"
     elif [[ "$key" == "ledgers.0.WALLET_MNEMONIC" || "$key" == "network.NGROK_TUNNELS_KEY" ]]; then
@@ -135,7 +130,6 @@ printf "\n"
 printf "%b\n" "${CYAN}Starting interactive configuration for '$CONFIG_FILE'...${NC}"
 printf "\n"
 
-# Interactive configuration of each variable
 handle_variable "ledgers.ergo.NODE_URL" "Ergo Node URL" validate_url
 handle_variable "ledgers.ergo.WALLET_MNEMONIC" "Ergo Wallet Mnemonic" validate_wallet_address
 handle_variable "reputation.REPUTATION_PROOF_ID" "Reputation Proof ID" validate_reputation_id
@@ -144,6 +138,7 @@ handle_variable "network.NGROK_TUNNELS_KEY" "NGROK Tunnels Key"
 handle_variable "costs.FREE_GAS_THRESHOLD" "Free Gas Threshold" validate_integer
 handle_variable "costs.SOCIALIZATION_FACTOR" "Socialization Factor" validate_integer
 handle_variable "payments.DONATION_PERCENTAGE" "Donation Percentage (e.g. 5.5)" validate_percentage
+handle_variable "DEBUG_MODE" "Debug Mode (true/false)" validate_boolean
 
 # --- Completion ---
 printf "\n"
