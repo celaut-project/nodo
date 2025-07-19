@@ -1028,11 +1028,19 @@ class SQLConnection(metaclass=Singleton):
             peer_id (Optional[str]): The ID of the peer or None for a self contract (to be send to clients.)
             gas_price (Int): Gas per unit of the token if the contract represents one, or gas per contract spend/execution/usage.
         """
-        contract_str: bytes = contract.ScriptTemplate.SerializeToString()
+        try:
+            contract_str: bytes = contract.ScriptTemplate.SerializeToString()
+        except Exception as e:
+            print(f"Error serializing contract script: {e}")
+            raise e
         address: str = contract.script.decode('utf-8')
 
         ledger = self.check_if_ledger_exists(ledger_to_check=contract.ledger)
-        ledger_str: bytes = contract.ledger.SerializeToString()
+        try:
+            ledger_str: bytes = ledger.SerializeToString()
+        except Exception as e:
+            print(f"Error serializing ledger: {e}")
+            raise e
 
         contract_hash: str = sha3_256(contract_str).hexdigest()
         ledger_hash: str = sha3_256(ledger_str).hexdigest()
