@@ -34,7 +34,7 @@ MANAGER_ITERATION_TIME = int(env_manager.get("MANAGER_ITERATION_TIME"))
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 
-DEBUG_MODE = False
+DEBUG_MODE = env_manager.get("DEBUG_MODE")
 
 sc = SQLConnection()
 
@@ -263,4 +263,6 @@ def manager_thread():
         DuplicateGrabber().manager()
         
         sleep(MANAGER_ITERATION_TIME)
+        if DEBUG_MODE:
+            log.LOGGER(f"Long interval count: {short_interval_count}/{SHORT_INTERVAL_COUNT}.")
         short_interval_count += 1
