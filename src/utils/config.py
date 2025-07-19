@@ -2,6 +2,7 @@ import os
 import yaml
 import hashlib
 import subprocess
+import time
 from functools import reduce
 from typing import Final, Dict, Callable, Any
 import docker as docker_lib
@@ -17,14 +18,17 @@ class ConfigManager(metaclass=Singleton):
     (like 'auto' for ports or path interpolation), and provides a simple
     interface to access configuration values.
     """
-    def __init__(self, config_path="config.yaml"):
+    def __init__(self, config_path="config.yaml", cache_duration=1.0):
         """
         Initializes the ConfigManager.
         Args:
             config_path (str): The path to the YAML configuration file.
+            cache_duration (float): Time in seconds to cache config before reloading from disk.
         """
         self.config_path = config_path
+        self.cache_duration = cache_duration
         self._config = {}
+        self._last_load_time = 0
         self.load_config()
 
     def _get_nested(self, data: Dict, keys: list) -> Any:
@@ -40,6 +44,13 @@ class ConfigManager(metaclass=Singleton):
             data = data.setdefault(key, {})
         data[keys[-1]] = value
 
+    def _should_reload_config(self) -> bool:
+        """
+        Determines if the configuration should be reloaded from disk.
+        Returns True if more than cache_duration seconds have passed since last load.
+        """
+        return (time.time() - self._last_load_time) > self.cache_duration
+
     def load_config(self):
         """Loads the YAML file, processes dynamic values, and interpolates paths."""
         if not os.path.exists(self.config_path):
@@ -50,6 +61,7 @@ class ConfigManager(metaclass=Singleton):
 
         self._process_dynamic_values()
         self._interpolate_paths(self._config)
+        self._last_load_time = time.time()
 
     def save_config(self):
         """Saves the current configuration back to the YAML file."""
@@ -62,16 +74,21 @@ class ConfigManager(metaclass=Singleton):
             os.chmod(self.config_path, 0o666)  # To allow sudo nodo update and still be writable
         except Exception as e:
             pass
+        
+        # Update the last load time since we just saved (config is fresh)
+        self._last_load_time = time.time()
 
     def get(self, key: str, default: Any = None) -> Any:
         """
         Retrieves a configuration value.
         Nested values can be accessed using dot notation (e.g., 'docker.DOCKER_CLIENT_TIMEOUT').
         Also allows top-level lookups (e.g., 'DOCKER_CLIENT_TIMEOUT').
+        
+        Reloads config from disk only if cache_duration has expired.
         """
-
-        # First reload config
-        self.load_config()  # TODO : This might not be necessary every time, consider caching if performance is an issue.
+        # Reload config only if cache has expired
+        if self._should_reload_config():
+            self.load_config()
 
         # 1. Try to get the value using nested key resolution
         value = self._get_nested(self._config, key.split('.'))
@@ -98,6 +115,13 @@ class ConfigManager(metaclass=Singleton):
         """
         self._set_nested(self._config, key.split('.'), value)
         self.save_config()
+
+    def force_reload(self):
+        """
+        Forces a reload of the configuration from disk, ignoring cache.
+        Useful when you know the file has been modified externally.
+        """
+        self.load_config()
 
     def _interpolate_paths(self, data: Any, context: Dict = None):
         """
@@ -130,7 +154,6 @@ class ConfigManager(metaclass=Singleton):
             else:
                 items.append((new_key, v))
         return dict(items)
-
 
     def _process_dynamic_values(self):
         """Handles special 'auto' values for dynamic configuration."""
