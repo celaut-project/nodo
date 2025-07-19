@@ -34,7 +34,7 @@ MANAGER_ITERATION_TIME = int(env_manager.get("MANAGER_ITERATION_TIME"))
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 
-DEBUG_MODE = env_manager.get("DEBUG_MODE")
+DEBUG_MODE = lambda: env_manager.get("DEBUG_MODE")
 
 sc = SQLConnection()
 
@@ -257,12 +257,12 @@ def manager_thread():
         # Functions to be executed every short interval
         if wanted_services:
             check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
-        maintain_containers(debug_mode=DEBUG_MODE)
-        maintain_clients(debug_mode=DEBUG_MODE)
-        peer_deposits(debug_mode=DEBUG_MODE)
+        maintain_containers(debug_mode=DEBUG_MODE())
+        maintain_clients(debug_mode=DEBUG_MODE())
+        peer_deposits(debug_mode=DEBUG_MODE())
         DuplicateGrabber().manager()
         
         sleep(MANAGER_ITERATION_TIME)
-        if DEBUG_MODE:
+        if DEBUG_MODE():
             log.LOGGER(f"Long interval count: {short_interval_count}/{SHORT_INTERVAL_COUNT}.")
         short_interval_count += 1
