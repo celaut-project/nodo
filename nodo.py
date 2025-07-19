@@ -413,11 +413,11 @@ if __name__ == '__main__':
             case 'config':
                 from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
                 os.system("chmod +x bash/reconfig.sh && ./bash/reconfig.sh")
-                if not validate_reputation_proof_ownership():
+                if env_manager.get("REPUTATION_PROOF_ID") and not validate_reputation_proof_ownership():
                     _msg = "The reputation proof is not associated with the provided main address. It will be removed from the node environment registry."
                     log.LOGGER(_msg)
                     print(_msg)
-                    env_manager.write_env("REPUTATION_PROOF_ID", "")
+                    env_manager.set("REPUTATION_PROOF_ID", "")
 
             case 'migrate':
                 import os
