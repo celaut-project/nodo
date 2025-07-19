@@ -235,6 +235,8 @@ def check_dev_clients():
 
 
 def manager_thread():
+
+    log.LOGGER("Starting manager thread...")
     
     # Functions to be executed at the beginning
     init_interfaces()
@@ -244,6 +246,7 @@ def manager_thread():
     
     short_interval_count = 0
     while True:
+        log.LOGGER("Manager thread iteration started.")
         if short_interval_count == int(SHORT_INTERVAL_COUNT):
             short_interval_count = 0
             
