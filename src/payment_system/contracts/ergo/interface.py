@@ -26,7 +26,7 @@ DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
 LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.  TODO Ergo ledger actually should be the serialized protobuf.  -> But must be an id, and be defined on a yalm config file with the rest of envs. 
 CONTRACT = "proveDlog(decodePoint())"  # Ergo tree template script
 CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
-ledgers.ergo.NODE_URL = lambda: env_manager.get("ledgers.ergo.NODE_URL")
+ERGO_NODE_URL lambda: env_manager.get("ledgers.ergo.NODE_URL")
 COLD_WALLET = lambda: env_manager.get('PAYMENTS_RECIVER_WALLET')
 ERGO_DONATION_WALLET = lambda: env_manager.get('ledgers.ergo.DONATION_WALLET')
 DONATION_PERCENTAGE = lambda: clamp(float(env_manager.get('ledgers.ergo.DONATION_PERCENTAGE')), 1.0, 0.0)  # type: ignore
