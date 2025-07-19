@@ -1,11 +1,11 @@
 main:
   MAIN_DIR: "/nodo"
-  STORAGE: "${MAIN_DIR}/storage"
-  CACHE: "${STORAGE}/__cache__/"
-  REGISTRY: "${STORAGE}/__registry__/"
-  METADATA_REGISTRY: "${STORAGE}/__metadata__/"
-  BLOCKDIR: "${STORAGE}/__block__/"
-  DATABASE_FILE: "${STORAGE}/database.sqlite"
+  STORAGE: "/nodo/storage"
+  CACHE: "/nodo/storage/__cache__/"
+  REGISTRY: "/nodo/storage/__registry__/"
+  METADATA_REGISTRY: "/nodo/storage/__metadata__/"
+  BLOCKDIR: "/nodo/storage/__block__/"
+  DATABASE_FILE: "/nodo/storage/database.sqlite"
 
 docker:
   DOCKER_CLIENT_TIMEOUT: 480
