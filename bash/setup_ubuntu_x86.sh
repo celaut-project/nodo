@@ -53,6 +53,12 @@ else
     fi
 fi
 
+echo "Installing yq for YAML processing..."
+if ! command -v yq &> /dev/null; then
+    sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
+    sudo chmod +x /usr/local/bin/yq
+fi
+
 echo "Adding Python 3.11 repository..."
 sudo add-apt-repository ppa:deadsnakes/ppa -y > /dev/null
 
