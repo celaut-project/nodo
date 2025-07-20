@@ -90,7 +90,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         
         check_balance = CHECK_SENDER_BALANCE[contract_hash]
         if not check_balance(amount):
-            _l.LOGGER(f"Insufficient balance for {contract_hash}")
+            _l.LOGGER(f"Insufficient balance for contract {contract_hash[:6]}.")
             continue
         
         if not deposit_token:
