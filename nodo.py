@@ -328,6 +328,7 @@ if __name__ == '__main__':
                 if os.geteuid() != 0:
                     print("This script requires superuser privileges. Please run with sudo.")
                 else:
+                    os.system(f"{MAIN_DIR}/bash/restore_source.sh")
                     os.system(f"{MAIN_DIR}/install.sh")
 
             case "stop":
