@@ -2,7 +2,8 @@
 
 CONFIG_FILE="config.yaml"
 
-# --- Prerequisite: Check if yq and bc are installed ---
+# --- Prerequisite Checks ---
+# Check for yq
 if ! command -v yq &> /dev/null; then
     echo -e "\033[1;31mError: 'yq' is not installed or not found in PATH.\033[0m"
     echo -e "\033[0;33m'yq' is required to safely read and write to the YAML configuration file.\033[0m"
@@ -10,12 +11,12 @@ if ! command -v yq &> /dev/null; then
     exit 1
 fi
 
+# Check for bc (required for advanced validation)
 if ! command -v bc &> /dev/null; then
     echo -e "\033[1;31mError: 'bc' is not installed or not found in PATH.\033[0m"
     echo -e "\033[0;33m'bc' is required for floating-point number validations.\033[0m"
     exit 1
 fi
-
 
 # --- Check if the configuration file exists ---
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -32,8 +33,7 @@ MAGENTA='\033[1;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# --- Master List of All Configurable Variables ---
-# Keeping this list updated is key for the progress counter.
+# --- Master List of All Configurable Variables (for Advanced Menu) ---
 ALL_VARIABLES=(
     "ledgers.ergo.NODE_URL" "ledgers.ergo.WALLET_MNEMONIC"
     "reputation.REPUTATION_PROOF_ID"
@@ -47,7 +47,8 @@ ALL_VARIABLES=(
 )
 TOTAL_VARS=${#ALL_VARIABLES[@]}
 
-# --- Utility Functions (yq) ---
+# --- Utility & Validation Functions (Shared) ---
+
 get_yaml_variable() {
     yq e ".$1" "$CONFIG_FILE" || echo "null"
 }
@@ -71,7 +72,6 @@ is_variable_set() {
     fi
 }
 
-# --- Validation Functions ---
 validate_url() { if [[ $1 =~ ^https?://.* ]]; then return 0; else printf "%b\n" "${RED}   -> Invalid URL. Must start with http:// or https://${NC}"; return 1; fi; }
 validate_wallet_address() { if [[ ${#1} -ge 30 ]]; then return 0; else printf "%b\n" "${RED}   -> Invalid format. At least 30 characters expected.${NC}"; return 1; fi; }
 validate_reputation_id() { if [[ ${#1} -ge 30 ]]; then return 0; else printf "%b\n" "${RED}   -> Invalid format. At least 30 characters expected.${NC}"; return 1; fi; }
@@ -79,7 +79,7 @@ validate_percentage() { if [[ $1 =~ ^[0-9]+(\.[0-9]+)?$ ]] && (( $(echo "$1 >= 0
 validate_integer() { if [[ $1 =~ ^-?[0-9]+$ ]]; then return 0; else printf "%b\n" "${RED}   -> Invalid input. Enter an integer number.${NC}"; return 1; fi; }
 validate_boolean() { if [[ "$1" == "true" || "$1" == "false" ]]; then return 0; else printf "%b\n" "${RED}   -> Invalid input. Enter 'true' or 'false'.${NC}"; return 1; fi; }
 
-# --- Interactive Input Handler ---
+# --- Interactive Input Handler (Shared) ---
 handle_variable() {
     local key=$1
     local description=$2
@@ -89,7 +89,7 @@ handle_variable() {
     printf "%b\n" "${CYAN}Configuring: ${YELLOW}${description}${NC}"
     if ! is_variable_set "$key"; then
         printf "   Current value: ${YELLOW}(not set)${NC}\n"
-    elif [[ "$key" == "ledgers.ergo.WALLET_MNEMONIC" || "$key" == "network.NGROK_TUNNELS_KEY" ]]; then
+    elif [[ "$key" == *MNEMONIC* || "$key" == *KEY* ]]; then
         printf "   Current value: ${GREEN}${current_value:0:5}...${current_value: -5}${NC}\n"
     else
         printf "   Current value: ${GREEN}${current_value}${NC}\n"
@@ -104,162 +104,151 @@ handle_variable() {
         fi
         if [ -n "$validation_function" ]; then
             if $validation_function "$new_value"; then
-                update_yaml_variable "$key" "$new_value"
-                printf "%b\n" "${GREEN}   => Value updated successfully.${NC}"
-                break
+                update_yaml_variable "$key" "$new_value"; printf "%b\n" "${GREEN}   => Value updated successfully.${NC}"; break
             else
                 printf "%b\n" "${RED}   => Invalid input. Please try again.${NC}"
             fi
         else
-            update_yaml_variable "$key" "$new_value"
-            printf "%b\n" "${GREEN}   => Value updated successfully.${NC}"
-            break
+            update_yaml_variable "$key" "$new_value"; printf "%b\n" "${GREEN}   => Value updated successfully.${NC}"; break
         fi
     done; printf "\n"
 }
 
-# --- Functions for Each Configuration Category ---
-configure_ledgers() {
+# --- MODE 1: Quick Setup (Initial Version) ---
+run_quick_setup() {
+    clear
+    printf "%b\n" "${BLUE}#############################################################${NC}"
+    printf "%b\n" "${BLUE}#${NC}              ${YELLOW}Quick Setup Utility${NC}                 ${BLUE}#${NC}"
+    printf "%b\n" "${BLUE}#${NC}          (Configuring essential variables)          ${BLUE}#${NC}"
+    printf "%b\n" "${BLUE}#############################################################${NC}"
+    printf "\n"
+    printf "%b\n" "${CYAN}Starting interactive configuration for '$CONFIG_FILE'...${NC}"
+    printf "\n"
+
     handle_variable "ledgers.ergo.NODE_URL" "Ergo Node URL" validate_url
     handle_variable "ledgers.ergo.WALLET_MNEMONIC" "Ergo Wallet Mnemonic" validate_wallet_address
-}
-configure_reputation() {
     handle_variable "reputation.REPUTATION_PROOF_ID" "Reputation Proof ID" validate_reputation_id
-}
-configure_payments() {
     handle_variable "payments.PAYMENTS_RECEIVER_WALLET" "Payment Receiver Wallet" validate_wallet_address
-    handle_variable "payments.DONATION_PERCENTAGE" "Donation Percentage (e.g., 5.5)" validate_percentage
-}
-configure_network() {
     handle_variable "network.NGROK_TUNNELS_KEY" "NGROK Tunnels Key"
-}
-configure_costs() {
     handle_variable "costs.FREE_GAS_THRESHOLD" "Free Gas Threshold" validate_integer
     handle_variable "costs.SOCIALIZATION_FACTOR" "Socialization Factor" validate_integer
-    handle_variable "costs.ALLOW_GAS_DEBT" "Allow Gas Debt (true/false)" validate_boolean
-}
-configure_packer() {
-    handle_variable "packer.SAVE_ALL" "Packer: Save all items (true/false)" validate_boolean
-}
-configure_communication() {
-    handle_variable "communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS" "Communication: Announce instance to connecting peers"
-    handle_variable "communication.SEND_ONLY_HASHES_ASKING_COST" "Communication: Send only hashes when asking for cost"
-    handle_variable "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH" "Communication: Deny cost request if hash is not available"
-}
-configure_misc() {
-    handle_variable "misc.VALIDATE_ON_IMPORT" "Misc: Validate on import (true/false)" validate_boolean
-}
-configure_logs() {
+    handle_variable "payments.DONATION_PERCENTAGE" "Donation Percentage (e.g. 5.5)" validate_percentage
     handle_variable "logs.DEBUG_MODE" "Debug Mode (true/false)" validate_boolean
+
+    printf "\n${GREEN}Quick setup complete!${NC}\n"
+    printf "Press [Enter] to return to the main menu."
+    read -r
 }
 
-# --- Main Menu Logic ---
+# --- MODE 2: Advanced Setup (Categorized Version) ---
+
+# --- Functions for Each Configuration Category ---
+configure_ledgers() { handle_variable "ledgers.ergo.NODE_URL" "Ergo Node URL" validate_url; handle_variable "ledgers.ergo.WALLET_MNEMONIC" "Ergo Wallet Mnemonic" validate_wallet_address; }
+configure_reputation() { handle_variable "reputation.REPUTATION_PROOF_ID" "Reputation Proof ID" validate_reputation_id; }
+configure_payments() { handle_variable "payments.PAYMENTS_RECEIVER_WALLET" "Payment Receiver Wallet" validate_wallet_address; handle_variable "payments.DONATION_PERCENTAGE" "Donation Percentage (e.g., 5.5)" validate_percentage; }
+configure_network() { handle_variable "network.NGROK_TUNNELS_KEY" "NGROK Tunnels Key"; }
+configure_costs() { handle_variable "costs.FREE_GAS_THRESHOLD" "Free Gas Threshold" validate_integer; handle_variable "costs.SOCIALIZATION_FACTOR" "Socialization Factor" validate_integer; handle_variable "costs.ALLOW_GAS_DEBT" "Allow Gas Debt (true/false)" validate_boolean; }
+configure_packer() { handle_variable "packer.SAVE_ALL" "Packer: Save all items (true/false)" validate_boolean; }
+configure_communication() { handle_variable "communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS" "Comm: Announce instance to connecting peers"; handle_variable "communication.SEND_ONLY_HASHES_ASKING_COST" "Comm: Send only hashes when asking for cost"; handle_variable "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH" "Comm: Deny cost request if hash is not available"; }
+configure_misc() { handle_variable "misc.VALIDATE_ON_IMPORT" "Misc: Validate on import (true/false)" validate_boolean; }
+configure_logs() { handle_variable "logs.DEBUG_MODE" "Debug Mode (true/false)" validate_boolean; }
+
+run_advanced_setup() {
+    while true; do
+        clear
+        printf "%b\n" "${BLUE}#############################################################${NC}"
+        printf "%b\n" "${BLUE}#${NC}           ${YELLOW}Advanced Configuration Utility${NC}            ${BLUE}#${NC}"
+        printf "%b\n" "${BLUE}#############################################################${NC}"
+
+        # Calculate and display configuration status
+        local set_count=0
+        for var in "${ALL_VARIABLES[@]}"; do if is_variable_set "$var"; then ((set_count++)); fi; done
+        local status_color="${YELLOW}"; if [ "$set_count" -eq "$TOTAL_VARS" ]; then status_color="${GREEN}"; fi
+        printf "\n${status_color}Configuration Status: ${set_count} of ${TOTAL_VARS} variables are set.${NC}\n\n"
+        
+        get_category_status() { local vars=("$@"); local total=${#vars[@]}; local count=0; for var in "${vars[@]}"; do if is_variable_set "$var"; then ((count++)); fi; done; if [ "$count" -eq "$total" ]; then echo -e "${GREEN}($count/$total set)${NC}"; else echo -e "${YELLOW}($count/$total set)${NC}"; fi; }
+        
+        # Menu Options
+        printf "Select a category to configure:\n"
+        printf " 1) Ledgers        %s\n" "$(get_category_status "ledgers.ergo.NODE_URL" "ledgers.ergo.WALLET_MNEMONIC")"
+        printf " 2) Reputation     %s\n" "$(get_category_status "reputation.REPUTATION_PROOF_ID")"
+        printf " 3) Payments       %s\n" "$(get_category_status "payments.PAYMENTS_RECEIVER_WALLET" "payments.DONATION_PERCENTAGE")"
+        printf " 4) Network        %s\n" "$(get_category_status "network.NGROK_TUNNELS_KEY")"
+        printf " 5) Costs          %s\n" "$(get_category_status "costs.FREE_GAS_THRESHOLD" "costs.SOCIALIZATION_FACTOR" "costs.ALLOW_GAS_DEBT")"
+        printf " 6) Packer         %s\n" "$(get_category_status "packer.SAVE_ALL")"
+        printf " 7) Communication  %s\n" "$(get_category_status "communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS" "communication.SEND_ONLY_HASHES_ASKING_COST" "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH")"
+        printf " 8) Misc           %s\n" "$(get_category_status "misc.VALIDATE_ON_IMPORT")"
+        printf " 9) Logs           %s\n" "$(get_category_status "logs.DEBUG_MODE")"
+        printf -- "-----------------------------------------------------\n"
+        if [ "$set_count" -ne "$TOTAL_VARS" ]; then printf "${CYAN}10) Configure ALL unset variables...${NC}\n"; fi
+        printf " 0) Back to Main Menu\n\n"
+
+        printf "${YELLOW}Choose an option: ${NC}"; read -r choice
+
+        case $choice in
+            1) configure_ledgers ;;
+            2) configure_reputation ;;
+            3) configure_payments ;;
+            4) configure_network ;;
+            5) configure_costs ;;
+            6) configure_packer ;;
+            7) configure_communication ;;
+            8) configure_misc ;;
+            9) configure_logs ;;
+            10) 
+                if [ "$set_count" -ne "$TOTAL_VARS" ]; then
+                    printf "\n${CYAN}Reviewing all configuration categories...${NC}\n"
+                    configure_ledgers; configure_reputation; configure_payments; configure_network; configure_costs; configure_packer; configure_communication; configure_misc; configure_logs
+                    printf "\n${GREEN}Full review completed.${NC}\n"; sleep 2
+                else
+                    printf "\n${GREEN}All variables are already set. Nothing to do.${NC}\n"; sleep 2
+                fi
+                ;;
+            0) break ;;
+            *) printf "\n${RED}Invalid option. Please try again.${NC}\n"; sleep 1 ;;
+        esac
+    done
+}
+
+# --- Main Execution: Top-Level Menu ---
 while true; do
     clear
     printf "%b\n" "${BLUE}#############################################################${NC}"
     printf "%b\n" "${BLUE}#${NC}             ${YELLOW}Node Configuration Utility${NC}              ${BLUE}#${NC}"
     printf "%b\n" "${BLUE}#############################################################${NC}"
-
-    # --- Calculate and display configuration status ---
-    set_count=0
-    for var in "${ALL_VARIABLES[@]}"; do
-        if is_variable_set "$var"; then
-            ((set_count++))
-        fi
-    done
-    
-    status_color="${YELLOW}"
-    if [ "$set_count" -eq "$TOTAL_VARS" ]; then
-        status_color="${GREEN}"
-    fi
-    printf "\n${status_color}Configuration Status: ${set_count} of ${TOTAL_VARS} variables are set.${NC}\n\n"
-    
-    # Function to get the status of a category
-    get_category_status() {
-        local vars=("$@")
-        local total=${#vars[@]}
-        local count=0
-        for var in "${vars[@]}"; do
-            if is_variable_set "$var"; then
-                ((count++))
-            fi
-        done
-        if [ "$count" -eq "$total" ]; then
-            echo -e "${GREEN}($count/$total set)${NC}"
-        else
-            echo -e "${YELLOW}($count/$total set)${NC}"
-        fi
-    }
-    
-    # Menu Options
-    cat_ledgers_vars=("ledgers.ergo.NODE_URL" "ledgers.ergo.WALLET_MNEMONIC")
-    cat_reputation_vars=("reputation.REPUTATION_PROOF_ID")
-    cat_payments_vars=("payments.PAYMENTS_RECEIVER_WALLET" "payments.DONATION_PERCENTAGE")
-    cat_network_vars=("network.NGROK_TUNNELS_KEY")
-    cat_costs_vars=("costs.FREE_GAS_THRESHOLD" "costs.SOCIALIZATION_FACTOR" "costs.ALLOW_GAS_DEBT")
-    cat_packer_vars=("packer.SAVE_ALL")
-    cat_comm_vars=("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS" "communication.SEND_ONLY_HASHES_ASKING_COST" "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH")
-    cat_misc_vars=("misc.VALIDATE_ON_IMPORT")
-    cat_logs_vars=("logs.DEBUG_MODE")
-
-    printf "Select a category to configure:\n"
-    printf " 1) Ledgers        %s\n" "$(get_category_status "${cat_ledgers_vars[@]}")"
-    printf " 2) Reputation     %s\n" "$(get_category_status "${cat_reputation_vars[@]}")"
-    printf " 3) Payments       %s\n" "$(get_category_status "${cat_payments_vars[@]}")"
-    printf " 4) Network        %s\n" "$(get_category_status "${cat_network_vars[@]}")"
-    printf " 5) Costs          %s\n" "$(get_category_status "${cat_costs_vars[@]}")"
-    printf " 6) Packer         %s\n" "$(get_category_status "${cat_packer_vars[@]}")"
-    printf " 7) Communication  %s\n" "$(get_category_status "${cat_comm_vars[@]}")"
-    printf " 8) Misc           %s\n" "$(get_category_status "${cat_misc_vars[@]}")"
-    printf " 9) Logs           %s\n" "$(get_category_status "${cat_logs_vars[@]}")"
-    printf -- "-----------------------------------------------------\n"
-    if [ "$set_count" -ne "$TOTAL_VARS" ]; then
-        printf "${CYAN}10) Configure ALL unset variables...${NC}\n"
-    fi
-    printf " 0) Exit\n\n"
-
+    printf "\n"
+    printf "Welcome! Please choose a configuration mode:\n\n"
+    printf " ${YELLOW}1)${NC} Quick Setup (Recommended for first-time use)\n"
+    printf " ${YELLOW}2)${NC} Advanced Configuration (View all options by category)\n"
+    printf "\n"
+    printf " ${YELLOW}0)${NC} Exit\n"
+    printf "\n"
     printf "${YELLOW}Choose an option: ${NC}"
-    read -r choice
+    read -r main_choice
 
-    case $choice in
-        1) configure_ledgers ;;
-        2) configure_reputation ;;
-        3) configure_payments ;;
-        4) configure_network ;;
-        5) configure_costs ;;
-        6) configure_packer ;;
-        7) configure_communication ;;
-        8) configure_misc ;;
-        9) configure_logs ;;
-        10) 
-            if [ "$set_count" -ne "$TOTAL_VARS" ]; then
-                printf "\n${CYAN}Reviewing all configuration categories...${NC}\n\n"
-                configure_ledgers
-                configure_reputation
-                configure_payments
-                configure_network
-                configure_costs
-                configure_packer
-                configure_communication
-                configure_misc
-                configure_logs
-                printf "${GREEN}Full review completed.${NC}\n"
-                sleep 2
-            else
-                printf "\n${GREEN}All variables are already set. Nothing to do.${NC}\n"; sleep 2
-            fi
+    case $main_choice in
+        1)
+            run_quick_setup
             ;;
-        0) break ;;
-        *) printf "\n${RED}Invalid option. Please try again.${NC}\n"; sleep 1 ;;
+        2)
+            run_advanced_setup
+            ;;
+        0)
+            break
+            ;;
+        *)
+            printf "\n${RED}Invalid option. Please try again.${NC}\n"
+            sleep 1
+            ;;
     esac
 done
 
 # --- Completion ---
 printf "\n"
 printf "%b\n" "${MAGENTA}-----------------------------------------------------${NC}"
-printf "%b\n" "${BLUE}Configuration process completed.${NC}"
+printf "%b\n" "${BLUE}Exiting configuration utility.${NC}"
 printf "\n"
-printf "%b\n" "${GREEN}The file '$CONFIG_FILE' has been updated.${NC}"
+printf "%b\n" "${GREEN}The file '$CONFIG_FILE' has been updated with your changes.${NC}"
 printf "\n"
 
 exit 0
