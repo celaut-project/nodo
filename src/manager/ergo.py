@@ -27,7 +27,7 @@ def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
                 "appVersion": data.get("appVersion", "unknown")
             }
         else:
-            logger(f"Ergo node {ergo_node_url} is not on the mainnet or has an incorrect genesis block ID.")
+            logger(f"Ergo node {ergo_node_url} is not on the mainnet or has an incorrect genesis block ID. The genesisBlockId is {data.get('genesisBlockId')}, expected {env_manager.get('ledgers.ergo.GENESIS_BLOCK_ID')}.")
             return None
     except requests.exceptions.RequestException as e:
         logger(f"Error connecting to Ergo node: {e}")
