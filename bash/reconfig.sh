@@ -114,7 +114,7 @@ handle_variable() {
     done; printf "\n"
 }
 
-# --- MODE 1: Quick Setup (Initial Version) ---
+# --- MODE 1: Quick Setup (Simplified Version) ---
 run_quick_setup() {
     clear
     printf "%b\n" "${BLUE}#############################################################${NC}"
@@ -129,12 +129,8 @@ run_quick_setup() {
     handle_variable "ledgers.ergo.WALLET_MNEMONIC" "Ergo Wallet Mnemonic" validate_wallet_address
     handle_variable "reputation.REPUTATION_PROOF_ID" "Reputation Proof ID" validate_reputation_id
     handle_variable "payments.PAYMENTS_RECEIVER_WALLET" "Payment Receiver Wallet" validate_wallet_address
-    handle_variable "network.NGROK_TUNNELS_KEY" "NGROK Tunnels Key"
-    handle_variable "costs.FREE_GAS_THRESHOLD" "Free Gas Threshold" validate_integer
-    handle_variable "costs.SOCIALIZATION_FACTOR" "Socialization Factor" validate_integer
     handle_variable "payments.DONATION_PERCENTAGE" "Donation Percentage (e.g. 5.5)" validate_percentage
-    handle_variable "logs.DEBUG_MODE" "Debug Mode (true/false)" validate_boolean
-
+    
     printf "\n${GREEN}Quick setup complete!${NC}\n"
     printf "Press [Enter] to return to the main menu."
     read -r
