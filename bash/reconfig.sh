@@ -33,7 +33,7 @@ MAGENTA='\033[1;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# --- Master List of All Configurable Variables (for Advanced Menu) ---
+# --- Master List of All Configurable Variables ---
 ALL_VARIABLES=(
     "ledgers.ergo.NODE_URL" "ledgers.ergo.WALLET_MNEMONIC"
     "reputation.REPUTATION_PROOF_ID"
@@ -137,8 +137,7 @@ run_quick_setup() {
 }
 
 # --- MODE 2: Advanced Setup (Categorized Version) ---
-
-# --- Functions for Each Configuration Category ---
+# Functions for Each Configuration Category
 configure_ledgers() { handle_variable "ledgers.ergo.NODE_URL" "Ergo Node URL" validate_url; handle_variable "ledgers.ergo.WALLET_MNEMONIC" "Ergo Wallet Mnemonic" validate_wallet_address; }
 configure_reputation() { handle_variable "reputation.REPUTATION_PROOF_ID" "Reputation Proof ID" validate_reputation_id; }
 configure_payments() { handle_variable "payments.PAYMENTS_RECEIVER_WALLET" "Payment Receiver Wallet" validate_wallet_address; handle_variable "payments.DONATION_PERCENTAGE" "Donation Percentage (e.g., 5.5)" validate_percentage; }
@@ -156,7 +155,6 @@ run_advanced_setup() {
         printf "%b\n" "${BLUE}#${NC}           ${YELLOW}Advanced Configuration Utility${NC}            ${BLUE}#${NC}"
         printf "%b\n" "${BLUE}#############################################################${NC}"
 
-        # Calculate and display configuration status
         local set_count=0
         for var in "${ALL_VARIABLES[@]}"; do if is_variable_set "$var"; then ((set_count++)); fi; done
         local status_color="${YELLOW}"; if [ "$set_count" -eq "$TOTAL_VARS" ]; then status_color="${GREEN}"; fi
@@ -164,7 +162,6 @@ run_advanced_setup() {
         
         get_category_status() { local vars=("$@"); local total=${#vars[@]}; local count=0; for var in "${vars[@]}"; do if is_variable_set "$var"; then ((count++)); fi; done; if [ "$count" -eq "$total" ]; then echo -e "${GREEN}($count/$total set)${NC}"; else echo -e "${YELLOW}($count/$total set)${NC}"; fi; }
         
-        # Menu Options
         printf "Select a category to configure:\n"
         printf " 1) Ledgers        %s\n" "$(get_category_status "ledgers.ergo.NODE_URL" "ledgers.ergo.WALLET_MNEMONIC")"
         printf " 2) Reputation     %s\n" "$(get_category_status "reputation.REPUTATION_PROOF_ID")"
@@ -182,15 +179,7 @@ run_advanced_setup() {
         printf "${YELLOW}Choose an option: ${NC}"; read -r choice
 
         case $choice in
-            1) configure_ledgers ;;
-            2) configure_reputation ;;
-            3) configure_payments ;;
-            4) configure_network ;;
-            5) configure_costs ;;
-            6) configure_packer ;;
-            7) configure_communication ;;
-            8) configure_misc ;;
-            9) configure_logs ;;
+            1) configure_ledgers ;; 2) configure_reputation ;; 3) configure_payments ;; 4) configure_network ;; 5) configure_costs ;; 6) configure_packer ;; 7) configure_communication ;; 8) configure_misc ;; 9) configure_logs ;;
             10) 
                 if [ "$set_count" -ne "$TOTAL_VARS" ]; then
                     printf "\n${CYAN}Reviewing all configuration categories...${NC}\n"
@@ -198,13 +187,40 @@ run_advanced_setup() {
                     printf "\n${GREEN}Full review completed.${NC}\n"; sleep 2
                 else
                     printf "\n${GREEN}All variables are already set. Nothing to do.${NC}\n"; sleep 2
-                fi
-                ;;
-            0) break ;;
-            *) printf "\n${RED}Invalid option. Please try again.${NC}\n"; sleep 1 ;;
+                fi ;;
+            0) break ;; *) printf "\n${RED}Invalid option. Please try again.${NC}\n"; sleep 1 ;;
         esac
     done
 }
+
+# --- MODE 3: View All Configuration ---
+view_all_variables() {
+    clear
+    printf "%b\n" "${BLUE}#############################################################${NC}"
+    printf "%b\n" "${BLUE}#${NC}             ${YELLOW}Current Configuration Viewer${NC}             ${BLUE}#${NC}"
+    printf "%b\n" "${BLUE}#############################################################${NC}\n"
+
+    for key in "${ALL_VARIABLES[@]}"; do
+        local current_value=$(get_yaml_variable "$key")
+        
+        printf "%-50s" "${CYAN}${key}:${NC}"
+
+        if ! is_variable_set "$key"; then
+            printf "${YELLOW}(not set)${NC}\n"
+        elif [[ "$key" == *MNEMONIC* || "$key" == *KEY* ]]; then
+            printf "${GREEN}${current_value:0:5}...${current_value: -5}${NC}\n"
+        elif [[ "$current_value" == "true" || "$current_value" == "false" ]]; then
+             printf "${MAGENTA}${current_value}${NC}\n"
+        else
+            printf "${GREEN}${current_value}${NC}\n"
+        fi
+    done
+
+    printf "\n\n${GREEN}End of configuration list.${NC}\n"
+    printf "Press [Enter] to return to the main menu."
+    read -r
+}
+
 
 # --- Main Execution: Top-Level Menu ---
 while true; do
@@ -213,9 +229,10 @@ while true; do
     printf "%b\n" "${BLUE}#${NC}             ${YELLOW}Node Configuration Utility${NC}              ${BLUE}#${NC}"
     printf "%b\n" "${BLUE}#############################################################${NC}"
     printf "\n"
-    printf "Welcome! Please choose a configuration mode:\n\n"
+    printf "Welcome! Please choose an option:\n\n"
     printf " ${YELLOW}1)${NC} Quick Setup (Recommended for first-time use)\n"
-    printf " ${YELLOW}2)${NC} Advanced Configuration (View all options by category)\n"
+    printf " ${YELLOW}2)${NC} Advanced Configuration (All options by category)\n"
+    printf " ${YELLOW}3)${NC} View Current Configuration\n"
     printf "\n"
     printf " ${YELLOW}0)${NC} Exit\n"
     printf "\n"
@@ -228,6 +245,9 @@ while true; do
             ;;
         2)
             run_advanced_setup
+            ;;
+        3)
+            view_all_variables
             ;;
         0)
             break
