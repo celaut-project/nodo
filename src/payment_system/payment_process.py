@@ -104,7 +104,8 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
         try:
             # Get all available ledgers for this peer and contract
             
-            ledgers = ledger_balancer(ledger_generator=get_peer_contract_instances(contract_hash, peer_id)) if contract_hash not in DEMOS else [("", "")]
+            scripts = get_peer_contract_instances(contract_hash, peer_id)
+            ledgers = ledger_balancer(ledger_generator=scripts) if contract_hash not in DEMOS else [("", "")]
             
             for script, ledger in ledgers:
                 
