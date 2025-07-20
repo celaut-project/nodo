@@ -1,5 +1,6 @@
 from src.database.sql_connection import SQLConnection
 from typing import Generator, Tuple, Set
+from src.utils.logger import LOGGER as log
 
 # TODO Implement a ledger balancer to decide which instance of the contract to use.
 # Also, filter between those supported by itself (by this node).
@@ -18,7 +19,7 @@ def ledger_balancer(ledger_generator: Generator[Tuple[bytes, str], None, None]) 
         Generator[Tuple[bytes, str], None, None]: 
             A filtered generator yielding only the available script and ledgers.
     """
-    sc = SQLConnection()
+    sc: SQLConnection = SQLConnection()
     checked_ledgers: Set[str] = set()  # Set to track checked ledgers
 
     for script, ledger in ledger_generator:
@@ -29,6 +30,9 @@ def ledger_balancer(ledger_generator: Generator[Tuple[bytes, str], None, None]) 
 
             if is_available:
                 yield (script, ledger)
+            else:
+                # If the ledger is not available, log it and skip yielding
+                log(f"Ledger {ledger} is not available for script {script[:6]}.")
         else:
             # If the ledger was already checked, simply yield if it was available
             yield (script, ledger)
