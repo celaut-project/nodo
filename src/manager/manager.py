@@ -91,7 +91,7 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
         except Exception as e:
             log.LOGGER(f"Uncontrolled error adding reputation proof {contract_ledger} for peer {peer_id}: {e}")
 
-    log.LOGGER(f'Get instance for peer -> {peer_id}')
+    print(peer)
     return peer_id
 
 def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str):
