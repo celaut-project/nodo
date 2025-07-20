@@ -25,7 +25,6 @@ env_manager = ConfigManager()
 DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
 LEDGER = "ergo" # or "ergo-testnet" for Ergo testnet.  TODO Ergo ledger actually should be the serialized protobuf.  -> But must be an id, and be defined on a yalm config file with the rest of envs. 
 CONTRACT = "proveDlog(decodePoint())"  # Ergo tree template script
-CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 ERGO_NODE_URL = lambda: env_manager.get("ledgers.ergo.NODE_URL")
 COLD_WALLET = lambda: env_manager.get('PAYMENTS_RECIVER_WALLET')
 ERGO_DONATION_WALLET = lambda: env_manager.get('ledgers.ergo.DONATION_WALLET')
@@ -36,6 +35,13 @@ WALLET_MNEMONIC = lambda: env_manager.get('ledgers.ergo.WALLET_MNEMONIC')  # Sen
 GAS_PER_ERG_L = lambda: int(env_manager.get("ledgers.ergo.GAS_PER_ERG"))
 WAIT_TX_TIME = 240  # 20 minutes (each 5 seconds)
 WAT_TX_SLEEP_TIME = 5
+
+ergo_template = celaut_pb2.Contract.ScriptTemplate(
+               prose="",
+               formal=CONTRACT.encode("utf-8")
+           )
+
+CONTRACT_HASH = sha3_256(ergo_template.SerializeToString()).hexdigest()
 
 """
 
@@ -143,10 +149,7 @@ def init():
            ledger=ergo_ledger,
            token_id="ERG",
            script=sender_addr.encode("utf-8"),
-           template=celaut_pb2.Contract.ScriptTemplate(
-               prose="",
-               formal=CONTRACT.encode("utf-8")
-           )
+           template=ergo_template
         )
     )
 
