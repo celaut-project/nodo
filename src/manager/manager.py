@@ -76,20 +76,20 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
 
     # Contracts
     for gas_price in peer.instance.api.payment_contracts:
-        log.LOGGER(f"Adding contract {gas_price.contract_ledger} for peer {peer_id}")
+        log.LOGGER(f"Adding contract {gas_price.contract} for peer {peer_id}")
         try:
-            sc.add_contract(contract=gas_price.contract_ledger, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
+            sc.add_contract(contract=gas_price.contract, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
         except Exception as e:
-            log.LOGGER(f"Error adding contract {gas_price.contract_ledger} for peer {peer_id}: {e}")
+            log.LOGGER(f"Error adding contract {gas_price.contract} for peer {peer_id}: {e}")
 
-    for contract_ledger in peer.reputation_proofs:
-        log.LOGGER(f"Adding reputation proof {contract_ledger} for peer {peer_id}")
+    for contract in peer.reputation_proofs:
+        log.LOGGER(f"Adding reputation proof {contract} for peer {peer_id}")
         try:
-            if not add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id):
-                log.LOGGER(f"Controlled error to add reputation proof {contract_ledger} for peer {peer_id}")
+            if not add_reputation_proof(contract_ledger=contract, peer_id=peer_id):
+                log.LOGGER(f"Controlled error to add reputation proof {contract} for peer {peer_id}")
                 continue
         except Exception as e:
-            log.LOGGER(f"Uncontrolled error adding reputation proof {contract_ledger} for peer {peer_id}: {e}")
+            log.LOGGER(f"Uncontrolled error adding reputation proof {contract} for peer {peer_id}: {e}")
 
     print(peer)
     return peer_id
