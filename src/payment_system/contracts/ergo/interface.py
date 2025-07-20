@@ -152,7 +152,10 @@ def init():
 
 def check_sender_balance(amount: int) -> bool:
     try:
-        return self.get_balances(only_sender=True)[0][1] > __gas_to_nanoerg(amount)
+        check = self.get_balances(only_sender=True)[0][1] > __gas_to_nanoerg(amount)
+        if not check:
+            LOGGER(f"Insufficient balance for the sender wallet. Required: {__gas_to_nanoerg(amount)}, Available: {self.get_balances(only_sender=True)[0][1]}")
+        return check
     except:
         return False
 
