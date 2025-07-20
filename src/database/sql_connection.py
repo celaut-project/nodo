@@ -1042,7 +1042,7 @@ class SQLConnection(metaclass=Singleton):
         self._execute("INSERT OR IGNORE INTO contract (hash, content) VALUES (?,?)",
                     (contract_hash, contract_str))
 
-        self._execute("INSERT OR IGNORE INTO ledger (hash, content) VALUES (?)",
+        self._execute("INSERT OR IGNORE INTO ledger (hash, content) VALUES (?,?)",
                     (ledger_hash, ledger_str))
 
         self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_hash, contract_hash, peer_id, gas_price) "
