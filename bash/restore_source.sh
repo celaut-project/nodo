@@ -37,6 +37,6 @@ fi
 
 # Restore each modified file to its last committed state
 for file in $files; do
-  echo "Restoring $file to its last committed state..."
+  # echo "Restoring $file to its last committed state..."
   git restore "$file"
 done
