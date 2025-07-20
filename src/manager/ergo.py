@@ -19,7 +19,7 @@ def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
 
         data = response.json()
 
-        if data.get("genesisBlockId") == env_manager.get("ERGO_GENESIS_BLOCK_ID"):
+        if data.get("genesisBlockId") == env_manager.get("ledgers.ergo.GENESIS_BLOCK_ID"):
             return {
                 "isMining": data.get("isMining", False),
                 "parameters": data.get("parameters", {}),
