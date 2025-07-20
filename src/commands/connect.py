@@ -69,4 +69,4 @@ def connect(peer: str):
                 print(f"Error sending instance to peer {peer}. {e}")
             
     except Exception as e:
-        print(e)
+        print(f"Error connecting to peer {peer}. {e}")
