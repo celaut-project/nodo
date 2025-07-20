@@ -135,7 +135,6 @@ if __name__ == '__main__':
             "\n- stop <instance id>"
             "\n- increase_gas <instance id> <gas to add>"
             "\n- decrease_gas <instance id> <gas to retire>"
-            "\n- increase_peer_deposit <peer id> <gas to add>"
             "\n- services"
             "\n- tag <service id|tag> <new tag>"
             "\n- clients"
@@ -169,6 +168,7 @@ if __name__ == '__main__':
             "\n- refresh_clients"
             "\n- daemon"
             "\n- tx_history"
+            "\n- increase_peer_deposit <peer id> <gas to add>"
             "\n\n",
               flush=True)
         try:
@@ -342,10 +342,6 @@ if __name__ == '__main__':
                 from src.commands.modify_gas import modify_gas
                 modify_gas(instance=sys.argv[2], gas=int(sys.argv[3]), decrement=True)
 
-            case "increase_peer_deposit":
-                from src.commands.increase_peer_deposit import increase_peer_deposit
-                increase_peer_deposit(peer_id=sys.argv[2], gas=int(sys.argv[3]))
-
             case "remove":
                 from src.commands.remove import remove
                 remove(service=sys.argv[2])
@@ -504,6 +500,10 @@ if __name__ == '__main__':
             case "tx_history":
                 from src.commands.tx_history import tx_history
                 tx_history()
+
+            case "increase_peer_deposit":
+                from src.commands.increase_peer_deposit import increase_peer_deposit
+                increase_peer_deposit(peer_id=sys.argv[2], gas=int(sys.argv[3]))
 
             case other:
                 print('Unknown command.', flush=True)
