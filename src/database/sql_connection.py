@@ -1016,8 +1016,8 @@ class SQLConnection(metaclass=Singleton):
                 # If they match, return the full object from the database.
                 return db_ledger
         
-        # If the loop finishes without finding a match, return None.
-        return None
+        # If the loop finishes without finding a match, return the same.
+        return ledger_to_check
 
     def add_contract(self, contract: celaut_pb2.Contract, peer_id: str = "LOCAL", gas_price: int = 0):
         """
