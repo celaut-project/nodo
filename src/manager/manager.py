@@ -428,10 +428,7 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
     
     if sc.internal_instance_exists(id=token):  # Is internal
         log.LOGGER(f"Token {token} is internal; let's stop it.")
-        try:
-            DOCKER_CLIENT().containers.get(token).remove(force=True)
-        except (docker_lib.errors.NotFound, docker_lib.errors.APIError):
-            pass  # Maybe was killed
+        stop_container(container_id=token)
         
         father_id = sc.get_internal_father_id(id=token)
         serialized_instance = sc.get_internal_instance(id=token)
@@ -439,7 +436,6 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
         try:
             refund = sc.get_container_gas(id=token)
             sc.purge_internal(id=token)
-            stop_container(container_id=token)
             
         except Exception as e:
             log.LOGGER('Error purging ' + token + ' ' + str(e))
