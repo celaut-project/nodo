@@ -8,7 +8,7 @@ def stop(instance: str):
         print("This script requires superuser privileges. Please run with sudo.")
         return
     
-    if stop_instance(token=instance):
+    if stop_instance(token=instance) is not None:
         print(f"Service instance {instance} deleted.")
     else:
         print(f"Something was wrong.")
