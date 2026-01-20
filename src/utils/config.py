@@ -249,6 +249,16 @@ if config.get('builder.ARM_SUPPORT'):
 if config.get('builder.X86_SUPPORT'):
     SUPPORTED_ARCHITECTURES.append(['linux/amd64', 'x86_64', 'amd64'])
 
+# Docker command
+DOCKER_COMMAND = "docker"
+
+# Check for rootless docker socket in the main directory
+_main_dir = config.get("main.MAIN_DIR")
+if _main_dir:
+    _rootless_socket = os.path.join(_main_dir, "docker", "docker.sock")
+    if os.path.exists(_rootless_socket):
+        os.environ["DOCKER_HOST"] = f"unix://{_rootless_socket}"
+
 # Docker client factory
 def get_docker_client():
     # Check for rootless docker socket in the main directory
