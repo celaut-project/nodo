@@ -19,6 +19,15 @@ DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MAIN_DIR = env_manager.get("MAIN_DIR")
 
 def is_nodo_service_running():
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            if s.connect_ex(('127.0.0.1', int(GATEWAY_PORT))) == 0:
+                return True
+    except Exception:
+        pass
+
     try:
         result = subprocess.run(
             ['systemctl', '--no-pager', 'status', 'nodo.service'],

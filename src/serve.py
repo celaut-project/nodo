@@ -13,6 +13,18 @@ env_manager = ConfigManager()
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 
 def serve():
+    import socket
+    import sys
+
+    # Check if port is in use to prevent simultaneous execution
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            if s.connect_ex(('127.0.0.1', int(GATEWAY_PORT))) == 0:
+                print(f"Error: Port {GATEWAY_PORT} is already in use. Nodo daemon is likely running.", flush=True)
+                sys.exit(1)
+    except Exception as e:
+        print(f"Warning: Could not check if port {GATEWAY_PORT} is in use: {e}", flush=True)
 
     # Run manager.
     threading.Thread(
