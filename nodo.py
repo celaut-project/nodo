@@ -176,6 +176,7 @@ if __name__ == '__main__':
             "\n- prune_containers"
             "\n- refresh_clients"
             "\n- daemon"
+            "\n- daemon_setup"
             "\n- tx_history"
             "\n- increase_peer_deposit <peer id> <gas to add>"
             "\n\n",

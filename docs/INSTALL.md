@@ -159,10 +159,18 @@ source venv/bin/activate
 python3 nodo.py daemon
 ```
 
-To keep it running after you close the terminal, you can use `nohup`:
-
 ```bash
 nohup python3 nodo.py daemon &
 ```
 
-The installation is now complete\! The node is running under your user account.
+#### **2.8. Optional: Set Up as a System Service**
+
+If you want to run Nodo as a system-wide `systemd` service after a manual installation, you can use the `daemon_setup` command (requires `sudo`):
+
+```bash
+sudo nodo daemon_setup
+```
+
+This will create the `/etc/systemd/system/nodo.service` file, enable it, and start it automatically.
+
+The installation is now complete! The node is running.
