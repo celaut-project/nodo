@@ -205,38 +205,49 @@ create_wrapper_script() {
               printf "\nWarning: $HOME/.local/bin is not in your PATH.\n"
               printf "Attempting to add it to your shell configuration...\n"
               
-              SHELL_CONFIG=""
-              case "$SHELL" in
-                  */bash)
-                      SHELL_CONFIG="$HOME/.bashrc"
-                      ;;
-                  */zsh)
-                      SHELL_CONFIG="$HOME/.zshrc"
-                      ;;
-                  *)
-                      # Fallback detection
-                      if [ -f "$HOME/.bashrc" ]; then
-                          SHELL_CONFIG="$HOME/.bashrc"
-                      elif [ -f "$HOME/.zshrc" ]; then
-                          SHELL_CONFIG="$HOME/.zshrc"
-                      fi
-                      ;;
-              esac
+              ADDED_TO_CONFIG=false
+              EXPORT_CMD='export PATH="$HOME/.local/bin:$PATH"'
 
-              if [ -n "$SHELL_CONFIG" ]; then
-                  if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$SHELL_CONFIG"; then
-                      echo '' >> "$SHELL_CONFIG"
-                      echo '# Added by nodo installer' >> "$SHELL_CONFIG"
-                      echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_CONFIG"
-                      printf "Successfully added to %s.\n" "$SHELL_CONFIG"
-                      printf "Please run 'source %s' or restart your terminal to use the 'nodo' command.\n" "$SHELL_CONFIG"
-                  else
-                      printf "It seems the PATH is already configured in %s but not active.\n" "$SHELL_CONFIG"
-                      printf "Please run 'source %s' or restart your terminal.\n" "$SHELL_CONFIG"
+              # Function to safely append to config
+              append_to_config() {
+                  local cfg="$1"
+                  local cmd="$2"
+                  if [ -f "$cfg" ]; then
+                      # Check if the file already contains the path (simplified check)
+                      if ! grep -Fq ".local/bin" "$cfg"; then
+                          echo "" >> "$cfg"
+                          echo "# Added by nodo installer" >> "$cfg"
+                          echo "$cmd" >> "$cfg"
+                          printf "  - Added to %s\n" "$cfg"
+                          ADDED_TO_CONFIG=true
+                      else
+                          printf "  - Already configured in %s (found '.local/bin')\n" "$cfg"
+                      fi
                   fi
-              else
-                  printf "Could not detect shell configuration file. Please add the following line manually to your shell config:\n"
-                  printf "  export PATH=\"\$HOME/.local/bin:\$PATH\"\n\n"
+              }
+
+              # Try common config files
+              # Bash (Interactive)
+              append_to_config "$HOME/.bashrc" "$EXPORT_CMD"
+              # Bash (Login) / Sh
+              append_to_config "$HOME/.bash_profile" "$EXPORT_CMD"
+              append_to_config "$HOME/.profile" "$EXPORT_CMD"
+              # Zsh
+              append_to_config "$HOME/.zshrc" "$EXPORT_CMD"
+
+              # Fish detection
+              if [[ "$SHELL" == */fish ]]; then
+                  printf "  - Detected Fish shell.\n"
+                  printf "    Please run: set -U fish_user_paths \$HOME/.local/bin \$fish_user_paths\n"
+              fi
+
+              if [ "$ADDED_TO_CONFIG" = true ]; then
+                  printf "Successfully updated shell configuration.\n"
+                  printf "Please restart your terminal or run 'source <your_config_file>' to apply changes.\n"
+              elif [[ "$SHELL" != */fish ]]; then
+                  printf "Could not find a suitable shell configuration file to update.\n"
+                  printf "Please manually add the following to your shell config:\n"
+                  printf "  %s\n\n" "$EXPORT_CMD"
               fi
               ;;
       esac
