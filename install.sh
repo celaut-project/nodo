@@ -197,10 +197,18 @@ create_wrapper_script() {
   else
       mkdir -p "$HOME/.local/bin"
       WRAPPER_SCRIPT="$HOME/.local/bin/nodo"
-      if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-          printf "Warning: $HOME/.local/bin is not in your PATH. You may need to add it.\n"
-      fi
+      
+      # Check if ~/.local/bin is in PATH using POSIX compliant case
+      case ":$PATH:" in
+          *":$HOME/.local/bin:"*) ;;
+          *)
+              printf "\nWarning: $HOME/.local/bin is not in your PATH.\n"
+              printf "To use the 'nodo' command, run the following or add it to your shell config:\n"
+              printf "  export PATH=\"\$HOME/.local/bin:\$PATH\"\n\n"
+              ;;
+      esac
   fi
+
 
   # Check if the wrapper script already exists and remove it
   if [ -f "$WRAPPER_SCRIPT" ]; then
