@@ -21,9 +21,14 @@ if [ ! -f "$DOCKER_DIR/docker.pid" ] || ! kill -0 $(cat "$DOCKER_DIR/docker.pid"
     MAX_RETRIES=30
     COUNT=0
     while [ ! -S "$DOCKER_DIR/docker.sock" ] && [ $COUNT -lt $MAX_RETRIES ]; do
+        if ! kill -0 $! 2>/dev/null; then
+            echo "Error: Docker process died. Check $DOCKER_DIR/docker.log"
+            exit 1
+        fi
         sleep 1
         COUNT=$((COUNT + 1))
     done
+
 
     if [ ! -S "$DOCKER_DIR/docker.sock" ]; then
         echo "Error: Docker failed to start. Check $DOCKER_DIR/docker.log"
