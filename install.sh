@@ -242,8 +242,27 @@ create_wrapper_script() {
 
       if [ "$ADDED_TO_CONFIG" = true ]; then
           printf "Successfully updated shell configuration.\n"
-          printf "Please restart your terminal or run 'source <your_config_file>' to apply changes.\n"
       fi
+      
+      # Check if ~/.local/bin is in the CURRENT PATH
+      case ":$PATH:" in
+          *":$HOME/.local/bin:"*) ;;
+          *)
+              # If we are in an interactive shell, we can try to reload it
+              case "$-" in
+                  *i*)
+                      printf "\nConfiguration updated. Reloading shell to apply changes...\n"
+                      printf "********** You can now use the 'nodo' command. **********\n"
+                      exec "$SHELL"
+                      ;;
+                  *)
+                      printf "\nWARNING: $HOME/.local/bin is NOT in your current PATH.\n"
+                      printf "To use the 'nodo' command immediately, run:\n"
+                      printf "  source ~/.bashrc\n"
+                      ;;
+              esac
+              ;;
+      esac
   fi
 
 
