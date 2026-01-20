@@ -183,7 +183,7 @@ if __name__ == '__main__':
               flush=True)
         try:
             if not is_nodo_service_running():
-                print("\nNote: Nodo service is not running.", flush=True)
+                print("\nNote: Nodo service is not running. Run 'nodo serve' or 'nodo daemon_setup' to start it.", flush=True)
         except Exception as e:
             print(f"Error checking nodo.service status: {e}", flush=True)
 
