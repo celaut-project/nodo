@@ -126,7 +126,7 @@ These are intended for development or advanced maintenance environments:
   `sudo nodo update`
 
 - **serve**  
-  Starts Nodo in development mode. If already running in the background, an alert will be shown.  
+  Starts Nodo in development mode, showing real-time logs in the console. If already running in the background, an alert will be shown.  
   **Example:**  
   `nodo serve`
 
@@ -175,6 +175,11 @@ These are intended for development or advanced maintenance environments:
   Launches Nodo as a background daemon.  
   **Example:**  
   `nodo daemon`
+
+- **daemon_setup**  
+  Sets up Nodo as a systemd service (requires superuser privileges). Useful if you installed Nodo in rootless mode and now want it to run as a system service.  
+  **Example:**  
+  `sudo nodo daemon_setup`
 
 ---
 
