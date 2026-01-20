@@ -232,10 +232,13 @@ create_wrapper_script() {
       append_to_config "$HOME/.zshrc" "$EXPORT_CMD"
 
       # Fish detection
-      if [[ "$SHELL" == */fish ]]; then
+      # Fish detection
+      case "$SHELL" in
+        */fish)
           printf "  - Detected Fish shell.\n"
           printf "    Please run: set -U fish_user_paths \$HOME/.local/bin \$fish_user_paths\n"
-      fi
+          ;;
+      esac
 
       if [ "$ADDED_TO_CONFIG" = true ]; then
           printf "Successfully updated shell configuration.\n"
