@@ -203,8 +203,41 @@ create_wrapper_script() {
           *":$HOME/.local/bin:"*) ;;
           *)
               printf "\nWarning: $HOME/.local/bin is not in your PATH.\n"
-              printf "To use the 'nodo' command, run the following or add it to your shell config:\n"
-              printf "  export PATH=\"\$HOME/.local/bin:\$PATH\"\n\n"
+              printf "Attempting to add it to your shell configuration...\n"
+              
+              SHELL_CONFIG=""
+              case "$SHELL" in
+                  */bash)
+                      SHELL_CONFIG="$HOME/.bashrc"
+                      ;;
+                  */zsh)
+                      SHELL_CONFIG="$HOME/.zshrc"
+                      ;;
+                  *)
+                      # Fallback detection
+                      if [ -f "$HOME/.bashrc" ]; then
+                          SHELL_CONFIG="$HOME/.bashrc"
+                      elif [ -f "$HOME/.zshrc" ]; then
+                          SHELL_CONFIG="$HOME/.zshrc"
+                      fi
+                      ;;
+              esac
+
+              if [ -n "$SHELL_CONFIG" ]; then
+                  if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$SHELL_CONFIG"; then
+                      echo '' >> "$SHELL_CONFIG"
+                      echo '# Added by nodo installer' >> "$SHELL_CONFIG"
+                      echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_CONFIG"
+                      printf "Successfully added to %s.\n" "$SHELL_CONFIG"
+                      printf "Please run 'source %s' or restart your terminal to use the 'nodo' command.\n" "$SHELL_CONFIG"
+                  else
+                      printf "It seems the PATH is already configured in %s but not active.\n" "$SHELL_CONFIG"
+                      printf "Please run 'source %s' or restart your terminal.\n" "$SHELL_CONFIG"
+                  fi
+              else
+                  printf "Could not detect shell configuration file. Please add the following line manually to your shell config:\n"
+                  printf "  export PATH=\"\$HOME/.local/bin:\$PATH\"\n\n"
+              fi
               ;;
       esac
   fi
