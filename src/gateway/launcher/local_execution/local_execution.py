@@ -108,10 +108,21 @@ def local_execution(
     if not block_all(container_id=container.id):
         log.LOGGER(f"Docker firewall block all function failed for {container.id}")
 
+    # Get the gateway IP from the container's network settings
+    gateway_ip = '172.17.0.1' # Default fallback
+    try:
+        networks_settings = container.attrs.get('NetworkSettings', {}).get('Networks', {})
+        for network_name, network_conf in networks_settings.items():
+            if network_conf.get('Gateway'):
+                gateway_ip = network_conf['Gateway']
+                break
+    except Exception as e:
+        log.LOGGER(f"Error getting gateway IP from container settings: {e}")
+
     # Allow connection to the node gateway.
     if not allow_connection(
         container_id=container.id, 
-        ip='172.17.0.1', port=GATEWAY_PORT, # Gateway internal endpoint.
+        ip=gateway_ip, port=GATEWAY_PORT, # Gateway internal endpoint.
         protocol=Protocol.TCP # Gateway communication is with TCP
     ):
         log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
