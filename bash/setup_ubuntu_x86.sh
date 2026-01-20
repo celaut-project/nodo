@@ -142,10 +142,18 @@ fi
 
 
 echo "Installing QEMU and binfmt-support for multi-architecture support..."
+echo "Note: This step requires sudo to install system packages (qemu-system, binfmt-support, qemu-user-static)."
 sudo apt-get -y install qemu-system binfmt-support qemu-user-static > /dev/null
 
 # Configure QEMU for multi-architecture support
-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
+if [ "$NODO_ROOTLESS" != "1" ]; then
+    echo "Configuring QEMU with Docker..."
+    docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
+else
+    echo "Skipping QEMU Docker configuration (NODO_ROOTLESS is set)."
+    echo "Multi-architecture support might be limited without privileged QEMU configuration."
+fi
+
 
 echo "Executing initialization script for x86..."
 sh ./bash/init_x86.sh > /dev/null
