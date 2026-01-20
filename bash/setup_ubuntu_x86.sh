@@ -206,6 +206,7 @@ echo "Executing initialization script for x86..."
 sh ./bash/init_x86.sh > /dev/null
 
 echo "Running migrations for Python application..."
+chmod +x bash/accept_kya.sh
 python3.11 nodo.py migrate > /dev/null
 
 echo "All steps completed."
