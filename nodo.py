@@ -325,11 +325,12 @@ if __name__ == '__main__':
                 execute(service=arg)
                 
             case "update":
-                if os.geteuid() != 0:
-                    print("This script requires superuser privileges. Please run with sudo.")
+                if not os.access(MAIN_DIR, os.W_OK):
+                    print("This script requires write privileges to the installation directory. Please run with sudo or change permissions.")
                 else:
                     os.system(f"{MAIN_DIR}/bash/restore_source.sh {MAIN_DIR}")
                     os.system(f"{MAIN_DIR}/install.sh")
+
 
             case "stop":
                 from src.commands.stop import stop
@@ -485,13 +486,9 @@ if __name__ == '__main__':
                 generate_gateway_config_dev(path=sys.argv[2])
                 
             case "prune_containers":
-                # Check if script is run as root
-                if os.geteuid() != 0:
-                    print("This script requires superuser privileges. Please run with sudo.")
-                    exit()
-                
                 from src.manager.maintain import maintain_containers
                 maintain_containers(debug_mode=True)
+
                 
             case "refresh_clients":
                 from src.manager.maintain import maintain_clients, peer_deposits

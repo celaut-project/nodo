@@ -30,22 +30,28 @@ a Dockerfile along with a configuration file and get a specification for that se
 
 ## Installation
 
-Basic installation:
+Basic installation (Rootless mode, recommended):
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sh
+```
+
+Installation with system-wide service (requires sudo):
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo sh
 ```
 
 ### Note on Installation
 
-- **Requirements**: Needs Ubuntu 22.04.5 LTS and curl package installed.
+- **Requirements**: Needs a modern Linux distribution (Ubuntu 22.04+ recommended) and `curl` installed.
 
-- **Version**: The Nodo version is currently in 'alpha', so it's recommended to use a virtual machine.
+- **Rootless Mode**: By default, the script installs Nodo in `$HOME/.nodo` and uses **Docker Rootless**. This means it doesn't require `sudo` for daily operations or managing containers, providing a more secure and isolated environment.
 
-- **Sudo Usage**: The installation script requires `sudo` privileges to install various apt packages and Docker. Use it responsibly under your own discretion.
+- **Sudo Usage**: `sudo` is only required if you want to install Nodo as a system-wide service or if the script needs to install missing system dependencies.
 
-- **Installation without sudo**: For a manual installation without directly executing the script with sudo, please follow the [manual guide](docs/INSTALL.md).
+- **Docker Containers**: The system manages its own isolated Docker engine. It will create and remove containers as part of its operations without affecting your system's Docker installation.
 
-- **Docker Containers**: The system will create and remove Docker containers as part of its operations.
+- **Manual Installation**: For more control over the process, please follow the [manual guide](docs/INSTALL.md).
+
 
 
 ## Platform Compatibility

@@ -1,21 +1,15 @@
 #!/bin/bash
 
-# Check if the script is running with root privileges
-if [ "$(id -u)" -ne 0 ]; then
-  printf "Error: This script needs to be run with sudo.\nPlease run: sudo $0\n" >&2
-  exit 1
-fi
-
 # Function to install git if it's not already installed
 install_git_if_needed() {
   if ! command -v git >/dev/null 2>&1; then
     printf "Git is not installed. Attempting to install git...\n"
     if [ -x "$(command -v apt)" ]; then
-      apt update && apt install -y git
+      sudo apt update && sudo apt install -y git
     elif [ -x "$(command -v yum)" ]; then
-      yum install -y git
+      sudo yum install -y git
     elif [ -x "$(command -v dnf)" ]; then
-      dnf install -y git
+      sudo dnf install -y git
     elif [ -x "$(command -v brew)" ]; then
       brew install git
     else
@@ -30,7 +24,17 @@ install_git_if_needed
 
 # Define the repository URL and the target directory
 REPO_URL="https://github.com/celaut-project/nodo.git"
-TARGET_DIR="/nodo"
+
+# Check if the script is running with root privileges
+if [ "$(id -u)" -ne 0 ]; then
+  printf "Running in rootless mode (installing to $HOME/.nodo)\n"
+  TARGET_DIR="$HOME/.nodo"
+  USE_SUDO=false
+else
+  TARGET_DIR="/nodo"
+  USE_SUDO=true
+fi
+
 SERVICE_FILE="/etc/systemd/system/nodo.service"
 MAX_RETRIES=3
 
@@ -65,11 +69,9 @@ if [ -d "$TARGET_DIR" ]; then
     exit 1
   fi
 
-  if systemctl list-units --full -all | grep -Fq "nodo.service"; then
+  if [ "$USE_SUDO" = true ] && systemctl list-units --full -all | grep -Fq "nodo.service"; then
     printf "Restarting nodo.service...\n"
-    systemctl restart nodo.service
-  else
-    printf "nodo.service does not exist, will create it later in the script.\n"
+    sudo systemctl restart nodo.service
   fi
 else
   printf "Cloning repository from $REPO_URL into $TARGET_DIR...\n"
@@ -94,11 +96,24 @@ fi
 if [ ! -f "$TARGET_DIR/config.yaml" ]; then
   printf "Creating configuration file $TARGET_DIR/config.yaml...\n"
   cp "$TARGET_DIR/config.example.yaml" "$TARGET_DIR/config.yaml"
+  # Update MAIN_DIR in config.yaml
+  if command -v yq >/dev/null 2>&1; then
+    yq -i ".main.MAIN_DIR = \"$TARGET_DIR\"" "$TARGET_DIR/config.yaml"
+    yq -i ".main.STORAGE = \"$TARGET_DIR/storage\"" "$TARGET_DIR/config.yaml"
+    yq -i ".main.CACHE = \"$TARGET_DIR/storage/__cache__/\"" "$TARGET_DIR/config.yaml"
+    yq -i ".main.REGISTRY = \"$TARGET_DIR/storage/__registry__/\"" "$TARGET_DIR/config.yaml"
+    yq -i ".main.METADATA_REGISTRY = \"$TARGET_DIR/storage/__metadata__/\"" "$TARGET_DIR/config.yaml"
+    yq -i ".main.BLOCKDIR = \"$TARGET_DIR/storage/__block__/\"" "$TARGET_DIR/config.yaml"
+    yq -i ".main.DATABASE_FILE = \"$TARGET_DIR/storage/database.sqlite\"" "$TARGET_DIR/config.yaml"
+    yq -i ".ledgers.ergo.HTTP_PEERS_PATH = \"$TARGET_DIR/storage/ergo_http_peers.json\"" "$TARGET_DIR/config.yaml"
+  else
+    sed -i "s|/nodo|$TARGET_DIR|g" "$TARGET_DIR/config.yaml"
+  fi
   chmod a+w "$TARGET_DIR/config.yaml"
 fi
 
 # Apply custom architecture-specific setup
-if [ "$(uname -m)" = "arm64" ]; then
+if [ "$(uname -m)" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then
   SETUP_SCRIPT="bash/setup_ubuntu_arm.sh"
 elif [ "$(uname -m)" = "x86_64" ]; then
   SETUP_SCRIPT="bash/setup_ubuntu_x86.sh"
@@ -109,23 +124,35 @@ fi
 chmod +x "$SETUP_SCRIPT"
 
 printf "Running setup script $SETUP_SCRIPT...\n"
+# We might need sudo for some parts of the setup script (installing packages)
+[ "$USE_SUDO" = false ] && export NODO_ROOTLESS=1
 if ! ./"$SETUP_SCRIPT" "$TARGET_DIR"; then
+
   printf "Error: The setup script $SETUP_SCRIPT failed to execute.\n" >&2
   exit 1
 fi
 
-SCRIPT_USER=$(logname)
+# Setup Docker Rootless
+chmod +x bash/setup_docker_rootless.sh
+./bash/setup_docker_rootless.sh "$TARGET_DIR"
+
+SCRIPT_USER=$(logname 2>/dev/null || echo $USER)
 
 create_service_file() {
+  if [ "$USE_SUDO" = false ]; then
+    printf "Skipping systemd service creation in rootless mode.\n"
+    return
+  fi
+
   if [ -f "$SERVICE_FILE" ]; then
     printf "Service file $SERVICE_FILE already exists. Removing it...\n"
-    systemctl stop nodo.service
-    systemctl disable nodo.service
-    rm -f "$SERVICE_FILE"
+    sudo systemctl stop nodo.service
+    sudo systemctl disable nodo.service
+    sudo rm -f "$SERVICE_FILE"
   fi
 
   printf "Creating $SERVICE_FILE...\n"
-  cat <<EOF > "$SERVICE_FILE"
+  sudo bash -c "cat <<EOF > \"$SERVICE_FILE\"
 [Unit]
 Description=Nodo Serve
 After=network.target
@@ -142,74 +169,91 @@ Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOF"
 
   printf "Setting the permissions for the service file...\n"
-  chmod 644 "$SERVICE_FILE"
+  sudo chmod 644 "$SERVICE_FILE"
 
   printf "Reloading systemd daemon, enabling, and starting the nodo service...\n"
-  systemctl daemon-reload
-  systemctl enable nodo.service
-  systemctl start nodo.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable nodo.service
+  sudo systemctl start nodo.service
   printf "Systemd daemon reloaded and nodo service started/enabled.\n"
 }
 
-if [ ! -f "$SERVICE_FILE" ]; then
-  printf "nodo.service does not exist. Creating service file...\n"
-  create_service_file
-else
-  printf "nodo.service already exists. Checking its status...\n"
-  systemctl --no-pager status nodo.service || printf "Service is not running or not correctly installed.\n"
+if [ "$USE_SUDO" = true ]; then
+    if [ ! -f "$SERVICE_FILE" ]; then
+      printf "nodo.service does not exist. Creating service file...\n"
+      create_service_file
+    else
+      printf "nodo.service already exists. Checking its status...\n"
+      sudo systemctl --no-pager status nodo.service || printf "Service is not running or not correctly installed.\n"
+    fi
 fi
 
 create_wrapper_script() {
-  WRAPPER_SCRIPT="/usr/local/bin/nodo"
+  if [ "$USE_SUDO" = true ]; then
+      WRAPPER_SCRIPT="/usr/local/bin/nodo"
+  else
+      mkdir -p "$HOME/.local/bin"
+      WRAPPER_SCRIPT="$HOME/.local/bin/nodo"
+      if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+          printf "Warning: $HOME/.local/bin is not in your PATH. You may need to add it.\n"
+      fi
+  fi
 
   # Check if the wrapper script already exists and remove it
   if [ -f "$WRAPPER_SCRIPT" ]; then
     printf "Wrapper script %s already exists. Removing it...\n" "$WRAPPER_SCRIPT"
-    rm -f "$WRAPPER_SCRIPT"
+    [ "$USE_SUDO" = true ] && sudo rm -f "$WRAPPER_SCRIPT" || rm -f "$WRAPPER_SCRIPT"
   fi
 
   printf "Creating %s...\n" "$WRAPPER_SCRIPT"
 
-  # Create the wrapper script. Note:
-  # - $TARGET_DIR is not escaped so it is expanded at compile time.
-  # - \$PWD and \$ORIGINAL_DIR are escaped to be evaluated at runtime.
-  cat <<EOF > "$WRAPPER_SCRIPT"
+  # Create the wrapper script.
+  cat <<EOF > "nodo_wrapper.sh"
 #!/bin/bash
 # ORIGINAL_DIR is set to the current directory at runtime
 ORIGINAL_DIR="\$PWD"
 # Change directory to TARGET_DIR, which was expanded at compile time
 cd "$TARGET_DIR" || exit
+
+# Start Docker Rootless if needed
+./bash/run_docker_rootless.sh "$TARGET_DIR"
+export DOCKER_HOST="unix://$TARGET_DIR/docker/docker.sock"
+
 # Activate the virtual environment in TARGET_DIR
 source "$TARGET_DIR/venv/bin/activate"
 # Execute the Python script with the runtime ORIGINAL_DIR and passed arguments
 ORIGINAL_DIR="\$ORIGINAL_DIR" python3 "$TARGET_DIR/nodo.py" "\$@"
 EOF
 
-  # Make the wrapper script executable
-  chmod +x "$WRAPPER_SCRIPT"
+  if [ "$USE_SUDO" = true ]; then
+      sudo mv nodo_wrapper.sh "$WRAPPER_SCRIPT"
+      sudo chmod +x "$WRAPPER_SCRIPT"
+  else
+      mv nodo_wrapper.sh "$WRAPPER_SCRIPT"
+      chmod +x "$WRAPPER_SCRIPT"
+  fi
 
-  printf "Setting permissions for %s and the wrapper script...\n" "$TARGET_DIR"
-  chmod -R 777 "$TARGET_DIR"
-  chmod +x "$WRAPPER_SCRIPT"
+  printf "Setting permissions for %s...\n" "$TARGET_DIR"
+  [ "$USE_SUDO" = true ] && sudo chmod -R 777 "$TARGET_DIR" || chmod -R 775 "$TARGET_DIR"
 }
 
 create_wrapper_script
 
-chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
-chmod -R 777 "$TARGET_DIR"
+if [ "$USE_SUDO" = true ]; then
+    sudo chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
+    sudo chmod -R 777 "$TARGET_DIR"
+fi
 
-if systemctl --no-pager status nodo.service >/dev/null 2>&1; then
+if [ "$USE_SUDO" = true ] && systemctl --no-pager status nodo.service >/dev/null 2>&1; then
   printf "Restarting nodo.service...\n"
-  systemctl restart nodo.service
-else
-  printf "Error: nodo.service does not exist or cannot be restarted. Please check the service creation process.\n" >&2
+  sudo systemctl restart nodo.service
 fi
 
 ACCEPT_KYA_SCRIPT="bash/accept_kya.sh"
 chmod +x "$ACCEPT_KYA_SCRIPT"
 
-printf "Installation and service setup completed successfully. The repository is located at $TARGET_DIR.\n"
+printf "Installation and setup completed successfully. The repository is located at $TARGET_DIR.\n"
 printf "********** You can now use the 'nodo' command. **********\n"
