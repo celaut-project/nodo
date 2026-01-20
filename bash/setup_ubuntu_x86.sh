@@ -28,13 +28,16 @@ handle_update_errors() {
 }
 
 echo "Updating package lists..."
+echo "Note: sudo is required to update the system package index so we can install dependencies."
 sudo apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false update > /dev/null 2>&1 || {
     handle_update_errors $?
 }
 
 echo "Installing required build dependencies..."
+echo "Note: sudo is required to install system-level build tools and libraries (build-essential, etc.)."
 if sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev protobuf-compiler \
                            libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null 2>&1; then
+
     echo "Dependencies installed successfully."
 else
     echo "Error installing dependencies. Attempting to fix broken dependencies..."
@@ -55,11 +58,13 @@ fi
 
 echo "Installing yq for YAML processing..."
 if ! command -v yq &> /dev/null; then
+    echo "Note: sudo is required to install 'yq' into /usr/local/bin."
     sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
     sudo chmod +x /usr/local/bin/yq
 fi
 
 echo "Adding Python 3.11 repository..."
+echo "Note: sudo is required to add the deadsnakes PPA for Python 3.11."
 sudo add-apt-repository ppa:deadsnakes/ppa -y > /dev/null
 
 echo "Updating package lists after adding Python repository..."
@@ -68,10 +73,12 @@ sudo apt-get -y update > /dev/null 2>&1 || {
 }
 
 echo "Installing Python 3.11 and pip..."
+echo "Note: sudo is required to install Python 3.11 system packages."
 sudo apt-get -y install python3.11 python3.11-venv python3.11-distutils > /dev/null
 
 echo "Installing pip for Python 3.11..."
 wget -q https://bootstrap.pypa.io/get-pip.py -O get-pip.py
+echo "Note: sudo is required to install pip globally for Python 3.11."
 sudo python3.11 get-pip.py > /dev/null
 rm get-pip.py
 
@@ -96,6 +103,7 @@ if ! python3 -m pip install -r "$REQUIREMENTS_FILE" > /dev/null; then
 fi
 
 echo "Installing OpenJDK 21"
+echo "Note: sudo is required to install the OpenJDK 21 JRE."
 sudo apt-get -y install openjdk-21-jre-headless
 
 if [ "$NODO_ROOTLESS" != "1" ]; then
