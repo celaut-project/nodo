@@ -417,9 +417,19 @@ if __name__ == '__main__':
                 from src.serve import serve
                 serve()
 
+            case 'daemon_setup':
+                if os.geteuid() != 0:
+                    print("This command requires sudo/root privileges.")
+                    sys.exit(1)
+                
+                script_path = os.path.join(MAIN_DIR, "bash", "daemon_setup.sh")
+                subprocess.run([script_path, MAIN_DIR], check=True)
+
             case 'serve':
                 if not is_nodo_service_running():
                     from src.serve import serve
+                    from src.utils.logger import set_print_to_console
+                    set_print_to_console(True)
                     serve()
                 else:
                     print("Nodo service is already running in the background. Cannot start serve.", flush=True)
