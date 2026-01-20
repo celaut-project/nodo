@@ -138,57 +138,10 @@ chmod +x bash/setup_docker_rootless.sh
 
 SCRIPT_USER=$(logname 2>/dev/null || echo $USER)
 
-create_service_file() {
-  if [ "$USE_SUDO" = false ]; then
-    printf "Skipping systemd service creation in rootless mode.\n"
-    return
-  fi
-
-  if [ -f "$SERVICE_FILE" ]; then
-    printf "Service file $SERVICE_FILE already exists. Removing it...\n"
-    sudo systemctl stop nodo.service
-    sudo systemctl disable nodo.service
-    sudo rm -f "$SERVICE_FILE"
-  fi
-
-  printf "Creating $SERVICE_FILE...\n"
-  sudo bash -c "cat <<EOF > \"$SERVICE_FILE\"
-[Unit]
-Description=Nodo Serve
-After=network.target
-
-[Service]
-Type=simple
-User=root
-Group=sudo
-WorkingDirectory=$TARGET_DIR
-ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py daemon'
-Restart=on-failure
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-EOF"
-
-  printf "Setting the permissions for the service file...\n"
-  sudo chmod 644 "$SERVICE_FILE"
-
-  printf "Reloading systemd daemon, enabling, and starting the nodo service...\n"
-  sudo systemctl daemon-reload
-  sudo systemctl enable nodo.service
-  sudo systemctl start nodo.service
-  printf "Systemd daemon reloaded and nodo service started/enabled.\n"
-}
-
 if [ "$USE_SUDO" = true ]; then
-    if [ ! -f "$SERVICE_FILE" ]; then
-      printf "nodo.service does not exist. Creating service file...\n"
-      create_service_file
-    else
-      printf "nodo.service already exists. Checking its status...\n"
-      sudo systemctl --no-pager status nodo.service || printf "Service is not running or not correctly installed.\n"
-    fi
+    printf "Setting up systemd service...\n"
+    chmod +x "$TARGET_DIR/bash/daemon_setup.sh"
+    "$TARGET_DIR/bash/daemon_setup.sh" "$TARGET_DIR"
 fi
 
 create_wrapper_script() {
@@ -306,15 +259,8 @@ EOF
 
 create_wrapper_script
 
-if [ "$USE_SUDO" = true ]; then
-    sudo chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
-    sudo chmod -R 777 "$TARGET_DIR"
-fi
+# Permissions and service restart are handled by daemon_setup.sh if USE_SUDO is true.
 
-if [ "$USE_SUDO" = true ] && systemctl --no-pager status nodo.service >/dev/null 2>&1; then
-  printf "Restarting nodo.service...\n"
-  sudo systemctl restart nodo.service
-fi
 
 ACCEPT_KYA_SCRIPT="bash/accept_kya.sh"
 chmod +x "$ACCEPT_KYA_SCRIPT"

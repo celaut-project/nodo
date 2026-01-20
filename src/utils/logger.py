@@ -15,11 +15,18 @@ logging.basicConfig(
     format='%(message)s'
 )
 
-LOGGER = (
-    lambda message: print(message + '\n')
-) if USE_PRINT else (
-    lambda message: logging.getLogger(__name__).info(message + '\n')
-)
+_print_to_console = USE_PRINT
+
+def set_print_to_console(enable: bool):
+    global _print_to_console
+    _print_to_console = enable
+
+def log_message(message):
+    logging.getLogger(__name__).info(message + '\n')
+    if _print_to_console:
+        print(message + '\n')
+
+LOGGER = log_message
 
 def ssformat(number, sig_digits=3):
     """
