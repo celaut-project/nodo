@@ -31,11 +31,13 @@ handle_apt_error() {
 }
 
 echo "1. Updating package lists..."
-apt-get update -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false \
-    || { handle_apt_error $?; apt-get update; }
+echo "Note: sudo is required to update the system package index so we can install dependencies."
+sudo apt-get update -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false \
+    || { handle_apt_error $?; sudo apt-get update; }
 
 echo "2. Installing build dependencies and basic tools..."
-apt-get install -y --no-install-recommends \
+echo "Note: sudo is required to install system-level build tools and libraries."
+sudo apt-get install -y --no-install-recommends \
     build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
     libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev \
     ca-certificates curl gnupg lsb-release software-properties-common \
@@ -43,31 +45,36 @@ apt-get install -y --no-install-recommends \
     > /dev/null || { handle_apt_error $?; exit 1; }
 
 echo "3. Ensuring UTF-8 locale support..."
-locale-gen en_US.UTF-8 >/dev/null || true
-update-locale LANG=en_US.UTF-8
+echo "Note: sudo is required to generate locales."
+sudo locale-gen en_US.UTF-8 >/dev/null || true
+sudo update-locale LANG=en_US.UTF-8
 
 echo "4. Installing yq for YAML parsing..."
 if ! command -v yq >/dev/null; then
-    wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_arm64
-    chmod +x /usr/local/bin/yq
+    echo "Note: sudo is required to install 'yq' into /usr/local/bin."
+    sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_arm64
+    sudo chmod +x /usr/local/bin/yq
     echo "   - yq installed."
 else
     echo "   - yq already installed."
 fi
 
 echo "5. Adding Deadsnakes PPA for Python 3.11..."
-add-apt-repository ppa:deadsnakes/ppa -y >/dev/null
+echo "Note: sudo is required to add the deadsnakes PPA."
+sudo add-apt-repository ppa:deadsnakes/ppa -y >/dev/null
 
 echo "6. Updating package lists after adding PPA..."
-apt-get update -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false \
-    || { handle_apt_error $?; apt-get update; }
+sudo apt-get update -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false \
+    || { handle_apt_error $?; sudo apt-get update; }
 
 echo "7. Installing Python 3.11 and venv modules..."
-apt-get install -y python3.11 python3.11-venv python3.11-distutils >/dev/null
+echo "Note: sudo is required to install Python 3.11 system packages."
+sudo apt-get install -y python3.11 python3.11-venv python3.11-distutils >/dev/null
 
 echo "8. Installing pip for Python 3.11..."
 wget -qO get-pip.py https://bootstrap.pypa.io/get-pip.py
-python3.11 get-pip.py >/dev/null
+echo "Note: sudo is required to install pip globally for Python 3.11."
+sudo python3.11 get-pip.py >/dev/null
 rm get-pip.py
 
 echo "9. Creating and activating virtualenv at $TARGET_DIR/venv..."
@@ -92,7 +99,8 @@ if ! pip install -r "$REQ_FILE" >/dev/null; then
 fi
 
 echo "11. Installing OpenJDK 21..."
-apt-get install -y openjdk-21-jre-headless >/dev/null
+echo "Note: sudo is required to install the OpenJDK 21 JRE."
+sudo apt-get install -y openjdk-21-jre-headless >/dev/null
 
 if [ "${NODO_ROOTLESS:-0}" -ne 1 ]; then
     echo "12. Setting up Docker (v24) for ARM..."
@@ -113,19 +121,21 @@ if [ "${NODO_ROOTLESS:-0}" -ne 1 ]; then
         ver=$(docker --version | grep -oP '\d+\.\d+\.\d+')
         if [[ $ver != 24.* ]]; then
             echo "   - Removing Docker $ver..."
-            apt-get remove -y docker docker-engine docker.io containerd runc >/dev/null
+            sudo apt-get remove -y docker docker-engine docker.io containerd runc >/dev/null
         fi
     fi
 
     # Install Docker 24.*
-    apt-get install -y --allow-downgrades docker-ce=5:24.* docker-ce-cli=5:24.* containerd.io >/dev/null
+    echo "Note: sudo is required to install Docker system packages."
+    sudo apt-get install -y --allow-downgrades docker-ce=5:24.* docker-ce-cli=5:24.* containerd.io >/dev/null
 else
     echo "12. Skipping system Docker installation (NODO_ROOTLESS is set)."
 fi
 
 echo "13. (Optional) Installing QEMU/binfmt for multi-architecture containers..."
 echo "Note: This step requires sudo to install system packages."
-apt-get install -y qemu-user-static binfmt-support >/dev/null
+sudo apt-get install -y qemu-user-static binfmt-support >/dev/null
+
 
 if [ "${NODO_ROOTLESS:-0}" -ne 1 ]; then
     echo "   - Configuring QEMU with Docker..."
