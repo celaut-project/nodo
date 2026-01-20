@@ -35,14 +35,14 @@ if [ ! -f "$BIN_DIR/dockerd" ]; then
     curl -L "https://download.docker.com/linux/static/stable/$DOCKER_ARCH/docker-$DOCKER_VERSION.tgz" | tar -xz -C "$BIN_DIR" --strip-components=1
 fi
 
-# 3. Download the Rootless kit script
-if [ ! -f "$BIN_DIR/dockerd-rootless.sh" ]; then
-    echo "Downloading dockerd-rootless.sh..."
-    curl -L https://raw.githubusercontent.com/moby/moby/master/contrib/dockerd-rootless.sh -o "$BIN_DIR/dockerd-rootless.sh"
-    chmod +x "$BIN_DIR/dockerd-rootless.sh"
+# 3. Download Rootless extras (RootlessKit, etc.)
+if [ ! -f "$BIN_DIR/rootlesskit" ]; then
+    echo "Downloading Docker Rootless extras for $DOCKER_ARCH..."
+    curl -L "https://download.docker.com/linux/static/stable/$DOCKER_ARCH/docker-rootless-extras-$DOCKER_VERSION.tgz" | tar -xz -C "$BIN_DIR" --strip-components=1
 fi
 
 # 4. Configure subuid and subgid if not already configured
+
 if ! grep -q "$USER" /etc/subuid; then
     echo "Configuring subuid/subgid for $USER..."
     sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$USER"
