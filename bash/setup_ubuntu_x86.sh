@@ -98,43 +98,48 @@ fi
 echo "Installing OpenJDK 21"
 sudo apt-get -y install openjdk-21-jre-headless
 
-echo "Installing required system packages for Docker ..."
-sudo apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
+if [ "$NODO_ROOTLESS" != "1" ]; then
+    echo "Installing required system packages for Docker ..."
+    sudo apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
 
-echo "Updating package lists..."
-sudo apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false update > /dev/null 2>&1 || {
-    handle_update_errors $?
-}
+    echo "Updating package lists..."
+    sudo apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false update > /dev/null 2>&1 || {
+        handle_update_errors $?
+    }
 
-echo "Installing required system packages for Docker..."
-sudo apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
+    echo "Installing required system packages for Docker..."
+    sudo apt-get -y install ca-certificates curl gnupg lsb-release > /dev/null
 
-echo "Adding Docker GPG key and repository..."
-if [ ! -f /usr/share/keyrings/docker-archive-keyring.gpg ]; then
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg > /dev/null
-fi
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-echo "Updating package lists again..."
-sudo apt-get -y update > /dev/null 2>&1 || {
-    handle_update_errors $?
-}
-
-# Check if Docker is already installed and its version
-if command -v docker > /dev/null 2>&1; then
-    DOCKER_VERSION=$(docker --version | grep -oP '\d+\.\d+\.\d+')
-    if [[ "$DOCKER_VERSION" != 24* ]]; then
-        echo "Docker version $DOCKER_VERSION is installed. Removing it..."
-        sudo apt-get -y remove docker docker-engine docker.io containerd runc > /dev/null
-    else
-        echo "Docker version 24 is already installed."
+    echo "Adding Docker GPG key and repository..."
+    if [ ! -f /usr/share/keyrings/docker-archive-keyring.gpg ]; then
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg > /dev/null
     fi
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    echo "Updating package lists again..."
+    sudo apt-get -y update > /dev/null 2>&1 || {
+        handle_update_errors $?
+    }
+
+    # Check if Docker is already installed and its version
+    if command -v docker > /dev/null 2>&1; then
+        DOCKER_VERSION=$(docker --version | grep -oP '\d+\.\d+\.\d+')
+        if [[ "$DOCKER_VERSION" != 24* ]]; then
+            echo "Docker version $DOCKER_VERSION is installed. Removing it..."
+            sudo apt-get -y remove docker docker-engine docker.io containerd runc > /dev/null
+        else
+            echo "Docker version 24 is already installed."
+        fi
+    fi
+
+    if ! command -v docker > /dev/null 2>&1 || [[ "$DOCKER_VERSION" != 24* ]]; then
+        echo "Installing Docker version 24..."
+        sudo apt-get -y --allow-downgrades install docker-ce=5:24.* docker-ce-cli=5:24.* containerd.io > /dev/null
+    fi
+else
+    echo "Skipping system Docker installation (NODO_ROOTLESS is set)."
 fi
 
-if ! command -v docker > /dev/null 2>&1 || [[ "$DOCKER_VERSION" != 24* ]]; then
-    echo "Installing Docker version 24..."
-    sudo apt-get -y --allow-downgrades install docker-ce=5:24.* docker-ce-cli=5:24.* containerd.io > /dev/null
-fi
 
 echo "Installing QEMU and binfmt-support for multi-architecture support..."
 sudo apt-get -y install qemu-system binfmt-support qemu-user-static > /dev/null

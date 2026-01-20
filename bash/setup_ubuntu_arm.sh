@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-if [ "$(id -u)" -ne 0 ]; then
+if [ "$(id -u)" -ne 0 ] && [ "${NODO_ROOTLESS:-0}" -ne 1 ]; then
     echo "Please run this script as root or with sudo."
     exit 1
 fi
@@ -94,30 +94,34 @@ fi
 echo "11. Installing OpenJDK 21..."
 apt-get install -y openjdk-21-jre-headless >/dev/null
 
-echo "12. Setting up Docker (v24) for ARM..."
-# Add Docker GPG key if missing
-if [ ! -f /usr/share/keyrings/docker-archive-keyring.gpg ]; then
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-        | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-fi
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
-   https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-  > /etc/apt/sources.list.d/docker.list
-
-apt-get update >/dev/null
-
-# Remove outdated Docker if present
-if command -v docker >/dev/null; then
-    ver=$(docker --version | grep -oP '\d+\.\d+\.\d+')
-    if [[ $ver != 24.* ]]; then
-        echo "   - Removing Docker $ver..."
-        apt-get remove -y docker docker-engine docker.io containerd runc >/dev/null
+if [ "${NODO_ROOTLESS:-0}" -ne 1 ]; then
+    echo "12. Setting up Docker (v24) for ARM..."
+    # Add Docker GPG key if missing
+    if [ ! -f /usr/share/keyrings/docker-archive-keyring.gpg ]; then
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+            | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
     fi
-fi
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
+       https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+      > /etc/apt/sources.list.d/docker.list
 
-# Install Docker 24.*
-apt-get install -y --allow-downgrades docker-ce=5:24.* docker-ce-cli=5:24.* containerd.io >/dev/null
+    apt-get update >/dev/null
+
+    # Remove outdated Docker if present
+    if command -v docker >/dev/null; then
+        ver=$(docker --version | grep -oP '\d+\.\d+\.\d+')
+        if [[ $ver != 24.* ]]; then
+            echo "   - Removing Docker $ver..."
+            apt-get remove -y docker docker-engine docker.io containerd runc >/dev/null
+        fi
+    fi
+
+    # Install Docker 24.*
+    apt-get install -y --allow-downgrades docker-ce=5:24.* docker-ce-cli=5:24.* containerd.io >/dev/null
+else
+    echo "12. Skipping system Docker installation (NODO_ROOTLESS is set)."
+fi
 
 echo "13. (Optional) Installing QEMU/binfmt for multi-architecture containers..."
 apt-get install -y qemu-user-static binfmt-support >/dev/null

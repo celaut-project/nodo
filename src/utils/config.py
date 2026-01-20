@@ -250,16 +250,21 @@ if config.get('builder.X86_SUPPORT'):
     SUPPORTED_ARCHITECTURES.append(['linux/amd64', 'x86_64', 'amd64'])
 
 # Docker client factory
-try:
-    DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
-except (subprocess.CalledProcessError, FileNotFoundError):
-    DOCKER_COMMAND = "/usr/bin/docker" # Fallback
-    print("Warning: 'docker' command not found in PATH. Using fallback.")
+def get_docker_client():
+    # Check for rootless docker socket in the main directory
+    main_dir = config.get("main.MAIN_DIR")
+    if main_dir:
+        rootless_socket = os.path.join(main_dir, "docker", "docker.sock")
+        if os.path.exists(rootless_socket):
+            os.environ["DOCKER_HOST"] = f"unix://{rootless_socket}"
+    
+    return docker_lib.from_env(
+        timeout=config.get("docker.DOCKER_CLIENT_TIMEOUT", 480),
+        max_pool_size=config.get("docker.DOCKER_MAX_CONNECTIONS", 1000)
+    )
 
-DOCKER_CLIENT = lambda: docker_lib.from_env(
-    timeout=config.get("docker.DOCKER_CLIENT_TIMEOUT", 480),
-    max_pool_size=config.get("docker.DOCKER_MAX_CONNECTIONS", 1000)
-)
+DOCKER_CLIENT = get_docker_client
+
 
 # Default System Resources for Manager
 DEFAULT_SYSTEM_RESOURCES: celaut_pb2.Sysresources = celaut_pb2.Sysresources(
