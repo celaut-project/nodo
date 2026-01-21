@@ -508,6 +508,11 @@ if __name__ == '__main__':
                 increase_peer_deposit(peer_id=sys.argv[2], gas=int(sys.argv[3]))
 
             case "docker":
+                # Check if script is run as root
+                if os.geteuid() != 0:
+                    print("This script requires superuser privileges. Please run with sudo.")
+                    exit()
+                
                 # Execute docker commands in nodo's isolated Docker context
                 from src.utils.config import DOCKER_COMMAND
                 docker_args = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else ""
