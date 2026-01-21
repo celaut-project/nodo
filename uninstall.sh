@@ -8,7 +8,7 @@ fi
 
 TARGET_DIR="/nodo"
 SERVICE_FILE="/etc/systemd/system/nodo.service"
-WRAPPER_SCRIPT="/usr/local/bin/nodo"
+WRAPPER_SCRIPT="/usr/local/bin/nodo"  # TODO In rootless mode probably is in $HOME/.local/bin/nodo. Check that too.
 
 # 1. Stop and disable service
 if systemctl list-units --full -all | grep -Fq "nodo.service"; then
