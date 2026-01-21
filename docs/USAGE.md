@@ -126,7 +126,7 @@ These are intended for development or advanced maintenance environments:
   `sudo nodo update`
 
 - **serve**  
-  Starts Nodo in development mode. If already running in the background, an alert will be shown.  
+  Starts Nodo daemon. If already running in the background, an alert will be shown.  
   **Example:**  
   `nodo serve`
 
@@ -170,11 +170,6 @@ These are intended for development or advanced maintenance environments:
   Removes unused containers (requires superuser privileges).  
   **Example:**  
   `sudo nodo prune_containers`
-
-- **daemon**  
-  Launches Nodo as a background daemon.  
-  **Example:**  
-  `nodo daemon`
 
 - **docker `<docker args>`**  
   Executes Docker commands in nodo's isolated Docker context. This allows you to inspect containers, images, and other Docker resources that belong to nodo without seeing your personal Docker environment.  
