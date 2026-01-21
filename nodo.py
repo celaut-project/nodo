@@ -161,10 +161,11 @@ if __name__ == '__main__':
             "\n- export <service> <path>"
             "\n- export <service> <path> --raw"
             "\n- import <path>"
-
-            "\n\n Advanced commands:"
-            "\n- update"
             "\n- serve"
+            "\n- daemon_setup"
+
+            "\n\n Development commands:"
+            "\n- update"
             "\n- migrate"
             "\n- storage:prune_blocks"
             "\n- test <test name>"
@@ -176,9 +177,9 @@ if __name__ == '__main__':
             "\n- prune_containers"
             "\n- refresh_clients"
             "\n- daemon"
-            "\n- daemon_setup"
             "\n- tx_history"
             "\n- increase_peer_deposit <peer id> <gas to add>"
+            "\n- docker <docker command>"
             "\n\n",
               flush=True)
         try:
@@ -522,6 +523,11 @@ if __name__ == '__main__':
             case "increase_peer_deposit":
                 from src.commands.increase_peer_deposit import increase_peer_deposit
                 increase_peer_deposit(peer_id=sys.argv[2], gas=int(sys.argv[3]))
+
+            case 'docker':
+                from src.utils.config import DOCKER_COMMAND
+                import subprocess
+                subprocess.run([DOCKER_COMMAND] + sys.argv[2:])
 
             case other:
                 print('Unknown command.', flush=True)

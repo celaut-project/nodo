@@ -252,12 +252,22 @@ if config.get('builder.X86_SUPPORT'):
 # Docker command
 DOCKER_COMMAND = "docker"
 
-# Check for rootless docker socket in the main directory
+# Check for rootless docker socket and binaries in the main directory
 _main_dir = config.get("main.MAIN_DIR")
 if _main_dir:
-    _rootless_socket = os.path.join(_main_dir, "docker", "docker.sock")
+    _docker_dir = os.path.join(_main_dir, "docker")
+    _rootless_socket = os.path.join(_docker_dir, "docker.sock")
+    _isolated_docker = os.path.join(_docker_dir, "bin", "docker")
+    
     if os.path.exists(_rootless_socket):
         os.environ["DOCKER_HOST"] = f"unix://{_rootless_socket}"
+    
+    if os.path.exists(_isolated_docker):
+        DOCKER_COMMAND = _isolated_docker
+        # Add isolated docker binaries to PATH for subprocesses
+        _docker_bin_dir = os.path.join(_docker_dir, "bin")
+        if _docker_bin_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = f"{_docker_bin_dir}:{os.environ.get('PATH', '')}"
 
 # Docker client factory
 def get_docker_client():
