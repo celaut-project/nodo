@@ -109,7 +109,8 @@ def local_execution(
         log.LOGGER(f"Docker firewall block all function failed for {container.id}")
 
     # Get the gateway IP from the container's network settings
-    gateway_ip = '172.17.0.1' # Default fallback
+    is_sudo = os.getuid() == 0  # Docker0 in case of root, 10.0.2.2 in case of slirp4netns.
+    gateway_ip = '172.17.0.1' if is_sudo else '10.0.2.2' # Default fallback
     try:
         networks_settings = container.attrs.get('NetworkSettings', {}).get('Networks', {})
         for network_name, network_conf in networks_settings.items():
