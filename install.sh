@@ -133,31 +133,10 @@ create_service_file() {
     rm -f "$SERVICE_FILE"
   fi
 
-  printf "Creating $SERVICE_FILE...\n"
-  cat <<EOF > "$SERVICE_FILE"
-[Unit]
-Description=Nodo Serve
-After=network.target docker.service
-Requires=docker.service
-
-[Service]
-Type=simple
-User=root
-Group=sudo
-WorkingDirectory=$TARGET_DIR
-# Start isolated Docker daemon before nodo
-ExecStartPre=/bin/bash $TARGET_DIR/bash/start_docker_daemon.sh $TARGET_DIR
-# Main nodo process
-ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py serve'
-# Stop isolated Docker daemon after nodo stops
-ExecStopPost=/bin/bash $TARGET_DIR/bash/stop_docker_daemon.sh $TARGET_DIR
-Restart=on-failure
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-EOF
+  printf "Creating $SERVICE_FILE from template...\n"
+  
+  # Generate service file from template, replacing {{MAIN_DIR}} placeholder
+  sed "s|{{MAIN_DIR}}|$TARGET_DIR|g" "$TARGET_DIR/bash/nodo.service.template" > "$SERVICE_FILE"
 
   printf "Setting the permissions for the service file...\n"
   chmod 644 "$SERVICE_FILE"

@@ -1,0 +1,22 @@
+[Unit]
+Description=Nodo Serve
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=sudo
+WorkingDirectory={{MAIN_DIR}}
+# Start isolated Docker daemon before nodo
+ExecStartPre=/bin/bash {{MAIN_DIR}}/bash/start_docker_daemon.sh {{MAIN_DIR}}
+# Main nodo process
+ExecStart=/bin/bash -c 'source {{MAIN_DIR}}/venv/bin/activate && exec python3 {{MAIN_DIR}}/nodo.py serve'
+# Stop isolated Docker daemon after nodo stops
+ExecStopPost=/bin/bash {{MAIN_DIR}}/bash/stop_docker_daemon.sh {{MAIN_DIR}}
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
