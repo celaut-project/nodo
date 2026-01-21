@@ -6,6 +6,10 @@ BIN_DIR="$DOCKER_DIR/bin"
 export PATH="$BIN_DIR:$PATH"
 export DOCKER_HOST="unix://$DOCKER_DIR/docker.sock"
 
+# Allow containers to access host services (needed for gateway communication)
+# This disables host loopback isolation so containers can reach the node gateway
+export DOCKERD_ROOTLESS_ROOTLESSKIT_DISABLE_HOST_LOOPBACK=false
+
 # Launch the isolated Docker daemon
 # --exec-root and --data-root ensure it doesn't use the default Docker folders
 if [ ! -f "$DOCKER_DIR/docker.pid" ] || ! kill -0 $(cat "$DOCKER_DIR/docker.pid") 2>/dev/null; then
