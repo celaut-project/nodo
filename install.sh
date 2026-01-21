@@ -148,7 +148,7 @@ WorkingDirectory=$TARGET_DIR
 # Start isolated Docker daemon before nodo
 ExecStartPre=/bin/bash $TARGET_DIR/bash/start_docker_daemon.sh $TARGET_DIR
 # Main nodo process
-ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py daemon'
+ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py serve'
 # Stop isolated Docker daemon after nodo stops
 ExecStopPost=/bin/bash $TARGET_DIR/bash/stop_docker_daemon.sh $TARGET_DIR
 Restart=on-failure

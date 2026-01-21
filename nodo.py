@@ -19,19 +19,15 @@ DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MAIN_DIR = env_manager.get("MAIN_DIR")
 
 def is_nodo_service_running():
+    """Check if the nodo service is running by verifying if GATEWAY_PORT is in use."""
+    import socket
     try:
-        result = subprocess.run(
-            ['systemctl', '--no-pager', 'status', 'nodo.service'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        return "Active: active" in result.stdout
-    except subprocess.TimeoutExpired:
-        print("Error: systemctl status timed out", flush=True)
-        return False
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            result = s.connect_ex(('localhost', int(GATEWAY_PORT)))
+            return result == 0  # Port is in use (connection successful)
     except Exception as e:
-        print(f"Error checking nodo.service status: {e}", flush=True)
+        print(f"Error checking if GATEWAY_PORT is in use: {e}", flush=True)
         return False
 
 def stop_service():
@@ -166,7 +162,6 @@ if __name__ == '__main__':
             "\n- refresh_ergo_nodes"
             "\n- prune_containers"
             "\n- refresh_clients"
-            "\n- daemon"
             "\n- tx_history"
             "\n- increase_peer_deposit <peer id> <gas to add>"
             "\n- docker <docker args>  (runs docker commands in nodo's isolated context)"
@@ -403,10 +398,6 @@ if __name__ == '__main__':
             case 'refresh_ergo_nodes':
                 from src.manager.ergo import get_refresh_peers
                 get_refresh_peers()
-
-            case 'daemon':
-                from src.serve import serve
-                serve()
 
             case 'serve':
                 if not is_nodo_service_running():
