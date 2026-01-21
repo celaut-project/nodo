@@ -7,6 +7,7 @@ import subprocess
 import re
 from protos import celaut_pb2 as celaut
 from src.utils.logger import LOGGER as logger
+from src.utils.config import DOCKER_COMMAND
 
 class Protocol(Enum):
     """Supported network protocols."""
@@ -28,9 +29,10 @@ def __get_container_ip(container_id: str) -> str:
     """
     Get the IP address of a Docker container.
     """
+    # A slirp4netns container might not have a direct IP, handle such cases
     try:
         result = subprocess.run(
-            ['docker', 'inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', container_id],
+            [DOCKER_COMMAND, 'inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', container_id],
             capture_output=True,
             text=True,
             check=True
