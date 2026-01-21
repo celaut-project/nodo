@@ -249,17 +249,86 @@ if config.get('builder.ARM_SUPPORT'):
 if config.get('builder.X86_SUPPORT'):
     SUPPORTED_ARCHITECTURES.append(['linux/amd64', 'x86_64', 'amd64'])
 
-# Docker client factory
+# Docker client factory - uses isolated Docker daemon
+# Get the private Docker socket path from config
+_DOCKER_SOCKET = config.get("docker.DOCKER_SOCKET")
+
 try:
-    DOCKER_COMMAND = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
+    _DOCKER_BIN = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
 except (subprocess.CalledProcessError, FileNotFoundError):
-    DOCKER_COMMAND = "/usr/bin/docker" # Fallback
+    _DOCKER_BIN = "/usr/bin/docker"  # Fallback
     print("Warning: 'docker' command not found in PATH. Using fallback.")
 
-DOCKER_CLIENT = lambda: docker_lib.from_env(
-    timeout=config.get("docker.DOCKER_CLIENT_TIMEOUT", 480),
-    max_pool_size=config.get("docker.DOCKER_MAX_CONNECTIONS", 1000)
-)
+# DOCKER_COMMAND includes the -H flag to use the isolated socket
+# This ensures all CLI docker calls use the nodo's private daemon
+if _DOCKER_SOCKET:
+    DOCKER_COMMAND = f"{_DOCKER_BIN} -H unix://{_DOCKER_SOCKET}"
+else:
+    DOCKER_COMMAND = _DOCKER_BIN
+    print("Warning: DOCKER_SOCKET not configured. Using default Docker daemon.")
+
+# DOCKER_CLIENT factory - connects to the isolated Docker daemon
+def _ensure_docker_daemon_running():
+    """
+    Ensures the isolated Docker daemon is running.
+    If the socket doesn't exist, attempts to start the daemon.
+    """
+    socket_path = config.get("docker.DOCKER_SOCKET")
+    if not socket_path:
+        return True  # No isolated socket configured, assume default Docker
+    
+    # Check if socket exists and is accessible
+    if os.path.exists(socket_path):
+        return True
+    
+    # Socket doesn't exist, try to start the daemon
+    main_dir = config.get("main.MAIN_DIR")
+    start_script = os.path.join(main_dir, "bash", "start_docker_daemon.sh")
+    
+    if os.path.exists(start_script):
+        print(f"Starting isolated Docker daemon for nodo...")
+        try:
+            result = subprocess.run(
+                ["/bin/bash", start_script, main_dir],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if result.returncode == 0:
+                print("Isolated Docker daemon started successfully.")
+                return True
+            else:
+                print(f"Warning: Failed to start isolated Docker daemon: {result.stderr}")
+                return False
+        except subprocess.TimeoutExpired:
+            print("Warning: Timeout starting isolated Docker daemon.")
+            return False
+        except Exception as e:
+            print(f"Warning: Error starting isolated Docker daemon: {e}")
+            return False
+    else:
+        print(f"Warning: Docker daemon start script not found at {start_script}")
+        return False
+
+def _create_docker_client():
+    """Creates a Docker client connected to nodo's isolated daemon."""
+    socket_path = config.get("docker.DOCKER_SOCKET")
+    if socket_path:
+        # Ensure the daemon is running before connecting
+        _ensure_docker_daemon_running()
+        return docker_lib.DockerClient(
+            base_url=f"unix://{socket_path}",
+            timeout=config.get("docker.DOCKER_CLIENT_TIMEOUT", 480),
+            max_pool_size=config.get("docker.DOCKER_MAX_CONNECTIONS", 1000)
+        )
+    else:
+        # Fallback to default if socket not configured
+        return docker_lib.from_env(
+            timeout=config.get("docker.DOCKER_CLIENT_TIMEOUT", 480),
+            max_pool_size=config.get("docker.DOCKER_MAX_CONNECTIONS", 1000)
+        )
+
+DOCKER_CLIENT = _create_docker_client
 
 # Default System Resources for Manager
 DEFAULT_SYSTEM_RESOURCES: celaut_pb2.Sysresources = celaut_pb2.Sysresources(

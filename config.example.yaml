@@ -12,6 +12,10 @@ docker:
   DOCKER_MAX_CONNECTIONS: 1000
   CONCURRENT_CONTAINER_CREATIONS: 10
   REMOVE_CONTAINERS: true
+  # Isolated Docker configuration - uses a separate daemon from user's Docker
+  DOCKER_SOCKET: "${main.MAIN_DIR}/docker/docker.sock"
+  DOCKER_DATA_ROOT: "${main.MAIN_DIR}/docker/data"
+  DOCKER_CONFIG_DIR: "${main.MAIN_DIR}/docker/config"
 
 builder:
   WAIT_FOR_CONTAINER: 60

@@ -116,7 +116,7 @@ These commands offer extended management and exploration features:
 
 ---
 
-## Advanced Commands
+## Development Commands
 
 These are intended for development or advanced maintenance environments:
 
@@ -175,6 +175,46 @@ These are intended for development or advanced maintenance environments:
   Launches Nodo as a background daemon.  
   **Example:**  
   `nodo daemon`
+
+- **docker `<docker args>`**  
+  Executes Docker commands in nodo's isolated Docker context. This allows you to inspect containers, images, and other Docker resources that belong to nodo without seeing your personal Docker environment.  
+  **Examples:**  
+  ```bash
+  nodo docker ps                    # List nodo's running containers
+  nodo docker images                # List nodo's Docker images
+  nodo docker logs <container_id>   # View logs of a nodo container
+  nodo docker stats                 # View resource usage of nodo containers
+  ```
+
+---
+
+## Isolated Docker Environment
+
+Nodo uses an **isolated Docker daemon** that is completely separate from your personal Docker environment. This means:
+
+- **Containers created by nodo** are not visible when you run `docker ps` on your system
+- **Your personal containers** are not visible to nodo
+- **Images and volumes** are stored separately in `{MAIN_DIR}/docker/data`
+
+### Why Isolated Docker?
+
+1. **Clean separation**: Your development containers won't interfere with nodo's service containers
+2. **Security**: Nodo's operations are sandboxed from your personal Docker environment
+3. **Easy cleanup**: Uninstalling nodo removes all its Docker resources without affecting your personal containers
+
+### Accessing Nodo's Docker
+
+Use the `nodo docker` command to interact with nodo's isolated Docker daemon:
+
+```bash
+# Instead of:
+docker ps
+
+# Use:
+nodo docker ps
+```
+
+The isolated Docker daemon configuration is stored in `{MAIN_DIR}/docker/config/daemon.json`.
 
 ---
 

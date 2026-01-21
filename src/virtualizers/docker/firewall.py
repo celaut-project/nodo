@@ -24,16 +24,19 @@ class NetworkRule:
     created_at: datetime
     rule_number: Optional[int] = None
 
+from src.utils.config import DOCKER_COMMAND
+
 def __get_container_ip(container_id: str) -> str:
     """
     Get the IP address of a Docker container.
     """
     try:
         result = subprocess.run(
-            ['docker', 'inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', container_id],
+            f"{DOCKER_COMMAND} inspect --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}}{{{{end}}}}' {container_id}",
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            shell=True
         )
         ip = result.stdout.strip()
         if not ip:

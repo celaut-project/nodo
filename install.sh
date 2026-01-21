@@ -114,6 +114,15 @@ if ! ./"$SETUP_SCRIPT" "$TARGET_DIR"; then
   exit 1
 fi
 
+# Setup isolated Docker daemon for nodo
+printf "Setting up isolated Docker daemon for nodo...\n"
+chmod +x "$TARGET_DIR/bash/setup_docker_daemon.sh"
+chmod +x "$TARGET_DIR/bash/start_docker_daemon.sh"
+chmod +x "$TARGET_DIR/bash/stop_docker_daemon.sh"
+if ! "$TARGET_DIR/bash/setup_docker_daemon.sh" "$TARGET_DIR"; then
+  printf "Warning: Docker daemon setup failed. Nodo will use the default Docker daemon.\n"
+fi
+
 SCRIPT_USER=$(logname)
 
 create_service_file() {
@@ -128,14 +137,20 @@ create_service_file() {
   cat <<EOF > "$SERVICE_FILE"
 [Unit]
 Description=Nodo Serve
-After=network.target
+After=network.target docker.service
+Requires=docker.service
 
 [Service]
 Type=simple
 User=root
 Group=sudo
 WorkingDirectory=$TARGET_DIR
+# Start isolated Docker daemon before nodo
+ExecStartPre=/bin/bash $TARGET_DIR/bash/start_docker_daemon.sh $TARGET_DIR
+# Main nodo process
 ExecStart=/bin/bash -c 'source $TARGET_DIR/venv/bin/activate && exec python3 $TARGET_DIR/nodo.py daemon'
+# Stop isolated Docker daemon after nodo stops
+ExecStopPost=/bin/bash $TARGET_DIR/bash/stop_docker_daemon.sh $TARGET_DIR
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
