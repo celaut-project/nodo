@@ -5,7 +5,6 @@ from typing import Optional, Generator, Protocol, Tuple
 import docker as docker_lib
 import grpc
 from bee_rpc import client as bee
-from google.protobuf.json_format import MessageToJson
 
 from src.manager.resources import IOBigData
 from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc
@@ -144,7 +143,7 @@ def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
 
 
 def __get_container_by_id(id: str) -> docker_lib.models.containers.Container:
-    return docker_lib.from_env().containers.get(
+    return DOCKER_CLIENT().containers.get(
         container_id=id
     )
 

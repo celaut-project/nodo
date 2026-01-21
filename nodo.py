@@ -153,7 +153,7 @@ if __name__ == '__main__':
             "\n- export <service> <path> --raw"
             "\n- import <path>"
 
-            "\n\n Advanced commands:"
+            "\n\n Development commands:"
             "\n- update"
             "\n- serve"
             "\n- migrate"
@@ -169,6 +169,7 @@ if __name__ == '__main__':
             "\n- daemon"
             "\n- tx_history"
             "\n- increase_peer_deposit <peer id> <gas to add>"
+            "\n- docker <docker args>  (runs docker commands in nodo's isolated context)"
             "\n\n",
               flush=True)
         try:
@@ -505,6 +506,18 @@ if __name__ == '__main__':
             case "increase_peer_deposit":
                 from src.commands.increase_peer_deposit import increase_peer_deposit
                 increase_peer_deposit(peer_id=sys.argv[2], gas=int(sys.argv[3]))
+
+            case "docker":
+                # Execute docker commands in nodo's isolated Docker context
+                from src.utils.config import DOCKER_COMMAND
+                docker_args = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else ""
+                if not docker_args:
+                    print("Usage: nodo docker <docker command>", flush=True)
+                    print("Example: nodo docker ps", flush=True)
+                    print("Example: nodo docker images", flush=True)
+                    print(f"\nThis uses nodo's isolated Docker daemon.", flush=True)
+                else:
+                    os.system(f"{DOCKER_COMMAND} {docker_args}")
 
             case other:
                 print('Unknown command.', flush=True)

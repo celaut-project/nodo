@@ -19,6 +19,22 @@ else
     printf "nodo.service not found or already stopped.\n"
 fi
 
+# 1b. Stop isolated Docker daemon if running
+DOCKER_PID_FILE="$TARGET_DIR/docker/docker.pid"
+if [ -f "$DOCKER_PID_FILE" ]; then
+    DOCKER_PID=$(cat "$DOCKER_PID_FILE")
+    if ps -p "$DOCKER_PID" > /dev/null 2>&1; then
+        printf "Stopping isolated Docker daemon (PID: $DOCKER_PID)...\n"
+        kill "$DOCKER_PID" 2>/dev/null || true
+        sleep 2
+        # Force kill if still running
+        if ps -p "$DOCKER_PID" > /dev/null 2>&1; then
+            kill -9 "$DOCKER_PID" 2>/dev/null || true
+        fi
+    fi
+    rm -f "$DOCKER_PID_FILE"
+fi
+
 # 2. Remove containers
 # We need to do this before removing the directory because we need the python env and code to identify containers.
 if [ -d "$TARGET_DIR" ]; then
@@ -42,13 +58,14 @@ try:
     os.chdir("$TARGET_DIR") # Change cwd so ConfigManager finds config.yaml
 
     from src.database.sql_connection import SQLConnection
-    from src.utils.config import ConfigManager
+    from src.utils.config import ConfigManager, DOCKER_CLIENT
     
     # Force load config
     ConfigManager()
     
     sc = SQLConnection()
-    client = docker.from_env()
+    # Use the isolated Docker client from nodo's config
+    client = DOCKER_CLIENT()
     
     container_ids = sc.get_all_internal_containers_ids()
     print(f"Found {len(container_ids)} containers to remove.")
