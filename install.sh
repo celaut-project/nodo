@@ -31,6 +31,7 @@ if [ "$(id -u)" -ne 0 ]; then
   TARGET_DIR="$HOME/.nodo"
   USE_SUDO=false
 else
+  printf "Running with root privileges (installing to /nodo)\n"
   TARGET_DIR="/nodo"
   USE_SUDO=true
 fi
@@ -132,9 +133,12 @@ if ! ./"$SETUP_SCRIPT" "$TARGET_DIR"; then
   exit 1
 fi
 
-# Setup Docker Rootless
-chmod +x bash/setup_docker_rootless.sh
-./bash/setup_docker_rootless.sh "$TARGET_DIR"
+if [ "$USE_SUDO" = false ]; then
+  # Setup Docker Rootless
+  printf "Setting up Docker Rootless...\n"
+  chmod +x bash/setup_docker_rootless.sh
+  ./bash/setup_docker_rootless.sh "$TARGET_DIR"
+fi
 
 SCRIPT_USER=$(logname 2>/dev/null || echo $USER)
 
@@ -185,7 +189,6 @@ create_wrapper_script() {
       append_to_config "$HOME/.zshrc" "$EXPORT_CMD"
 
       # Fish detection
-      # Fish detection
       case "$SHELL" in
         */fish)
           printf "  - Detected Fish shell.\n"
@@ -218,9 +221,9 @@ create_wrapper_script() {
       esac
   fi
 
-
   # Check if the wrapper script already exists and remove it
   if [ -f "$WRAPPER_SCRIPT" ]; then
+    # TODO Check wrapper script on both, sudo and non-sudo cases. Check config files too with the paths.
     printf "Wrapper script %s already exists. Removing it...\n" "$WRAPPER_SCRIPT"
     [ "$USE_SUDO" = true ] && sudo rm -f "$WRAPPER_SCRIPT" || rm -f "$WRAPPER_SCRIPT"
   fi
@@ -234,10 +237,6 @@ create_wrapper_script() {
 ORIGINAL_DIR="\$PWD"
 # Change directory to TARGET_DIR, which was expanded at compile time
 cd "$TARGET_DIR" || exit
-
-# Start Docker Rootless if needed
-./bash/run_docker_rootless.sh "$TARGET_DIR"
-export DOCKER_HOST="unix://$TARGET_DIR/docker/docker.sock"
 
 # Activate the virtual environment in TARGET_DIR
 source "$TARGET_DIR/venv/bin/activate"
