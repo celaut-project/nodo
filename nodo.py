@@ -30,20 +30,6 @@ def is_nodo_service_running():
         print(f"Error checking if GATEWAY_PORT is in use: {e}", flush=True)
         return False
 
-def stop_service():
-    try:
-        # Run systemctl stop nodo.service
-        result = subprocess.run(['systemctl', 'stop', 'nodo.service'], capture_output=True, text=True)
-        # Check if the command was successful
-        if result.returncode == 0:
-            print("nodo.service stopped successfully.", flush=True)
-            return True
-        else:
-            print(f"Failed to stop nodo.service: {result.stderr}", flush=True)
-            return False
-    except Exception as e:
-        print(f"Error stopping nodo.service: {e}", flush=True)
-        return False
 
 def get_git_commit():
     try:
@@ -165,6 +151,7 @@ if __name__ == '__main__':
             "\n- tx_history"
             "\n- increase_peer_deposit <peer id> <gas to add>"
             "\n- docker <docker args>  (runs docker commands in nodo's isolated context)"
+            "\n- daemon start|status|stop|doctor  (control the nodo.service systemd unit)"
             "\n\n",
               flush=True)
         try:
@@ -514,6 +501,11 @@ if __name__ == '__main__':
                     print(f"\nThis uses nodo's isolated Docker daemon.", flush=True)
                 else:
                     os.system(f"{DOCKER_COMMAND} {docker_args}")
+
+            case "daemon":
+                from src.commands.daemon import daemon_command
+                subcommand = sys.argv[2] if len(sys.argv) > 2 else None
+                daemon_command(subcommand=subcommand, main_dir=MAIN_DIR)
 
             case other:
                 print('Unknown command.', flush=True)
