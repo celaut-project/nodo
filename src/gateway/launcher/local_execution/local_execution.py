@@ -123,6 +123,8 @@ def local_execution(
             if allow_connection_to_instance(container_id=container.id, instance=instance):
                 log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
                 break
+            else:
+                log.LOGGER(f"Container {container.id} not allowed to connect with {tag}!  This will cause errors.")  # TODO. Control that.
 
     # TODO END OF virtualizers.docker.execute.py
 

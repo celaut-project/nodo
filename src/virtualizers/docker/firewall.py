@@ -148,9 +148,14 @@ def allow_connection_to_instance(container_id: str, instance: celaut.Instance) -
                 ip, port = uri.ip, uri.port
                 protocol = slot_protocol[i_slot]
                 result = allow_connection(container_id, ip, port, protocol)
+                if not result:
+                    logger(f"Failed to allow connection to an instance, continues to another slot.")
                 results.append(result)
 
-        return any(results)
+        final = any(results)
+        if not final:
+            raise Exception(f"Any of the slots were able to connect.")  # TODO Doesn't have sense exceptions and return bools. Fix that code.
+        return final
     except Exception as e:
         logger(f"Failed to allow connection to an instance: {e}")
         return False
