@@ -32,7 +32,8 @@ if [ ! -f "${DOCKER_CONFIG_DIR}/daemon.json" ]; then
     "log-opts": {
         "max-size": "10m",
         "max-file": "3"
-    }
+    },
+    "ipv6": false
 }
 EOF
 fi
