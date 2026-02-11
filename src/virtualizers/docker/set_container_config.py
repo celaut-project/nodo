@@ -34,7 +34,7 @@ def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysreso
         __config__.initial_sysresources.CopyFrom(resources)
         log.LOGGER(f"Initial system resources loaded: \n {__config__.initial_sysresources}")
 
-    log.LOGGER(f"Configuration file generated: \n {__config__}")
+    log.LOGGER(f"Configuration file generated")
     return __config__
 
 def write_config(path: str, config: celaut.ConfigurationFile):
@@ -49,7 +49,7 @@ def set_config(container_id: str,
             ):
     
     __config__ = get_config(config=config, resources=resources, network_resolution=network_resolution)
-    log.LOGGER(f"Configuration file for the container {container_id}: \n {__config__}")
+    log.LOGGER(f"Configuration file for the container {container_id}")
 
     os.mkdir(CACHE + container_id)
 
