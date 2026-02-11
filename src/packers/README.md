@@ -15,7 +15,7 @@ Here is the updated documentation with this refinement:
     - **Example:** `3030`, `5000`
   - **`protocol` (Required):** The protocols supported by the service.
     - **Type:** Array of Strings
-    - **Allowed Values:** `"http"`, `"tls`", or other network protocols.
+    - **Allowed Values:** `"http"`, `"tls"`, or other network protocols.
     - **Example:** `["http", "tls"]`
 
 ### **2. `architecture` (Required)**
@@ -51,6 +51,22 @@ Here is the updated documentation with this refinement:
     - **Type:** String
     - **Example:** `"Formal explanation detailing the interaction with the Bitcoin network for block propagation."`
 
+### **6. `resources` (Optional)**
+- **Type:** Object
+- **Description:** Controls container resource guarantees (initial) and ceilings (at_most) plus an optional start delay. All fields default to the values used in `zip_with_dockerfile.py` when `resources` is absent.
+- **Keys:**
+  - **`start_time_ms` (Optional):** Milliseconds to wait before allowing the service to run; defaults to `0`.
+  - **`at_init` (Optional):** Initial resource guarantees applied right when the container starts. Missing keys default to `0` except `mem_limit` (10_000_000 bytes) and `disk_space` (2_000_000_000 bytes).
+    - **`blkio_weight`** (Integer)
+    - **`cpu_period`** (Integer)
+    - **`cpu_quota`** (Integer)
+    - **`mem_limit`** (Integer, default `10_000_000` bytes)
+    - **`disk_space`** (Integer, default `2_000_000_000` bytes)
+  - **`at_most` (Optional):** Hard ceilings for the same keys. Each value is clamped to be at least the corresponding `at_init` value so you cannot shrink the allowed resource range by raising `at_most` below the initial guarantee.
+    - Defaults mirror `at_init`.
+
+*Explanation: Providing a `resources` block lets packers enforce consistent CPU, memory, disk, and I/O limits while also optionally deferring the service start. If omitted, the node's default configuration values are used (but the service is always packaged with a concrete resource configuration).*
+
 ### **Example Documentation**
 
 #### **Example 1 (No outgoing network access)**
@@ -81,7 +97,18 @@ Here is the updated documentation with this refinement:
             "tags": ["Bittorrent"],
             "prose": "Formal explanation: Participation in Bittorrent swarms for downloading and uploading data chunks."
         }
-    ]
+    ],
+    "resources": {
+        "start_time_ms": 500,
+        "at_init": {
+            "mem_limit": 20000000,
+            "disk_space": 1000000000
+        },
+        "at_most": {
+            "mem_limit": 50000000,
+            "disk_space": 2000000000
+        }
+    }
 }
 ```
 *Explanation: This service is configured with two sets of outgoing network permissions. The prose formally describes the high-level purpose of connecting to the Bitcoin and Bittorrent networks.*
