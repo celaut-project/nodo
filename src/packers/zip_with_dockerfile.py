@@ -64,7 +64,9 @@ class ZipContainerPacker:
         # 5. Secure execution
         try:
             log.LOGGER(f"Starting build {target_arch} on host {host_arch}...")
-            subprocess.run(build_cmd, cwd=self.path, check=True)
+            # Capture output so we can log it if there's an error
+            process = subprocess.run(build_cmd, cwd=self.path, check=True, capture_output=True, text=True)
+            
             log.LOGGER("Filesystem export completed successfully.")
             
             # Calculate buffer length from the exported files
@@ -77,7 +79,8 @@ class ZipContainerPacker:
             self.buffer_len = total_size
 
         except subprocess.CalledProcessError as e:
-            self.error_msg = f"Critical build error: {e}"
+            # Include stdout and stderr in the error message
+            self.error_msg = f"Critical build error: {e}\n--- STDOUT ---\n{e.stdout}\n--- STDERR ---\n{e.stderr}"
             log.LOGGER(self.error_msg)
             return
 
