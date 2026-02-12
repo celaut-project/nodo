@@ -58,7 +58,13 @@ def __export_registry(project_dir: str, directory: str, pack_config: Dict):
                 if _dir:
                     print(f"Go to pack {dependency}")
                     from src.commands.packer.zip_with_dockerfile.pack import pack
-                    dependency = pack(_dir)
+                    try:
+                        dependency = pack(_dir)
+                    except Exception as e:
+                        dependency = None
+                    
+                    if not dependency:
+                        raise Exception(f"Dependency packing error. Process cancelled.")
                 
                 else:
                     raise Exception(f"Dependency not found. {dependency}")
