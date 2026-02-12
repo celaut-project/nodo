@@ -37,7 +37,8 @@ cat > "${DOCKER_CONFIG_DIR}/daemon.json" <<EOF
         "max-size": "10m",
         "max-file": "3"
     },
-    "ipv6": false
+    "ipv6": false,
+    "dns": ["8.8.8.8", "8.8.4.4"]
 }
 EOF
 
