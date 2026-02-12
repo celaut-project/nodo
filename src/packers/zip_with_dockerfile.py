@@ -3,7 +3,7 @@ from typing import Generator, List, Tuple, Union
 
 from src.utils import logger as log
 import json
-import os, subprocess
+import os, subprocess, platform
 import src.manager.resources as resources
 from bee_rpc import client as grpcbb
 from bee_rpc import buffer_pb2, block_builder
@@ -37,81 +37,56 @@ class ZipContainerPacker:
 
         if not arch: raise Exception("Can't pack this service, not supported architecture.")
 
-        # Directories are created on cache.
-        os.system("mkdir " + CACHE + self.aux_id + "/building")
-        os.system("mkdir " + CACHE + self.aux_id + "/filesystem")
+        # 1. Architecture detection
+        host_arch = platform.machine().lower()
+        target_arch = arch
 
-        # Log the selected architecture.
-        log.LOGGER(f"Arch selected {arch}")
+        # 2. Prepare output path
+        dest_path = os.path.join(CACHE, self.aux_id, "filesystem")
+        os.makedirs(dest_path, exist_ok=True)
 
-        # Build container and get compressed layers.
-        if not os.path.isfile(self.path + 'Dockerfile'):
-            raise Exception("Error: Dockerfile not found.")
-
-        # Define Docker commands
-        commands = [
-            f"{DOCKER_COMMAND} buildx build --platform {arch} --no-cache -t builder{self.aux_id} {self.path}",
-            f"{DOCKER_COMMAND} save builder{self.aux_id} > {CACHE}{self.aux_id}/building/container.tar",
-            f"tar -xvf {CACHE}{self.aux_id}/building/container.tar -C {CACHE}{self.aux_id}/building/"
+        # 3. Construct secure command
+        build_cmd = [
+            DOCKER_COMMAND, "buildx", "build",
+            "--platform", target_arch,
+            "--no-cache",
+            "--output", f"type=local,dest={dest_path}",
+            self.path
         ]
 
-        # Execute Docker commands with error handling using subprocess
-        for cmd in commands:
-            try:
-                log.LOGGER(cmd)
-                # Run command and capture output
-                process = subprocess.Popen(
-                    cmd,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                stdout, stderr = process.communicate()
-                
-                if process.returncode != 0:
-                    # If command failed, store the error message and log it
-                    self.error_msg = stderr.strip() or stdout.strip() or f"Command failed with return code {process.returncode}"
-                    log.LOGGER(f"Error executing command: {cmd}")
-                    log.LOGGER(f"Error message: {self.error_msg}")
-                    return  # Exit initialization if there's an error
-                
-            except Exception as e:
-                # Handle any other exceptions that might occur
-                self.error_msg = str(e)
-                log.LOGGER(f"Exception while executing command: {cmd}")
-                log.LOGGER(f"Exception: {self.error_msg}")
-                return
+        # 4. Stability Shield (If emulating ARM on Intel, limit threads)
+        if "arm64" in target_arch and "x86" in host_arch:
+            build_cmd.insert(-1, "--build-arg")
+            build_cmd.insert(-1, "CARGO_BUILD_JOBS=2")  # For Rust code
+            build_cmd.insert(-1, "--build-arg")
+            build_cmd.insert(-1, "MAKEFLAGS=-j2")  # For C/C++ code
 
+        # 5. Secure execution
         try:
-            # Get the buffer length only if previous commands succeeded
-            size_cmd = f"{DOCKER_COMMAND} image inspect builder{self.aux_id} --format='{{{{.Size}}}}'"
-            process = subprocess.run(size_cmd, shell=True, capture_output=True, text=True)
-            if process.returncode == 0:
-                self.buffer_len = int(process.stdout.strip())
-            else:
-                self.error_msg = f"Failed to get image size: {process.stderr.strip()}"
-                log.LOGGER(self.error_msg)
-                return
-                
-        except Exception as e:
-            self.error_msg = f"Error getting image size: {str(e)}"
+            log.LOGGER(f"Starting build {target_arch} on host {host_arch}...")
+            subprocess.run(build_cmd, cwd=self.path, check=True)
+            log.LOGGER("Filesystem export completed successfully.")
+            
+            # Calculate buffer length from the exported files
+            total_size = 0
+            for dirpath, _, filenames in os.walk(dest_path):
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    if not os.path.islink(fp):
+                        total_size += os.path.getsize(fp)
+            self.buffer_len = total_size
+
+        except subprocess.CalledProcessError as e:
+            self.error_msg = f"Critical build error: {e}"
             log.LOGGER(self.error_msg)
             return
-        
+
         # Check first tag for use as name
-        self.tag = self.json["tag"] if "tag" in self.json else None
+        self.tag = self.json.get("tag")
         
     def parseContainer(self):
         def parseFilesys() -> celaut.Metadata.HashTag:
-            # Save his filesystem on cache.
-            for layer in os.listdir(CACHE + self.aux_id + "/building/"):
-                if os.path.isdir(CACHE + self.aux_id + "/building/" + layer):
-                    log.LOGGER('Unzipping layer ' + layer)
-                    os.system(
-                        "tar -xvf " + CACHE + self.aux_id + "/building/" + layer + "/layer.tar -C "
-                        + CACHE + self.aux_id + "/filesystem/"
-                    )
+            # File system is already exported to filesystem/ by buildx
             # Add filesystem data to filesystem buffer object.
             def recursive_parsing(directory: str) -> celaut.Service.Container.Filesystem:
                 host_dir = CACHE + self.aux_id + "/filesystem"
@@ -347,7 +322,6 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]
         identifier, metadata, service = spec_file.save()
 
     # os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')  <-- This avoids rebuilding the container on the first run, but it causes file permission issues since it inherits them as they were on the host. Preferably, if using Docker, it is better to rebuild it.
-    os.system(DOCKER_COMMAND + ' rmi -f builder' + aux_id)
     os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier, metadata, service
 
