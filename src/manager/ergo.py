@@ -95,11 +95,8 @@ def check_ergo_node_availability():
     if not internet_available():
         return
     
-    logger("Checking Ergo node availability...")
-    
     current_ergo_node = env_manager.get("ledgers.ergo.NODE_URL")
     if __available_ergo_node(current_ergo_node):
-        logger(f"Ergo node {current_ergo_node} is available.")
         return
     
     logger(f"Ergo node {current_ergo_node} is not available.")
