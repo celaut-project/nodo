@@ -57,7 +57,7 @@ class ZipContainerPacker:
         # 4. Stability Shield (If emulating ARM on Intel, limit threads)
         if "arm64" in target_arch and "x86" in host_arch:
             build_cmd.insert(-1, "--build-arg")
-            build_cmd.insert(-1, "CARGO_BUILD_JOBS=2")  # For Rust code
+            build_cmd.insert(-1, "CARGO_BUILD_JOBS=1")  # For Rust code
             build_cmd.insert(-1, "--build-arg")
             build_cmd.insert(-1, "MAKEFLAGS=-j2")  # For C/C++ code
 
