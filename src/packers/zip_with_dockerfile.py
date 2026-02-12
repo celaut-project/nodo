@@ -3,7 +3,7 @@ from typing import Generator, List, Tuple, Union
 
 from src.utils import logger as log
 import json
-import os, subprocess, platform
+import os, subprocess, platform, shlex
 import src.manager.resources as resources
 from bee_rpc import client as grpcbb
 from bee_rpc import buffer_pb2, block_builder
@@ -46,8 +46,8 @@ class ZipContainerPacker:
         os.makedirs(dest_path, exist_ok=True)
 
         # 3. Construct secure command
-        build_cmd = [
-            DOCKER_COMMAND, "buildx", "build",
+        build_cmd = shlex.split(DOCKER_COMMAND) + [
+            "buildx", "build",
             "--platform", target_arch,
             "--no-cache",
             "--output", f"type=local,dest={dest_path}",
