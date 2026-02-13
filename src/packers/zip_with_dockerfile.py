@@ -49,6 +49,7 @@ class ZipContainerPacker:
         build_cmd = shlex.split(DOCKER_COMMAND) + [
             "buildx", "build",
             "--platform", target_arch,
+            "--progress", "plain",
             "--no-cache",
             "--output", f"type=local,dest={dest_path}",
             self.path
@@ -64,9 +65,32 @@ class ZipContainerPacker:
         # 5. Secure execution
         try:
             log.LOGGER(f"Starting build {target_arch} on host {host_arch}...")
-            # Capture output so we can log it if there's an error
-            process = subprocess.run(build_cmd, cwd=self.path, check=True, capture_output=True, text=True)
             
+            process = subprocess.Popen(
+                build_cmd, 
+                cwd=self.path, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+
+            # TODO yield the logs and show on commands/packer
+            full_output = []
+            for line in iter(process.stdout.readline, ""):
+                line_str = line.strip()
+                if line_str:
+                    log.LOGGER(line_str)
+                    full_output.append(line_str)
+            
+            process.wait()
+            if process.returncode != 0:
+                self.error_msg = f"Critical build error: Command {build_cmd} returned non-zero exit status {process.returncode}.\n"
+                self.error_msg += "\n".join(full_output)
+                log.LOGGER(self.error_msg)
+                return
+
             log.LOGGER("Filesystem export completed successfully.")
             
             # Calculate buffer length from the exported files
@@ -78,9 +102,8 @@ class ZipContainerPacker:
                         total_size += os.path.getsize(fp)
             self.buffer_len = total_size
 
-        except subprocess.CalledProcessError as e:
-            # Include stdout and stderr in the error message
-            self.error_msg = f"Critical build error: {e}\n--- STDOUT ---\n{e.stdout}\n--- STDERR ---\n{e.stderr}"
+        except Exception as e:
+            self.error_msg = f"Unexpected error during build: {str(e)}"
             log.LOGGER(self.error_msg)
             return
 
