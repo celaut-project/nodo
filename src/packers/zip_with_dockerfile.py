@@ -44,6 +44,7 @@ class ZipContainerPacker:
         # 2. Prepare output path
         dest_path = os.path.join(CACHE, self.aux_id, "filesystem")
         os.makedirs(dest_path, exist_ok=True)
+        tar_path = os.path.join(CACHE, self.aux_id, "filesystem.tar")
 
         # 3. Construct secure command
         build_cmd = shlex.split(DOCKER_COMMAND) + [
@@ -51,7 +52,7 @@ class ZipContainerPacker:
             "--platform", target_arch,
             "--progress", "plain",
             "--no-cache",
-            "--output", f"type=local,dest={dest_path}",
+            "--output", f"type=tar,dest={tar_path}",
             self.path
         ]
 
@@ -90,6 +91,12 @@ class ZipContainerPacker:
                 self.error_msg += "\n".join(full_output)
                 log.LOGGER(self.error_msg)
                 return
+
+            log.LOGGER(f"Extracting {tar_path} to {dest_path}...")
+            import tarfile
+            with tarfile.open(tar_path) as tar:
+                tar.extractall(path=dest_path)
+            os.remove(tar_path)
 
             log.LOGGER("Filesystem export completed successfully.")
             
