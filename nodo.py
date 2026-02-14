@@ -73,6 +73,15 @@ def check_rust_installation():
         except subprocess.CalledProcessError as e:
             print("Error installing Rust:", e, flush=True)
 
+def resolve_user_path(user_path: str) -> str:
+    """
+    Resolve a user-provided path against the original shell directory.
+    """
+    original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
+    if os.path.isabs(user_path):
+        return user_path
+    return os.path.abspath(os.path.join(original_directory, user_path))
+
 if __name__ == '__main__':
 
     if not os.path.exists(os.path.join(MAIN_DIR, "storage", ".acceptedkya")):
@@ -199,21 +208,10 @@ if __name__ == '__main__':
 
                     from src.commands.export_raw import export_raw
                     import os
-                    import sys
-
-                    # Get the original directory where the command was executed
-                    original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
 
                     # Get the path provided by the user
                     user_path = sys.argv[3]
-
-                    # Determine if the path is absolute or relative
-                    if os.path.isabs(user_path):
-                        # If it's absolute, use it directly
-                        absolute_path = user_path
-                    else:
-                        # If it's relative, combine it with the original directory
-                        absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+                    absolute_path = resolve_user_path(user_path)
 
                     # Create the directory structure if it doesn't exist
                     os.makedirs(os.path.dirname(absolute_path), exist_ok=True)
@@ -224,21 +222,10 @@ if __name__ == '__main__':
                 else:
                     from src.commands.export_bee import export_bee
                     import os
-                    import sys
-
-                    # Get the original directory where the command was executed
-                    original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
 
                     # Get the path provided by the user
                     user_path = sys.argv[3]
-
-                    # Determine if the path is absolute or relative
-                    if os.path.isabs(user_path):
-                        # If it's absolute, use it directly
-                        absolute_path = user_path
-                    else:
-                        # If it's relative, combine it with the original directory
-                        absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+                    absolute_path = resolve_user_path(user_path)
 
                     # Create the directory structure if it doesn't exist
                     os.makedirs(os.path.dirname(absolute_path), exist_ok=True)
@@ -251,19 +238,9 @@ if __name__ == '__main__':
                 import os
                 import sys
 
-                # Get the original directory where the command was executed
-                original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
-
                 # Get the path provided by the user
                 user_path = sys.argv[2]
-
-                # Determine if the path is absolute or relative
-                if os.path.isabs(user_path):
-                    # If it's absolute, use it directly
-                    absolute_path = user_path
-                else:
-                    # If it's relative, combine it with the original directory
-                    absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+                absolute_path = resolve_user_path(user_path)
 
                 # Check if the file exists
                 if not os.path.exists(absolute_path):
@@ -283,19 +260,9 @@ if __name__ == '__main__':
                     import os
                     import sys
 
-                    # Get the original directory where the command was executed
-                    original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
-
                     # Get the path provided by the user
                     user_path = arg
-
-                    # Determine if the path is absolute or relative
-                    if os.path.isabs(user_path):
-                        # If it's absolute, use it directly
-                        absolute_path = user_path
-                    else:
-                        # If it's relative, combine it with the original directory
-                        absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+                    absolute_path = resolve_user_path(user_path)
 
                     # Check if the file exists
                     if not os.path.exists(absolute_path):
@@ -425,21 +392,11 @@ if __name__ == '__main__':
                 import os
                 import sys
 
-                # Get the original directory where the command was executed
-                original_directory = os.environ.get("ORIGINAL_DIR", os.getcwd())
-
                 # Get the path provided by the user
                 user_path = sys.argv[2]
 
                 if "http" not in user_path[:4]:
-
-                    # Determine if the path is absolute or relative
-                    if os.path.isabs(user_path):
-                        # If it's absolute, use it directly
-                        absolute_path = user_path
-                    else:
-                        # If it's relative, combine it with the original directory
-                        absolute_path = os.path.abspath(os.path.join(original_directory, user_path))
+                    absolute_path = resolve_user_path(user_path)
 
                     # Check if the directory exists
                     if not os.path.exists(absolute_path):
@@ -457,11 +414,27 @@ if __name__ == '__main__':
 
             case "rundev":
                 from src.commands.run_dev import run_dev
-                run_dev(path=sys.argv[2])
+                import os
+                import sys
+
+                absolute_path = resolve_user_path(sys.argv[2])
+                if not os.path.isdir(absolute_path):
+                    print(f"Error: The directory {absolute_path} does not exist")
+                    sys.exit(1)
+
+                run_dev(path=absolute_path)
 
             case "ggconf":
                 from src.commands.ggconf import generate_gateway_config_dev
-                generate_gateway_config_dev(path=sys.argv[2])
+                import os
+                import sys
+
+                absolute_path = resolve_user_path(sys.argv[2])
+                if not os.path.isdir(absolute_path):
+                    print(f"Error: The directory {absolute_path} does not exist")
+                    sys.exit(1)
+
+                generate_gateway_config_dev(path=absolute_path)
                 
             case "prune_containers":
                 # Check if script is run as root
