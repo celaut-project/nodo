@@ -89,7 +89,8 @@ def launch_service(
                     )
 
                 #  If the service was from an internal instance, allow it to connect to it's new dependency.
-                if sc.internal_instance_exists(id=father_id):
+                #   There is an exception for instances with the "rundev" refix. In such cases there is no container.
+                if "rundev" not in father_id and sc.internal_instance_exists(id=father_id):
                     try:
                         for slot in instance.instance.uri_slot:
                             for uri in slot.uri:
