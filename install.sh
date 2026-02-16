@@ -6,6 +6,85 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+# Defaults
+REPO_URL="https://github.com/celaut-project/nodo.git"
+TARGET_DIR="/nodo"
+SERVICE_FILE="/etc/systemd/system/nodo.service"
+MAX_RETRIES=3
+USE_LOCAL_SOURCE=false
+BRANCH="stable"
+BRANCH_EXPLICIT=false
+
+print_usage() {
+  cat <<EOF
+Usage: sudo ./install.sh [options]
+
+Options:
+  --source-dir <path>  Use an existing local source directory instead of cloning.
+  --target-dir <path>  Install/clone into this directory (default: /nodo).
+  --repo-url <url>     Repository URL for clone/pull.
+  --branch <name>      Git branch for clone/pull (default: stable).
+  -h, --help           Show this help message.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --source-dir)
+      if [ -z "$2" ]; then
+        printf "Error: --source-dir requires a path.\n" >&2
+        exit 1
+      fi
+      TARGET_DIR="$2"
+      USE_LOCAL_SOURCE=true
+      shift 2
+      ;;
+    --target-dir)
+      if [ -z "$2" ]; then
+        printf "Error: --target-dir requires a path.\n" >&2
+        exit 1
+      fi
+      TARGET_DIR="$2"
+      shift 2
+      ;;
+    --repo-url)
+      if [ -z "$2" ]; then
+        printf "Error: --repo-url requires a URL.\n" >&2
+        exit 1
+      fi
+      REPO_URL="$2"
+      shift 2
+      ;;
+    --branch)
+      if [ -z "$2" ]; then
+        printf "Error: --branch requires a branch name.\n" >&2
+        exit 1
+      fi
+      BRANCH="$2"
+      BRANCH_EXPLICIT=true
+      shift 2
+      ;;
+    -h|--help)
+      print_usage
+      exit 0
+      ;;
+    *)
+      printf "Error: Unknown argument '%s'.\n" "$1" >&2
+      print_usage
+      exit 1
+      ;;
+  esac
+done
+
+# Normalize local source path to absolute
+if [ "$USE_LOCAL_SOURCE" = true ]; then
+  if [ ! -d "$TARGET_DIR" ]; then
+    printf "Error: Local source directory '%s' does not exist.\n" "$TARGET_DIR" >&2
+    exit 1
+  fi
+  TARGET_DIR="$(cd "$TARGET_DIR" >/dev/null 2>&1 && pwd)"
+fi
+
 # Function to install git if it's not already installed
 install_git_if_needed() {
   if ! command -v git >/dev/null 2>&1; then
@@ -25,27 +104,12 @@ install_git_if_needed() {
   fi
 }
 
-# Install git if needed
-install_git_if_needed
-
-# Define the repository URL and the target directory
-REPO_URL="https://github.com/celaut-project/nodo.git"
-TARGET_DIR="/nodo"
-SERVICE_FILE="/etc/systemd/system/nodo.service"
-MAX_RETRIES=3
-
-# Increase the Git buffer size to handle large repositories
-git config --global http.postBuffer 524288000  # 500MB
-git config --global http.lowSpeedLimit 0       # Removes the low-speed limit
-git config --global http.lowSpeedTime 999999   # Adjusts the low-speed timeout
-git config --global http.noKeepAlive true      # Disables HTTP keep-alive
-
 # Function to retry git clone in case of network errors
 clone_repo() {
   local retries=0
   while [ $retries -lt $MAX_RETRIES ]; do
     printf "Attempting to clone repository (try $((retries + 1))/$MAX_RETRIES)...\n"
-    if git clone "$REPO_URL" "$TARGET_DIR"; then
+    if git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$TARGET_DIR"; then
       return 0  # Success
     else
       printf "Error: Failed to clone the repository on attempt $((retries + 1)).\n"
@@ -56,38 +120,103 @@ clone_repo() {
   return 1  # Failure after retries
 }
 
-# Check if the target directory already exists
-if [ -d "$TARGET_DIR" ]; then
-  printf "Target directory $TARGET_DIR already exists. Performing git pull...\n"
+escape_for_sed() {
+  printf '%s' "$1" | sed 's/[&|]/\\&/g'
+}
+
+sync_config_main_paths() {
+  local config_file="$TARGET_DIR/config.yaml"
+  local escaped_main
+  local escaped_storage
+  local escaped_cache
+  local escaped_registry
+  local escaped_metadata
+  local escaped_blockdir
+  local escaped_db
+
+  escaped_main="$(escape_for_sed "$TARGET_DIR")"
+  escaped_storage="$(escape_for_sed "$TARGET_DIR/storage")"
+  escaped_cache="$(escape_for_sed "$TARGET_DIR/storage/__cache__/")"
+  escaped_registry="$(escape_for_sed "$TARGET_DIR/storage/__registry__/")"
+  escaped_metadata="$(escape_for_sed "$TARGET_DIR/storage/__metadata__/")"
+  escaped_blockdir="$(escape_for_sed "$TARGET_DIR/storage/__block__/")"
+  escaped_db="$(escape_for_sed "$TARGET_DIR/storage/database.sqlite")"
+
+  sed -i \
+    -e "s|^\([[:space:]]*MAIN_DIR:[[:space:]]*\).*|\1\"$escaped_main\"|" \
+    -e "s|^\([[:space:]]*STORAGE:[[:space:]]*\).*|\1\"$escaped_storage\"|" \
+    -e "s|^\([[:space:]]*CACHE:[[:space:]]*\).*|\1\"$escaped_cache\"|" \
+    -e "s|^\([[:space:]]*REGISTRY:[[:space:]]*\).*|\1\"$escaped_registry\"|" \
+    -e "s|^\([[:space:]]*METADATA_REGISTRY:[[:space:]]*\).*|\1\"$escaped_metadata\"|" \
+    -e "s|^\([[:space:]]*BLOCKDIR:[[:space:]]*\).*|\1\"$escaped_blockdir\"|" \
+    -e "s|^\([[:space:]]*DATABASE_FILE:[[:space:]]*\).*|\1\"$escaped_db\"|" \
+    "$config_file"
+}
+
+if [ "$USE_LOCAL_SOURCE" = true ]; then
+  printf "Using local source directory at %s (git clone/pull skipped).\n" "$TARGET_DIR"
   cd "$TARGET_DIR" || { printf "Error: Failed to change directory to $TARGET_DIR.\n" >&2; exit 1; }
-  if ! git pull; then
-    printf "Error: Failed to perform git pull.\n" >&2
-    exit 1
-  fi
-
-  if systemctl list-units --full -all | grep -Fq "nodo.service"; then
-    printf "Restarting nodo.service...\n"
-    systemctl restart nodo.service
-  else
-    printf "nodo.service does not exist, will create it later in the script.\n"
-  fi
 else
-  printf "Cloning repository from $REPO_URL into $TARGET_DIR...\n"
+  # Install git if needed
+  install_git_if_needed
 
-  # Try cloning with retries
-  if ! clone_repo; then
-    printf "Error: Failed to clone the repository after $MAX_RETRIES attempts.\n" >&2
+  # Increase the Git buffer size to handle large repositories
+  git config --global http.postBuffer 524288000  # 500MB
+  git config --global http.lowSpeedLimit 0       # Removes the low-speed limit
+  git config --global http.lowSpeedTime 999999   # Adjusts the low-speed timeout
+  git config --global http.noKeepAlive true      # Disables HTTP keep-alive
 
-    # Optionally, try using git:// instead of https://
-    printf "Attempting to clone using git:// protocol...\n"
-    REPO_URL="git://github.com/celaut-project/nodo.git"
-    if ! clone_repo; then
-      printf "Error: Failed to clone the repository using git:// protocol as well.\n" >&2
+  # Check if the target directory already exists
+  if [ -d "$TARGET_DIR" ]; then
+    if [ "$BRANCH_EXPLICIT" != true ]; then
+      CURRENT_BRANCH="$(git -C "$TARGET_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+      if [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "HEAD" ]; then
+        BRANCH="$CURRENT_BRANCH"
+      fi
+    fi
+
+    printf "Target directory %s already exists. Updating branch '%s'...\n" "$TARGET_DIR" "$BRANCH"
+    cd "$TARGET_DIR" || { printf "Error: Failed to change directory to $TARGET_DIR.\n" >&2; exit 1; }
+
+    if ! git fetch origin "$BRANCH"; then
+      printf "Error: Failed to fetch branch '%s' from origin.\n" "$BRANCH" >&2
       exit 1
     fi
-  fi
 
-  cd "$TARGET_DIR" || { printf "Error: Failed to change directory to $TARGET_DIR.\n" >&2; exit 1; }
+    if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+      if ! git checkout "$BRANCH"; then
+        printf "Error: Failed to checkout local branch '%s'.\n" "$BRANCH" >&2
+        exit 1
+      fi
+    else
+      if ! git checkout -b "$BRANCH" "origin/$BRANCH"; then
+        printf "Error: Failed to create local branch '%s' from origin/%s.\n" "$BRANCH" "$BRANCH" >&2
+        exit 1
+      fi
+    fi
+
+    if ! git pull --ff-only origin "$BRANCH"; then
+      printf "Error: Failed to pull branch '%s' (non-fast-forward or conflict).\n" "$BRANCH" >&2
+      exit 1
+    fi
+  else
+    printf "Cloning branch '%s' from %s into %s...\n" "$BRANCH" "$REPO_URL" "$TARGET_DIR"
+
+    # Try cloning with retries
+    if ! clone_repo; then
+      printf "Error: Failed to clone the repository after %s attempts.\n" "$MAX_RETRIES" >&2
+
+      # Optionally, try using git:// instead of https://
+      printf "Attempting to clone using git:// protocol...\n"
+      REPO_URL="git://github.com/celaut-project/nodo.git"
+      if ! clone_repo; then
+        printf "Error: Failed to clone the repository using git:// protocol as well.\n" >&2
+        exit 1
+      fi
+    fi
+
+    cd "$TARGET_DIR" || { printf "Error: Failed to change directory to $TARGET_DIR.\n" >&2; exit 1; }
+  fi
 fi
 
 # Create configuration file if it does not exist
@@ -96,6 +225,9 @@ if [ ! -f "$TARGET_DIR/config.yaml" ]; then
   cp "$TARGET_DIR/config.example.yaml" "$TARGET_DIR/config.yaml"
   chmod a+w "$TARGET_DIR/config.yaml"
 fi
+
+# Keep paths aligned with TARGET_DIR, including local-source installs.
+sync_config_main_paths
 
 # Apply custom architecture-specific setup
 if [ "$(uname -m)" = "arm64" ]; then
@@ -123,20 +255,32 @@ if ! "$TARGET_DIR/bash/setup_docker_daemon.sh" "$TARGET_DIR"; then
   printf "Warning: Docker daemon setup failed. Nodo will use the default Docker daemon.\n"
 fi
 
-SCRIPT_USER=$(logname)
+SCRIPT_USER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
 
 create_service_file() {
+  local expected_file
+  local escaped_target
+  expected_file="$(mktemp)"
+  escaped_target="$(escape_for_sed "$TARGET_DIR")"
+
+  # Generate expected service file from template
+  sed "s|{{MAIN_DIR}}|$escaped_target|g" "$TARGET_DIR/bash/nodo.service.template" > "$expected_file"
+
+  if [ -f "$SERVICE_FILE" ] && cmp -s "$SERVICE_FILE" "$expected_file"; then
+    printf "Service file %s is already up to date.\n" "$SERVICE_FILE"
+    rm -f "$expected_file"
+    return
+  fi
+
   if [ -f "$SERVICE_FILE" ]; then
-    printf "Service file $SERVICE_FILE already exists. Removing it...\n"
-    systemctl stop nodo.service
-    systemctl disable nodo.service
-    rm -f "$SERVICE_FILE"
+    printf "Service file %s differs from expected. Recreating it...\n" "$SERVICE_FILE"
+    systemctl stop nodo.service || true
+    systemctl disable nodo.service || true
   fi
 
   printf "Creating $SERVICE_FILE from template...\n"
-  
-  # Generate service file from template, replacing {{MAIN_DIR}} placeholder
-  sed "s|{{MAIN_DIR}}|$TARGET_DIR|g" "$TARGET_DIR/bash/nodo.service.template" > "$SERVICE_FILE"
+  cp "$expected_file" "$SERVICE_FILE"
+  rm -f "$expected_file"
 
   printf "Setting the permissions for the service file...\n"
   chmod 644 "$SERVICE_FILE"
@@ -148,13 +292,7 @@ create_service_file() {
   printf "Systemd daemon reloaded and nodo service started/enabled.\n"
 }
 
-if [ ! -f "$SERVICE_FILE" ]; then
-  printf "nodo.service does not exist. Creating service file...\n"
-  create_service_file
-else
-  printf "nodo.service already exists. Checking its status...\n"
-  systemctl --no-pager status nodo.service || printf "Service is not running or not correctly installed.\n"
-fi
+create_service_file
 
 create_wrapper_script() {
   WRAPPER_SCRIPT="/usr/local/bin/nodo"
@@ -195,14 +333,14 @@ create_wrapper_script
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
 chmod -R 777 "$TARGET_DIR"
 
-if systemctl --no-pager status nodo.service >/dev/null 2>&1; then
+if systemctl list-unit-files --type=service | grep -Fq "nodo.service"; then
   printf "Restarting nodo.service...\n"
-  systemctl restart nodo.service
+  systemctl restart nodo.service || systemctl start nodo.service
 else
   printf "Error: nodo.service does not exist or cannot be restarted. Please check the service creation process.\n" >&2
 fi
 
-ACCEPT_KYA_SCRIPT="bash/accept_kya.sh"
+ACCEPT_KYA_SCRIPT="$TARGET_DIR/bash/accept_kya.sh"
 chmod +x "$ACCEPT_KYA_SCRIPT"
 
 printf "Installation and service setup completed successfully. The repository is located at $TARGET_DIR.\n"

@@ -35,6 +35,20 @@ Basic installation:
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo sh
 ```
 
+Local source installation (development workflow):
+```bash
+cd /home/user/Desktop/nodo
+sudo ./install.sh --source-dir /home/user/Desktop/nodo
+```
+
+This mode keeps `nodo.service` and the isolated Docker daemon pointed to your local checkout, so code changes can be tested by restarting the service (no push/reinstall cycle needed).
+
+Branch-based installation (default branch is `stable`):
+```bash
+sudo ./install.sh --branch stable
+sudo ./install.sh --branch dev
+```
+
 ### Note on Installation
 
 - **Requirements**: Needs Ubuntu 22.04.5 LTS and curl package installed.
