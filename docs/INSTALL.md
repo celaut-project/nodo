@@ -5,6 +5,24 @@ This guide will walk you through the node's installation process. It is divided 
 1.  **Administrator Phase:** Steps requiring `sudo` privileges to prepare your system.
 2.  **User Phase:** Steps you can run as a regular user in your home directory, without `sudo`.
 
+### **Quick Local-Source Setup (for developers)**
+
+If you already have a local checkout and want `nodo.service` to run directly from it, use:
+
+```bash
+cd /home/user/Desktop/nodo
+sudo ./install.sh --source-dir /home/user/Desktop/nodo
+```
+
+This skips `git clone/pull`, rewires `config.yaml` + `nodo.service` to that local path, and keeps the isolated Docker daemon under your checkout.
+
+If you want to install/update directly from a specific branch:
+
+```bash
+sudo ./install.sh --branch stable   # production/main branch
+sudo ./install.sh --branch dev      # development branch
+```
+
 -----
 
 ### **1. Administrator Phase (requires `sudo`)**
