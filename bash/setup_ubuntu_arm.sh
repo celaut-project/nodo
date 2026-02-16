@@ -133,10 +133,10 @@ else
 fi
 
 echo "15. Running ARM-specific init script..."
-if [ -x "$TARGET_DIR/bash/init_arm.sh" ]; then
+if [ -f "$TARGET_DIR/bash/init_arm.sh" ]; then
     sh "$TARGET_DIR/bash/init_arm.sh"
 else
-    echo "   - init_arm.sh not found or not executable."
+    echo "   - init_arm.sh not found."
 fi
 
 echo "16. Running database migrations with Python..."
