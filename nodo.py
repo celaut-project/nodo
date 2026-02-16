@@ -85,7 +85,7 @@ def resolve_user_path(user_path: str) -> str:
 if __name__ == '__main__':
 
     if not os.path.exists(os.path.join(MAIN_DIR, "storage", ".acceptedkya")):
-        os.system(MAIN_DIR+"/bash/accept_kya.sh "+MAIN_DIR)
+        os.system(f"/bin/bash {MAIN_DIR}/bash/accept_kya.sh {MAIN_DIR}")
 
     os.umask(0o002)
 
@@ -278,8 +278,8 @@ if __name__ == '__main__':
                 if os.geteuid() != 0:
                     print("This script requires superuser privileges. Please run with sudo.")
                 else:
-                    os.system(f"{MAIN_DIR}/bash/restore_source.sh {MAIN_DIR}")
-                    os.system(f"{MAIN_DIR}/install.sh")
+                    os.system(f"/bin/bash {MAIN_DIR}/bash/restore_source.sh {MAIN_DIR}")
+                    os.system(f"/bin/bash {MAIN_DIR}/install.sh")
 
             case "stop":
                 from src.commands.stop import stop
@@ -362,7 +362,7 @@ if __name__ == '__main__':
 
             case 'config':
                 from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
-                os.system("chmod +x bash/reconfig.sh && ./bash/reconfig.sh")
+                os.system("/bin/bash bash/reconfig.sh")
                 if env_manager.get("REPUTATION_PROOF_ID") and not validate_reputation_proof_ownership():
                     _msg = "The reputation proof is not associated with the provided main address. It will be removed from the node environment registry."
                     log.LOGGER(_msg)

@@ -238,20 +238,15 @@ else
   exit 1
 fi
 
-chmod +x "$SETUP_SCRIPT"
-
 printf "Running setup script $SETUP_SCRIPT...\n"
-if ! ./"$SETUP_SCRIPT" "$TARGET_DIR"; then
+if ! /bin/bash "$SETUP_SCRIPT" "$TARGET_DIR"; then
   printf "Error: The setup script $SETUP_SCRIPT failed to execute.\n" >&2
   exit 1
 fi
 
 # Setup isolated Docker daemon for nodo
 printf "Setting up isolated Docker daemon for nodo...\n"
-chmod +x "$TARGET_DIR/bash/setup_docker_daemon.sh"
-chmod +x "$TARGET_DIR/bash/start_docker_daemon.sh"
-chmod +x "$TARGET_DIR/bash/stop_docker_daemon.sh"
-if ! "$TARGET_DIR/bash/setup_docker_daemon.sh" "$TARGET_DIR"; then
+if ! /bin/bash "$TARGET_DIR/bash/setup_docker_daemon.sh" "$TARGET_DIR"; then
   printf "Warning: Docker daemon setup failed. Nodo will use the default Docker daemon.\n"
 fi
 
@@ -323,15 +318,12 @@ EOF
   # Make the wrapper script executable
   chmod +x "$WRAPPER_SCRIPT"
 
-  printf "Setting permissions for %s and the wrapper script...\n" "$TARGET_DIR"
-  chmod -R 777 "$TARGET_DIR"
-  chmod +x "$WRAPPER_SCRIPT"
+  printf "Wrapper script %s created.\n" "$WRAPPER_SCRIPT"
 }
 
 create_wrapper_script
 
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
-chmod -R 777 "$TARGET_DIR"
 
 if systemctl list-unit-files --type=service | grep -Fq "nodo.service"; then
   printf "Restarting nodo.service...\n"
@@ -339,9 +331,6 @@ if systemctl list-unit-files --type=service | grep -Fq "nodo.service"; then
 else
   printf "Error: nodo.service does not exist or cannot be restarted. Please check the service creation process.\n" >&2
 fi
-
-ACCEPT_KYA_SCRIPT="$TARGET_DIR/bash/accept_kya.sh"
-chmod +x "$ACCEPT_KYA_SCRIPT"
 
 printf "Installation and service setup completed successfully. The repository is located at $TARGET_DIR.\n"
 printf "********** You can now use the 'nodo' command. **********\n"
