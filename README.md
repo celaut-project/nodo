@@ -35,6 +35,9 @@ Basic installation:
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo sh
 ```
 
+<details>
+<summary>Developer installation (click to expand)</summary>
+
 Local source installation (development workflow):
 ```bash
 cd /home/user/Desktop/nodo
@@ -48,6 +51,7 @@ Branch-based installation (default branch is `stable`):
 sudo ./install.sh --branch stable
 sudo ./install.sh --branch dev
 ```
+</details>
 
 ### Note on Installation
 
@@ -64,14 +68,14 @@ sudo ./install.sh --branch dev
 
 ## Platform Compatibility
 
-Below is a breakdown of **Nodo** feature support across different operating systems. Since the project is still under development, most capabilities are currently available only on Linux, with varying levels of maturity.
+Below is a breakdown of **Nodo** feature support across different operating systems. Since the project is still under development, capability levels vary by platform.
 
 | Functionality         | Linux    | Mac              | Windows          |
 | --------------------- | -------- | ---------------- | ---------------- |
-| Local execution       | 🟢 Beta  | 🔴 Not supported | 🔴 Not supported |
-| Packaging             | 🟢 Beta  | 🔴 Not supported | 🔴 Not supported |
-| Local network         | 🟡 Alpha | 🔴 Not supported | 🔴 Not supported |
-| Trustless network     | 🟡 Alpha | 🔴 Not supported | 🔴 Not supported |
+| Local execution       | 🟢 Beta  | 🔴 Not supported | 🟢 Beta          |
+| Packaging             | 🟢 Beta  | 🔴 Not supported | 🟢 Beta          |
+| Local network         | 🟡 Alpha | 🔴 Not supported | 🟡 Alpha         |
+| Trustless network     | 🟡 Alpha | 🔴 Not supported | 🟡 Alpha         |
 
 * 🟢 **Beta**: Functionality implemented and relatively stable.
 * 🟡 **Alpha**: Functionality under active development and subject to change.

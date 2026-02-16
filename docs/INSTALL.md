@@ -5,7 +5,8 @@ This guide will walk you through the node's installation process. It is divided 
 1.  **Administrator Phase:** Steps requiring `sudo` privileges to prepare your system.
 2.  **User Phase:** Steps you can run as a regular user in your home directory, without `sudo`.
 
-### **Quick Local-Source Setup (for developers)**
+<details>
+<summary><strong>Quick Local-Source Setup (for developers)</strong></summary>
 
 If you already have a local checkout and want `nodo.service` to run directly from it, use:
 
@@ -22,6 +23,7 @@ If you want to install/update directly from a specific branch:
 sudo ./install.sh --branch stable   # production/main branch
 sudo ./install.sh --branch dev      # development branch
 ```
+</details>
 
 -----
 
