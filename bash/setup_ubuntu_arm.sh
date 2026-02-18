@@ -71,10 +71,9 @@ python3.11 get-pip.py >/dev/null
 rm get-pip.py
 
 echo "9. Creating and activating virtualenv at $TARGET_DIR/venv..."
-cd "$TARGET_DIR"
-python3.11 -m venv venv
+python3.11 -m venv "$TARGET_DIR/venv"
 # shellcheck disable=SC1091
-source venv/bin/activate
+source "$TARGET_DIR/venv/bin/activate"
 
 REQ_FILE="$TARGET_DIR/bash/requirements.txt"
 if [ ! -f "$REQ_FILE" ]; then
