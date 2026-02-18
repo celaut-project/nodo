@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [ -z "${BASH_VERSION:-}" ]; then
+    printf "Error: This script requires bash. Run: bash %s\n" "$0" >&2
+    exit 1
+fi
+
 CONFIG_FILE="config.yaml"
 
 # --- Prerequisite Checks ---
