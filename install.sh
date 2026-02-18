@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [ -z "${BASH_VERSION:-}" ]; then
+  printf "Error: This installer requires bash. Run: bash install.sh\n" >&2
+  exit 1
+fi
+
 # Check if the script is running with root privileges
 if [ "$(id -u)" -ne 0 ]; then
   printf "Error: This script needs to be run with sudo.\nPlease run: sudo $0\n" >&2
@@ -250,7 +255,10 @@ if ! /bin/bash "$TARGET_DIR/bash/setup_docker_daemon.sh" "$TARGET_DIR"; then
   printf "Warning: Docker daemon setup failed. Nodo will use the default Docker daemon.\n"
 fi
 
-SCRIPT_USER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
+SCRIPT_USER="${SUDO_USER:-}"
+if [ -z "$SCRIPT_USER" ]; then
+  SCRIPT_USER="$(logname 2>/dev/null || echo root)"
+fi
 
 create_service_file() {
   local expected_file
