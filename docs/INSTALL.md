@@ -149,7 +149,7 @@ Execute the final scripts to initialize the configuration and apply database mig
 
 ```bash
 # Initialization script
-sh ./bash/init_x86.sh
+bash ./bash/init_x86.sh
 
 # Application migrations
 python3.11 nodo.py migrate

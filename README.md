@@ -32,7 +32,7 @@ a Dockerfile along with a configuration file and get a specification for that se
 
 Basic installation:
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash
 ```
 
 <details>
