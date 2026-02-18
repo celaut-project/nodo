@@ -65,4 +65,7 @@ if [[ "${response,,}" == "yes" || "${response,,}" == "y" ]]; then
     echo "Acceptance recorded in '$accepted_marker_file'."
     echo "KyA process completed for '$TARGET_DIR'."
     exit 0
+else
+    echo "KyA was not accepted. Exiting."
+    exit 1
 fi
