@@ -121,6 +121,7 @@ sudo apt-get -y update > /dev/null 2>&1 || {
 }
 
 # Check if Docker is already installed and its version
+DOCKER_VERSION=""
 if command -v docker > /dev/null 2>&1; then
     DOCKER_VERSION=$(docker --version | grep -oP '\d+\.\d+\.\d+')
     if [[ "$DOCKER_VERSION" != 24* ]]; then
@@ -143,9 +144,10 @@ sudo apt-get -y install qemu-system binfmt-support qemu-user-static > /dev/null
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
 
 echo "Executing initialization script for x86..."
-sh ./bash/init_x86.sh > /dev/null
+# Use 'source' so exported variables persist in this shell session
+source "$TARGET_DIR/bash/init_x86.sh"
 
 echo "Running migrations for Python application..."
-python3.11 nodo.py migrate > /dev/null
+python3.11 "$TARGET_DIR/nodo.py" migrate > /dev/null
 
 echo "All steps completed."

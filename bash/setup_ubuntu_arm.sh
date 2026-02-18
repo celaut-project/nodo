@@ -133,7 +133,8 @@ fi
 
 echo "15. Running ARM-specific init script..."
 if [ -f "$TARGET_DIR/bash/init_arm.sh" ]; then
-    sh "$TARGET_DIR/bash/init_arm.sh"
+    # Use 'source' so exported variables persist in this shell session
+    source "$TARGET_DIR/bash/init_arm.sh"
 else
     echo "   - init_arm.sh not found."
 fi
