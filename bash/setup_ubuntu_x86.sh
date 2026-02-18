@@ -76,8 +76,8 @@ sudo python3.11 get-pip.py > /dev/null
 rm get-pip.py
 
 echo "Creating and activating Python virtual environment..."
-python3.11 -m venv venv
-source venv/bin/activate
+python3.11 -m venv "$TARGET_DIR/venv"
+source "$TARGET_DIR/venv/bin/activate"
 
 REQUIREMENTS_FILE="$TARGET_DIR/bash/requirements.txt"
 
