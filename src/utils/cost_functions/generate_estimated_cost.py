@@ -1,10 +1,8 @@
 from typing import Optional
 from protos import celaut_pb2 as celaut, celaut_pb2
-from typing import Dict, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.utils.utils import from_gas_amount
-from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
 from src.manager.manager import could_ve_this_sysreq
 from src.utils.cost_functions.execution_cost import is_free_gas
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost, compute_maintenance_cost

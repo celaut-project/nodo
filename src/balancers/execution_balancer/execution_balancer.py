@@ -67,11 +67,13 @@ def execution_balancer(
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
 
     try:
-        peers['local'] = generate_estimated_cost(
+        _local = generate_estimated_cost(
             resources=resources,
             metadata=metadata,
             config=configuration
         )
+        if _local:
+            peers['local'] = _local
     except build.UnsupportedArchitectureException as e:
         log.LOGGER(e.__str__())
         pass
