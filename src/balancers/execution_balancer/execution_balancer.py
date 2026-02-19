@@ -24,6 +24,17 @@ def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
     
     # Formats an EstimatedCost proto directly, no JSON or extra fields.
     def format_estimated_cost_simple(cost_proto) -> str:
+        if not hasattr(cost_proto, 'cost') or \
+            not hasattr(cost_proto.cost, 'n') or \
+            not hasattr(cost_proto, 'init_maintenance_cost') or \
+            not hasattr(cost_proto.init_maintenance_cost, 'n') or \
+            not hasattr(cost_proto, 'max_maintenance_cost') or \
+            not hasattr(cost_proto.max_maintenance_cost, 'n') or \
+            not hasattr(cost_proto, 'maintenance_seconds_loop') or \
+            not hasattr(cost_proto, 'variance'):
+            log.LOGGER(f"Estimated cost is missing required fields, skipping. Estimated cost: {cost_proto}")
+            return "Invalid EstimatedCost (missing required fields)"
+
         fields = []
         if hasattr(cost_proto, 'cost') and hasattr(cost_proto.cost, 'n'):
             fields.append(f"cost: {cost_proto.cost.n}")

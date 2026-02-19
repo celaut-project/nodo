@@ -14,7 +14,7 @@ def stop_container(container_id: str) -> None:
     client = DOCKER_CLIENT()
     try:
         container = client.containers.get(container_id)
-        container.remove(force=True)
+        container.stop() # remove(force=True) <-- TODO on stable.
         log.LOGGER(f"Container '{container_id}' stopped successfully.")
     except docker_lib.errors.NotFound as e:
         log.LOGGER(f"CONTAINER NOT FOUND: {container_id}")

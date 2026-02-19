@@ -25,6 +25,17 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
     
     def __compute_score(peer_id: str, estimated_cost: celaut_pb2.EstimatedCost) -> float:
 
+        if not hasattr(estimated_cost, 'cost') or \
+            not hasattr(estimated_cost.cost, 'n') or \
+            not hasattr(estimated_cost, 'init_maintenance_cost') or \
+            not hasattr(estimated_cost.init_maintenance_cost, 'n') or \
+            not hasattr(estimated_cost, 'max_maintenance_cost') or \
+            not hasattr(estimated_cost.max_maintenance_cost, 'n') or \
+            not hasattr(estimated_cost, 'maintenance_seconds_loop') or \
+            not hasattr(estimated_cost, 'variance'):
+            logger(f"Estimated cost for peer {peer_id} is missing required fields, skipping. Estimated cost: {estimated_cost}")
+            return float('inf')  # Assign a very high cost to skip this peer
+
         gas_cost: int = int(
             INIT_COST_CONFIGURATION_FACTOR * vcnorm(
                 cost=from_gas_amount(estimated_cost.cost),
