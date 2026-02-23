@@ -108,6 +108,6 @@ def launch_service(
                log.LOGGER(f"Exception launching service on peer {peer}: {str(e)}")
                continue
 
-        _err_msg = f"Can't launch this service {service_id}"
+        _err_msg = f"Unable to launch service {service_id} locally or on any peer."
         log.LOGGER(_err_msg)
         raise Exception(_err_msg)
