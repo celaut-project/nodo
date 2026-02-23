@@ -140,8 +140,10 @@ fi
 echo "Installing QEMU and binfmt-support for multi-architecture support..."
 sudo apt-get -y install qemu-system binfmt-support qemu-user-static > /dev/null
 
-# Configure QEMU for multi-architecture support
-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
+# Configure QEMU for multi-architecture support using nodo's isolated Docker daemon
+DOCKER_SOCKET="${TARGET_DIR}/docker/docker.sock"
+/bin/bash "$TARGET_DIR/bash/start_docker_daemon.sh" "$TARGET_DIR" > /dev/null
+docker -H "unix://${DOCKER_SOCKET}" run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
 
 echo "Executing initialization script for x86..."
 # Use 'source' so exported variables persist in this shell session
