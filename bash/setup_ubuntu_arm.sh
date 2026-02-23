@@ -120,7 +120,9 @@ apt-get install -y --allow-downgrades docker-ce=5:24.* docker-ce-cli=5:24.* cont
 
 echo "13. (Optional) Installing QEMU/binfmt for multi-architecture containers..."
 apt-get install -y qemu-user-static binfmt-support >/dev/null
-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes >/dev/null
+DOCKER_SOCKET="${TARGET_DIR}/docker/docker.sock"
+/bin/bash "$TARGET_DIR/bash/start_docker_daemon.sh" "$TARGET_DIR" >/dev/null
+docker -H "unix://${DOCKER_SOCKET}" run --rm --privileged multiarch/qemu-user-static --reset -p yes >/dev/null
 
 echo "14. Installing Rust (cargo)…"
 if ! command -v cargo >/dev/null; then
