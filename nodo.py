@@ -82,6 +82,19 @@ def resolve_user_path(user_path: str) -> str:
         return user_path
     return os.path.abspath(os.path.join(original_directory, user_path))
 
+
+def resolve_service_input(service_input: str) -> str:
+    if ".celaut" not in service_input:
+        return service_input
+
+    from src.commands.import_bee import import_bee
+
+    absolute_path = resolve_user_path(service_input)
+    if not os.path.exists(absolute_path):
+        raise FileNotFoundError(f"The file {absolute_path} does not exist")
+
+    return import_bee(path=absolute_path)
+
 if __name__ == '__main__':
 
     if not os.path.exists(os.path.join(MAIN_DIR, "storage", ".acceptedkya")):
@@ -121,6 +134,7 @@ if __name__ == '__main__':
     if len(sys.argv) == 1:
         print("Command needed: "
             "\n- execute <service id> | <service tag> | <'.celaut' file path>"
+            "\n- estimate <service id> | <service tag> | <'.celaut' file path>"
             "\n- inspect <service id> | <service tag>"
             "\n- remove <service id> | <service tag>"
             "\n- stop <instance id>"
@@ -252,27 +266,27 @@ if __name__ == '__main__':
                 
             case "execute":
                 from src.commands.execute import execute
-                
-                arg = sys.argv[2]
-                
-                if ".celaut" in arg:
-                    from src.commands.import_bee import import_bee
-                    import os
-                    import sys
+                import sys
 
-                    # Get the path provided by the user
-                    user_path = arg
-                    absolute_path = resolve_user_path(user_path)
+                try:
+                    arg = resolve_service_input(sys.argv[2])
+                except FileNotFoundError as e:
+                    print(f"Error: {str(e)}")
+                    sys.exit(1)
 
-                    # Check if the file exists
-                    if not os.path.exists(absolute_path):
-                        print(f"Error: The file {absolute_path} does not exist")
-                        sys.exit(1)
-
-                    # Call the import_bee function
-                    arg = import_bee(path=absolute_path)
-                
                 execute(service=arg)
+
+            case "estimate":
+                from src.commands.estimate import estimate
+                import sys
+
+                try:
+                    arg = resolve_service_input(sys.argv[2])
+                except FileNotFoundError as e:
+                    print(f"Error: {str(e)}")
+                    sys.exit(1)
+
+                estimate(service=arg)
                 
             case "update":
                 if os.geteuid() != 0:

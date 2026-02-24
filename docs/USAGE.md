@@ -13,6 +13,19 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo execute 1234567890abcdef`
 
+- **estimate `<service id | service tag | '.celaut' file path>`**  
+  Estimates service execution cost without launching it.  
+  Prints:
+  - execution feasibility (`YES/NO`)
+  - reason when execution is not possible
+  - estimated gas costs (initial and maintenance)
+  - resource availability and total capacity (CPU, RAM, disk)
+  
+  **Examples:**  
+  `nodo estimate 1234567890abcdef`  
+  `nodo estimate my_service_tag`  
+  `nodo estimate ./my-service.celaut`
+
 - **remove `<service id>`**  
   Removes a service from the node using its ID.  
   **Example:**  
@@ -113,6 +126,27 @@ These commands offer extended management and exploration features:
   Displays the list of connected peer nodes.  
   **Example:**  
   `nodo peers`
+
+---
+
+## Estimate Resource Calculation Notes
+
+`nodo estimate` uses the same internal checks as runtime cost estimation:
+
+- **Execution feasibility check**
+  - Uses the service `resources.at_most.mem_limit`.
+  - Validation uses the same memory guard as execution flow (`could_ve_this_sysreq`).
+
+- **Service memory pool**
+  - Total/available pool comes from `IOBigData`, which is initialized with:
+  `virtual_memory().available`
+  - This represents memory reserved for service execution decisions in nodo.
+
+- **System totals**
+  - CPU total: physical cores via `psutil.cpu_count(logical=False)`
+  - CPU available: `100 - psutil.cpu_percent(...)`
+  - RAM total/available: `psutil.virtual_memory().total` / `.available`
+  - Disk total/free: `psutil.disk_usage('/').total` / `.free`
 
 ---
 
