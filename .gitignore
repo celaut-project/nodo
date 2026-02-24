@@ -14,4 +14,4 @@ venv
 .venv
 tests/script_data.json
 storage/*
-docker
+/docker/
