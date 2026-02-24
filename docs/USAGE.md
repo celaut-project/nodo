@@ -211,6 +211,19 @@ nodo docker ps
 
 The isolated Docker daemon configuration is stored in `{MAIN_DIR}/docker/config/daemon.json`.
 
+### Service Container Security Options
+
+Nodo applies Docker `security_opt` values when creating service containers:
+
+- `seccomp={MAIN_DIR}/src/virtualizers/docker/seccomp.json`
+- `apparmor=unconfined` (when AppArmor is enabled on the host)
+- `label=disable` (when SELinux is enabled on the host)
+
+You can tune these options in `config.yaml` under:
+
+- `docker.SECURITY_APPARMOR_UNCONFINED`
+- `docker.SECURITY_SELINUX_DISABLE_LABEL`
+
 ---
 
 ## Daemon execution
