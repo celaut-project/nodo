@@ -1,14 +1,15 @@
-from typing import Any, Generator
-import grpc
 import os
+from typing import Any, Generator
 
-from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc, gateway_bee
+import grpc
+
 from bee_rpc.client import client_grpc
+from protos import celaut_pb2, celaut_pb2_grpc, gateway_bee
 
+from src.commands.__by_tag import get_id
+from src.manager.manager import get_dev_clients
 from src.utils.config import SHA3_256_ID, ConfigManager
 from src.utils.utils import to_gas_amount
-from src.manager.manager import get_dev_clients
-from src.commands.__by_tag import get_id
 
 env_manager = ConfigManager()
 
@@ -18,6 +19,28 @@ REGISTRY = env_manager.get("REGISTRY")
 DEFAULT_INITIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT")
 
 SHA3_256 = SHA3_256_ID.hex()
+
+
+def resolve_service_hash(service: str) -> str:
+    resolved_service = get_id(service)
+    service = resolved_service if resolved_service else service
+
+    if os.path.exists(os.path.join(REGISTRY, service)):
+        return service
+
+    try:
+        for selected in os.listdir(METADATA_REGISTRY):
+            with open(os.path.join(METADATA_REGISTRY, selected), "rb") as f:
+                metadata = celaut_pb2.Metadata()
+                metadata.ParseFromString(f.read())
+                first_tag = metadata.hashtag.tag[0] if len(metadata.hashtag.tag) > 0 else ""
+                if str(first_tag) == str(service):
+                    return selected
+    except Exception:
+        return ""
+
+    return ""
+
 
 def generator(_hash: str, mem_limit: int = 50 * pow(10, 4), initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT) -> Generator[Any, None, None]:
     print("Get clients")
@@ -54,29 +77,14 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 4), initial_gas_amount: 
 
 
 def execute(service: str):
-    service = get_id(service)
+    service = resolve_service_hash(service)
+    if not service:
+        print("No service allowed.")
+        return
 
     g_stub = celaut_pb2_grpc.GatewayStub(
         grpc.insecure_channel(f"localhost:{GATEWAY_PORT}"),
     )
-    
-    if not os.path.exists(os.path.join(REGISTRY, service)):
-        found = False
-        try:
-            for selected in os.listdir(os.path.join(METADATA_REGISTRY)):
-                with open(os.path.join(METADATA_REGISTRY, selected), "rb") as f:
-                    metadata = celaut_pb2.Metadata()
-                    metadata.ParseFromString(f.read())
-                    first_tag = metadata.hashtag.tag[0] if len(metadata.hashtag.tag) > 0 else ""
-                    if str(first_tag) == str(service):
-                        service = selected
-                        found = True
-                        break
-            if not found: raise Exception
-        except Exception as e:
-            print(f"Error: {str(e)}")
-            print("No service allowed.")
-            return
 
     print(f"Execute {service}")
     service = next(client_grpc(
