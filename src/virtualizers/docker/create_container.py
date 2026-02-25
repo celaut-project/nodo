@@ -1,3 +1,4 @@
+import json
 import os
 from typing import List
 
@@ -38,7 +39,9 @@ def get_container_security_opts() -> List[str]:
 
     if seccomp_profile_path:
         if os.path.isfile(seccomp_profile_path):
-            security_opts.append(f"seccomp={seccomp_profile_path}")
+            with open(seccomp_profile_path, "r", encoding="utf-8") as f:
+                seccomp_content = json.dumps(json.load(f), separators=(",", ":"))
+            security_opts.append(f"seccomp={seccomp_content}")
         elif not _missing_seccomp_profile_warned:
             log.LOGGER(
                 f"Missing seccomp profile at {seccomp_profile_path}. "
