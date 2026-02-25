@@ -19,6 +19,8 @@ docker:
   # Security options applied to service containers.
   SECURITY_APPARMOR_UNCONFINED: true
   SECURITY_SELINUX_DISABLE_LABEL: true
+  SECURITY_NO_SECCOMP: true  # This option disables seccomp security profiles, use with caution.
+  SECURITY_PRIVILEGED: true  # This option gives the container full access to the host, use with caution.
 
 builder:
   WAIT_FOR_CONTAINER: 60
