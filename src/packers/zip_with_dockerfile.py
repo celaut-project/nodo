@@ -347,6 +347,7 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]
     
     _memory = int(PACKER_MEMORY_SIZE_FACTOR) * spec_file.buffer_len
     log.LOGGER(f"Try to lock {_memory / (1024**2):.2f} MB")
+    log.LOGGER(f"Total RAM: {IOBigData().get_ram_avaliable() / (1024**2):.2f} MB")
     with resources.mem_manager(len=_memory):
         spec_file.parseContainer()
         spec_file.parseApi()
