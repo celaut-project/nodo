@@ -4,6 +4,7 @@ from time import sleep
 from threading import Lock
 
 import threading
+import psutil
 
 
 class Singleton(type):
@@ -47,7 +48,8 @@ class IOBigData(metaclass=Singleton):
                  ram_pool_method=None
                  ) -> None:
 
-        self.ram_pool = ram_pool_method
+        self.ram_pool = ram_pool_method if ram_pool_method is not None \
+            else lambda: psutil.virtual_memory().available
 
         self.log = log
         self.ram_locked = 0
