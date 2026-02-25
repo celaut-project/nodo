@@ -37,17 +37,21 @@ def get_container_security_opts() -> List[str]:
     security_opts: List[str] = []
     seccomp_profile_path = _default_seccomp_profile_path()
 
-    if seccomp_profile_path:
-        if os.path.isfile(seccomp_profile_path):
-            with open(seccomp_profile_path, "r", encoding="utf-8") as f:
-                seccomp_content = json.dumps(json.load(f), separators=(",", ":"))
-            security_opts.append(f"seccomp={seccomp_content}")
-        elif not _missing_seccomp_profile_warned:
-            log.LOGGER(
-                f"Missing seccomp profile at {seccomp_profile_path}. "
-                f"Using Docker default seccomp profile."
-            )
-            _missing_seccomp_profile_warned = True
+    if no_seccomp := env_manager.get("docker.SECURITY_NO_SECCOMP", False):
+        log.LOGGER("Running container without seccomp profile due to configuration.")
+        security_opts.append("seccomp=unconfined")
+    else:
+        if seccomp_profile_path:
+            if os.path.isfile(seccomp_profile_path):
+                with open(seccomp_profile_path, "r", encoding="utf-8") as f:
+                    seccomp_content = json.dumps(json.load(f), separators=(",", ":"))
+                security_opts.append(f"seccomp={seccomp_content}")
+            elif not _missing_seccomp_profile_warned:
+                log.LOGGER(
+                    f"Missing seccomp profile at {seccomp_profile_path}. "
+                    f"Using Docker default seccomp profile."
+                )
+                _missing_seccomp_profile_warned = True
 
     if env_manager.get("docker.SECURITY_APPARMOR_UNCONFINED", True) and _is_apparmor_enabled():
         security_opts.append("apparmor=unconfined")
@@ -70,6 +74,10 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
         security_opts = get_container_security_opts()
         if security_opts:
             create_args["security_opt"] = security_opts
+
+        if env_manager.get("docker.SECURITY_PRIVILEGED", False):
+            log.LOGGER("🚨 Running container in PRIVILEGED mode (full host access) due to configuration.")
+            create_args["privileged"] = True
 
         return DOCKER_CLIENT().containers.create(
             **create_args
