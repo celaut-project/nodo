@@ -347,9 +347,9 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]
 
     
     _memory = int(PACKER_MEMORY_SIZE_FACTOR) * spec_file.buffer_len
-    log.LOGGER(f"Try to lock {_memory / (1024**2):.2f} MB")
-    log.LOGGER(f"RAM avaliable: {IOBigData().get_ram_avaliable() / (1024**2):.2f} MB")
+    log.LOGGER(f"Try to lock {_memory / (1024**2):.2f} MB of RAM for packing process (filesystem size: {spec_file.buffer_len / (1024**2):.2f} MB). RAM avaliable before locking: {IOBigData().get_ram_avaliable() / (1024**2):.2f} MB")
     with resources.mem_manager(len=_memory):
+        log.LOGGER(f"RAM locked successfully for packing process. RAM avaliable after locking: {IOBigData().get_ram_avaliable() / (1024**2):.2f} MB")
         spec_file.parseContainer()
         spec_file.parseApi()
         spec_file.parseNetwork()
