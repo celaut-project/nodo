@@ -12,6 +12,7 @@ from src.utils.config import ConfigManager, SHA3_256_ID, DOCKER_COMMAND, PACKER_
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
 from src.utils.config import ConfigManager
+from src.manager.resources import IOBigData
 
 env_manager = ConfigManager()
 
