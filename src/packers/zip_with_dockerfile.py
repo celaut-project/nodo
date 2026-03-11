@@ -1,9 +1,11 @@
+import base64
 import codecs
+import fcntl
 from typing import Generator, List, Tuple, Union
 
 from src.utils import logger as log
 import json
-import os, subprocess, platform, shlex
+import os, subprocess, platform, shlex, sys, uuid
 import src.manager.resources as resources
 from bee_rpc import client as grpcbb
 from bee_rpc import buffer_pb2, block_builder
@@ -377,7 +379,52 @@ def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Serv
 
 def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
     log.LOGGER('Compiling zip ' + str(zip))
-    service_id, metadata, service = zipfile_ok(zip=zip)
+    lock_file = _acquire_pack_lock()
+    try:
+        result_path = os.path.join(CACHE, f"pack_result_{uuid.uuid4().hex}.json")
+        main_dir = env_manager.get("MAIN_DIR") or os.getcwd()
+        cmd = [
+            sys.executable, "-m", "src.packers.zip_with_dockerfile",
+            "--worker", zip, result_path
+        ]
+        proc = subprocess.run(cmd, cwd=main_dir)
+
+        if proc.returncode != 0:
+            yield from grpcbb.serialize_to_buffer(
+                message_iterator=[
+                    pack_pb2.PackOutputError(
+                        message=f"Subprocess pack failed with exit code {proc.returncode}."
+                    )
+                ],
+                indices=gateway_bee.PackOutput_indices
+            )
+            return
+
+        if not os.path.exists(result_path):
+            yield from grpcbb.serialize_to_buffer(
+                message_iterator=[
+                    pack_pb2.PackOutputError(
+                        message=f"Subprocess pack did not produce result file: {result_path}"
+                    )
+                ],
+                indices=gateway_bee.PackOutput_indices
+            )
+            return
+
+        with open(result_path, "r") as f:
+            result = json.load(f)
+        os.remove(result_path)
+
+        error_msg = result.get("error")
+        if error_msg:
+            service_id, metadata, service = None, None, error_msg
+        else:
+            service_id = result.get("service_id")
+            metadata_b64 = result.get("metadata_b64")
+            metadata = celaut.Metadata.FromString(base64.b64decode(metadata_b64)) if metadata_b64 else None
+            service = result.get("service")
+    finally:
+        _release_pack_lock(lock_file)
     
     if not service_id and not metadata and service:
         error_msg = service
@@ -405,3 +452,55 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
 
     # shutil.rmtree(service_with_meta.name)
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
+
+
+def _acquire_pack_lock():
+    lock_path = os.path.join(CACHE, "pack.lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    lock_file = open(lock_path, "w")
+    fcntl.flock(lock_file, fcntl.LOCK_EX)
+    return lock_file
+
+
+def _release_pack_lock(lock_file) -> None:
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+    finally:
+        lock_file.close()
+
+
+def _write_pack_result(result_path: str, data: dict) -> None:
+    os.makedirs(os.path.dirname(result_path), exist_ok=True)
+    with open(result_path, "w") as f:
+        json.dump(data, f)
+
+
+def _worker_main() -> None:
+    argv = sys.argv[1:]
+    if not argv or argv[0] != "--worker":
+        return
+
+    if len(argv) != 3:
+        print("Usage: --worker <zip> <result_path>", file=sys.stderr)
+        sys.exit(2)
+
+    _, zip_path, result_path = argv
+
+    try:
+        service_id, metadata, service = zipfile_ok(zip=zip_path)
+
+        if not service_id and not metadata and service:
+            _write_pack_result(result_path, {"error": service})
+        else:
+            metadata_b64 = base64.b64encode(metadata.SerializeToString()).decode("ascii") if metadata else None
+            _write_pack_result(result_path, {
+                "service_id": service_id,
+                "metadata_b64": metadata_b64,
+                "service": service
+            })
+    except Exception as e:
+        _write_pack_result(result_path, {"error": f"Worker exception: {str(e)}"})
+
+
+if __name__ == "__main__":
+    _worker_main()
