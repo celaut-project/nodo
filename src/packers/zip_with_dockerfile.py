@@ -1,7 +1,7 @@
 import base64
 import codecs
 import fcntl
-from typing import Generator, List, Tuple, Union
+from typing import Generator, List, Tuple
 
 from src.utils import logger as log
 import json
@@ -11,8 +11,7 @@ from bee_rpc import client as grpcbb
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager, SHA3_256_ID, DOCKER_COMMAND, PACKER_SUPPORTED_ARCHITECTURES
-from src.utils.utils import get_service_hex_main_hash
-from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
+from src.utils.verify import calculate_hashes, calculate_hashes_by_stream
 from src.utils.config import ConfigManager
 from src.manager.resources import IOBigData
 
@@ -280,49 +279,32 @@ class ZipContainerPacker:
                 network.prose = json_network['prose']
                 self.service.network.append(network)
 
-    def save(self) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
-        service: Union[str, pack_pb2.Service]
-        if not self.blocks:
-            service_buffer = self.service.SerializeToString()  # 2*len
-            self.metadata.hashtag.hash.extend(
-                get_service_list_of_hashes(
-                    service_buffer=service_buffer
-                )
-            )
-            service_id: str = get_service_hex_main_hash(
-                metadata=self.metadata
-            )
-            # Once service hashes are calculated, we prune the filesystem for save storage.
-            # self.service.container.filesystem.ClearField('branch')
-            # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-            del service_buffer  # -len
-            service = self.service
-        else:
-            # Generate the hashes.
-            bytes_id, service_directory = block_builder.build_multiblock(
-                pf_object_with_block_pointers=self.service,
-                blocks=self.blocks
-            )
-            service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
-            self.metadata.hashtag.hash.extend(
-                [celaut.Metadata.HashTag.Hash(
-                    type=SHA3_256_ID,
-                    value=bytes_id
-                )]
-            )
-            
-            """  <!-- Validation don't needed here -->
-            
-                from hashlib import sha3_256
-                validate_content = sha3_256()
-                for i in grpcbb.read_multiblock_directory(directory=service_directory):
-                    validate_content.update(i)
-                if validate_content.digest() != bytes_id:
-                    raise Exception(f"Invalid packing, wrong validated content {validate_content.hexdigest()}, but should be {bytes.hex(bytes_id)}")
+    def save(self) -> Tuple[str, celaut.Metadata, str]:
+        # Always build a multiblock directory so the service is returned as a path.
+        bytes_id, service_directory = block_builder.build_multiblock(
+            pf_object_with_block_pointers=self.service,
+            blocks=self.blocks
+        )
+        service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
+        self.metadata.hashtag.hash.extend(
+            [celaut.Metadata.HashTag.Hash(
+                type=SHA3_256_ID,
+                value=bytes_id
+            )]
+        )
 
-            """
-                
-            service = service_directory
+        """  <!-- Validation don't needed here -->
+        
+            from hashlib import sha3_256
+            validate_content = sha3_256()
+            for i in grpcbb.read_multiblock_directory(directory=service_directory):
+                validate_content.update(i)
+            if validate_content.digest() != bytes_id:
+                raise Exception(f"Invalid packing, wrong validated content {validate_content.hexdigest()}, but should be {bytes.hex(bytes_id)}")
+
+        """
+            
+        service = service_directory
         # Add the tag attribute as the first tag or tag list in the metadata. This could be used as the name of the service for better human identification.
         if self.tag and type(self.tag) is str: 
             self.metadata.hashtag.tag.extend([self.tag])
@@ -340,7 +322,7 @@ class ZipContainerPacker:
             
         return service_id, self.metadata, service
 
-def ok(path, aux_id) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
+def ok(path, aux_id) -> Tuple[str, celaut.Metadata, str]:
     spec_file = ZipContainerPacker(path=path, aux_id=aux_id)
     
     # Check if there was an error during initialization
@@ -363,7 +345,7 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]
     return identifier, metadata, service
 
 
-def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, Union[str, pack_pb2.Service]]:
+def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, str]:
     import random
     aux_id = str(random.random())
     os.system('mkdir ' + CACHE + aux_id)
@@ -414,7 +396,7 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
         with open(result_path, "r") as f:
             result = json.load(f)
         os.remove(result_path)
-
+        
         error_msg = result.get("error")
         if error_msg:
             service_id, metadata, service = None, None, error_msg
@@ -422,7 +404,9 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
             service_id = result.get("service_id")
             metadata_b64 = result.get("metadata_b64")
             metadata = celaut.Metadata.FromString(base64.b64decode(metadata_b64)) if metadata_b64 else None
-            service = result.get("service")
+            service = result.get("service_dir")
+            if service is None:
+                service_id, metadata, service = None, None, "Worker did not return service directory."
     finally:
         _release_pack_lock(lock_file)
     
@@ -493,11 +477,14 @@ def _worker_main() -> None:
             _write_pack_result(result_path, {"error": service})
         else:
             metadata_b64 = base64.b64encode(metadata.SerializeToString()).decode("ascii") if metadata else None
-            _write_pack_result(result_path, {
-                "service_id": service_id,
-                "metadata_b64": metadata_b64,
-                "service": service
-            })
+            if not isinstance(service, str):
+                _write_pack_result(result_path, {"error": "Worker expected service directory, got protobuf."})
+            else:
+                _write_pack_result(result_path, {
+                    "service_id": service_id,
+                    "metadata_b64": metadata_b64,
+                    "service_dir": service
+                })
     except Exception as e:
         _write_pack_result(result_path, {"error": f"Worker exception: {str(e)}"})
 
