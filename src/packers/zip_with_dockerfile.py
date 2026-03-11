@@ -8,6 +8,7 @@ import json
 import os, subprocess, platform, shlex, sys, uuid
 import src.manager.resources as resources
 from bee_rpc import client as grpcbb
+from bee_rpc.utils import modify_env
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager, SHA3_256_ID, DOCKER_COMMAND, PACKER_SUPPORTED_ARCHITECTURES
@@ -18,9 +19,17 @@ from src.manager.resources import IOBigData
 env_manager = ConfigManager()
 
 CACHE = env_manager.get("CACHE")
+BLOCKDIR = env_manager.get("BLOCKDIR")
 PACKER_MEMORY_SIZE_FACTOR = env_manager.get("PACKER_MEMORY_SIZE_FACTOR")
 SAVE_ALL = env_manager.get("SAVE_ALL")
 MIN_BUFFER_BLOCK_SIZE = env_manager.get("MIN_BUFFER_BLOCK_SIZE")
+
+# Ensure bee_rpc uses the configured cache and block directories.
+if CACHE:
+    os.makedirs(CACHE, exist_ok=True)
+if BLOCKDIR:
+    os.makedirs(BLOCKDIR, exist_ok=True)
+    modify_env(cache_dir=CACHE, block_dir=BLOCKDIR)
 
 
 class ZipContainerPacker:
