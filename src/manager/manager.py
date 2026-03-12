@@ -1,8 +1,6 @@
-import json
 from uuid import uuid4
 from typing import Optional, Generator, Protocol, Tuple
 
-import docker as docker_lib
 import grpc
 from bee_rpc import client as bee
 
@@ -14,15 +12,16 @@ from src.database.sql_connection import SQLConnection, is_peer_available
 
 from src.utils import logger as log
 from src.utils import utils
-from src.utils.config import DOCKER_CLIENT, ConfigManager
+from src.utils.config import ConfigManager
 from src.utils.utils import (
     from_gas_amount,
     to_gas_amount,
     generate_uris_by_peer_id
 )
 from src.utils.config import ConfigManager
-from src.virtualizers.docker.firewall import remove_rule
-from src.virtualizers.docker.stop_container import stop_container
+from src.virtualizers.interface import remove_firewall_rule
+from src.virtualizers.interface import kill
+from src.virtualizers.interface import hotplug
 
 env_manager = ConfigManager()
 
@@ -140,12 +139,6 @@ def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
             sc.update_sys_req(id=id, mem_limit=sys_req.mem_limit)
 
     return True
-
-
-def __get_container_by_id(id: str) -> docker_lib.models.containers.Container:
-    return DOCKER_CLIENT().containers.get(
-        container_id=id
-    )
 
 
 def __refund_gas(
@@ -329,80 +322,35 @@ def default_initial_cost(
         sc.get_gas_amount_by_father_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
     ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INITIAL_GAS_AMOUNT)
 
-def add_container(
+def provision_vmachine(
         service_id: str,
         father_id: str,
-        container: docker_lib.models.containers.Container,
+        vmachine_id: str,
+        vmachine_ip: str,
         initial_gas_amount: Optional[int],
         serialized_instance: str,
         system_requirements_range: celaut_pb2.ModifyServiceSystemResourcesInput = None
-) -> str:
+):
     
-    id: str = container.id
-    log.LOGGER(f'Add container for {father_id}')
+    log.LOGGER(f'Add service for {father_id}')
     initial_gas_amount = initial_gas_amount if initial_gas_amount \
         else default_initial_cost(father_id=father_id)
         
     sc.add_local_instance(
         father_id=father_id,
-        container_id=container.id,
-        container_ip=container.attrs['NetworkSettings']['IPAddress'],
+        container_id=vmachine_id,
+        container_ip=vmachine_ip,
         gas=initial_gas_amount,
         serialized_instance=serialized_instance,
         service_id=service_id
     )
     
-    if not container_modify_system_params(
-            id=id,
+    if not hotplug(
+            vmachine_id=vmachine_id,
             system_requeriments_range=system_requirements_range
     ):
-        log.LOGGER(f'Exception during modify params of {id}.')
-        raise Exception(f'Exception during modify params of {id}.')
-    
-    return id
-
-
-def container_modify_system_params(
-        id: str,
-        system_requeriments_range: celaut_pb2.ModifyServiceSystemResourcesInput
-) -> bool:
-    _id = id[:6]
-    log.LOGGER(f'Modify params of {_id}')
-
-    # https://docker-py.readthedocs.io/en/stable/containers.html#docker.models.containers.Container.update
-    # Set system requeriments parameters.
-
-    system_requeriments = system_requeriments_range.max_sysreq # TODO: Implement the use of min_sysreq in case there are not enough max_sysreq, it can be lower as long as it does not go below the minimum threshold
-    if not system_requeriments: 
-        log.LOGGER(f"No system requeriments for {_id}")
-        return False
-
-    # Docker has a minimum of 6Mb of mem limit.
-    if system_requeriments.mem_limit < 6*10**6:
-        system_requeriments.mem_limit = 6*10**6
-
-    if __modify_sysreq(
-            id=id,
-            sys_req=system_requeriments
-    ):
-        try:
-            # Memory limit should be smaller than already set memoryswap limit, update the memoryswap at the same time
-            container = __get_container_by_id(id=id)
-            container.update(
-                mem_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR == 0 \
-                    else system_requeriments.mem_limit - MEMSWAP_FACTOR * system_requeriments.mem_limit,
-                memswap_limit=system_requeriments.mem_limit if MEMSWAP_FACTOR > 0 else -1
-            )
-        except Exception as e:
-            log.LOGGER(f"Docker container for {_id} fail with e: {str(e)}")
-            # TODO reset modified system req.  Maybe the __get_container_by_id should be inside of __modify_sysreq.
-            return False
-        
-        log.LOGGER(f"System params modified correctly for {_id}.")
-        return True
-
-    log.LOGGER(f"System req could not be modified for {id}: mem limit {system_requeriments.mem_limit}")
-    return False
+        log.LOGGER(f'Exception during modify params of {vmachine_id}.')
+        raise Exception(f'Exception during modify params of {vmachine_id}.')
 
 
 def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
@@ -422,12 +370,12 @@ def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
 
 
 def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
-    log.LOGGER('Prune container ' + token)
+    log.LOGGER('Kill service ' + token)
     father_id, serialized_instance = None, None
     
     if sc.internal_instance_exists(id=token):  # Is internal
         log.LOGGER(f"Token {token} is internal; let's stop it.")
-        stop_container(container_id=token)
+        kill(vmachine_id=token)
         
         father_id = sc.get_internal_father_id(id=token)
         serialized_instance = sc.get_internal_instance(id=token)
@@ -484,7 +432,7 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
             instance.ParseFromString(serialized_instance)
             for slot in instance.instance.uri_slot:
                 for uri in slot:
-                    if not remove_rule(container_id=father_id, ip=uri.ip, port=uri.port, protocol=Protocol.TCP):
+                    if not remove_firewall_rule(vmachine_id=father_id, ip=uri.ip, port=uri.port, protocol=Protocol.TCP):
                         log.LOGGER(f"Docker firewall remove rule function failed for the father {father_id}")
                         # TODO This should be controlled.
         except Exception as e:

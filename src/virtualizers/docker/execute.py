@@ -7,6 +7,11 @@ import docker as docker_lib
 from src.utils import logger as log
 from src.utils.config import DOCKER_CLIENT, ConfigManager
 
+from src.virtualizers.docker.firewall import allow_connection_to_instance, block_all, allow_connection, Protocol
+from src.gateway.utils import GATEWAY_PORT
+from src.manager.networks import filter_networks_with_ancestors, resolve_network
+from src.virtualizers.docker.set_container_config import set_config
+
 env_manager = ConfigManager()
 _missing_seccomp_profile_warned = False
 
@@ -31,7 +36,7 @@ def _default_seccomp_profile_path() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "seccomp.json"))
 
 
-def get_container_security_opts() -> List[str]:
+def __get_container_security_opts() -> List[str]:
     global _missing_seccomp_profile_warned
 
     security_opts: List[str] = []
@@ -71,7 +76,7 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
             "dns": ["127.0.0.1"]
         }
 
-        security_opts = get_container_security_opts()
+        security_opts = __get_container_security_opts()
         if security_opts:
             create_args["security_opt"] = security_opts
 
@@ -89,3 +94,70 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
     except Exception as e:
         log.LOGGER('DOCKER RUN ERROR -> ' + str(e))
         raise e
+
+
+def execute(assigment_ports, by_local, service_id, service, config, initial_system_resources, father_id) -> (str, str):
+    container = create_container(
+        use_other_ports=assigment_ports if not by_local else None,
+        id=service_id,
+        entrypoint=service.container.entrypoint
+    )
+
+    networks = service.network
+
+    #  Filter networks if ancestors do not explicitly allow them.
+    if sc.internal_instance_exists(id=father_id):
+        networks = filter_networks_with_ancestors(networks=networks, father_id=father_id)
+
+    # Obtain instances to connect to the available networks.
+    networks_resolved: List[celaut.ConfigurationFile.NetworkResolution] = [
+        celaut.ConfigurationFile.NetworkResolution(
+            tags=network.tags, 
+            peer_instances=resolve_network(network)
+        )
+        for network in networks if len(network.tags) > 0
+    ]
+
+    #  Set the configuration file into the instance file system root.
+    set_config(
+        container_id=container.id, 
+        config=config, 
+        resources=initial_system_resources,
+        api=service.container.config,
+        network_resolution=networks_resolved
+    )
+
+    # The container must be started after adding the configuration file and
+    #  before requiring its IP address, since docker assigns it at startup.
+
+    try:
+        container.start()
+    except docker_lib.errors.APIError as e:
+        log.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' ' + str(e))
+        raise e
+
+    # Reload this object from the server again and update attrs with the new data.
+    container.reload()
+
+    if not block_all(container_id=container.id):
+        log.LOGGER(f"Docker firewall block all function failed for {container.id}")
+
+    # Allow connection to the node gateway.
+    if not allow_connection(
+        container_id=container.id, 
+        ip='172.17.0.1', port=GATEWAY_PORT, # Gateway internal endpoint.
+        protocol=Protocol.TCP # Gateway communication is with TCP
+    ):
+        log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
+
+    for network_resolution in networks_resolved:
+        tag = network_resolution.tags[0]
+
+        for instance in network_resolution.peer_instances:
+            if allow_connection_to_instance(container_id=container.id, instance=instance):
+                log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
+                break
+            else:
+                log.LOGGER(f"Container {container.id} not allowed to connect with {tag}!  This will cause errors.")  # TODO. Control that.
+
+    return container.id, container.attrs['NetworkSettings']['IPAddress']

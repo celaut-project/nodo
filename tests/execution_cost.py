@@ -1,11 +1,5 @@
 import psutil
 from protos import celaut_pb2 as celaut
-from src.utils.utils import read_service_from_disk
-from src.virtualizers.docker import build
-from src.virtualizers.docker.architecture import check_supported_architecture, UnsupportedArchitectureException
-from src.utils.logger import LOGGER as logger
-from src.utils.config import DOCKER_CLIENT, ConfigManager
-from src.utils.verify import get_service_hex_main_hash
 from src.utils.cost_functions.execution_cost import execution_cost
 
 # Case 1: Instance with specific requirements (CPU heavy)
@@ -59,7 +53,7 @@ def mock_high_supply(system_resources): return 0.95 # Simulate 95% weighted supp
 __get_available_supply = mock_high_supply
 try:
     cost5_high = execution_cost(meta1, req1)
-        print(f"Estimated Cost with 95% Supply: {cost5_high}")
-    except Exception as e:
-        print(f"Error calculating cost 5: {e}")
-    __get_available_supply = original_get_supply
+    print(f"Estimated Cost with 95% Supply: {cost5_high}")
+except Exception as e:
+    print(f"Error calculating cost 5: {e}")
+__get_available_supply = original_get_supply

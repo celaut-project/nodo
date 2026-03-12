@@ -16,7 +16,9 @@ import src.utils.logger as l
 from protos import celaut_pb2, celaut_pb2
 from src.utils.config import DOCKER_COMMAND, ConfigManager
 from src.utils.verify import get_service_hex_main_hash
-from src.virtualizers.docker.architecture import UnsupportedArchitectureException, get_arch_tag, check_supported_architecture
+from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag, check_supported_architecture
+
+from src.utils.config import DOCKER_CLIENT
 
 env_manager = ConfigManager()
 
@@ -40,7 +42,7 @@ actual_building_processes_lock = threading.Lock()
 actual_building_processes: Set[str] = set()  # list of hexadecimal string sha256 value hashes.
 
 
-def build_container_from_definition(service: celaut_pb2.Service,
+def __build_container_from_definition(service: celaut_pb2.Service,
                                     metadata: celaut_pb2.Metadata,
                                     service_id: str):
     # Build the container from filesystem definition.
@@ -68,10 +70,6 @@ def build_container_from_definition(service: celaut_pb2.Service,
                 dir_element=dir_element,
                 symlinks_element=symlinks_element
             )
-
-    if not check_supported_architecture(service=service, metadata=metadata):
-        l.LOGGER('Build process of ' + service_id + ': unsupported architecture.')
-        raise UnsupportedArchitectureException(arch=str(metadata))
 
     l.LOGGER('Build process of ' + service_id + ': wait for unlock the memory.')
 
@@ -189,8 +187,31 @@ def build(
             with actual_building_processes_lock:
                 actual_building_processes.add(service_id)
 
-            build_container_from_definition(
+            __build_container_from_definition(
                 service=service,
                 metadata=metadata,
                 service_id=service_id
             )
+
+
+def is_service_built(service_hash: str) -> bool: 
+    """Check if the service is built by comparing the service hash with existing Docker images."""
+    try:
+        # Get the list of images
+        images = DOCKER_CLIENT().images.list()
+        
+        # Check if images exist and process tags safely
+        for img in images:
+            try:
+                if img.tags and isinstance(img.tags[0], str):  # Validate tag structure
+                    # Extract the hash from the tag and check if it matches the service_hash
+                    if service_hash == img.tags[0].split('.')[0]:
+                        return True
+            except:
+                continue
+    except (IndexError, AttributeError) as e:
+        # Log the error, handle exceptions for missing attributes or invalid indexing
+        logger(f"An error occurred while checking if service is built: {e}")
+    except Exception as e:
+        logger(f"Unexpected error in __is_service_built: {e}")
+    return False

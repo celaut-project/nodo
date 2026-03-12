@@ -10,7 +10,7 @@ from src.tunneling_system.rpc_tunnel import service_tunnel
 from src.tunneling_system.tunnels import TunnelSystem
 from src.gateway.utils import generate_node_peer_info
 from src.manager.manager import add_peer_instance, modify_gas_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_gas, \
-    container_modify_system_params, get_sysresources
+    hotplug, get_sysresources
 from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import logger as log
@@ -128,7 +128,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 gas_to_spend=MODIFY_RESOURCES_COST,
                 refund_gas_function_container=refund_gas
         ): raise Exception('Launch service error spending gas for ' + context.peer())
-        if not container_modify_system_params(
+        if not hotplug(
                 id=token,
                 system_requeriments_range=next(bee.parse_from_buffer(
                     request_iterator=request_iterator,
