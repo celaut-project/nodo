@@ -1,11 +1,14 @@
 import psutil
 from protos import celaut_pb2 as celaut
-from src.utils.utils import read_service_from_disk
 from src.virtualizers.docker import build
-from src.virtualizers.docker.architecture import check_supported_architecture, UnsupportedArchitectureException
 from src.utils.logger import LOGGER as logger
-from src.utils.config import DOCKER_CLIENT, ConfigManager
+from src.utils.config import ConfigManager
 from src.utils.verify import get_service_hex_main_hash
+from src.virtualizers.architecture import check_supported_architecture, UnsupportedArchitectureException
+from src.virtualizers.interface import is_service_built
+from src.utils.utils import read_service_from_disk
+from src.utils.verify import get_service_hex_main_hash
+from src.utils.logger import LOGGER as logger
 
 env_manager = ConfigManager()
 
@@ -38,59 +41,6 @@ DEFAULT_WEIGHTS = {res: DEFAULT_WEIGHT for res in DEFAULT_RESOURCES}
 EXPONENTIAL_COST_FACTOR = 1.0 # Needs tuning based on desired economic behavior
 
 # --- Functions ---
-
-def __is_service_built(service_hash: str) -> bool: 
-    # TODO Needs to be on virtualizers/
-    """Check if the service is built by comparing the service hash with existing Docker images."""
-    try:
-        # Get the list of images
-        images = DOCKER_CLIENT().images.list()
-        
-        # Check if images exist and process tags safely
-        for img in images:
-            try:
-                if img.tags and isinstance(img.tags[0], str):  # Validate tag structure
-                    # Extract the hash from the tag and check if it matches the service_hash
-                    if service_hash == img.tags[0].split('.')[0]:
-                        return True
-            except:
-                continue
-    except (IndexError, AttributeError) as e:
-        # Log the error, handle exceptions for missing attributes or invalid indexing
-        logger(f"An error occurred while checking if service is built: {e}")
-    except Exception as e:
-        logger(f"Unexpected error in __is_service_built: {e}")
-    return False
-
-
-def __build_cost(metadata: celaut.Metadata) -> int:
-    """Calculate the cost of building a service based on its metadata and Docker status."""
-    try:
-        # Get the service hash from the metadata
-        service_hash = get_service_hex_main_hash(metadata=metadata)
-        
-        # Check if the service is already built
-        if __is_service_built(service_hash):
-            return 0
-        
-        logger(f"System has no built container to run service {service_hash}.")
-
-        # Check if the architecture is supported
-        if not check_supported_architecture(
-            service=read_service_from_disk(service_hash=service_hash), 
-            metadata=metadata
-        ):
-            raise UnsupportedArchitectureException(arch=str(metadata))
-
-        # Calculate the total build cost
-        return sum([
-            BUILD_COST,
-            # Add any additional costs here (e.g., cost of obtaining the container) # TODO
-        ])
-
-    except Exception as e:
-        logger('Manager - build cost exception: ' + str(e))
-        raise e
 
 def __get_available_supply(system_resources: celaut.Sysresources) -> float:
     """
@@ -278,6 +228,35 @@ def maintain_execution_cost(system_resources: celaut.Sysresources) -> int:
     cost = used_compute_power_factor * EXECUTION_COST
     return int(round(cost))
 
+def build_cost(metadata: celaut_pb2.Metadata) -> int:
+    """Calculate the cost of building a service based on its metadata and Docker status."""
+    try:
+        # Get the service hash from the metadata
+        service_hash = get_service_hex_main_hash(metadata=metadata)
+        
+        # Check if the service is already built
+        if is_service_built(service_hash):
+            return 0
+        
+        logger(f"System has no built container to run service {service_hash}.")
+
+        # Check if the architecture is supported
+        if not check_supported_architecture(
+            service=read_service_from_disk(service_hash=service_hash), 
+            metadata=metadata
+        ):
+            raise UnsupportedArchitectureException(arch=str(metadata))
+
+        # Calculate the total build cost
+        return sum([
+            BUILD_COST,
+            # Add any additional costs here (e.g., cost of obtaining the container) # TODO
+        ])
+
+    except Exception as e:
+        logger('Manager - build cost exception: ' + str(e))
+        raise e
+
 def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresources) -> int:
     """
     Calculates the estimated execution cost for running a service instance.
@@ -288,7 +267,7 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
        an exponential factor (`EXPONENTIAL_COST_FACTOR`) to heavily penalize
        running on systems where relevant resources are scarce.
     2. Build Cost: The cost associated with building the service container,
-       obtained via `__build_cost` using service metadata.
+       obtained via `build_cost` using service metadata.
     3. Execution Benefit/Offset: A fixed value (`EXECUTION_BENEFIT`) representing
        a baseline operational cost or incentive.
 
@@ -308,7 +287,7 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
 
         # Calculate the individual cost components
         ressources_cost = maintain_execution_cost(system_resources=system_resources)
-        build_c = __build_cost(metadata=metadata)
+        build_c = build_cost(metadata=metadata)
         benefit = EXECUTION_BENEFIT
 
         # Calculate total cost

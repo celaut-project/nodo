@@ -1,21 +1,15 @@
 from typing import Optional, Callable, List, Dict
 
-import docker as docker_lib
-
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
-from src.gateway.utils import GATEWAY_PORT
-from src.manager.networks import filter_networks_with_ancestors, resolve_network
-from src.virtualizers.docker import build
-from src.virtualizers.docker.create_container import create_container
-from src.virtualizers.docker.set_container_config import set_config
+from src.virtualizers.interface import build
+from src.virtualizers.docker.execute import execute
 from src.tunneling_system.tunnels import TunnelSystem
-from src.manager.manager import default_initial_cost, add_container
+from src.manager.manager import default_initial_cost, provision_vmachine
 from src.utils import utils, logger as log
-from src.utils.config import DEFAULT_SYSTEM_RESOURCES
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
-from src.virtualizers.docker.firewall import allow_connection_to_instance, block_all, allow_connection, Protocol
+
 
 sc = SQLConnection()
 
@@ -40,14 +34,14 @@ def local_execution(
     initial_system_resources: celaut.Sysresources = resources.at_init
 
     try:
-        service_id = build.build(
+        service_id = build(
             service=service,
             metadata=metadata,
             service_id=service_id,
-        )  # If the container is not built, build it.
+        )  # If the service is not built, build it.
     except Exception as e:
         try:
-            log.LOGGER('Error building the container: ' + str(e))
+            log.LOGGER('Error building the service: ' + str(e))
             refund_gas.pop()()  # Refund the gas.
         except IndexError:
             log.LOGGER('Error refunding the gas.')
@@ -62,71 +56,15 @@ def local_execution(
         {slot.port: get_free_port() for slot in service.api.slot} if not by_local \
         else {slot.port: slot.port for slot in service.api.slot}
 
-    # TODO START OF virtualizers.docker.execute.py
-    container = create_container(
-        use_other_ports=assigment_ports if not by_local else None,
-        id=service_id,
-        entrypoint=service.container.entrypoint
-    )
-
-    networks = service.network
-
-    #  Filter networks if ancestors do not explicitly allow them.
-    if sc.internal_instance_exists(id=father_id):
-        networks = filter_networks_with_ancestors(networks=networks, father_id=father_id)
-
-    # Obtain instances to connect to the available networks.
-    networks_resolved: List[celaut.ConfigurationFile.NetworkResolution] = [
-        celaut.ConfigurationFile.NetworkResolution(
-            tags=network.tags, 
-            peer_instances=resolve_network(network)
-        )
-        for network in networks if len(network.tags) > 0
-    ]
-
-    #  Set the configuration file into the instance file system root.
-    set_config(
-        container_id=container.id, 
+    vmachine_id, vmachine_ip = execute(
+        assigment_ports=assigment_ports, 
+        by_local=by_local, 
+        service_id=service_id, 
+        service=service, 
         config=config, 
-        resources=initial_system_resources,
-        api=service.container.config,
-        network_resolution=networks_resolved
+        initial_system_resources=initial_system_resources, 
+        father_id=father_id
     )
-
-    # The container must be started after adding the configuration file and
-    #  before requiring its IP address, since docker assigns it at startup.
-
-    try:
-        container.start()
-    except docker_lib.errors.APIError as e:
-        log.LOGGER('ERROR ON CONTAINER ' + str(container.id) + ' ' + str(e))
-        raise e
-
-    # Reload this object from the server again and update attrs with the new data.
-    container.reload()
-
-    if not block_all(container_id=container.id):
-        log.LOGGER(f"Docker firewall block all function failed for {container.id}")
-
-    # Allow connection to the node gateway.
-    if not allow_connection(
-        container_id=container.id, 
-        ip='172.17.0.1', port=GATEWAY_PORT, # Gateway internal endpoint.
-        protocol=Protocol.TCP # Gateway communication is with TCP
-    ):
-        log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
-
-    for network_resolution in networks_resolved:
-        tag = network_resolution.tags[0]
-
-        for instance in network_resolution.peer_instances:
-            if allow_connection_to_instance(container_id=container.id, instance=instance):
-                log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
-                break
-            else:
-                log.LOGGER(f"Container {container.id} not allowed to connect with {tag}!  This will cause errors.")  # TODO. Control that.
-
-    # TODO END OF virtualizers.docker.execute.py
 
     try:
         for internal, external in assigment_ports.items():
@@ -136,7 +74,7 @@ def local_execution(
             # for host_ip in host_ip_list:
             _ip: str = utils.get_local_ip_from_network(
                     network=utils.get_network_name(direction=father_ip),
-                ) if not by_local else container.attrs['NetworkSettings']['IPAddress']
+                ) if not by_local else vmachine_ip
             _port: int = external
 
             if require_tunnel:
@@ -146,7 +84,7 @@ def local_execution(
                 else:
                     _msg = "Any tunnel available. Instance can't be serve."
                     log.LOGGER(_msg)
-                    # TODO Delete container.
+                    # TODO Delete service using virtualizers.interfaze.kill.
                     raise Exception(_msg)
 
             uri_slot.uri.append(
@@ -165,17 +103,20 @@ def local_execution(
             uri_slot=[uri_slot]
         )
 
-    token = add_container(
-            service_id=service_id,
-            father_id=father_id,
-            container=container,
-            initial_gas_amount=initial_gas_amount,
-            serialized_instance=instance.SerializeToString(),
-            system_requirements_range=celaut_pb2.ModifyServiceSystemResourcesInput(
-                min_sysreq=initial_system_resources, max_sysreq=initial_system_resources)
+    provision_vmachine(
+        service_id=service_id,
+        father_id=father_id,
+        vmachine_id=vmachine_id,
+        vmachine_ip=vmachine_ip,
+        initial_gas_amount=initial_gas_amount,
+        serialized_instance=instance.SerializeToString(),
+        system_requirements_range=celaut_pb2.ModifyServiceSystemResourcesInput(
+                min_sysreq=initial_system_resources, 
+                max_sysreq=initial_system_resources
             )
+        )
     
     return celaut_pb2.ServiceInstance(
-        token=token,
+        token=vmachine_id,
         instance=instance
     )

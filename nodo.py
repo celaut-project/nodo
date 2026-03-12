@@ -164,7 +164,6 @@ if __name__ == '__main__':
             "\n- migrate"
             "\n- storage:prune_blocks"
             "\n- test <test name>"
-            "\n- rundev <repository path>"
             "\n- ggconf <repository path>"
             "\n- submit_reputation"
             "\n- validate_reputation_proof_ownership"
@@ -425,18 +424,6 @@ if __name__ == '__main__':
             case "tui":
                 check_rust_installation()
                 os.system(f"cd {MAIN_DIR}/src/commands/tui && cargo run")
-
-            case "rundev":
-                from src.commands.run_dev import run_dev
-                import os
-                import sys
-
-                absolute_path = resolve_user_path(sys.argv[2])
-                if not os.path.isdir(absolute_path):
-                    print(f"Error: The directory {absolute_path} does not exist")
-                    sys.exit(1)
-
-                run_dev(path=absolute_path)
 
             case "ggconf":
                 from src.commands.ggconf import generate_gateway_config_dev
