@@ -4,6 +4,7 @@ from src.utils import logger as log
 from src.utils.config import DOCKER_CLIENT
 from src.manager.modify_resources import modify_sysreq
 import docker as docker_lib
+from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
