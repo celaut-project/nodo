@@ -9,7 +9,7 @@ from src.utils import utils, logger as log
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_gas_amount, to_gas_amount
 from src.database.sql_connection import SQLConnection
-from src.virtualizers.docker.firewall import Protocol, allow_connection
+from src.virtualizers.docker.firewall import TransportProtocol, allow_connection
 
 sc = SQLConnection()
 
@@ -95,7 +95,7 @@ def launch_service(
                         for slot in instance.instance.uri_slot:
                             for uri in slot.uri:
                                 if not allow_connection(container_id=father_id,
-                                                        ip=uri.ip, port=uri.port, protocol=Protocol.TCP):
+                                                        ip=uri.ip, port=uri.port, protocol=TransportProtocol.TCP):
                                     log.LOGGER(f"Docker firewall allow connection function failed for the father {father_id}")
                                     # TODO This should be controlled.
                     except Exception as e:

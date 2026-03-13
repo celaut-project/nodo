@@ -7,7 +7,7 @@ import docker as docker_lib
 from src.utils import logger as log
 from src.utils.config import DOCKER_CLIENT, ConfigManager
 
-from src.virtualizers.docker.firewall import allow_connection_to_instance, block_all, allow_connection, Protocol
+from src.virtualizers.docker.firewall import allow_connection_to_instance, block_all, allow_connection, TransportProtocol
 from src.gateway.utils import GATEWAY_PORT
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.virtualizers.docker.set_container_config import set_config
@@ -146,7 +146,7 @@ def execute(assigment_ports, by_local, service_id, service, config, initial_syst
     if not allow_connection(
         container_id=container.id, 
         ip='172.17.0.1', port=GATEWAY_PORT, # Gateway internal endpoint.
-        protocol=Protocol.TCP # Gateway communication is with TCP
+        protocol=TransportProtocol.TCP # Gateway communication is with TCP
     ):
         log.LOGGER(f"Docker firewall allow connection function failed for {container.id}")
 
