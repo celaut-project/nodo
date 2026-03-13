@@ -129,7 +129,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 refund_gas_function_container=refund_gas
         ): raise Exception('Launch service error spending gas for ' + context.peer())
         if not hotplug(
-                id=token,
+                vmachine_id=token,
                 system_requeriments_range=next(bee.parse_from_buffer(
                     request_iterator=request_iterator,
                     indices=celaut_pb2.ModifyServiceSystemResourcesInput,
