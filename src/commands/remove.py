@@ -9,6 +9,8 @@ REGISTRY = env_manager.get("REGISTRY")
 DEFAULT_INITIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT")
 
 
+# TODO This command must be generalized into virtualizers/interface.  But first DB must contain the virtualizer used by the vmachine.
+
 def remove(service: str):
     service = get_id(service)
 

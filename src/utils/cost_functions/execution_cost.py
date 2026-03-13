@@ -5,7 +5,7 @@ from src.utils.logger import LOGGER as logger
 from src.utils.config import ConfigManager
 from src.utils.verify import get_service_hex_main_hash
 from src.virtualizers.architecture import check_supported_architecture, UnsupportedArchitectureException
-from src.virtualizers.interface import is_service_built
+from src.virtualizers.interface import is_built
 from src.utils.utils import read_service_from_disk
 from src.utils.verify import get_service_hex_main_hash
 from src.utils.logger import LOGGER as logger
@@ -235,7 +235,7 @@ def build_cost(metadata: celaut_pb2.Metadata) -> int:
         service_hash = get_service_hex_main_hash(metadata=metadata)
         
         # Check if the service is already built
-        if is_service_built(service_hash):
+        if is_built(service_hash):
             return 0
         
         logger(f"System has no built container to run service {service_hash}.")

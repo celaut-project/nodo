@@ -14,11 +14,7 @@ from bee_rpc import client as bee
 
 from protos import celaut_pb2_grpc, celaut_pb2, celaut_pb2
 from src.utils import logger as log, logger
-from src.utils.config import (
-    SHA3_256_ID,
-    DOCKER_CLIENT,
-    ConfigManager
-)
+from src.utils.config import ConfigManager
 from src.utils.singleton import Singleton
 from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
 

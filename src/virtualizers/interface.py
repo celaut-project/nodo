@@ -3,6 +3,8 @@ from src.virtualizers.docker.build import build as docker_build
 from src.virtualizers.docker.hotplug import hotplug as docker_hotplug
 from src.virtualizers.docker.kill import kill as docker_kill
 from src.virtualizers.docker.firewall import remove_rule as docker_remove_rule
+from src.virtualizers.docker.maintain import maintain as docker_maintain
+from typing import Optional, Callable
 from src.virtualizers.architecture import check_supported_architecture, UnsupportedArchitectureException
 from protos import celaut_pb2
 from src.utils.logger import LOGGER as l
@@ -13,7 +15,7 @@ This interface defines the functions that any virtualizer implementation must pr
 Currently, it is implemented by the Docker virtualizer, but it can be extended to support other virtualization technologies in the future.
 """
 
-def is_service_build(service_hash: str) -> bool:
+def is_built(service_hash: str) -> bool:
     """Check if a service with the given hash is already built."""
     return docker_is_service_built(service_hash)
 
@@ -46,6 +48,14 @@ def hotplug(
 def kill(vmachine_id: str) -> bool:
     """Kill a running service."""
     return docker_kill(vmachine_id=vmachine_id)
+
+def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[str], None]) -> None:
+    """Check the status of a running service and remove it if it has exited."""
+    docker_maintain(
+        vmachine_id=vmachine_id,
+        debug_mode=debug_mode,
+        remove_and_penalize=remove_and_penalize
+    )
 
 def remove_firewall_rule(
         vmachine_id: str,
