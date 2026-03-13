@@ -5,7 +5,7 @@ from threading import Lock
 
 import threading
 import psutil
-
+from protos import celaut_pb2
 
 class Singleton(type):
     _instances = {}
