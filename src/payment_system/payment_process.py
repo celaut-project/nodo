@@ -14,7 +14,7 @@ from src.payment_system.contracts.ergo import interface as ergo
 
 from protos import celaut_pb2_grpc, celaut_pb2
 
-from src.reputation_system.interface import update_container_reputation, update_peer_reputation
+from src.reputation_system.interface import update_vmachine_reputation, update_peer_reputation
 
 from src.manager.manager import get_client_id_on_other_peer, increase_local_gas_for_client
 from src.database.sql_connection import SQLConnection
@@ -195,7 +195,7 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
             _l.LOGGER(f"Payment of {amount} to {peer_id} communicated successfully.")
             return True
         except Exception as e:
-            update_container_reputation(container_id=peer_id, amount=-1)  # TODO On envs.
+            update_vmachine_reputation(container_id=peer_id, amount=-1)  # TODO On envs.
             attempt += 1
             _l.LOGGER(f"Communication attempt {attempt} failed: {str(e)}")
             if attempt >= COMMUNICATION_ATTEMPTS:

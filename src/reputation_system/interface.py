@@ -19,10 +19,10 @@ def update_peer_reputation(peer_id: str, amount: int) -> bool:
     if sc.peer_exists(peer_id=peer_id):
         return sc.update_reputation_peer(peer_id, amount)
 
-def update_container_reputation(container_id: str, amount: int) -> bool:
-    """Update reputation of the peer where the container is been executed (if it's external) and the reputation of the container' service
+def update_vmachine_reputation(vmachine_id: str, amount: int) -> bool:
+    """Update reputation of the peer where the vmachine is been executed (if it's external) and the reputation of the container' service
     Args:
-        container_id (str): Container's id
+        vmachine_id (str): Vmachine's id
         amount (int): The amount to add to the reputation score.
 
     Returns:
@@ -31,8 +31,8 @@ def update_container_reputation(container_id: str, amount: int) -> bool:
 
     # TODO Add factors to allow different weights.
 
-    if "##" in container_id:
-        peer_id: str = container_id.split('##')[1]
+    if "##" in vmachine_id:
+        peer_id: str = vmachine_id.split('##')[1]
         update_peer_reputation(peer_id=peer_id, amount=amount)
     
     # TODO update the service.

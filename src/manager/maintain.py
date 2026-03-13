@@ -14,7 +14,7 @@ from src.manager.manager import stop_instance, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import increase_deposit_on_peer, init_interfaces
-from src.reputation_system.interface import update_container_reputation, submit_reputation, update_peer_reputation
+from src.reputation_system.interface import update_vmachine_reputation, submit_reputation, update_peer_reputation
 from src.utils import logger as log
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
@@ -106,51 +106,51 @@ def check_wanted_service(wanted: str):
             
 
 
-def maintain_containers(debug_mode: bool=False):
-    def remove_and_penalize_container(container_id):
-        update_container_reputation(container_id=container_id, amount=-100)
-        log.LOGGER(f"Prunning container {container_id} from the registry because the docker container does not exist.")
+def maintain_vmachines(debug_mode: bool=False):
+    def remove_and_penalize_vmachine(vmachine_id: str):
+        update_vmachine_reputation(container_id=vmachine_id, amount=-100)
+        log.LOGGER(f"Prunning container {vmachine_id} from the registry because the docker container does not exist.")
         try:
-            stop_instance(token=container_id)
+            stop_instance(token=vmachine_id)
         except Exception as e:
-            log.LOGGER(f"Error prunning container {container_id}: {e}")
+            log.LOGGER(f"Error prunning container {vmachine_id}: {e}")
     
-    for container_id in sc.get_all_internal_containers_ids():
+    for vmachine_id in sc.get_all_internal_containers_ids():
 
-        # Skip development containers from the ggconf command
-        if "rundev" in container_id:
-            if debug_mode: log.LOGGER(f"Skipping development container {container_id}.")
+        # Skip development vmachines from the ggconf command
+        if "rundev" in vmachine_id:
+            if debug_mode: log.LOGGER(f"Skipping development vmachine {vmachine_id}.")
             continue
 
-        if debug_mode: log.LOGGER(f"Checking container: {container_id}")
+        if debug_mode: log.LOGGER(f"Checking vmachine: {vmachine_id}")
         try:
-            container = DOCKER_CLIENT().containers.get(container_id)   # TODO refactor with manager.__get_container_by_id()
-            if debug_mode: log.LOGGER(f"Container {container_id} status: {container.status}")
+            container = DOCKER_CLIENT().containers.get(vmachine_id)   # TODO refactor with manager.__get_container_by_id()
+            if debug_mode: log.LOGGER(f"Container {vmachine_id} status: {container.status}")
             if container.status == 'exited':
-                log.LOGGER(f"Container {container_id} has exited. Removing and penalizing.")
-                remove_and_penalize_container(container_id=container_id)
+                log.LOGGER(f"Instance {vmachine_id} has exited. Removing and penalizing.")
+                remove_and_penalize_vmachine(vmachine_id=vmachine_id)
         except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-            log.LOGGER(f"Error fetching container {container_id}: {str(e)}. Assuming it does not exist.")
-            remove_and_penalize_container(container_id=container_id)
+            log.LOGGER(f"Error fetching container {vmachine_id}: {str(e)}. Assuming it does not exist.")
+            remove_and_penalize_vmachine(vmachine_id=vmachine_id)
             
         gas_cost = compute_maintenance_cost(
             system_resources=celaut.Sysresources(
-                mem_limit=sc.get_sys_req(id=container_id)['mem_limit']
+                mem_limit=sc.get_sys_req(id=vmachine_id)['mem_limit']
             )
         )
-        if debug_mode: log.LOGGER(f"Computed gas cost for {container_id}: {gas_cost:e}")
+        if debug_mode: log.LOGGER(f"Computed gas cost for {vmachine_id}: {gas_cost:e}")
         
-        if not spend_gas(id=container_id, gas_to_spend=gas_cost, debug_mode=debug_mode):
+        if not spend_gas(id=vmachine_id, gas_to_spend=gas_cost, debug_mode=debug_mode):
             try:
-                update_container_reputation(container_id=container_id, amount=-10)
-                log.LOGGER(f"Pruning container {container_id} due to insufficient gas.")
-                stop_instance(token=container_id)
+                update_vmachine_reputation(container_id=vmachine_id, amount=-10)
+                log.LOGGER(f"Pruning container {vmachine_id} due to insufficient gas.")
+                stop_instance(token=vmachine_id)
             except Exception as e:
-                log.LOGGER(f'Error purging {container_id}: {str(e)}')
-                raise Exception(f'Error purging {container_id}: {str(e)}')
+                log.LOGGER(f'Error purging {vmachine_id}: {str(e)}')
+                raise Exception(f'Error purging {vmachine_id}: {str(e)}')
         else:
-            update_container_reputation(container_id=container_id, amount=10)
-            if debug_mode: log.LOGGER(f"Updated reputation for {container_id} due to successful maintenance.")
+            update_vmachine_reputation(container_id=vmachine_id, amount=10)
+            if debug_mode: log.LOGGER(f"Updated reputation for {vmachine_id} due to successful maintenance.")
 
 
 def maintain_clients(debug_mode: bool=False):
@@ -260,7 +260,7 @@ def manager_thread():
         # Functions to be executed every short interval
         if wanted_services:
             check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
-        maintain_containers(debug_mode=DEBUG_MODE())
+        maintain_vmachines(debug_mode=DEBUG_MODE())
         maintain_clients(debug_mode=DEBUG_MODE())
         peer_deposits(debug_mode=DEBUG_MODE())
         DuplicateGrabber().manager()
