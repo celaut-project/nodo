@@ -4,6 +4,7 @@ from src.virtualizers.docker.hotplug import hotplug as docker_hotplug
 from src.virtualizers.docker.kill import kill as docker_kill
 from src.virtualizers.docker.firewall import remove_rule as docker_remove_rule
 from src.virtualizers.docker.maintain import maintain as docker_maintain
+from src.virtualizers.docker.firewall import TransportProtocol
 from typing import Optional, Callable
 from src.virtualizers.architecture import check_supported_architecture, UnsupportedArchitectureException
 from protos import celaut_pb2
@@ -61,7 +62,7 @@ def remove_firewall_rule(
         vmachine_id: str,
         ip: str,
         port: int,
-        protocol: Protocol
+        protocol: TransportProtocol
 ) -> bool:
     """Remove a firewall rule for a given container."""
     return docker_remove_rule(

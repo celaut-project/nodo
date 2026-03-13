@@ -8,7 +8,7 @@ import re
 from protos import celaut_pb2 as celaut
 from src.utils.logger import LOGGER as logger
 
-class Protocol(Enum):
+class TransportProtocol(Enum):
     """Supported network protocols."""
     TCP = "tcp"
     UDP = "udp"
@@ -20,7 +20,7 @@ class NetworkRule:
     source_ip: str
     destination_ip: str
     destination_port: Optional[int]
-    protocol: Protocol
+    protocol: TransportProtocol
     created_at: datetime
     rule_number: Optional[int] = None
 
@@ -67,7 +67,7 @@ def block_all(container_id: str) -> bool:
         container_ip = __get_container_ip(container_id)
 
         # Now drop all other NEW connections
-        for protocol in Protocol:
+        for protocol in TransportProtocol:
             success, message = __execute_iptables([
                 '-I', 'FORWARD',
                 '-s', container_ip,
@@ -86,7 +86,7 @@ def block_all(container_id: str) -> bool:
         logger(f"Failed to block all traffic: {e}")
         return False
 
-def allow_connection(container_id: str, ip: str, port: Optional[int] = None, protocol: Protocol = Protocol.TCP) -> bool:
+def allow_connection(container_id: str, ip: str, port: Optional[int] = None, protocol: TransportProtocol = TransportProtocol.TCP) -> bool:
     """
     Allow outgoing traffic from container to specific IP and optional port.
     """
@@ -130,9 +130,9 @@ def allow_connection_to_instance(container_id: str, instance: celaut.Instance) -
 
             # Auxiliar policy  <- TODO check
             if "udp" in str(stack):
-                protocol = Protocol.UDP
+                protocol = TransportProtocol.UDP
             else:
-                protocol = Protocol.TCP
+                protocol = TransportProtocol.TCP
 
             slot_protocol[i_slot] = protocol
 
@@ -161,7 +161,7 @@ def allow_connection_to_instance(container_id: str, instance: celaut.Instance) -
         return False
 
 
-def remove_rule(container_id: str, ip: str, port: Optional[int] = None, protocol: Protocol = Protocol.TCP) -> bool:
+def remove_rule(container_id: str, ip: str, port: Optional[int] = None, protocol: TransportProtocol = TransportProtocol.TCP) -> bool:
     """
     Remove a previously created rule for a specific IP and port.
     """
@@ -201,7 +201,7 @@ def list_rules(container_id: str) -> List[NetworkRule]:
         container_ip = __get_container_ip(container_id)
         rules = []
         
-        for protocol in Protocol:
+        for protocol in TransportProtocol:
             success, output = __execute_iptables(['-L', 'FORWARD', '-n', '--line-numbers'])
             if not success:
                 logger(f"Failed to list {protocol.value} rules: {output}")

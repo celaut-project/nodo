@@ -1,5 +1,5 @@
 from uuid import uuid4
-from typing import Optional, Generator, Protocol, Tuple
+from typing import Optional, Generator, Tuple
 
 import grpc
 from bee_rpc import client as bee
@@ -22,6 +22,7 @@ from src.utils.config import ConfigManager
 from src.virtualizers.interface import remove_firewall_rule
 from src.virtualizers.interface import kill
 from src.virtualizers.interface import hotplug
+from src.virtualizers.docker.firewall import TransportProtocol
 
 env_manager = ConfigManager()
 
@@ -433,7 +434,7 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
             instance.ParseFromString(serialized_instance)
             for slot in instance.instance.uri_slot:
                 for uri in slot:
-                    if not remove_firewall_rule(vmachine_id=father_id, ip=uri.ip, port=uri.port, protocol=Protocol.TCP):
+                    if not remove_firewall_rule(vmachine_id=father_id, ip=uri.ip, port=uri.port, protocol=TransportProtocol.TCP):
                         log.LOGGER(f"Docker firewall remove rule function failed for the father {father_id}")
                         # TODO This should be controlled.
         except Exception as e:
