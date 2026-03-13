@@ -240,6 +240,8 @@ nodo docker ps
 
 The isolated Docker daemon configuration is stored in `{MAIN_DIR}/docker/config/daemon.json`.
 
+If `buildx` builds inside nodo's isolated Docker can't resolve or reach external hosts (e.g. `github.com`), check that file for a forced `dns` setting that doesn't work in your network (common in corporate/VPN environments). After changing it, restart `nodo.service` (or rerun `{MAIN_DIR}/bash/start_docker_daemon.sh {MAIN_DIR}`).
+
 ### Service Container Security Options
 
 Nodo applies Docker `security_opt` values when creating service containers:
