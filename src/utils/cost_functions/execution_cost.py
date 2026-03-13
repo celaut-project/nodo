@@ -228,7 +228,7 @@ def maintain_execution_cost(system_resources: celaut.Sysresources) -> int:
     cost = used_compute_power_factor * EXECUTION_COST
     return int(round(cost))
 
-def build_cost(metadata: celaut_pb2.Metadata) -> int:
+def build_cost(metadata: celaut.Metadata) -> int:
     """Calculate the cost of building a service based on its metadata and Docker status."""
     try:
         # Get the service hash from the metadata
