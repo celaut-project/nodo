@@ -443,8 +443,8 @@ if __name__ == '__main__':
                     print("This script requires superuser privileges. Please run with sudo.")
                     exit()
                 
-                from src.manager.maintain import maintain_containers
-                maintain_containers(debug_mode=True)
+                from src.manager.maintain import maintain_vmachines
+                maintain_vmachines(debug_mode=True)
                 
             case "refresh_clients":
                 from src.manager.maintain import maintain_clients, peer_deposits

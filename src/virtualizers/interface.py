@@ -7,6 +7,12 @@ from src.virtualizers.architecture import check_supported_architecture, Unsuppor
 from protos import celaut_pb2
 from src.utils.logger import LOGGER as l
 
+
+"""
+This interface defines the functions that any virtualizer implementation must provide.
+Currently, it is implemented by the Docker virtualizer, but it can be extended to support other virtualization technologies in the future.
+"""
+
 def is_service_build(service_hash: str) -> bool:
     """Check if a service with the given hash is already built."""
     return docker_is_service_built(service_hash)
