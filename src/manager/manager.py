@@ -375,6 +375,7 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
     
     if sc.internal_instance_exists(id=token):  # Is internal
         log.LOGGER(f"Token {token} is internal; let's stop it.")
+        
         kill(vmachine_id=token)
         
         father_id = sc.get_internal_father_id(id=token)

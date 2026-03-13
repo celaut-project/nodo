@@ -5,8 +5,6 @@ import os
 import grpc
 from bee_rpc import client as beerpc
 
-import docker as docker_lib
-
 from protos import celaut_pb2 as celaut, celaut_pb2_grpc, celaut_pb2
 from protos.gateway_bee import StartService_input_indices, StartService_input_message_mode
 from src.manager.ergo import check_ergo_node_availability
@@ -18,9 +16,10 @@ from src.reputation_system.interface import update_vmachine_reputation, submit_r
 from src.utils import logger as log
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
-from src.utils.config import DOCKER_CLIENT, SHA3_256_ID, ConfigManager
+from src.utils.config import SHA3_256_ID, ConfigManager
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
 from src.utils.config import ConfigManager
+from src.virtualizers.interface import maintain as vm_maintain
 
 env_manager = ConfigManager()
 
@@ -123,15 +122,7 @@ def maintain_vmachines(debug_mode: bool=False):
             continue
 
         if debug_mode: log.LOGGER(f"Checking vmachine: {vmachine_id}")
-        try:
-            container = DOCKER_CLIENT().containers.get(vmachine_id)   # TODO refactor with manager.__get_container_by_id()
-            if debug_mode: log.LOGGER(f"Container {vmachine_id} status: {container.status}")
-            if container.status == 'exited':
-                log.LOGGER(f"Instance {vmachine_id} has exited. Removing and penalizing.")
-                remove_and_penalize_vmachine(vmachine_id=vmachine_id)
-        except (docker_lib.errors.NotFound, docker_lib.errors.APIError) as e:
-            log.LOGGER(f"Error fetching container {vmachine_id}: {str(e)}. Assuming it does not exist.")
-            remove_and_penalize_vmachine(vmachine_id=vmachine_id)
+        vm_maintain(vmachine_id=vmachine_id, debug_mode=debug_mode, remove_and_penalize=remove_and_penalize_vmachine)
             
         gas_cost = compute_maintenance_cost(
             system_resources=celaut.Sysresources(
