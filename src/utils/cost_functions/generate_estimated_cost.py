@@ -2,8 +2,7 @@ from typing import Any, Dict, Optional
 import psutil
 
 from protos import celaut_pb2 as celaut, celaut_pb2
-from src.manager.manager import could_ve_this_sysreq
-from src.manager.resources import IOBigData
+from src.manager.resources import IOBigData, could_ve_this_sysreq
 from src.utils.cost_functions.execution_cost import is_free_gas
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost, compute_maintenance_cost
 from src.utils.utils import from_gas_amount, to_gas_amount
