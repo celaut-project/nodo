@@ -116,7 +116,7 @@ def get_internal_service_id_by_uri(uri: str) -> str:
     return sc.get_local_instance_id_by_uri(uri=uri)
 
 
-def __modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
+def modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
     if not sc.internal_instance_exists(id=id):
         log.LOGGER(f'Manager error: container {id} does not exists.')
         return False

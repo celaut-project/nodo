@@ -2,6 +2,7 @@ from bee_rpc import client as bee
 from protos import celaut_pb2, celaut_pb2
 from src.utils import logger as log
 from src.utils.config import DOCKER_CLIENT
+from src.manager.manager import modify_sysreq
 import docker as docker_lib
 
 
@@ -30,7 +31,7 @@ def hotplug(
     if system_requeriments.mem_limit < 6*10**6:
         system_requeriments.mem_limit = 6*10**6
 
-    if __modify_sysreq(
+    if modify_sysreq(
             id=container_id,
             sys_req=system_requeriments
     ):
