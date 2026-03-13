@@ -78,7 +78,7 @@ class IOBigData(metaclass=Singleton):
         except ValueError:
             return "%s %s" % (size_bytes, size_name[0])
 
-    def __stats(self, message: str, comments: bool = False):
+    def __stats(self, message: str, comments: bool = True):
         if comments:
             with self.amount_lock:
                 self.log('\n--------- ' + message + ' -------------')
@@ -134,7 +134,9 @@ class IOBigData(metaclass=Singleton):
 
     def prevent_kill(self, len: int) -> bool:
         with self.amount_lock:
+            self.__stats('prevent kill ' + IOBigData.convert_size(len))
             b = self.get_ram_avaliable() > len
+            self.__stats('prevent kill ' + IOBigData.convert_size(len) + ' -> ' + str(b))
         return b
 
     def wait_to_prevent_kill(self, len: int) -> None:
