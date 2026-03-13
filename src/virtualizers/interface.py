@@ -1,11 +1,12 @@
 from src.virtualizers.docker.build import is_service_built as docker_is_service_built
 from src.virtualizers.docker.build import build as docker_build
+from src.virtualizers.docker.execute import execute as docker_execute
 from src.virtualizers.docker.hotplug import hotplug as docker_hotplug
 from src.virtualizers.docker.kill import kill as docker_kill
 from src.virtualizers.docker.firewall import remove_rule as docker_remove_rule
 from src.virtualizers.docker.maintain import maintain as docker_maintain
 from src.virtualizers.docker.firewall import TransportProtocol
-from typing import Optional, Callable
+from typing import Optional, Callable, Dict, Tuple
 from src.virtualizers.architecture import check_supported_architecture, UnsupportedArchitectureException
 from protos import celaut_pb2
 from src.utils.logger import LOGGER as l
@@ -56,6 +57,33 @@ def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[
         vmachine_id=vmachine_id,
         debug_mode=debug_mode,
         remove_and_penalize=remove_and_penalize
+    )
+
+def execute(
+        assigment_ports: Optional[Dict[int, int]],
+        by_local: bool,
+        service_id: str,
+        service: celaut_pb2.Service,
+        config: Optional[celaut_pb2.Configuration],
+        initial_system_resources: celaut_pb2.Sysresources,
+        father_id: str,
+) -> Tuple[str, str]:
+    """
+    Execute a built service and return (vmachine_id, vmachine_ip).
+
+    Note: This is currently backed by the Docker virtualizer. It exists to allow
+    the rest of the codebase to stop importing Docker-specific implementations
+    directly and make it possible to add other virtualizers (e.g. Cloud Hypervisor)
+    behind this interface.
+    """
+    return docker_execute(
+        assigment_ports=assigment_ports,
+        by_local=by_local,
+        service_id=service_id,
+        service=service,
+        config=config,
+        initial_system_resources=initial_system_resources,
+        father_id=father_id,
     )
 
 def remove_firewall_rule(
