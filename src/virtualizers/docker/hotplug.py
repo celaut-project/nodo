@@ -2,6 +2,7 @@ from bee_rpc import client as bee
 from protos import celaut_pb2, celaut_pb2
 from src.utils import logger as log
 from src.utils.config import DOCKER_CLIENT
+import docker as docker_lib
 
 
 def __get_container_by_id(id: str) -> docker_lib.models.containers.Container:
