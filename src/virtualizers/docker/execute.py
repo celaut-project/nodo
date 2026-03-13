@@ -4,6 +4,8 @@ from typing import List
 
 import docker as docker_lib
 
+from protos import celaut_pb2 as celaut
+
 from src.utils import logger as log
 from src.utils.config import DOCKER_CLIENT, ConfigManager
 
@@ -11,6 +13,7 @@ from src.virtualizers.docker.firewall import allow_connection_to_instance, block
 from src.gateway.utils import GATEWAY_PORT
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.virtualizers.docker.set_container_config import set_config
+from src.database.sql_connection import SQLConnection
 
 env_manager = ConfigManager()
 _missing_seccomp_profile_warned = False
@@ -106,7 +109,7 @@ def execute(assigment_ports, by_local, service_id, service, config, initial_syst
     networks = service.network
 
     #  Filter networks if ancestors do not explicitly allow them.
-    if sc.internal_instance_exists(id=father_id):
+    if SQLConnection().internal_instance_exists(id=father_id):
         networks = filter_networks_with_ancestors(networks=networks, father_id=father_id)
 
     # Obtain instances to connect to the available networks.
