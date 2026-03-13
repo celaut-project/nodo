@@ -5,6 +5,8 @@ from src.utils.config import DOCKER_CLIENT
 from src.manager.modify_resources import modify_sysreq
 import docker as docker_lib
 
+env_manager = ConfigManager()
+MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
 
 def __get_container_by_id(id: str) -> docker_lib.models.containers.Container:
     return DOCKER_CLIENT().containers.get(
