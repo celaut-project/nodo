@@ -1,3 +1,4 @@
+from protos import celaut_pb2
 from src.manager.resources import IOBigData, could_ve_this_sysreq
 from src.database.sql_connection import SQLConnection
 from src.utils import logger as log
