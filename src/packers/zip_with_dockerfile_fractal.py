@@ -9,7 +9,7 @@ from bee_rpc import client as grpcbb
 from bee_rpc import buffer_pb2, block_builder
 from bee_rpc.reader import read_from_registry
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
-from src.utils.config import ConfigManager, SHA3_256_ID, DOCKER_COMMAND, PACKER_SUPPORTED_ARCHITECTURES
+from src.utils.config import ConfigManager, SHA3_256_ID, DOCKER_COMMAND, DOCKER_ENV, PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.utils import get_service_hex_main_hash
 from src.utils.verify import get_service_list_of_hashes, calculate_hashes, calculate_hashes_by_stream
 from src.utils.config import ConfigManager
@@ -39,8 +39,8 @@ class ZipContainerPacker:
         if not arch: raise Exception("Can't pack this service, not supported architecture.")
 
         # Directories are created on cache.
-        os.system("mkdir " + CACHE + self.aux_id + "/building")
-        os.system("mkdir " + CACHE + self.aux_id + "/filesystem")
+        os.makedirs(os.path.join(CACHE, self.aux_id, "building"), exist_ok=True)
+        os.makedirs(os.path.join(CACHE, self.aux_id, "filesystem"), exist_ok=True)
 
         # Log the selected architecture.
         log.LOGGER(f"Arch selected {arch}")
@@ -49,45 +49,68 @@ class ZipContainerPacker:
         if not os.path.isfile(self.path + 'Dockerfile'):
             raise Exception("Error: Dockerfile not found.")
 
-        # Define Docker commands
-        commands = [
-            f"{DOCKER_COMMAND} buildx build --platform {arch} --no-cache -t builder{self.aux_id} {self.path}",
-            f"{DOCKER_COMMAND} save builder{self.aux_id} > {CACHE}{self.aux_id}/building/container.tar",
-            f"tar -xvf {CACHE}{self.aux_id}/building/container.tar -C {CACHE}{self.aux_id}/building/"
+        build_cmd = DOCKER_COMMAND + [
+            "buildx", "build",
+            "--platform", arch,
+            "--no-cache",
+            "-t", f"builder{self.aux_id}",
+            self.path,
+        ]
+        save_cmd = DOCKER_COMMAND + ["save", f"builder{self.aux_id}"]
+        tar_cmd = [
+            "tar",
+            "-xvf",
+            f"{CACHE}{self.aux_id}/building/container.tar",
+            "-C",
+            f"{CACHE}{self.aux_id}/building/",
         ]
 
-        # Execute Docker commands with error handling using subprocess
-        for cmd in commands:
-            try:
-                log.LOGGER(cmd)
-                # Run command and capture output
-                process = subprocess.Popen(
-                    cmd,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                stdout, stderr = process.communicate()
-                
-                if process.returncode != 0:
-                    # If command failed, store the error message and log it
-                    self.error_msg = stderr.strip() or stdout.strip() or f"Command failed with return code {process.returncode}"
-                    log.LOGGER(f"Error executing command: {cmd}")
-                    log.LOGGER(f"Error message: {self.error_msg}")
-                    return  # Exit initialization if there's an error
-                
-            except Exception as e:
-                # Handle any other exceptions that might occur
-                self.error_msg = str(e)
-                log.LOGGER(f"Exception while executing command: {cmd}")
-                log.LOGGER(f"Exception: {self.error_msg}")
-                return
+        def _run(cmd, env=None, stdout=None, text=True):
+            result = subprocess.run(
+                cmd,
+                env=env,
+                stdout=stdout,
+                stderr=subprocess.PIPE,
+                text=text
+            )
+            if result.returncode != 0:
+                err = result.stderr.strip() if text else result.stderr.decode("utf-8", errors="replace").strip()
+                self.error_msg = err or f"Command failed with return code {result.returncode}"
+                log.LOGGER(f"Error executing command: {cmd}")
+                log.LOGGER(f"Error message: {self.error_msg}")
+                return False
+            return True
+
+        # Execute Docker build
+        log.LOGGER(" ".join(build_cmd))
+        if not _run(build_cmd, env=DOCKER_ENV):
+            return
+
+        # Save image to tar
+        log.LOGGER(" ".join(save_cmd))
+        try:
+            with open(f"{CACHE}{self.aux_id}/building/container.tar", "wb") as tar_file:
+                if not _run(save_cmd, env=DOCKER_ENV, stdout=tar_file, text=False):
+                    return
+        except Exception as e:
+            self.error_msg = str(e)
+            log.LOGGER(f"Exception while executing command: {save_cmd}")
+            log.LOGGER(f"Exception: {self.error_msg}")
+            return
+
+        # Extract tar
+        log.LOGGER(" ".join(tar_cmd))
+        if not _run(tar_cmd):
+            return
 
         try:
             # Get the buffer length only if previous commands succeeded
-            size_cmd = f"{DOCKER_COMMAND} image inspect builder{self.aux_id} --format='{{{{.Size}}}}'"
-            process = subprocess.run(size_cmd, shell=True, capture_output=True, text=True)
+            size_cmd = DOCKER_COMMAND + [
+                "image", "inspect",
+                f"builder{self.aux_id}",
+                "--format", "{{.Size}}",
+            ]
+            process = subprocess.run(size_cmd, env=DOCKER_ENV, capture_output=True, text=True)
             if process.returncode == 0:
                 self.buffer_len = int(process.stdout.strip())
             else:
@@ -318,7 +341,14 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, Union[str, celaut.Service]]:
         identifier, metadata, service = spec_file.save()
 
     # os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')  <-- This avoids rebuilding the container on the first run, but it causes file permission issues since it inherits them as they were on the host. Preferably, if using Docker, it is better to rebuild it.
-    os.system(DOCKER_COMMAND + ' rmi -f builder' + aux_id)
+    try:
+        subprocess.run(
+            DOCKER_COMMAND + ["rmi", "-f", f"builder{aux_id}"],
+            env=DOCKER_ENV,
+            check=False
+        )
+    except Exception:
+        pass
     os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier, metadata, service
 
