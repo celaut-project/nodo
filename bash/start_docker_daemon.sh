@@ -41,7 +41,6 @@ mkdir -p "${DOCKER_EXEC_ROOT}"
 if [ ! -f "${DOCKER_CONFIG_DIR}/daemon.json" ]; then
     cat > "${DOCKER_CONFIG_DIR}/daemon.json" <<EOF
 {
-    "data-root": "${DOCKER_DATA_ROOT}",
     "storage-driver": "overlay2",
     "log-driver": "json-file",
     "log-opts": {
@@ -52,6 +51,15 @@ if [ ! -f "${DOCKER_CONFIG_DIR}/daemon.json" ]; then
     "default-cgroupns-mode": "host"
 }
 EOF
+else
+    # Remove legacy/unsupported keys that break Docker 24.x
+    # apparmor-profile is not a valid daemon.json option
+    if grep -q '"apparmor-profile"' "${DOCKER_CONFIG_DIR}/daemon.json"; then
+        sed -i '/"apparmor-profile"/d' "${DOCKER_CONFIG_DIR}/daemon.json"
+    fi
+    # Avoid duplicate keys when we pass flags for these values
+    sed -i '/"data-root"/d' "${DOCKER_CONFIG_DIR}/daemon.json"
+    sed -i '/"exec-root"/d' "${DOCKER_CONFIG_DIR}/daemon.json"
 fi
 
 # Check if daemon is already running
