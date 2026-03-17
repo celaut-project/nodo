@@ -1,7 +1,7 @@
 # I/O Big Data utils.
 import gc
 from time import sleep
-from threading import Lock
+from threading import Lock, RLock
 
 import threading
 import psutil
@@ -54,7 +54,7 @@ class IOBigData(metaclass=Singleton):
         self.log = log
         self.ram_locked = 0
         self.get_ram_avaliable = lambda: self.ram_pool() - self.ram_locked
-        self.amount_lock = Lock()
+        self.amount_lock = RLock()
 
         self.wait = []
         self.wait_lock = Lock()
