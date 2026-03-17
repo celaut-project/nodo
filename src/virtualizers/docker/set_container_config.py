@@ -5,7 +5,7 @@ from typing import List, Optional
 from protos import celaut_pb2 as celaut
 from src.gateway.utils import generate_node_peer_info
 from src.utils import logger as log
-from src.utils.config import DOCKER_COMMAND, ConfigManager
+from src.utils.config import DOCKER_COMMAND, DOCKER_ENV, ConfigManager
 
 from src.utils.config import ConfigManager
 
@@ -60,8 +60,13 @@ def set_config(container_id: str,
     while 1:
         try:
             subprocess.run(
-                f"{DOCKER_COMMAND} cp {CACHE}{container_id}/__config__ {container_id}:/{'/'.join(api.path)}",
-                shell=True
+                DOCKER_COMMAND + [
+                    "cp",
+                    f"{CACHE}{container_id}/__config__",
+                    f"{container_id}:/{'/'.join(api.path)}"
+                ],
+                env=DOCKER_ENV,
+                check=True
             )
             break
         except subprocess.CalledProcessError as e:

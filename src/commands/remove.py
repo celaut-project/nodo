@@ -1,6 +1,8 @@
 import os
+import shutil
+import subprocess
 from src.commands.__by_tag import get_id
-from src.utils.config import ConfigManager, DOCKER_COMMAND
+from src.utils.config import ConfigManager, DOCKER_COMMAND, DOCKER_ENV
 
 env_manager = ConfigManager()
 
@@ -19,16 +21,18 @@ def remove(service: str):
         print("This script requires superuser privileges. Please run with sudo.")
         return
 
-    # Iterate through the commands and execute each.
-    for cmd in [
-        f"{DOCKER_COMMAND} rmi {service}.docker --force",
-        f"rm -rf {REGISTRY}/{service}",
-        f"rm -rf {METADATA_REGISTRY}/{service}"
-    ]:
-        ret_code = os.system(cmd)
-        if ret_code != 0:  # If the return code is not zero, log the failure.
-            print(f"Error executing command: {cmd} with return code {ret_code}")
-            raise Exception(f"Command failed: {cmd}")
+    try:
+        subprocess.run(
+            DOCKER_COMMAND + ["rmi", f"{service}.docker", "--force"],
+            env=DOCKER_ENV,
+            check=True
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing docker rmi: {e}")
+        raise
+
+    shutil.rmtree(os.path.join(REGISTRY, service), ignore_errors=True)
+    shutil.rmtree(os.path.join(METADATA_REGISTRY, service), ignore_errors=True)
 
     
     print(f'Service {service} removed from the node.')

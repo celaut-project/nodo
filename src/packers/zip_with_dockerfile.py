@@ -5,13 +5,13 @@ from typing import Generator, List, Tuple
 
 from src.utils import logger as log
 import json
-import os, subprocess, platform, shlex, sys, uuid
+import os, subprocess, platform, sys, uuid
 import src.manager.resources as resources
 from bee_rpc import client as grpcbb
 from bee_rpc.utils import modify_env
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
-from src.utils.config import ConfigManager, SHA3_256_ID, DOCKER_COMMAND, PACKER_SUPPORTED_ARCHITECTURES
+from src.utils.config import ConfigManager, SHA3_256_ID, DOCKER_COMMAND, DOCKER_ENV, PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.verify import calculate_hashes, calculate_hashes_by_stream
 from src.utils.config import ConfigManager
 from src.manager.resources import IOBigData
@@ -58,7 +58,7 @@ class ZipContainerPacker:
         tar_path = os.path.join(CACHE, self.aux_id, "filesystem.tar")
 
         # 3. Construct secure command
-        build_cmd = shlex.split(DOCKER_COMMAND) + [
+        build_cmd = DOCKER_COMMAND + [
             "buildx", "build",
             "--platform", target_arch,
             "--progress", "plain",
@@ -84,6 +84,7 @@ class ZipContainerPacker:
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.STDOUT, 
                 text=True,
+                env=DOCKER_ENV,
                 bufsize=1,
                 universal_newlines=True
             )
@@ -342,6 +343,7 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, str]:
     _memory = int(PACKER_MEMORY_SIZE_FACTOR) * spec_file.buffer_len
     log.LOGGER(f"Try to lock {_memory / (1024**2):.2f} MB of RAM for packing process (filesystem size: {spec_file.buffer_len / (1024**2):.2f} MB). RAM avaliable before locking: {IOBigData().get_ram_avaliable() / (1024**2):.2f} MB")
     with resources.mem_manager(len=_memory):
+        # TODO Check Try to lock 57.98 MB of RAM for packing process (filesystem size: 28.99 MB). RAM avaliable before locking: 8506.90 MB
         log.LOGGER(f"RAM locked successfully for packing process. RAM avaliable after locking: {IOBigData().get_ram_avaliable() / (1024**2):.2f} MB")
         spec_file.parseContainer()
         spec_file.parseApi()

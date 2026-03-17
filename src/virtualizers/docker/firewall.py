@@ -24,7 +24,7 @@ class NetworkRule:
     created_at: datetime
     rule_number: Optional[int] = None
 
-from src.utils.config import DOCKER_COMMAND
+from src.utils.config import DOCKER_COMMAND, DOCKER_ENV
 
 def __get_container_ip(container_id: str) -> str:
     """
@@ -32,11 +32,16 @@ def __get_container_ip(container_id: str) -> str:
     """
     try:
         result = subprocess.run(
-            f"{DOCKER_COMMAND} inspect --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}}{{{{end}}}}' {container_id}",
+            DOCKER_COMMAND + [
+                "inspect",
+                "--format",
+                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                container_id
+            ],
+            env=DOCKER_ENV,
             capture_output=True,
             text=True,
-            check=True,
-            shell=True
+            check=True
         )
         ip = result.stdout.strip()
         if not ip:

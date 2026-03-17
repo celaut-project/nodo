@@ -5,6 +5,7 @@ import subprocess
 import time
 import copy
 import threading
+from pathlib import Path
 from functools import reduce
 from typing import Final, Dict, Callable, Any
 import docker as docker_lib
@@ -251,21 +252,35 @@ if config.get('builder.X86_SUPPORT'):
 
 # Docker client factory - uses isolated Docker daemon
 # Get the private Docker socket path from config
-_DOCKER_SOCKET = config.get("docker.DOCKER_SOCKET")
+# Base paths for the isolated Docker installation (inside nodo directory)
+_main_dir = config.get("main.MAIN_DIR")
+NODO_ROOT = Path(_main_dir).expanduser().resolve() if _main_dir else Path(__file__).resolve().parents[2]
+BIN_DIR = NODO_ROOT / "bin"
+PLUGIN_DIR = NODO_ROOT / "libexec" / "docker" / "cli-plugins"
 
-try:
-    _DOCKER_BIN = subprocess.check_output(["which", "docker"]).strip().decode("utf-8")
-except (subprocess.CalledProcessError, FileNotFoundError):
-    _DOCKER_BIN = "/usr/bin/docker"  # Fallback
-    print("Warning: 'docker' command not found in PATH. Using fallback.")
+DOCKER_BIN = str(BIN_DIR / "docker")
+DOCKERD_BIN = str(BIN_DIR / "dockerd")
 
-# DOCKER_COMMAND includes the -H flag to use the isolated socket
-# This ensures all CLI docker calls use the nodo's private daemon
-if _DOCKER_SOCKET:
-    DOCKER_COMMAND = f"{_DOCKER_BIN} -H unix://{_DOCKER_SOCKET}"
-else:
-    DOCKER_COMMAND = _DOCKER_BIN
-    print("Warning: DOCKER_SOCKET not configured. Using default Docker daemon.")
+# Private Docker socket (defaults to nodo's docker/ dir if not set)
+DOCKER_SOCKET = config.get("docker.DOCKER_SOCKET") or str(NODO_ROOT / "docker" / "docker.sock")
+
+# Validate isolated binaries and plugin
+if not os.path.isfile(DOCKER_BIN):
+    raise RuntimeError(f"Cliente Docker de Nodo no encontrado en {DOCKER_BIN}. Ejecuta el instalador.")
+if not os.path.isfile(str(PLUGIN_DIR / "docker-buildx")):
+    raise RuntimeError(f"Plugin buildx no encontrado en {PLUGIN_DIR}. Ejecuta el instalador.")
+
+# Isolated environment for ALL Docker CLI calls
+DOCKER_ENV = os.environ.copy()
+DOCKER_ENV.update({
+    "DOCKER_CLI_PLUGINS_DIR": str(PLUGIN_DIR),
+    "DOCKER_API_VERSION": "1.43",
+    "DOCKER_HOST": f"unix://{DOCKER_SOCKET}",
+    "PATH": f"{BIN_DIR}{os.pathsep}{os.environ.get('PATH', '')}",
+})
+
+# Base Docker command as a list (safer than strings + shlex)
+DOCKER_COMMAND = [DOCKER_BIN, "-H", f"unix://{DOCKER_SOCKET}"]
 
 # DOCKER_CLIENT factory - connects to the isolated Docker daemon
 def _ensure_docker_daemon_running():
@@ -273,9 +288,9 @@ def _ensure_docker_daemon_running():
     Ensures the isolated Docker daemon is running.
     If the socket doesn't exist, attempts to start the daemon.
     """
-    socket_path = config.get("docker.DOCKER_SOCKET")
+    socket_path = DOCKER_SOCKET
     if not socket_path:
-        return True  # No isolated socket configured, assume default Docker
+        return True
     
     # Check if socket exists and is accessible
     if os.path.exists(socket_path):
@@ -312,21 +327,14 @@ def _ensure_docker_daemon_running():
 
 def _create_docker_client():
     """Creates a Docker client connected to nodo's isolated daemon."""
-    socket_path = config.get("docker.DOCKER_SOCKET")
-    if socket_path:
-        # Ensure the daemon is running before connecting
-        _ensure_docker_daemon_running()
-        return docker_lib.DockerClient(
-            base_url=f"unix://{socket_path}",
-            timeout=config.get("docker.DOCKER_CLIENT_TIMEOUT", 480),
-            max_pool_size=config.get("docker.DOCKER_MAX_CONNECTIONS", 1000)
-        )
-    else:
-        # Fallback to default if socket not configured
-        return docker_lib.from_env(
-            timeout=config.get("docker.DOCKER_CLIENT_TIMEOUT", 480),
-            max_pool_size=config.get("docker.DOCKER_MAX_CONNECTIONS", 1000)
-        )
+    socket_path = DOCKER_SOCKET
+    # Ensure the daemon is running before connecting
+    _ensure_docker_daemon_running()
+    return docker_lib.DockerClient(
+        base_url=f"unix://{socket_path}",
+        timeout=config.get("docker.DOCKER_CLIENT_TIMEOUT", 480),
+        max_pool_size=config.get("docker.DOCKER_MAX_CONNECTIONS", 1000)
+    )
 
 DOCKER_CLIENT = _create_docker_client
 

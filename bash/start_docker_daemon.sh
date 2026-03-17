@@ -11,16 +11,31 @@ if [ -z "$1" ]; then
 fi
 
 TARGET_DIR="$1"
+BIN_DIR="${TARGET_DIR}/bin"
+DOCKERD_BIN="${BIN_DIR}/dockerd"
+DOCKER_BIN="${BIN_DIR}/docker"
 DOCKER_DIR="${TARGET_DIR}/docker"
 DOCKER_DATA_ROOT="${DOCKER_DIR}/data"
 DOCKER_SOCKET="${DOCKER_DIR}/docker.sock"
 DOCKER_PID_FILE="${DOCKER_DIR}/docker.pid"
 DOCKER_CONFIG_DIR="${DOCKER_DIR}/config"
 DOCKER_LOG_FILE="${DOCKER_DIR}/dockerd.log"
+DOCKER_EXEC_ROOT="${DOCKER_DIR}/exec"
+
+if [ ! -x "${DOCKERD_BIN}" ]; then
+    echo "Error: isolated dockerd not found at ${DOCKERD_BIN}. Run the installer."
+    exit 1
+fi
+
+if [ ! -x "${DOCKER_BIN}" ]; then
+    echo "Error: isolated docker client not found at ${DOCKER_BIN}. Run the installer."
+    exit 1
+fi
 
 # Create directories if they don't exist
 mkdir -p "${DOCKER_DATA_ROOT}"
 mkdir -p "${DOCKER_CONFIG_DIR}"
+mkdir -p "${DOCKER_EXEC_ROOT}"
 
 # Create daemon.json if it doesn't exist
 if [ ! -f "${DOCKER_CONFIG_DIR}/daemon.json" ]; then
@@ -57,24 +72,34 @@ rm -f "${DOCKER_SOCKET}"
 echo "Starting isolated Docker daemon for nodo..."
 echo "  Socket: ${DOCKER_SOCKET}"
 echo "  Data root: ${DOCKER_DATA_ROOT}"
+echo "  Exec root: ${DOCKER_EXEC_ROOT}"
 echo "  Log file: ${DOCKER_LOG_FILE}"
 
 # Start the Docker daemon with isolated configuration
-# Note: containerd can be shared with the system, but everything else is isolated
-nohup dockerd \
+DOCKER_PATH="${BIN_DIR}:${PATH}"
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    SUDO="sudo"
+fi
+
+nohup ${SUDO} env PATH="${DOCKER_PATH}" "${DOCKERD_BIN}" \
     --config-file="${DOCKER_CONFIG_DIR}/daemon.json" \
     -H "unix://${DOCKER_SOCKET}" \
     --pidfile="${DOCKER_PID_FILE}" \
+    --data-root="${DOCKER_DATA_ROOT}" \
+    --exec-root="${DOCKER_EXEC_ROOT}" \
+    --userland-proxy=false \
     > "${DOCKER_LOG_FILE}" 2>&1 &
 
 # Wait for the socket to be created (max 30 seconds)
 echo "Waiting for Docker daemon to start..."
 for i in $(seq 1 30); do
     if [ -S "${DOCKER_SOCKET}" ]; then
+        ${SUDO} chmod 666 "${DOCKER_SOCKET}" >/dev/null 2>&1 || true
         echo "Nodo Docker daemon started successfully!"
         
         # Verify it works
-        if docker -H "unix://${DOCKER_SOCKET}" info > /dev/null 2>&1; then
+        if "${DOCKER_BIN}" -H "unix://${DOCKER_SOCKET}" info > /dev/null 2>&1; then
             echo "Docker daemon is responsive."
             exit 0
         fi

@@ -11,12 +11,15 @@ if [ -z "$1" ]; then
 fi
 
 TARGET_DIR="$1"
+BIN_DIR="${TARGET_DIR}/bin"
+DOCKERD_BIN="${BIN_DIR}/dockerd"
 DOCKER_DIR="${TARGET_DIR}/docker"
 DOCKER_DATA_ROOT="${DOCKER_DIR}/data"
 DOCKER_SOCKET="${DOCKER_DIR}/docker.sock"
 DOCKER_PID_FILE="${DOCKER_DIR}/docker.pid"
 DOCKER_CONFIG_DIR="${DOCKER_DIR}/config"
 DOCKER_LOG_FILE="${DOCKER_DIR}/dockerd.log"
+DOCKER_EXEC_ROOT="${DOCKER_DIR}/exec"
 
 echo "Setting up isolated Docker daemon for nodo..."
 echo "  Docker directory: ${DOCKER_DIR}"
@@ -26,6 +29,7 @@ echo "  Socket: ${DOCKER_SOCKET}"
 # Create required directories
 mkdir -p "${DOCKER_DATA_ROOT}"
 mkdir -p "${DOCKER_CONFIG_DIR}"
+mkdir -p "${DOCKER_EXEC_ROOT}"
 
 # Create the daemon.json configuration file for the isolated Docker daemon
 cat > "${DOCKER_CONFIG_DIR}/daemon.json" <<EOF
@@ -67,4 +71,4 @@ echo "Environment variables to use this Docker daemon:"
 echo "  DOCKER_HOST=unix://${DOCKER_SOCKET}"
 echo ""
 echo "To manually start the daemon:"
-echo "  dockerd --config-file=${DOCKER_CONFIG_DIR}/daemon.json -H unix://${DOCKER_SOCKET} --pidfile=${DOCKER_PID_FILE}"
+echo "  ${DOCKERD_BIN} --config-file=${DOCKER_CONFIG_DIR}/daemon.json -H unix://${DOCKER_SOCKET} --pidfile=${DOCKER_PID_FILE} --data-root=${DOCKER_DATA_ROOT} --exec-root=${DOCKER_EXEC_ROOT}"

@@ -93,36 +93,37 @@ fi
 echo "11. Installing OpenJDK 21..."
 apt-get install -y openjdk-21-jre-headless >/dev/null
 
-echo "12. Setting up Docker (v24) for ARM..."
-# Add Docker GPG key if missing
-if [ ! -f /usr/share/keyrings/docker-archive-keyring.gpg ]; then
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-        | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-fi
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
-   https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-  > /etc/apt/sources.list.d/docker.list
+echo "12. Downloading isolated Docker 24.0.9 binaries..."
+NODO_DIR="$TARGET_DIR"
+BIN_DIR="${NODO_DIR}/bin"
+PLUGIN_DIR="${NODO_DIR}/libexec/docker/cli-plugins"
+mkdir -p "$BIN_DIR" "$PLUGIN_DIR"
 
-apt-get update >/dev/null
+ARCH=$(uname -m)
+if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then ARCH="arm64"; fi
 
-# Remove outdated Docker if present
-if command -v docker >/dev/null; then
-    ver=$(docker --version | grep -oP '\d+\.\d+\.\d+')
-    if [[ $ver != 24.* ]]; then
-        echo "   - Removing Docker $ver..."
-        apt-get remove -y docker docker-engine docker.io containerd runc >/dev/null
-    fi
-fi
+DOCKER_TGZ="docker-24.0.9.tgz"
+curl -fsSL "https://download.docker.com/linux/static/stable/${ARCH}/${DOCKER_TGZ}" -o "/tmp/${DOCKER_TGZ}"
+tar -xzf "/tmp/${DOCKER_TGZ}" -C "/tmp/"
+cp "/tmp/docker/docker" "$BIN_DIR/"
+cp "/tmp/docker/dockerd" "$BIN_DIR/"
+cp /tmp/docker/containerd* "$BIN_DIR/" 2>/dev/null || true
+cp /tmp/docker/ctr "$BIN_DIR/" 2>/dev/null || true
+cp "/tmp/docker/runc" "$BIN_DIR/" 2>/dev/null || true
+rm -rf "/tmp/docker" "/tmp/${DOCKER_TGZ}"
+chmod +x "$BIN_DIR"/*
 
-# Install Docker 24.*
-apt-get install -y --allow-downgrades docker-ce=5:24.* docker-ce-cli=5:24.* containerd.io >/dev/null
+echo "Downloading isolated buildx v0.12.1 plugin..."
+BUILDX_URL="https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0.12.1.linux-${ARCH}"
+curl -fsSL "$BUILDX_URL" -o "${PLUGIN_DIR}/docker-buildx"
+chmod +x "${PLUGIN_DIR}/docker-buildx"
 
 echo "13. (Optional) Installing QEMU/binfmt for multi-architecture containers..."
 apt-get install -y qemu-user-static binfmt-support >/dev/null
 DOCKER_SOCKET="${TARGET_DIR}/docker/docker.sock"
 /bin/bash "$TARGET_DIR/bash/start_docker_daemon.sh" "$TARGET_DIR" >/dev/null
-docker -H "unix://${DOCKER_SOCKET}" run --rm --privileged multiarch/qemu-user-static --reset -p yes >/dev/null
+"${TARGET_DIR}/bin/docker" -H "unix://${DOCKER_SOCKET}" run --rm --privileged multiarch/qemu-user-static --reset -p yes >/dev/null
 
 echo "14. Installing Rust (cargo)…"
 if ! command -v cargo >/dev/null; then

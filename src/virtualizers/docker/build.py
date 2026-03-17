@@ -14,9 +14,9 @@ from bee_rpc.client import copy_block_if_exists
 
 import src.utils.logger as l
 from protos import celaut_pb2, celaut_pb2
-from src.utils.config import DOCKER_COMMAND, ConfigManager
+from src.utils.config import DOCKER_COMMAND, DOCKER_ENV, ConfigManager
 from src.utils.verify import get_service_hex_main_hash
-from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag, check_supported_architecture
+from src.virtualizers.architecture import get_arch_tag
 
 from src.utils.config import DOCKER_CLIENT
 
@@ -125,7 +125,10 @@ def __build_container_from_definition(service: celaut_pb2.Service,
         l.LOGGER('Build process of ' + service_id + ': building it ...')
         open(_dir + '/Dockerfile', 'w').write('FROM scratch\nCOPY --chmod=777 fs .')
         cache_id = service_id + str(time()) + '.cache'
-        check_output(f'{DOCKER_COMMAND} buildx build --platform ' + arch + ' -t ' + cache_id + ' ' + _dir + '/.', shell=True)
+        check_output(
+            DOCKER_COMMAND + ["buildx", "build", "--platform", arch, "-t", cache_id, _dir + '/.'],
+            env=DOCKER_ENV
+        )
         l.LOGGER('Build process of ' + service_id + ': build it.')
         try:
             rmtree(_dir)
@@ -133,8 +136,10 @@ def __build_container_from_definition(service: celaut_pb2.Service,
             pass
 
         # Generate the symlinks.
-        overlay_dir = check_output(DOCKER_COMMAND+" inspect --format='{{ .GraphDriver.Data.UpperDir }}' " + cache_id,
-                                   shell=True).decode('utf-8')[:-1]
+        overlay_dir = check_output(
+            DOCKER_COMMAND + ["inspect", "--format", "{{ .GraphDriver.Data.UpperDir }}", cache_id],
+            env=DOCKER_ENV
+        ).decode('utf-8').strip()
         l.LOGGER('Build process of ' + service_id + ': overlay dir ' + str(overlay_dir))
         for symlink in symlinks:
             try:
@@ -150,8 +155,14 @@ def __build_container_from_definition(service: celaut_pb2.Service,
                     'Build process of ' + service_id + ': symlink error (AttributeError) ' + str(symlink.src) + str(
                         symlink.dst))
 
-        check_output(f'{DOCKER_COMMAND} image tag ' + cache_id + ' ' + service_id + '.docker', shell=True)
-        check_output(F'{DOCKER_COMMAND} rmi ' + cache_id, shell=True)
+        check_output(
+            DOCKER_COMMAND + ["image", "tag", cache_id, service_id + '.docker'],
+            env=DOCKER_ENV
+        )
+        check_output(
+            DOCKER_COMMAND + ["rmi", cache_id],
+            env=DOCKER_ENV
+        )
         l.LOGGER('Build process of ' + service_id + ': finished.')
 
         with actual_building_processes_lock:
@@ -176,7 +187,10 @@ def build(
     while True:
         try:
             # check if it's locally.
-            check_output(DOCKER_COMMAND + ' inspect ' + service_id + '.docker', shell=True)
+            check_output(
+                DOCKER_COMMAND + ["inspect", service_id + '.docker'],
+                env=DOCKER_ENV
+            )
             return service_id
 
         except CalledProcessError:
