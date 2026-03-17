@@ -49,7 +49,6 @@ if [ ! -f "${DOCKER_CONFIG_DIR}/daemon.json" ]; then
         "max-file": "3"
     },
     "ipv6": false,
-    "apparmor-profile": "unconfined",
     "default-cgroupns-mode": "host"
 }
 EOF
