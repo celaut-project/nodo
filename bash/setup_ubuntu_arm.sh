@@ -100,11 +100,20 @@ PLUGIN_DIR="${NODO_DIR}/libexec/docker/cli-plugins"
 mkdir -p "$BIN_DIR" "$PLUGIN_DIR"
 
 ARCH=$(uname -m)
-if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi
-if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then ARCH="arm64"; fi
+DOCKER_ARCH="$ARCH"
+BUILDX_ARCH="$ARCH"
+# Docker static binaries use x86_64/aarch64, buildx uses amd64/arm64
+if [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then
+    DOCKER_ARCH="x86_64"
+    BUILDX_ARCH="amd64"
+fi
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    DOCKER_ARCH="aarch64"
+    BUILDX_ARCH="arm64"
+fi
 
 DOCKER_TGZ="docker-24.0.9.tgz"
-curl -fsSL "https://download.docker.com/linux/static/stable/${ARCH}/${DOCKER_TGZ}" -o "/tmp/${DOCKER_TGZ}"
+curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/${DOCKER_TGZ}" -o "/tmp/${DOCKER_TGZ}"
 tar -xzf "/tmp/${DOCKER_TGZ}" -C "/tmp/"
 cp "/tmp/docker/docker" "$BIN_DIR/"
 cp "/tmp/docker/dockerd" "$BIN_DIR/"
@@ -115,7 +124,7 @@ rm -rf "/tmp/docker" "/tmp/${DOCKER_TGZ}"
 chmod +x "$BIN_DIR"/*
 
 echo "Downloading isolated buildx v0.12.1 plugin..."
-BUILDX_URL="https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0.12.1.linux-${ARCH}"
+BUILDX_URL="https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0.12.1.linux-${BUILDX_ARCH}"
 curl -fsSL "$BUILDX_URL" -o "${PLUGIN_DIR}/docker-buildx"
 chmod +x "${PLUGIN_DIR}/docker-buildx"
 
