@@ -41,7 +41,9 @@ cat > "${DOCKER_CONFIG_DIR}/daemon.json" <<EOF
         "max-size": "10m",
         "max-file": "3"
     },
-    "ipv6": false
+    "ipv6": false,
+    "apparmor-profile": "unconfined",
+    "default-cgroupns-mode": "host"
 }
 EOF
 
