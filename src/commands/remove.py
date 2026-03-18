@@ -32,8 +32,20 @@ def remove(service: str):
         print(f"Error executing docker rmi: {e}")
         raise
 
-    shutil.rmtree(os.path.join(REGISTRY, service))
-    shutil.rmtree(os.path.join(METADATA_REGISTRY, service))
+    registry_path = os.path.join(REGISTRY, service)
+    if os.path.isfile(registry_path):
+        os.remove(registry_path)
+    elif os.path.isdir(registry_path):
+        shutil.rmtree(registry_path)
+    else:
+        print(f"Warning: {registry_path} does not exist.")
 
+    metadata_path = os.path.join(METADATA_REGISTRY, service)
+    if os.path.isfile(metadata_path):
+        os.remove(metadata_path)
+    elif os.path.isdir(metadata_path):
+        shutil.rmtree(metadata_path)
+    else:
+        print(f"Warning: {metadata_path} does not exist.")
     
     print(f'Service {service} removed from the node.')
