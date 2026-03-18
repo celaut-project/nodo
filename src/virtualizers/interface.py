@@ -1,5 +1,7 @@
 from src.virtualizers.docker.build import is_service_built as docker_is_service_built
 from src.virtualizers.docker.build import build as docker_build
+from src.virtualizers.cloud_hypervisor.build import is_service_built as ch_is_service_built
+from src.virtualizers.cloud_hypervisor.build import build as ch_build
 from src.virtualizers.docker.execute import execute as docker_execute
 from src.virtualizers.docker.remove import remove as remove_docker
 from src.virtualizers.docker.hotplug import hotplug as docker_hotplug
@@ -40,11 +42,11 @@ def _resolve_virtualizer_for_instance(vmachine_id: str) -> str:
 def _is_supported_virtualizer(name: str) -> bool:
     return name in {"docker", "cloud_hypervisor"}
 
-def _ensure_usable_virtualizer(name: str) -> str:
+def _ensure_usable_virtualizer(name: str, allow_cloud_hypervisor: bool = False) -> str:
     if not _is_supported_virtualizer(name):
         l.LOGGER(f"Unknown virtualizer '{name}', falling back to docker.")
         return "docker"
-    if name == "cloud_hypervisor":
+    if name == "cloud_hypervisor" and not allow_cloud_hypervisor:
         raise NotImplementedError(
             "Virtualizer 'cloud_hypervisor' is configured but not implemented yet."
         )
@@ -55,7 +57,12 @@ def get_configured_virtualizer() -> str:
 
 def is_built(service_hash: str) -> bool:
     """Check if a service with the given hash is already built."""
-    _ensure_usable_virtualizer(_get_default_virtualizer())
+    virtualizer = _ensure_usable_virtualizer(
+        _get_default_virtualizer(),
+        allow_cloud_hypervisor=True,
+    )
+    if virtualizer == "cloud_hypervisor":
+        return ch_is_service_built(service_hash)
     return docker_is_service_built(service_hash)
 
 def build(
@@ -68,12 +75,22 @@ def build(
         l.LOGGER('Build process of ' + service_id + ': unsupported architecture.')
         raise UnsupportedArchitectureException(arch=str(metadata))
 
-    _ensure_usable_virtualizer(_get_default_virtualizer())
+    virtualizer = _ensure_usable_virtualizer(
+        _get_default_virtualizer(),
+        allow_cloud_hypervisor=True,
+    )
+
+    if virtualizer == "cloud_hypervisor":
+        return ch_build(
+            service=service,
+            metadata=metadata,
+            service_id=service_id,
+        )
 
     return docker_build(
         service=service,
         metadata=metadata,
-        service_id=service_id
+        service_id=service_id,
     )
 
 def hotplug(
