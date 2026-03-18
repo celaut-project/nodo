@@ -30,7 +30,6 @@ def remove(service: str):
         )
     except subprocess.CalledProcessError as e:
         print(f"Error executing docker rmi: {e}")
-        l(f"Error executing docker rmi: {e}")
         raise
 
     shutil.rmtree(os.path.join(REGISTRY, service), ignore_errors=True)
