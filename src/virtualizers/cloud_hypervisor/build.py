@@ -18,8 +18,8 @@ from src.virtualizers.architecture import get_arch_tag, UnsupportedArchitectureE
 env_manager = ConfigManager()
 
 CACHE = env_manager.get("CACHE")
-KERNEL_PATH = env_manager.get("virtualizers.cloud_hypervisor.KERNEL_PATH")
-INITRAMFS_PATH = env_manager.get("virtualizers.cloud_hypervisor.INITRAMFS_PATH")
+KERNEL_PATHS = env_manager.get("virtualizers.cloud_hypervisor.KERNEL_PATHS") or {}
+INITRAMFS_PATHS = env_manager.get("virtualizers.cloud_hypervisor.INITRAMFS_PATHS") or {}
 
 OVERHEAD_BYTES = 64 * 1024 * 1024
 MIN_ROOTFS_BYTES = 128 * 1024 * 1024
@@ -32,16 +32,33 @@ def _bundle_dir(service_id: str, arch: str) -> Path:
     return Path(CACHE) / "cloud_hypervisor" / service_id / arch
 
 
-def _validate_guest_assets() -> tuple[str, str]:
-    if not KERNEL_PATH or not os.path.isfile(KERNEL_PATH):
+def _validate_guest_assets(arch: str) -> tuple[str, str]:
+    kernel_path = KERNEL_PATHS.get(arch)
+    initramfs_path = INITRAMFS_PATHS.get(arch)
+
+    if not kernel_path:
+        available = ", ".join(sorted(KERNEL_PATHS.keys())) or "none"
         raise FileNotFoundError(
-            f"Cloud Hypervisor kernel not found at '{KERNEL_PATH}'."
+            f"No kernel path configured for arch '{arch}'. "
+            f"Available KERNEL_PATHS: {available}."
         )
-    if not INITRAMFS_PATH or not os.path.isfile(INITRAMFS_PATH):
+    if not os.path.isfile(kernel_path):
         raise FileNotFoundError(
-            f"Cloud Hypervisor initramfs not found at '{INITRAMFS_PATH}'."
+            f"Cloud Hypervisor kernel not found at '{kernel_path}'."
         )
-    return KERNEL_PATH, INITRAMFS_PATH
+
+    if not initramfs_path:
+        available = ", ".join(sorted(INITRAMFS_PATHS.keys())) or "none"
+        raise FileNotFoundError(
+            f"No initramfs path configured for arch '{arch}'. "
+            f"Available INITRAMFS_PATHS: {available}."
+        )
+    if not os.path.isfile(initramfs_path):
+        raise FileNotFoundError(
+            f"Cloud Hypervisor initramfs not found at '{initramfs_path}'."
+        )
+
+    return kernel_path, initramfs_path
 
 
 def _write_item(
@@ -131,6 +148,13 @@ def _mkfs_ext4(rootfs_dir: Path, image_path: Path, size_bytes: int) -> None:
         ) from e
 
 
+def _is_service_built_for_arch(service_hash: str, arch: str) -> bool:
+    if not CACHE:
+        return False
+    bundle_dir = Path(CACHE) / "cloud_hypervisor" / service_hash / arch
+    return (bundle_dir / "rootfs.ext4").is_file() and (bundle_dir / "bundle.json").is_file()
+
+
 def is_service_built(service_hash: str) -> bool:
     if not CACHE:
         return False
@@ -158,10 +182,10 @@ def build(
     if not arch:
         raise UnsupportedArchitectureException(arch=str(metadata))
 
-    if is_service_built(service_id):
+    if _is_service_built_for_arch(service_id, arch):
         return service_id
 
-    kernel_path, initramfs_path = _validate_guest_assets()
+    kernel_path, initramfs_path = _validate_guest_assets(arch)
 
     bundle_dir = _bundle_dir(service_id, arch)
     bundle_dir.mkdir(parents=True, exist_ok=True)
