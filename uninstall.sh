@@ -35,6 +35,16 @@ if [ -f "$DOCKER_PID_FILE" ]; then
     rm -f "$DOCKER_PID_FILE"
 fi
 
+# 1c. Verify isolated Docker daemon is stopped and warn if sockets remain
+DOCKER_SOCKET="$TARGET_DIR/docker/docker.sock"
+if pgrep -f "$TARGET_DIR/docker" >/dev/null 2>&1; then
+    printf "Warning: Detected docker-related processes still running under %s.\n" "$TARGET_DIR"
+    printf "You may need to stop them manually before removing the directory.\n"
+fi
+if [ -S "$DOCKER_SOCKET" ]; then
+    printf "Warning: Docker socket still exists at %s (daemon may still be running).\n" "$DOCKER_SOCKET"
+fi
+
 # 2. Remove containers
 # We need to do this before removing the directory because we need the python env and code to identify containers.
 if [ -d "$TARGET_DIR" ]; then
