@@ -1,0 +1,494 @@
+import hashlib
+import ipaddress
+import json
+import math
+import os
+import posixpath
+import shutil
+import subprocess
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+from uuid import uuid4
+
+from protos import celaut_pb2 as celaut
+from src.database.sql_connection import SQLConnection
+from src.gateway.utils import generate_node_peer_info
+from src.manager.networks import filter_networks_with_ancestors, resolve_network
+from src.utils import logger as log
+from src.utils.config import ConfigManager
+from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
+from src.virtualizers.cloud_hypervisor.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
+
+env_manager = ConfigManager()
+sc = SQLConnection()
+
+CACHE = env_manager.get("CACHE")
+CH_BINARY_PATH = env_manager.get("virtualizers.cloud_hypervisor.BINARY_PATH")
+NETWORK_MODE = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_MODE", "tap_bridge")
+NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_BRIDGE_NAME", "br-ch")
+NETWORK_SUBNET = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_SUBNET", "192.168.200.0/24")
+NETWORK_GATEWAY_IP = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_GATEWAY_IP", "192.168.200.1")
+
+DEFAULT_VCPUS = 1
+DEFAULT_MEM_MIB = 256
+MIN_MEM_MIB = 128
+
+
+class CHExecuteError(RuntimeError):
+    pass
+
+
+def _run(command: List[str], *, check: bool = True, capture_output: bool = True) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            command,
+            check=check,
+            capture_output=capture_output,
+            text=True,
+        )
+    except FileNotFoundError as e:
+        raise CHExecuteError(f"Required command not found: {command[0]}") from e
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.strip() if e.stderr else ""
+        stdout = e.stdout.strip() if e.stdout else ""
+        raise CHExecuteError(
+            f"Command failed: {' '.join(command)} -> {stderr or stdout or 'unknown error'}"
+        ) from e
+
+
+def _bundle_dir(service_id: str, arch: str) -> Path:
+    if not CACHE:
+        raise CHExecuteError("CACHE path is not configured.")
+    return Path(CACHE) / "cloud_hypervisor" / service_id / arch
+
+
+def _runtime_vm_dir(vmachine_id: str) -> Path:
+    if not CACHE:
+        raise CHExecuteError("CACHE path is not configured.")
+    return Path(CACHE) / "cloud_hypervisor" / "runtime" / vmachine_id
+
+
+def _resolve_ch_binary() -> str:
+    if CH_BINARY_PATH:
+        if os.path.isfile(CH_BINARY_PATH) and os.access(CH_BINARY_PATH, os.X_OK):
+            return CH_BINARY_PATH
+        raise CHExecuteError(
+            f"Configured cloud-hypervisor binary is invalid or not executable: {CH_BINARY_PATH}"
+        )
+
+    resolved = shutil.which("cloud-hypervisor")
+    if not resolved:
+        raise CHExecuteError(
+            "cloud-hypervisor binary not found. Set virtualizers.cloud_hypervisor.BINARY_PATH or install it in PATH."
+        )
+    return resolved
+
+
+def _resolve_service_arch(service_id: str, service: celaut.Service) -> str:
+    arch = get_arch_tag(service=service, metadata=None)
+    if arch:
+        return arch
+
+    base_dir = Path(CACHE) / "cloud_hypervisor" / service_id if CACHE else None
+    if base_dir and base_dir.is_dir():
+        candidates = [p.name for p in base_dir.iterdir() if p.is_dir() and (p / "bundle.json").is_file()]
+        if len(candidates) == 1:
+            return candidates[0]
+
+    raise UnsupportedArchitectureException(arch="unknown")
+
+
+def _load_bundle(service_id: str, arch: str) -> Dict[str, str]:
+    bundle_dir = _bundle_dir(service_id, arch)
+    bundle_path = bundle_dir / "bundle.json"
+    if not bundle_path.is_file():
+        raise CHExecuteError(f"Missing CH bundle manifest: {bundle_path}")
+
+    with open(bundle_path, "r", encoding="utf-8") as f:
+        bundle = json.load(f)
+
+    rootfs_path = Path(bundle.get("rootfs_path", ""))
+    kernel_path = Path(bundle.get("kernel_path", ""))
+    initramfs_path = Path(bundle.get("initramfs_path", ""))
+
+    if not rootfs_path.is_file():
+        raise CHExecuteError(f"Missing CH rootfs image: {rootfs_path}")
+    if not kernel_path.is_file():
+        raise CHExecuteError(f"Missing CH kernel image: {kernel_path}")
+    if not initramfs_path.is_file():
+        raise CHExecuteError(f"Missing CH initramfs image: {initramfs_path}")
+
+    return {
+        "rootfs_path": str(rootfs_path),
+        "kernel_path": str(kernel_path),
+        "initramfs_path": str(initramfs_path),
+        "arch": bundle.get("arch", arch),
+    }
+
+
+def _ip_network() -> ipaddress.IPv4Network:
+    try:
+        network = ipaddress.ip_network(NETWORK_SUBNET, strict=False)
+    except ValueError as e:
+        raise CHExecuteError(f"Invalid NETWORK_SUBNET: {NETWORK_SUBNET}") from e
+
+    if network.version != 4:
+        raise CHExecuteError("Only IPv4 subnets are supported for Cloud Hypervisor networking.")
+    if network.num_addresses < 4:
+        raise CHExecuteError(f"NETWORK_SUBNET too small for VM allocation: {NETWORK_SUBNET}")
+    return network
+
+
+def _used_ips() -> set[str]:
+    used: set[str] = set()
+
+    for state in list_runtime_states().values():
+        ip = state.get("ip")
+        if isinstance(ip, str) and ip:
+            used.add(ip)
+
+    for vmachine_id in sc.get_all_internal_containers_ids():
+        ip = sc.get_internal_ip(id=vmachine_id)
+        if ip:
+            used.add(ip)
+
+    return used
+
+
+def _deterministic_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
+    network = _ip_network()
+    gateway_ip = ipaddress.ip_address(NETWORK_GATEWAY_IP)
+    if gateway_ip not in network:
+        raise CHExecuteError(
+            f"NETWORK_GATEWAY_IP {NETWORK_GATEWAY_IP} does not belong to subnet {NETWORK_SUBNET}"
+        )
+
+    hosts = network.num_addresses - 2
+    if hosts <= 1:
+        raise CHExecuteError(f"No usable host addresses in subnet {NETWORK_SUBNET}")
+
+    used = _used_ips()
+    digest = hashlib.sha256(vmachine_id.encode("utf-8")).digest()
+    seed = int.from_bytes(digest[:8], "big")
+
+    selected_ip: Optional[str] = None
+    for offset in range(hosts):
+        host_index = ((seed + offset) % hosts) + 1
+        candidate = ipaddress.ip_address(int(network.network_address) + host_index)
+        candidate_str = str(candidate)
+        if candidate == gateway_ip:
+            continue
+        if candidate_str in used:
+            continue
+        selected_ip = candidate_str
+        break
+
+    if not selected_ip:
+        raise CHExecuteError(f"No available IPs in subnet {NETWORK_SUBNET}")
+
+    mac = f"02:{digest[0]:02x}:{digest[1]:02x}:{digest[2]:02x}:{digest[3]:02x}:{digest[4]:02x}"
+    return selected_ip, mac
+
+
+def _ensure_command_available(command: str) -> None:
+    if not shutil.which(command):
+        raise CHExecuteError(f"Required command not found in PATH: {command}")
+
+
+def _network_preflight() -> ipaddress.IPv4Network:
+    if NETWORK_MODE != "tap_bridge":
+        raise CHExecuteError(
+            f"Unsupported NETWORK_MODE '{NETWORK_MODE}'. This phase supports only 'tap_bridge'."
+        )
+
+    for command in ("ip", "sysctl", "iptables", "debugfs"):
+        _ensure_command_available(command)
+
+    network = _ip_network()
+    prefix_len = network.prefixlen
+
+    link_exists = _run(["ip", "link", "show", NETWORK_BRIDGE_NAME], check=False)
+    if link_exists.returncode != 0:
+        _run(["ip", "link", "add", NETWORK_BRIDGE_NAME, "type", "bridge"])
+
+    addr_show = _run(["ip", "-4", "addr", "show", "dev", NETWORK_BRIDGE_NAME], check=False)
+    expected_cidr = f"{NETWORK_GATEWAY_IP}/{prefix_len}"
+    if expected_cidr not in (addr_show.stdout or ""):
+        _run(["ip", "addr", "add", expected_cidr, "dev", NETWORK_BRIDGE_NAME])
+
+    _run(["ip", "link", "set", NETWORK_BRIDGE_NAME, "up"])
+    _run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
+
+    return network
+
+
+def _create_tap(vmachine_id: str) -> str:
+    tap_suffix = hashlib.sha1(vmachine_id.encode("utf-8")).hexdigest()[:10]
+    tap_name = f"tap{tap_suffix}"
+
+    _run(["ip", "tuntap", "add", "dev", tap_name, "mode", "tap"])
+    _run(["ip", "link", "set", tap_name, "master", NETWORK_BRIDGE_NAME])
+    _run(["ip", "link", "set", tap_name, "up"])
+
+    return tap_name
+
+
+def _delete_tap(tap_name: str) -> None:
+    _run(["ip", "link", "del", tap_name], check=False)
+
+
+def _resolve_initial_resources(resources: celaut.Sysresources) -> Tuple[int, int]:
+    vcpus = DEFAULT_VCPUS
+    mem_mib = DEFAULT_MEM_MIB
+
+    try:
+        if resources and resources.HasField("cpu_quota") and resources.HasField("cpu_period"):
+            if resources.cpu_period > 0 and resources.cpu_quota > 0:
+                vcpus = max(1, int(math.ceil(resources.cpu_quota / resources.cpu_period)))
+
+        if resources and resources.HasField("mem_limit") and resources.mem_limit > 0:
+            mem_mib = max(MIN_MEM_MIB, int(math.ceil(resources.mem_limit / (1024 * 1024))))
+    except Exception:
+        pass
+
+    return vcpus, mem_mib
+
+
+def _build_network_resolution(service: celaut.Service, father_id: str) -> List[celaut.ConfigurationFile.NetworkResolution]:
+    networks = service.network
+    if father_id and sc.internal_instance_exists(id=father_id):
+        networks = filter_networks_with_ancestors(networks=networks, father_id=father_id)
+
+    return [
+        celaut.ConfigurationFile.NetworkResolution(
+            tags=network.tags,
+            peer_instances=resolve_network(network),
+        )
+        for network in networks
+        if len(network.tags) > 0
+    ]
+
+
+def _build_configuration_file(
+    config: Optional[celaut.Configuration],
+    resources: celaut.Sysresources,
+    network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
+) -> celaut.ConfigurationFile:
+    cfg = celaut.ConfigurationFile()
+    local_peer = generate_node_peer_info(network=NETWORK_BRIDGE_NAME)
+    cfg.gateway.CopyFrom(local_peer.instance)
+
+    if config:
+        cfg.config.CopyFrom(config)
+
+    if network_resolution:
+        cfg.network_resolution.extend(network_resolution)
+
+    if resources:
+        cfg.initial_sysresources.CopyFrom(resources)
+
+    return cfg
+
+
+def _run_debugfs_write(image_path: Path, host_file: Path, guest_target: str) -> None:
+    guest_target = guest_target if guest_target.startswith("/") else f"/{guest_target}"
+    target_dir = posixpath.dirname(guest_target)
+
+    directory_parts = [part for part in target_dir.split("/") if part]
+    current = ""
+    for part in directory_parts:
+        current = f"{current}/{part}"
+        mkdir_result = _run(
+            ["debugfs", "-w", "-R", f"mkdir {current}", str(image_path)],
+            check=False,
+        )
+        if mkdir_result.returncode != 0:
+            stderr = (mkdir_result.stderr or "").strip().lower()
+            if "file exists" not in stderr:
+                raise CHExecuteError(
+                    f"debugfs mkdir failed for {current}: {mkdir_result.stderr or mkdir_result.stdout or ''}"
+                )
+
+    _run(["debugfs", "-w", "-R", f"rm {guest_target}", str(image_path)], check=False)
+
+    write_cmd = f"write {host_file} {guest_target}"
+    _run(["debugfs", "-w", "-R", write_cmd, str(image_path)])
+
+
+def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port: int) -> List[List[str]]:
+    add_commands = [
+        ["iptables", "-t", "nat", "-A", "PREROUTING", "-p", protocol, "--dport", str(external_port), "-j", "DNAT", "--to-destination", f"{vm_ip}:{internal_port}"],
+        ["iptables", "-t", "nat", "-A", "OUTPUT", "-p", protocol, "--dport", str(external_port), "-j", "DNAT", "--to-destination", f"{vm_ip}:{internal_port}"],
+        ["iptables", "-A", "FORWARD", "-p", protocol, "-d", vm_ip, "--dport", str(internal_port), "-j", "ACCEPT"],
+    ]
+
+    for command in add_commands:
+        _run(command)
+
+    return [
+        ["iptables", "-t", "nat", "-D", "PREROUTING", "-p", protocol, "--dport", str(external_port), "-j", "DNAT", "--to-destination", f"{vm_ip}:{internal_port}"],
+        ["iptables", "-t", "nat", "-D", "OUTPUT", "-p", protocol, "--dport", str(external_port), "-j", "DNAT", "--to-destination", f"{vm_ip}:{internal_port}"],
+        ["iptables", "-D", "FORWARD", "-p", protocol, "-d", vm_ip, "--dport", str(internal_port), "-j", "ACCEPT"],
+    ]
+
+
+def _remove_rules(commands: List[List[str]]) -> None:
+    for command in commands:
+        _run(command, check=False)
+
+
+def execute(
+    assigment_ports: Optional[Dict[int, int]],
+    by_local: bool,
+    service_id: str,
+    service: celaut.Service,
+    config: Optional[celaut.Configuration],
+    initial_system_resources: celaut.Sysresources,
+    father_id: str,
+) -> Tuple[str, str]:
+    vmachine_id = str(uuid4())
+    runtime_dir = _runtime_vm_dir(vmachine_id)
+    cleanup_rules: List[List[str]] = []
+    tap_name: Optional[str] = None
+    process: Optional[subprocess.Popen] = None
+
+    try:
+        _network_preflight()
+        _resolve_ch_binary()
+
+        arch = _resolve_service_arch(service_id=service_id, service=service)
+        bundle = _load_bundle(service_id=service_id, arch=arch)
+
+        vm_ip, mac = _deterministic_ip_and_mac(vmachine_id)
+
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        rootfs_path = runtime_dir / "rootfs.ext4"
+        api_socket_path = runtime_dir / "cloud-hypervisor.sock"
+        config_host_path = runtime_dir / "__config__"
+        stdout_path = runtime_dir / "cloud-hypervisor.stdout.log"
+        stderr_path = runtime_dir / "cloud-hypervisor.stderr.log"
+
+        shutil.copy2(bundle["rootfs_path"], rootfs_path)
+
+        network_resolution = _build_network_resolution(service=service, father_id=father_id)
+        cfg = _build_configuration_file(
+            config=config,
+            resources=initial_system_resources,
+            network_resolution=network_resolution,
+        )
+
+        with open(config_host_path, "wb") as f:
+            f.write(cfg.SerializeToString())
+
+        target_dir = "/" + "/".join(service.container.config.path) if service.container.config.path else "/"
+        target_path = posixpath.join(target_dir, "__config__")
+        _run_debugfs_write(
+            image_path=rootfs_path,
+            host_file=config_host_path,
+            guest_target=target_path,
+        )
+
+        tap_name = _create_tap(vmachine_id)
+
+        vcpus, mem_mib = _resolve_initial_resources(initial_system_resources)
+        network = _ip_network()
+        netmask = str(network.netmask)
+        kernel_cmdline = f"root=/dev/vda rw ip={vm_ip}::{NETWORK_GATEWAY_IP}:{netmask}::eth0:off"
+
+        ch_binary = _resolve_ch_binary()
+        start_command = [
+            ch_binary,
+            "--api-socket",
+            str(api_socket_path),
+            "--kernel",
+            bundle["kernel_path"],
+            "--initramfs",
+            bundle["initramfs_path"],
+            "--disk",
+            f"path={rootfs_path}",
+            "--cpus",
+            f"boot={vcpus}",
+            "--memory",
+            f"size={mem_mib}M",
+            "--net",
+            f"tap={tap_name},mac={mac}",
+            "--cmdline",
+            kernel_cmdline,
+        ]
+
+        with open(stdout_path, "w", encoding="utf-8") as stdout_file, open(
+            stderr_path, "w", encoding="utf-8"
+        ) as stderr_file:
+            process = subprocess.Popen(start_command, stdout=stdout_file, stderr=stderr_file)
+
+        time.sleep(1.0)
+        if process.poll() is not None:
+            raise CHExecuteError(
+                f"cloud-hypervisor process exited early with code {process.returncode}. "
+                f"See {stderr_path}"
+            )
+
+        dnat_rules_state: List[Dict[str, object]] = []
+        if not by_local and assigment_ports:
+            for internal_port, external_port in assigment_ports.items():
+                for protocol in ("tcp", "udp"):
+                    removal_commands = _add_dnat_rule(
+                        protocol=protocol,
+                        external_port=external_port,
+                        vm_ip=vm_ip,
+                        internal_port=internal_port,
+                    )
+                    cleanup_rules.extend(removal_commands)
+                    dnat_rules_state.append(
+                        {
+                            "protocol": protocol,
+                            "external_port": external_port,
+                            "internal_port": internal_port,
+                            "destination_ip": vm_ip,
+                        }
+                    )
+
+        save_runtime_state(
+            vmachine_id,
+            {
+                "vmachine_id": vmachine_id,
+                "service_id": service_id,
+                "arch": bundle["arch"],
+                "pid": process.pid,
+                "api_socket": str(api_socket_path),
+                "tap": tap_name,
+                "ip": vm_ip,
+                "mac": mac,
+                "rootfs_path": str(rootfs_path),
+                "dnat_rules": dnat_rules_state,
+                "bridge": NETWORK_BRIDGE_NAME,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+        # Keep gateway egress behavior aligned with Docker semantics for now.
+        log.LOGGER(f"Cloud Hypervisor VM started: {vmachine_id} ({vm_ip})")
+        return vmachine_id, vm_ip
+
+    except Exception as e:
+        _remove_rules(cleanup_rules)
+
+        if process and process.poll() is None:
+            process.terminate()
+            time.sleep(0.5)
+            if process.poll() is None:
+                process.kill()
+
+        if tap_name:
+            _delete_tap(tap_name)
+
+        delete_runtime_state(vmachine_id)
+
+        if runtime_dir.exists():
+            shutil.rmtree(runtime_dir, ignore_errors=True)
+
+        if isinstance(e, CHExecuteError):
+            raise
+        raise CHExecuteError(str(e)) from e

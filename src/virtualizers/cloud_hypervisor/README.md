@@ -68,6 +68,7 @@ Claves sugeridas:
 ```
 virtualizers.cloud_hypervisor.KERNEL_PATH
 virtualizers.cloud_hypervisor.INITRAMFS_PATH
+virtualizers.cloud_hypervisor.BINARY_PATH
 virtualizers.cloud_hypervisor.CACHE_DIR
 virtualizers.cloud_hypervisor.API_SOCKETS_DIR
 virtualizers.cloud_hypervisor.NETWORK_MODE

@@ -2,6 +2,7 @@ from src.virtualizers.docker.build import is_service_built as docker_is_service_
 from src.virtualizers.docker.build import build as docker_build
 from src.virtualizers.cloud_hypervisor.build import is_service_built as ch_is_service_built
 from src.virtualizers.cloud_hypervisor.build import build as ch_build
+from src.virtualizers.cloud_hypervisor.execute import execute as ch_execute
 from src.virtualizers.docker.execute import execute as docker_execute
 from src.virtualizers.docker.remove import remove as remove_docker
 from src.virtualizers.docker.hotplug import hotplug as docker_hotplug
@@ -53,7 +54,10 @@ def _ensure_usable_virtualizer(name: str, allow_cloud_hypervisor: bool = False) 
     return name
 
 def get_configured_virtualizer() -> str:
-    return _ensure_usable_virtualizer(_get_default_virtualizer())
+    return _ensure_usable_virtualizer(
+        _get_default_virtualizer(),
+        allow_cloud_hypervisor=True,
+    )
 
 def is_built(service_hash: str) -> bool:
     """Check if a service with the given hash is already built."""
@@ -135,7 +139,21 @@ def execute(
     directly and make it possible to add other virtualizers (e.g. Cloud Hypervisor)
     behind this interface.
     """
-    _ensure_usable_virtualizer(_get_default_virtualizer())
+    virtualizer = _ensure_usable_virtualizer(
+        _get_default_virtualizer(),
+        allow_cloud_hypervisor=True,
+    )
+    if virtualizer == "cloud_hypervisor":
+        return ch_execute(
+            assigment_ports=assigment_ports,
+            by_local=by_local,
+            service_id=service_id,
+            service=service,
+            config=config,
+            initial_system_resources=initial_system_resources,
+            father_id=father_id,
+        )
+
     return docker_execute(
         assigment_ports=assigment_ports,
         by_local=by_local,
