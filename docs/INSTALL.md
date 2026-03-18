@@ -27,6 +27,64 @@ sudo ./install.sh --branch dev      # development branch
 
 -----
 
+### **Cloud Hypervisor Provisioning in `install.sh`**
+
+From this point on, `install.sh` provisions Cloud Hypervisor assets automatically per host architecture.
+
+#### **What the installer now does**
+
+1. Uses a **hardcoded Cloud Hypervisor version** in `install.sh`:
+   - `CH_VERSION="v51.1"`
+   - No public CLI flag (`--ch-version`) is exposed.
+2. Passes that version to the architecture setup script:
+   - `bash/setup_ubuntu_x86.sh` on `x86_64`
+   - `bash/setup_ubuntu_arm.sh` on `arm64`
+3. In each `setup_*` script, after base dependencies:
+   - Downloads the static Cloud Hypervisor binary from GitHub Releases.
+     - `x86_64`: tries `cloud-hypervisor-static`, then `cloud-hypervisor-static-x86_64`
+     - `arm64`: tries `cloud-hypervisor-static-aarch64`, then `cloud-hypervisor-static-arm64`
+   - Installs it at:
+     - `${TARGET_DIR}/bin/cloud-hypervisor`
+   - Detects kernel/initramfs from `/boot` using deterministic resolution:
+     - First: `/boot/vmlinuz` and `/boot/initrd.img`
+     - Fallback: latest `/boot/vmlinuz-*` and `/boot/initrd.img-*`
+   - Copies resolved assets to fixed paths:
+     - `${TARGET_DIR}/cloud_hypervisor/kernels/linux/<arch>/vmlinuz`
+     - `${TARGET_DIR}/cloud_hypervisor/initramfs/linux/<arch>/initramfs`
+   - Updates `config.yaml` via `yq`:
+     - `virtualizers.cloud_hypervisor.BINARY_PATH`
+     - `virtualizers.cloud_hypervisor.KERNEL_PATHS."linux/<arch>"`
+     - `virtualizers.cloud_hypervisor.INITRAMFS_PATHS."linux/<arch>"`
+4. Runs in **fail-hard mode**:
+   - If binary download, `/boot` asset detection, copy, or `yq` update fails, installation exits with a clear error.
+
+#### **Post-install verification**
+
+After running `sudo ./install.sh`, validate:
+
+```bash
+test -x <TARGET_DIR>/bin/cloud-hypervisor
+test -f <TARGET_DIR>/cloud_hypervisor/kernels/linux/<arch>/vmlinuz
+test -f <TARGET_DIR>/cloud_hypervisor/initramfs/linux/<arch>/initramfs
+yq '.virtualizers.cloud_hypervisor.BINARY_PATH' <TARGET_DIR>/config.yaml
+yq '.virtualizers.cloud_hypervisor.KERNEL_PATHS."linux/<arch>"' <TARGET_DIR>/config.yaml
+yq '.virtualizers.cloud_hypervisor.INITRAMFS_PATHS."linux/<arch>"' <TARGET_DIR>/config.yaml
+```
+
+Replace:
+- `<TARGET_DIR>` with your installation directory (default: `/nodo`).
+- `<arch>` with `amd64` or `arm64` depending on host.
+
+#### **Expected failure cases (by design)**
+
+- No network access to GitHub Releases.
+- `yq` missing/unusable when writing `config.yaml`.
+- No valid kernel/initramfs found under `/boot`.
+
+In all these cases, installer execution stops intentionally to avoid partial CH configuration.
+
+-----
+
 ### **1. Administrator Phase (requires `sudo`)**
 
 These commands must be executed by a user with superuser privileges to install all the necessary system-wide dependencies and tools.

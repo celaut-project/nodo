@@ -19,6 +19,7 @@ MAX_RETRIES=3
 USE_LOCAL_SOURCE=false
 BRANCH="stable"
 BRANCH_EXPLICIT=false
+CH_VERSION="v51.1"
 
 print_usage() {
   cat <<EOF
@@ -244,7 +245,7 @@ else
 fi
 
 printf "Running setup script $SETUP_SCRIPT...\n"
-if ! /bin/bash "$SETUP_SCRIPT" "$TARGET_DIR"; then
+if ! /bin/bash "$SETUP_SCRIPT" "$TARGET_DIR" "$CH_VERSION"; then
   printf "Error: The setup script $SETUP_SCRIPT failed to execute.\n" >&2
   exit 1
 fi

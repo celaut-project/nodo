@@ -8,6 +8,110 @@ if [ -z "$1" ]; then
 fi
 
 TARGET_DIR="$1"
+CH_VERSION="${2:-v51.1}"
+CONFIG_FILE="$TARGET_DIR/config.yaml"
+CH_ARCH_TAG="linux/amd64"
+
+fail() {
+    echo "Error: $1"
+    exit 1
+}
+
+resolve_boot_asset() {
+    local preferred_path="$1"
+    local fallback_pattern="$2"
+    local resolved_path=""
+
+    if [ -L "$preferred_path" ] || [ -f "$preferred_path" ]; then
+        resolved_path="$(readlink -f "$preferred_path")"
+        if [ -n "$resolved_path" ] && [ -f "$resolved_path" ]; then
+            printf '%s\n' "$resolved_path"
+            return 0
+        fi
+    fi
+
+    resolved_path="$(
+        find /boot -maxdepth 1 -type f -name "$fallback_pattern" -printf '%T@ %p\n' \
+            | sort -nr \
+            | head -n1 \
+            | cut -d' ' -f2-
+    )"
+    if [ -n "$resolved_path" ] && [ -f "$resolved_path" ]; then
+        printf '%s\n' "$resolved_path"
+        return 0
+    fi
+
+    return 1
+}
+
+download_ch_binary() {
+    local destination="$1"
+    local base_url="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${CH_VERSION}"
+    local tmp_file
+    local assets=(
+        "cloud-hypervisor-static"
+        "cloud-hypervisor-static-x86_64"
+    )
+
+    tmp_file="$(mktemp /tmp/cloud-hypervisor.XXXXXX)"
+    for asset in "${assets[@]}"; do
+        if wget -qO "$tmp_file" "${base_url}/${asset}"; then
+            install -m 0755 "$tmp_file" "$destination"
+            rm -f "$tmp_file"
+            return 0
+        fi
+    done
+
+    rm -f "$tmp_file"
+    return 1
+}
+
+provision_cloud_hypervisor_assets() {
+    local ch_binary_target="$TARGET_DIR/bin/cloud-hypervisor"
+    local ch_kernel_target="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
+    local ch_initramfs_target="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
+    local kernel_source
+    local initramfs_source
+
+    if [ ! -f "$CONFIG_FILE" ]; then
+        fail "config.yaml not found at ${CONFIG_FILE}."
+    fi
+    if ! command -v yq >/dev/null 2>&1; then
+        fail "yq is required to update ${CONFIG_FILE}."
+    fi
+
+    mkdir -p "$(dirname "$ch_binary_target")"
+    mkdir -p "$(dirname "$ch_kernel_target")"
+    mkdir -p "$(dirname "$ch_initramfs_target")"
+
+    echo "Downloading Cloud Hypervisor ${CH_VERSION} static binary..."
+    if ! download_ch_binary "$ch_binary_target"; then
+        fail "Unable to download Cloud Hypervisor ${CH_VERSION} release asset for x86_64."
+    fi
+
+    kernel_source="$(resolve_boot_asset "/boot/vmlinuz" "vmlinuz-*")" \
+        || fail "Unable to locate kernel in /boot (checked /boot/vmlinuz and vmlinuz-*)."
+    initramfs_source="$(resolve_boot_asset "/boot/initrd.img" "initrd.img-*")" \
+        || fail "Unable to locate initramfs in /boot (checked /boot/initrd.img and initrd.img-*)."
+
+    cp -f "$kernel_source" "$ch_kernel_target"
+    cp -f "$initramfs_source" "$ch_initramfs_target"
+    chmod 0644 "$ch_kernel_target" "$ch_initramfs_target"
+
+    CH_BINARY_TARGET="$ch_binary_target" yq -i \
+        '.virtualizers.cloud_hypervisor.BINARY_PATH = strenv(CH_BINARY_TARGET)' \
+        "$CONFIG_FILE"
+    CH_ARCH_TAG="$CH_ARCH_TAG" CH_KERNEL_TARGET="$ch_kernel_target" yq -i \
+        '.virtualizers.cloud_hypervisor.KERNEL_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_KERNEL_TARGET)' \
+        "$CONFIG_FILE"
+    CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$ch_initramfs_target" yq -i \
+        '.virtualizers.cloud_hypervisor.INITRAMFS_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_INITRAMFS_TARGET)' \
+        "$CONFIG_FILE"
+
+    test -x "$ch_binary_target" || fail "Cloud Hypervisor binary is not executable at ${ch_binary_target}."
+    test -f "$ch_kernel_target" || fail "Kernel copy failed at ${ch_kernel_target}."
+    test -f "$ch_initramfs_target" || fail "Initramfs copy failed at ${ch_initramfs_target}."
+}
 
 handle_update_errors() {
     exit_code=$1
@@ -58,6 +162,9 @@ if ! command -v yq &> /dev/null; then
     sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
     sudo chmod +x /usr/local/bin/yq
 fi
+
+echo "Provisioning Cloud Hypervisor assets..."
+provision_cloud_hypervisor_assets
 
 echo "Adding Python 3.11 repository..."
 sudo add-apt-repository ppa:deadsnakes/ppa -y > /dev/null

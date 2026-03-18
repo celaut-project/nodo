@@ -11,6 +11,110 @@ if [ -z "$TARGET_DIR" ]; then
     echo "Error: You must pass the project root directory as the first argument."
     exit 1
 fi
+CH_VERSION="${2:-v51.1}"
+CONFIG_FILE="$TARGET_DIR/config.yaml"
+CH_ARCH_TAG="linux/arm64"
+
+fail() {
+    echo "Error: $1"
+    exit 1
+}
+
+resolve_boot_asset() {
+    local preferred_path="$1"
+    local fallback_pattern="$2"
+    local resolved_path=""
+
+    if [ -L "$preferred_path" ] || [ -f "$preferred_path" ]; then
+        resolved_path="$(readlink -f "$preferred_path")"
+        if [ -n "$resolved_path" ] && [ -f "$resolved_path" ]; then
+            printf '%s\n' "$resolved_path"
+            return 0
+        fi
+    fi
+
+    resolved_path="$(
+        find /boot -maxdepth 1 -type f -name "$fallback_pattern" -printf '%T@ %p\n' \
+            | sort -nr \
+            | head -n1 \
+            | cut -d' ' -f2-
+    )"
+    if [ -n "$resolved_path" ] && [ -f "$resolved_path" ]; then
+        printf '%s\n' "$resolved_path"
+        return 0
+    fi
+
+    return 1
+}
+
+download_ch_binary() {
+    local destination="$1"
+    local base_url="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${CH_VERSION}"
+    local tmp_file
+    local assets=(
+        "cloud-hypervisor-static-aarch64"
+        "cloud-hypervisor-static-arm64"
+    )
+
+    tmp_file="$(mktemp /tmp/cloud-hypervisor.XXXXXX)"
+    for asset in "${assets[@]}"; do
+        if wget -qO "$tmp_file" "${base_url}/${asset}"; then
+            install -m 0755 "$tmp_file" "$destination"
+            rm -f "$tmp_file"
+            return 0
+        fi
+    done
+
+    rm -f "$tmp_file"
+    return 1
+}
+
+provision_cloud_hypervisor_assets() {
+    local ch_binary_target="$TARGET_DIR/bin/cloud-hypervisor"
+    local ch_kernel_target="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
+    local ch_initramfs_target="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
+    local kernel_source
+    local initramfs_source
+
+    if [ ! -f "$CONFIG_FILE" ]; then
+        fail "config.yaml not found at ${CONFIG_FILE}."
+    fi
+    if ! command -v yq >/dev/null 2>&1; then
+        fail "yq is required to update ${CONFIG_FILE}."
+    fi
+
+    mkdir -p "$(dirname "$ch_binary_target")"
+    mkdir -p "$(dirname "$ch_kernel_target")"
+    mkdir -p "$(dirname "$ch_initramfs_target")"
+
+    echo "5. Provisioning Cloud Hypervisor assets..."
+    if ! download_ch_binary "$ch_binary_target"; then
+        fail "Unable to download Cloud Hypervisor ${CH_VERSION} release asset for arm64."
+    fi
+
+    kernel_source="$(resolve_boot_asset "/boot/vmlinuz" "vmlinuz-*")" \
+        || fail "Unable to locate kernel in /boot (checked /boot/vmlinuz and vmlinuz-*)."
+    initramfs_source="$(resolve_boot_asset "/boot/initrd.img" "initrd.img-*")" \
+        || fail "Unable to locate initramfs in /boot (checked /boot/initrd.img and initrd.img-*)."
+
+    cp -f "$kernel_source" "$ch_kernel_target"
+    cp -f "$initramfs_source" "$ch_initramfs_target"
+    chmod 0644 "$ch_kernel_target" "$ch_initramfs_target"
+
+    CH_BINARY_TARGET="$ch_binary_target" yq -i \
+        '.virtualizers.cloud_hypervisor.BINARY_PATH = strenv(CH_BINARY_TARGET)' \
+        "$CONFIG_FILE"
+    CH_ARCH_TAG="$CH_ARCH_TAG" CH_KERNEL_TARGET="$ch_kernel_target" yq -i \
+        '.virtualizers.cloud_hypervisor.KERNEL_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_KERNEL_TARGET)' \
+        "$CONFIG_FILE"
+    CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$ch_initramfs_target" yq -i \
+        '.virtualizers.cloud_hypervisor.INITRAMFS_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_INITRAMFS_TARGET)' \
+        "$CONFIG_FILE"
+
+    test -x "$ch_binary_target" || fail "Cloud Hypervisor binary is not executable at ${ch_binary_target}."
+    test -f "$ch_kernel_target" || fail "Kernel copy failed at ${ch_kernel_target}."
+    test -f "$ch_initramfs_target" || fail "Initramfs copy failed at ${ch_initramfs_target}."
+}
 
 handle_apt_error() {
     local code=$1
@@ -55,22 +159,24 @@ else
     echo "   - yq already installed."
 fi
 
-echo "5. Adding Deadsnakes PPA for Python 3.11..."
+provision_cloud_hypervisor_assets
+
+echo "6. Adding Deadsnakes PPA for Python 3.11..."
 add-apt-repository ppa:deadsnakes/ppa -y >/dev/null
 
-echo "6. Updating package lists after adding PPA..."
+echo "7. Updating package lists after adding PPA..."
 apt-get update -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false \
     || { handle_apt_error $?; apt-get update; }
 
-echo "7. Installing Python 3.11 and venv modules..."
+echo "8. Installing Python 3.11 and venv modules..."
 apt-get install -y python3.11 python3.11-venv python3.11-distutils >/dev/null
 
-echo "8. Installing pip for Python 3.11..."
+echo "9. Installing pip for Python 3.11..."
 wget -qO get-pip.py https://bootstrap.pypa.io/get-pip.py
 python3.11 get-pip.py >/dev/null
 rm get-pip.py
 
-echo "9. Creating and activating virtualenv at $TARGET_DIR/venv..."
+echo "10. Creating and activating virtualenv at $TARGET_DIR/venv..."
 python3.11 -m venv "$TARGET_DIR/venv"
 # shellcheck disable=SC1091
 source "$TARGET_DIR/venv/bin/activate"
@@ -82,7 +188,7 @@ if [ ! -f "$REQ_FILE" ]; then
     exit 1
 fi
 
-echo "10. Installing Python dependencies..."
+echo "11. Installing Python dependencies..."
 pip install --upgrade pip >/dev/null
 if ! pip install -r "$REQ_FILE" >/dev/null; then
     echo "   - Failed to install Python packages."
@@ -90,10 +196,10 @@ if ! pip install -r "$REQ_FILE" >/dev/null; then
     exit 1
 fi
 
-echo "11. Installing OpenJDK 21..."
+echo "12. Installing OpenJDK 21..."
 apt-get install -y openjdk-21-jre-headless >/dev/null
 
-echo "12. Downloading isolated Docker 24.0.9 binaries..."
+echo "13. Downloading isolated Docker 24.0.9 binaries..."
 NODO_DIR="$TARGET_DIR"
 BIN_DIR="${NODO_DIR}/bin"
 PLUGIN_DIR="${NODO_DIR}/libexec/docker/cli-plugins"
@@ -128,13 +234,13 @@ BUILDX_URL="https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0
 curl -fsSL "$BUILDX_URL" -o "${PLUGIN_DIR}/docker-buildx"
 chmod +x "${PLUGIN_DIR}/docker-buildx"
 
-echo "13. (Optional) Installing QEMU/binfmt for multi-architecture containers..."
+echo "14. (Optional) Installing QEMU/binfmt for multi-architecture containers..."
 apt-get install -y qemu-user-static binfmt-support >/dev/null
 DOCKER_SOCKET="${TARGET_DIR}/docker/docker.sock"
 /bin/bash "$TARGET_DIR/bash/start_docker_daemon.sh" "$TARGET_DIR" >/dev/null
 "${TARGET_DIR}/bin/docker" -H "unix://${DOCKER_SOCKET}" run --rm --privileged multiarch/qemu-user-static --reset -p yes >/dev/null
 
-echo "14. Installing Rust (cargo)…"
+echo "15. Installing Rust (cargo)…"
 if ! command -v cargo >/dev/null; then
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     # shellcheck disable=SC1091
@@ -143,7 +249,7 @@ else
     echo "   - Rust already installed."
 fi
 
-echo "15. Running ARM-specific init script..."
+echo "16. Running ARM-specific init script..."
 if [ -f "$TARGET_DIR/bash/init_arm.sh" ]; then
     # Use 'source' so exported variables persist in this shell session
     source "$TARGET_DIR/bash/init_arm.sh"
@@ -151,7 +257,7 @@ else
     echo "   - init_arm.sh not found."
 fi
 
-echo "16. Running database migrations with Python..."
+echo "17. Running database migrations with Python..."
 python3.11 nodo.py migrate >/dev/null || {
     echo "   - Migration failed."
     deactivate
