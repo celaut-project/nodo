@@ -1,6 +1,6 @@
 import json
 import os
-from typing import List
+from typing import List, Tuple
 
 import docker as docker_lib
 
@@ -99,7 +99,7 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
         raise e
 
 
-def execute(assigment_ports, by_local, service_id, service, config, initial_system_resources, father_id) -> (str, str):
+def execute(assigment_ports, by_local, service_id, service, config, initial_system_resources, father_id) -> Tuple[str, str]:
     container = create_container(
         use_other_ports=assigment_ports if not by_local else None,
         id=service_id,

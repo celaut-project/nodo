@@ -16,6 +16,7 @@ docker:
   DOCKER_SOCKET: "${main.MAIN_DIR}/docker/docker.sock"
   DOCKER_DATA_ROOT: "${main.MAIN_DIR}/docker/data"
   DOCKER_CONFIG_DIR: "${main.MAIN_DIR}/docker/config"
+  DOCKER_NETWORK: "docker0"
   # Security options applied to service containers.
   SECURITY_APPARMOR_UNCONFINED: true
   SECURITY_SELINUX_DISABLE_LABEL: true
@@ -38,8 +39,10 @@ packer:
 network:
   GATEWAY_PORT: auto
   NGROK_TUNNELS_KEY: ""
-  DOCKER_NETWORK: "docker0"
   LOCAL_NETWORK: "lo"
+  # If true, child instances launched by internal instances are NOT exposed on the host.
+  # If false, child instances will be published and reachable from the internet (subject to host firewall).
+  ISOLATE_INTERNAL_CHILDREN: true
 
 logs:
   MEMORY_LOGS: false
