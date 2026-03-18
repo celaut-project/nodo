@@ -466,15 +466,20 @@ if __name__ == '__main__':
                     exit()
                 
                 # Execute docker commands in nodo's isolated Docker context
-                from src.utils.config import DOCKER_COMMAND
-                docker_args = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else ""
+                from src.utils.config import DOCKER_COMMAND, DOCKER_ENV
+                docker_args = sys.argv[2:] if len(sys.argv) > 2 else []
                 if not docker_args:
                     print("Usage: nodo docker <docker command>", flush=True)
                     print("Example: nodo docker ps", flush=True)
                     print("Example: nodo docker images", flush=True)
                     print(f"\nThis uses nodo's isolated Docker daemon.", flush=True)
                 else:
-                    os.system(f"{DOCKER_COMMAND} {docker_args}")
+                    result = subprocess.run(
+                        DOCKER_COMMAND + docker_args,
+                        env=DOCKER_ENV,
+                    )
+                    if result.returncode != 0:
+                        sys.exit(result.returncode)
 
             case "daemon":
                 from src.commands.daemon import daemon_command
