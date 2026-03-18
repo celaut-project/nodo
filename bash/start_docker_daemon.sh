@@ -5,6 +5,10 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bash/lib_docker_daemon.sh
+. "${SCRIPT_DIR}/lib_docker_daemon.sh"
+
 if [ -z "$1" ]; then
     echo "Error: TARGET_DIR is not provided."
     exit 1
@@ -37,30 +41,8 @@ mkdir -p "${DOCKER_DATA_ROOT}"
 mkdir -p "${DOCKER_CONFIG_DIR}"
 mkdir -p "${DOCKER_EXEC_ROOT}"
 
-# Create daemon.json if it doesn't exist
-if [ ! -f "${DOCKER_CONFIG_DIR}/daemon.json" ]; then
-    cat > "${DOCKER_CONFIG_DIR}/daemon.json" <<EOF
-{
-    "storage-driver": "overlay2",
-    "log-driver": "json-file",
-    "log-opts": {
-        "max-size": "10m",
-        "max-file": "3"
-    },
-    "ipv6": false,
-    "default-cgroupns-mode": "host"
-}
-EOF
-else
-    # Remove legacy/unsupported keys that break Docker 24.x
-    # apparmor-profile is not a valid daemon.json option
-    if grep -q '"apparmor-profile"' "${DOCKER_CONFIG_DIR}/daemon.json"; then
-        sed -i '/"apparmor-profile"/d' "${DOCKER_CONFIG_DIR}/daemon.json"
-    fi
-    # Avoid duplicate keys when we pass flags for these values
-    sed -i '/"data-root"/d' "${DOCKER_CONFIG_DIR}/daemon.json"
-    sed -i '/"exec-root"/d' "${DOCKER_CONFIG_DIR}/daemon.json"
-fi
+# Ensure daemon.json exists and is compatible with our flags
+ensure_daemon_config "${DOCKER_CONFIG_DIR}"
 
 # Check if daemon is already running
 if [ -f "${DOCKER_PID_FILE}" ]; then
