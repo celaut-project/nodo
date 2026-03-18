@@ -24,6 +24,8 @@ INITRAMFS_PATHS = env_manager.get("virtualizers.cloud_hypervisor.INITRAMFS_PATHS
 OVERHEAD_BYTES = 64 * 1024 * 1024
 MIN_ROOTFS_BYTES = 128 * 1024 * 1024
 BLOCK_SIZE = 4096
+MKFS_MAX_ATTEMPTS = 3
+MKFS_GROWTH_FACTOR = 2
 
 
 def _bundle_dir(service_id: str, arch: str) -> Path:
@@ -122,30 +124,64 @@ def _dir_size_bytes(path: Path) -> int:
     return total
 
 
-def _mkfs_ext4(rootfs_dir: Path, image_path: Path, size_bytes: int) -> None:
-    blocks = math.ceil(size_bytes / BLOCK_SIZE)
-    try:
-        subprocess.run(
-            [
-                "mkfs.ext4",
-                "-d",
-                str(rootfs_dir),
-                str(image_path),
-                str(blocks),
-            ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except FileNotFoundError as e:
-        raise RuntimeError("mkfs.ext4 not found in PATH.") from e
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.strip() if e.stderr else ""
-        stdout = e.stdout.strip() if e.stdout else ""
-        raise RuntimeError(
-            f"mkfs.ext4 failed: {stderr or stdout or 'unknown error'}"
-        ) from e
+def _is_mkfs_out_of_space_error(stderr: str, stdout: str) -> bool:
+    output = f"{stderr}\n{stdout}".lower()
+    return (
+        "could not allocate block in ext2 filesystem" in output
+        or "no space left on device" in output
+    )
+
+
+def _mkfs_ext4(rootfs_dir: Path, image_path: Path, size_bytes: int) -> int:
+    current_size = size_bytes
+
+    for attempt in range(1, MKFS_MAX_ATTEMPTS + 1):
+        blocks = math.ceil(current_size / BLOCK_SIZE)
+        try:
+            subprocess.run(
+                [
+                    "mkfs.ext4",
+                    "-b",
+                    str(BLOCK_SIZE),
+                    "-m",
+                    "0",
+                    "-d",
+                    str(rootfs_dir),
+                    str(image_path),
+                    str(blocks),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            return current_size
+        except FileNotFoundError as e:
+            raise RuntimeError("mkfs.ext4 not found in PATH.") from e
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.strip() if e.stderr else ""
+            stdout = e.stdout.strip() if e.stdout else ""
+            if (
+                attempt < MKFS_MAX_ATTEMPTS
+                and _is_mkfs_out_of_space_error(stderr=stderr, stdout=stdout)
+            ):
+                current_size = int(current_size * MKFS_GROWTH_FACTOR)
+                logger(
+                    "mkfs.ext4 ran out of space while populating rootfs. "
+                    f"Retrying with larger image ({current_size} bytes)."
+                )
+                try:
+                    if image_path.exists():
+                        image_path.unlink()
+                except OSError:
+                    pass
+                continue
+
+            raise RuntimeError(
+                f"mkfs.ext4 failed: {stderr or stdout or 'unknown error'}"
+            ) from e
+
+    raise RuntimeError("mkfs.ext4 failed after exhausting retries.")
 
 
 def _is_service_built_for_arch(service_hash: str, arch: str) -> bool:
@@ -203,14 +239,14 @@ def build(
     _apply_symlinks(symlinks, rootfs_dir)
 
     total_bytes = _dir_size_bytes(rootfs_dir)
-    size_bytes = max(MIN_ROOTFS_BYTES, total_bytes + OVERHEAD_BYTES)
+    initial_size_bytes = max(MIN_ROOTFS_BYTES, total_bytes + OVERHEAD_BYTES)
 
     rootfs_path = bundle_dir / "rootfs.ext4"
     if rootfs_path.exists():
         rootfs_path.unlink()
 
     try:
-        _mkfs_ext4(rootfs_dir, rootfs_path, size_bytes)
+        size_bytes = _mkfs_ext4(rootfs_dir, rootfs_path, initial_size_bytes)
     finally:
         shutil.rmtree(rootfs_dir, ignore_errors=True)
 

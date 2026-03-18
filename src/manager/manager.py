@@ -135,7 +135,7 @@ def __refund_gas_function_factory(
         container: list = None,
         add_function=None
 ) -> lambda: None:
-    if container:
+    if container is not None:
         container.append(
             lambda: __refund_gas(gas=gas, token=token, add_function=add_function)
         )
