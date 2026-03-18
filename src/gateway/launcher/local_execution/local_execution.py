@@ -8,9 +8,11 @@ from src.manager.manager import default_initial_cost, provision_vmachine
 from src.utils import utils, logger as log
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
+from src.utils.config import ConfigManager
 
 
 sc = SQLConnection()
+env_manager = ConfigManager()
 
 def local_execution(
         config: Optional[celaut_pb2.Configuration],
@@ -51,7 +53,15 @@ def local_execution(
     # If the request is made by a local service (container inside this node).
     require_tunnel = TunnelSystem().from_tunnel(ip=father_ip)
     is_internal_father = bool(father_id) and sc.internal_instance_exists(id=father_id)
-    by_local: bool = is_internal_father and not require_tunnel
+    isolate_internal_children = env_manager.get("network.ISOLATE_INTERNAL_CHILDREN", True)
+    by_local: bool = is_internal_father and not require_tunnel and isolate_internal_children
+    log.LOGGER(
+        "Internal child isolation is "
+        + ("enabled" if isolate_internal_children else "disabled")
+        + f" (father_id={father_id}, father_ip={father_ip}, by_local={by_local})"
+    )
+
+    # TODO Control race conditions on get free ports. Maybe using a lock or a port reservation system.
     assigment_ports: Optional[Dict[int, int]] = \
         {slot.port: get_free_port() for slot in service.api.slot} if not by_local \
         else {slot.port: slot.port for slot in service.api.slot}

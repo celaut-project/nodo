@@ -12,7 +12,7 @@ from src.utils.config import ConfigManager
 env_manager = ConfigManager()
 
 CACHE = env_manager.get("CACHE")
-DOCKER_NETWORK = env_manager.get("DOCKER_NETWORK")
+DOCKER_NETWORK = env_manager.get("docker.DOCKER_NETWORK")
 
 def get_config(config: Optional[celaut.Configuration], resources: celaut.Sysresources,  network_resolution: List[celaut.ConfigurationFile.NetworkResolution]=[]) -> celaut.ConfigurationFile:
 
