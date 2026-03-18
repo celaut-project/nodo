@@ -10,45 +10,70 @@ TARGET_DIR="/nodo"
 SERVICE_FILE="/etc/systemd/system/nodo.service"
 WRAPPER_SCRIPT="/usr/local/bin/nodo"
 
-# 1. Stop and disable service
-if systemctl list-units --full -all | grep -Fq "nodo.service"; then
-    printf "Stopping and disabling nodo.service...\n"
-    systemctl stop nodo.service
-    systemctl disable nodo.service
-else
-    printf "nodo.service not found or already stopped.\n"
-fi
+log() {
+  printf "%s\n" "$1"
+}
 
-# 1b. Stop isolated Docker daemon if running
-DOCKER_PID_FILE="$TARGET_DIR/docker/docker.pid"
-if [ -f "$DOCKER_PID_FILE" ]; then
-    DOCKER_PID=$(cat "$DOCKER_PID_FILE")
-    if ps -p "$DOCKER_PID" > /dev/null 2>&1; then
-        printf "Stopping isolated Docker daemon (PID: $DOCKER_PID)...\n"
-        kill "$DOCKER_PID" 2>/dev/null || true
-        sleep 2
-        # Force kill if still running
-        if ps -p "$DOCKER_PID" > /dev/null 2>&1; then
-            kill -9 "$DOCKER_PID" 2>/dev/null || true
-        fi
+stop_unit_if_exists() {
+  local unit="$1"
+  if systemctl list-units --full -all | grep -Fq "$unit"; then
+    log "Stopping and disabling $unit..."
+    systemctl stop "$unit" 2>/dev/null || true
+    systemctl disable "$unit" 2>/dev/null || true
+  fi
+}
+
+stop_units_referencing_target_dir() {
+  log "Scanning for systemd services referencing $TARGET_DIR..."
+  local units
+  units=$(systemctl list-units --type=service --all --no-legend 2>/dev/null | awk '{print $1}')
+  for unit in $units; do
+    if systemctl show -p ExecStart "$unit" 2>/dev/null | grep -Fq "$TARGET_DIR"; then
+      stop_unit_if_exists "$unit"
     fi
-    rm -f "$DOCKER_PID_FILE"
-fi
+  done
+}
 
-# 1c. Verify isolated Docker daemon is stopped and warn if sockets remain
-DOCKER_SOCKET="$TARGET_DIR/docker/docker.sock"
-if pgrep -f "$TARGET_DIR/docker" >/dev/null 2>&1; then
-    printf "Warning: Detected docker-related processes still running under %s.\n" "$TARGET_DIR"
-    printf "You may need to stop them manually before removing the directory.\n"
-fi
-if [ -S "$DOCKER_SOCKET" ]; then
-    printf "Warning: Docker socket still exists at %s (daemon may still be running).\n" "$DOCKER_SOCKET"
-fi
+kill_dockerd_under_target_dir() {
+  local pids
+  pids=$(pgrep -f "$TARGET_DIR/.*/dockerd" || true)
+  if [ -n "$pids" ]; then
+    log "Stopping dockerd processes under $TARGET_DIR: $pids"
+    kill $pids 2>/dev/null || true
+    sleep 2
+    # Force kill if still running
+    for pid in $pids; do
+      if ps -p "$pid" >/dev/null 2>&1; then
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+    done
+  fi
+}
 
-# 2. Remove containers
-# We need to do this before removing the directory because we need the python env and code to identify containers.
+unmount_netns() {
+  local netns_dir="$TARGET_DIR/docker/exec/netns"
+  if [ -d "$netns_dir" ]; then
+    log "Unmounting docker netns mounts under $netns_dir..."
+    if command -v findmnt >/dev/null 2>&1; then
+      # Unmount deepest targets first to avoid dependency issues
+      while read -r mp; do
+        [ -n "$mp" ] && umount -l "$mp" 2>/dev/null || true
+      done < <(findmnt -R -n -o TARGET "$netns_dir" 2>/dev/null | sort -r)
+    else
+      if mount | grep -Fq "$netns_dir"; then
+        umount -l "$netns_dir" 2>/dev/null || true
+      fi
+    fi
+  fi
+}
+
+# 1. Stop and disable services
+stop_unit_if_exists "nodo.service"
+stop_units_referencing_target_dir
+
+# 2. Remove containers (best-effort) before stopping Docker
 if [ -d "$TARGET_DIR" ]; then
-    printf "Attempting to clean up Docker containers created by the node...\n"
+    log "Attempting to clean up Docker containers created by the node..."
     
     CLEANUP_SCRIPT="$TARGET_DIR/cleanup_containers.py"
     
@@ -97,39 +122,71 @@ EOF
 
     # Run the cleanup script using the venv
     if [ -f "$TARGET_DIR/venv/bin/activate" ]; then
-        printf "Using virtual environment at $TARGET_DIR/venv to run cleanup...\n"
+        log "Using virtual environment at $TARGET_DIR/venv to run cleanup..."
         # We use a subshell to avoid polluting the current shell environment
         (
             source "$TARGET_DIR/venv/bin/activate"
             python3 "$CLEANUP_SCRIPT"
         )
     else
-        printf "Warning: Virtual environment not found at $TARGET_DIR/venv. Skipping container cleanup via DB.\n"
-        printf "You may need to manually remove Docker containers created by this node.\n"
+        log "Warning: Virtual environment not found at $TARGET_DIR/venv. Skipping container cleanup via DB."
+        log "You may need to manually remove Docker containers created by this node."
     fi
     
     rm -f "$CLEANUP_SCRIPT"
 else
-    printf "Target directory $TARGET_DIR not found. Skipping container cleanup.\n"
+    log "Target directory $TARGET_DIR not found. Skipping container cleanup."
 fi
 
-# 3. Remove service file
+# 3. Stop isolated Docker daemon if running
+DOCKER_PID_FILE="$TARGET_DIR/docker/docker.pid"
+if [ -f "$DOCKER_PID_FILE" ]; then
+    DOCKER_PID=$(cat "$DOCKER_PID_FILE")
+    if ps -p "$DOCKER_PID" > /dev/null 2>&1; then
+        log "Stopping isolated Docker daemon (PID: $DOCKER_PID)..."
+        kill "$DOCKER_PID" 2>/dev/null || true
+        sleep 2
+        # Force kill if still running
+        if ps -p "$DOCKER_PID" > /dev/null 2>&1; then
+            kill -9 "$DOCKER_PID" 2>/dev/null || true
+        fi
+    fi
+    rm -f "$DOCKER_PID_FILE"
+fi
+
+# 3b. Stop any remaining dockerd processes under /nodo
+kill_dockerd_under_target_dir
+
+# 3c. Verify isolated Docker daemon is stopped and warn if sockets remain
+DOCKER_SOCKET="$TARGET_DIR/docker/docker.sock"
+if pgrep -f "$TARGET_DIR/docker" >/dev/null 2>&1; then
+    log "Warning: Detected docker-related processes still running under $TARGET_DIR."
+    log "You may need to stop them manually before removing the directory."
+fi
+if [ -S "$DOCKER_SOCKET" ]; then
+    log "Warning: Docker socket still exists at $DOCKER_SOCKET (daemon may still be running)."
+fi
+
+# 4. Unmount any leftover netns mounts to avoid "Device or resource busy"
+unmount_netns
+
+# 5. Remove service file
 if [ -f "$SERVICE_FILE" ]; then
-    printf "Removing service file $SERVICE_FILE...\n"
+    log "Removing service file $SERVICE_FILE..."
     rm -f "$SERVICE_FILE"
     systemctl daemon-reload
 fi
 
-# 4. Remove wrapper script
+# 6. Remove wrapper script
 if [ -f "$WRAPPER_SCRIPT" ]; then
-    printf "Removing wrapper script $WRAPPER_SCRIPT...\n"
+    log "Removing wrapper script $WRAPPER_SCRIPT..."
     rm -f "$WRAPPER_SCRIPT"
 fi
 
-# 5. Remove project directory
+# 7. Remove project directory
 if [ -d "$TARGET_DIR" ]; then
-    printf "Removing project directory $TARGET_DIR...\n"
+    log "Removing project directory $TARGET_DIR..."
     rm -rf "$TARGET_DIR"
 fi
 
-printf "Uninstallation completed successfully.\n"
+log "Uninstallation completed successfully."
