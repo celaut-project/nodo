@@ -92,10 +92,18 @@ def launch_service(
                 #   There is an exception for instances with the "rundev" refix. In such cases there is no container.
                 if "rundev" not in father_id and sc.internal_instance_exists(id=father_id):
                     try:
+                        slot_protocol = {}
+                        for slot in instance.instance.api.slot:
+                            stack = slot.protocol_stack
+                            # TODO: Inspect protocol stack more exhaustively (multiple transports, ordering, etc.).
+                            protocol = TransportProtocol.UDP if "udp" in str(stack).lower() else TransportProtocol.TCP
+                            slot_protocol[slot.port] = protocol
+
                         for slot in instance.instance.uri_slot:
                             for uri in slot.uri:
+                                protocol = slot_protocol.get(slot.internal_port, TransportProtocol.TCP)
                                 if not allow_connection(container_id=father_id,
-                                                        ip=uri.ip, port=uri.port, protocol=TransportProtocol.TCP):
+                                                        ip=uri.ip, port=uri.port, protocol=protocol):
                                     log.LOGGER(f"Docker firewall allow connection function failed for the father {father_id}")
                                     # TODO This should be controlled.
                     except Exception as e:

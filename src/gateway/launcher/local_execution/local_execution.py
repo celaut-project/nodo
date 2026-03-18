@@ -48,9 +48,10 @@ def local_execution(
             log.LOGGER(str(e))
             raise e
 
-    # If the request is made by a local service.
+    # If the request is made by a local service (container inside this node).
     require_tunnel = TunnelSystem().from_tunnel(ip=father_ip)
-    by_local: bool = father_id == father_ip and not require_tunnel
+    is_internal_father = bool(father_id) and sc.internal_instance_exists(id=father_id)
+    by_local: bool = is_internal_father and not require_tunnel
     assigment_ports: Optional[Dict[int, int]] = \
         {slot.port: get_free_port() for slot in service.api.slot} if not by_local \
         else {slot.port: slot.port for slot in service.api.slot}
