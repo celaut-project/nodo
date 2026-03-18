@@ -7,25 +7,23 @@ main:
   BLOCKDIR: "/nodo/storage/__block__/"
   DATABASE_FILE: "/nodo/storage/database.sqlite"
 
-docker:
-  DOCKER_CLIENT_TIMEOUT: 480
-  DOCKER_MAX_CONNECTIONS: 1000
-  CONCURRENT_CONTAINER_CREATIONS: 10
-  REMOVE_CONTAINERS: true
-  # Isolated Docker configuration - uses a separate daemon from user's Docker
-  DOCKER_SOCKET: "${main.MAIN_DIR}/docker/docker.sock"
-  DOCKER_DATA_ROOT: "${main.MAIN_DIR}/docker/data"
-  DOCKER_CONFIG_DIR: "${main.MAIN_DIR}/docker/config"
-  DOCKER_NETWORK: "docker0"
-  # Network used for docker buildx builds. "host" helps ensure DNS is reachable.
-  BUILDX_NETWORK: "host"
-  # Buildx builder name used for builds (created if missing).
-  BUILDX_BUILDER: "nodo-hostnet"
-  # Security options applied to service containers.
-  SECURITY_APPARMOR_UNCONFINED: true
-  SECURITY_SELINUX_DISABLE_LABEL: true
-  SECURITY_NO_SECCOMP: true  # This option disables seccomp security profiles, use with caution.
-  SECURITY_PRIVILEGED: true  # This option gives the container full access to the host, use with caution.
+virtualizers:
+  DEFAULT_VIRTUALIZER: docker
+  docker:
+    DOCKER_CLIENT_TIMEOUT: 480
+    DOCKER_MAX_CONNECTIONS: 1000
+    CONCURRENT_CONTAINER_CREATIONS: 10
+    REMOVE_CONTAINERS: true
+    # Isolated Docker configuration - uses a separate daemon from user's Docker
+    DOCKER_SOCKET: "${main.MAIN_DIR}/docker/docker.sock"
+    DOCKER_DATA_ROOT: "${main.MAIN_DIR}/docker/data"
+    DOCKER_CONFIG_DIR: "${main.MAIN_DIR}/docker/config"
+    DOCKER_NETWORK: "docker0"
+    # Security options applied to service containers.
+    SECURITY_APPARMOR_UNCONFINED: true
+    SECURITY_SELINUX_DISABLE_LABEL: true
+    SECURITY_NO_SECCOMP: true  # This option disables seccomp security profiles, use with caution.
+    SECURITY_PRIVILEGED: true  # This option gives the container full access to the host, use with caution.
 
 builder:
   WAIT_FOR_CONTAINER: 60
@@ -39,6 +37,11 @@ packer:
   PACKER_MEMORY_SIZE_FACTOR: 2.0
   ARM_PACKER_SUPPORT: true
   X86_PACKER_SUPPORT: true
+  docker:
+    # Network used for docker buildx builds. "host" helps ensure DNS is reachable.
+    BUILDX_NETWORK: "host"
+    # Buildx builder name used for builds (created if missing).
+    BUILDX_BUILDER: "nodo-hostnet"
 
 network:
   GATEWAY_PORT: auto

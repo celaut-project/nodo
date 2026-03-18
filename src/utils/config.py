@@ -103,7 +103,7 @@ class ConfigManager(metaclass=Singleton):
     def get(self, key: str, default: Any = None) -> Any:
         """
         Retrieves a configuration value.
-        Nested values can be accessed using dot notation (e.g., 'docker.DOCKER_CLIENT_TIMEOUT').
+        Nested values can be accessed using dot notation (e.g., 'virtualizers.docker.DOCKER_CLIENT_TIMEOUT').
         Also allows top-level lookups (e.g., 'DOCKER_CLIENT_TIMEOUT').
         
         Reloads config from disk only if cache_duration has expired.
@@ -262,7 +262,7 @@ DOCKER_BIN = str(BIN_DIR / "docker")
 DOCKERD_BIN = str(BIN_DIR / "dockerd")
 
 # Private Docker socket (defaults to nodo's docker/ dir if not set)
-DOCKER_SOCKET = config.get("docker.DOCKER_SOCKET") or str(NODO_ROOT / "docker" / "docker.sock")
+DOCKER_SOCKET = config.get("virtualizers.docker.DOCKER_SOCKET") or str(NODO_ROOT / "docker" / "docker.sock")
 
 # Validate isolated binaries and plugin
 if not os.path.isfile(DOCKER_BIN):
@@ -332,8 +332,8 @@ def _create_docker_client():
     _ensure_docker_daemon_running()
     return docker_lib.DockerClient(
         base_url=f"unix://{socket_path}",
-        timeout=config.get("docker.DOCKER_CLIENT_TIMEOUT", 480),
-        max_pool_size=config.get("docker.DOCKER_MAX_CONNECTIONS", 1000)
+        timeout=config.get("virtualizers.docker.DOCKER_CLIENT_TIMEOUT", 480),
+        max_pool_size=config.get("virtualizers.docker.DOCKER_MAX_CONNECTIONS", 1000)
     )
 
 DOCKER_CLIENT = _create_docker_client
