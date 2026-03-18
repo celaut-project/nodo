@@ -3,6 +3,7 @@ import shutil
 import subprocess
 from src.commands.__by_tag import get_id
 from src.utils.config import ConfigManager, DOCKER_COMMAND, DOCKER_ENV
+from src.utils.logger import LOGGER as l
 
 env_manager = ConfigManager()
 
@@ -29,6 +30,7 @@ def remove(service: str):
         )
     except subprocess.CalledProcessError as e:
         print(f"Error executing docker rmi: {e}")
+        l(f"Error executing docker rmi: {e}")
         raise
 
     shutil.rmtree(os.path.join(REGISTRY, service), ignore_errors=True)
