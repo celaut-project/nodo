@@ -17,6 +17,8 @@ docker:
   DOCKER_DATA_ROOT: "${main.MAIN_DIR}/docker/data"
   DOCKER_CONFIG_DIR: "${main.MAIN_DIR}/docker/config"
   DOCKER_NETWORK: "docker0"
+  # Network used for docker buildx builds. "host" helps ensure DNS is reachable.
+  BUILDX_NETWORK: "host"
   # Security options applied to service containers.
   SECURITY_APPARMOR_UNCONFINED: true
   SECURITY_SELINUX_DISABLE_LABEL: true
