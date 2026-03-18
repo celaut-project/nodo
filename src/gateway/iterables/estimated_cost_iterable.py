@@ -5,7 +5,7 @@ from bee_rpc import client as bee, buffer_pb2
 
 from protos import celaut_pb2
 from src.utils.tools.recursion_guard import RecursionGuard
-from src.virtualizers.docker import build
+from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
 from src.manager.manager import default_initial_cost
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
@@ -61,7 +61,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                     indices=celaut_pb2.EstimatedCost
                 )
             
-            except build.UnsupportedArchitectureException as e:
+            except UnsupportedArchitectureException as e:
                 raise e
             
             finally:

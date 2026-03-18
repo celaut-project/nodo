@@ -1,6 +1,5 @@
 import psutil
 from protos import celaut_pb2 as celaut
-from src.virtualizers.docker import build
 from src.utils.logger import LOGGER as logger
 from src.utils.config import ConfigManager
 from src.utils.verify import get_service_hex_main_hash
@@ -279,7 +278,7 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
         int: The total estimated execution cost, rounded to the nearest integer.
 
     Raises:
-        build.UnsupportedArchitectureException: If build cost calculation fails due to architecture.
+        UnsupportedArchitectureException: If build cost calculation fails due to architecture.
         Exception: Propagates errors from supply calculation or other unexpected issues.
     """
     try:
@@ -298,7 +297,7 @@ def execution_cost(metadata: celaut.Metadata, system_resources: celaut.Sysresour
 
         return int(round(total_cost))
 
-    except build.UnsupportedArchitectureException as e:
+    except UnsupportedArchitectureException as e:
         logger(f"[ERROR] Build error due to unsupported architecture: {e}")
         raise e # Propagate specific build error
     except Exception as e:

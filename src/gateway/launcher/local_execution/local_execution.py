@@ -2,7 +2,7 @@ from typing import Optional, Callable, List, Dict
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
-from src.virtualizers.interface import build, execute
+from src.virtualizers.interface import build, execute, get_configured_virtualizer
 from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.manager import default_initial_cost, provision_vmachine
 from src.utils import utils, logger as log
@@ -122,6 +122,7 @@ def local_execution(
         vmachine_ip=vmachine_ip,
         initial_gas_amount=initial_gas_amount,
         serialized_instance=instance.SerializeToString(),
+        virtualizer=get_configured_virtualizer(),
         system_requirements_range=celaut_pb2.ModifyServiceSystemResourcesInput(
                 min_sysreq=initial_system_resources, 
                 max_sysreq=initial_system_resources

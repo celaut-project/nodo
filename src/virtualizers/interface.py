@@ -6,7 +6,7 @@ from src.virtualizers.docker.hotplug import hotplug as docker_hotplug
 from src.virtualizers.docker.kill import kill as docker_kill
 from src.virtualizers.docker.firewall import remove_rule as docker_remove_rule
 from src.virtualizers.docker.maintain import maintain as docker_maintain
-from src.virtualizers.docker.firewall import TransportProtocol
+from src.virtualizers.firewall import TransportProtocol
 from typing import Optional, Callable, Dict, Tuple
 from src.virtualizers.architecture import check_supported_architecture, UnsupportedArchitectureException
 from protos import celaut_pb2
@@ -38,14 +38,24 @@ def _resolve_virtualizer_for_instance(vmachine_id: str) -> str:
     return _get_default_virtualizer()
 
 def _is_supported_virtualizer(name: str) -> bool:
-    return name == "docker"
+    return name in {"docker", "cloud_hypervisor"}
+
+def _ensure_usable_virtualizer(name: str) -> str:
+    if not _is_supported_virtualizer(name):
+        l.LOGGER(f"Unknown virtualizer '{name}', falling back to docker.")
+        return "docker"
+    if name == "cloud_hypervisor":
+        raise NotImplementedError(
+            "Virtualizer 'cloud_hypervisor' is configured but not implemented yet."
+        )
+    return name
+
+def get_configured_virtualizer() -> str:
+    return _ensure_usable_virtualizer(_get_default_virtualizer())
 
 def is_built(service_hash: str) -> bool:
     """Check if a service with the given hash is already built."""
-    virtualizer = _get_default_virtualizer()
-    if not _is_supported_virtualizer(virtualizer):
-        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
-        virtualizer = "docker"
+    _ensure_usable_virtualizer(_get_default_virtualizer())
     return docker_is_service_built(service_hash)
 
 def build(
@@ -58,10 +68,7 @@ def build(
         l.LOGGER('Build process of ' + service_id + ': unsupported architecture.')
         raise UnsupportedArchitectureException(arch=str(metadata))
 
-    virtualizer = _get_default_virtualizer()
-    if not _is_supported_virtualizer(virtualizer):
-        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
-        virtualizer = "docker"
+    _ensure_usable_virtualizer(_get_default_virtualizer())
 
     return docker_build(
         service=service,
@@ -74,9 +81,7 @@ def hotplug(
         system_requeriments_range: celaut_pb2.ModifyServiceSystemResourcesInput
 ) -> bool:
     """Modify the system requirements of a running service."""
-    virtualizer = _resolve_virtualizer_for_instance(vmachine_id)
-    if not _is_supported_virtualizer(virtualizer):
-        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
+    _ensure_usable_virtualizer(_resolve_virtualizer_for_instance(vmachine_id))
     return docker_hotplug(
         container_id=vmachine_id,
         system_requeriments_range=system_requeriments_range
@@ -84,16 +89,12 @@ def hotplug(
 
 def kill(vmachine_id: str) -> bool:
     """Kill a running service."""
-    virtualizer = _resolve_virtualizer_for_instance(vmachine_id)
-    if not _is_supported_virtualizer(virtualizer):
-        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
+    _ensure_usable_virtualizer(_resolve_virtualizer_for_instance(vmachine_id))
     return docker_kill(vmachine_id=vmachine_id)
 
 def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[str], None]) -> None:
     """Check the status of a running service and remove it if it has exited."""
-    virtualizer = _resolve_virtualizer_for_instance(vmachine_id)
-    if not _is_supported_virtualizer(virtualizer):
-        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
+    _ensure_usable_virtualizer(_resolve_virtualizer_for_instance(vmachine_id))
     docker_maintain(
         vmachine_id=vmachine_id,
         debug_mode=debug_mode,
@@ -117,10 +118,7 @@ def execute(
     directly and make it possible to add other virtualizers (e.g. Cloud Hypervisor)
     behind this interface.
     """
-    virtualizer = _get_default_virtualizer()
-    if not _is_supported_virtualizer(virtualizer):
-        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
-        virtualizer = "docker"
+    _ensure_usable_virtualizer(_get_default_virtualizer())
     return docker_execute(
         assigment_ports=assigment_ports,
         by_local=by_local,
@@ -133,9 +131,7 @@ def execute(
 
 def remove(vmachine_id: str) -> bool:
     """Remove a service."""
-    virtualizer = _resolve_virtualizer_for_instance(vmachine_id)
-    if not _is_supported_virtualizer(virtualizer):
-        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
+    _ensure_usable_virtualizer(_resolve_virtualizer_for_instance(vmachine_id))
     return remove_docker(vmachine_id=vmachine_id)
 
 def remove_firewall_rule(
@@ -145,9 +141,7 @@ def remove_firewall_rule(
         protocol: TransportProtocol
 ) -> bool:
     """Remove a firewall rule for a given container."""
-    virtualizer = _resolve_virtualizer_for_instance(vmachine_id)
-    if not _is_supported_virtualizer(virtualizer):
-        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
+    _ensure_usable_virtualizer(_resolve_virtualizer_for_instance(vmachine_id))
     return docker_remove_rule(
         container_id=vmachine_id,
         ip=ip,
