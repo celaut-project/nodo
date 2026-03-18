@@ -66,6 +66,7 @@ def local_execution(
         father_id=father_id
     )
 
+    uri_slots: List[celaut.Instance.Uri_Slot] = []
     try:
         for internal, external in assigment_ports.items():
             uri_slot = celaut.Instance.Uri_Slot()
@@ -93,6 +94,7 @@ def local_execution(
                     port=_port
                 )
             )
+            uri_slots.append(uri_slot)
             
     except Exception as e:
         log.LOGGER(f"Exception setting uri_slot: {str(e)}")
@@ -100,7 +102,7 @@ def local_execution(
 
     instance = celaut.Instance(
             api=service.api,
-            uri_slot=[uri_slot]
+            uri_slot=uri_slots
         )
 
     provision_vmachine(
