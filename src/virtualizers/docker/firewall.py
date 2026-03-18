@@ -1,5 +1,3 @@
-from enum import Enum
-import socket
 from typing import Optional, List, Tuple, Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -7,11 +5,7 @@ import subprocess
 import re
 from protos import celaut_pb2 as celaut
 from src.utils.logger import LOGGER as logger
-
-class TransportProtocol(Enum):
-    """Supported network protocols."""
-    TCP = "tcp"
-    UDP = "udp"
+from src.virtualizers.firewall import TransportProtocol
 
 @dataclass
 class NetworkRule:

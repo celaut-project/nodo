@@ -7,7 +7,7 @@ import protos.celaut_pb2 as celaut
 from protos import celaut_pb2, celaut_pb2_grpc
 from protos.gateway_bee import StartService_input_indices
 from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
-from src.virtualizers.docker import build
+from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
@@ -74,7 +74,7 @@ def execution_balancer(
         )
         if _local:
             peers['local'] = _local
-    except build.UnsupportedArchitectureException as e:
+    except UnsupportedArchitectureException as e:
         log.LOGGER(e.__str__())
         pass
     except Exception as e:

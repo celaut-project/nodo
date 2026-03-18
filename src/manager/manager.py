@@ -22,7 +22,7 @@ from src.utils.config import ConfigManager
 from src.virtualizers.interface import remove_firewall_rule
 from src.virtualizers.interface import kill
 from src.virtualizers.interface import hotplug
-from src.virtualizers.docker.firewall import TransportProtocol
+from src.virtualizers.firewall import TransportProtocol
 
 env_manager = ConfigManager()
 
@@ -303,6 +303,7 @@ def provision_vmachine(
         vmachine_ip: str,
         initial_gas_amount: Optional[int],
         serialized_instance: str,
+        virtualizer: Optional[str] = None,
         system_requirements_range: celaut_pb2.ModifyServiceSystemResourcesInput = None
 ):
     
@@ -316,7 +317,8 @@ def provision_vmachine(
         container_ip=vmachine_ip,
         gas=initial_gas_amount,
         serialized_instance=serialized_instance,
-        service_id=service_id
+        service_id=service_id,
+        virtualizer=virtualizer,
     )
     
     if not hotplug(

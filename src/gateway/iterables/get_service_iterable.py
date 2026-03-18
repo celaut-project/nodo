@@ -4,7 +4,7 @@ from bee_rpc import client as bee, buffer_pb2
 from protos import celaut_pb2
 from protos.gateway_bee import StartService_input_indices
 from src.gateway.iterables.abstract_input_service_iterable import find_service_hash
-from src.virtualizers.docker import build
+from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.utils.logger import LOGGER as logger
 from src.utils.utils import service_extended, read_metadata_from_disk
 
@@ -43,7 +43,7 @@ class GetServiceIterable:
                 ),
                 indices=StartService_input_indices  # Client and configuration not needed.
             )
-        except build.UnsupportedArchitectureException as e:
+        except UnsupportedArchitectureException as e:
             raise e
         finally:
             logger("Finalized request for a service.")
