@@ -19,6 +19,8 @@ docker:
   DOCKER_NETWORK: "docker0"
   # Network used for docker buildx builds. "host" helps ensure DNS is reachable.
   BUILDX_NETWORK: "host"
+  # Buildx builder name used for builds (created if missing).
+  BUILDX_BUILDER: "nodo-hostnet"
   # Security options applied to service containers.
   SECURITY_APPARMOR_UNCONFINED: true
   SECURITY_SELINUX_DISABLE_LABEL: true

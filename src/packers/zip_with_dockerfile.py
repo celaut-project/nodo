@@ -24,6 +24,7 @@ PACKER_MEMORY_SIZE_FACTOR = env_manager.get("PACKER_MEMORY_SIZE_FACTOR")
 SAVE_ALL = env_manager.get("SAVE_ALL")
 MIN_BUFFER_BLOCK_SIZE = env_manager.get("MIN_BUFFER_BLOCK_SIZE")
 BUILDX_NETWORK = env_manager.get("docker.BUILDX_NETWORK", "host")
+BUILDX_BUILDER = env_manager.get("docker.BUILDX_BUILDER", "nodo-hostnet")
 
 # Ensure bee_rpc uses the configured cache and block directories.
 if CACHE:
@@ -59,11 +60,54 @@ class ZipContainerPacker:
         tar_path = os.path.join(CACHE, self.aux_id, "filesystem.tar")
 
         # 3. Construct secure command
+        # Ensure a buildx builder with host network is available when requested.
+        if BUILDX_BUILDER and str(BUILDX_NETWORK).lower() == "host":
+            try:
+                inspect_cmd = DOCKER_COMMAND + ["buildx", "inspect", BUILDX_BUILDER]
+                inspect = subprocess.run(
+                    inspect_cmd,
+                    cwd=self.path,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=DOCKER_ENV,
+                    check=False
+                )
+                if inspect.returncode != 0:
+                    create_cmd = DOCKER_COMMAND + [
+                        "buildx", "create",
+                        "--name", BUILDX_BUILDER,
+                        "--driver", "docker-container",
+                        "--driver-opt", "network=host"
+                    ]
+                    subprocess.run(
+                        create_cmd,
+                        cwd=self.path,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        env=DOCKER_ENV,
+                        check=False
+                    )
+                bootstrap_cmd = DOCKER_COMMAND + ["buildx", "inspect", BUILDX_BUILDER, "--bootstrap"]
+                subprocess.run(
+                    bootstrap_cmd,
+                    cwd=self.path,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=DOCKER_ENV,
+                    check=False
+                )
+            except Exception as e:
+                log.LOGGER(f"Warning: failed to prepare buildx builder '{BUILDX_BUILDER}': {e}")
+
         build_cmd = DOCKER_COMMAND + [
             "buildx", "build",
             "--platform", target_arch,
             "--progress", "plain",
             "--no-cache",
+            "--builder", str(BUILDX_BUILDER),
             "--network", str(BUILDX_NETWORK),
             "--output", f"type=tar,dest={tar_path}",
             self.path
