@@ -1,7 +1,7 @@
 from src.virtualizers.docker.build import is_service_built as docker_is_service_built
 from src.virtualizers.docker.build import build as docker_build
 from src.virtualizers.docker.execute import execute as docker_execute
-from src.vitualizers.docker.remove import remove as remove_docker
+from src.virtualizers.docker.remove import remove as remove_docker
 from src.virtualizers.docker.hotplug import hotplug as docker_hotplug
 from src.virtualizers.docker.kill import kill as docker_kill
 from src.virtualizers.docker.firewall import remove_rule as docker_remove_rule
