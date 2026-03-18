@@ -186,6 +186,7 @@ fi
 # 7. Remove project directory
 if [ -d "$TARGET_DIR" ]; then
     log "Removing project directory $TARGET_DIR..."
+    sudo umount /nodo/docker/exec/netns/default
     rm -rf "$TARGET_DIR"
 fi
 
