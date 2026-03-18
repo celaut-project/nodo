@@ -320,7 +320,13 @@ def provision_vmachine(
         service_id=service_id,
         virtualizer=virtualizer,
     )
-    
+
+    if virtualizer == "cloud_hypervisor":
+        log.LOGGER(
+            f"Skipping hotplug for {vmachine_id}: cloud_hypervisor hotplug is not implemented in this phase."
+        )
+        return
+
     if not hotplug(
             vmachine_id=vmachine_id,
             system_requeriments_range=system_requirements_range

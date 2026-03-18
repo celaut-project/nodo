@@ -25,6 +25,7 @@ virtualizers:
     SECURITY_NO_SECCOMP: true  # This option disables seccomp security profiles, use with caution.
     SECURITY_PRIVILEGED: true  # This option gives the container full access to the host, use with caution.
   cloud_hypervisor:
+    BINARY_PATH: ""
     KERNEL_PATHS:
       linux/amd64: "${main.MAIN_DIR}/cloud_hypervisor/kernels/linux/amd64/vmlinuz"
       linux/arm64: "${main.MAIN_DIR}/cloud_hypervisor/kernels/linux/arm64/vmlinuz"
