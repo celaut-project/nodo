@@ -11,6 +11,8 @@ from typing import Optional, Callable, Dict, Tuple
 from src.virtualizers.architecture import check_supported_architecture, UnsupportedArchitectureException
 from protos import celaut_pb2
 from src.utils.logger import LOGGER as l
+from src.utils.config import ConfigManager
+from src.database.sql_connection import SQLConnection
 
 
 """
@@ -18,8 +20,32 @@ This interface defines the functions that any virtualizer implementation must pr
 Currently, it is implemented by the Docker virtualizer, but it can be extended to support other virtualization technologies in the future.
 """
 
+env_manager = ConfigManager()
+sc = SQLConnection()
+
+def _get_default_virtualizer() -> str:
+    return env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "docker")
+
+def _resolve_virtualizer_for_instance(vmachine_id: str) -> str:
+    try:
+        v = sc.get_internal_virtualizer(id=vmachine_id)
+        if v:
+            v = str(v).strip()
+            if v:
+                return v
+    except Exception as e:
+        l.LOGGER(f"Error reading virtualizer for {vmachine_id}: {e}")
+    return _get_default_virtualizer()
+
+def _is_supported_virtualizer(name: str) -> bool:
+    return name == "docker"
+
 def is_built(service_hash: str) -> bool:
     """Check if a service with the given hash is already built."""
+    virtualizer = _get_default_virtualizer()
+    if not _is_supported_virtualizer(virtualizer):
+        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
+        virtualizer = "docker"
     return docker_is_service_built(service_hash)
 
 def build(
@@ -32,6 +58,11 @@ def build(
         l.LOGGER('Build process of ' + service_id + ': unsupported architecture.')
         raise UnsupportedArchitectureException(arch=str(metadata))
 
+    virtualizer = _get_default_virtualizer()
+    if not _is_supported_virtualizer(virtualizer):
+        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
+        virtualizer = "docker"
+
     return docker_build(
         service=service,
         metadata=metadata,
@@ -43,6 +74,9 @@ def hotplug(
         system_requeriments_range: celaut_pb2.ModifyServiceSystemResourcesInput
 ) -> bool:
     """Modify the system requirements of a running service."""
+    virtualizer = _resolve_virtualizer_for_instance(vmachine_id)
+    if not _is_supported_virtualizer(virtualizer):
+        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
     return docker_hotplug(
         container_id=vmachine_id,
         system_requeriments_range=system_requeriments_range
@@ -50,10 +84,16 @@ def hotplug(
 
 def kill(vmachine_id: str) -> bool:
     """Kill a running service."""
+    virtualizer = _resolve_virtualizer_for_instance(vmachine_id)
+    if not _is_supported_virtualizer(virtualizer):
+        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
     return docker_kill(vmachine_id=vmachine_id)
 
 def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[str], None]) -> None:
     """Check the status of a running service and remove it if it has exited."""
+    virtualizer = _resolve_virtualizer_for_instance(vmachine_id)
+    if not _is_supported_virtualizer(virtualizer):
+        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
     docker_maintain(
         vmachine_id=vmachine_id,
         debug_mode=debug_mode,
@@ -77,6 +117,10 @@ def execute(
     directly and make it possible to add other virtualizers (e.g. Cloud Hypervisor)
     behind this interface.
     """
+    virtualizer = _get_default_virtualizer()
+    if not _is_supported_virtualizer(virtualizer):
+        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
+        virtualizer = "docker"
     return docker_execute(
         assigment_ports=assigment_ports,
         by_local=by_local,
@@ -89,6 +133,9 @@ def execute(
 
 def remove(vmachine_id: str) -> bool:
     """Remove a service."""
+    virtualizer = _resolve_virtualizer_for_instance(vmachine_id)
+    if not _is_supported_virtualizer(virtualizer):
+        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
     return remove_docker(vmachine_id=vmachine_id)
 
 def remove_firewall_rule(
@@ -98,6 +145,9 @@ def remove_firewall_rule(
         protocol: TransportProtocol
 ) -> bool:
     """Remove a firewall rule for a given container."""
+    virtualizer = _resolve_virtualizer_for_instance(vmachine_id)
+    if not _is_supported_virtualizer(virtualizer):
+        l.LOGGER(f"Unknown virtualizer '{virtualizer}', falling back to docker.")
     return docker_remove_rule(
         container_id=vmachine_id,
         ip=ip,

@@ -23,8 +23,8 @@ BLOCKDIR = env_manager.get("BLOCKDIR")
 PACKER_MEMORY_SIZE_FACTOR = env_manager.get("PACKER_MEMORY_SIZE_FACTOR")
 SAVE_ALL = env_manager.get("SAVE_ALL")
 MIN_BUFFER_BLOCK_SIZE = env_manager.get("MIN_BUFFER_BLOCK_SIZE")
-BUILDX_NETWORK = env_manager.get("docker.BUILDX_NETWORK", "host")
-BUILDX_BUILDER = env_manager.get("docker.BUILDX_BUILDER", "nodo-hostnet")
+BUILDX_NETWORK = env_manager.get("packer.docker.BUILDX_NETWORK", "host")
+BUILDX_BUILDER = env_manager.get("packer.docker.BUILDX_BUILDER", "nodo-hostnet")
 
 # Ensure bee_rpc uses the configured cache and block directories.
 if CACHE:

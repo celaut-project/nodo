@@ -103,7 +103,8 @@ def create_tables(cursor):
                 gas TEXT,
                 mem_limit INTEGER,
                 serialized_instance TEXT,
-                service_id TEXT
+                service_id TEXT,
+                virtualizer TEXT DEFAULT NULL
             )
         ''',
         "delegated_instances": '''

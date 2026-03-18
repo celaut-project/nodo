@@ -278,7 +278,16 @@ class SQLConnection(metaclass=Singleton):
 
     # Local instance Methods
 
-    def add_local_instance(self, father_id: str, container_ip: str, container_id: str, gas: int, serialized_instance: str, service_id: str):
+    def add_local_instance(
+        self,
+        father_id: str,
+        container_ip: str,
+        container_id: str,
+        gas: int,
+        serialized_instance: str,
+        service_id: str,
+        virtualizer: Optional[str] = None
+    ):
         """
         Adds an internal container to the database.
 
@@ -289,12 +298,15 @@ class SQLConnection(metaclass=Singleton):
             gas (int): The gas amount.
             serialized_instance (str): Serialized celaut instance
             service_id (str): Service id
+            virtualizer (Optional[str]): Virtualizer backend name
         """
         gas = str(gas)
+        if virtualizer is None:
+            virtualizer = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "docker")
         self._execute('''
-            INSERT INTO local_instances (id, ip, father_id, gas, mem_limit, serialized_instance, service_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (container_id, container_ip, father_id, gas, 0, serialized_instance, service_id))
+            INSERT INTO local_instances (id, ip, father_id, gas, mem_limit, serialized_instance, service_id, virtualizer)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (container_id, container_ip, father_id, gas, 0, serialized_instance, service_id, virtualizer))
         log.LOGGER(f'Saved instance {container_id} as dependency of {father_id}')
 
     def update_sys_req(self, id: str, mem_limit: Optional[int]) -> bool:
@@ -426,6 +438,22 @@ class SQLConnection(metaclass=Singleton):
         if row:
             return row['service_id']
         raise Exception(f'No service found for container ID {id}')
+
+    def get_internal_virtualizer(self, id: str) -> Optional[str]:
+        """
+        Retrieves the virtualizer for a given container ID.
+
+        Args:
+            id (str): The container ID.
+
+        Returns:
+            Optional[str]: The associated virtualizer, or None if not found.
+        """
+        result = self._execute('''
+            SELECT virtualizer FROM local_instances WHERE id = ?
+        ''', (id,))
+        row = result.fetchone()
+        return row['virtualizer'] if row else None
 
     def get_all_internal_containers_ids(self) -> List[str]:
         """
