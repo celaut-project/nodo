@@ -32,8 +32,8 @@ def remove(service: str):
         print(f"Error executing docker rmi: {e}")
         raise
 
-    shutil.rmtree(os.path.join(REGISTRY, service), ignore_errors=True)
-    shutil.rmtree(os.path.join(METADATA_REGISTRY, service), ignore_errors=True)
+    shutil.rmtree(os.path.join(REGISTRY, service))
+    shutil.rmtree(os.path.join(METADATA_REGISTRY, service))
 
     
     print(f'Service {service} removed from the node.')
