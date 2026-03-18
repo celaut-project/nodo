@@ -25,8 +25,12 @@ virtualizers:
     SECURITY_NO_SECCOMP: true  # This option disables seccomp security profiles, use with caution.
     SECURITY_PRIVILEGED: true  # This option gives the container full access to the host, use with caution.
   cloud_hypervisor:
-    KERNEL_PATH: "${main.MAIN_DIR}/cloud_hypervisor/vmlinuz"
-    INITRAMFS_PATH: "${main.MAIN_DIR}/cloud_hypervisor/initramfs"
+    KERNEL_PATHS:
+      linux/amd64: "${main.MAIN_DIR}/cloud_hypervisor/kernels/linux/amd64/vmlinuz"
+      linux/arm64: "${main.MAIN_DIR}/cloud_hypervisor/kernels/linux/arm64/vmlinuz"
+    INITRAMFS_PATHS:
+      linux/amd64: "${main.MAIN_DIR}/cloud_hypervisor/initramfs/linux/amd64/initramfs"
+      linux/arm64: "${main.MAIN_DIR}/cloud_hypervisor/initramfs/linux/arm64/initramfs"
     CACHE_DIR: "${main.CACHE}/cloud_hypervisor"
     API_SOCKETS_DIR: "${main.MAIN_DIR}/cloud_hypervisor/sockets"
     NETWORK_MODE: "tap_bridge"
