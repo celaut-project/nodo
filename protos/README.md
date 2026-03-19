@@ -338,6 +338,4 @@ Obligatorio poner el bloque de comentarios con los 4 mantras y la definición de
    Si la respuesta no es sí → fuera.
 
 Esta es la lista **completa y accionable**.  
-Una vez aplicados estos cambios, el `Service.proto` queda **100 % elemental, atemporal y alineado con los 4 mantras**.
-
-¿Quieres que te genere el diff exacto en formato patch, o el archivo completo ya actualizado listo para copiar? Dime y lo entrego en un segundo.
+Una vez aplicados estos cambios, `celaut.proto` queda **100 % elemental, atemporal y alineado con los 4 mantras**.
