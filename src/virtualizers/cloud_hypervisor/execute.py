@@ -31,6 +31,8 @@ NETWORK_MODE = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_MODE", "ta
 NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_BRIDGE_NAME", "br-ch")
 NETWORK_SUBNET = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_SUBNET", "192.168.200.0/24")
 NETWORK_GATEWAY_IP = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_GATEWAY_IP", "192.168.200.1")
+CH_SERIAL_MODE = env_manager.get("virtualizers.cloud_hypervisor.SERIAL_MODE", "file")
+CH_CONSOLE_MODE = env_manager.get("virtualizers.cloud_hypervisor.CONSOLE_MODE", "off")
 
 DEFAULT_VCPUS = 1
 DEFAULT_MEM_MIB = 256
@@ -346,6 +348,57 @@ def _remove_rules(commands: List[List[str]]) -> None:
         _run(command, check=False)
 
 
+def _resolve_ch_stream_args(runtime_dir: Path) -> Tuple[List[str], Optional[Path]]:
+    args: List[str] = []
+    serial_log_path: Optional[Path] = None
+
+    serial_mode = str(CH_SERIAL_MODE).strip() if CH_SERIAL_MODE is not None else ""
+    serial_mode_lower = serial_mode.lower()
+    if serial_mode:
+        if serial_mode_lower == "file":
+            serial_log_path = runtime_dir / "cloud-hypervisor.serial.log"
+            args.extend(["--serial", f"file={serial_log_path}"])
+        elif serial_mode_lower in {"off", "null", "tty"}:
+            args.extend(["--serial", serial_mode_lower])
+        else:
+            args.extend(["--serial", serial_mode])
+            if serial_mode_lower.startswith("file="):
+                serial_path_value = serial_mode.split("=", 1)[1].strip()
+                if serial_path_value:
+                    serial_log_path = Path(serial_path_value)
+
+    console_mode = str(CH_CONSOLE_MODE).strip() if CH_CONSOLE_MODE is not None else ""
+    console_mode_lower = console_mode.lower()
+    if console_mode:
+        if console_mode_lower in {"off", "null", "tty"} or console_mode_lower.startswith("file="):
+            args.extend(["--console", console_mode])
+        else:
+            raise CHExecuteError(
+                f"Invalid CONSOLE_MODE value '{console_mode}'. Expected one of off/null/tty/file=<path>."
+            )
+
+    return args, serial_log_path
+
+
+def _log_host_network_probe(vmachine_id: str, vm_ip: str, tap_name: Optional[str]) -> None:
+    probes: List[Tuple[str, List[str]]] = [
+        ("bridge_addr", ["ip", "-4", "addr", "show", "dev", NETWORK_BRIDGE_NAME]),
+        ("route_to_vm", ["ip", "-4", "route", "get", vm_ip]),
+        ("neigh_vm", ["ip", "-4", "neigh", "show", vm_ip]),
+    ]
+    if tap_name:
+        probes.append(("tap_link", ["ip", "link", "show", tap_name]))
+
+    for label, command in probes:
+        result = _run(command, check=False)
+        stdout = (result.stdout or "").strip() or "<empty>"
+        stderr = (result.stderr or "").strip() or "<empty>"
+        log.LOGGER(
+            f"[CH][{vmachine_id}] host network probe {label}: rc={result.returncode}, "
+            f"stdout={stdout}, stderr={stderr}"
+        )
+
+
 def _tail_file(path: Path, max_lines: int = 40) -> str:
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -379,6 +432,7 @@ def execute(
     config_host_path = runtime_dir / "__config__"
     stdout_path = runtime_dir / "cloud-hypervisor.stdout.log"
     stderr_path = runtime_dir / "cloud-hypervisor.stderr.log"
+    serial_log_path: Optional[Path] = None
 
     try:
         log.LOGGER(
@@ -438,6 +492,7 @@ def execute(
 
         tap_name = _create_tap(vmachine_id)
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
+        _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
 
         vcpus, mem_mib = _resolve_initial_resources(initial_system_resources)
         netmask = str(network.netmask)
@@ -446,6 +501,12 @@ def execute(
             f"[CH][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib}, "
             f"kernel_cmdline={kernel_cmdline}"
         )
+
+        stream_args, serial_log_path = _resolve_ch_stream_args(runtime_dir=runtime_dir)
+        if serial_log_path:
+            log.LOGGER(f"[CH][{vmachine_id}] guest serial log path: {serial_log_path}")
+        if stream_args:
+            log.LOGGER(f"[CH][{vmachine_id}] cloud-hypervisor stream args: {' '.join(stream_args)}")
 
         start_command = [
             ch_binary,
@@ -466,6 +527,7 @@ def execute(
             "--cmdline",
             kernel_cmdline,
         ]
+        start_command.extend(stream_args)
         log.LOGGER(f"[CH][{vmachine_id}] launching cloud-hypervisor: {' '.join(start_command)}")
 
         with open(stdout_path, "w", encoding="utf-8") as stdout_file, open(
@@ -484,6 +546,7 @@ def execute(
                 f"See {stderr_path}. stderr tail: {_tail_file(stderr_path)}"
             )
         log.LOGGER(f"[CH][{vmachine_id}] process health check passed after 1s")
+        _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
 
         dnat_rules_state: List[Dict[str, object]] = []
         if not by_local and assigment_ports:
@@ -523,6 +586,7 @@ def execute(
                 "rootfs_path": str(rootfs_path),
                 "dnat_rules": dnat_rules_state,
                 "bridge": NETWORK_BRIDGE_NAME,
+                "serial_log": str(serial_log_path) if serial_log_path else "",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -545,6 +609,8 @@ def execute(
             )
         log.LOGGER(f"[CH][{vmachine_id}] stdout tail ({stdout_path}): {_tail_file(stdout_path)}")
         log.LOGGER(f"[CH][{vmachine_id}] stderr tail ({stderr_path}): {_tail_file(stderr_path)}")
+        if serial_log_path:
+            log.LOGGER(f"[CH][{vmachine_id}] serial tail ({serial_log_path}): {_tail_file(serial_log_path)}")
 
         if cleanup_rules:
             log.LOGGER(f"[CH][{vmachine_id}] removing {len(cleanup_rules)} cleanup firewall rules")
