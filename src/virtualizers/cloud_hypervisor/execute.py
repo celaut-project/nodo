@@ -31,6 +31,7 @@ NETWORK_MODE = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_MODE", "ta
 NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_BRIDGE_NAME", "br-ch")
 NETWORK_SUBNET = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_SUBNET", "192.168.200.0/24")
 NETWORK_GATEWAY_IP = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_GATEWAY_IP", "192.168.200.1")
+GUEST_NET_DEVICE = env_manager.get("virtualizers.cloud_hypervisor.GUEST_NET_DEVICE", "auto")
 CH_SERIAL_MODE = env_manager.get("virtualizers.cloud_hypervisor.SERIAL_MODE", "file")
 CH_CONSOLE_MODE = env_manager.get("virtualizers.cloud_hypervisor.CONSOLE_MODE", "off")
 
@@ -399,6 +400,35 @@ def _log_host_network_probe(vmachine_id: str, vm_ip: str, tap_name: Optional[str
         )
 
 
+def _resolve_guest_config_targets(service: celaut.Service) -> List[str]:
+    # Keep compatibility with Docker semantics where the effective config file
+    # is expected at /__config__ in the guest filesystem.
+    targets: List[str] = ["/__config__"]
+
+    target_dir = "/" + "/".join(service.container.config.path) if service.container.config.path else "/"
+    normalized_target_dir = posixpath.normpath(target_dir)
+    if posixpath.basename(normalized_target_dir) == "__config__":
+        service_target = normalized_target_dir
+    else:
+        service_target = posixpath.join(normalized_target_dir, "__config__")
+
+    if service_target not in targets:
+        targets.append(service_target)
+
+    return targets
+
+
+def _kernel_cmdline(vm_ip: str, netmask: str) -> str:
+    guest_dev = str(GUEST_NET_DEVICE).strip() if GUEST_NET_DEVICE is not None else ""
+    if not guest_dev or guest_dev.lower() in {"auto", "none"}:
+        # Leave the kernel interface field empty so it selects the first usable NIC.
+        ip_param = f"ip={vm_ip}::{NETWORK_GATEWAY_IP}:{netmask}:::off"
+    else:
+        ip_param = f"ip={vm_ip}::{NETWORK_GATEWAY_IP}:{netmask}::{guest_dev}:off"
+
+    return f"root=/dev/vda rw {ip_param}"
+
+
 def _tail_file(path: Path, max_lines: int = 40) -> str:
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -480,15 +510,19 @@ def execute(
             f"({config_host_path.stat().st_size} bytes)"
         )
 
-        target_dir = "/" + "/".join(service.container.config.path) if service.container.config.path else "/"
-        target_path = posixpath.join(target_dir, "__config__")
-        log.LOGGER(f"[CH][{vmachine_id}] injecting config into guest target: {target_path}")
-        _run_debugfs_write(
-            image_path=rootfs_path,
-            host_file=config_host_path,
-            guest_target=target_path,
+        config_targets = _resolve_guest_config_targets(service=service)
+        log.LOGGER(
+            f"[CH][{vmachine_id}] guest config targets={config_targets} "
+            f"(service.container.config.path={list(service.container.config.path)})"
         )
-        log.LOGGER(f"[CH][{vmachine_id}] guest config injection completed")
+        for target_path in config_targets:
+            log.LOGGER(f"[CH][{vmachine_id}] injecting config into guest target: {target_path}")
+            _run_debugfs_write(
+                image_path=rootfs_path,
+                host_file=config_host_path,
+                guest_target=target_path,
+            )
+        log.LOGGER(f"[CH][{vmachine_id}] guest config injection completed for {len(config_targets)} target(s)")
 
         tap_name = _create_tap(vmachine_id)
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
@@ -496,10 +530,10 @@ def execute(
 
         vcpus, mem_mib = _resolve_initial_resources(initial_system_resources)
         netmask = str(network.netmask)
-        kernel_cmdline = f"root=/dev/vda rw ip={vm_ip}::{NETWORK_GATEWAY_IP}:{netmask}::eth0:off"
+        kernel_cmdline = _kernel_cmdline(vm_ip=vm_ip, netmask=netmask)
         log.LOGGER(
             f"[CH][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib}, "
-            f"kernel_cmdline={kernel_cmdline}"
+            f"guest_net_device={GUEST_NET_DEVICE}, kernel_cmdline={kernel_cmdline}"
         )
 
         stream_args, serial_log_path = _resolve_ch_stream_args(runtime_dir=runtime_dir)
