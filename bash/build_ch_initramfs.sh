@@ -62,7 +62,7 @@ cat > "$ROOT/init" <<'INIT_EOF'
 #!/bin/sh
 set -eu
 
-export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 log() {
     echo "[nodo-ch-initramfs] $*"
