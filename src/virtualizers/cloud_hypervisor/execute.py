@@ -7,6 +7,7 @@ import posixpath
 import shutil
 import subprocess
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -53,8 +54,14 @@ def _run(command: List[str], *, check: bool = True, capture_output: bool = True)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.strip() if e.stderr else ""
         stdout = e.stdout.strip() if e.stdout else ""
+        details: List[str] = []
+        if stdout:
+            details.append(f"stdout={stdout}")
+        if stderr:
+            details.append(f"stderr={stderr}")
         raise CHExecuteError(
-            f"Command failed: {' '.join(command)} -> {stderr or stdout or 'unknown error'}"
+            f"Command failed ({e.returncode}): {' '.join(command)} -> "
+            f"{' | '.join(details) if details else 'unknown error'}"
         ) from e
 
 
@@ -339,6 +346,20 @@ def _remove_rules(commands: List[List[str]]) -> None:
         _run(command, check=False)
 
 
+def _tail_file(path: Path, max_lines: int = 40) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        return "<missing>"
+    except Exception as e:
+        return f"<unreadable: {e}>"
+
+    if not lines:
+        return "<empty>"
+    return "".join(lines[-max_lines:]).strip()
+
+
 def execute(
     assigment_ports: Optional[Dict[int, int]],
     by_local: bool,
@@ -353,26 +374,45 @@ def execute(
     cleanup_rules: List[List[str]] = []
     tap_name: Optional[str] = None
     process: Optional[subprocess.Popen] = None
+    rootfs_path = runtime_dir / "rootfs.ext4"
+    api_socket_path = runtime_dir / "cloud-hypervisor.sock"
+    config_host_path = runtime_dir / "__config__"
+    stdout_path = runtime_dir / "cloud-hypervisor.stdout.log"
+    stderr_path = runtime_dir / "cloud-hypervisor.stderr.log"
 
     try:
-        _network_preflight()
-        _resolve_ch_binary()
+        log.LOGGER(
+            f"[CH][{vmachine_id}] execute start: service_id={service_id}, father_id={father_id}, "
+            f"by_local={by_local}, assignment_ports={assigment_ports}, cache={CACHE}, "
+            f"bridge={NETWORK_BRIDGE_NAME}, subnet={NETWORK_SUBNET}, gateway={NETWORK_GATEWAY_IP}"
+        )
+
+        log.LOGGER(f"[CH][{vmachine_id}] running network preflight")
+        network = _network_preflight()
+        log.LOGGER(f"[CH][{vmachine_id}] network preflight ok: {network.with_prefixlen}")
+
+        ch_binary = _resolve_ch_binary()
+        log.LOGGER(f"[CH][{vmachine_id}] cloud-hypervisor binary resolved: {ch_binary}")
 
         arch = _resolve_service_arch(service_id=service_id, service=service)
         bundle = _load_bundle(service_id=service_id, arch=arch)
+        log.LOGGER(
+            f"[CH][{vmachine_id}] bundle loaded: arch={bundle['arch']}, "
+            f"rootfs={bundle['rootfs_path']}, kernel={bundle['kernel_path']}, "
+            f"initramfs={bundle['initramfs_path']}"
+        )
 
         vm_ip, mac = _deterministic_ip_and_mac(vmachine_id)
+        log.LOGGER(f"[CH][{vmachine_id}] deterministic networking: ip={vm_ip}, mac={mac}")
 
         runtime_dir.mkdir(parents=True, exist_ok=True)
-        rootfs_path = runtime_dir / "rootfs.ext4"
-        api_socket_path = runtime_dir / "cloud-hypervisor.sock"
-        config_host_path = runtime_dir / "__config__"
-        stdout_path = runtime_dir / "cloud-hypervisor.stdout.log"
-        stderr_path = runtime_dir / "cloud-hypervisor.stderr.log"
+        log.LOGGER(f"[CH][{vmachine_id}] runtime dir prepared: {runtime_dir}")
 
         shutil.copy2(bundle["rootfs_path"], rootfs_path)
+        log.LOGGER(f"[CH][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")
 
         network_resolution = _build_network_resolution(service=service, father_id=father_id)
+        log.LOGGER(f"[CH][{vmachine_id}] network resolution entries: {len(network_resolution)}")
         cfg = _build_configuration_file(
             config=config,
             resources=initial_system_resources,
@@ -381,23 +421,32 @@ def execute(
 
         with open(config_host_path, "wb") as f:
             f.write(cfg.SerializeToString())
+        log.LOGGER(
+            f"[CH][{vmachine_id}] config serialized: {config_host_path} "
+            f"({config_host_path.stat().st_size} bytes)"
+        )
 
         target_dir = "/" + "/".join(service.container.config.path) if service.container.config.path else "/"
         target_path = posixpath.join(target_dir, "__config__")
+        log.LOGGER(f"[CH][{vmachine_id}] injecting config into guest target: {target_path}")
         _run_debugfs_write(
             image_path=rootfs_path,
             host_file=config_host_path,
             guest_target=target_path,
         )
+        log.LOGGER(f"[CH][{vmachine_id}] guest config injection completed")
 
         tap_name = _create_tap(vmachine_id)
+        log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
 
         vcpus, mem_mib = _resolve_initial_resources(initial_system_resources)
-        network = _ip_network()
         netmask = str(network.netmask)
         kernel_cmdline = f"root=/dev/vda rw ip={vm_ip}::{NETWORK_GATEWAY_IP}:{netmask}::eth0:off"
+        log.LOGGER(
+            f"[CH][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib}, "
+            f"kernel_cmdline={kernel_cmdline}"
+        )
 
-        ch_binary = _resolve_ch_binary()
         start_command = [
             ch_binary,
             "--api-socket",
@@ -417,18 +466,24 @@ def execute(
             "--cmdline",
             kernel_cmdline,
         ]
+        log.LOGGER(f"[CH][{vmachine_id}] launching cloud-hypervisor: {' '.join(start_command)}")
 
         with open(stdout_path, "w", encoding="utf-8") as stdout_file, open(
             stderr_path, "w", encoding="utf-8"
         ) as stderr_file:
             process = subprocess.Popen(start_command, stdout=stdout_file, stderr=stderr_file)
+        log.LOGGER(
+            f"[CH][{vmachine_id}] process started: pid={process.pid}, api_socket={api_socket_path}, "
+            f"stdout={stdout_path}, stderr={stderr_path}"
+        )
 
         time.sleep(1.0)
         if process.poll() is not None:
             raise CHExecuteError(
                 f"cloud-hypervisor process exited early with code {process.returncode}. "
-                f"See {stderr_path}"
+                f"See {stderr_path}. stderr tail: {_tail_file(stderr_path)}"
             )
+        log.LOGGER(f"[CH][{vmachine_id}] process health check passed after 1s")
 
         dnat_rules_state: List[Dict[str, object]] = []
         if not by_local and assigment_ports:
@@ -449,6 +504,10 @@ def execute(
                             "destination_ip": vm_ip,
                         }
                     )
+                    log.LOGGER(
+                        f"[CH][{vmachine_id}] DNAT rule added: {protocol} "
+                        f"host:{external_port} -> guest:{vm_ip}:{internal_port}"
+                    )
 
         save_runtime_state(
             vmachine_id,
@@ -467,26 +526,47 @@ def execute(
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )
+        if CACHE:
+            state_path = Path(CACHE) / "cloud_hypervisor" / "runtime" / f"{vmachine_id}.json"
+            log.LOGGER(f"[CH][{vmachine_id}] runtime state persisted: {state_path}")
 
         # Keep gateway egress behavior aligned with Docker semantics for now.
-        log.LOGGER(f"Cloud Hypervisor VM started: {vmachine_id} ({vm_ip})")
+        log.LOGGER(
+            f"Cloud Hypervisor VM started: {vmachine_id} ({vm_ip}), runtime_dir={runtime_dir}"
+        )
         return vmachine_id, vm_ip
 
     except Exception as e:
+        log.LOGGER(f"[CH][{vmachine_id}] execute failed: {type(e).__name__}: {e}")
+        log.LOGGER(f"[CH][{vmachine_id}] traceback:\n{traceback.format_exc()}")
+        if process:
+            log.LOGGER(
+                f"[CH][{vmachine_id}] process state at failure: pid={process.pid}, poll={process.poll()}"
+            )
+        log.LOGGER(f"[CH][{vmachine_id}] stdout tail ({stdout_path}): {_tail_file(stdout_path)}")
+        log.LOGGER(f"[CH][{vmachine_id}] stderr tail ({stderr_path}): {_tail_file(stderr_path)}")
+
+        if cleanup_rules:
+            log.LOGGER(f"[CH][{vmachine_id}] removing {len(cleanup_rules)} cleanup firewall rules")
         _remove_rules(cleanup_rules)
 
         if process and process.poll() is None:
+            log.LOGGER(f"[CH][{vmachine_id}] terminating cloud-hypervisor process pid={process.pid}")
             process.terminate()
             time.sleep(0.5)
             if process.poll() is None:
+                log.LOGGER(f"[CH][{vmachine_id}] killing cloud-hypervisor process pid={process.pid}")
                 process.kill()
 
         if tap_name:
+            log.LOGGER(f"[CH][{vmachine_id}] deleting TAP interface: {tap_name}")
             _delete_tap(tap_name)
 
+        log.LOGGER(f"[CH][{vmachine_id}] deleting runtime state entry")
         delete_runtime_state(vmachine_id)
 
         if runtime_dir.exists():
+            log.LOGGER(f"[CH][{vmachine_id}] removing runtime directory: {runtime_dir}")
             shutil.rmtree(runtime_dir, ignore_errors=True)
 
         if isinstance(e, CHExecuteError):

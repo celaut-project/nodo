@@ -1,4 +1,5 @@
 from typing import Optional
+import traceback
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.balancers.execution_balancer.execution_balancer import execution_balancer
@@ -114,6 +115,7 @@ def launch_service(
 
             except Exception as e:
                log.LOGGER(f"Exception launching service on peer {peer}: {str(e)}")
+               log.LOGGER(traceback.format_exc())
                continue
 
         _err_msg = f"Unable to launch service {service_id} locally or on any peer."
