@@ -484,7 +484,27 @@ def _neighbor_is_usable(neigh_output: str) -> bool:
     return "LLADDR" in text
 
 
-def _wait_guest_network_ready(vmachine_id: str, vm_ip: str, timeout_s: float) -> None:
+def _detect_initramfs_fatal(serial_log_path: Optional[Path]) -> Optional[str]:
+    if not serial_log_path:
+        return None
+    serial_tail = _tail_file(serial_log_path, max_lines=200)
+    if not serial_tail or serial_tail.startswith("<"):
+        return None
+
+    marker = "[nodo-ch-initramfs] ERROR:"
+    fatal_line: Optional[str] = None
+    for line in serial_tail.splitlines():
+        if marker in line:
+            fatal_line = line.strip()
+    return fatal_line
+
+
+def _wait_guest_network_ready(
+    vmachine_id: str,
+    vm_ip: str,
+    timeout_s: float,
+    serial_log_path: Optional[Path],
+) -> None:
     deadline = time.monotonic() + timeout_s
     attempt = 0
     last_ping_stdout = "<empty>"
@@ -494,6 +514,11 @@ def _wait_guest_network_ready(vmachine_id: str, vm_ip: str, timeout_s: float) ->
 
     while time.monotonic() < deadline:
         attempt += 1
+        initramfs_fatal = _detect_initramfs_fatal(serial_log_path=serial_log_path)
+        if initramfs_fatal:
+            raise CHExecuteError(
+                f"Guest initramfs boot error before network ready: {initramfs_fatal}"
+            )
 
         ping_result = _run(["ping", "-4", "-c", "1", "-W", "1", vm_ip], check=False)
         neigh_result = _run(["ip", "-4", "neigh", "show", vm_ip], check=False)
@@ -515,6 +540,12 @@ def _wait_guest_network_ready(vmachine_id: str, vm_ip: str, timeout_s: float) ->
             return
 
         time.sleep(0.5)
+
+    initramfs_fatal = _detect_initramfs_fatal(serial_log_path=serial_log_path)
+    if initramfs_fatal:
+        raise CHExecuteError(
+            f"Guest initramfs boot error before network ready: {initramfs_fatal}"
+        )
 
     raise CHExecuteError(
         f"Guest network did not become ready within {timeout_s:.1f}s for {vm_ip}. "
@@ -722,7 +753,12 @@ def execute(
         log.LOGGER(
             f"[CH][{vmachine_id}] waiting guest network readiness: vm_ip={vm_ip}, timeout={network_timeout_s}s"
         )
-        _wait_guest_network_ready(vmachine_id=vmachine_id, vm_ip=vm_ip, timeout_s=network_timeout_s)
+        _wait_guest_network_ready(
+            vmachine_id=vmachine_id,
+            vm_ip=vm_ip,
+            timeout_s=network_timeout_s,
+            serial_log_path=serial_log_path,
+        )
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
 
         dnat_rules_state: List[Dict[str, object]] = []
