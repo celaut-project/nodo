@@ -38,6 +38,9 @@ virtualizers:
     NETWORK_BRIDGE_NAME: "br-ch"
     NETWORK_SUBNET: "192.168.200.0/24"
     NETWORK_GATEWAY_IP: "192.168.200.1"
+    # Guest interface used by the kernel ip=... cmdline.
+    # Use "auto" to avoid hardcoding (recommended), or set e.g. "eth0".
+    GUEST_NET_DEVICE: "auto"
     # Guest output streams for debug:
     # SERIAL_MODE: file|off|null|tty|file=/custom/path.log
     # CONSOLE_MODE: off|null|tty|file=/custom/path.log
