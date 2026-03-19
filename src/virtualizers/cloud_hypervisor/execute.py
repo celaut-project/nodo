@@ -676,6 +676,9 @@ def execute(
         if stream_args:
             log.LOGGER(f"[CH][{vmachine_id}] cloud-hypervisor stream args: {' '.join(stream_args)}")
 
+        # Explicitly declare raw image type to avoid CH autodetection safeguards
+        # that can mark sector-0 writes as read-only and break ext4 rw mounts.
+        disk_arg = f"path={rootfs_path},image_type=raw"
         start_command = [
             ch_binary,
             "--api-socket",
@@ -685,7 +688,7 @@ def execute(
             "--initramfs",
             bundle["initramfs_path"],
             "--disk",
-            f"path={rootfs_path}",
+            disk_arg,
             "--cpus",
             f"boot={vcpus}",
             "--memory",
