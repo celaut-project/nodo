@@ -32,6 +32,7 @@ NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_BRI
 NETWORK_SUBNET = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_SUBNET", "192.168.200.0/24")
 NETWORK_GATEWAY_IP = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_GATEWAY_IP", "192.168.200.1")
 GUEST_NET_DEVICE = env_manager.get("virtualizers.cloud_hypervisor.GUEST_NET_DEVICE", "auto")
+KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.cloud_hypervisor.KERNEL_CMDLINE_EXTRA", "console=ttyS0")
 CH_SERIAL_MODE = env_manager.get("virtualizers.cloud_hypervisor.SERIAL_MODE", "file")
 CH_CONSOLE_MODE = env_manager.get("virtualizers.cloud_hypervisor.CONSOLE_MODE", "off")
 
@@ -426,7 +427,11 @@ def _kernel_cmdline(vm_ip: str, netmask: str) -> str:
     else:
         ip_param = f"ip={vm_ip}::{NETWORK_GATEWAY_IP}:{netmask}::{guest_dev}:off"
 
-    return f"root=/dev/vda rw {ip_param}"
+    cmdline_parts = ["root=/dev/vda", "rw", ip_param]
+    extra = str(KERNEL_CMDLINE_EXTRA).strip() if KERNEL_CMDLINE_EXTRA is not None else ""
+    if extra:
+        cmdline_parts.append(extra)
+    return " ".join(cmdline_parts)
 
 
 def _tail_file(path: Path, max_lines: int = 40) -> str:
