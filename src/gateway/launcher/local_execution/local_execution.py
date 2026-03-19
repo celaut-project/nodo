@@ -1,3 +1,4 @@
+import traceback
 from typing import Optional, Callable, List, Dict
 
 from protos import celaut_pb2 as celaut, celaut_pb2
@@ -24,6 +25,11 @@ def local_execution(
         service_id: Optional[str],
         refund_gas: List[Callable]
 ) -> celaut_pb2.ServiceInstance:
+    configured_virtualizer = get_configured_virtualizer()
+    log.LOGGER(
+        f"Local execution start: service_id={service_id}, father_id={father_id}, "
+        f"father_ip={father_ip}, virtualizer={configured_virtualizer}"
+    )
 
     #  TODO check this.
     father_id = father_id if father_id else ""
@@ -43,12 +49,14 @@ def local_execution(
     except Exception as e:
         try:
             log.LOGGER('Error building the service: ' + str(e))
+            log.LOGGER(traceback.format_exc())
             refund_gas.pop()()  # Refund the gas.
         except IndexError:
             log.LOGGER('Error refunding the gas.')
         finally:
             log.LOGGER(str(e))
             raise e
+    log.LOGGER(f"Service build ready for execution: service_id={service_id}")
 
     # If the request is made by a local service (container inside this node).
     require_tunnel = TunnelSystem().from_tunnel(ip=father_ip)
@@ -65,7 +73,15 @@ def local_execution(
     assigment_ports: Optional[Dict[int, int]] = \
         {slot.port: get_free_port() for slot in service.api.slot} if not by_local \
         else {slot.port: slot.port for slot in service.api.slot}
+    log.LOGGER(
+        f"Execution network mode: by_local={by_local}, require_tunnel={require_tunnel}, "
+        f"assigment_ports={assigment_ports}"
+    )
 
+    log.LOGGER(
+        f"Invoking virtualizer execute: virtualizer={configured_virtualizer}, "
+        f"service_id={service_id}, father_id={father_id}"
+    )
     vmachine_id, vmachine_ip = execute(
         assigment_ports=assigment_ports, 
         by_local=by_local, 
@@ -75,16 +91,21 @@ def local_execution(
         initial_system_resources=initial_system_resources, 
         father_id=father_id
     )
+    log.LOGGER(f"Virtualizer execute returned: vmachine_id={vmachine_id}, vmachine_ip={vmachine_ip}")
 
     uri_slots: List[celaut.Instance.Uri_Slot] = []
     try:
+        resolved_network = utils.get_network_name(direction=father_ip) if not by_local else ""
+        log.LOGGER(
+            f"Preparing published URI slots: resolved_network={resolved_network if resolved_network else 'by_local'}"
+        )
         for internal, external in assigment_ports.items():
             uri_slot = celaut.Instance.Uri_Slot()
             uri_slot.internal_port = internal
 
             # for host_ip in host_ip_list:
             _ip: str = utils.get_local_ip_from_network(
-                    network=utils.get_network_name(direction=father_ip),
+                    network=resolved_network,
                 ) if not by_local else vmachine_ip
             _port: int = external
 
@@ -104,10 +125,15 @@ def local_execution(
                     port=_port
                 )
             )
+            log.LOGGER(
+                f"Published URI mapping: internal_port={internal}, advertised={_ip}:{_port}, "
+                f"vmachine_ip={vmachine_ip}, by_local={by_local}"
+            )
             uri_slots.append(uri_slot)
             
     except Exception as e:
         log.LOGGER(f"Exception setting uri_slot: {str(e)}")
+        log.LOGGER(traceback.format_exc())
         raise e
 
     instance = celaut.Instance(
@@ -122,12 +148,16 @@ def local_execution(
         vmachine_ip=vmachine_ip,
         initial_gas_amount=initial_gas_amount,
         serialized_instance=instance.SerializeToString(),
-        virtualizer=get_configured_virtualizer(),
+        virtualizer=configured_virtualizer,
         system_requirements_range=celaut_pb2.ModifyServiceSystemResourcesInput(
                 min_sysreq=initial_system_resources, 
                 max_sysreq=initial_system_resources
             )
         )
+    log.LOGGER(
+        f"Instance provisioned in DB: vmachine_id={vmachine_id}, virtualizer={configured_virtualizer}, "
+        f"uri_slots={len(uri_slots)}"
+    )
     
     return celaut_pb2.ServiceInstance(
         token=vmachine_id,
