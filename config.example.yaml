@@ -44,6 +44,8 @@ virtualizers:
     # Extra kernel cmdline parameters for guest boot diagnostics.
     # Keep console=ttyS0 so serial logs receive kernel/init output.
     KERNEL_CMDLINE_EXTRA: "console=ttyS0"
+    # Fail fast if the guest does not become reachable on the bridge network.
+    GUEST_NETWORK_READY_TIMEOUT_S: 8
     # Guest output streams for debug:
     # SERIAL_MODE: file|off|null|tty|file=/custom/path.log
     # CONSOLE_MODE: off|null|tty|file=/custom/path.log

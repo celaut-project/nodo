@@ -35,6 +35,10 @@ GUEST_NET_DEVICE = env_manager.get("virtualizers.cloud_hypervisor.GUEST_NET_DEVI
 KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.cloud_hypervisor.KERNEL_CMDLINE_EXTRA", "console=ttyS0")
 CH_SERIAL_MODE = env_manager.get("virtualizers.cloud_hypervisor.SERIAL_MODE", "file")
 CH_CONSOLE_MODE = env_manager.get("virtualizers.cloud_hypervisor.CONSOLE_MODE", "off")
+GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
+    "virtualizers.cloud_hypervisor.GUEST_NETWORK_READY_TIMEOUT_S",
+    8,
+)
 
 DEFAULT_VCPUS = 1
 DEFAULT_MEM_MIB = 256
@@ -139,6 +143,74 @@ def _load_bundle(service_id: str, arch: str) -> Dict[str, str]:
     }
 
 
+def _validate_custom_initramfs(initramfs_path: str) -> None:
+    _ensure_command_available("lsinitramfs")
+    result = _run(["lsinitramfs", initramfs_path], check=False)
+    if result.returncode != 0:
+        raise CHExecuteError(
+            f"Unable to inspect initramfs with lsinitramfs: {initramfs_path}. "
+            f"stderr={((result.stderr or '').strip() or '<empty>')}"
+        )
+
+    entries = {
+        line.strip().lstrip("./")
+        for line in (result.stdout or "").splitlines()
+        if line.strip()
+    }
+    required_entries = {
+        "init",
+        "bin/busybox",
+        "etc/nodo-ch-initramfs.marker",
+    }
+    missing = sorted(required_entries.difference(entries))
+    if missing:
+        raise CHExecuteError(
+            "Invalid Cloud Hypervisor initramfs. Missing required custom entries: "
+            f"{missing}. initramfs={initramfs_path}. Re-run installation to regenerate "
+            "the custom CH initramfs."
+        )
+
+
+def _validate_entrypoint_strict(service: celaut.Service) -> str:
+    raw_entrypoints = [str(item).strip() for item in service.container.entrypoint]
+    entrypoints = [item for item in raw_entrypoints if item]
+
+    if len(entrypoints) != 1:
+        raise CHExecuteError(
+            "Cloud Hypervisor requires exactly one entrypoint path. "
+            f"Received {len(entrypoints)} value(s): {raw_entrypoints}"
+        )
+
+    entrypoint = entrypoints[0]
+    if not entrypoint.startswith("/"):
+        raise CHExecuteError(
+            f"Cloud Hypervisor entrypoint must be an absolute path. Got: '{entrypoint}'."
+        )
+    if any(char.isspace() for char in entrypoint):
+        raise CHExecuteError(
+            "Cloud Hypervisor entrypoint must be a single executable path without spaces. "
+            f"Got: '{entrypoint}'."
+        )
+
+    return entrypoint
+
+
+def _guest_network_ready_timeout_seconds() -> float:
+    raw_timeout = GUEST_NETWORK_READY_TIMEOUT_S
+    try:
+        timeout = float(raw_timeout)
+    except (TypeError, ValueError) as e:
+        raise CHExecuteError(
+            f"Invalid GUEST_NETWORK_READY_TIMEOUT_S value: {raw_timeout!r}"
+        ) from e
+
+    if timeout <= 0:
+        raise CHExecuteError(
+            f"GUEST_NETWORK_READY_TIMEOUT_S must be > 0. Got: {raw_timeout!r}"
+        )
+    return timeout
+
+
 def _ip_network() -> ipaddress.IPv4Network:
     try:
         network = ipaddress.ip_network(NETWORK_SUBNET, strict=False)
@@ -214,7 +286,7 @@ def _network_preflight() -> ipaddress.IPv4Network:
             f"Unsupported NETWORK_MODE '{NETWORK_MODE}'. This phase supports only 'tap_bridge'."
         )
 
-    for command in ("ip", "sysctl", "iptables", "debugfs"):
+    for command in ("ip", "sysctl", "iptables", "debugfs", "ping"):
         _ensure_command_available(command)
 
     network = _ip_network()
@@ -401,22 +473,62 @@ def _log_host_network_probe(vmachine_id: str, vm_ip: str, tap_name: Optional[str
         )
 
 
+def _neighbor_is_usable(neigh_output: str) -> bool:
+    text = neigh_output.strip().upper()
+    if not text:
+        return False
+    if "FAILED" in text or "INCOMPLETE" in text:
+        return False
+    if "REACHABLE" in text or "STALE" in text or "DELAY" in text or "PROBE" in text or "PERMANENT" in text:
+        return True
+    return "LLADDR" in text
+
+
+def _wait_guest_network_ready(vmachine_id: str, vm_ip: str, timeout_s: float) -> None:
+    deadline = time.monotonic() + timeout_s
+    attempt = 0
+    last_ping_stdout = "<empty>"
+    last_ping_stderr = "<empty>"
+    last_neigh_stdout = "<empty>"
+    last_ping_rc: Optional[int] = None
+
+    while time.monotonic() < deadline:
+        attempt += 1
+
+        ping_result = _run(["ping", "-4", "-c", "1", "-W", "1", vm_ip], check=False)
+        neigh_result = _run(["ip", "-4", "neigh", "show", vm_ip], check=False)
+
+        last_ping_rc = ping_result.returncode
+        last_ping_stdout = (ping_result.stdout or "").strip() or "<empty>"
+        last_ping_stderr = (ping_result.stderr or "").strip() or "<empty>"
+        last_neigh_stdout = (neigh_result.stdout or "").strip() or "<empty>"
+
+        ready = ping_result.returncode == 0 or _neighbor_is_usable(last_neigh_stdout)
+        log.LOGGER(
+            f"[CH][{vmachine_id}] guest network readiness attempt={attempt}, "
+            f"ping_rc={ping_result.returncode}, neigh={last_neigh_stdout}"
+        )
+        if ready:
+            log.LOGGER(
+                f"[CH][{vmachine_id}] guest network readiness passed after {attempt} attempt(s)"
+            )
+            return
+
+        time.sleep(0.5)
+
+    raise CHExecuteError(
+        f"Guest network did not become ready within {timeout_s:.1f}s for {vm_ip}. "
+        f"last_ping_rc={last_ping_rc}, last_ping_stdout={last_ping_stdout}, "
+        f"last_ping_stderr={last_ping_stderr}, last_neigh={last_neigh_stdout}. "
+        "Check guest serial log and verify custom initramfs/rootfs entrypoint."
+    )
+
+
 def _resolve_guest_config_targets(service: celaut.Service) -> List[str]:
-    # Keep compatibility with Docker semantics where the effective config file
-    # is expected at /__config__ in the guest filesystem.
-    targets: List[str] = ["/__config__"]
-
-    target_dir = "/" + "/".join(service.container.config.path) if service.container.config.path else "/"
-    normalized_target_dir = posixpath.normpath(target_dir)
-    if posixpath.basename(normalized_target_dir) == "__config__":
-        service_target = normalized_target_dir
-    else:
-        service_target = posixpath.join(normalized_target_dir, "__config__")
-
-    if service_target not in targets:
-        targets.append(service_target)
-
-    return targets
+    # CH runtime expects the serialized configuration at the filesystem root.
+    # We keep this deterministic regardless of service.container.config.path.
+    _ = service
+    return ["/__config__"]
 
 
 def _kernel_cmdline(vm_ip: str, netmask: str) -> str:
@@ -465,9 +577,11 @@ def execute(
     rootfs_path = runtime_dir / "rootfs.ext4"
     api_socket_path = runtime_dir / "cloud-hypervisor.sock"
     config_host_path = runtime_dir / "__config__"
+    entrypoint_host_path = runtime_dir / ".__nodo_entrypoint"
     stdout_path = runtime_dir / "cloud-hypervisor.stdout.log"
     stderr_path = runtime_dir / "cloud-hypervisor.stderr.log"
     serial_log_path: Optional[Path] = None
+    resolved_entrypoint: Optional[str] = None
 
     try:
         log.LOGGER(
@@ -490,6 +604,11 @@ def execute(
             f"rootfs={bundle['rootfs_path']}, kernel={bundle['kernel_path']}, "
             f"initramfs={bundle['initramfs_path']}"
         )
+        _validate_custom_initramfs(bundle["initramfs_path"])
+        log.LOGGER(f"[CH][{vmachine_id}] initramfs validation passed for {bundle['initramfs_path']}")
+
+        resolved_entrypoint = _validate_entrypoint_strict(service=service)
+        log.LOGGER(f"[CH][{vmachine_id}] validated strict entrypoint: {resolved_entrypoint}")
 
         vm_ip, mac = _deterministic_ip_and_mac(vmachine_id)
         log.LOGGER(f"[CH][{vmachine_id}] deterministic networking: ip={vm_ip}, mac={mac}")
@@ -528,6 +647,16 @@ def execute(
                 guest_target=target_path,
             )
         log.LOGGER(f"[CH][{vmachine_id}] guest config injection completed for {len(config_targets)} target(s)")
+
+        with open(entrypoint_host_path, "w", encoding="utf-8") as f:
+            f.write(f"{resolved_entrypoint}\n")
+        log.LOGGER(f"[CH][{vmachine_id}] entrypoint metadata serialized: {entrypoint_host_path}")
+        _run_debugfs_write(
+            image_path=rootfs_path,
+            host_file=entrypoint_host_path,
+            guest_target="/.__nodo_entrypoint",
+        )
+        log.LOGGER(f"[CH][{vmachine_id}] guest entrypoint injection completed: /.__nodo_entrypoint")
 
         tap_name = _create_tap(vmachine_id)
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
@@ -585,6 +714,12 @@ def execute(
                 f"See {stderr_path}. stderr tail: {_tail_file(stderr_path)}"
             )
         log.LOGGER(f"[CH][{vmachine_id}] process health check passed after 1s")
+
+        network_timeout_s = _guest_network_ready_timeout_seconds()
+        log.LOGGER(
+            f"[CH][{vmachine_id}] waiting guest network readiness: vm_ip={vm_ip}, timeout={network_timeout_s}s"
+        )
+        _wait_guest_network_ready(vmachine_id=vmachine_id, vm_ip=vm_ip, timeout_s=network_timeout_s)
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
 
         dnat_rules_state: List[Dict[str, object]] = []
@@ -623,6 +758,7 @@ def execute(
                 "ip": vm_ip,
                 "mac": mac,
                 "rootfs_path": str(rootfs_path),
+                "entrypoint": resolved_entrypoint,
                 "dnat_rules": dnat_rules_state,
                 "bridge": NETWORK_BRIDGE_NAME,
                 "serial_log": str(serial_log_path) if serial_log_path else "",

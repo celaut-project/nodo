@@ -45,12 +45,15 @@ From this point on, `install.sh` provisions Cloud Hypervisor assets automaticall
      - `arm64`: tries `cloud-hypervisor-static-aarch64`, then `cloud-hypervisor-static-arm64`
    - Installs it at:
      - `${TARGET_DIR}/bin/cloud-hypervisor`
-   - Detects kernel/initramfs from `/boot` using deterministic resolution:
-     - First: `/boot/vmlinuz` and `/boot/initrd.img`
-     - Fallback: latest `/boot/vmlinuz-*` and `/boot/initrd.img-*`
-   - Copies resolved assets to fixed paths:
+   - Detects kernel from `/boot` using deterministic resolution:
+     - First: `/boot/vmlinuz`
+     - Fallback: latest `/boot/vmlinuz-*`
+   - Copies kernel and generates a custom CH initramfs to fixed paths:
      - `${TARGET_DIR}/cloud_hypervisor/kernels/linux/<arch>/vmlinuz`
      - `${TARGET_DIR}/cloud_hypervisor/initramfs/linux/<arch>/initramfs`
+   - Builds initramfs with `bash/build_ch_initramfs.sh`:
+     - includes `/init`, static busybox applets, and marker `etc/nodo-ch-initramfs.marker`
+     - this initramfs is independent from host `/boot/initrd.img*`
    - Updates `config.yaml` via `yq`:
      - `virtualizers.cloud_hypervisor.BINARY_PATH`
      - `virtualizers.cloud_hypervisor.KERNEL_PATHS."linux/<arch>"`
@@ -79,7 +82,8 @@ Replace:
 
 - No network access to GitHub Releases.
 - `yq` missing/unusable when writing `config.yaml`.
-- No valid kernel/initramfs found under `/boot`.
+- No valid kernel found under `/boot`.
+- Missing tools to build CH initramfs (`busybox-static`, `cpio`, `gzip`).
 
 In all these cases, installer execution stops intentionally to avoid partial CH configuration.
 
