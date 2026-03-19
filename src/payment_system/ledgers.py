@@ -13,7 +13,8 @@ def local_payment_methods() -> Generator[celaut.GasPrice, None, None]:
 
         address = script.decode("utf-8")
 
-        LOGGER(f"Using ledger {ledger} with address {address} for contract {CONTRACT_HASH}")
+        ledger_tag = ledger.tags[0] if ledger.tags else "unknown"
+        LOGGER(f"Using ledger {ledger_tag} with address {address} for contract {CONTRACT_HASH}")
 
         contract_ledger = celaut.Contract()
         contract_ledger.template.formal = CONTRACT.encode("utf-8")
