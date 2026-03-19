@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import stat
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -26,6 +27,7 @@ MIN_ROOTFS_BYTES = 128 * 1024 * 1024
 BLOCK_SIZE = 4096
 MKFS_MAX_ATTEMPTS = 3
 MKFS_GROWTH_FACTOR = 2
+_EXEC_BITS = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
 
 
 def _bundle_dir(service_id: str, arch: str) -> Path:
@@ -122,6 +124,45 @@ def _dir_size_bytes(path: Path) -> int:
             except FileNotFoundError:
                 continue
     return total
+
+
+def _looks_executable_file(path: Path) -> bool:
+    try:
+        with open(path, "rb") as f:
+            header = f.read(4)
+    except OSError:
+        return False
+    return header.startswith(b"#!") or header == b"\x7fELF"
+
+
+def _chmod_add_exec(path: Path) -> None:
+    try:
+        mode = path.stat(follow_symlinks=False).st_mode
+    except OSError:
+        return
+    if not stat.S_ISREG(mode):
+        return
+    if mode & _EXEC_BITS:
+        return
+    os.chmod(path, mode | _EXEC_BITS, follow_symlinks=False)
+
+
+def _apply_executable_permissions(rootfs_dir: Path, entrypoint: Optional[str]) -> None:
+    entrypoint_host_path: Optional[Path] = None
+    if entrypoint and entrypoint.startswith("/"):
+        entrypoint_host_path = rootfs_dir / entrypoint.lstrip("/")
+
+    for root, _, files in os.walk(rootfs_dir):
+        root_path = Path(root)
+        for filename in files:
+            file_path = root_path / filename
+            if file_path.is_symlink():
+                continue
+            if entrypoint_host_path and file_path == entrypoint_host_path:
+                _chmod_add_exec(file_path)
+                continue
+            if _looks_executable_file(file_path):
+                _chmod_add_exec(file_path)
 
 
 def _is_mkfs_out_of_space_error(stderr: str, stdout: str) -> bool:
@@ -237,6 +278,8 @@ def build(
     symlinks: List[celaut_pb2.Service.Container.Filesystem.ItemBranch.Link] = []
     _write_fs(fs, rootfs_dir, symlinks)
     _apply_symlinks(symlinks, rootfs_dir)
+    entrypoint = service.container.entrypoint[0] if len(service.container.entrypoint) == 1 else None
+    _apply_executable_permissions(rootfs_dir=rootfs_dir, entrypoint=entrypoint)
 
     total_bytes = _dir_size_bytes(rootfs_dir)
     initial_size_bytes = max(MIN_ROOTFS_BYTES, total_bytes + OVERHEAD_BYTES)
