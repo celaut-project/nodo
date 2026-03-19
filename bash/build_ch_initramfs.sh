@@ -54,7 +54,7 @@ trap cleanup EXIT
 mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/etc" "$ROOT/newroot" "$ROOT/proc" "$ROOT/sys"
 
 install -m 0755 "$BUSYBOX_BIN" "$ROOT/bin/busybox"
-for applet in sh mount switch_root sleep cat echo mkdir ln test; do
+for applet in sh mount switch_root sleep cat echo mkdir ln test chmod; do
     ln -sf /bin/busybox "$ROOT/bin/$applet"
 done
 
@@ -79,6 +79,8 @@ mkdir -p /proc /sys /dev /newroot
 mount -t proc proc /proc || fatal "cannot mount /proc"
 mount -t sysfs sysfs /sys || fatal "cannot mount /sys"
 mount -t devtmpfs devtmpfs /dev || mount -t tmpfs tmpfs /dev || fatal "cannot mount /dev"
+mkdir -p /dev/shm
+mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /dev/shm || fatal "cannot mount /dev/shm"
 
 WAIT_SECONDS=20
 i=0
@@ -92,6 +94,14 @@ done
 [ -b /dev/vda ] || fatal "timed out waiting for /dev/vda after ${WAIT_SECONDS}s"
 
 mount -t ext4 -o rw /dev/vda /newroot || fatal "cannot mount /dev/vda on /newroot"
+
+mkdir -p /newroot/proc /newroot/sys /newroot/dev /newroot/run /newroot/tmp
+chmod 1777 /newroot/tmp || fatal "cannot set /newroot/tmp permissions"
+
+mount --move /proc /newroot/proc || fatal "cannot move /proc to new root"
+mount --move /sys /newroot/sys || fatal "cannot move /sys to new root"
+mount --move /dev /newroot/dev || fatal "cannot move /dev to new root"
+mount -t tmpfs -o mode=755,nosuid,nodev tmpfs /newroot/run || fatal "cannot mount /run"
 
 [ -f /newroot/__config__ ] || fatal "missing /__config__ in service rootfs"
 [ -f /newroot/.__nodo_entrypoint ] || fatal "missing /.__nodo_entrypoint metadata file"
