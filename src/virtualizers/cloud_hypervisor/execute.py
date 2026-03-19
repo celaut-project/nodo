@@ -491,10 +491,14 @@ def _detect_initramfs_fatal(serial_log_path: Optional[Path]) -> Optional[str]:
     if not serial_tail or serial_tail.startswith("<"):
         return None
 
-    marker = "[nodo-ch-initramfs] ERROR:"
     fatal_line: Optional[str] = None
     for line in serial_tail.splitlines():
-        if marker in line:
+        line_stripped = line.strip()
+        if "[nodo-ch-initramfs] ERROR:" in line_stripped:
+            fatal_line = line_stripped
+            continue
+        if "Kernel panic - not syncing: Attempted to kill init!" in line_stripped:
+            fatal_line = line_stripped
             fatal_line = line.strip()
     return fatal_line
 
