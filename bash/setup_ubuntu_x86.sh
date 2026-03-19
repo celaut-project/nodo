@@ -70,14 +70,17 @@ provision_cloud_hypervisor_assets() {
     local ch_binary_target="$TARGET_DIR/bin/cloud-hypervisor"
     local ch_kernel_target="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
     local ch_initramfs_target="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
+    local ch_initramfs_builder="$TARGET_DIR/bash/build_ch_initramfs.sh"
     local kernel_source
-    local initramfs_source
 
     if [ ! -f "$CONFIG_FILE" ]; then
         fail "config.yaml not found at ${CONFIG_FILE}."
     fi
     if ! command -v yq >/dev/null 2>&1; then
         fail "yq is required to update ${CONFIG_FILE}."
+    fi
+    if [ ! -x "$ch_initramfs_builder" ]; then
+        fail "Missing executable initramfs builder at ${ch_initramfs_builder}."
     fi
 
     mkdir -p "$(dirname "$ch_binary_target")"
@@ -91,12 +94,11 @@ provision_cloud_hypervisor_assets() {
 
     kernel_source="$(resolve_boot_asset "/boot/vmlinuz" "vmlinuz-*")" \
         || fail "Unable to locate kernel in /boot (checked /boot/vmlinuz and vmlinuz-*)."
-    initramfs_source="$(resolve_boot_asset "/boot/initrd.img" "initrd.img-*")" \
-        || fail "Unable to locate initramfs in /boot (checked /boot/initrd.img and initrd.img-*)."
 
     cp -f "$kernel_source" "$ch_kernel_target"
-    cp -f "$initramfs_source" "$ch_initramfs_target"
-    chmod 0644 "$ch_kernel_target" "$ch_initramfs_target"
+    chmod 0644 "$ch_kernel_target"
+
+    "$ch_initramfs_builder" "$TARGET_DIR" "$CH_ARCH_TAG" "$ch_initramfs_target"
 
     CH_BINARY_TARGET="$ch_binary_target" yq -i \
         '.virtualizers.cloud_hypervisor.BINARY_PATH = strenv(CH_BINARY_TARGET)' \
@@ -138,14 +140,16 @@ sudo apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-
 
 echo "Installing required build dependencies..."
 if sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev protobuf-compiler \
-                           libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null 2>&1; then
+                           libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev \
+                           busybox-static cpio gzip initramfs-tools-core iputils-ping > /dev/null 2>&1; then
     echo "Dependencies installed successfully."
 else
     echo "Error installing dependencies. Attempting to fix broken dependencies..."
     if sudo apt --fix-broken install -y > /dev/null 2>&1; then
         echo "Fixed broken dependencies. Retrying to install required build dependencies..."
         if sudo apt-get install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
-                                   libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev > /dev/null 2>&1; then
+                                   libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev \
+                                   busybox-static cpio gzip initramfs-tools-core iputils-ping > /dev/null 2>&1; then
             echo "Dependencies installed successfully after fixing broken dependencies."
         else
             echo "Failed to install dependencies after fixing broken dependencies. Please check manually."
