@@ -41,6 +41,9 @@ virtualizers:
     # Guest interface used by the kernel ip=... cmdline.
     # Use "auto" to avoid hardcoding (recommended), or set e.g. "eth0".
     GUEST_NET_DEVICE: "auto"
+    # Extra kernel cmdline parameters for guest boot diagnostics.
+    # Keep console=ttyS0 so serial logs receive kernel/init output.
+    KERNEL_CMDLINE_EXTRA: "console=ttyS0"
     # Guest output streams for debug:
     # SERIAL_MODE: file|off|null|tty|file=/custom/path.log
     # CONSOLE_MODE: off|null|tty|file=/custom/path.log
