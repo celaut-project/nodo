@@ -226,128 +226,184 @@ message Resources {
 ====
 ====
 
-# PLAN DE IMPLEMENTACIÓN.
+# PLAN DE IMPLEMENTACIÓN (ACTUALIZADO Y ATERRIZADO A CÓDIGO)
 
-**CAMBIOS OBLIGATORIOS QUE DEBEMOS APLICAR**  
-(para pasar de la especificación actual a la versión **elemental y orgánica** que cumple los 4 mantras)
+Este plan parte del estado real de `protos/celaut.proto` (actual) y detalla **todos los cambios de código** para llevar el repositorio al esquema orgánico definido arriba (`Init`, `ConfigDeclaration`, `KernelInterface`, `shared_identity`, `xattrs`, `Network.protocol_stack`).
 
-A continuación tienes **el listado exacto y ordenado** de cambios estructurales, con el motivo (mantra), el impacto técnico y lo que los desarrolladores deben tener en cuenta.
+## 0. Supuestos de migración
 
-### 1. Cambios estructurales en el mensaje raíz `Service`
-| Cambio | Motivo (mantra) | Qué hacer |
-|--------|------------------|-----------|
-| Añadir `ConfigDeclaration config_declaration = 5;` | Separación Genoma/Sustrato (3) + aislamiento | El host inyecta el `__config__`. Nunca viaja dentro del genoma. |
-| Mantener `prose`, `container`, `api`, `network` | Orgánico (1) | Sin cambios en orden. |
+- Esta migración se considera **breaking** a nivel de contrato protobuf.
+- Estrategia acordada: **hard cutover** (sin backward compatibility).
+  - Lectura: aceptar solo esquema nuevo.
+  - Escritura: emitir solo esquema nuevo.
+- Todo payload antiguo debe considerarse inválido desde el momento del despliegue.
 
-### 2. Cambios dentro de `Container`
-| Campo actual | → Nuevo | Motivo | Acción para devs |
-|--------------|---------|--------|------------------|
-| Sustituir `repeated string entrypoint = 3;` | `Init init = 3;` | Elemental (2) + PID 1 inequívoco | Reemplazar completamente. `Init` tiene `argv` + `working_directory` + `xattrs`. |
-| `Architecture` (tags-prose-formal) | Sin cambio | Anti-consenso (4) | OK |
-| `repeated Api.Protocol node_protocol_stack ;` | Sin cambio | — | OK |
-| Añadir `KernelInterface kernel_interface;` | Nuevo | Separación Genoma/Sustrato (3) | Obligatorio. Declara requisitos al host (ABI, capacidades, etc.). |
-| Eliminado `Config config = 5;` | sustituido por ConfigDeclaration fuera de Container |
+## 1. Fase de contrato protobuf (bloqueante)
 
-### 3. Nuevo mensaje `Init` (reemplaza `entrypoint`)
-```proto
-message Init {
-    repeated string argv = 1;               // argv[0] = ruta absoluta al binario PID 1
-    optional string working_directory = 2;  // default = "/"
-    map<string, bytes> xattrs = 3;
-}
-```
-**Obligatorio** para todos los builders. El organismo ya no “tiene un entrypoint”, tiene un punto de activación inequívoco dentro de su propio filesystem.
+### 1.1 Archivos de esquema a modificar
 
-### 4. Nuevo mensaje `KernelInterface`
-```proto
-message KernelInterface {
-    repeated string tags = 1;
-    string prose = 2;
-    bytes formal = 3;
-}
-```
-**Obligatorio**. Es la “carta de requisitos” al host. Nunca se incorpora dentro del Service.
+- `protos/celaut.proto`
+  - `Service`: añadir `ConfigDeclaration config_declaration = 5;`.
+  - `Service.Container`: reemplazar `entrypoint` por `Init`, eliminar `Config`, añadir `KernelInterface`.
+  - `Service.Container.Filesystem.ItemBranch`: añadir `shared_identity` en `oneof` y `xattrs`.
+  - `Service.Network`: renombrar `client_protocol_stack` -> `protocol_stack`.
+  - `Service.Api.Slot`: añadir `map<string, bytes> xattrs = 3;`.
+- `protos/pack.proto`
+  - Sincronizar con el nuevo contrato de `celaut.Service` (al menos: `init`, `config_declaration`, `kernel_interface`, `protocol_stack`).
+  - Revisar coherencia entre `pack.Service.Container` y `celaut.Service.Container` para evitar divergencia semántica.
+- `src/commands/tui/protos/celaut.proto`
+  - Mantenerlo idéntico al `protos/celaut.proto` principal (evitar drift de Rust/TUI).
 
-### 5. Cambios en `Filesystem` (el más crítico)
-```proto
-message Filesystem {
-    message ItemBranch {
-        ...
-        oneof item {
-            bytes file = 2;
-            Link link = 3;
-            Filesystem filesystem = 4;
-            uint64 shared_identity = 5;   // ← NUEVO
-        }
-        map<string, bytes> xattrs = 6;     // ← NUEVO
-    }
-}
-```
+### 1.2 Artefactos generados
 
-**Acciones para los desarrolladores del builder:**
-- **Hardlinks**: durante la serialización asignar IDs internos secuenciales (64-bit) y usar `shared_identity` cuando dos nombres compartan el mismo inode. Nunca duplicar bytes.
-- **Symlinks**: siguen usando `Link` (referencia por nombre).
-- **Metadata**: todo lo que antes era `mode`, `uid`, `gid`, `mtime`, `device` **DEBE** ir en `xattrs` con claves libres (ej: "posix.mode", "posix.uid", "selinux.label", "future.quantum.integrity", etc.).
-- **Atomicidad**: el `bytes filesystem` debe serializarse de forma canónica (orden de branches determinista + hardlink IDs asignados antes de escribir).
+- Regenerar:
+  - `protos/celaut_pb2.py`
+  - `protos/celaut_pb2_grpc.py`
+  - `protos/pack_pb2.py`
+- Validar script:
+  - `bash/generate_protos.sh`
+- Recompilar TUI (usa `build.rs` + `prost`):
+  - `src/commands/tui/build.rs` ya recompila con cambios de proto; verificar build tras sincronizar `src/commands/tui/protos/celaut.proto`.
 
-### 6. Nuevo mensaje `ConfigDeclaration` (hermano de `container`)
-```proto
-message ConfigDeclaration {
-    repeated string path = 1;
-    DataFormat format = 2;
-}
-```
-El host debe inyectar el archivo en la ruta indicada **antes** de arrancar el organismo.
+### 1.3 Decisión obligatoria sobre numeración de campos
 
-### 7. Cambios en `Network` (para reflejar aislamiento por defecto)
-```proto
-message Network {
-    repeated string tags = 1;
-    string prose = 2;
-    bytes formal = 3;
-    repeated Api.Protocol protocol_stack = 4;   // ← cambiado de client_protocol_stack
-}
-```
-**Importante**:
-- Default = **cero acceso externo**.
-- El organismo declara “necesito este ámbito” (google, bitcoin-mainnet, etc.).
-- El host decide si concede y materializa el canal real.
-- `client_protocol_stack` → ahora `protocol_stack` (más claro y elemental).
+- Antes de implementar, fijar y documentar si se reutilizan números de campo o se reservan.
+- Recomendación técnica para minimizar corrupción wire-format: **no reutilizar números de campos eliminados** y usar `reserved` para nombres/números legacy.
 
-### 8. Añadir las 4 reglas de oro + definición de hash (al inicio del archivo)
-Obligatorio poner el bloque de comentarios con los 4 mantras y la definición del hash inmutable:
+## 2. Fase de builders/packers (serialización del Service)
 
-```proto
-// El hash inmutable se calcula como H(serialized_canonical(Service))
-// donde H es "la función hash tal que H(H(bytes vacíos)) = <digest canónico>"
-```
+### 2.1 Archivos a tocar
 
-### COSAS QUE LOS DESARROLLADORES DEBEN TENER SIEMPRE EN CUENTA
+- `src/packers/zip_with_dockerfile.py`
+- `src/packers/zip_with_dockerfile_fractal.py`
+- `src/packers/README.md`
 
-1. **Backward compatibility**  
-   - La nueva versión **rompe** `entrypoint` y `Config` (se convierten en `Init` y `ConfigDeclaration`).  
-   - Durante la transición: los builders deben soportar ambos durante 1 versión y emitir warning.
+### 2.2 Cambios funcionales
 
-2. **Serialización del filesystem**  
-   - Debe ser **canónica** (orden de campos determinista).  
-   - Hardlink IDs se asignan en una pasada previa (DFS o similar) antes de escribir bytes.  
-   - El hash del Service entero incluye el `filesystem` serializado → cualquier cambio en orden o IDs invalida el hash.
+- Migrar `entrypoint` de `service.json` a estructura `init`:
+  - `container.init.argv`
+  - `container.init.working_directory`
+  - `container.init.xattrs`
+- Migrar `container.config` a `service.config_declaration`.
+- Añadir parsing opcional de:
+  - `kernel_interface` (tags/prose/formal)
+  - `api[].xattrs`
+- Filesystem:
+  - Orden determinista de `branch` (`sorted(...)`), evitando `os.listdir` no determinista.
+  - Detección de hardlinks por inode y emisión de `shared_identity`.
+  - Captura de metadatos en `xattrs` (ej: `posix.mode`, `posix.uid`, `posix.gid`, `posix.mtime_ns`, etc.).
 
-3. **Hosts / runtimes**  
-   - Deben leer `KernelInterface` y `Network` **antes** de arrancar.  
-   - Si no pueden satisfacer `formal`, rechazar el Service.  
-   - Inyectar `__config__` según `ConfigDeclaration`.  
-   - Interpretar `xattrs` de ItemBranch según lo declarado en `kernel_interface`.
+## 3. Fase de runtimes/virtualizadores
 
-4. **Extensibilidad futura**  
-   - **Nunca** añadir campos nuevos fuera de `xattrs` o `tags-prose-formal`.  
-   - Todo lo que aparezca en 1000 años (cuántico, biológico, etc.) va dentro de `xattrs` o `formal`.
+### 3.1 Docker runtime
 
-5. **Regla de oro práctica para cualquier cambio**  
-   Pregunta antes de tocar nada:  
-   “¿Esto hace al organismo más completo sin contaminarlo con el host?”  
-   Si la respuesta no es sí → fuera.
+Archivos:
+- `src/virtualizers/docker/execute.py`
+- `src/virtualizers/docker/set_container_config.py`
+- `src/virtualizers/docker/build.py`
 
-Esta es la lista **completa y accionable**.  
-Una vez aplicados estos cambios, `celaut.proto` queda **100 % elemental, atemporal y alineado con los 4 mantras**.
+Cambios:
+- `execute.py`: usar `service.container.init.argv` en lugar de `service.container.entrypoint`.
+- `set_container_config.py`: recibir `service.config_declaration` en vez de `service.container.config`.
+- `build.py`: soportar `shared_identity` para reconstrucción de hardlinks (no tratar todo lo no-file/no-dir como symlink).
+- Aplicar `xattrs` del filesystem al materializar rootfs (al menos permisos/mode inicialmente).
 
+### 3.2 Cloud Hypervisor runtime
+
+Archivos:
+- `src/virtualizers/cloud_hypervisor/build.py`
+- `src/virtualizers/cloud_hypervisor/execute.py`
+- `bash/build_ch_initramfs.sh`
+
+Cambios:
+- Reemplazar validación de `entrypoint` por validación de `init`:
+  - `argv` no vacío
+  - `argv[0]` absoluto
+  - `working_directory` válida
+- Cambiar inyección de metadata del arranque:
+  - de `/.__nodo_entrypoint` a un payload de init (por ejemplo JSON/binario con `argv`, `cwd`, `xattrs`).
+- `build_ch_initramfs.sh`:
+  - leer la nueva metadata de init
+  - hacer `cd` al `working_directory`
+  - ejecutar con argv completo (`switch_root ... "$argv0" "$@"` equivalente)
+- Inyección de config:
+  - usar `service.config_declaration.path` (ahora está en `Service`, no en `Container`).
+- Materialización de filesystem:
+  - añadir soporte de `shared_identity` y `xattrs` igual que en Docker.
+
+## 4. Fase de red, manager y superficie CLI
+
+### 4.1 Red y resolución de peers
+
+Archivo:
+- `src/manager/networks.py`
+
+Cambio:
+- `network.client_protocol_stack` -> `network.protocol_stack`.
+
+### 4.2 Inspección y UX de CLI
+
+Archivo:
+- `src/commands/inspect.py`
+
+Cambios:
+- Mostrar `container.init` en lugar de `container.entrypoint`.
+- Mostrar `service.config_declaration` en lugar de `container.config`.
+- Mostrar `kernel_interface` cuando exista.
+
+## 5. Migración de datos (sin compatibilidad temporal)
+
+### 5.1 Migración persistente (registry/cache)
+
+- Añadir script de migración de servicios serializados en registry/cache:
+  - Reescribir servicios antiguos al nuevo contrato.
+  - Recalcular hash/ID si cambia serialización canónica.
+- Ejecutar migración **antes** del despliegue del nuevo runtime.
+- Si existen artefactos no migrables, fallar de forma explícita y no arrancar.
+
+## 6. Plan de pruebas (obligatorio)
+
+### 6.1 Unit tests a actualizar
+
+- `tests/test_cloud_hypervisor_execute_helpers.py`
+  - reemplazar tests de `_validate_entrypoint_strict` por tests de validación de `init`.
+  - adaptar test de config target a `config_declaration`.
+
+### 6.2 Nuevos tests a añadir
+
+- Packer:
+  - serialización canónica (`branch` ordenado determinísticamente).
+  - hardlinks (`shared_identity`) sin duplicación de bytes.
+  - metadatos en `xattrs`.
+- Runtime:
+  - Docker y CH ejecutan `init.argv` completo con `working_directory`.
+  - inyección de `__config__` desde `config_declaration`.
+- Red:
+  - `protocol_stack` en `Service.Network` sin referencias legacy.
+
+### 6.3 Smoke/regresión
+
+- Empaquetar servicio de ejemplo con esquema nuevo.
+- Arrancar en Docker y Cloud Hypervisor.
+- Verificar conectividad esperada y aislamiento por defecto.
+
+## 7. Secuencia recomendada de ejecución
+
+1. Actualizar protos (`celaut.proto`, `pack.proto`, copia TUI).
+2. Regenerar stubs Python y recompilar TUI.
+3. Adaptar packers (emisión y lectura solo del esquema nuevo).
+4. Adaptar runtimes Docker/CH + script initramfs.
+5. Adaptar manager/CLI (`networks.py`, `inspect.py`).
+6. Añadir/actualizar tests.
+7. Ejecutar migración de datos y activar escritura estricta nueva.
+
+## 8. Checklist de cierre
+
+- No quedan referencias en código a:
+  - `container.entrypoint`
+  - `container.config`
+  - `network.client_protocol_stack`
+- No existe lógica de fallback/mapeo desde esquema legacy.
+- Protos principal/TUI/pack están sincronizados.
+- Tests unitarios + smoke en ambos virtualizadores en verde.
+- Documentación de packers y runtime actualizada con el modelo `init/config_declaration`.
