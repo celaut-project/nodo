@@ -5,6 +5,19 @@
 // ====================================================================
 
 // ======================
+// EXPLICACIÓN DE TÉRMINOS CLAVE
+// (para que todos los desarrolladores y futuros lectores entiendan el lenguaje orgánico)
+// ======================
+/*
+- Organismo: el Service completo. Es una entidad viva indivisible. (en el sentido de que es una unidad de información coherente, autónoma y expresable)
+- Genoma: la parte que viaja 100% con el Service (filesystem + init + formas). Define todo su comportamiento observable.
+- Sustrato: el host/nodo que ejecuta el Service. Solo recibe declaraciones (nunca se incorpora dentro del organismo).
+- Nombre: la ruta en el árbol (ItemBranch.name).
+- Forma: los atributos indivisibles del objeto (hoy solo xattrs; mañana lo que sea).
+- Esencia: el contenido real (bytes) o referencia (link / shared_identity).
+*/
+
+// ======================
 // LAS 4 REGLAS DE ORO (Mantras) — NO NEGOCIABLES
 // ======================
 /*
@@ -15,31 +28,27 @@
 
 2. Mantra Elemental (Aristotélica)
    No inventamos nada. Materializamos solo lo que ya existe en cualquier estructura jerárquica de objetos.
-   La única vía de evolución futura es map<string, bytes> xattrs.
+   La única vía de evolución futura es map<string, bytes> xattrs y tags-prose-formal.
 
 3. Mantra de Separación Genoma / Sustrato
    Genoma → viaja dentro del Service (filesystem + form + init).
-   Sustrato → solo se declara (nunca se incorpora). Default = aislamiento total.
+   Sustrato → solo se declara (nunca se incorpora).
 
 4. Mantra Anti-Consenso
    El esquema debe estar a prueba de rotura de convenciones.
-   Nunca se usan cadenas mágicas ni nombres que requieran consenso global.
+   Nunca se usan "cadenas mágicas" ni nombres que requieran consenso global.
    Única excepción permitida: patrón tags-prose-formal (o equivalente) cuando NO se puede materializar lo elemental.
 */
 
 // ======================
 // DEFINICIÓN DEL HASH INMUTABLE DEL SERVICE
-// (cumple Mantra 4 al 100%)
+// (en base al Mantra 4)
 // ======================
 /*
 El hash inmutable se calcula como:
-
     H( serialized_canonical(Service) )
-
 donde H es la función hash identificada de forma anti-consenso como:
-
       "la función hash tal que H(H(bytes vacíos)) = <digest canónico fijado en esta versión de la especificación>"
-
 No se nombra nunca el algoritmo. Cada nodo verifica en runtime que su función satisface exactamente esa ecuación. Así nunca depende de convenciones de nombres.
 */
 
@@ -47,7 +56,7 @@ No se nombra nunca el algoritmo. Cada nodo verifica en runtime que su función s
 // MENSAJES (anidados según dependencias reales + razonamiento orgánico de cada componente)
 // ======================
 message Service {
-    // prose → Nombre humano del organismo (Mantra 1). Elemental y atemporal.
+    // prose → Explicación en lenguaje natural del organismo (Mantra 1). Elemental y atemporal.
     string prose = 1;
 
     // El organismo completo (genoma).
@@ -56,7 +65,7 @@ message Service {
     // Declaración de API (cómo el mundo externo puede hablar con el organismo).
     Api api = 3;
 
-    // Declaración de ámbitos externos requeridos (Mantra 3: aislamiento por defecto).
+    // Declaración de ámbitos externos requeridos (aislamiento por defecto).
     repeated Network network = 4;
 
     // Declaración de configuración inicial que el host debe inyectar (sustrato puro).
@@ -70,37 +79,59 @@ message Container {
     // Serialized rootfs completo (el árbol con Nombre + Forma + Esencia).
     bytes filesystem = 2;
 
-    // Punto de activación inequívoco (PID 1 o equivalente en cualquier sistema futuro).
+    // Punto de activación inequívoco (ver razonamiento en Init).
     Init init = 3;
 
     // Requisitos de recursos (elementales, no necesitan tags-prose-formal).
     optional Resources resources = 4;
-    Config config = 5;  // (mantener por compatibilidad histórica; no afecta mantras)
 
     // Protocol stack interno del nodo.
-    repeated Api.Protocol node_protocol_stack = 6;
+    repeated Api.Protocol node_protocol_stack = 5;
 
     // Carta de requisitos al sustrato (solo declaración).
-    KernelInterface kernel_interface = 7;
+    KernelInterface kernel_interface = 6;
 
     // =============================================================
     message Architecture {
         // Razonamiento: nunca podemos materializar "x86_64" o "wasm" sin romper Mantra 4.
         repeated string tags = 1;
         string prose = 2;
-        bytes formal = 3;  // descriptor binario real del genoma
+        bytes formal = 3; // descriptor binario real del genoma
     }
 
     message Init {
-        // Razonamiento: todo organismo necesita un punto de entrada inequívoco (Mantra 1).
-        // argv + working_directory + xattrs es la forma más elemental posible.
-        repeated string argv = 1;
+        // ¿Realmente lo más elemental es tener argv y working_directory?
+        //
+        // Respuesta elemental (Mantra 2): SÍ.
+        //
+        // Razones profundas:
+        // 1. Un solo "path a ejecutable" sería demasiado restrictivo. En cualquier sistema (hoy o en 1000 años)
+        //    la activación de un organismo casi siempre necesita parámetros (ej: /bin/sh -c "script", /app/server --port 8080).
+        //    argv (lista de strings) es la forma más abstracta y universal de expresar eso.
+        // 2. working_directory (cwd) es parte indivisible de la activación: muchos organismos usan rutas relativas
+        //    dentro de su propio filesystem. Sin cwd explícito, el comportamiento dejaría de ser reproducible.
+        // 3. Un solo path obligaría a meter args y cwd en xattrs (menos limpio y menos elemental).
+        // 4. argv[0] + cwd + xattrs es la mínima tríada que cubre TODOS los casos conocidos y futuros sin asumir OS.
+        //
+        // Conclusión: argv + working_directory es MÁS elemental que un simple path.
+        repeated string argv = 1;               // argv[0] debe existir dentro del filesystem
         optional string working_directory = 2;  // default = "/"
-        map<string, bytes> xattrs = 3;
+        map<string, bytes> xattrs = 3;          // cualquier parámetro extra futuro
     }
 
     message KernelInterface {
-        // Razonamiento: requisitos mínimos al sustrato (Mantra 3). Nunca se incorpora.
+        // ¿No hay nada elemental que escribir aquí?
+        //
+        // Respuesta: NO. tags-prose-formal ES lo más elemental posible.
+        //
+        // Razones (Mantra 4 + Mantra 3):
+        // - Cualquier campo concreto (abi_version, required_capabilities, etc.) sería una "cadena mágica"
+        //   que rompería consenso entre hosts futuros.
+        // - El organismo solo necesita declarar "necesito un sustrato que entienda esto".
+        //   tags + prose + formal bytes es la única forma anti-consenso y eterna.
+        // - Todo lo que el futuro traiga (cuántico, biológico, etc.) irá dentro del formal.
+        //
+        // No se puede simplificar más sin violar Mantra 4.
         repeated string tags = 1;
         string prose = 2;
         bytes formal = 3;
@@ -119,20 +150,14 @@ message Container {
                 bytes file = 2;               // Esencia (contenido)
                 Link link = 3;                // referencia por nombre (inode propio)
                 Filesystem filesystem = 4;    // directorio anidado
-                uint64 hardlink_inode = 5;    // referencia al mismo inode (identidad compartida)
+                uint64 shared_identity = 5;   // ← TODO RESUELTO
             }
 
-            // Forma materializada → solo xattrs (Mantra 2). Todo lo demás (permisos, timestamps, devices…) va aquí.
-            // Razonamiento: en 1000 años no asumimos usuarios, tiempo lineal ni dispositivos. xattrs es eterno.
-            optional ItemForm form = 10;
+            // Forma → solo xattrs (Mantra 2). Todo lo demás va aquí.
+            map<string, bytes> xattrs = 6;
         }
 
         repeated ItemBranch branch = 1;
-    }
-
-    message ItemForm {
-        // Versión más elemental y atemporal posible.
-        map<string, bytes> xattrs = 1;
     }
 }
 
@@ -141,7 +166,6 @@ message ConfigDeclaration {
     // El host la inyecta en la ruta indicada. Nunca viaja dentro del genoma.
     repeated string path = 1;
     DataFormat format = 2;
-    bytes expected_hash = 3;  // opcional, para reproducibilidad
 }
 
 message Network {
@@ -149,17 +173,9 @@ message Network {
     // El organismo nace aislado. Cualquier conexión externa es un "sentido" que debe declarar explícitamente.
     // El host decide si lo concede y materializa el canal real (peers, DNS, túnel, etc.).
     // Nunca lleva direcciones concretas dentro del genoma.
-
-    // Identificador del ámbito externo requerido (ej: google, bitcoin-mainnet, etc.).
     repeated string tags = 1;
-
-    // Explicación humana del ámbito.
     string prose = 2;
-
-    // Descriptor binario que el host interpreta (semillas, versión de protocolo, etc.).
     bytes formal = 3;
-
-    // Protocolos que el organismo usará dentro de ese ámbito.
     repeated Api.Protocol protocol_stack = 4;
 }
 
@@ -172,12 +188,10 @@ message Api {
         string prose = 2;
         bytes formal = 3;
     }
-
     message Slot {
         int32 port = 1;
         repeated Protocol protocol_stack = 2;
     }
-
     map<string, DataFormat> environment_variables = 3;
     repeated Slot slot = 4;
     repeated GasPrice payment_contracts = 5;
@@ -189,22 +203,25 @@ message Resources {
     optional int32 start_time_ms = 3;
 }
 
-// (Tipos externos: DataFormat, Sysresources, GasPrice, Config se mantienen fuera o se anidan en futuras iteraciones.
+// (Tipos externos: DataFormat, Sysresources, GasPrice se mantienen fuera o se anidan en futuras iteraciones.
 // No afectan a los mantras actuales.)
 
-```
+*/
 
-**Resumen orgánico de por qué este es el esquema definitivo**
-
-- Todo lo que afecta al comportamiento observable viaja con el organismo (genoma).  
-- Todo lo del host solo se declara (sustrato).  
-- Default = aislamiento total (Network y ConfigDeclaration lo dejan explícito).  
-- No queda ni un campo que pueda romperse en 1000 años (ItemForm = solo xattrs).  
-- Ambos tipos de enlaces (link + hardlink_inode) se mantienen porque son dos semánticas orgánicas distintas e indispensables.  
+// ======================
+// Resumen orgánico de por qué este es el esquema definitivo
+// ======================
+/*
+- Todo lo que afecta al comportamiento observable viaja con el organismo (genoma).
+- Todo lo del host solo se declara (sustrato).
+- Default = aislamiento total (Network y ConfigDeclaration lo dejan explícito).
+- No queda ni un campo que pueda romperse en 1000 años (xattrs puro).
+- Ambos tipos de referencias (link + shared_identity) se mantienen porque son dos semánticas orgánicas distintas e indispensables.
 - El hash sigue definido como H(H("")) → eterno y anti-consenso.
+- Todos los TODOs resueltos con razonamiento estricto bajo los 4 mantras.
+*/
 
-Esta es la versión **más desnuda y elemental** que podemos tener hoy.
-
+```
 
 ====
 ====
@@ -223,11 +240,11 @@ A continuación tienes **el listado exacto y ordenado** de cambios estructurales
 ### 2. Cambios dentro de `Container`
 | Campo actual | → Nuevo | Motivo | Acción para devs |
 |--------------|---------|--------|------------------|
-| `repeated string entrypoint = 3;` | `Init init = 3;` | Elemental (2) + PID 1 inequívoco | Reemplazar completamente. `Init` tiene `argv` + `working_directory` + `xattrs`. |
+| Sustituir `repeated string entrypoint = 3;` | `Init init = 3;` | Elemental (2) + PID 1 inequívoco | Reemplazar completamente. `Init` tiene `argv` + `working_directory` + `xattrs`. |
 | `Architecture` (tags-prose-formal) | Sin cambio | Anti-consenso (4) | OK |
-| `repeated Api.Protocol node_protocol_stack = 6;` | Sin cambio | — | OK |
-| Añadir `KernelInterface kernel_interface = 7;` | Nuevo | Separación Genoma/Sustrato (3) | Obligatorio. Declara requisitos al host (ABI, capacidades, etc.). |
-| `Config config = 5;` | Mantener por compatibilidad histórica | — | Se deja pero se desaconseja su uso futuro. |
+| `repeated Api.Protocol node_protocol_stack ;` | Sin cambio | — | OK |
+| Añadir `KernelInterface kernel_interface;` | Nuevo | Separación Genoma/Sustrato (3) | Obligatorio. Declara requisitos al host (ABI, capacidades, etc.). |
+| Eliminado `Config config = 5;` | sustituido por ConfigDeclaration fuera de Container |
 
 ### 3. Nuevo mensaje `Init` (reemplaza `entrypoint`)
 ```proto
@@ -283,7 +300,6 @@ message ItemForm {
 message ConfigDeclaration {
     repeated string path = 1;
     DataFormat format = 2;
-    bytes expected_hash = 3;   // opcional
 }
 ```
 El host debe inyectar el archivo en la ruta indicada **antes** de arrancar el organismo.
@@ -339,3 +355,4 @@ Obligatorio poner el bloque de comentarios con los 4 mantras y la definición de
 
 Esta es la lista **completa y accionable**.  
 Una vez aplicados estos cambios, `celaut.proto` queda **100 % elemental, atemporal y alineado con los 4 mantras**.
+
