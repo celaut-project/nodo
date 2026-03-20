@@ -1,6 +1,5 @@
 
-
-from asyncio import subprocess
+import subprocess
 
 from src.utils.config import DOCKER_COMMAND, DOCKER_ENV
 
