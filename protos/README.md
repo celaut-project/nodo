@@ -189,12 +189,13 @@ message Api {
         bytes formal = 3;
     }
     message Slot {
-        int32 port = 1;
+        int32 port = 1;  # Could be bytes at some point.
         repeated Protocol protocol_stack = 2;
+        map<string, bytes> xattrs = 3;
     }
     map<string, DataFormat> environment_variables = 3;
     repeated Slot slot = 4;
-    repeated GasPrice payment_contracts = 5;
+    repeated GasPrice payment_contracts = 5; //  GasPrice es elemental porque no se refiere al “gas” de Ethereum, sino a unidades abstractas de recursos (computación, almacenamiento, tiempo, energía, etc.). El payment_contract declara mediante tags-prose-formal qué cosa se entrega (un contrato blockchain, una paloma mensajera, reputación, energía, o cualquier futuro equivalente) a cambio de X unidades de recursos. Luego, cada función de la API declara cuánto cuesta en esas mismas unidades. Así el organismo lleva su propio modelo económico completo sin asumir ninguna economía concreta ni requerir consenso global.
 }
 
 message Resources {
@@ -218,13 +219,14 @@ message Resources {
 - No queda ni un campo que pueda romperse en 1000 años (xattrs puro).
 - Ambos tipos de referencias (link + shared_identity) se mantienen porque son dos semánticas orgánicas distintas e indispensables.
 - El hash sigue definido como H(H("")) → eterno y anti-consenso.
-- Todos los TODOs resueltos con razonamiento estricto bajo los 4 mantras.
 */
 
 ```
 
 ====
 ====
+
+# PLAN DE IMPLEMENTACIÓN.
 
 **CAMBIOS OBLIGATORIOS QUE DEBEMOS APLICAR**  
 (para pasar de la especificación actual a la versión **elemental y orgánica** que cumple los 4 mantras)
@@ -275,22 +277,15 @@ message Filesystem {
             bytes file = 2;
             Link link = 3;
             Filesystem filesystem = 4;
-            uint64 hardlink_inode = 5;   // ← NUEVO
+            uint64 shared_identity = 5;   // ← NUEVO
         }
-        optional ItemForm form = 10;     // ← NUEVO
+        map<string, bytes> xattrs = 6;     // ← NUEVO
     }
 }
 ```
 
-**ItemForm** (nuevo y obligatorio):
-```proto
-message ItemForm {
-    map<string, bytes> xattrs = 1;   // ÚNICA vía de extensión. Todo lo demás (mode, uid, gid, mtime, device…) va aquí.
-}
-```
-
 **Acciones para los desarrolladores del builder:**
-- **Hardlinks**: durante la serialización asignar IDs internos secuenciales (64-bit) y usar `hardlink_inode` cuando dos nombres compartan el mismo inode. Nunca duplicar bytes.
+- **Hardlinks**: durante la serialización asignar IDs internos secuenciales (64-bit) y usar `shared_identity` cuando dos nombres compartan el mismo inode. Nunca duplicar bytes.
 - **Symlinks**: siguen usando `Link` (referencia por nombre).
 - **Metadata**: todo lo que antes era `mode`, `uid`, `gid`, `mtime`, `device` **DEBE** ir en `xattrs` con claves libres (ej: "posix.mode", "posix.uid", "selinux.label", "future.quantum.integrity", etc.).
 - **Atomicidad**: el `bytes filesystem` debe serializarse de forma canónica (orden de branches determinista + hardlink IDs asignados antes de escribir).
@@ -342,7 +337,7 @@ Obligatorio poner el bloque de comentarios con los 4 mantras y la definición de
    - Deben leer `KernelInterface` y `Network` **antes** de arrancar.  
    - Si no pueden satisfacer `formal`, rechazar el Service.  
    - Inyectar `__config__` según `ConfigDeclaration`.  
-   - Interpretar `xattrs` del `ItemForm` según lo declarado en `kernel_interface`.
+   - Interpretar `xattrs` de ItemBranch según lo declarado en `kernel_interface`.
 
 4. **Extensibilidad futura**  
    - **Nunca** añadir campos nuevos fuera de `xattrs` o `tags-prose-formal`.  
