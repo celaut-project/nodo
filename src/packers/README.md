@@ -1,8 +1,5 @@
-# service.json (Hard Cutover)
-
-Este packer acepta **solo** el esquema nuevo. Si detecta claves legacy (`entrypoint`, `config`, `resources.start_time_ms`) falla explícitamente.
-
-## Estructura
+# service.json
+## Structure
 
 ```json
 {
@@ -46,10 +43,10 @@ Este packer acepta **solo** el esquema nuevo. Si detecta claves legacy (`entrypo
 }
 ```
 
-## Notas
+## Notes
 
-- `init.entry_path` se serializa en `container.init.entry_path`.
-- `init.xattrs` se serializa en `container.init.xattrs` (UTF-8 para valores de texto).
-- `config_declaration.path` se serializa en `container.config_declaration.path`.
-- `api[].gas_amount_per_call` se serializa en `api.slot[].gas_amount_per_call`.
-- `resources.start_time_ms` ya no existe.
+- `init.entry_path` is serialized to `container.init.entry_path`.
+- `init.xattrs` is serialized to `container.init.xattrs` (UTF-8 for text values).
+- `config_declaration.path` is serialized to `container.config_declaration.path`.
+- `api[].gas_amount_per_call` is serialized to `api.slot[].gas_amount_per_call`.
+- `resources.start_time_ms` no longer exists.
