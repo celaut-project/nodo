@@ -48,7 +48,7 @@
 El hash inmutable se calcula como:
     H( serialized_canonical(Service) )
 donde H es la función hash identificada de forma anti-consenso como:
-      "la función hash tal que H(H(bytes vacíos)) = <digest canónico fijado en esta versión de la especificación>"
+      "la función hash tal que H(bytes vacíos) = <digest canónico fijado en esta versión de la especificación>"
 No se nombra nunca el algoritmo. Cada nodo verifica en runtime que su función satisface exactamente esa ecuación. Así nunca depende de convenciones de nombres.
 */
 
@@ -100,23 +100,8 @@ message Container {
     }
 
     message Init {
-        // ¿Realmente lo más elemental es tener argv y working_directory?
-        //
-        // Respuesta elemental (Mantra 2): SÍ.
-        //
-        // Razones profundas:
-        // 1. Un solo "path a ejecutable" sería demasiado restrictivo. En cualquier sistema (hoy o en 1000 años)
-        //    la activación de un organismo casi siempre necesita parámetros (ej: /bin/sh -c "script", /app/server --port 8080).
-        //    argv (lista de strings) es la forma más abstracta y universal de expresar eso.
-        // 2. working_directory (cwd) es parte indivisible de la activación: muchos organismos usan rutas relativas
-        //    dentro de su propio filesystem. Sin cwd explícito, el comportamiento dejaría de ser reproducible.
-        // 3. Un solo path obligaría a meter args y cwd en xattrs (menos limpio y menos elemental).
-        // 4. argv[0] + cwd + xattrs es la mínima tríada que cubre TODOS los casos conocidos y futuros sin asumir OS.
-        //
-        // Conclusión: argv + working_directory es MÁS elemental que un simple path.
-        repeated string argv = 1;               // argv[0] debe existir dentro del filesystem
-        optional string working_directory = 2;  // default = "/"
-        map<string, bytes> xattrs = 3;          // cualquier parámetro extra futuro
+        repeated string entry_path = 1; 
+        map<string, bytes> xattrs = 2;          // cualquier parámetro extra futuro
     }
 
     message KernelInterface {
@@ -216,7 +201,6 @@ message Resources {
 - Todo lo del host solo se declara (sustrato).
 - Default = aislamiento total (Network y ConfigDeclaration lo dejan explícito).
 - No queda ni un campo que pueda romperse en 1000 años (xattrs puro).
-- El hash sigue definido como H(H("")) → eterno y anti-consenso.
 */
 
 ```
@@ -279,8 +263,7 @@ Este plan parte del estado real de `protos/celaut.proto` (actual) y detalla **to
 ### 2.2 Cambios funcionales
 
 - Migrar `entrypoint` de `service.json` a estructura `init`:
-  - `container.init.argv`
-  - `container.init.working_directory`
+  - `container.init.entry_path`
   - `container.init.xattrs`
 - Migrar `container.config` a `service.config_declaration`.
 - Añadir parsing opcional de:
@@ -300,7 +283,7 @@ Archivos:
 - `src/virtualizers/docker/build.py`
 
 Cambios:
-- `execute.py`: usar `service.container.init.argv` en lugar de `service.container.entrypoint`.
+- `execute.py`: usar `service.container.init.entry_path` en lugar de `service.container.entrypoint`.
 - `set_container_config.py`: recibir `service.config_declaration` en vez de `service.container.config`.
 - Aplicar `xattrs` del filesystem al materializar rootfs (al menos permisos/mode inicialmente).
 
@@ -313,9 +296,7 @@ Archivos:
 
 Cambios:
 - Reemplazar validación de `entrypoint` por validación de `init`:
-  - `argv` no vacío
-  - `argv[0]` absoluto
-  - `working_directory` válida
+  - `entry_path` no vacío y ruta válida en container.filesystem
 - Cambiar inyección de metadata del arranque:
   - de `/.__nodo_entrypoint` a un payload de init (por ejemplo JSON/binario con `argv`, `cwd`, `xattrs`).
 - `build_ch_initramfs.sh`:
@@ -346,16 +327,6 @@ Cambios:
 - Mostrar `container.init` en lugar de `container.entrypoint`.
 - Mostrar `service.config_declaration` en lugar de `container.config`.
 - Mostrar `kernel_interface` cuando exista.
-
-## 5. Migración de datos (sin compatibilidad temporal)
-
-### 5.1 Migración persistente (registry/cache)
-
-- Añadir script de migración de servicios serializados en registry/cache:
-  - Reescribir servicios antiguos al nuevo contrato.
-  - Recalcular hash/ID si cambia serialización canónica.
-- Ejecutar migración **antes** del despliegue del nuevo runtime.
-- Si existen artefactos no migrables, fallar de forma explícita y no arrancar.
 
 ## 6. Plan de pruebas (obligatorio)
 
