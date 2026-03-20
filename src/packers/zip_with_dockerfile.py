@@ -180,6 +180,20 @@ class ZipContainerPacker:
         resources = self.json.get("resources", {})
 
     def parseContainer(self):
+        def _normalize_path_segments(raw_path):
+            if isinstance(raw_path, str):
+                raw_items = [raw_path]
+            else:
+                raw_items = [str(item) for item in raw_path]
+
+            normalized = []
+            for item in raw_items:
+                for segment in item.split("/"):
+                    clean = segment.strip()
+                    if clean:
+                        normalized.append(clean)
+            return normalized
+
         def parseFilesys() -> celaut.Metadata.HashTag:
             # File system is already exported to filesystem/ by buildx
             # Add filesystem data to filesystem buffer object.
@@ -275,9 +289,13 @@ class ZipContainerPacker:
 
         # Entrypoint
         init = self.json.get("init", {})
-        entry_path = init.get("entry_path", [])
-        if isinstance(entry_path, str):
-            entry_path = [entry_path]
+        if not isinstance(init, dict):
+            init = {}
+
+        entry_path = _normalize_path_segments(init.get("entry_path", []))
+        if not entry_path and self.json.get("entrypoint"):
+            # Legacy compatibility: map service.json entrypoint -> container.init.entry_path
+            entry_path = _normalize_path_segments(self.json.get("entrypoint"))
         self.service.container.init.entry_path.extend(entry_path)
         for key, value in init.get("xattrs", {}).items():
             if isinstance(value, str):
@@ -289,9 +307,8 @@ class ZipContainerPacker:
         
         # Config file spec.
         config_declaration = self.json.get("config_declaration", {"path": ["__config__"]})
-        self.service.container.config_declaration.path.extend(
-            config_declaration.get("path", ["__config__"])
-        )
+        config_path = _normalize_path_segments(config_declaration.get("path", ["__config__"]))
+        self.service.container.config_declaration.path.extend(config_path)
         self.service.container.config_declaration.format.CopyFrom(
             celaut.DataFormat()
         )
