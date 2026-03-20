@@ -5,13 +5,13 @@
 {
   "architecture": "linux/amd64",
   "init": {
-    "entry_path": ["/service/start"],
+    "entry_path": ["service", "start"],
     "xattrs": {
       "boot_mode": "prod"
     }
   },
   "config_declaration": {
-    "path": ["__config__"]
+    "path": ["config", "runtime", "node.pb"]
   },
   "api": [
     {
@@ -46,7 +46,10 @@
 ## Notes
 
 - `init.entry_path` is serialized to `container.init.entry_path`.
+- Legacy `entrypoint` is still accepted in `service.json` and is mapped to `container.init.entry_path`.
+- If `service.json` provides slash-based input (for example `"/service/start"`), packer normalizes it to segmented form (`["service","start"]`).
 - `init.xattrs` is serialized to `container.init.xattrs` (UTF-8 for text values).
 - `config_declaration.path` is serialized to `container.config_declaration.path`.
+- If `service.json` provides slash-based input (for example `"/config/runtime/node.pb"`), packer normalizes it to segmented form.
 - `api[].gas_amount_per_call` is serialized to `api.slot[].gas_amount_per_call`.
 - `resources.start_time_ms` no longer exists.
