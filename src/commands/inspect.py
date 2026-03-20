@@ -3,6 +3,7 @@ from bee_rpc.utils import getsize
 from src.commands.__by_tag import get_id
 from src.utils.config import SHA3_256_ID, SHAKE_256_ID, ConfigManager
 from src.utils.utils import read_metadata_from_disk, read_service_from_disk
+from src.utils.contract_xattrs import get_address, get_script, get_token_id
 
 env_manager = ConfigManager()
 
@@ -55,8 +56,9 @@ def inspect(service: str):
     print_rule("🔍 Reputation Proofs")
     for c in metadata.reputation_proofs:
         print(f"{'Ledger':<10}: {', '.join(c.ledger.tags)}")
-        print(f"{'Script':<10}: {c.contract.hex()}")
-        print(f"{'Address':<10}: {c.token_id}\n")
+        print(f"{'Script':<10}: {get_script(c).hex()}")
+        print(f"{'Address':<10}: {get_address(c)}")
+        print(f"{'Token ID':<10}: {get_token_id(c)}\n")
 
     # Service Definition
     print_rule("📦 Service Definition", borders=True)
@@ -83,7 +85,7 @@ def inspect(service: str):
     print_rule("⚙ Container Configuration")
     print(f"Architecture: {', '.join([tag for tag in service_obj.container.architecture.tags])}")
     print(f"Prose: {service_obj.container.architecture.prose}")
-    print(f"Entrypoint: {service_obj.container.entrypoint}")
+    print(f"Init entry_path: {list(service_obj.container.init.entry_path)}")
 
     if service_obj.container.resources:
         print("Resources:")
@@ -107,12 +109,10 @@ def inspect(service: str):
         print_sysresources("At Init", resources.at_init)
         print_sysresources("At Most", resources.at_most)
 
-        if resources.start_time_ms:
-            print(f"  Start Time (ms): {resources.start_time_ms}")
         print("")
 
     print("Node compatibility")
-    print(f"- Config File: {service_obj.container.config}")
+    print(f"- Config Declaration: {service_obj.container.config_declaration}")
     print("- Protocols:")
     for proto in service_obj.container.node_protocol_stack:
         print(f"    * Tags: {proto.tags}")

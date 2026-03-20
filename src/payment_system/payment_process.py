@@ -188,7 +188,7 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
                 input=celaut_pb2.Payment(
                     gas_amount=to_gas_amount(amount),
                     deposit_token=deposit_token,
-                    contract_ledger=contract_ledger,
+                    contract=contract_ledger,
                 )
             ), None)
 

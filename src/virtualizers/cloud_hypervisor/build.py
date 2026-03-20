@@ -278,7 +278,11 @@ def build(
     symlinks: List[celaut_pb2.Service.Container.Filesystem.ItemBranch.Link] = []
     _write_fs(fs, rootfs_dir, symlinks)
     _apply_symlinks(symlinks, rootfs_dir)
-    entrypoint = service.container.entrypoint[0] if len(service.container.entrypoint) == 1 else None
+    entrypoint = (
+        service.container.init.entry_path[0]
+        if len(service.container.init.entry_path) == 1
+        else None
+    )
     _apply_executable_permissions(rootfs_dir=rootfs_dir, entrypoint=entrypoint)
 
     total_bytes = _dir_size_bytes(rootfs_dir)

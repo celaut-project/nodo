@@ -31,6 +31,7 @@ class ZipContainerPacker:
         self.json = json.load(open(self.path + "service.json", "r"))
         self.aux_id = aux_id
         self.error_msg = None
+        self._validate_service_json_shape()
 
         arch = None
         for a in PACKER_SUPPORTED_ARCHITECTURES:
@@ -125,6 +126,9 @@ class ZipContainerPacker:
         
         # Check first tag for use as name
         self.tag = self.json["tag"] if "tag" in self.json else None
+
+    def _validate_service_json_shape(self) -> None:
+        resources = self.json.get("resources", {})
         
     def parseContainer(self):
         def parseFilesys() -> None:
@@ -201,9 +205,6 @@ class ZipContainerPacker:
 
         # 0 is considered as no limit.
 
-        # start_time_ms es opcional
-        self.service.container.resources.start_time_ms = int(res.get("start_time_ms", 0))
-
         # Extract at_init and at_most resource configurations
         at_init = res.get("at_init", {})
         at_most = res.get("at_most", {})
@@ -238,15 +239,26 @@ class ZipContainerPacker:
 
 
         # Entrypoint
-        if self.json.get('entrypoint'):
-            self.service.container.entrypoint.append(self.json.get('entrypoint'))
+        init = self.json.get("init", {})
+        entry_path = init.get("entry_path", [])
+        if isinstance(entry_path, str):
+            entry_path = [entry_path]
+        self.service.container.init.entry_path.extend(entry_path)
+        for key, value in init.get("xattrs", {}).items():
+            if isinstance(value, str):
+                self.service.container.init.xattrs[key] = value.encode("utf-8")
+            else:
+                self.service.container.init.xattrs[key] = bytes(value)
         
         # Arch
         
         # Config file spec.
-        self.service.container.config.path.append('__config__')
-        self.service.container.config.format.CopyFrom(
-            celaut.DataFormat()  # celaut.ConfigFile definition.
+        config_declaration = self.json.get("config_declaration", {"path": ["__config__"]})
+        self.service.container.config_declaration.path.extend(
+            config_declaration.get("path", ["__config__"])
+        )
+        self.service.container.config_declaration.format.CopyFrom(
+            celaut.DataFormat()
         )
         self.service.container.architecture.tags.extend([self.json.get('architecture')])
         
@@ -277,6 +289,8 @@ class ZipContainerPacker:
                     tags=item.get('protocol')
                 )
             )
+            for method, gas_amount in item.get("gas_amount_per_call", {}).items():
+                slot.gas_amount_per_call[method].n = str(gas_amount)
             self.service.api.slot.append(slot)
             
     def parseNetwork(self):

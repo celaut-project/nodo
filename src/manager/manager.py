@@ -104,7 +104,7 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str):
 
     # Contracts
     for gas_price in peer.instance.api.payment_contracts:
-        sc.add_contract(contract=gas_price.contract_ledger, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
+        sc.add_contract(contract=gas_price.contract, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
 
     for contract_ledger in peer.reputation_proofs:
         if not add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id):
