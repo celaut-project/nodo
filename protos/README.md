@@ -14,7 +14,7 @@
 - Sustrato: el host/nodo que ejecuta el Service. Solo recibe declaraciones (nunca se incorpora dentro del organismo).
 - Nombre: la ruta en el árbol (ItemBranch.name).
 - Forma: los atributos indivisibles del objeto (hoy solo xattrs; mañana lo que sea).
-- Esencia: el contenido real (bytes) o referencia (link / shared_identity).
+- Esencia: el contenido real (bytes) o referencia (link).
 */
 
 // ======================
@@ -150,7 +150,6 @@ message Container {
                 bytes file = 2;               // Esencia (contenido)
                 Link link = 3;                // referencia por nombre (inode propio)
                 Filesystem filesystem = 4;    // directorio anidado
-                uint64 shared_identity = 5;   // ← TODO RESUELTO
             }
 
             // Forma → solo xattrs (Mantra 2). Todo lo demás va aquí.
@@ -217,7 +216,6 @@ message Resources {
 - Todo lo del host solo se declara (sustrato).
 - Default = aislamiento total (Network y ConfigDeclaration lo dejan explícito).
 - No queda ni un campo que pueda romperse en 1000 años (xattrs puro).
-- Ambos tipos de referencias (link + shared_identity) se mantienen porque son dos semánticas orgánicas distintas e indispensables.
 - El hash sigue definido como H(H("")) → eterno y anti-consenso.
 */
 
@@ -228,7 +226,7 @@ message Resources {
 
 # PLAN DE IMPLEMENTACIÓN (ACTUALIZADO Y ATERRIZADO A CÓDIGO)
 
-Este plan parte del estado real de `protos/celaut.proto` (actual) y detalla **todos los cambios de código** para llevar el repositorio al esquema orgánico definido arriba (`Init`, `ConfigDeclaration`, `KernelInterface`, `shared_identity`, `xattrs`, `Network.protocol_stack`).
+Este plan parte del estado real de `protos/celaut.proto` (actual) y detalla **todos los cambios de código** para llevar el repositorio al esquema orgánico definido arriba (`Init`, `ConfigDeclaration`, `KernelInterface`, `xattrs`, `Network.protocol_stack`).
 
 ## 0. Supuestos de migración
 
@@ -245,7 +243,7 @@ Este plan parte del estado real de `protos/celaut.proto` (actual) y detalla **to
 - `protos/celaut.proto`
   - `Service`: añadir `ConfigDeclaration config_declaration = 5;`.
   - `Service.Container`: reemplazar `entrypoint` por `Init`, eliminar `Config`, añadir `KernelInterface`.
-  - `Service.Container.Filesystem.ItemBranch`: añadir `shared_identity` en `oneof` y `xattrs`.
+  - `Service.Container.Filesystem.ItemBranch`: añadir `xattrs`.
   - `Service.Network`: renombrar `client_protocol_stack` -> `protocol_stack`.
   - `Service.Api.Slot`: añadir `map<string, bytes> xattrs = 3;`.
 - `protos/pack.proto`
@@ -290,7 +288,6 @@ Este plan parte del estado real de `protos/celaut.proto` (actual) y detalla **to
   - `api[].xattrs`
 - Filesystem:
   - Orden determinista de `branch` (`sorted(...)`), evitando `os.listdir` no determinista.
-  - Detección de hardlinks por inode y emisión de `shared_identity`.
   - Captura de metadatos en `xattrs` (ej: `posix.mode`, `posix.uid`, `posix.gid`, `posix.mtime_ns`, etc.).
 
 ## 3. Fase de runtimes/virtualizadores
@@ -305,7 +302,6 @@ Archivos:
 Cambios:
 - `execute.py`: usar `service.container.init.argv` en lugar de `service.container.entrypoint`.
 - `set_container_config.py`: recibir `service.config_declaration` en vez de `service.container.config`.
-- `build.py`: soportar `shared_identity` para reconstrucción de hardlinks (no tratar todo lo no-file/no-dir como symlink).
 - Aplicar `xattrs` del filesystem al materializar rootfs (al menos permisos/mode inicialmente).
 
 ### 3.2 Cloud Hypervisor runtime
@@ -329,7 +325,7 @@ Cambios:
 - Inyección de config:
   - usar `service.config_declaration.path` (ahora está en `Service`, no en `Container`).
 - Materialización de filesystem:
-  - añadir soporte de `shared_identity` y `xattrs` igual que en Docker.
+  - añadir soporte de `xattrs` igual que en Docker.
 
 ## 4. Fase de red, manager y superficie CLI
 
@@ -373,7 +369,6 @@ Cambios:
 
 - Packer:
   - serialización canónica (`branch` ordenado determinísticamente).
-  - hardlinks (`shared_identity`) sin duplicación de bytes.
   - metadatos en `xattrs`.
 - Runtime:
   - Docker y CH ejecutan `init.argv` completo con `working_directory`.
