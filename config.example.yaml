@@ -8,7 +8,7 @@ main:
   DATABASE_FILE: "/nodo/storage/database.sqlite"
 
 virtualizers:
-  DEFAULT_VIRTUALIZER: cloud_hypervisor
+  DEFAULT_VIRTUALIZER: docker
   docker:
     DOCKER_CLIENT_TIMEOUT: 480
     DOCKER_MAX_CONNECTIONS: 1000
