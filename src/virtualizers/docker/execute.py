@@ -8,6 +8,7 @@ from protos import celaut_pb2 as celaut
 
 from src.utils import logger as log
 from src.utils.config import DOCKER_CLIENT, ConfigManager
+from src.virtualizers.entry_path import resolve_entrypoint_path
 
 from src.virtualizers.docker.firewall import allow_connection_to_instance, block_all, allow_connection, TransportProtocol
 from src.gateway.utils import GATEWAY_PORT
@@ -70,11 +71,11 @@ def __get_container_security_opts() -> List[str]:
     return security_opts
 
 
-def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_lib.models.containers.Container:
+def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_lib.models.containers.Container:
     try:
         create_args = {
             "image": id + '.docker',  # https://github.com/moby/moby/issues/20972#issuecomment-193381422
-            "entrypoint": ' '.join(entrypoint),
+            "entrypoint": entrypoint,
             "ports": use_other_ports,
             "dns": ["127.0.0.1"]
         }
@@ -101,10 +102,11 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
 
 def execute(assigment_ports, by_local, service_id, service, config, initial_system_resources, father_id) -> Tuple[str, str]:
     entry_path = list(service.container.init.entry_path)
+    resolved_entrypoint = resolve_entrypoint_path(entry_path=entry_path)
     container = create_container(
         use_other_ports=assigment_ports if not by_local else None,
         id=service_id,
-        entrypoint=entry_path
+        entrypoint=resolved_entrypoint
     )
 
     networks = service.network
