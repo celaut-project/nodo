@@ -65,7 +65,7 @@ def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
         if uris:
             break
 
-    client_protocol_stack = network.client_protocol_stack
+    client_protocol_stack = network.protocol_stack
     i_slot = 1  # Default slot id (because internal port usage is irrelevant here)
 
     instance = celaut.Instance(

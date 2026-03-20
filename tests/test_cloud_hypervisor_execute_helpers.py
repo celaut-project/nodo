@@ -16,7 +16,7 @@ def _service_with_entrypoint(*entrypoints: str):
     if celaut is None:
         raise RuntimeError(f"Test dependency import failed: {IMPORT_ERROR}")
     service = celaut.Service()
-    service.container.entrypoint.extend(entrypoints)
+    service.container.init.entry_path.extend(entrypoints)
     return service
 
 
@@ -68,7 +68,7 @@ class CloudHypervisorExecuteHelpersTests(unittest.TestCase):
 
     def test_resolve_guest_config_targets_is_root_config_path(self):
         service = celaut.Service()
-        service.container.config.path.extend(["some", "nested", "dir"])
+        service.container.config_declaration.path.extend(["some", "nested", "dir"])
         self.assertEqual(ch_execute._resolve_guest_config_targets(service), ["/__config__"])
 
 

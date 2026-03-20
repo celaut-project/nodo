@@ -172,7 +172,7 @@ def _validate_custom_initramfs(initramfs_path: str) -> None:
 
 
 def _validate_entrypoint_strict(service: celaut.Service) -> str:
-    raw_entrypoints = [str(item).strip() for item in service.container.entrypoint]
+    raw_entrypoints = [str(item).strip() for item in service.container.init.entry_path]
     entrypoints = [item for item in raw_entrypoints if item]
 
     if len(entrypoints) != 1:
@@ -561,7 +561,7 @@ def _wait_guest_network_ready(
 
 def _resolve_guest_config_targets(service: celaut.Service) -> List[str]:
     # CH runtime expects the serialized configuration at the filesystem root.
-    # We keep this deterministic regardless of service.container.config.path.
+    # We keep this deterministic regardless of service.container.config_declaration.path.
     _ = service
     return ["/__config__"]
 
@@ -672,7 +672,7 @@ def execute(
         config_targets = _resolve_guest_config_targets(service=service)
         log.LOGGER(
             f"[CH][{vmachine_id}] guest config targets={config_targets} "
-            f"(service.container.config.path={list(service.container.config.path)})"
+            f"(service.container.config_declaration.path={list(service.container.config_declaration.path)})"
         )
         for target_path in config_targets:
             log.LOGGER(f"[CH][{vmachine_id}] injecting config into guest target: {target_path}")

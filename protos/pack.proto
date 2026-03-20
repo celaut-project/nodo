@@ -4,6 +4,11 @@ import "celaut.proto";
 
 message Service {
     message Container {
+        message Init {
+            repeated string entry_path = 1;
+            map<string, bytes> xattrs = 2;
+        }
+
         message Filesystem {
             message ItemBranch {
                 string name = 1; // id for path
@@ -17,9 +22,9 @@ message Service {
         }
         celaut.Service.Container.Architecture architecture = 1;
         celaut.Service.Container.Filesystem filesystem = 2;
-        repeated string entrypoint = 3;
+        Init init = 3;
         optional celaut.Service.Container.Resources resources = 4;
-        celaut.Service.Container.Config config = 5;
+        celaut.Service.Container.ConfigDeclaration config_declaration = 5;
         repeated celaut.Service.Api.Protocol node_protocol_stack = 6;
     }
     string prose = 1;

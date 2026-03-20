@@ -9,6 +9,7 @@ from src.database import sql_connection
 from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.utils.logger import LOGGER
 from src.utils.config import ConfigManager
+from src.utils.contract_xattrs import set_address, set_script, set_token_id
 from threading import Lock
 from time import sleep
 
@@ -36,12 +37,7 @@ GAS_PER_ERG_L = lambda: int(env_manager.get("ledgers.ergo.GAS_PER_ERG"))
 WAIT_TX_TIME = 240  # 20 minutes (each 5 seconds)
 WAT_TX_SLEEP_TIME = 5
 
-ergo_template = celaut_pb2.Contract.ScriptTemplate(
-               prose="",
-               formal=CONTRACT.encode("utf-8")
-           )
-
-CONTRACT_HASH = sha3_256(ergo_template.SerializeToString()).hexdigest()
+CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 
 """
 
@@ -144,13 +140,12 @@ def get_balances(only_sender: bool=False) -> Tuple[Tuple[str, float], Tuple[str,
 def init():
     sender_addr = str(__get_sender_addr(AUXILIAR_MNEMONIC).toString())
     sql = sql_connection.SQLConnection()
+    contract = celaut_pb2.Contract(ledger=ergo_ledger)
+    set_token_id(contract, "ERG")
+    set_address(contract, sender_addr)
+    set_script(contract, CONTRACT.encode("utf-8"))
     sql.add_contract(
-        contract=celaut_pb2.Contract(
-           ledger=ergo_ledger,
-           token_id="ERG",
-           script=sender_addr.encode("utf-8"),
-           template=ergo_template
-        )
+        contract=contract
     )
 
 def check_sender_balance(amount: int) -> bool:
@@ -282,15 +277,11 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
                 obj = response.json()
                 if obj["numConfirmations"] > 1:
                     LOGGER(f"Tx {tx_id} verified.")
-                    return celaut_pb2.Contract(
-                        ledger=ledger,
-                        token_id="ERG",
-                        template=celaut_pb2.Contract.ScriptTemplate(
-                            prose="",
-                            formal=CONTRACT.encode("utf-8")
-                        ),
-                        script=script
-                    )
+                    contract = celaut_pb2.Contract(ledger=ledger)
+                    set_token_id(contract, "ERG")
+                    set_script(contract, CONTRACT.encode("utf-8"))
+                    set_address(contract, script.decode("utf-8"))
+                    return contract
 
             raise Exception(f"Can't verify the tx {tx_id}")
 

@@ -6,6 +6,7 @@ from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCos
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.reputation_system.contracts.ergo.proof_validation import sign_message
+from src.utils.contract_xattrs import get_script, get_address
 from src.tunneling_system.rpc_tunnel import service_tunnel
 from src.tunneling_system.tunnels import TunnelSystem
 from src.gateway.utils import generate_node_peer_info
@@ -170,8 +171,8 @@ class Gateway(celaut_pb2_grpc.Gateway):
         if not validate_payment_process(
                 amount=from_gas_amount(payment.gas_amount),
                 ledger=payment.contract.ledger,
-                contract=payment.contract.template.formal,
-                script=payment.contract.script,
+                contract=get_script(payment.contract),
+                script=get_address(payment.contract).encode("utf-8"),
                 token=payment.deposit_token,
         ):
             raise Exception('Error: payment not valid.')

@@ -14,6 +14,7 @@ from bee_rpc import client as bee
 
 from protos import celaut_pb2_grpc, celaut_pb2, celaut_pb2
 from src.utils import logger as log, logger
+from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_script, get_token_id
 from src.utils.config import ConfigManager
 from src.utils.singleton import Singleton
 from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
@@ -1052,8 +1053,8 @@ class SQLConnection(metaclass=Singleton):
             peer_id (Optional[str]): The ID of the peer or None for a self contract (to be send to clients.)
             gas_price (Int): Gas per unit of the token if the contract represents one, or gas per contract spend/execution/usage.
         """
-        contract_str: bytes = contract.template.SerializeToString()
-        address: str = contract.script.decode('utf-8')
+        contract_str: bytes = get_script(contract) or contract_shape_bytes(contract)
+        address: str = get_address(contract)
 
         ledger = self.check_if_ledger_exists(ledger_to_check=contract.ledger)
         ledger_str: bytes = ledger.SerializeToString()
@@ -1111,7 +1112,7 @@ class SQLConnection(metaclass=Singleton):
         """
 
         try:
-            new_proof_id = contract.token_id
+            new_proof_id = get_token_id(contract)
 
             # Fetch the peer to ensure it exists
             result = self._execute('SELECT id FROM peer WHERE id = ?', (peer_id,))

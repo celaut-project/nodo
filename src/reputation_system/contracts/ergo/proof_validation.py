@@ -13,6 +13,7 @@ from src.reputation_system.bip_wallet_verification import bip_ecdsa_verify, bip_
 from src.database.access_functions.peers import get_peer_directions
 from src.utils.logger import LOGGER as logger
 from src.utils.config import ConfigManager
+from src.utils.contract_xattrs import get_script, get_token_id
 
 from typing import Optional
 
@@ -75,13 +76,21 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
     generating a random message, signing it using the peer's public key, and verifying the signature.
     """
     # Check compatibility of the contract ledger
-    compatibility = contract_ledger.ledger.formal == ergo_ledger.formal and contract_ledger.template.formal == CONTRACT.encode("utf-8")
+    compatibility = (
+        contract_ledger.ledger.formal == ergo_ledger.formal
+        and get_script(contract_ledger) == CONTRACT.encode("utf-8")
+    )
     
     if not compatibility: 
-        logger(f"Contract ledger not compatible: ledger: {contract_ledger.ledger.formal == ergo_ledger.formal} | template: {contract_ledger.contract.formal == CONTRACT.encode('utf-8')}")
+        logger(
+            "Contract ledger not compatible: "
+            f"ledger={contract_ledger.ledger.formal == ergo_ledger.formal} "
+            f"script={get_script(contract_ledger) == CONTRACT.encode('utf-8')}"
+        )
         return False
     
-    if not contract_ledger.token_id:
+    token_id = get_token_id(contract_ledger)
+    if not token_id:
         logger(f"Incomplete contract ledger, there is no address")
         return False
     
@@ -90,7 +99,7 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
     logger(f"Generated random message: {message}")
     
     # Get public key from explorer
-    public_key = __get_single_address_with_all_tokens(contract_ledger.token_id)
+    public_key = __get_single_address_with_all_tokens(token_id)
     if not public_key:
         logger("Failed to obtain public key.")
         return False

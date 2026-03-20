@@ -44,7 +44,7 @@ def write_config(path: str, config: celaut.ConfigurationFile):
 def set_config(container_id: str, 
                config: Optional[celaut.Configuration], 
                resources: celaut.Sysresources,
-               api: celaut.Service.Container.Config,
+               api: celaut.Service.Container.ConfigDeclaration,
                network_resolution: List[celaut.ConfigurationFile.NetworkResolution]
             ):
     

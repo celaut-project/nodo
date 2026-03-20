@@ -100,10 +100,11 @@ def create_container(id: str, entrypoint: list, use_other_ports=None) -> docker_
 
 
 def execute(assigment_ports, by_local, service_id, service, config, initial_system_resources, father_id) -> Tuple[str, str]:
+    entry_path = list(service.container.init.entry_path)
     container = create_container(
         use_other_ports=assigment_ports if not by_local else None,
         id=service_id,
-        entrypoint=service.container.entrypoint
+        entrypoint=entry_path
     )
 
     networks = service.network
@@ -126,7 +127,7 @@ def execute(assigment_ports, by_local, service_id, service, config, initial_syst
         container_id=container.id, 
         config=config, 
         resources=initial_system_resources,
-        api=service.container.config,
+        api=service.container.config_declaration,
         network_resolution=networks_resolved
     )
 

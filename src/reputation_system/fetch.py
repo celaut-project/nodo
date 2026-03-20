@@ -3,6 +3,7 @@ from typing import Generator
 from protos import celaut_pb2 as celaut
 from src.reputation_system.envs import CONTRACT, ergo_ledger
 from src.utils.config import ConfigManager
+from src.utils.contract_xattrs import set_script, set_token_id
 
 
 env_manager = ConfigManager()
@@ -10,15 +11,10 @@ env_manager = ConfigManager()
 def local_proofs() -> Generator[celaut.Contract, None, None]:
     proof_id = env_manager.get('REPUTATION_PROOF_ID')
     if proof_id:
-        yield celaut.Contract(
-            template=celaut.Contract.ScriptTemplate(
-                prose="",
-                formal=CONTRACT.encode("utf-8")
-            ),
-            script=b"",
-            token_id=proof_id,
-            ledger=ergo_ledger
-        )
+        contract = celaut.Contract(ledger=ergo_ledger)
+        set_script(contract, CONTRACT.encode("utf-8"))
+        set_token_id(contract, proof_id)
+        yield contract
     
 def get_reputation_proofs_by_hash() -> Generator[celaut.Contract, None, None]:
     pass  # TODO
