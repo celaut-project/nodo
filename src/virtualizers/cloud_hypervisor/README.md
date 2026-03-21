@@ -75,6 +75,11 @@ virtualizers.cloud_hypervisor.NETWORK_MODE
 virtualizers.cloud_hypervisor.NETWORK_BRIDGE_NAME
 virtualizers.cloud_hypervisor.NETWORK_SUBNET
 virtualizers.cloud_hypervisor.NETWORK_GATEWAY_IP
+virtualizers.cloud_hypervisor.SECURITY.PATH_CONFINEMENT
+virtualizers.cloud_hypervisor.SECURITY.DEVICE_NODES_POLICY
+virtualizers.cloud_hypervisor.SECURITY.DEVICE_NODE_ALLOWLIST
+virtualizers.cloud_hypervisor.SECURITY.REQUIRE_TRUSTED_SERVICE_FOR_DEVICES
+virtualizers.cloud_hypervisor.SECURITY.TRUSTED_SERVICE_IDS
 ```
 
 ## Riesgos y mitigaciones

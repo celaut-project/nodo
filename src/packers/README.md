@@ -53,3 +53,34 @@
 - If `service.json` provides slash-based input (for example `"/config/runtime/node.pb"`), packer normalizes it to segmented form.
 - `api[].gas_amount_per_call` is serialized to `api.slot[].gas_amount_per_call`.
 - `resources.start_time_ms` no longer exists.
+
+## Filesystem Metadata Xattrs Contract
+
+Each `container.filesystem.branch[*]` element includes a metadata contract in
+`branch.xattrs` so Cloud Hypervisor can rebuild an `ext4` with the original
+filesystem metadata.
+
+Reserved keys:
+
+- `mode`
+- `uid`
+- `gid`
+- `mtime_ns`
+- `device.major`
+- `device.minor`
+- `device.is_block`
+
+Encoding rules:
+
+- All values are UTF-8 bytes containing base-10 integers.
+- `device.is_block` must be `0` or `1`.
+- Non-device elements (`file`, `dir`, `symlink`) must encode:
+  - `device.major = 0`
+  - `device.minor = 0`
+  - `device.is_block = 0`
+
+Compatibility behavior:
+
+- Legacy services without these keys are still accepted by Cloud Hypervisor
+  builder, using the previous executable fallback heuristic.
+- Partial or malformed metadata is treated as an integrity error.
