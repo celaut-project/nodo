@@ -51,6 +51,25 @@ virtualizers:
     # CONSOLE_MODE: off|null|tty|file=/custom/path.log
     SERIAL_MODE: "file"
     CONSOLE_MODE: "off"
+    SECURITY:
+      # Enforce rootfs destination confinement for all filesystem paths.
+      PATH_CONFINEMENT: true
+      # Device nodes policy for filesystem xattrs: deny|allowlist
+      DEVICE_NODES_POLICY: "deny"
+      # Allowlist entries apply only when DEVICE_NODES_POLICY=allowlist.
+      # Example:
+      # - path: "/dev/null"
+      #   type: "char"   # char|block
+      #   major: 1
+      #   minor: 3
+      #   mode: "0666"   # optional permission mode (setuid/setgid/sticky forbidden)
+      DEVICE_NODE_ALLOWLIST: []
+      # When true, allowlist device nodes only for trusted service IDs.
+      REQUIRE_TRUSTED_SERVICE_FOR_DEVICES: true
+      # Explicit list of trusted service hashes allowed to use device node allowlist.
+      TRUSTED_SERVICE_IDS: []
+      # Reserved hook for future rootfs build sandboxing strategy.
+      ROOTFS_BUILD_SANDBOX: "none"
 
 builder:
   WAIT_FOR_CONTAINER: 60

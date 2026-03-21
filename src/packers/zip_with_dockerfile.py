@@ -12,6 +12,12 @@ from bee_rpc.utils import modify_env
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager, SHA3_256_ID, DOCKER_COMMAND, DOCKER_ENV, PACKER_SUPPORTED_ARCHITECTURES
+from src.utils.filesystem_xattrs import (
+    describe_mode_type,
+    encode_filesystem_metadata_xattrs,
+    is_supported_filesystem_entry_mode,
+    metadata_from_lstat,
+)
 from src.utils.verify import calculate_hashes, calculate_hashes_by_stream
 from src.utils.config import ConfigManager
 from src.manager.resources import IOBigData
@@ -206,29 +212,55 @@ class ZipContainerPacker:
                         continue
                     branch = celaut.Service.Container.Filesystem.ItemBranch()
                     branch.name = os.path.basename(b_name)
+                    branch_host_path = host_dir + directory + b_name
+                    try:
+                        branch_stat = os.lstat(branch_host_path)
+                    except OSError as e:
+                        raise RuntimeError(
+                            f"Unable to read filesystem metadata for '{directory + b_name}': {e}"
+                        ) from e
+
+                    if not is_supported_filesystem_entry_mode(branch_stat.st_mode):
+                        raise RuntimeError(
+                            "Unsupported filesystem entry type for "
+                            f"'{directory + b_name}': "
+                            f"{describe_mode_type(branch_stat.st_mode)} "
+                            f"(mode={oct(branch_stat.st_mode)})"
+                        )
+                    branch_metadata = metadata_from_lstat(branch_stat)
+                    encode_filesystem_metadata_xattrs(branch.xattrs, branch_metadata)
+
                     # It's a link.
-                    if os.path.islink(host_dir + directory + b_name):
+                    if os.path.islink(branch_host_path):
                         branch.link.dst = directory + b_name
-                        branch.link.src = os.path.realpath(host_dir + directory + b_name)[
+                        branch.link.src = os.path.realpath(branch_host_path)[
                                           len(host_dir):] if host_dir in os.path.realpath(
-                            host_dir + directory + b_name) else os.path.realpath(host_dir + directory + b_name)
+                            branch_host_path) else os.path.realpath(branch_host_path)
+                    # Device node (block/char): represent as file placeholder and recover via xattrs in CH build.
+                    elif branch_metadata.is_device:
+                        branch.file = b""
                     # It's a file.
-                    elif os.path.isfile(host_dir + directory + b_name):
-                        if os.path.getsize(host_dir + directory + b_name) < MIN_BUFFER_BLOCK_SIZE:
-                            with open(host_dir + directory + b_name, 'rb') as file:
+                    elif os.path.isfile(branch_host_path):
+                        if os.path.getsize(branch_host_path) < MIN_BUFFER_BLOCK_SIZE:
+                            with open(branch_host_path, 'rb') as file:
                                 branch.file = file.read()
                         else:
                             block_hash, block = block_builder.create_block(
-                                file_path=host_dir + directory + b_name,
+                                file_path=branch_host_path,
                                 copy=True
                             )
                             branch.file = block.SerializeToString()
                             if block_hash not in self.blocks:
                                 self.blocks.append(block_hash)
                     # It's a folder.
-                    elif os.path.isdir(host_dir + directory + b_name):
+                    elif os.path.isdir(branch_host_path):
                         branch.filesystem.CopyFrom(
                             recursive_parsing(directory=directory + b_name + '/')
+                        )
+                    else:
+                        raise RuntimeError(
+                            "Unsupported filesystem entry kind for "
+                            f"'{directory + b_name}' after metadata capture."
                         )
                     filesystem.branch.append(branch)
                 return filesystem
