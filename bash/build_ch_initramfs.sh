@@ -54,7 +54,7 @@ trap cleanup EXIT
 mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/etc" "$ROOT/newroot" "$ROOT/proc" "$ROOT/sys"
 
 install -m 0755 "$BUSYBOX_BIN" "$ROOT/bin/busybox"
-for applet in sh mount switch_root sleep cat echo mkdir ln test chmod; do
+for applet in sh mount switch_root sleep cat echo mkdir ln test chmod ip; do
     ln -sf /bin/busybox "$ROOT/bin/$applet"
 done
 
@@ -73,6 +73,117 @@ fatal() {
     while true; do
         sleep 3600
     done
+}
+
+mask_octet_to_bits() {
+    case "$1" in
+        255) echo 8 ;;
+        254) echo 7 ;;
+        252) echo 6 ;;
+        248) echo 5 ;;
+        240) echo 4 ;;
+        224) echo 3 ;;
+        192) echo 2 ;;
+        128) echo 1 ;;
+        0)   echo 0 ;;
+        *)   return 1 ;;
+    esac
+}
+
+mask_to_prefix() {
+    local netmask="$1"
+    local o1 o2 o3 o4
+    local b1 b2 b3 b4
+    IFS=. read -r o1 o2 o3 o4 <<EOF
+$netmask
+EOF
+    [ -n "${o1:-}" ] && [ -n "${o2:-}" ] && [ -n "${o3:-}" ] && [ -n "${o4:-}" ] || return 1
+    b1="$(mask_octet_to_bits "$o1")" || return 1
+    b2="$(mask_octet_to_bits "$o2")" || return 1
+    b3="$(mask_octet_to_bits "$o3")" || return 1
+    b4="$(mask_octet_to_bits "$o4")" || return 1
+    echo $((b1 + b2 + b3 + b4))
+}
+
+first_non_loopback_iface() {
+    local p iface
+    for p in /sys/class/net/*; do
+        iface="${p##*/}"
+        [ "$iface" = "lo" ] && continue
+        echo "$iface"
+        return 0
+    done
+    return 1
+}
+
+iface_has_ipv4() {
+    local iface="$1"
+    /bin/busybox ip -4 addr show dev "$iface" 2>/dev/null | /bin/busybox grep -q 'inet '
+}
+
+configure_guest_network() {
+    local cmdline ip_arg token
+    local client_ip gateway_ip netmask iface autoconf
+    local old_ifs prefix
+
+    cmdline="$(cat /proc/cmdline 2>/dev/null || true)"
+    ip_arg=""
+    for token in $cmdline; do
+        case "$token" in
+            ip=*)
+                ip_arg="${token#ip=}"
+                ;;
+        esac
+    done
+
+    [ -n "$ip_arg" ] || {
+        log "no ip= kernel parameter; skipping guest network bootstrap"
+        return 0
+    }
+
+    case "$ip_arg" in
+        *:*)
+            old_ifs="$IFS"
+            IFS=':'
+            set -- $ip_arg
+            IFS="$old_ifs"
+            client_ip="${1:-}"
+            gateway_ip="${3:-}"
+            netmask="${4:-}"
+            iface="${6:-}"
+            autoconf="${7:-}"
+            ;;
+        *)
+            log "unsupported ip= format '$ip_arg'; skipping guest network bootstrap"
+            return 0
+            ;;
+    esac
+
+    if [ -z "$iface" ] || [ "$iface" = "none" ] || [ "$iface" = "auto" ]; then
+        iface="$(first_non_loopback_iface || true)"
+    fi
+    [ -n "$iface" ] || fatal "no guest network interface found"
+
+    /bin/busybox ip link set dev "$iface" up || fatal "cannot bring up interface '$iface'"
+
+    if iface_has_ipv4 "$iface"; then
+        log "guest network already configured on '$iface'"
+        return 0
+    fi
+
+    [ -n "$client_ip" ] || fatal "missing client IP in ip= kernel parameter"
+    [ -n "$netmask" ] || fatal "missing netmask in ip= kernel parameter"
+    prefix="$(mask_to_prefix "$netmask")" || fatal "invalid netmask '$netmask' in ip= kernel parameter"
+
+    /bin/busybox ip addr add "${client_ip}/${prefix}" dev "$iface" \
+        || fatal "cannot assign ${client_ip}/${prefix} to '$iface'"
+
+    if [ -n "$gateway_ip" ] && [ "$gateway_ip" != "0.0.0.0" ]; then
+        /bin/busybox ip route replace default via "$gateway_ip" dev "$iface" \
+            || fatal "cannot set default route via '$gateway_ip' on '$iface'"
+    fi
+
+    log "configured guest network iface=$iface ip=${client_ip}/${prefix} gw=${gateway_ip:-<none>} autoconf=${autoconf:-<empty>}"
 }
 
 mkdir -p /proc /sys /dev /newroot
@@ -94,6 +205,7 @@ done
 [ -b /dev/vda ] || fatal "timed out waiting for /dev/vda after ${WAIT_SECONDS}s"
 
 mount -t ext4 -o rw /dev/vda /newroot || fatal "cannot mount /dev/vda on /newroot"
+configure_guest_network
 
 mkdir -p /newroot/proc /newroot/sys /newroot/dev /newroot/run /newroot/tmp
 chmod 1777 /newroot/tmp || fatal "cannot set /newroot/tmp permissions"

@@ -539,7 +539,8 @@ def _wait_guest_network_ready(
         f"Guest network did not become ready within {timeout_s:.1f}s for {vm_ip}. "
         f"last_ping_rc={last_ping_rc}, last_ping_stdout={last_ping_stdout}, "
         f"last_ping_stderr={last_ping_stderr}, last_neigh={last_neigh_stdout}. "
-        "Check guest serial log and verify custom initramfs/rootfs entrypoint."
+        "Check guest serial log for initramfs network bootstrap errors and verify "
+        "custom initramfs/rootfs entrypoint."
     )
 
 
