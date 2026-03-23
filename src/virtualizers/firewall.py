@@ -2,6 +2,11 @@ from enum import Enum
 from typing import Optional
 
 from protos import celaut_pb2 as celaut
+from src.database.sql_connection import SQLConnection
+from src.utils.config import ConfigManager
+
+sc = SQLConnection()
+env_manager = ConfigManager()
 
 
 class TransportProtocol(Enum):
@@ -10,12 +15,33 @@ class TransportProtocol(Enum):
     UDP = "udp"
 
 
+def _resolve_virtualizer(vmachine_id: str) -> str:
+    try:
+        virtualizer = sc.get_internal_virtualizer(id=vmachine_id)
+        if isinstance(virtualizer, str) and virtualizer.strip():
+            return virtualizer.strip()
+    except Exception:
+        pass
+    return env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "docker")
+
+
 def allow_connection(
     vmachine_id: str,
     ip: str,
     port: Optional[int] = None,
     protocol: TransportProtocol = TransportProtocol.TCP,
 ) -> bool:
+    virtualizer = _resolve_virtualizer(vmachine_id)
+    if virtualizer == "cloud_hypervisor":
+        from src.virtualizers.cloud_hypervisor.firewall import allow_connection as ch_allow_connection
+
+        return ch_allow_connection(
+            vmachine_id=vmachine_id,
+            ip=ip,
+            port=port,
+            protocol=protocol,
+        )
+
     from src.virtualizers.docker.firewall import allow_connection as docker_allow_connection
 
     return docker_allow_connection(
@@ -30,6 +56,17 @@ def allow_connection_to_instance(
     vmachine_id: str,
     instance: celaut.Instance,
 ) -> bool:
+    virtualizer = _resolve_virtualizer(vmachine_id)
+    if virtualizer == "cloud_hypervisor":
+        from src.virtualizers.cloud_hypervisor.firewall import (
+            allow_connection_to_instance as ch_allow_connection_to_instance,
+        )
+
+        return ch_allow_connection_to_instance(
+            vmachine_id=vmachine_id,
+            instance=instance,
+        )
+
     from src.virtualizers.docker.firewall import allow_connection_to_instance as docker_allow_connection_to_instance
 
     return docker_allow_connection_to_instance(
@@ -39,6 +76,12 @@ def allow_connection_to_instance(
 
 
 def block_all(vmachine_id: str) -> bool:
+    virtualizer = _resolve_virtualizer(vmachine_id)
+    if virtualizer == "cloud_hypervisor":
+        from src.virtualizers.cloud_hypervisor.firewall import block_all as ch_block_all
+
+        return ch_block_all(vmachine_id=vmachine_id)
+
     from src.virtualizers.docker.firewall import block_all as docker_block_all
 
     return docker_block_all(container_id=vmachine_id)
@@ -50,6 +93,17 @@ def remove_rule(
     port: Optional[int] = None,
     protocol: TransportProtocol = TransportProtocol.TCP,
 ) -> bool:
+    virtualizer = _resolve_virtualizer(vmachine_id)
+    if virtualizer == "cloud_hypervisor":
+        from src.virtualizers.cloud_hypervisor.firewall import remove_rule as ch_remove_rule
+
+        return ch_remove_rule(
+            vmachine_id=vmachine_id,
+            ip=ip,
+            port=port,
+            protocol=protocol,
+        )
+
     from src.virtualizers.docker.firewall import remove_rule as docker_remove_rule
 
     return docker_remove_rule(
