@@ -46,6 +46,8 @@ virtualizers:
     KERNEL_CMDLINE_EXTRA: "console=ttyS0"
     # Fail fast if the guest does not become reachable on the bridge network.
     GUEST_NETWORK_READY_TIMEOUT_S: 8
+    # cgroup v2 root path for per-VM lifecycle hotplug controls.
+    CGROUPS_BASE_DIR: "/sys/fs/cgroup"
     # Guest output streams for debug:
     # SERIAL_MODE: file|off|null|tty|file=/custom/path.log
     # CONSOLE_MODE: off|null|tty|file=/custom/path.log
