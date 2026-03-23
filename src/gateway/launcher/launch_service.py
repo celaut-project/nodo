@@ -105,7 +105,9 @@ def launch_service(
                                 protocol = slot_protocol.get(slot.internal_port, TransportProtocol.TCP)
                                 if not allow_connection(vmachine_id=father_id,
                                                         ip=uri.ip, port=uri.port, protocol=protocol):
-                                    log.LOGGER(f"Docker firewall allow connection function failed for the father {father_id}")
+                                    log.LOGGER(
+                                        f"Firewall allow_connection failed for parent instance {father_id}"
+                                    )
                                     # TODO This should be controlled.
                     except Exception as e:
                         log.LOGGER(f"Exception blocking firewall rules to {father_id} for the dependency {str(instance)}")

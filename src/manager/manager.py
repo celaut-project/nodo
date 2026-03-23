@@ -411,7 +411,9 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
             for slot in instance.instance.uri_slot:
                 for uri in slot:
                     if not remove_firewall_rule(vmachine_id=father_id, ip=uri.ip, port=uri.port, protocol=TransportProtocol.TCP):
-                        log.LOGGER(f"Docker firewall remove rule function failed for the father {father_id}")
+                        log.LOGGER(
+                            f"Firewall remove_rule failed for parent instance {father_id}"
+                        )
                         # TODO This should be controlled.
         except Exception as e:
             log.LOGGER(f"Exception removing rules for the father {father_id}")

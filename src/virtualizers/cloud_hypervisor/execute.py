@@ -15,13 +15,20 @@ from uuid import uuid4
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
+from src.gateway.utils import GATEWAY_PORT
 from src.gateway.utils import generate_node_peer_info
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
+from src.virtualizers.cloud_hypervisor.firewall import (
+    allow_connection as ch_allow_connection,
+    allow_connection_to_instance as ch_allow_connection_to_instance,
+    block_all as ch_block_all,
+)
 from src.virtualizers.cloud_hypervisor.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
 from src.virtualizers.entry_path import resolve_entrypoint_path
+from src.virtualizers.firewall import TransportProtocol
 
 env_manager = ConfigManager()
 sc = SQLConnection()
@@ -551,6 +558,52 @@ def _resolve_guest_config_targets(service: celaut.Service) -> List[str]:
     return ["/__config__"]
 
 
+def _configure_guest_firewall_policy(
+    vmachine_id: str,
+    vm_ip: str,
+    network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
+) -> None:
+    if not ch_block_all(vmachine_id=vmachine_id, source_ip=vm_ip):
+        raise CHExecuteError(
+            f"Failed to apply default deny firewall policy for VM {vmachine_id} ({vm_ip})."
+        )
+
+    if not ch_allow_connection(
+        vmachine_id=vmachine_id,
+        ip=NETWORK_GATEWAY_IP,
+        port=GATEWAY_PORT,
+        protocol=TransportProtocol.TCP,
+        source_ip=vm_ip,
+    ):
+        raise CHExecuteError(
+            f"Failed to allow gateway egress for VM {vmachine_id}: "
+            f"{vm_ip} -> {NETWORK_GATEWAY_IP}:{GATEWAY_PORT}/tcp"
+        )
+    log.LOGGER(
+        f"[CH][{vmachine_id}] firewall allow gateway: {vm_ip} -> {NETWORK_GATEWAY_IP}:{GATEWAY_PORT}/tcp"
+    )
+
+    for net_res in network_resolution:
+        tag = net_res.tags[0] if net_res.tags else "<untagged>"
+        rule_applied = False
+        for instance in net_res.peer_instances:
+            if ch_allow_connection_to_instance(
+                vmachine_id=vmachine_id,
+                instance=instance,
+                source_ip=vm_ip,
+            ):
+                log.LOGGER(
+                    f"[CH][{vmachine_id}] firewall allow network tag '{tag}' resolved via peer instance"
+                )
+                rule_applied = True
+                break
+
+        if not rule_applied:
+            log.LOGGER(
+                f"[CH][{vmachine_id}] firewall warning: no egress rule could be applied for network tag '{tag}'"
+            )
+
+
 def _kernel_cmdline(vm_ip: str, netmask: str) -> str:
     guest_dev = str(GUEST_NET_DEVICE).strip() if GUEST_NET_DEVICE is not None else ""
     if not guest_dev or guest_dev.lower() in {"auto", "none"}:
@@ -747,6 +800,11 @@ def execute(
             vm_ip=vm_ip,
             timeout_s=network_timeout_s,
             serial_log_path=serial_log_path,
+        )
+        _configure_guest_firewall_policy(
+            vmachine_id=vmachine_id,
+            vm_ip=vm_ip,
+            network_resolution=network_resolution,
         )
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
 
