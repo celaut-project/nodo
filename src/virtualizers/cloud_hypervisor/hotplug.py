@@ -225,6 +225,15 @@ def hotplug(
     report["success"] = strict_ok
     _persist_report(vmachine_id=vmachine_id, state=state, report=report, cgroup_path=cgroup_path)
 
+    if not strict_ok:
+        failed_details = {
+            name: result
+            for name, result in report["results"].items()
+            if result.get("status") == "failed"
+        }
+        if failed_details:
+            log.LOGGER(f"[CH][{_id}] hotplug failure details: {failed_details}")
+
     log.LOGGER(
         f"[CH][{_id}] hotplug result success={strict_ok}, "
         f"mem={report['results']['mem_limit']['status']}, cpu={report['results']['cpu']['status']}, "
