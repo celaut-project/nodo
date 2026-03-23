@@ -143,6 +143,16 @@ def maintain_vmachines(debug_mode: bool=False):
             update_vmachine_reputation(container_id=vmachine_id, amount=10)
             if debug_mode: log.LOGGER(f"Updated reputation for {vmachine_id} due to successful maintenance.")
 
+    # Cloud Hypervisor janitor: cleanup stale/orphan runtime resources not tracked by DB.
+    try:
+        from src.virtualizers.cloud_hypervisor.maintain import (
+            janitor_cleanup_orphans as ch_janitor_cleanup_orphans,
+        )
+
+        ch_janitor_cleanup_orphans(debug_mode=debug_mode)
+    except Exception as e:
+        log.LOGGER(f"[CH][janitor] failed: {e}")
+
 
 def maintain_clients(debug_mode: bool=False):
     for client_id in SQLConnection().get_clients_id():

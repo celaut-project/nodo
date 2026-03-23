@@ -5,10 +5,23 @@ from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
 from src.utils.utils import from_gas_amount
+try:
+    from src.virtualizers.cloud_hypervisor.observability import get_vm_runtime_snapshot
+except Exception:  # pragma: no cover - defensive fallback for minimal environments
+    def get_vm_runtime_snapshot(vmachine_id: str):
+        _ = vmachine_id
+        return {
+            "pid": None,
+            "alive": False,
+            "uptime_s": None,
+            "mem_rss_bytes": None,
+            "log_paths": {},
+        }
 
 env_manager = ConfigManager()
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 METADATA = env_manager.get("METADATA_REGISTRY")
+DEFAULT_VIRTUALIZER = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "docker")
 
 def list_instances(groupable: bool = False, search: str = ""):
     conn = sqlite3.connect(DATABASE_FILE)
@@ -48,6 +61,8 @@ def list_instances(groupable: bool = False, search: str = ""):
                 return f"{service_id} (Metadata Error)"
             
         def bytes_to_readable(bytes_value):
+            if bytes_value is None:
+                return "N/A"
             # Define units and their thresholds (using 1024-based units)
             units = [(1024**3, "GB"), (1024**2, "MB"), (1024, "KB"), (1, "bytes")]
             
@@ -57,20 +72,43 @@ def list_instances(groupable: bool = False, search: str = ""):
                     value = bytes_value / threshold
                     # Return formatted string (2 decimal places unless it's bytes)
                     return f"{value:.2f} {unit}" if unit != "bytes" else f"{int(value)} {unit}"
-            
+
             return "0 bytes"  # Fallback for zero bytes
+
+        def seconds_to_readable(seconds_value):
+            if seconds_value is None:
+                return "N/A"
+            try:
+                total_seconds = int(seconds_value)
+            except (TypeError, ValueError):
+                return "N/A"
+            if total_seconds < 0:
+                total_seconds = 0
+            days, rem = divmod(total_seconds, 86400)
+            hours, rem = divmod(rem, 3600)
+            minutes, seconds = divmod(rem, 60)
+            parts = []
+            if days:
+                parts.append(f"{days}d")
+            if hours:
+                parts.append(f"{hours}h")
+            if minutes:
+                parts.append(f"{minutes}m")
+            parts.append(f"{seconds}s")
+            return " ".join(parts)
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT id, father_id, gas, serialized_instance, service_id, mem_limit FROM local_instances"
+                "SELECT id, father_id, gas, serialized_instance, service_id, mem_limit, virtualizer FROM local_instances"
             )
-            for id_, father_id, gas, si, service, mem_limit in cursor.fetchall():
+            for id_, father_id, gas, si, service, mem_limit, virtualizer in cursor.fetchall():
                 parent_type = (
                     'internal_service' if father_id in internal_ids else
                     'client' if father_id in client_ids else
                     'unknown'
                 )
+                runtime_virtualizer = str(virtualizer).strip() if virtualizer else DEFAULT_VIRTUALIZER
                 gas = int(gas)
                 gas_value = 'N/A'
                 if gas is not None:
@@ -78,6 +116,15 @@ def list_instances(groupable: bool = False, search: str = ""):
                        gas_value = ssformat(int(gas))
                    except (ValueError, TypeError):
                        gas_value = "Invalid Gas Data"
+
+                vm_pid = "N/A"
+                vm_uptime = "N/A"
+                vm_mem = "N/A"
+                if groupable and runtime_virtualizer == "cloud_hypervisor" and id_:
+                    snapshot = get_vm_runtime_snapshot(vmachine_id=id_)
+                    vm_pid = str(snapshot.get("pid")) if snapshot.get("pid") is not None else "N/A"
+                    vm_uptime = seconds_to_readable(snapshot.get("uptime_s"))
+                    vm_mem = bytes_to_readable(snapshot.get("mem_rss_bytes"))
 
                 instances.append({
                     'id': id_ or 'N/A',
@@ -88,7 +135,11 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'parent_type': parent_type,
                     'gas': gas_value,
                     'location': 'local',
-                    'mem_limit': bytes_to_readable(mem_limit)
+                    'virtualizer': runtime_virtualizer,
+                    'mem_limit': bytes_to_readable(mem_limit),
+                    'vm_pid': vm_pid,
+                    'vm_uptime': vm_uptime,
+                    'vm_mem': vm_mem,
                 })
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
@@ -114,7 +165,11 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'parent_type': parent_type,
                     'gas': gas,
                     'location': peer_id or 'Unknown Peer',
-                    'mem_limit': 'N/A'
+                    'virtualizer': 'delegated',
+                    'mem_limit': 'N/A',
+                    'vm_pid': 'N/A',
+                    'vm_uptime': 'N/A',
+                    'vm_mem': 'N/A',
                 })
 
     except sqlite3.Error as e:
@@ -140,7 +195,7 @@ def list_instances(groupable: bool = False, search: str = ""):
             print("No service instances found.")
         return
 
-    def format_instance(inst, prefix=""):
+    def format_instance(inst, prefix="", include_runtime=False):
         color = '\033[37m' if inst.get('location', 'local') != 'local' else ''
         reset = '\033[0m' if color else ''
 
@@ -160,8 +215,17 @@ def list_instances(groupable: bool = False, search: str = ""):
             ("Parent Type", "parent_type"),
             ("Gas", "gas"),
             ("Location", "location"),
+            ("Virtualizer", "virtualizer"),
             ("Memory limit", "mem_limit")
         ]
+        if include_runtime and inst.get("virtualizer") == "cloud_hypervisor":
+            fields.extend(
+                [
+                    ("VM PID", "vm_pid"),
+                    ("VM Uptime", "vm_uptime"),
+                    ("VM Memory", "vm_mem"),
+                ]
+            )
         output_lines = []
         for label, key in fields:
             output_lines.extend(format_line(label, inst.get(key, 'N/A')))
@@ -196,7 +260,7 @@ def list_instances(groupable: bool = False, search: str = ""):
 
             if node_id not in inst_map: return
 
-            format_instance(inst_map[node_id], prefix)
+            format_instance(inst_map[node_id], prefix, include_runtime=True)
             node_children = children.get(node_id, [])
             if node_children:
                 print(f"{prefix}Dependencies:")
@@ -213,6 +277,6 @@ def list_instances(groupable: bool = False, search: str = ""):
 
     else:
         for i, inst in enumerate(instances):
-            format_instance(inst)
+            format_instance(inst, include_runtime=False)
             if i < len(instances) - 1:
                 print("-" * 40 + "\n")
