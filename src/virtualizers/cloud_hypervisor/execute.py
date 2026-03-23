@@ -294,8 +294,47 @@ def _network_preflight() -> ipaddress.IPv4Network:
 
     _run(["ip", "link", "set", NETWORK_BRIDGE_NAME, "up"])
     _run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
+    _ensure_masquerade(network)
 
     return network
+
+
+def _ensure_masquerade(network: ipaddress.IPv4Network) -> None:
+    subnet = network.with_prefixlen
+    check_cmd = [
+        "iptables",
+        "-t",
+        "nat",
+        "-C",
+        "POSTROUTING",
+        "-s",
+        subnet,
+        "!",
+        "-d",
+        subnet,
+        "-j",
+        "MASQUERADE",
+    ]
+    exists = _run(check_cmd, check=False)
+    if exists.returncode == 0:
+        return
+
+    _run(
+        [
+            "iptables",
+            "-t",
+            "nat",
+            "-A",
+            "POSTROUTING",
+            "-s",
+            subnet,
+            "!",
+            "-d",
+            subnet,
+            "-j",
+            "MASQUERADE",
+        ]
+    )
 
 
 def _create_tap(vmachine_id: str) -> str:
@@ -558,6 +597,69 @@ def _resolve_guest_config_targets(service: celaut.Service) -> List[str]:
     return ["/__config__"]
 
 
+def _is_domain_tag(tag: str) -> bool:
+    text = str(tag).strip().lower()
+    if not text or "." not in text or " " in text:
+        return False
+    return all(ch.isalnum() or ch in {"-", "."} for ch in text)
+
+
+def _resolve_domain_allowlist_records(
+    network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
+) -> List[Tuple[str, str]]:
+    records: set[Tuple[str, str]] = set()
+
+    for net_res in network_resolution:
+        domains = [str(tag).strip().lower() for tag in net_res.tags if _is_domain_tag(tag)]
+        if not domains:
+            continue
+
+        ips: set[str] = set()
+        for instance in net_res.peer_instances:
+            for slot in instance.uri_slot:
+                for uri in slot.uri:
+                    ip_text = str(uri.ip).strip()
+                    if not ip_text:
+                        continue
+                    try:
+                        parsed = ipaddress.ip_address(ip_text)
+                    except ValueError:
+                        continue
+                    if parsed.version != 4:
+                        continue
+                    ips.add(ip_text)
+
+        for domain in domains:
+            for ip in ips:
+                records.add((domain, ip))
+
+    return sorted(records, key=lambda item: (item[0], item[1]))
+
+
+def _prepare_guest_dns_files(
+    runtime_dir: Path,
+    network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
+) -> Tuple[Path, Path, List[Tuple[str, str]]]:
+    domain_records = _resolve_domain_allowlist_records(network_resolution)
+
+    hosts_lines = ["127.0.0.1 localhost"]
+    for domain, ip in domain_records:
+        hosts_lines.append(f"{ip} {domain}")
+    hosts_content = "\n".join(hosts_lines) + "\n"
+
+    resolv_content = f"nameserver {NETWORK_GATEWAY_IP}\noptions ndots:1\n"
+
+    hosts_host_path = runtime_dir / ".__nodo_hosts"
+    resolv_host_path = runtime_dir / ".__nodo_resolv.conf"
+
+    with open(hosts_host_path, "w", encoding="utf-8") as f:
+        f.write(hosts_content)
+    with open(resolv_host_path, "w", encoding="utf-8") as f:
+        f.write(resolv_content)
+
+    return hosts_host_path, resolv_host_path, domain_records
+
+
 def _configure_guest_firewall_policy(
     vmachine_id: str,
     vm_ip: str,
@@ -581,6 +683,22 @@ def _configure_guest_firewall_policy(
         )
     log.LOGGER(
         f"[CH][{vmachine_id}] firewall allow gateway: {vm_ip} -> {NETWORK_GATEWAY_IP}:{GATEWAY_PORT}/tcp"
+    )
+
+    for dns_protocol in (TransportProtocol.UDP, TransportProtocol.TCP):
+        if not ch_allow_connection(
+            vmachine_id=vmachine_id,
+            ip=NETWORK_GATEWAY_IP,
+            port=53,
+            protocol=dns_protocol,
+            source_ip=vm_ip,
+        ):
+            raise CHExecuteError(
+                f"Failed to allow DNS egress for VM {vmachine_id}: "
+                f"{vm_ip} -> {NETWORK_GATEWAY_IP}:53/{dns_protocol.value}"
+            )
+    log.LOGGER(
+        f"[CH][{vmachine_id}] firewall allow DNS: {vm_ip} -> {NETWORK_GATEWAY_IP}:53/tcp,udp"
     )
 
     for net_res in network_resolution:
@@ -721,6 +839,25 @@ def execute(
             )
         log.LOGGER(f"[CH][{vmachine_id}] guest config injection completed for {len(config_targets)} target(s)")
 
+        hosts_host_path, resolv_host_path, domain_records = _prepare_guest_dns_files(
+            runtime_dir=runtime_dir,
+            network_resolution=network_resolution,
+        )
+        _run_debugfs_write(
+            image_path=rootfs_path,
+            host_file=hosts_host_path,
+            guest_target="/etc/hosts",
+        )
+        _run_debugfs_write(
+            image_path=rootfs_path,
+            host_file=resolv_host_path,
+            guest_target="/etc/resolv.conf",
+        )
+        log.LOGGER(
+            f"[CH][{vmachine_id}] guest DNS metadata injected: /etc/hosts + /etc/resolv.conf "
+            f"(allowed_domains={len(domain_records)}, resolver={NETWORK_GATEWAY_IP})"
+        )
+
         with open(entrypoint_host_path, "w", encoding="utf-8") as f:
             f.write(f"{resolved_entrypoint}\n")
         log.LOGGER(f"[CH][{vmachine_id}] entrypoint metadata serialized: {entrypoint_host_path}")
@@ -846,6 +983,10 @@ def execute(
                 "rootfs_path": str(rootfs_path),
                 "entrypoint": resolved_entrypoint,
                 "dnat_rules": dnat_rules_state,
+                "dns_allowlist": [
+                    {"domain": domain, "ip": ip}
+                    for domain, ip in domain_records
+                ],
                 "bridge": NETWORK_BRIDGE_NAME,
                 "serial_log": str(serial_log_path) if serial_log_path else "",
                 "created_at": datetime.now(timezone.utc).isoformat(),
