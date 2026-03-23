@@ -51,6 +51,7 @@ def hotplug(
     system_requeriments_range: celaut_pb2.ModifyServiceSystemResourcesInput,
 ) -> bool:
     _id = vmachine_id[:6]
+    log.LOGGER(f"[CH][{_id}] event=hotplug request")
     log.LOGGER(f"[CH][{_id}] hotplug request received")
 
     if not system_requeriments_range:
@@ -234,6 +235,10 @@ def hotplug(
         if failed_details:
             log.LOGGER(f"[CH][{_id}] hotplug failure details: {failed_details}")
 
+    log.LOGGER(
+        f"[CH][{_id}] event=hotplug result={strict_ok}, "
+        f"mem={report['results']['mem_limit']['status']}, cpu={report['results']['cpu']['status']}"
+    )
     log.LOGGER(
         f"[CH][{_id}] hotplug result success={strict_ok}, "
         f"mem={report['results']['mem_limit']['status']}, cpu={report['results']['cpu']['status']}, "

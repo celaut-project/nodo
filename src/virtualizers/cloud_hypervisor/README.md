@@ -37,7 +37,7 @@ Componentes esenciales para ejecutar un servicio en CH:
 3. **Fase 2 – Execute CH**. Entregables: creación de microVM con API socket; montaje de rootfs; inyección de `__config__`; arranque y obtención de IP; persistencia de estado de VM.
 4. **Fase 3 – Red y firewall**. Entregables: reglas por interfaz TAP o IP estable; allowlist a gateway y peers; compatibilidad con `allow_connection_*` desde la capa común.
 5. **Fase 4 – Lifecycle y hotplug**. Entregables: mapeo de `mem_limit/cpu` a cgroups v2 dedicados por VM; semántica explícita de “no soportado” por campo; `kill/maintain/remove` para VM.
-6. **Fase 5 – Observabilidad y operación**. Entregables: logs mínimos por VM; métricas básicas (PID, uptime, mem); limpieza de recursos; rollback a Docker por flag.
+6. **Fase 5 – Observabilidad y operación**. Entregables: logs mínimos por VM; métricas básicas (PID, uptime, mem); limpieza de recursos; compatiblidad con `commands instances` para VMs de CH (incluyendo campo `virtualizer`).
 
 ## Viabilidad técnica y operativa
 
@@ -118,6 +118,13 @@ virtualizers.cloud_hypervisor.SECURITY.TRUSTED_SERVICE_IDS
   - `disk_space`: no soportado en Fase 4 (no bloquea).
   - Soportados fallidos (`mem_limit` o `cpu`) hacen fallar hotplug (enforcement estricto).
 - Inyección de `__config__`: pre‑boot (rootfs), no en runtime.
+- Observabilidad Fase 5:
+  - `commands instances` muestra `virtualizer` siempre.
+  - Métricas runtime de CH (`pid`, `uptime`, `mem`) se muestran en modo `groupable`.
+  - No se amplía `Gateway.GetMetrics` en esta fase.
+- Operación Fase 5:
+  - Cleanup mantiene política actual (se elimina runtime dir/state al cerrar VM).
+  - Janitor automático limpia runtime states huérfanos o stale (proceso caído).
 
 ## Diseño de red (decisión cerrada)
 

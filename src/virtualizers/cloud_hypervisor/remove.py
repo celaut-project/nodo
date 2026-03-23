@@ -25,6 +25,7 @@ def remove(vmachine_id: str) -> bool:
 
     # Dual mode: runtime VM cleanup if state/runtime exists; otherwise remove service bundle.
     if load_runtime_state(vmachine_id) is not None or _runtime_vm_dir(vmachine_id).exists():
+        log.LOGGER(f"[CH][{vmachine_id}] event=remove mode=runtime")
         return kill(vmachine_id=vmachine_id)
 
     bundle_dir = _service_bundle_dir(vmachine_id)
@@ -36,7 +37,7 @@ def remove(vmachine_id: str) -> bool:
 
     try:
         shutil.rmtree(bundle_dir, ignore_errors=True)
-        log.LOGGER(f"[CH][{vmachine_id}] service bundle removed: {bundle_dir}")
+        log.LOGGER(f"[CH][{vmachine_id}] event=remove mode=bundle bundle_removed={bundle_dir}")
         return True
     except Exception as e:
         log.LOGGER(f"[CH][{vmachine_id}] remove bundle failed ({bundle_dir}): {e}")

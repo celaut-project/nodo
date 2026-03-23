@@ -129,6 +129,68 @@ class CloudHypervisorLifecycleTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertFalse(bundle_dir.exists())
 
+    def test_janitor_cleans_orphan_runtime(self):
+        with patch.object(
+            ch_maintain,
+            "list_runtime_states",
+            return_value={"vm-orphan": {"pid": 777}},
+        ), patch.object(
+            ch_maintain.sc,
+            "internal_instance_exists",
+            return_value=False,
+        ), patch.object(
+            ch_maintain,
+            "kill_ch_vm",
+            return_value=True,
+        ) as kill_mock:
+            ch_maintain.janitor_cleanup_orphans(debug_mode=False)
+
+        kill_mock.assert_called_once_with(vmachine_id="vm-orphan")
+
+    def test_janitor_cleans_stale_dead_process(self):
+        with patch.object(
+            ch_maintain,
+            "list_runtime_states",
+            return_value={"vm-dead": {"pid": 888}},
+        ), patch.object(
+            ch_maintain.sc,
+            "internal_instance_exists",
+            return_value=True,
+        ), patch.object(
+            ch_maintain,
+            "_pid_alive",
+            return_value=False,
+        ), patch.object(
+            ch_maintain,
+            "kill_ch_vm",
+            return_value=True,
+        ) as kill_mock:
+            ch_maintain.janitor_cleanup_orphans(debug_mode=False)
+
+        kill_mock.assert_called_once_with(vmachine_id="vm-dead")
+
+    def test_janitor_skips_healthy_registered_runtime(self):
+        with patch.object(
+            ch_maintain,
+            "list_runtime_states",
+            return_value={"vm-ok": {"pid": 999}},
+        ), patch.object(
+            ch_maintain.sc,
+            "internal_instance_exists",
+            return_value=True,
+        ), patch.object(
+            ch_maintain,
+            "_pid_alive",
+            return_value=True,
+        ), patch.object(
+            ch_maintain,
+            "kill_ch_vm",
+            return_value=True,
+        ) as kill_mock:
+            ch_maintain.janitor_cleanup_orphans(debug_mode=False)
+
+        kill_mock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

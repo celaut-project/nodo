@@ -775,6 +775,7 @@ def execute(
     resolved_entrypoint: Optional[str] = None
 
     try:
+        log.LOGGER(f"[CH][{vmachine_id}] event=start")
         log.LOGGER(
             f"[CH][{vmachine_id}] execute start: service_id={service_id}, father_id={father_id}, "
             f"by_local={by_local}, assignment_ports={assigment_ports}, cache={CACHE}, "
@@ -943,6 +944,7 @@ def execute(
             vm_ip=vm_ip,
             network_resolution=network_resolution,
         )
+        log.LOGGER(f"[CH][{vmachine_id}] event=ready")
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
 
         dnat_rules_state: List[Dict[str, object]] = []
@@ -990,6 +992,8 @@ def execute(
                 "cgroup_path": "",
                 "bridge": NETWORK_BRIDGE_NAME,
                 "serial_log": str(serial_log_path) if serial_log_path else "",
+                "stdout_log": str(stdout_path),
+                "stderr_log": str(stderr_path),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )

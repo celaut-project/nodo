@@ -124,7 +124,7 @@ def kill(vmachine_id: str) -> bool:
     cgroup_path = str(state.get("cgroup_path") or "")
     runtime_dir = _runtime_dir(vmachine_id)
 
-    log.LOGGER(f"[CH][{vmachine_id}] kill requested")
+    log.LOGGER(f"[CH][{vmachine_id}] event=kill requested")
     _kill_pid(vmachine_id=vmachine_id, pid=pid)
     _cleanup_dnat_rules(vmachine_id=vmachine_id, dnat_rules=dnat_rules)
     _cleanup_tap(vmachine_id=vmachine_id, tap_name=tap_name)
@@ -133,10 +133,10 @@ def kill(vmachine_id: str) -> bool:
     try:
         if runtime_dir and runtime_dir.exists():
             shutil.rmtree(runtime_dir, ignore_errors=True)
-            log.LOGGER(f"[CH][{vmachine_id}] runtime directory removed: {runtime_dir}")
+            log.LOGGER(f"[CH][{vmachine_id}] event=cleanup runtime_dir_removed={runtime_dir}")
     except Exception as e:
         log.LOGGER(f"[CH][{vmachine_id}] failed removing runtime directory: {e}")
 
     delete_runtime_state(vmachine_id)
-    log.LOGGER(f"[CH][{vmachine_id}] runtime state removed")
+    log.LOGGER(f"[CH][{vmachine_id}] event=cleanup runtime_state_removed")
     return True
