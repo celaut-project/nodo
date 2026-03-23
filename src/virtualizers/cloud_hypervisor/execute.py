@@ -21,6 +21,7 @@ from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.virtualizers.cloud_hypervisor.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
+from src.virtualizers.entry_path import resolve_entrypoint_path
 
 env_manager = ConfigManager()
 sc = SQLConnection()
@@ -172,27 +173,10 @@ def _validate_custom_initramfs(initramfs_path: str) -> None:
 
 
 def _validate_entrypoint_strict(service: celaut.Service) -> str:
-    raw_entrypoints = [str(item).strip() for item in service.container.init.entry_path]
-    entrypoints = [item for item in raw_entrypoints if item]
-
-    if len(entrypoints) != 1:
-        raise CHExecuteError(
-            "Cloud Hypervisor requires exactly one entrypoint path. "
-            f"Received {len(entrypoints)} value(s): {raw_entrypoints}"
-        )
-
-    entrypoint = entrypoints[0]
-    if not entrypoint.startswith("/"):
-        raise CHExecuteError(
-            f"Cloud Hypervisor entrypoint must be an absolute path. Got: '{entrypoint}'."
-        )
-    if any(char.isspace() for char in entrypoint):
-        raise CHExecuteError(
-            "Cloud Hypervisor entrypoint must be a single executable path without spaces. "
-            f"Got: '{entrypoint}'."
-        )
-
-    return entrypoint
+    try:
+        return resolve_entrypoint_path(entry_path=service.container.init.entry_path)
+    except ValueError as e:
+        raise CHExecuteError(f"Invalid Cloud Hypervisor entrypoint: {e}") from e
 
 
 def _guest_network_ready_timeout_seconds() -> float:
