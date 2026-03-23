@@ -36,7 +36,7 @@ Componentes esenciales para ejecutar un servicio en CH:
 2. **Fase 1 – Build CH**. Entregables: pipeline para generar `rootfs.ext4` desde `service.container.filesystem`; selección de kernel/initramfs por arquitectura; layout de cache de artefactos; `is_built` basado en bundle CH.
 3. **Fase 2 – Execute CH**. Entregables: creación de microVM con API socket; montaje de rootfs; inyección de `__config__`; arranque y obtención de IP; persistencia de estado de VM.
 4. **Fase 3 – Red y firewall**. Entregables: reglas por interfaz TAP o IP estable; allowlist a gateway y peers; compatibilidad con `allow_connection_*` desde la capa común.
-5. **Fase 4 – Lifecycle y hotplug**. Entregables: mapeo de `mem_limit/cpu` a CH o cgroups del proceso; semántica explícita de “no soportado” por campo; `kill/maintain/remove` para VM.
+5. **Fase 4 – Lifecycle y hotplug**. Entregables: mapeo de `mem_limit/cpu` a cgroups v2 dedicados por VM; semántica explícita de “no soportado” por campo; `kill/maintain/remove` para VM.
 6. **Fase 5 – Observabilidad y operación**. Entregables: logs mínimos por VM; métricas básicas (PID, uptime, mem); limpieza de recursos; rollback a Docker por flag.
 
 ## Viabilidad técnica y operativa
@@ -46,9 +46,10 @@ Mapa por función de `src/virtualizers/interface.py`:
 - `is_built(service_hash)`: Viable. Debe comprobar la existencia del bundle CH (por ejemplo `rootfs.ext4` + metadatos + kernel/initramfs seleccionados).
 - `build(service, metadata, service_id)`: Viable con coste alto. Requiere transformar el filesystem del servicio en un rootfs booteable y asociarlo a un guest base por arquitectura.
 - `execute(...) -> (vmachine_id, vmachine_ip)`: Viable. Debe crear una microVM, configurar red, arrancar, y persistir `pid/socket/tap/ip`.
-- `hotplug(vmachine_id, system_requirements_range)`: Parcialmente viable. `mem_limit` y `cpu` pueden mapearse a CH o a cgroups del proceso; otros campos pueden declararse no soportados inicialmente.
-- `kill(vmachine_id)`: Viable. Apagar por API si está disponible, o terminar el proceso si no responde.
+- `hotplug(vmachine_id, system_requirements_range)`: Viable en Fase 4 vía **cgroups v2** por VM (`memory.max` y `cpu.max`), con reporte por campo (`applied/unsupported/ignored/failed`) en runtime state y logs.
+- `kill(vmachine_id)`: Viable. Estrategia de Fase 4: `SIGKILL` directo + cleanup de TAP, DNAT, runtime state/runtime dir y cgroup dedicado.
 - `maintain(vmachine_id, debug_mode, remove_and_penalize)`: Viable. Comprobar proceso/socket y penalizar si no existe.
+- `remove(vmachine_id)`: Viable en modo dual: limpiar VM runtime si existe; si no, eliminar bundle de build CH por `service_id`.
 - `remove_firewall_rule(vmachine_id, ip, port, protocol)`: Viable. Debe operar sobre TAP o IP persistida de la VM.
 
 Requisitos operativos del host:
@@ -75,6 +76,7 @@ virtualizers.cloud_hypervisor.NETWORK_MODE
 virtualizers.cloud_hypervisor.NETWORK_BRIDGE_NAME
 virtualizers.cloud_hypervisor.NETWORK_SUBNET
 virtualizers.cloud_hypervisor.NETWORK_GATEWAY_IP
+virtualizers.cloud_hypervisor.CGROUPS_BASE_DIR
 virtualizers.cloud_hypervisor.SECURITY.PATH_CONFINEMENT
 virtualizers.cloud_hypervisor.SECURITY.DEVICE_NODES_POLICY
 virtualizers.cloud_hypervisor.SECURITY.DEVICE_NODE_ALLOWLIST
@@ -108,7 +110,13 @@ virtualizers.cloud_hypervisor.SECURITY.TRUSTED_SERVICE_IDS
 ## Decisiones resueltas
 
 - Red: se adopta TAP + bridge con IP determinista por `vmachine_id`.
-- Hotplug: solo `mem_limit` garantizado; el resto aplica si es posible y, si no, retorna “no soportado”.
+- Hotplug: backend exclusivo por cgroups v2, con cgroup dedicado por VM.
+- Semántica por campo en hotplug:
+  - `mem_limit`: soportado (`memory.max`).
+  - `cpu_period/cpu_quota`: soportado (`cpu.max`).
+  - `blkio_weight`: no soportado en Fase 4 (no bloquea).
+  - `disk_space`: no soportado en Fase 4 (no bloquea).
+  - Soportados fallidos (`mem_limit` o `cpu`) hacen fallar hotplug (enforcement estricto).
 - Inyección de `__config__`: pre‑boot (rootfs), no en runtime.
 
 ## Diseño de red (decisión cerrada)
@@ -164,6 +172,7 @@ virtualizers.cloud_hypervisor:
   NETWORK_BRIDGE_NAME: "br-ch"
   NETWORK_SUBNET: "192.168.200.0/24"
   NETWORK_GATEWAY_IP: "192.168.200.1"
+  CGROUPS_BASE_DIR: "/sys/fs/cgroup"
 ```
 
 ### Resumen de red

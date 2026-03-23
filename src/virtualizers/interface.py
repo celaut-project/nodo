@@ -3,6 +3,10 @@ from src.virtualizers.docker.build import build as docker_build
 from src.virtualizers.cloud_hypervisor.build import is_service_built as ch_is_service_built
 from src.virtualizers.cloud_hypervisor.build import build as ch_build
 from src.virtualizers.cloud_hypervisor.execute import execute as ch_execute
+from src.virtualizers.cloud_hypervisor.hotplug import hotplug as ch_hotplug
+from src.virtualizers.cloud_hypervisor.kill import kill as ch_kill
+from src.virtualizers.cloud_hypervisor.maintain import maintain as ch_maintain
+from src.virtualizers.cloud_hypervisor.remove import remove as remove_ch
 from src.virtualizers.docker.execute import execute as docker_execute
 from src.virtualizers.docker.remove import remove as remove_docker
 from src.virtualizers.docker.hotplug import hotplug as docker_hotplug
@@ -101,7 +105,15 @@ def hotplug(
         system_requeriments_range: celaut_pb2.ModifyServiceSystemResourcesInput
 ) -> bool:
     """Modify the system requirements of a running service."""
-    _ensure_usable_virtualizer(_resolve_virtualizer_for_instance(vmachine_id))
+    virtualizer = _ensure_usable_virtualizer(
+        _resolve_virtualizer_for_instance(vmachine_id),
+        allow_cloud_hypervisor=True,
+    )
+    if virtualizer == "cloud_hypervisor":
+        return ch_hotplug(
+            vmachine_id=vmachine_id,
+            system_requeriments_range=system_requeriments_range,
+        )
     return docker_hotplug(
         container_id=vmachine_id,
         system_requeriments_range=system_requeriments_range
@@ -109,12 +121,27 @@ def hotplug(
 
 def kill(vmachine_id: str) -> bool:
     """Kill a running service."""
-    _ensure_usable_virtualizer(_resolve_virtualizer_for_instance(vmachine_id))
+    virtualizer = _ensure_usable_virtualizer(
+        _resolve_virtualizer_for_instance(vmachine_id),
+        allow_cloud_hypervisor=True,
+    )
+    if virtualizer == "cloud_hypervisor":
+        return ch_kill(vmachine_id=vmachine_id)
     return docker_kill(vmachine_id=vmachine_id)
 
 def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[str], None]) -> None:
     """Check the status of a running service and remove it if it has exited."""
-    _ensure_usable_virtualizer(_resolve_virtualizer_for_instance(vmachine_id))
+    virtualizer = _ensure_usable_virtualizer(
+        _resolve_virtualizer_for_instance(vmachine_id),
+        allow_cloud_hypervisor=True,
+    )
+    if virtualizer == "cloud_hypervisor":
+        ch_maintain(
+            vmachine_id=vmachine_id,
+            debug_mode=debug_mode,
+            remove_and_penalize=remove_and_penalize,
+        )
+        return
     docker_maintain(
         vmachine_id=vmachine_id,
         debug_mode=debug_mode,
@@ -165,7 +192,12 @@ def execute(
 
 def remove(vmachine_id: str) -> bool:
     """Remove a service."""
-    _ensure_usable_virtualizer(_resolve_virtualizer_for_instance(vmachine_id))
+    virtualizer = _ensure_usable_virtualizer(
+        _resolve_virtualizer_for_instance(vmachine_id),
+        allow_cloud_hypervisor=True,
+    )
+    if virtualizer == "cloud_hypervisor":
+        return remove_ch(vmachine_id=vmachine_id)
     return remove_docker(vmachine_id=vmachine_id)
 
 def remove_firewall_rule(
@@ -175,7 +207,10 @@ def remove_firewall_rule(
         protocol: TransportProtocol
 ) -> bool:
     """Remove a firewall rule for a given container."""
-    _ensure_usable_virtualizer(_resolve_virtualizer_for_instance(vmachine_id))
+    _ensure_usable_virtualizer(
+        _resolve_virtualizer_for_instance(vmachine_id),
+        allow_cloud_hypervisor=True,
+    )
     return vm_remove_rule(
         vmachine_id=vmachine_id,
         ip=ip,

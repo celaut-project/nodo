@@ -987,6 +987,7 @@ def execute(
                     {"domain": domain, "ip": ip}
                     for domain, ip in domain_records
                 ],
+                "cgroup_path": "",
                 "bridge": NETWORK_BRIDGE_NAME,
                 "serial_log": str(serial_log_path) if serial_log_path else "",
                 "created_at": datetime.now(timezone.utc).isoformat(),
