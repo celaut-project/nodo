@@ -28,17 +28,20 @@ class CloudHypervisorExecuteHelpersTests(unittest.TestCase):
 
     def test_validate_entrypoint_strict_rejects_missing_entrypoint(self):
         service = _service_with_entrypoint()
-        with self.assertRaisesRegex(ch_execute.CHExecuteError, "exactly one entrypoint"):
+        with self.assertRaisesRegex(ch_execute.CHExecuteError, "empty"):
             ch_execute._validate_entrypoint_strict(service)
 
-    def test_validate_entrypoint_strict_rejects_multiple_values(self):
-        service = _service_with_entrypoint("/bin/server", "--flag")
-        with self.assertRaisesRegex(ch_execute.CHExecuteError, "exactly one entrypoint"):
-            ch_execute._validate_entrypoint_strict(service)
+    def test_validate_entrypoint_strict_accepts_segmented_values(self):
+        service = _service_with_entrypoint("usr", "local", "bin", "server")
+        self.assertEqual(ch_execute._validate_entrypoint_strict(service), "/usr/local/bin/server")
 
-    def test_validate_entrypoint_strict_rejects_relative_path(self):
+    def test_validate_entrypoint_strict_normalizes_relative_single_value(self):
         service = _service_with_entrypoint("bin/server")
-        with self.assertRaisesRegex(ch_execute.CHExecuteError, "absolute path"):
+        self.assertEqual(ch_execute._validate_entrypoint_strict(service), "/bin/server")
+
+    def test_validate_entrypoint_strict_rejects_cli_arguments(self):
+        service = _service_with_entrypoint("/bin/server", "--flag")
+        with self.assertRaisesRegex(ch_execute.CHExecuteError, "not CLI arguments"):
             ch_execute._validate_entrypoint_strict(service)
 
     def test_validate_custom_initramfs_accepts_required_entries(self):
