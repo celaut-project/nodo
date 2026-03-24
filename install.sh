@@ -19,7 +19,7 @@ MAX_RETRIES=3
 USE_LOCAL_SOURCE=false
 BRANCH="stable"
 BRANCH_EXPLICIT=false
-CH_VERSION="v51.1"
+CH_VERSION="v43.0"
 
 print_usage() {
   cat <<EOF
