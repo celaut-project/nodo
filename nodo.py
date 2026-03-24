@@ -137,7 +137,7 @@ if __name__ == '__main__':
             "\n- estimate <service id> | <service tag> | <'.celaut' file path>"
             "\n- inspect <service id> | <service tag>"
             "\n- remove <service id> | <service tag>"
-            "\n- stop <instance id>"
+            "\n- kill <instance id>"
             "\n- increase_gas <instance id> <gas to add>"
             "\n- decrease_gas <instance id> <gas to retire>"
             "\n- services"
@@ -294,9 +294,9 @@ if __name__ == '__main__':
                     os.system(f"/bin/bash {MAIN_DIR}/bash/restore_source.sh {MAIN_DIR}")
                     os.system(f"/bin/bash {MAIN_DIR}/install.sh")
 
-            case "stop":
-                from src.commands.stop import stop
-                stop(instance=sys.argv[2])
+            case "kill":
+                from src.commands.kill import kill
+                kill(instance=sys.argv[2])
                 
             case "increase_gas":
                 from src.commands.modify_gas import modify_gas
