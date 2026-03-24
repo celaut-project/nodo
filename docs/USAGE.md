@@ -164,6 +164,20 @@ These are intended for development or advanced maintenance environments:
   **Example:**  
   `nodo serve`
 
+- **daemon `<subcommand>`**  
+  Manages the Nodo systemd service (requires superuser privileges).  
+  Subcommands: start, status, stop, restart  
+  **Examples:**  
+  `sudo nodo daemon start`  
+  `sudo nodo daemon status`  
+  `sudo nodo daemon stop`  
+  `sudo nodo daemon restart`
+
+- **doctor**  
+  Checks and fixes the Nodo systemd service configuration, and performs virtualization checks (requires superuser privileges).  
+  **Example:**  
+  `sudo nodo doctor`
+
 - **migrate**  
   Updates the database schema.  
   **Example:**  
@@ -262,6 +276,17 @@ You can tune these options in `config.yaml` under:
 ### Automatic Execution via systemd
 
 If Nodo was installed with superuser privileges, it will be automatically configured as a `systemd` service to run in the background.
+
+### Managing the Service
+
+Use `nodo daemon` commands to start, stop, restart, or check the status of the Nodo service:
+
+- `sudo nodo daemon start` - Start the service
+- `sudo nodo daemon stop` - Stop the service  
+- `sudo nodo daemon restart` - Restart the service
+- `sudo nodo daemon status` - Check service status
+
+Use `sudo nodo doctor` to check and fix the service configuration if issues arise.
 
 ### Manual Execution in Development Mode: `nodo serve`
 
