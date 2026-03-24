@@ -350,6 +350,10 @@ def _create_tap(vmachine_id: str) -> str:
     tap_suffix = hashlib.sha1(vmachine_id.encode("utf-8")).hexdigest()[:10]
     tap_name = f"tap{tap_suffix}"
 
+    # Check if TAP already exists and delete it to avoid conflicts
+    if _run(["ip", "link", "show", "dev", tap_name], check=False).returncode == 0:
+        _run(["ip", "link", "del", tap_name], check=False)
+
     _run(["ip", "tuntap", "add", "dev", tap_name, "mode", "tap"])
     _run(["ip", "link", "set", tap_name, "master", NETWORK_BRIDGE_NAME])
     _run(["ip", "link", "set", tap_name, "up"])
