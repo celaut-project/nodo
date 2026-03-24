@@ -174,7 +174,7 @@ if __name__ == '__main__':
             "\n- increase_peer_deposit <peer id> <gas to add>"
             "\n- docker <docker args>  (runs docker commands in nodo's isolated context)"
             "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
-            "\n- doctor  (check/fix nodo.service and run KVM readiness checks)"
+            "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
             "\n\n",
               flush=True)
         try:
