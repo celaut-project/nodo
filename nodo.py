@@ -173,7 +173,8 @@ if __name__ == '__main__':
             "\n- tx_history"
             "\n- increase_peer_deposit <peer id> <gas to add>"
             "\n- docker <docker args>  (runs docker commands in nodo's isolated context)"
-            "\n- daemon start|status|stop|doctor  (control the nodo.service systemd unit)"
+            "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
+            "\n- doctor  (check/fix nodo.service and run KVM readiness checks)"
             "\n\n",
               flush=True)
         try:
@@ -485,6 +486,10 @@ if __name__ == '__main__':
                 from src.commands.daemon import daemon_command
                 subcommand = sys.argv[2] if len(sys.argv) > 2 else None
                 daemon_command(subcommand=subcommand, main_dir=MAIN_DIR)
+
+            case "doctor":
+                from src.commands.doctor import doctor_command
+                doctor_command(main_dir=MAIN_DIR)
 
             case other:
                 print('Unknown command.', flush=True)
