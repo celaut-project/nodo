@@ -2,7 +2,7 @@ import os
 from src.manager.manager import stop_instance
 
 
-def stop(instance: str):
+def kill(instance: str):
     # Check if script is run as root
     if os.geteuid() != 0:
         print("This script requires superuser privileges. Please run with sudo.")

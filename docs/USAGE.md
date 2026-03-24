@@ -31,10 +31,10 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo remove 1234567890abcdef`
 
-- **stop `<instance id>`**  
+- **kill `<instance id>`**  
   Stops a running service instance by ID.  
   **Example:**  
-  `nodo stop abcdef1234567890`
+  `nodo kill abcdef1234567890`
 
 - **increase_gas `<instance id> <gas amount>`**  
   Increases the allocated gas for a service instance.  
