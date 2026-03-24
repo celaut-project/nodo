@@ -76,6 +76,8 @@ virtualizers.cloud_hypervisor.NETWORK_MODE
 virtualizers.cloud_hypervisor.NETWORK_BRIDGE_NAME
 virtualizers.cloud_hypervisor.NETWORK_SUBNET
 virtualizers.cloud_hypervisor.NETWORK_GATEWAY_IP
+virtualizers.cloud_hypervisor.MIN_MEM_MIB
+virtualizers.cloud_hypervisor.DEFAULT_MEM_MIB
 virtualizers.cloud_hypervisor.CGROUPS_BASE_DIR
 virtualizers.cloud_hypervisor.SECURITY.PATH_CONFINEMENT
 virtualizers.cloud_hypervisor.SECURITY.DEVICE_NODES_POLICY
@@ -111,6 +113,9 @@ virtualizers.cloud_hypervisor.SECURITY.TRUSTED_SERVICE_IDS
 
 - Red: se adopta TAP + bridge con IP determinista por `vmachine_id`.
 - Hotplug: backend exclusivo por cgroups v2, con cgroup dedicado por VM.
+- Memoria de arranque:
+  - `MIN_MEM_MIB` define solo el piso para poder iniciar microVMs ligeras.
+  - Workloads más pesados (por ejemplo Python) deben pedir memoria suficiente vía `sysresources`.
 - Semántica por campo en hotplug:
   - `mem_limit`: soportado (`memory.max`).
   - `cpu_period/cpu_quota`: soportado (`cpu.max`).

@@ -15,6 +15,9 @@ except Exception:  # pragma: no cover - defensive fallback for minimal environme
             "alive": False,
             "uptime_s": None,
             "mem_rss_bytes": None,
+            "cgroup_memory_max_raw": None,
+            "cgroup_memory_max_bytes": None,
+            "cgroup_memory_current_bytes": None,
             "log_paths": {},
         }
 
@@ -75,6 +78,11 @@ def list_instances(groupable: bool = False, search: str = ""):
 
             return "0 bytes"  # Fallback for zero bytes
 
+        def cgroup_limit_to_readable(limit_raw, limit_bytes):
+            if str(limit_raw or "").strip() == "max":
+                return "max"
+            return bytes_to_readable(limit_bytes)
+
         def seconds_to_readable(seconds_value):
             if seconds_value is None:
                 return "N/A"
@@ -119,12 +127,19 @@ def list_instances(groupable: bool = False, search: str = ""):
 
                 vm_pid = "N/A"
                 vm_uptime = "N/A"
-                vm_mem = "N/A"
+                vm_mem_rss = "N/A"
+                vm_mem_limit_cgroup = "N/A"
+                vm_mem_current_cgroup = "N/A"
                 if groupable and runtime_virtualizer == "cloud_hypervisor" and id_:
                     snapshot = get_vm_runtime_snapshot(vmachine_id=id_)
                     vm_pid = str(snapshot.get("pid")) if snapshot.get("pid") is not None else "N/A"
                     vm_uptime = seconds_to_readable(snapshot.get("uptime_s"))
-                    vm_mem = bytes_to_readable(snapshot.get("mem_rss_bytes"))
+                    vm_mem_rss = bytes_to_readable(snapshot.get("mem_rss_bytes"))
+                    vm_mem_limit_cgroup = cgroup_limit_to_readable(
+                        snapshot.get("cgroup_memory_max_raw"),
+                        snapshot.get("cgroup_memory_max_bytes"),
+                    )
+                    vm_mem_current_cgroup = bytes_to_readable(snapshot.get("cgroup_memory_current_bytes"))
 
                 instances.append({
                     'id': id_ or 'N/A',
@@ -139,7 +154,9 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'mem_limit': bytes_to_readable(mem_limit),
                     'vm_pid': vm_pid,
                     'vm_uptime': vm_uptime,
-                    'vm_mem': vm_mem,
+                    'vm_mem_rss': vm_mem_rss,
+                    'vm_mem_limit_cgroup': vm_mem_limit_cgroup,
+                    'vm_mem_current_cgroup': vm_mem_current_cgroup,
                 })
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
@@ -169,7 +186,9 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'mem_limit': 'N/A',
                     'vm_pid': 'N/A',
                     'vm_uptime': 'N/A',
-                    'vm_mem': 'N/A',
+                    'vm_mem_rss': 'N/A',
+                    'vm_mem_limit_cgroup': 'N/A',
+                    'vm_mem_current_cgroup': 'N/A',
                 })
 
     except sqlite3.Error as e:
@@ -223,7 +242,9 @@ def list_instances(groupable: bool = False, search: str = ""):
                 [
                     ("VM PID", "vm_pid"),
                     ("VM Uptime", "vm_uptime"),
-                    ("VM Memory", "vm_mem"),
+                    ("VM Memory (RSS)", "vm_mem_rss"),
+                    ("VM Memory limit (cgroup)", "vm_mem_limit_cgroup"),
+                    ("VM Memory current (cgroup)", "vm_mem_current_cgroup"),
                 ]
             )
         output_lines = []

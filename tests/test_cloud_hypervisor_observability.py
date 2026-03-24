@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 IMPORT_ERROR = None
@@ -40,6 +42,9 @@ class CloudHypervisorObservabilityTests(unittest.TestCase):
         self.assertEqual(snapshot["log_paths"]["stdout"], "/tmp/vm.stdout.log")
         self.assertEqual(snapshot["log_paths"]["stderr"], "/tmp/vm.stderr.log")
         self.assertEqual(snapshot["log_paths"]["serial"], "/tmp/vm.serial.log")
+        self.assertIsNone(snapshot["cgroup_memory_max_raw"])
+        self.assertIsNone(snapshot["cgroup_memory_max_bytes"])
+        self.assertIsNone(snapshot["cgroup_memory_current_bytes"])
 
     def test_snapshot_fallback_when_pid_missing(self):
         created_at = ch_obs.datetime.now(ch_obs.timezone.utc).isoformat()
@@ -60,6 +65,20 @@ class CloudHypervisorObservabilityTests(unittest.TestCase):
         self.assertEqual(snapshot["pid"], 654)
         self.assertFalse(snapshot["alive"])
         self.assertIsNone(snapshot["mem_rss_bytes"])
+
+    def test_snapshot_reads_cgroup_memory_limit_and_current(self):
+        with TemporaryDirectory() as tmpdir:
+            cgroup_path = Path(tmpdir) / "nodo-ch" / "vm-cgroup"
+            cgroup_path.mkdir(parents=True, exist_ok=True)
+            (cgroup_path / "memory.max").write_text("50000000\n", encoding="utf-8")
+            (cgroup_path / "memory.current").write_text("33000000\n", encoding="utf-8")
+
+            state = {"pid": 0, "cgroup_path": str(cgroup_path)}
+            snapshot = ch_obs.get_vm_runtime_snapshot(vmachine_id="vm-cgroup", state=state)
+
+        self.assertEqual(snapshot["cgroup_memory_max_raw"], "50000000")
+        self.assertEqual(snapshot["cgroup_memory_max_bytes"], 50000000)
+        self.assertEqual(snapshot["cgroup_memory_current_bytes"], 33000000)
 
 
 if __name__ == "__main__":
