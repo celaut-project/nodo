@@ -34,7 +34,7 @@ From this point on, `install.sh` provisions Cloud Hypervisor assets automaticall
 #### **What the installer now does**
 
 1. Uses a **hardcoded Cloud Hypervisor version** in `install.sh`:
-   - `CH_VERSION="v51.1"`
+   - `CH_VERSION="v43.0"`
    - No public CLI flag (`--ch-version`) is exposed.
 2. Passes that version to the architecture setup script:
    - `bash/setup_ubuntu_x86.sh` on `x86_64`
