@@ -13,6 +13,15 @@ METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 VALIDATE_ON_IMPORT = env_manager.get("VALIDATE_ON_IMPORT")
 
 
+def read_service_content(service_path):
+    if os.path.isfile(service_path):
+        with open(service_path, "rb") as f:
+            yield f.read()
+    else:
+        for i in read_multiblock_directory(directory=service_path):
+            yield i
+
+
 def import_bee(path: str) -> Optional[str]:
     # Get the current directory (where the "nodo" command is executed from)
     current_directory = os.getcwd()
@@ -58,7 +67,7 @@ def import_bee(path: str) -> Optional[str]:
                 print("There is no service hash, try to get it from the service specification")
                 from hashlib import sha3_256
                 validate_content = sha3_256()
-                for i in read_multiblock_directory(directory=service_dir):
+                for i in read_service_content(service_dir):
                     validate_content.update(i)
                 service_hash = validate_content.hexdigest()
             except Exception as e:
@@ -71,7 +80,7 @@ def import_bee(path: str) -> Optional[str]:
         elif VALIDATE_ON_IMPORT:
             from hashlib import sha3_256
             validate_content = sha3_256()
-            for i in read_multiblock_directory(directory=service_dir):
+            for i in read_service_content(service_dir):
                 validate_content.update(i)
             if service_hash != validate_content.hexdigest():
                 print("Hash sha3-256 is on the service, but is not correct.")
