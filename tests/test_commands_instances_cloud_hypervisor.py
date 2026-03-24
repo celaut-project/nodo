@@ -110,6 +110,9 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                     "pid": 1234,
                     "uptime_s": 42,
                     "mem_rss_bytes": 8 * 1024 * 1024,
+                    "cgroup_memory_max_raw": str(128 * 1024 * 1024),
+                    "cgroup_memory_max_bytes": 128 * 1024 * 1024,
+                    "cgroup_memory_current_bytes": 12 * 1024 * 1024,
                 },
             ):
                 out = io.StringIO()
@@ -132,11 +135,17 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                         "pid": 1234,
                         "uptime_s": 65,
                         "mem_rss_bytes": 9 * 1024 * 1024,
+                        "cgroup_memory_max_raw": str(50 * 1000 * 1000),
+                        "cgroup_memory_max_bytes": 50 * 1000 * 1000,
+                        "cgroup_memory_current_bytes": 11 * 1024 * 1024,
                     }
                 return {
                     "pid": None,
                     "uptime_s": None,
                     "mem_rss_bytes": None,
+                    "cgroup_memory_max_raw": None,
+                    "cgroup_memory_max_bytes": None,
+                    "cgroup_memory_current_bytes": None,
                 }
 
             with patch.object(instances_cmd, "DATABASE_FILE", db_path), patch.object(
@@ -154,7 +163,9 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
         self.assertIn("Virtualizer: cloud_hypervisor", rendered)
         self.assertIn("VM PID: 1234", rendered)
         self.assertIn("VM Uptime: 1m 5s", rendered)
-        self.assertIn("VM Memory: 9.00 MB", rendered)
+        self.assertIn("VM Memory (RSS): 9.00 MB", rendered)
+        self.assertIn("VM Memory limit (cgroup): 47.68 MB", rendered)
+        self.assertIn("VM Memory current (cgroup): 11.00 MB", rendered)
         self.assertIn("Virtualizer: docker", rendered)
         self.assertNotIn("VM PID: N/A", rendered)
 

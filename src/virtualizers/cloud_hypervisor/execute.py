@@ -48,9 +48,18 @@ GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
     8,
 )
 
+def _env_int(key: str, default: int) -> int:
+    try:
+        return int(env_manager.get(key, default))
+    except Exception:
+        return int(default)
+
+
 DEFAULT_VCPUS = 1
-DEFAULT_MEM_MIB = 256
-MIN_MEM_MIB = 128
+DEFAULT_MEM_MIB = max(16, _env_int("virtualizers.cloud_hypervisor.DEFAULT_MEM_MIB", 256))
+MIN_MEM_MIB = max(16, _env_int("virtualizers.cloud_hypervisor.MIN_MEM_MIB", 64))
+if DEFAULT_MEM_MIB < MIN_MEM_MIB:
+    DEFAULT_MEM_MIB = MIN_MEM_MIB
 
 
 class CHExecuteError(RuntimeError):

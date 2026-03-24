@@ -1,9 +1,11 @@
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import psutil
 
+from src.virtualizers.cloud_hypervisor.cgroups import CGROUPS_BASE_DIR
 from src.virtualizers.cloud_hypervisor.runtime_state import load_runtime_state
 
 
@@ -66,6 +68,59 @@ def _resolve_log_paths(state: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
+def _guess_cgroup_path(vmachine_id: str, runtime_state: Dict[str, Any]) -> Optional[Path]:
+    configured = str(runtime_state.get("cgroup_path") or "").strip()
+    if configured:
+        return Path(configured)
+
+    safe_id = str(vmachine_id or "").strip()
+    if not safe_id or "/" in safe_id:
+        return None
+    return Path(CGROUPS_BASE_DIR) / "nodo-ch" / safe_id
+
+
+def _read_first_line(path: Path) -> Optional[str]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.readline().strip()
+        return raw or None
+    except Exception:
+        return None
+
+
+def _parse_cgroup_int(raw: Optional[str]) -> Optional[int]:
+    text = str(raw or "").strip()
+    if not text or text == "max":
+        return None
+    try:
+        return int(text)
+    except Exception:
+        return None
+
+
+def _cgroup_memory_snapshot(
+    vmachine_id: str,
+    runtime_state: Dict[str, Any],
+) -> Dict[str, Any]:
+    cgroup_path = _guess_cgroup_path(vmachine_id=vmachine_id, runtime_state=runtime_state)
+    if not cgroup_path or not cgroup_path.exists():
+        return {
+            "path": str(cgroup_path) if cgroup_path else None,
+            "memory_max_raw": None,
+            "memory_max_bytes": None,
+            "memory_current_bytes": None,
+        }
+
+    memory_max_raw = _read_first_line(cgroup_path / "memory.max")
+    memory_current_raw = _read_first_line(cgroup_path / "memory.current")
+    return {
+        "path": str(cgroup_path),
+        "memory_max_raw": memory_max_raw,
+        "memory_max_bytes": _parse_cgroup_int(memory_max_raw),
+        "memory_current_bytes": _parse_cgroup_int(memory_current_raw),
+    }
+
+
 def get_vm_runtime_snapshot(
     vmachine_id: str,
     state: Optional[Dict[str, Any]] = None,
@@ -73,6 +128,7 @@ def get_vm_runtime_snapshot(
     runtime_state = dict(state or load_runtime_state(vmachine_id) or {})
     pid = int(runtime_state.get("pid") or 0)
     proc = _process_snapshot(pid)
+    cgroup_memory = _cgroup_memory_snapshot(vmachine_id=vmachine_id, runtime_state=runtime_state)
 
     uptime_s = proc["uptime_s"]
     if uptime_s is None:
@@ -84,5 +140,9 @@ def get_vm_runtime_snapshot(
         "alive": bool(proc["alive"]),
         "uptime_s": uptime_s,
         "mem_rss_bytes": proc["mem_rss_bytes"],
+        "cgroup_path": cgroup_memory["path"],
+        "cgroup_memory_max_raw": cgroup_memory["memory_max_raw"],
+        "cgroup_memory_max_bytes": cgroup_memory["memory_max_bytes"],
+        "cgroup_memory_current_bytes": cgroup_memory["memory_current_bytes"],
         "log_paths": _resolve_log_paths(runtime_state),
     }
