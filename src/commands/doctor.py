@@ -1,8 +1,13 @@
 import os
+import platform
 import pwd
 import grp
 import re
+import shutil
 import subprocess
+import tempfile
+import time
+from pathlib import Path
 
 
 def _parse_unit_user(unit_content: str) -> str:
@@ -116,6 +121,384 @@ def _doctor_kvm_checks(service_user: str):
         )
 
 
+# ---------------------------------------------------------------------------
+# Cloud Hypervisor compatibility checks
+# ---------------------------------------------------------------------------
+
+def _resolve_config_paths(main_dir: str):
+    """Load minimal CH-related paths from config.yaml without importing ConfigManager."""
+    import yaml
+
+    config_path = os.path.join(main_dir, "config.yaml")
+    if not os.path.isfile(config_path):
+        return {}
+
+    with open(config_path, "r") as f:
+        raw = yaml.safe_load(f) or {}
+
+    main_cfg = raw.get("main", {})
+    main_dir_cfg = main_cfg.get("MAIN_DIR", main_dir)
+    ch_cfg = raw.get("virtualizers", {}).get("cloud_hypervisor", {})
+
+    def _interpolate(value):
+        if not isinstance(value, str):
+            return value
+        return value.replace("${main.MAIN_DIR}", str(main_dir_cfg))
+
+    return {
+        "binary_path": _interpolate(ch_cfg.get("BINARY_PATH", "")),
+        "kernel_paths": {
+            k: _interpolate(v)
+            for k, v in (ch_cfg.get("KERNEL_PATHS") or {}).items()
+        },
+        "initramfs_paths": {
+            k: _interpolate(v)
+            for k, v in (ch_cfg.get("INITRAMFS_PATHS") or {}).items()
+        },
+        "main_dir": str(main_dir_cfg),
+    }
+
+
+def _get_host_arch_tag() -> str:
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64"):
+        return "linux/amd64"
+    if machine in ("aarch64", "arm64"):
+        return "linux/arm64"
+    return f"linux/{machine}"
+
+
+def _parse_kernel_version(release: str):
+    """Extract (major, minor) ints from a kernel release string like '6.17.0-19-generic'."""
+    match = re.match(r"(\d+)\.(\d+)", release)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    return None, None
+
+
+def _doctor_ch_binary(ch_binary: str):
+    """Check cloud-hypervisor binary exists, is executable, and report its version."""
+    print("\nCloud Hypervisor binary:", flush=True)
+
+    if not ch_binary:
+        resolved = shutil.which("cloud-hypervisor")
+        if resolved:
+            ch_binary = resolved
+        else:
+            print("[FAIL] No cloud-hypervisor binary configured and none found in PATH.", flush=True)
+            return None
+
+    if not os.path.isfile(ch_binary):
+        print(f"[FAIL] Cloud Hypervisor binary not found at: {ch_binary}", flush=True)
+        return None
+
+    if not os.access(ch_binary, os.X_OK):
+        print(f"[FAIL] Cloud Hypervisor binary is not executable: {ch_binary}", flush=True)
+        return None
+
+    print(f"[OK] Cloud Hypervisor binary found: {ch_binary}", flush=True)
+
+    # Get version
+    try:
+        result = subprocess.run(
+            [ch_binary, "--version"], capture_output=True, text=True, timeout=10
+        )
+        version_text = (result.stdout or "").strip() or (result.stderr or "").strip()
+        if version_text:
+            print(f"[OK] Cloud Hypervisor version: {version_text}", flush=True)
+        else:
+            print("[WARN] Could not determine Cloud Hypervisor version.", flush=True)
+    except Exception as e:
+        print(f"[WARN] Could not query Cloud Hypervisor version: {e}", flush=True)
+        version_text = ""
+
+    return ch_binary
+
+
+def _doctor_host_kernel():
+    """Check host kernel version and warn about known-incompatible kernels."""
+    print("\nHost kernel compatibility:", flush=True)
+
+    release = platform.release()
+    major, minor = _parse_kernel_version(release)
+    print(f"[INFO] Host kernel: {release}", flush=True)
+
+    if major is not None and minor is not None:
+        # Kernels >= 6.13 may introduce KVM exit reason changes that break
+        # older Cloud Hypervisor builds.  6.17+ is experimentally bleeding-edge.
+        if major > 6 or (major == 6 and minor >= 17):
+            print(
+                f"[WARN] Kernel {major}.{minor} is bleeding-edge. Cloud Hypervisor may fail with "
+                "'VcpuRun InternalError' if the CH binary does not support the KVM changes "
+                "introduced in this kernel.",
+                flush=True,
+            )
+            print(
+                "  Suggestion: Upgrade Cloud Hypervisor to the latest release, or "
+                "use a stable kernel (e.g. 6.8, 6.11, 6.12 LTS).",
+                flush=True,
+            )
+        elif major == 6 and minor >= 13:
+            print(
+                f"[WARN] Kernel {major}.{minor} includes KVM changes that may affect "
+                "Cloud Hypervisor compatibility. Verify with the smoke test below.",
+                flush=True,
+            )
+        else:
+            print(f"[OK] Kernel {major}.{minor} is expected to be compatible.", flush=True)
+    else:
+        print("[WARN] Could not parse kernel version. Compatibility cannot be assessed.", flush=True)
+
+    return release
+
+
+def _doctor_guest_kernel(kernel_paths: dict, host_arch_tag: str):
+    """Check guest kernel (vmlinuz) exists for the host architecture."""
+    print("\nGuest kernel (vmlinuz):", flush=True)
+
+    kernel_path = kernel_paths.get(host_arch_tag, "")
+    if not kernel_path:
+        print(
+            f"[FAIL] No guest kernel path configured for architecture '{host_arch_tag}'.",
+            flush=True,
+        )
+        return None
+
+    if not os.path.isfile(kernel_path):
+        print(f"[FAIL] Guest kernel not found at: {kernel_path}", flush=True)
+        print("  Suggestion: Re-run the installer to provision kernel assets.", flush=True)
+        return None
+
+    size = os.path.getsize(kernel_path)
+    print(f"[OK] Guest kernel found: {kernel_path} ({size} bytes)", flush=True)
+
+    # Basic sanity: vmlinuz should be at least 1 MiB for a real kernel
+    if size < 1024 * 1024:
+        print(
+            f"[WARN] Guest kernel is suspiciously small ({size} bytes). "
+            "It may be corrupt or truncated.",
+            flush=True,
+        )
+
+    return kernel_path
+
+
+def _doctor_initramfs(initramfs_paths: dict, host_arch_tag: str):
+    """Check custom initramfs exists and contains required entries."""
+    print("\nCustom initramfs:", flush=True)
+
+    initramfs_path = initramfs_paths.get(host_arch_tag, "")
+    if not initramfs_path:
+        print(
+            f"[FAIL] No initramfs path configured for architecture '{host_arch_tag}'.",
+            flush=True,
+        )
+        return None
+
+    if not os.path.isfile(initramfs_path):
+        print(f"[FAIL] Initramfs not found at: {initramfs_path}", flush=True)
+        print("  Suggestion: Re-run the installer to regenerate the initramfs.", flush=True)
+        return None
+
+    size = os.path.getsize(initramfs_path)
+    print(f"[OK] Initramfs found: {initramfs_path} ({size} bytes)", flush=True)
+
+    # Verify contents with lsinitramfs if available
+    lsinitramfs = shutil.which("lsinitramfs")
+    if lsinitramfs:
+        try:
+            result = subprocess.run(
+                [lsinitramfs, initramfs_path], capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                entries = {
+                    line.strip().lstrip("./")
+                    for line in (result.stdout or "").splitlines()
+                    if line.strip()
+                }
+                required = {"init", "bin/busybox", "etc/nodo-ch-initramfs.marker"}
+                missing = sorted(required - entries)
+                if missing:
+                    print(
+                        f"[FAIL] Initramfs is missing required entries: {missing}",
+                        flush=True,
+                    )
+                    print(
+                        "  Suggestion: Re-run the installer to regenerate the initramfs.",
+                        flush=True,
+                    )
+                else:
+                    print("[OK] Initramfs contains all required entries (init, busybox, marker).", flush=True)
+            else:
+                print(
+                    f"[WARN] lsinitramfs returned error ({result.returncode}). "
+                    "Cannot verify initramfs contents.",
+                    flush=True,
+                )
+        except Exception as e:
+            print(f"[WARN] Could not inspect initramfs: {e}", flush=True)
+    else:
+        print("[WARN] lsinitramfs not found; skipping content verification.", flush=True)
+
+    return initramfs_path
+
+
+def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str):
+    """Run a minimal Cloud Hypervisor VM to verify vCPU execution works on this host.
+
+    This catches incompatibilities between the CH binary and the host kernel's
+    KVM implementation (e.g. the 'Unexpected exit reason on vcpu run: InternalError'
+    seen with kernel 6.17+).
+    """
+    print("\nCloud Hypervisor KVM smoke test:", flush=True)
+
+    if not ch_binary or not kernel_path or not initramfs_path:
+        print("[SKIP] Smoke test skipped — missing binary, kernel, or initramfs.", flush=True)
+        return
+
+    if not os.path.exists("/dev/kvm"):
+        print("[SKIP] Smoke test skipped — /dev/kvm not available.", flush=True)
+        return
+
+    tmpdir = tempfile.mkdtemp(prefix="nodo-doctor-ch-smoke-")
+    try:
+        # Create a minimal ext4 rootfs image (just needs to be mountable)
+        rootfs_path = os.path.join(tmpdir, "rootfs.ext4")
+        api_socket = os.path.join(tmpdir, "ch.sock")
+        stderr_log = os.path.join(tmpdir, "ch.stderr.log")
+        serial_log = os.path.join(tmpdir, "ch.serial.log")
+
+        # Create a 16 MiB empty ext4 image
+        try:
+            subprocess.run(
+                ["dd", "if=/dev/zero", f"of={rootfs_path}", "bs=1M", "count=16"],
+                capture_output=True, check=True
+            )
+            subprocess.run(
+                ["mkfs.ext4", "-F", "-q", rootfs_path],
+                capture_output=True, check=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            print(f"[SKIP] Cannot create test rootfs: {e}", flush=True)
+            return
+
+        cmdline = "root=/dev/vda rw console=ttyS0"
+
+        cmd = [
+            ch_binary,
+            "--api-socket", api_socket,
+            "--kernel", kernel_path,
+            "--initramfs", initramfs_path,
+            "--disk", f"path={rootfs_path},image_type=raw",
+            "--cpus", "boot=1",
+            "--memory", "size=64M",
+            "--cmdline", cmdline,
+            "--serial", f"file={serial_log}",
+            "--console", "off",
+        ]
+
+        with open(stderr_log, "w") as stderr_f:
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=stderr_f
+            )
+
+        # Wait a bit for the VM to start (or fail)
+        time.sleep(2.0)
+
+        poll = process.poll()
+
+        # Read stderr output
+        stderr_content = ""
+        try:
+            with open(stderr_log, "r", errors="replace") as f:
+                stderr_content = f.read()
+        except Exception:
+            pass
+
+        serial_content = ""
+        try:
+            with open(serial_log, "r", errors="replace") as f:
+                serial_content = f.read()
+        except Exception:
+            pass
+
+        if poll is not None:
+            # Process exited — this is a problem
+            if "VcpuRun" in stderr_content or "InternalError" in stderr_content:
+                print(
+                    "[FAIL] Cloud Hypervisor vCPU failed to execute. The CH binary is "
+                    "incompatible with this host kernel's KVM implementation.",
+                    flush=True,
+                )
+                print(f"  stderr: {stderr_content.strip()[:500]}", flush=True)
+                print(
+                    "  Suggestion: Update Cloud Hypervisor to the latest version, or "
+                    "downgrade the host kernel to a stable release (e.g. 6.8, 6.11, 6.12 LTS).",
+                    flush=True,
+                )
+            elif "Vmm(VmCreate(KernelLoad" in stderr_content:
+                print(
+                    "[FAIL] Cloud Hypervisor could not load the guest kernel. "
+                    "The vmlinuz file may be incompatible or corrupt.",
+                    flush=True,
+                )
+                print(f"  stderr: {stderr_content.strip()[:500]}", flush=True)
+                print(
+                    "  Suggestion: Re-install Nodo or replace the guest kernel with a "
+                    "known-good vmlinuz for this architecture.",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[FAIL] Cloud Hypervisor exited early with code {poll}.",
+                    flush=True,
+                )
+                print(f"  stderr: {stderr_content.strip()[:500]}", flush=True)
+        else:
+            # VM is still running — vCPU works!
+            # Check that serial has output (kernel is actually booting)
+            if serial_content.strip():
+                print(
+                    "[OK] Cloud Hypervisor vCPU is running. Guest kernel boot detected via serial output.",
+                    flush=True,
+                )
+            else:
+                print(
+                    "[OK] Cloud Hypervisor vCPU is running (process alive after 2s).",
+                    flush=True,
+                )
+
+            # Terminate the test VM
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=3)
+
+    except Exception as e:
+        print(f"[WARN] Smoke test encountered an error: {e}", flush=True)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _doctor_cloud_hypervisor(main_dir: str):
+    """Run all Cloud Hypervisor compatibility checks."""
+    cfg = _resolve_config_paths(main_dir)
+    if not cfg:
+        print("\n[WARN] Could not load config.yaml; skipping Cloud Hypervisor checks.", flush=True)
+        return
+
+    host_arch_tag = _get_host_arch_tag()
+    print(f"\nHost architecture: {host_arch_tag}", flush=True)
+
+    ch_binary = _doctor_ch_binary(cfg.get("binary_path", ""))
+    _doctor_host_kernel()
+    guest_kernel = _doctor_guest_kernel(cfg.get("kernel_paths", {}), host_arch_tag)
+    initramfs = _doctor_initramfs(cfg.get("initramfs_paths", {}), host_arch_tag)
+    _doctor_ch_smoke_test(ch_binary, guest_kernel, initramfs)
+
+
 def doctor_command(main_dir):
     if os.geteuid() != 0:
         print("This script requires superuser privileges. Please run with sudo.")
@@ -170,3 +553,4 @@ def doctor_command(main_dir):
 
     print(f"Service runtime user for checks: {current_service_user}", flush=True)
     _doctor_kvm_checks(current_service_user)
+    _doctor_cloud_hypervisor(main_dir)

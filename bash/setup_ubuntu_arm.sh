@@ -161,7 +161,123 @@ else
     echo "   - yq already installed."
 fi
 
+validate_cloud_hypervisor_kvm() {
+    local ch_binary="$TARGET_DIR/bin/cloud-hypervisor"
+    local ch_kernel="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
+    local ch_initramfs="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
+
+    echo "Running Cloud Hypervisor KVM compatibility smoke test..."
+
+    if [ ! -x "$ch_binary" ]; then
+        echo "Warning: CH binary not found, skipping smoke test."
+        return 0
+    fi
+    if [ ! -f "$ch_kernel" ]; then
+        echo "Warning: Guest kernel not found, skipping smoke test."
+        return 0
+    fi
+    if [ ! -f "$ch_initramfs" ]; then
+        echo "Warning: Initramfs not found, skipping smoke test."
+        return 0
+    fi
+    if [ ! -e /dev/kvm ]; then
+        echo "Warning: /dev/kvm not available, skipping smoke test."
+        return 0
+    fi
+
+    local smoke_dir
+    smoke_dir="$(mktemp -d /tmp/nodo-ch-smoke.XXXXXX)"
+
+    local rootfs="$smoke_dir/rootfs.ext4"
+    local api_sock="$smoke_dir/ch.sock"
+    local stderr_log="$smoke_dir/ch.stderr.log"
+    local serial_log="$smoke_dir/ch.serial.log"
+
+    # Create a minimal ext4 image
+    dd if=/dev/zero of="$rootfs" bs=1M count=16 > /dev/null 2>&1 || {
+        echo "Warning: Could not create test rootfs, skipping smoke test."
+        rm -rf "$smoke_dir"
+        return 0
+    }
+    mkfs.ext4 -F -q "$rootfs" > /dev/null 2>&1 || {
+        echo "Warning: Could not format test rootfs, skipping smoke test."
+        rm -rf "$smoke_dir"
+        return 0
+    }
+
+    "$ch_binary" \
+        --api-socket "$api_sock" \
+        --kernel "$ch_kernel" \
+        --initramfs "$ch_initramfs" \
+        --disk "path=$rootfs,image_type=raw" \
+        --cpus boot=1 \
+        --memory size=64M \
+        --cmdline "root=/dev/vda rw console=ttyS0" \
+        --serial "file=$serial_log" \
+        --console off \
+        > /dev/null 2> "$stderr_log" &
+    local ch_pid=$!
+
+    sleep 3
+
+    if kill -0 "$ch_pid" 2>/dev/null; then
+        # VM is running — vCPU works on this kernel
+        echo "Cloud Hypervisor KVM smoke test passed."
+        kill "$ch_pid" 2>/dev/null
+        wait "$ch_pid" 2>/dev/null
+        rm -rf "$smoke_dir"
+        return 0
+    fi
+
+    # Process exited early — check why
+    local stderr_content=""
+    [ -f "$stderr_log" ] && stderr_content="$(cat "$stderr_log" 2>/dev/null)"
+
+    rm -rf "$smoke_dir"
+
+    if echo "$stderr_content" | grep -qE "VcpuRun|InternalError"; then
+        local kernel_release
+        kernel_release="$(uname -r)"
+        echo ""
+        echo "============================================================"
+        echo "FATAL: Cloud Hypervisor vCPU failed on this host."
+        echo ""
+        echo "The Cloud Hypervisor binary (${CH_VERSION}) is incompatible"
+        echo "with the host kernel (${kernel_release})."
+        echo ""
+        echo "stderr: ${stderr_content}"
+        echo ""
+        echo "Solutions:"
+        echo "  1. Upgrade Cloud Hypervisor to a newer version."
+        echo "  2. Downgrade the host kernel to a stable release"
+        echo "     (e.g. 6.8, 6.11, or 6.12 LTS)."
+        echo "============================================================"
+        echo ""
+        fail "Cloud Hypervisor is incompatible with host kernel ${kernel_release}. See details above."
+    fi
+
+    if echo "$stderr_content" | grep -q "KernelLoad"; then
+        echo ""
+        echo "============================================================"
+        echo "FATAL: Cloud Hypervisor could not load the guest kernel."
+        echo ""
+        echo "The vmlinuz at ${ch_kernel} may be incompatible or corrupt."
+        echo "stderr: ${stderr_content}"
+        echo "============================================================"
+        echo ""
+        fail "Guest kernel is not loadable by Cloud Hypervisor. Re-provision kernel assets."
+    fi
+
+    echo "Warning: Cloud Hypervisor exited early during smoke test."
+    echo "  stderr: ${stderr_content}"
+    echo "  Nodo may not be able to run services with Cloud Hypervisor on this host."
+    return 0
+}
+
 provision_cloud_hypervisor_assets
+
+echo "Validating Cloud Hypervisor on this host..."
+validate_cloud_hypervisor_kvm
 
 echo "6. Adding Deadsnakes PPA for Python 3.11..."
 add-apt-repository ppa:deadsnakes/ppa -y >/dev/null

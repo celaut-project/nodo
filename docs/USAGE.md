@@ -174,7 +174,16 @@ These are intended for development or advanced maintenance environments:
   `sudo nodo daemon restart`
 
 - **doctor**  
-  Checks and fixes the Nodo systemd service configuration, and performs virtualization checks (requires superuser privileges).  
+  Checks and fixes the Nodo systemd service configuration, and performs comprehensive virtualization and Cloud Hypervisor compatibility checks (requires superuser privileges).  
+  Checks performed:
+  - Systemd service file integrity
+  - CPU virtualization flags (vmx/svm)
+  - KVM kernel modules and /dev/kvm access
+  - Cloud Hypervisor binary existence and version
+  - Host kernel version (warns about bleeding-edge kernels with KVM incompatibilities)
+  - Guest kernel (`vmlinuz`) presence and size validation
+  - Custom initramfs presence and required entry validation
+  - **KVM smoke test**: launches a minimal VM to verify that the Cloud Hypervisor binary can actually execute vCPUs on the host kernel  
   **Example:**  
   `sudo nodo doctor`
 
