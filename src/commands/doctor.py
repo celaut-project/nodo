@@ -347,8 +347,7 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
     """Run a minimal Cloud Hypervisor VM to verify vCPU execution works on this host.
 
     This catches incompatibilities between the CH binary and the host kernel's
-    KVM implementation (e.g. the 'Unexpected exit reason on vcpu run: InternalError'
-    seen with kernel 6.17+).
+    KVM implementation (e.g. the 'Unexpected exit reason on vcpu run: InternalError').
     """
     print("\nCloud Hypervisor KVM smoke test:", flush=True)
 
