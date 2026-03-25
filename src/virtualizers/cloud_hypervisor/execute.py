@@ -47,7 +47,7 @@ GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
     "virtualizers.cloud_hypervisor.GUEST_NETWORK_READY_TIMEOUT_S",
     8,
 )
-CONSERVE_RUNTIME_DIR_ON_FAILURE = env_manager.get("virtualizers.cloud_hypervisor.CONSERVE_RUNTIME_DIR_ON_FAILURE", True)
+CONSERVE_RUNTIME_DIR_ON_FAILURE = env_manager.get("virtualizers.cloud_hypervisor.CONSERVE_RUNTIME_DIR_ON_FAILURE", False)
 
 def _env_int(key: str, default: int) -> int:
     try:
