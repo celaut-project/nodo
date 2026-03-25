@@ -67,7 +67,7 @@ set -eu
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 log() {
-    echo "[nodo-ch-initramfs] $*"
+    echo "[nodo-ch-initramfs] $*" >&2
 }
 
 fatal() {
