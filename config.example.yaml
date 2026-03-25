@@ -58,6 +58,7 @@ virtualizers:
     # CONSOLE_MODE: off|null|tty|file=/custom/path.log
     SERIAL_MODE: "file"
     CONSOLE_MODE: "off"
+    CONSERVE_RUNTIME_DIR_ON_FAILURE: false
     SECURITY:
       # Enforce rootfs destination confinement for all filesystem paths.
       PATH_CONFINEMENT: true
@@ -78,7 +79,6 @@ virtualizers:
       # Reserved hook for future rootfs build sandboxing strategy.
       ROOTFS_BUILD_SANDBOX: "none"
       # When true, if a VM fails to boot or encounters an error, its runtime directory will be preserved for debugging instead of being deleted.
-      CONSERVE_RUNTIME_DIR_ON_FAILURE: false
 
 builder:
   WAIT_FOR_CONTAINER: 60
