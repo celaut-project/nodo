@@ -48,7 +48,7 @@ This mode keeps `nodo.service` and the isolated Docker daemon pointed to your lo
 
 Branch-based installation (default branch is `stable`):
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash -s -- --branch dev
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/dev/install.sh | sudo bash -s -- --branch dev
 ```
 </details>
 
