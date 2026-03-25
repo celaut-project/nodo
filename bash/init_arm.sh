@@ -1,1 +1,0 @@
-export COMPUTE_POWER_RATE=1
