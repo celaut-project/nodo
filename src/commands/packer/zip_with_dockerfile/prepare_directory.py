@@ -85,6 +85,12 @@ def __ensure_is_correct(directory: str):
 def prepare_directory(directory: str) -> Tuple[bool, str]:
     # Check if the directory is a remote Git repository (contains both https:// and .git)
     if "http" in directory[:4]:
+        subdir = ""
+
+        # Extract subdirectory from URL fragment
+        if "#" in directory:
+            directory, subdir = directory.split("#", 1)
+
         # If the directory URL doesn't end with ".git", append it
         if not directory.endswith(".git"):
             directory += ".git"
@@ -106,10 +112,17 @@ def prepare_directory(directory: str) -> Tuple[bool, str]:
             # Clone the Git repository into the cache directory
             subprocess.run(["git", "clone", directory, repo_path], check=True)
         
-        __ensure_is_correct(repo_path)
+        # Resolve final project path
+        project_path = os.path.join(repo_path, subdir) if subdir else repo_path
+
+        # Validate subdirectory exists
+        if not os.path.isdir(project_path):
+            raise Exception(f"Subdirectory '{subdir}' does not exist in the repository")
+
+        __ensure_is_correct(project_path)
         
-        # Return the path to the cloned repository
-        return True, repo_path
+        # Return the path to the project (NOT repo root)
+        return True, project_path
     
     elif os.path.isdir(directory):
         # Remove the last character '/' from the path if it exists
