@@ -367,15 +367,7 @@ else
     echo "   - Rust already installed."
 fi
 
-echo "16. Running ARM-specific init script..."
-if [ -f "$TARGET_DIR/bash/init_arm.sh" ]; then
-    # Use 'source' so exported variables persist in this shell session
-    source "$TARGET_DIR/bash/init_arm.sh"
-else
-    echo "   - init_arm.sh not found."
-fi
-
-echo "17. Running database migrations with Python..."
+echo "16. Running database migrations with Python..."
 python3.11 nodo.py migrate >/dev/null || {
     echo "   - Migration failed."
     deactivate

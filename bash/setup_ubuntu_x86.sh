@@ -373,10 +373,6 @@ DOCKER_SOCKET="${TARGET_DIR}/docker/docker.sock"
 /bin/bash "$TARGET_DIR/bash/start_docker_daemon.sh" "$TARGET_DIR" > /dev/null
 "${TARGET_DIR}/bin/docker" -H "unix://${DOCKER_SOCKET}" run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
 
-echo "Executing initialization script for x86..."
-# Use 'source' so exported variables persist in this shell session
-source "$TARGET_DIR/bash/init_x86.sh"
-
 echo "Running migrations for Python application..."
 python3.11 "$TARGET_DIR/nodo.py" migrate > /dev/null
 

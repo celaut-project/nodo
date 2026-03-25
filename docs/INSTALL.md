@@ -205,15 +205,10 @@ rm get-pip.py
 python3 -m pip install -r "$TARGET_DIR/bash/requirements.txt"
 ```
 
-#### **2.5. Run Initialization and Migration Scripts**
+#### **2.5. Run  Migration Script**
 
-Execute the final scripts to initialize the configuration and apply database migrations.
+Execute the final script to apply database migrations.
 
-```bash
-# Initialization script
-bash ./bash/init_x86.sh
-
-# Application migrations
 python3.11 nodo.py migrate
 ```
 
