@@ -45,11 +45,11 @@ virtualizers:
     # Keep console=ttyS0 so serial logs receive kernel/init output.
     KERNEL_CMDLINE_EXTRA: "console=ttyS0"
     # Fail fast if the guest does not become reachable on the bridge network.
-    GUEST_NETWORK_READY_TIMEOUT_S: 8
+    GUEST_NETWORK_READY_TIMEOUT_S: 20
     # Memory policy for VM boot:
     # - MIN_MEM_MIB is only the floor needed to boot lightweight workloads.
     # - Services requiring more memory must request it explicitly in sysresources.
-    MIN_MEM_MIB: 64
+    MIN_MEM_MIB: 128
     DEFAULT_MEM_MIB: 256
     # cgroup v2 root path for per-VM lifecycle hotplug controls.
     CGROUPS_BASE_DIR: "/sys/fs/cgroup"
