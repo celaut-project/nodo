@@ -47,7 +47,7 @@ GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
     "virtualizers.cloud_hypervisor.GUEST_NETWORK_READY_TIMEOUT_S",
     8,
 )
-CONSERVE_RUNTIME_DIR_ON_FAILURE = env_manager.get("virtualizers.cloud_hypervisor.CONSERVE_RUNTIME_DIR_ON_FAILURE", False)
+CONSERVE_RUNTIME_DIR_ON_FAILURE = env_manager.get("virtualizers.cloud_hypervisor.CONSERVE_RUNTIME_DIR_ON_FAILURE", True)
 
 def _env_int(key: str, default: int) -> int:
     try:
@@ -1054,7 +1054,7 @@ def execute(
 
         if runtime_dir.exists():
             if CONSERVE_RUNTIME_DIR_ON_FAILURE:
-                
+
                 log.LOGGER(f"[CH][{vmachine_id}] preserving runtime directory for debugging: {runtime_dir}")
                 failures_dir = Path(CACHE) / "cloud_hypervisor" / "failures"
                 failures_dir.mkdir(parents=True, exist_ok=True)
