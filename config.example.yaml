@@ -58,7 +58,7 @@ virtualizers:
     # CONSOLE_MODE: off|null|tty|file=/custom/path.log
     SERIAL_MODE: "file"
     CONSOLE_MODE: "off"
-    CONSERVE_RUNTIME_DIR_ON_FAILURE: false
+    CONSERVE_RUNTIME_DIR_ON_FAILURE: true
     SECURITY:
       # Enforce rootfs destination confinement for all filesystem paths.
       PATH_CONFINEMENT: true
