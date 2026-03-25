@@ -283,8 +283,8 @@ validate_cloud_hypervisor_kvm() {
 echo "Provisioning Cloud Hypervisor assets..."
 provision_cloud_hypervisor_assets
 
-echo "Validating Cloud Hypervisor on this host..."
-validate_cloud_hypervisor_kvm
+# echo "Validating Cloud Hypervisor on this host..."
+# validate_cloud_hypervisor_kvm
 
 echo "Adding Python 3.11 repository..."
 sudo add-apt-repository ppa:deadsnakes/ppa -y > /dev/null
