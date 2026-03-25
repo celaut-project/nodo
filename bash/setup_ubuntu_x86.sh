@@ -205,6 +205,10 @@ rm -rf /tmp/docker /tmp/docker.tgz
 chmod +x "$BIN_DIR"/*
 
 echo "Installing buildx..."
+DOCKER_CONFIG="${TARGET_DIR}/.docker"
+PLUGIN_DIR="${DOCKER_CONFIG}/cli-plugins"
+mkdir -p "$PLUGIN_DIR"
+
 curl -fsSL "https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0.12.1.linux-${BUILDX_ARCH}" \
   -o "${PLUGIN_DIR}/docker-buildx"
 chmod +x "${PLUGIN_DIR}/docker-buildx"
