@@ -107,7 +107,7 @@ def check_wanted_service(wanted: str):
 
 def maintain_vmachines(debug_mode: bool=False):
     def remove_and_penalize_vmachine(vmachine_id: str):
-        update_vmachine_reputation(container_id=vmachine_id, amount=-100)
+        update_vmachine_reputation(vmachine_id=vmachine_id, amount=-100)
         log.LOGGER(f"Prunning container {vmachine_id} from the registry because the docker container does not exist.")
         try:
             stop_instance(token=vmachine_id)

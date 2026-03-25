@@ -77,6 +77,8 @@ virtualizers:
       TRUSTED_SERVICE_IDS: []
       # Reserved hook for future rootfs build sandboxing strategy.
       ROOTFS_BUILD_SANDBOX: "none"
+      # When true, if a VM fails to boot or encounters an error, its runtime directory will be preserved for debugging instead of being deleted.
+      CONSERVE_RUNTIME_DIR_ON_FAILURE: false
 
 builder:
   WAIT_FOR_CONTAINER: 60

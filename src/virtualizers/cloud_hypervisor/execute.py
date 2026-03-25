@@ -47,6 +47,7 @@ GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
     "virtualizers.cloud_hypervisor.GUEST_NETWORK_READY_TIMEOUT_S",
     8,
 )
+CONSERVE_RUNTIME_DIR_ON_FAILURE = env_manager.get("virtualizers.cloud_hypervisor.CONSERVE_RUNTIME_DIR_ON_FAILURE", False)
 
 def _env_int(key: str, default: int) -> int:
     try:
@@ -1052,8 +1053,23 @@ def execute(
         delete_runtime_state(vmachine_id)
 
         if runtime_dir.exists():
-            log.LOGGER(f"[CH][{vmachine_id}] removing runtime directory: {runtime_dir}")
-            shutil.rmtree(runtime_dir, ignore_errors=True)
+            if CONSERVE_RUNTIME_DIR_ON_FAILURE:
+                
+                log.LOGGER(f"[CH][{vmachine_id}] preserving runtime directory for debugging: {runtime_dir}")
+                failures_dir = Path(CACHE) / "cloud_hypervisor" / "failures"
+                failures_dir.mkdir(parents=True, exist_ok=True)
+                
+                target = failures_dir / vmachine_id
+                shutil.move(str(runtime_dir), str(target))
+
+                with open(target / "error.txt", "w") as f:
+                    f.write(str(e))
+                    f.write("\n\n")
+                    f.write(traceback.format_exc())
+
+            else:
+                log.LOGGER(f"[CH][{vmachine_id}] removing runtime directory: {runtime_dir}")
+                shutil.rmtree(runtime_dir, ignore_errors=True)
 
         if isinstance(e, CHExecuteError):
             raise
