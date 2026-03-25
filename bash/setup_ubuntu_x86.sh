@@ -221,3 +221,4 @@ echo "Running migrations..."
 python3.11 "$TARGET_DIR/nodo.py" migrate > /dev/null
 
 echo "All steps completed."
+deactivate
