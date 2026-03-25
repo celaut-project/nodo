@@ -1,3 +1,0 @@
-export WAIT_FOR_CONTAINER=120
-export USE_PRINT=True
-export MEMORY_LOGS=True
