@@ -60,6 +60,8 @@ done
 
 cat > "$ROOT/init" <<'INIT_EOF'
 #!/bin/sh
+exec >/dev/console 2>&1
+set -x
 set -eu
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -107,12 +109,38 @@ EOF
 
 first_non_loopback_iface() {
     local p iface
+
+    log "detecting network interfaces..."
+    log "available interfaces: $(ls /sys/class/net 2>/dev/null | tr '\n' ' ')"
+
     for p in /sys/class/net/*; do
         iface="${p##*/}"
-        [ "$iface" = "lo" ] && continue
+
+        log "checking iface='$iface'"
+
+        if [ "$iface" = "lo" ]; then
+            log "skipping loopback"
+            continue
+        fi
+
+        # Opcional: comprobar si tiene carrier (link up real)
+        if [ -f "/sys/class/net/$iface/carrier" ]; then
+            carrier="$(cat /sys/class/net/$iface/carrier 2>/dev/null || echo 0)"
+            log "iface='$iface' carrier=$carrier"
+        fi
+
+        # Opcional: comprobar estado operativo
+        if [ -f "/sys/class/net/$iface/operstate" ]; then
+            state="$(cat /sys/class/net/$iface/operstate 2>/dev/null || echo unknown)"
+            log "iface='$iface' operstate=$state"
+        fi
+
+        log "selected iface='$iface'"
         echo "$iface"
         return 0
     done
+
+    log "no suitable non-loopback interface found"
     return 1
 }
 
