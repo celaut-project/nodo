@@ -104,6 +104,7 @@ network:
   # If true, child instances launched by internal instances are NOT exposed on the host.
   # If false, child instances will be published and reachable from the internet (subject to host firewall).
   ISOLATE_INTERNAL_CHILDREN: true
+  CONSIDER_DEV_AS_INTERNAL: true  # If true, instances with "dev" in their father_id are considered internal regardless of actual network location. Use false in case node is controlled via ssh session for example.
 
 logs:
   MEMORY_LOGS: false
