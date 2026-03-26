@@ -277,12 +277,13 @@ DOCKER_ENV.update({
     "DOCKER_API_VERSION": "1.43",
     "DOCKER_HOST": f"unix://{DOCKER_SOCKET}",
     "PATH": f"{BIN_DIR}{os.pathsep}{os.environ.get('PATH', '')}",
-    "DOCKER_CLI_PLUGINS_EXTRA_DIRS": str(PLUGIN_DIR)
+    "DOCKER_CONFIG": str(NODO_ROOT / "libexec" / "docker")
 })
 
 # Base Docker command as a list (safer than strings + shlex)
-DOCKER_COMMAND = [DOCKER_BIN, "-H", f"unix://{DOCKER_SOCKET}"]
-
+# DOCKER_COMMAND = [DOCKER_BIN, "-H", f"unix://{DOCKER_SOCKET}"]
+DOCKER_COMMAND = [DOCKER_BIN]
+                
 # DOCKER_CLIENT factory - connects to the isolated Docker daemon
 def _ensure_docker_daemon_running():
     """
