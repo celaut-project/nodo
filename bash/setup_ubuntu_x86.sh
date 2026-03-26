@@ -209,6 +209,11 @@ curl -fsSL "https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0
   -o "${PLUGIN_DIR}/docker-buildx"
 chmod +x "${PLUGIN_DIR}/docker-buildx"
 
+echo "Installing docker-init..."
+curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-init-24.0.9" \
+  -o "${BIN_DIR}/docker-init"
+chmod +x "${BIN_DIR}/docker-init"
+
 echo "Installing QEMU..."
 sudo apt-get -y install qemu-system binfmt-support qemu-user-static > /dev/null
 
