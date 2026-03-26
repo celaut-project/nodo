@@ -964,7 +964,7 @@ def execute(
         dnat_rules_state: List[Dict[str, object]] = []
         if not by_local and assigment_ports:
             for internal_port, external_port in assigment_ports.items():
-                for protocol in ("tcp", "udp"):
+                for protocol in ("tcp", "udp"):  # TODO
                     removal_commands = _add_dnat_rule(
                         protocol=protocol,
                         external_port=external_port,

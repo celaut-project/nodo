@@ -12,6 +12,7 @@ def get_free_port(open_port: bool = False) -> int:
     Returns:
         int: A free port number.
     """
+    # TODO Control race conditions on get free ports. Maybe using a lock or a port reservation system.
     with socket.socket() as s:
         s.bind(('', 0))
         port = int(s.getsockname()[1])
@@ -35,7 +36,7 @@ def get_local_ip() -> str:
         s.close()
         return ip_address
     except Exception as e:
-        raise(f"Error getting local IP: {e}")
+        raise(f"Error getting local IP: {e}") # pyright: ignore[reportGeneralTypeIssues]
 
 def internet_available() -> bool:
     """

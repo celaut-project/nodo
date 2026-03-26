@@ -100,7 +100,6 @@ packer:
 
 network:
   GATEWAY_PORT: auto
-  NGROK_TUNNELS_KEY: ""
   LOCAL_NETWORK: "lo"
   # If true, child instances launched by internal instances are NOT exposed on the host.
   # If false, child instances will be published and reachable from the internet (subject to host firewall).

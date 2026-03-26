@@ -59,22 +59,20 @@ def local_execution(
     log.LOGGER(f"Service build ready for execution: service_id={service_id}")
 
     # If the request is made by a local service (container inside this node).
-    require_tunnel = TunnelSystem().from_tunnel(ip=father_ip)
     is_internal_father = bool(father_id) and sc.internal_instance_exists(id=father_id)
     isolate_internal_children = env_manager.get("network.ISOLATE_INTERNAL_CHILDREN", True)
-    by_local: bool = is_internal_father and not require_tunnel and isolate_internal_children
+    expose_outside: bool = not is_internal_father or not isolate_internal_children  # If the father is internal, but isolate internal children is disabled, the child should be exposed outside.
     log.LOGGER(
         "Internal child isolation is "
         + ("enabled" if isolate_internal_children else "disabled")
-        + f" (father_id={father_id}, father_ip={father_ip}, by_local={by_local})"
+        + f" (father_id={father_id}, father_ip={father_ip}, by_local={not expose_outside})"
     )
 
-    # TODO Control race conditions on get free ports. Maybe using a lock or a port reservation system.
     assigment_ports: Optional[Dict[int, int]] = \
-        {slot.port: get_free_port() for slot in service.api.slot} if not by_local \
+        {slot.port: get_free_port() for slot in service.api.slot} if expose_outside \
         else {slot.port: slot.port for slot in service.api.slot}
     log.LOGGER(
-        f"Execution network mode: by_local={by_local}, require_tunnel={require_tunnel}, "
+        f"Execution network mode: by_local={not expose_outside}, "
         f"assigment_ports={assigment_ports}"
     )
 
@@ -84,7 +82,7 @@ def local_execution(
     )
     vmachine_id, vmachine_ip = execute(
         assigment_ports=assigment_ports, 
-        by_local=by_local, 
+        by_local=not expose_outside, 
         service_id=service_id, 
         service=service, 
         config=config, 
@@ -94,30 +92,21 @@ def local_execution(
     log.LOGGER(f"Virtualizer execute returned: vmachine_id={vmachine_id}, vmachine_ip={vmachine_ip}")
 
     uri_slots: List[celaut.Instance.Uri_Slot] = []
+    resolved_network = ""
     try:
-        resolved_network = utils.get_network_name(direction=father_ip) if not by_local else ""
-        log.LOGGER(
-            f"Preparing published URI slots: resolved_network={resolved_network if resolved_network else 'by_local'}"
-        )
+        if expose_outside: 
+            resolved_network = utils.get_network_name(direction=father_ip)
+        log.LOGGER(f"Preparing published URI slots: resolved_network={resolved_network} and father IP={father_ip if father_ip else 'N/A'}")
+
         for internal, external in assigment_ports.items():
             uri_slot = celaut.Instance.Uri_Slot()
             uri_slot.internal_port = internal
 
-            # for host_ip in host_ip_list:
+            # get the host ip to be published for this instance. If the instance doesn't require to be exposed, publish the vmachine_ip, otherwise publish the local IP of this node.:
             _ip: str = utils.get_local_ip_from_network(
                     network=resolved_network,
-                ) if not by_local else vmachine_ip
+                ) if expose_outside else vmachine_ip
             _port: int = external
-
-            if require_tunnel:
-                _response = TunnelSystem().generate_tunnel(ip=_ip, port=_port)
-                if _response:
-                    _ip, _port = _response
-                else:
-                    _msg = "Any tunnel available. Instance can't be serve."
-                    log.LOGGER(_msg)
-                    # TODO Delete service using virtualizers.interfaze.kill.
-                    raise Exception(_msg)
 
             uri_slot.uri.append(
                 celaut.Instance.Uri(
@@ -127,7 +116,7 @@ def local_execution(
             )
             log.LOGGER(
                 f"Published URI mapping: internal_port={internal}, advertised={_ip}:{_port}, "
-                f"vmachine_ip={vmachine_ip}, by_local={by_local}"
+                f"vmachine_ip={vmachine_ip}, by_local={not expose_outside}"
             )
             uri_slots.append(uri_slot)
             
