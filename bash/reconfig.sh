@@ -41,7 +41,6 @@ ALL_VARIABLES=(
     "ledgers.ergo.NODE_URL" "ledgers.ergo.WALLET_MNEMONIC"
     "reputation.REPUTATION_PROOF_ID"
     "payments.PAYMENTS_RECEIVER_WALLET" "payments.DONATION_PERCENTAGE"
-    "network.NGROK_TUNNELS_KEY"
     "costs.FREE_GAS_THRESHOLD" "costs.SOCIALIZATION_FACTOR" "costs.ALLOW_GAS_DEBT"
     "packer.SAVE_ALL"
     "communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS" "communication.SEND_ONLY_HASHES_ASKING_COST" "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH"
@@ -123,7 +122,6 @@ run_quick_setup() {
 configure_ledgers() { handle_variable "ledgers.ergo.NODE_URL" "Ergo Node URL" validate_url; handle_variable "ledgers.ergo.WALLET_MNEMONIC" "Ergo Wallet Mnemonic" validate_wallet_address; }
 configure_reputation() { handle_variable "reputation.REPUTATION_PROOF_ID" "Reputation Proof ID" validate_reputation_id; }
 configure_payments() { handle_variable "payments.PAYMENTS_RECEIVER_WALLET" "Payment Receiver Wallet" validate_wallet_address; handle_variable "payments.DONATION_PERCENTAGE" "Donation Percentage (e.g., 5.5)" validate_percentage; }
-configure_network() { handle_variable "network.NGROK_TUNNELS_KEY" "NGROK Tunnels Key"; }
 configure_costs() { handle_variable "costs.FREE_GAS_THRESHOLD" "Free Gas Threshold" validate_integer; handle_variable "costs.SOCIALIZATION_FACTOR" "Socialization Factor" validate_integer; handle_variable "costs.ALLOW_GAS_DEBT" "Allow Gas Debt (true/false)" validate_boolean; }
 configure_packer() { handle_variable "packer.SAVE_ALL" "Packer: Save all items (true/false)" validate_boolean; }
 configure_communication() { handle_variable "communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS" "Comm: Announce instance to connecting peers"; handle_variable "communication.SEND_ONLY_HASHES_ASKING_COST" "Comm: Send only hashes when asking for cost"; handle_variable "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH" "Comm: Deny cost request if hash is not available"; }
@@ -145,7 +143,6 @@ run_advanced_setup() {
         echo -e " 1) Ledgers        $(get_category_status "ledgers.ergo.NODE_URL" "ledgers.ergo.WALLET_MNEMONIC")"
         echo -e " 2) Reputation     $(get_category_status "reputation.REPUTATION_PROOF_ID")"
         echo -e " 3) Payments       $(get_category_status "payments.PAYMENTS_RECEIVER_WALLET" "payments.DONATION_PERCENTAGE")"
-        echo -e " 4) Network        $(get_category_status "network.NGROK_TUNNELS_KEY")"
         echo -e " 5) Costs          $(get_category_status "costs.FREE_GAS_THRESHOLD" "costs.SOCIALIZATION_FACTOR" "costs.ALLOW_GAS_DEBT")"
         echo -e " 6) Packer         $(get_category_status "packer.SAVE_ALL")"
         echo -e " 7) Communication  $(get_category_status "communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS" "communication.SEND_ONLY_HASHES_ASKING_COST" "communication.DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH")"
@@ -199,9 +196,6 @@ view_all_variables() {
     echo -e "\n${BOLD}--- PAYMENTS ---${NC}"
     print_kv "Payment Receiver Wallet" "payments.PAYMENTS_RECEIVER_WALLET"
     print_kv "Donation Percentage" "payments.DONATION_PERCENTAGE"
-    
-    echo -e "\n${BOLD}--- NETWORK ---${NC}"
-    print_kv "NGROK Tunnels Key" "network.NGROK_TUNNELS_KEY"
 
     echo -e "\n${BOLD}--- COSTS ---${NC}"
     print_kv "Free Gas Threshold" "costs.FREE_GAS_THRESHOLD"

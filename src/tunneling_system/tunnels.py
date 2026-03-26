@@ -13,7 +13,6 @@ from src.utils.config import ConfigManager
 env_manager = ConfigManager()
 
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
-NGROK_TUNNELS_KEY = env_manager.get("NGROK_TUNNELS_KEY")
 NUM_GATEWAY_TUNNELS = 1
 
 """
@@ -59,7 +58,7 @@ class TunnelSystem(metaclass=Singleton):
         self.__initialize_providers()
 
     def __initialize_providers(self) -> None:
-        ngrok_key = NGROK_TUNNELS_KEY
+        ngrok_key = ""
         if ngrok_key:
             tokens = [(ngrok_key, 3)] if ngrok_key else []
 
