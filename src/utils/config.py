@@ -276,8 +276,7 @@ DOCKER_ENV.update({
     "DOCKER_CLI_PLUGINS_DIR": str(PLUGIN_DIR),
     "DOCKER_API_VERSION": "1.43",
     "DOCKER_HOST": f"unix://{DOCKER_SOCKET}",
-    "PATH": f"{BIN_DIR}{os.pathsep}{os.environ.get('PATH', '')}",
-    "DOCKER_CONFIG": f"{_main_dir}/.docker"
+    "PATH": f"{BIN_DIR}{os.pathsep}{os.environ.get('PATH', '')}"
 })
 
 # Base Docker command as a list (safer than strings + shlex)
