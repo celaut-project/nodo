@@ -445,19 +445,78 @@ def _run_debugfs_write(image_path: Path, host_file: Path, guest_target: str) -> 
 
 
 def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port: int) -> List[List[str]]:
+    """
+    Forwards a host port to a VM.
+
+    - PREROUTING: redirects incoming traffic from outside.
+    - FORWARD: allows new connections to the VM and the return of the session.
+    - OUTPUT is not used because it only affects traffic originating locally on the host.
+    """
+    protocol = protocol.lower().strip()
+    if protocol not in {"tcp", "udp"}:
+        raise ValueError(f"Unsupported protocol: {protocol}")
+
+    external_port_s = str(int(external_port))
+    internal_port_s = str(int(internal_port))
+
     add_commands = [
-        ["iptables", "-t", "nat", "-A", "PREROUTING", "-p", protocol, "--dport", str(external_port), "-j", "DNAT", "--to-destination", f"{vm_ip}:{internal_port}"],
-        ["iptables", "-t", "nat", "-A", "OUTPUT", "-p", protocol, "--dport", str(external_port), "-j", "DNAT", "--to-destination", f"{vm_ip}:{internal_port}"],
-        ["iptables", "-A", "FORWARD", "-p", protocol, "-d", vm_ip, "--dport", str(internal_port), "-j", "ACCEPT"],
+        [
+            "iptables", "-t", "nat", "-A", "PREROUTING",
+            "-p", protocol,
+            "--dport", external_port_s,
+            "-j", "DNAT",
+            "--to-destination", f"{vm_ip}:{internal_port_s}",
+        ],
+        [
+            "iptables", "-A", "FORWARD",
+            "-p", protocol,
+            "-d", vm_ip,
+            "--dport", internal_port_s,
+            "-m", "conntrack",
+            "--ctstate", "NEW,ESTABLISHED,RELATED",
+            "-j", "ACCEPT",
+        ],
+        [
+            "iptables", "-A", "FORWARD",
+            "-p", protocol,
+            "-s", vm_ip,
+            "--sport", internal_port_s,
+            "-m", "conntrack",
+            "--ctstate", "ESTABLISHED,RELATED",
+            "-j", "ACCEPT",
+        ],
     ]
 
     for command in add_commands:
         _run(command)
 
+    # Return the commands to remove the rules later
     return [
-        ["iptables", "-t", "nat", "-D", "PREROUTING", "-p", protocol, "--dport", str(external_port), "-j", "DNAT", "--to-destination", f"{vm_ip}:{internal_port}"],
-        ["iptables", "-t", "nat", "-D", "OUTPUT", "-p", protocol, "--dport", str(external_port), "-j", "DNAT", "--to-destination", f"{vm_ip}:{internal_port}"],
-        ["iptables", "-D", "FORWARD", "-p", protocol, "-d", vm_ip, "--dport", str(internal_port), "-j", "ACCEPT"],
+        [
+            "iptables", "-t", "nat", "-D", "PREROUTING",
+            "-p", protocol,
+            "--dport", external_port_s,
+            "-j", "DNAT",
+            "--to-destination", f"{vm_ip}:{internal_port_s}",
+        ],
+        [
+            "iptables", "-D", "FORWARD",
+            "-p", protocol,
+            "-d", vm_ip,
+            "--dport", internal_port_s,
+            "-m", "conntrack",
+            "--ctstate", "NEW,ESTABLISHED,RELATED",
+            "-j", "ACCEPT",
+        ],
+        [
+            "iptables", "-D", "FORWARD",
+            "-p", protocol,
+            "-s", vm_ip,
+            "--sport", internal_port_s,
+            "-m", "conntrack",
+            "--ctstate", "ESTABLISHED,RELATED",
+            "-j", "ACCEPT",
+        ],
     ]
 
 
