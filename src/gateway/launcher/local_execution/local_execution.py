@@ -60,7 +60,7 @@ def local_execution(
 
     father_is_local_vmachine = bool(father_id) and sc.internal_instance_exists(id=father_id)
     isolate_internal_children = env_manager.get("network.ISOLATE_INTERNAL_CHILDREN", True)
-    is_dev_client = "dev" in father_id   # TODO On execute command we must be able to specify if we want to expose the instance outside of not (to cover when the node is controlled using an ssh session for example). We should avoid use the rpc method.
+    is_dev_client = "dev" in father_id and env_manager.get("network.CONSIDER_DEV_AS_INTERNAL", True)
     # In case of dev instances, we consider them as internal.
     # If the father is internal, but isolate internal children is disabled, the child should be exposed outside.
     expose_outside: bool = not is_dev_client and (not father_is_local_vmachine or not isolate_internal_children)
