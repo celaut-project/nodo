@@ -196,16 +196,12 @@ tar -xzf /tmp/docker.tgz -C /tmp/
 
 install_tmp "/tmp/docker/docker" "$BIN_DIR/docker"
 install_tmp "/tmp/docker/dockerd" "$BIN_DIR/dockerd"
-intall_tmp "/tmp/docker/docker-init" "$BIN_DIR/docker-init"
+install_tmp "/tmp/docker/docker-init" "$BIN_DIR/docker-init"
 install_tmp "/tmp/docker/ctr" "$BIN_DIR/ctr"
 install_tmp "/tmp/docker/runc" "$BIN_DIR/runc"
-instapp_tmp "/tmp/docker/containerd" "$BIN_DIR/containerd"
-instapp_tmp "/tmp/docker/containerd-shim-runc-v2" "$BIN_DIR/containerd-shim-runc-v2"
-instal_tmp "/tmp/docker/docker-proxy" "$BIN_DIR/docker-proxy"
-
-cp /tmp/docker/containerd* "$BIN_DIR/" 2>/dev/null || true
-cp /tmp/docker/ctr "$BIN_DIR/" 2>/dev/null || true
-cp /tmp/docker/runc "$BIN_DIR/" 2>/dev/null || true
+install_tmp "/tmp/docker/containerd" "$BIN_DIR/containerd"
+install_tmp "/tmp/docker/containerd-shim-runc-v2" "$BIN_DIR/containerd-shim-runc-v2"
+install_tmp "/tmp/docker/docker-proxy" "$BIN_DIR/docker-proxy"
 
 rm -rf /tmp/docker /tmp/docker.tgz
 chmod +x "$BIN_DIR"/*
