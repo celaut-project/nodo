@@ -131,8 +131,7 @@ def __get_only_the_ip_from_context_method(context_peer: str) -> str:
         raise Exception('Error getting the ip from the context: ' + str(e))
 
 
-get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr'] \
-    if network != "localhost" else network
+get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
 
 longestSublistFinder = lambda string1, string2, split: split.join(
     [a for a in string1.split(split) for b in string2.split(split) if a == b]) + split
