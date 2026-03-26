@@ -196,6 +196,12 @@ tar -xzf /tmp/docker.tgz -C /tmp/
 
 install_tmp "/tmp/docker/docker" "$BIN_DIR/docker"
 install_tmp "/tmp/docker/dockerd" "$BIN_DIR/dockerd"
+intall_tmp "/tmp/docker/docker-init" "$BIN_DIR/docker-init"
+install_tmp "/tmp/docker/ctr" "$BIN_DIR/ctr"
+install_tmp "/tmp/docker/runc" "$BIN_DIR/runc"
+instapp_tmp "/tmp/docker/containerd" "$BIN_DIR/containerd"
+instapp_tmp "/tmp/docker/containerd-shim-runc-v2" "$BIN_DIR/containerd-shim-runc-v2"
+instal_tmp "/tmp/docker/docker-proxy" "$BIN_DIR/docker-proxy"
 
 cp /tmp/docker/containerd* "$BIN_DIR/" 2>/dev/null || true
 cp /tmp/docker/ctr "$BIN_DIR/" 2>/dev/null || true
@@ -208,11 +214,6 @@ echo "Installing buildx..."
 curl -fsSL "https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0.12.1.linux-${BUILDX_ARCH}" \
   -o "${PLUGIN_DIR}/docker-buildx"
 chmod +x "${PLUGIN_DIR}/docker-buildx"
-
-echo "Installing docker-init..."
-curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-init-24.0.9" \
-  -o "${BIN_DIR}/docker-init"
-chmod +x "${BIN_DIR}/docker-init"
 
 echo "Installing QEMU..."
 sudo apt-get -y install qemu-system binfmt-support qemu-user-static > /dev/null
