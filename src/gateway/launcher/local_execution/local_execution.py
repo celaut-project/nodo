@@ -71,8 +71,9 @@ def local_execution(
         + f" (father_id={father_id}, father_ip={father_ip}, by_local={not expose_outside})"
     )
 
+    free_port_ranges = env_manager.get("network.FREE_PORTS_RANGE", [])
     assigment_ports: Optional[Dict[int, int]] = \
-        {slot.port: get_free_port() for slot in service.api.slot} if expose_outside \
+        {slot.port: get_free_port(free_port_ranges=free_port_ranges) for slot in service.api.slot} if expose_outside \
         else {slot.port: slot.port for slot in service.api.slot}
     log.LOGGER(
         f"Execution network mode: by_local={not expose_outside}, "

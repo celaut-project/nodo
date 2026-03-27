@@ -467,7 +467,7 @@ if __name__ == '__main__':
                     exit()
                 
                 # Execute docker commands in nodo's isolated Docker context
-                from src.utils.config import DOCKER_COMMAND, DOCKER_ENV
+                from src.utils.runtime import DOCKER_COMMAND, DOCKER_ENV
                 docker_args = sys.argv[2:] if len(sys.argv) > 2 else []
                 if not docker_args:
                     print("Usage: nodo docker <docker command>", flush=True)

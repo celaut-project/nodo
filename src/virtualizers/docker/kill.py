@@ -1,7 +1,7 @@
 import docker as docker_lib
 
 from src.utils import logger as log
-from src.utils.config import DOCKER_CLIENT
+from src.utils.runtime import DOCKER_CLIENT
 
 def kill(vmachine_id: str) -> bool:
     # TODO Maybe the container not exists.

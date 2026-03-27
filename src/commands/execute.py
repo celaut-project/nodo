@@ -8,7 +8,8 @@ from protos import celaut_pb2, celaut_pb2_grpc, gateway_bee
 
 from src.commands.__by_tag import get_id
 from src.manager.manager import get_dev_clients
-from src.utils.config import SHA3_256_ID, ConfigManager
+from src.utils.hashing import SHA3_256_ID
+from src.utils.config import ConfigManager
 from src.utils.utils import to_gas_amount
 
 env_manager = ConfigManager()

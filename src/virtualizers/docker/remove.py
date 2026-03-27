@@ -1,7 +1,7 @@
 
 import subprocess
 
-from src.utils.config import DOCKER_COMMAND, DOCKER_ENV
+from src.utils.runtime import DOCKER_COMMAND, DOCKER_ENV
 
 
 def remove(vmachine_id: str) -> bool:

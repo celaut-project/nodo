@@ -16,9 +16,9 @@ from src.reputation_system.interface import update_vmachine_reputation, submit_r
 from src.utils import logger as log
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
-from src.utils.config import SHA3_256_ID, ConfigManager
-from src.utils.tools.duplicate_grabber import DuplicateGrabber
+from src.utils.hashing import SHA3_256_ID
 from src.utils.config import ConfigManager
+from src.utils.tools.duplicate_grabber import DuplicateGrabber
 from src.virtualizers.interface import maintain as vm_maintain
 
 env_manager = ConfigManager()

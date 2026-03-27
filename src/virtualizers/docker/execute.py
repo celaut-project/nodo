@@ -7,7 +7,8 @@ import docker as docker_lib
 from protos import celaut_pb2 as celaut
 
 from src.utils import logger as log
-from src.utils.config import DOCKER_CLIENT, ConfigManager
+from src.utils.runtime import DOCKER_CLIENT
+from src.utils.config import ConfigManager
 from src.virtualizers.entry_path import resolve_entrypoint_path
 
 from src.virtualizers.docker.firewall import allow_connection_to_instance, block_all, allow_connection, TransportProtocol
