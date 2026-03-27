@@ -14,11 +14,12 @@ from bee_rpc.client import copy_block_if_exists
 
 import src.utils.logger as l
 from protos import celaut_pb2, celaut_pb2
-from src.utils.config import DOCKER_COMMAND, DOCKER_ENV, ConfigManager
+from src.utils.runtime import DOCKER_COMMAND, DOCKER_ENV
+from src.utils.config import ConfigManager
 from src.utils.verify import get_service_hex_main_hash
 from src.virtualizers.architecture import get_arch_tag
 
-from src.utils.config import DOCKER_CLIENT
+from src.utils.runtime import DOCKER_CLIENT
 
 env_manager = ConfigManager()
 

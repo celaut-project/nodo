@@ -1,6 +1,6 @@
 from typing import Callable
 import docker as docker_lib
-from src.utils.config import DOCKER_CLIENT
+from src.utils.runtime import DOCKER_CLIENT
 
 def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[str], None]) -> None:
     try:

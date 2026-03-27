@@ -11,7 +11,9 @@ from bee_rpc import client as grpcbb
 from bee_rpc.utils import modify_env
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
-from src.utils.config import ConfigManager, SHA3_256_ID, DOCKER_COMMAND, DOCKER_ENV, PACKER_SUPPORTED_ARCHITECTURES
+from src.utils.config import ConfigManager
+from src.utils.hashing import SHA3_256_ID
+from src.utils.runtime import DOCKER_COMMAND, DOCKER_ENV, PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.filesystem_xattrs import (
     describe_mode_type,
     encode_filesystem_metadata_xattrs,

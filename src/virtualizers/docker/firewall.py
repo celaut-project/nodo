@@ -18,7 +18,7 @@ class NetworkRule:
     created_at: datetime
     rule_number: Optional[int] = None
 
-from src.utils.config import DOCKER_COMMAND, DOCKER_ENV
+from src.utils.runtime import DOCKER_COMMAND, DOCKER_ENV
 
 def __get_container_ip(container_id: str) -> str:
     """
