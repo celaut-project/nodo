@@ -53,6 +53,7 @@ def __execute_iptables(command: List[str]) -> Tuple[bool, str]:
             raise ValueError(f"Invalid iptables argument format: {arg}")
 
     try:
+        command.extend(['-m', 'comment', '--comment', 'nodo;docker'])
         result = subprocess.run(['iptables'] + command, capture_output=True, text=True, check=True)
         return True, result.stdout
     except subprocess.CalledProcessError as e:
