@@ -15,14 +15,25 @@ class TransportProtocol(Enum):
     UDP = "udp"
 
 
+def _normalize_virtualizer(name: Optional[str]) -> str:
+    if not isinstance(name, str):
+        return "docker"
+    v = name.strip().lower()
+    if v in {"ch", "cloud_hypervisor", "cloud-hypervisor"}:
+        return "ch"
+    if v == "docker":
+        return "docker"
+    return v
+
+
 def _resolve_virtualizer(vmachine_id: str) -> str:
     try:
         virtualizer = sc.get_internal_virtualizer(id=vmachine_id)
         if isinstance(virtualizer, str) and virtualizer.strip():
-            return virtualizer.strip()
+            return _normalize_virtualizer(virtualizer)
     except Exception:
         pass
-    return env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "docker")
+    return _normalize_virtualizer(env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "ch"))
 
 
 def allow_connection(
@@ -32,7 +43,7 @@ def allow_connection(
     protocol: TransportProtocol = TransportProtocol.TCP,
 ) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "cloud_hypervisor":
+    if virtualizer == "ch":
         from src.virtualizers.ch.firewall import allow_connection as ch_allow_connection
 
         return ch_allow_connection(
@@ -57,7 +68,7 @@ def allow_connection_to_instance(
     instance: celaut.Instance,
 ) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "cloud_hypervisor":
+    if virtualizer == "ch":
         from src.virtualizers.ch.firewall import (
             allow_connection_to_instance as ch_allow_connection_to_instance,
         )
@@ -77,7 +88,7 @@ def allow_connection_to_instance(
 
 def block_all(vmachine_id: str) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "cloud_hypervisor":
+    if virtualizer == "ch":
         from src.virtualizers.ch.firewall import block_all as ch_block_all
 
         return ch_block_all(vmachine_id=vmachine_id)
@@ -94,7 +105,7 @@ def remove_rule(
     protocol: TransportProtocol = TransportProtocol.TCP,
 ) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "cloud_hypervisor":
+    if virtualizer == "ch":
         from src.virtualizers.ch.firewall import remove_rule as ch_remove_rule
 
         return ch_remove_rule(
