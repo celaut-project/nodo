@@ -308,8 +308,13 @@ def _network_preflight() -> ipaddress.IPv4Network:
 
     return network
 
-
+# TODO Use firewall.py
 def _ensure_masquerade(network: ipaddress.IPv4Network) -> None:
+    # The MASQUERADE rule is shared across all VMs in the NETWORK_SUBNET.
+    # It should NOT be added to 'cleanup_rules' or removed when shutting down a single VM,
+    # as doing so could break connectivity for other active machines.
+    # Only DNAT / port-forwarding rules are VM-specific and safe to clean up
+    # when the instance terminates.
     subnet = network.with_prefixlen
     check_cmd = [
         "iptables",
@@ -324,6 +329,8 @@ def _ensure_masquerade(network: ipaddress.IPv4Network) -> None:
         subnet,
         "-j",
         "MASQUERADE",
+        "-m", "comment",
+        "--comment", f"nodo;masquerade;subnet={subnet}",
     ]
     exists = _run(check_cmd, check=False)
     if exists.returncode == 0:
@@ -343,6 +350,8 @@ def _ensure_masquerade(network: ipaddress.IPv4Network) -> None:
             subnet,
             "-j",
             "MASQUERADE",
+            "-m", "comment",
+            "--comment", f"nodo;masquerade;subnet={subnet}",
         ]
     )
 
@@ -444,13 +453,18 @@ def _run_debugfs_write(image_path: Path, host_file: Path, guest_target: str) -> 
     _run(["debugfs", "-w", "-R", write_cmd, str(image_path)])
 
 
-def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port: int) -> List[List[str]]:
+# TODO Use firewall.py
+def _add_dnat_rule(vmachine_id: str, protocol: str, external_port: int, vm_ip: str, internal_port: int) -> List[List[str]]:
     """
     Forwards a host port to a VM.
 
     - PREROUTING: redirects incoming traffic from outside.
     - FORWARD: allows new connections to the VM and the return of the session.
     - OUTPUT is not used because it only affects traffic originating locally on the host.
+
+    Note:
+    - Each iptables rule includes a comment with the VM ID (`vmachine_id`) to allow
+      filtering, coloring, or later removal specific to this VM.
     """
     protocol = protocol.lower().strip()
     if protocol not in {"tcp", "udp"}:
@@ -459,6 +473,7 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
     external_port_s = str(int(external_port))
     internal_port_s = str(int(internal_port))
 
+    # Add DNAT and FORWARD rules with VM-specific comments for easier identification
     add_commands = [
         [
             "iptables", "-t", "nat", "-A", "PREROUTING",
@@ -466,6 +481,8 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "--dport", external_port_s,
             "-j", "DNAT",
             "--to-destination", f"{vm_ip}:{internal_port_s}",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
         [
             "iptables", "-A", "FORWARD",
@@ -475,6 +492,8 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "-m", "conntrack",
             "--ctstate", "NEW,ESTABLISHED,RELATED",
             "-j", "ACCEPT",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
         [
             "iptables", "-A", "FORWARD",
@@ -484,13 +503,15 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "-m", "conntrack",
             "--ctstate", "ESTABLISHED,RELATED",
             "-j", "ACCEPT",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
     ]
 
     for command in add_commands:
         _run(command)
 
-    # Return the commands to remove the rules later
+    # Return the commands to remove the rules later (also including the comment)
     return [
         [
             "iptables", "-t", "nat", "-D", "PREROUTING",
@@ -498,6 +519,8 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "--dport", external_port_s,
             "-j", "DNAT",
             "--to-destination", f"{vm_ip}:{internal_port_s}",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
         [
             "iptables", "-D", "FORWARD",
@@ -507,6 +530,8 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "-m", "conntrack",
             "--ctstate", "NEW,ESTABLISHED,RELATED",
             "-j", "ACCEPT",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
         [
             "iptables", "-D", "FORWARD",
@@ -516,6 +541,8 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "-m", "conntrack",
             "--ctstate", "ESTABLISHED,RELATED",
             "-j", "ACCEPT",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
     ]
 
@@ -1025,6 +1052,7 @@ def execute(
             for internal_port, external_port in assigment_ports.items():
                 for protocol in ("tcp", "udp"):  # TODO
                     removal_commands = _add_dnat_rule(
+                        vmachine_id=vmachine_id,
                         protocol=protocol,
                         external_port=external_port,
                         vm_ip=vm_ip,

@@ -16,6 +16,10 @@ def _execute_iptables(command: List[str]) -> Tuple[bool, str]:
         if not re.match(r"^[a-zA-Z0-9_\-.:/@]+$", str(arg)):
             raise ValueError(f"Invalid iptables argument format: {arg}")
 
+    # Ensure contains comment
+    if "-m" not in command or "comment" not in command:
+        raise ValueError("iptables command must include a comment for auditing purposes.")
+
     try:
         result = subprocess.run(
             ["iptables"] + command,
@@ -117,6 +121,8 @@ def block_all(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
                     "NEW",
                     "-j",
                     "DROP",
+                    "-m", "comment",
+                    "--comment", f"nodo;block_all;vm={vmachine_id}",
                 ]
             )
             if not success:
@@ -154,6 +160,8 @@ def allow_connection(
         if port is not None:
             command.extend(["--dport", str(port)])
         command.extend(["-j", "ACCEPT"])
+
+        command.extend(['-m', 'comment', '--comment', f"nodo;allow;vm={vmachine_id}"])
 
         success, message = _execute_iptables(command)
         if success:
@@ -238,6 +246,8 @@ def remove_rule(
         if port is not None:
             command.extend(["--dport", str(port)])
         command.extend(["-j", "ACCEPT"])
+
+        command.extend(['-m', 'comment', '--comment', f"nodo;remove;vm={vmachine_id}"])
 
         success, message = _execute_iptables(command)
         if success:

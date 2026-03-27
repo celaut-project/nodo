@@ -1,192 +1,121 @@
-# Cloud Hypervisor como virtualizador (aislamiento fuerte)
+# Cloud Hypervisor as Virtualizer (Strong Isolation)
 
-## Objetivo y contexto
+## Objective and Context
 
-Integrar **Cloud Hypervisor (CH)** como backend de virtualización para ejecutar servicios con **aislamiento fuerte** (microVM sobre KVM), manteniendo el contrato actual expuesto por `src/virtualizers/interface.py`.
+Integrate **Cloud Hypervisor (CH)** as a virtualization backend to execute services with **strong isolation** (microVMs over KVM), while maintaining the existing contract exposed by `src/virtualizers/interface.py`.
 
-La motivación es elevar el aislamiento frente a contenedores, reducir el blast radius ante escapes y endurecer límites entre servicios sin cambiar la API consumida por el resto del sistema.
+The primary motivation is to increase isolation compared to standard containers, reduce the blast radius of potential escapes, and harden boundaries between services without changing the API consumed by the rest of the system.
 
-## Estado actual y bloqueos
+## Current State and Blockers
 
-Aunque existe una fachada en `src/virtualizers/interface.py`, hoy el acoplamiento con Docker sigue presente en varios puntos, lo que impide seleccionar otro virtualizador sin refactor.
+While a facade exists in `src/virtualizers/interface.py`, the system remains tightly coupled with Docker in several areas, preventing the selection of an alternative virtualizer without refactoring.
 
-Puntos críticos a desacoplar:
+**Critical points to decouple:**
+* `src/balancers/execution_balancer/execution_balancer.py` calls `src/virtualizers.docker.build` directly.
+* `src/gateway/iterables/*` imports `src/virtualizers.docker.build` directly.
+* `src/gateway/launcher/launch_service.py` imports `TransportProtocol` and `allow_connection` from the Docker module.
+* `src/manager/manager.py` uses `TransportProtocol` from Docker.
+* `src/virtualizers/interface.py` currently only delegates to Docker and only accepts `docker` in `_is_supported_virtualizer`.
 
-- `src/balancers/execution_balancer/execution_balancer.py` usa `src/virtualizers.docker.build` de forma directa.
-- `src/gateway/iterables/*` importan `src/virtualizers.docker.build` directamente.
-- `src/gateway/launcher/launch_service.py` importa `TransportProtocol` y `allow_connection` desde Docker.
-- `src/manager/manager.py` usa `TransportProtocol` de Docker.
-- `src/virtualizers/interface.py` solo delega a Docker y solo acepta `docker` en `_is_supported_virtualizer`.
+**Consequence:** Even if a CH backend is implemented, it cannot be used until these points are moved to the common interface.
 
-Consecuencia: aunque se implemente un backend CH, no podrá usarse sin mover estos puntos a la interfaz común.
 
-## Arquitectura propuesta (mínimo viable)
 
-Componentes esenciales para ejecutar un servicio en CH:
+## Proposed Architecture (MVP)
 
-- **Guest base** por arquitectura: kernel (`vmlinuz`) + `initramfs` minimal.
-- **Rootfs por servicio**: `rootfs.ext4` generado desde `service.container.filesystem`.
-- **Inyección de `__config__`**: equivalente a `set_container_config.py` pero para el rootfs (pre‑boot o via virtio-fs).
-- **Red**: interfaz TAP por VM + bridge del host, con política “deny by default”.
-- **Persistencia de estado**: índice `vmachine_id -> {pid, api_socket, tap, ip, rootfs}` para `kill/maintain/firewall`.
+Essential components to run a service in CH:
+* **Base Guest by Architecture:** Kernel (`vmlinuz`) + minimal `initramfs`.
+* **Per-Service Rootfs:** `rootfs.ext4` generated from `service.container.filesystem`.
+* **`__config__` Injection:** Equivalent to `set_container_config.py` but for the rootfs (pre-boot or via virtio-fs).
+* **Networking:** One TAP interface per VM + host bridge, following a "deny by default" policy.
+* **State Persistence:** An index mapping `vmachine_id -> {pid, api_socket, tap, ip, rootfs}` for `kill/maintain/firewall` operations.
 
-## Plan por fases con hitos y entregables
+---
 
-1. **Fase 0 – Desacoplar Docker y preparar interfaz**. Entregables: llamadas a `src/virtualizers/interface.py` desde el resto del sistema; `TransportProtocol` movido a una capa neutral; registro del virtualizer por instancia en DB; claves de configuración para CH.
-2. **Fase 1 – Build CH**. Entregables: pipeline para generar `rootfs.ext4` desde `service.container.filesystem`; selección de kernel/initramfs por arquitectura; layout de cache de artefactos; `is_built` basado en bundle CH.
-3. **Fase 2 – Execute CH**. Entregables: creación de microVM con API socket; montaje de rootfs; inyección de `__config__`; arranque y obtención de IP; persistencia de estado de VM.
-4. **Fase 3 – Red y firewall**. Entregables: reglas por interfaz TAP o IP estable; allowlist a gateway y peers; compatibilidad con `allow_connection_*` desde la capa común.
-5. **Fase 4 – Lifecycle y hotplug**. Entregables: mapeo de `mem_limit/cpu` a cgroups v2 dedicados por VM; semántica explícita de “no soportado” por campo; `kill/maintain/remove` para VM.
-6. **Fase 5 – Observabilidad y operación**. Entregables: logs mínimos por VM; métricas básicas (PID, uptime, mem); limpieza de recursos; compatiblidad con `commands instances` para VMs de CH (incluyendo campo `virtualizer`).
+## Phased Plan: Milestones and Deliverables
 
-## Viabilidad técnica y operativa
+1.  **Phase 0 – Decouple Docker & Interface Preparation:**
+    * Route all calls through `src/virtualizers/interface.py`.
+    * Move `TransportProtocol` to a neutral layer.
+    * Register virtualizer type per instance in the DB.
+    * Define CH configuration keys.
+2.  **Phase 1 – CH Build:**
+    * Pipeline to generate `rootfs.ext4` from `service.container.filesystem`.
+    * Kernel/initramfs selection by architecture.
+    * Artifact cache layout.
+    * `is_built` logic based on the CH bundle.
+3.  **Phase 2 – CH Execute:**
+    * MicroVM creation via API socket.
+    * Rootfs mounting and `__config__` injection.
+    * Boot process and IP acquisition.
+    * VM state persistence.
+4.  **Phase 3 – Networking & Firewall:**
+    * Rules per TAP interface or stable IP.
+    * Allowlist for gateway and peers.
+    * Compatibility with `allow_connection_*` from the common layer.
+5.  **Phase 4 – Lifecycle & Hotplug:**
+    * Mapping `mem_limit/cpu` to dedicated **cgroups v2** per VM.
+    * Explicit "unsupported" semantics per field.
+    * `kill/maintain/remove` implementation for VMs.
+6.  **Phase 5 – Observability & Operations:**
+    * Minimal per-VM logs.
+    * Basic metrics (PID, uptime, mem).
+    * Resource cleanup.
+    * Compatibility with `commands instances` (including the `virtualizer` field).
 
-Mapa por función de `src/virtualizers/interface.py`:
+---
 
-- `is_built(service_hash)`: Viable. Debe comprobar la existencia del bundle CH (por ejemplo `rootfs.ext4` + metadatos + kernel/initramfs seleccionados).
-- `build(service, metadata, service_id)`: Viable con coste alto. Requiere transformar el filesystem del servicio en un rootfs booteable y asociarlo a un guest base por arquitectura.
-- `execute(...) -> (vmachine_id, vmachine_ip)`: Viable. Debe crear una microVM, configurar red, arrancar, y persistir `pid/socket/tap/ip`.
-- `hotplug(vmachine_id, system_requirements_range)`: Viable en Fase 4 vía **cgroups v2** por VM (`memory.max` y `cpu.max`), con reporte por campo (`applied/unsupported/ignored/failed`) en runtime state y logs.
-- `kill(vmachine_id)`: Viable. Estrategia de Fase 4: `SIGKILL` directo + cleanup de TAP, DNAT, runtime state/runtime dir y cgroup dedicado.
-- `maintain(vmachine_id, debug_mode, remove_and_penalize)`: Viable. Comprobar proceso/socket y penalizar si no existe.
-- `remove(vmachine_id)`: Viable en modo dual: limpiar VM runtime si existe; si no, eliminar bundle de build CH por `service_id`.
-- `remove_firewall_rule(vmachine_id, ip, port, protocol)`: Viable. Debe operar sobre TAP o IP persistida de la VM.
+## Technical and Operational Feasibility
 
-Requisitos operativos del host:
+Mapping of `src/virtualizers/interface.py` functions:
 
-- Soporte KVM (`/dev/kvm`) y permisos de acceso.
-- Módulos de red (TAP/bridge) y política iptables/nftables compatible.
-- Capacidad de ejecutar procesos `cloud-hypervisor` y mantener sockets de control.
+| Function | Feasibility | Implementation Detail |
+| :--- | :--- | :--- |
+| `is_built` | **High** | Check for CH bundle (rootfs + metadata + kernel). |
+| `build` | **Medium/High** | Transform filesystem into bootable rootfs; map to base guest. |
+| `execute` | **High** | Create microVM, config net, boot, and persist `pid/socket/tap/ip`. |
+| `hotplug` | **Medium** | Via **cgroups v2** (`memory.max`, `cpu.max`); report status per field. |
+| `kill` | **High** | Direct `SIGKILL` + cleanup of TAP, DNAT, and cgroups. |
+| `maintain` | **High** | Validate process/socket health; penalize if missing. |
+| `remove` | **High** | Dual mode: clean runtime if active; delete build bundle by `service_id`. |
+| `remove_firewall_rule`| **High** | Operates on the TAP interface or the VM's persisted IP. |
 
-## Cambios públicos/Interfaces a documentar
+**Host Operational Requirements:**
+* KVM support (`/dev/kvm`) and access permissions.
+* Networking modules (TAP/bridge) and compatible iptables/nftables policy.
+* Capability to run `cloud-hypervisor` binaries and manage control sockets.
 
-- `_is_supported_virtualizer` debe aceptar `cloud_hypervisor`.
-- `TransportProtocol` debe moverse a una capa neutral (no en `src/virtualizers/docker/*`).
-- Nuevas claves de configuración bajo `virtualizers.cloud_hypervisor.*`.
+---
 
-Claves sugeridas:
+## Configuration & Interface Changes
 
-```
-virtualizers.cloud_hypervisor.KERNEL_PATH
-virtualizers.cloud_hypervisor.INITRAMFS_PATH
-virtualizers.cloud_hypervisor.BINARY_PATH
-virtualizers.cloud_hypervisor.CACHE_DIR
-virtualizers.cloud_hypervisor.API_SOCKETS_DIR
-virtualizers.cloud_hypervisor.NETWORK_MODE
-virtualizers.cloud_hypervisor.NETWORK_BRIDGE_NAME
-virtualizers.cloud_hypervisor.NETWORK_SUBNET
-virtualizers.cloud_hypervisor.NETWORK_GATEWAY_IP
-virtualizers.cloud_hypervisor.MIN_MEM_MIB
-virtualizers.cloud_hypervisor.DEFAULT_MEM_MIB
-virtualizers.cloud_hypervisor.CGROUPS_BASE_DIR
-virtualizers.cloud_hypervisor.SECURITY.PATH_CONFINEMENT
-virtualizers.cloud_hypervisor.SECURITY.DEVICE_NODES_POLICY
-virtualizers.cloud_hypervisor.SECURITY.DEVICE_NODE_ALLOWLIST
-virtualizers.cloud_hypervisor.SECURITY.REQUIRE_TRUSTED_SERVICE_FOR_DEVICES
-virtualizers.cloud_hypervisor.SECURITY.TRUSTED_SERVICE_IDS
-```
+* `_is_supported_virtualizer` must accept `cloud_hypervisor`.
+* `TransportProtocol` must be moved to a neutral layer (not under `docker/*`).
+* New configuration keys under `virtualizers.cloud_hypervisor.*`:
+    * Paths for `KERNEL`, `INITRAMFS`, and `BINARY`.
+    * `NETWORK_MODE`, `BRIDGE_NAME`, `SUBNET`.
+    * `SECURITY` policies (path confinement, device allowlists).
 
-## Riesgos y mitigaciones
+---
 
-- IP no determinista o difícil de recuperar. Mitigación: asignación determinista y persistencia de estado por `vmachine_id`.
-- Hotplug parcial con semántica distinta a Docker. Mitigación: tabla de compatibilidad por campo y retorno explícito de “no soportado”.
-- Permisos KVM y red en host. Mitigación: checks de preflight y fallback a Docker si falta soporte.
-- Coste de build del rootfs y caching. Mitigación: cache por `service_id` y reutilización de guest base.
-- Divergencia de firewall respecto a Docker. Mitigación: capa común de firewall basada en interfaz o IP estable.
+## Network Design (Final Decision)
 
-## Plan de pruebas
+### Model
+We reject NAT (user-mode/slirp) in favor of **TAP interfaces attached to a host bridge (`br-ch`)**. This maintains the current network contract and allows firewall rules via the VM's IP.
 
-- Build: generar `rootfs.ext4` para un servicio simple y validar `is_built`.
-- Execute: boot de microVM, ejecución de entrypoint, obtención de IP.
-- Red/Firewall: bloqueo por defecto y allowlist a gateway/peers.
-- Lifecycle: `kill/maintain` con VM caída y hotplug parcial.
-- Compatibilidad: fallback a Docker con flag y arquitectura no soportada.
+### Deterministic IP Assignment
+IPs and MACs are derived from the `vmachine_id` without DHCP to ensure stability.
+1.  Hash the `vmachine_id`.
+2.  Derive a local MAC with prefix `02:42:ac`.
+3.  Calculate an offset based on the subnet size.
+4.  Assign the IP: `Base IP + Offset`.
 
-## Criterios de éxito
 
-- Servicios ejecutan con aislamiento fuerte sin cambios en el API del sistema.
-- `interface.py` soporta `docker` y `cloud_hypervisor` de forma conmutable por configuración.
-- Red y firewall mantienen el comportamiento funcional existente.
-- El sistema puede operar sin Docker cuando CH está habilitado.
 
-## Decisiones resueltas
+---
 
-- Red: se adopta TAP + bridge con IP determinista por `vmachine_id`.
-- Hotplug: backend exclusivo por cgroups v2, con cgroup dedicado por VM.
-- Memoria de arranque:
-  - `MIN_MEM_MIB` define solo el piso para poder iniciar microVMs ligeras.
-  - Workloads más pesados (por ejemplo Python) deben pedir memoria suficiente vía `sysresources`.
-- Semántica por campo en hotplug:
-  - `mem_limit`: soportado (`memory.max`).
-  - `cpu_period/cpu_quota`: soportado (`cpu.max`).
-  - `blkio_weight`: no soportado en Fase 4 (no bloquea).
-  - `disk_space`: no soportado en Fase 4 (no bloquea).
-  - Soportados fallidos (`mem_limit` o `cpu`) hacen fallar hotplug (enforcement estricto).
-- Inyección de `__config__`: pre‑boot (rootfs), no en runtime.
-- Observabilidad Fase 5:
-  - `commands instances` muestra `virtualizer` siempre.
-  - Métricas runtime de CH (`pid`, `uptime`, `mem`) se muestran en modo `groupable`.
-  - No se amplía `Gateway.GetMetrics` en esta fase.
-- Operación Fase 5:
-  - Cleanup mantiene política actual (se elimina runtime dir/state al cerrar VM).
-  - Janitor automático limpia runtime states huérfanos o stale (proceso caído).
-
-## Diseño de red (decisión cerrada)
-
-### Modelo de red
-
-Se descarta NAT (user-mode/slirp) y se adopta **TAP atado a un bridge en el host (`br-ch`)**. Esto permite mantener el contrato actual de red y aplicar reglas de firewall por IP de la VM.
-
-### Motivos
-
-- Aislamiento y control en capa 2, compatible con `allow_connection`.
-- Comunicación P2P entre peers con reglas explícitas.
-- Menor overhead al evitar NAT por paquete.
-
-### Asignación de IP determinista
-
-La IP y la MAC se derivan del `vmachine_id`, sin DHCP, para garantizar estabilidad y permitir reinicios sin perder reglas.
-
-Algoritmo recomendado:
-
-1. Tomar `vmachine_id` y calcular hash (SHA‑256 o MD5).
-2. Derivar MAC local con prefijo `02:42:ac` y bytes del hash.
-3. Calcular offset por módulo del tamaño de la subred.
-4. Sumar el offset a la IP base de la red.
-
-### Flujo de implementación
-
-**Preflight del host (una vez):**
-
-1. Crear bridge: `ip link add br-ch type bridge`.
-2. Asignar gateway: `ip addr add 192.168.200.1/24 dev br-ch`.
-3. Habilitar forwarding: `sysctl net.ipv4.ip_forward=1`.
-4. Aplicar deny‑by‑default en `FORWARD` para `br-ch`.
-
-**Ejecución de la microVM (`execute`):**
-
-1. Calcular IP y MAC deterministas.
-2. Crear TAP, levantarla y asociarla a `br-ch`.
-3. Lanzar `cloud-hypervisor` con `--net-tap` y cmdline con IP estática.
-4. Persistir `{tap, ip}` en el estado de la VM.
-
-**Integración con firewall:**
-
-1. Consultar IP estable desde el estado de VM.
-2. Insertar regla `FORWARD` para `<IP_VM> -> <IP_PEER>` con puerto y protocolo.
-3. Eliminar reglas usando los mismos parámetros.
-
-### Configuración requerida
-
-```yaml
-virtualizers.cloud_hypervisor:
-  NETWORK_MODE: "tap_bridge"
-  NETWORK_BRIDGE_NAME: "br-ch"
-  NETWORK_SUBNET: "192.168.200.0/24"
-  NETWORK_GATEWAY_IP: "192.168.200.1"
-  CGROUPS_BASE_DIR: "/sys/fs/cgroup"
-```
-
-### Resumen de red
-
-Este diseño elimina dependencias de la red de Docker, mantiene el modelo deny‑by‑default y garantiza IPs estables para el ciclo de vida completo de cada servicio.
+## Success Criteria
+* Services run with strong isolation without changes to the system API.
+* `interface.py` supports both `docker` and `cloud_hypervisor` via configuration.
+* Network and firewall maintain existing functional behavior.
+* The system can operate entirely without Docker when CH is enabled.
