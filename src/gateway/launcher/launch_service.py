@@ -120,6 +120,6 @@ def launch_service(
                log.LOGGER(traceback.format_exc())
                continue
 
-        _err_msg = f"Unable to launch service {service_id} locally or on any peer."
+        _err_msg = f"Unable to launch service {service_id}: cannot run locally due to architecture incompatibility or insufficient resources, and no available peer could execute the service at this time."
         log.LOGGER(_err_msg)
         raise Exception(_err_msg)
