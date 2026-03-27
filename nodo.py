@@ -7,7 +7,7 @@ from src.payment_system.contracts.envs import print_payment_info
 from src.utils.config import ConfigManager
 from src.utils.network import get_local_ip
 
-env_manager = ConfigManager()
+env_manager = ConfigManager(log=log.LOGGER)
 
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 MEMORY_LOGS = env_manager.get("MEMORY_LOGS")
