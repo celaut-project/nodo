@@ -61,9 +61,10 @@ def local_execution(
     father_is_local_vmachine = bool(father_id) and sc.internal_instance_exists(id=father_id)
     isolate_internal_children = env_manager.get("network.ISOLATE_INTERNAL_CHILDREN", True)
     is_dev_client = "dev" in father_id and env_manager.get("network.CONSIDER_DEV_AS_INTERNAL", True)
+    disabled_outside = env_manager.get("network.DISABLE_EXPOSE_OUTSIDE", False)
     # In case of dev instances, we consider them as internal.
     # If the father is internal, but isolate internal children is disabled, the child should be exposed outside.
-    expose_outside: bool = not is_dev_client and (not father_is_local_vmachine or not isolate_internal_children)
+    expose_outside: bool = not disabled_outside and not is_dev_client and (not father_is_local_vmachine or not isolate_internal_children)
     log.LOGGER(
         "Internal child isolation is "
         + ("enabled" if isolate_internal_children else "disabled")

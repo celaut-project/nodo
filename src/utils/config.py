@@ -13,6 +13,7 @@ from mnemonic import Mnemonic
 from protos import celaut_pb2
 from src.utils.singleton import Singleton
 from src.utils.network import get_free_port
+from src.utils.logger import LOGGER as log
 
 class ConfigManager(metaclass=Singleton):
     """
@@ -77,7 +78,7 @@ class ConfigManager(metaclass=Singleton):
             
             # Save if dynamic processing made changes
             if config_changed:
-                print("Dynamic values were processed, saving configuration...")
+                log("Dynamic values were processed, saving configuration...")
                 self._save_config_unlocked()  # Use internal method to avoid double locking
 
     def _save_config_unlocked(self):
@@ -185,9 +186,23 @@ class ConfigManager(metaclass=Singleton):
         # Handle auto gateway port - use direct config access to avoid recursion
         gateway_port = self._get_nested(self._config, ['network', 'GATEWAY_PORT'])
         if gateway_port == 'auto':
-            port = get_free_port(open_port=True)
+            port = get_free_port()
+            if port and os.geteuid() == 0:
+                try:
+                    subprocess.run(
+                        ["ufw", "allow", f"{port}/tcp"],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                except subprocess.CalledProcessError as e:
+                    raise Exception(
+                        f"Error attempting to open port {port} in the firewall (ufw): {e.stderr}"
+                    )
+                except FileNotFoundError:
+                    raise Exception("ufw command not found. Ensure ufw is installed if you intend to open ports.")
             self._set_nested(self._config, ['network', 'GATEWAY_PORT'], port)
-            print(f"Dynamically assigned Gateway Port: {port}")
+            log(f"Dynamically assigned Gateway Port: {port}")
 
         # Handle auto mnemonics in ledgers
         if 'ledgers' in self._config and isinstance(self._config['ledgers'], list):
@@ -195,11 +210,11 @@ class ConfigManager(metaclass=Singleton):
                 if ledger.get('WALLET_MNEMONIC') == 'auto':
                     mnemonic = Mnemonic("english").generate(strength=128)
                     self._config['ledgers'][i]['WALLET_MNEMONIC'] = mnemonic
-                    print(f"Generated new mnemonic for ledger '{ledger.get('name', i)}'")
+                    log(f"Generated new mnemonic for ledger '{ledger.get('name', i)}'")
                 if ledger.get('AUXILIARY_MNEMONIC') == 'auto':
                     mnemonic = Mnemonic("english").generate(strength=128)
                     self._config['ledgers'][i]['AUXILIARY_MNEMONIC'] = mnemonic
-                    print(f"Generated new auxiliary mnemonic for ledger '{ledger.get('name', i)}'")
+                    log(f"Generated new auxiliary mnemonic for ledger '{ledger.get('name', i)}'")
         
         # DON'T save here to avoid recursion - let load_config handle the timing
         # The save will happen when set() is called from outside
@@ -214,7 +229,7 @@ class ConfigManager(metaclass=Singleton):
 try:
     config = ConfigManager()
 except FileNotFoundError as e:
-    print(f"ERROR: {e}")
+    log(f"ERROR: {e}")
     # Handle error appropriately, maybe exit or create a default config
     exit(1)
 
@@ -303,7 +318,7 @@ def _ensure_docker_daemon_running():
     start_script = os.path.join(main_dir, "bash", "start_docker_daemon.sh")
     
     if os.path.exists(start_script):
-        print(f"Starting isolated Docker daemon for nodo...")
+        log(f"Starting isolated Docker daemon for nodo...")
         try:
             result = subprocess.run(
                 ["/bin/bash", start_script, main_dir],
@@ -312,19 +327,19 @@ def _ensure_docker_daemon_running():
                 timeout=60
             )
             if result.returncode == 0:
-                print("Isolated Docker daemon started successfully.")
+                log("Isolated Docker daemon started successfully.")
                 return True
             else:
-                print(f"Warning: Failed to start isolated Docker daemon: {result.stderr}")
+                log(f"Warning: Failed to start isolated Docker daemon: {result.stderr}")
                 return False
         except subprocess.TimeoutExpired:
-            print("Warning: Timeout starting isolated Docker daemon.")
+            log("Warning: Timeout starting isolated Docker daemon.")
             return False
         except Exception as e:
-            print(f"Warning: Error starting isolated Docker daemon: {e}")
+            log(f"Warning: Error starting isolated Docker daemon: {e}")
             return False
     else:
-        print(f"Warning: Docker daemon start script not found at {start_script}")
+        log(f"Warning: Docker daemon start script not found at {start_script}")
         return False
 
 def _create_docker_client():
