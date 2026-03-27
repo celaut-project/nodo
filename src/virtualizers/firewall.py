@@ -33,7 +33,7 @@ def allow_connection(
 ) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
     if virtualizer == "cloud_hypervisor":
-        from src.virtualizers.cloud_hypervisor.firewall import allow_connection as ch_allow_connection
+        from src.virtualizers.ch.firewall import allow_connection as ch_allow_connection
 
         return ch_allow_connection(
             vmachine_id=vmachine_id,
@@ -58,7 +58,7 @@ def allow_connection_to_instance(
 ) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
     if virtualizer == "cloud_hypervisor":
-        from src.virtualizers.cloud_hypervisor.firewall import (
+        from src.virtualizers.ch.firewall import (
             allow_connection_to_instance as ch_allow_connection_to_instance,
         )
 
@@ -78,7 +78,7 @@ def allow_connection_to_instance(
 def block_all(vmachine_id: str) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
     if virtualizer == "cloud_hypervisor":
-        from src.virtualizers.cloud_hypervisor.firewall import block_all as ch_block_all
+        from src.virtualizers.ch.firewall import block_all as ch_block_all
 
         return ch_block_all(vmachine_id=vmachine_id)
 
@@ -95,7 +95,7 @@ def remove_rule(
 ) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
     if virtualizer == "cloud_hypervisor":
-        from src.virtualizers.cloud_hypervisor.firewall import remove_rule as ch_remove_rule
+        from src.virtualizers.ch.firewall import remove_rule as ch_remove_rule
 
         return ch_remove_rule(
             vmachine_id=vmachine_id,
@@ -104,11 +104,14 @@ def remove_rule(
             protocol=protocol,
         )
 
-    from src.virtualizers.docker.firewall import remove_rule as docker_remove_rule
+    if virtualizer == "docker":
+        from src.virtualizers.docker.firewall import remove_rule as docker_remove_rule
 
-    return docker_remove_rule(
-        container_id=vmachine_id,
-        ip=ip,
-        port=port,
-        protocol=protocol,
-    )
+        return docker_remove_rule(
+            container_id=vmachine_id,
+            ip=ip,
+            port=port,
+            protocol=protocol,
+        )
+    
+    raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")

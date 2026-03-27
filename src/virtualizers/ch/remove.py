@@ -3,8 +3,8 @@ from pathlib import Path
 
 from src.utils import logger as log
 from src.utils.config import ConfigManager
-from src.virtualizers.cloud_hypervisor.kill import kill
-from src.virtualizers.cloud_hypervisor.runtime_state import load_runtime_state
+from src.virtualizers.ch.kill import kill
+from src.virtualizers.ch.runtime_state import load_runtime_state
 
 env_manager = ConfigManager()
 CACHE = env_manager.get("CACHE")

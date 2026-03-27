@@ -145,7 +145,7 @@ def maintain_vmachines(debug_mode: bool=False):
 
     # Cloud Hypervisor janitor: cleanup stale/orphan runtime resources not tracked by DB.
     try:
-        from src.virtualizers.cloud_hypervisor.maintain import (
+        from src.virtualizers.ch.maintain import (
             janitor_cleanup_orphans as ch_janitor_cleanup_orphans,
         )
 

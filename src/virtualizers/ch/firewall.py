@@ -5,7 +5,7 @@ from typing import Iterable, List, Optional, Tuple
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.utils.logger import LOGGER as logger
-from src.virtualizers.cloud_hypervisor.runtime_state import load_runtime_state
+from src.virtualizers.ch.runtime_state import load_runtime_state
 from src.virtualizers.firewall import TransportProtocol
 
 sc = SQLConnection()

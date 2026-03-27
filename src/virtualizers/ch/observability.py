@@ -5,8 +5,8 @@ from typing import Any, Dict, Optional
 
 import psutil
 
-from src.virtualizers.cloud_hypervisor.cgroups import CGROUPS_BASE_DIR
-from src.virtualizers.cloud_hypervisor.runtime_state import load_runtime_state
+from src.virtualizers.ch.cgroups import CGROUPS_BASE_DIR
+from src.virtualizers.ch.runtime_state import load_runtime_state
 
 
 def _parse_iso8601(ts: str) -> Optional[datetime]:

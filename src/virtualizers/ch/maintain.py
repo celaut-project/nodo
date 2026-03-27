@@ -3,9 +3,9 @@ from typing import Callable
 
 from src.database.sql_connection import SQLConnection
 from src.utils import logger as log
-from src.virtualizers.cloud_hypervisor.kill import kill as kill_ch_vm
-from src.virtualizers.cloud_hypervisor.runtime_state import load_runtime_state
-from src.virtualizers.cloud_hypervisor.runtime_state import list_runtime_states
+from src.virtualizers.ch.kill import kill as kill_ch_vm
+from src.virtualizers.ch.runtime_state import load_runtime_state
+from src.virtualizers.ch.runtime_state import list_runtime_states
 
 sc = SQLConnection()
 
