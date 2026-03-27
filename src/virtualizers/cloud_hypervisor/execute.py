@@ -850,6 +850,15 @@ def _tail_file(path: Path, max_lines: int = 40) -> str:
         return "<empty>"
     return "".join(lines[-max_lines:]).strip()
 
+def _set_process_name(name: str):
+    """Set /proc/self/comm (max 15 chars)."""
+
+    import ctypes
+    import ctypes.util
+    PR_SET_NAME = 15
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    libc.prctl(PR_SET_NAME, name.encode("utf-8")[:15], 0, 0, 0)
+
 
 def execute(
     assigment_ports: Optional[Dict[int, int]],
@@ -1015,7 +1024,11 @@ def execute(
         with open(stdout_path, "w", encoding="utf-8") as stdout_file, open(
             stderr_path, "w", encoding="utf-8"
         ) as stderr_file:
-            process = subprocess.Popen(start_command, stdout=stdout_file, stderr=stderr_file)
+            process = subprocess.Popen(start_command, 
+                                       stdout=stdout_file, 
+                                       stderr=stderr_file, 
+                                       preexec_fn=lambda: _set_process_name(f"nodo-ch-{vmachine_id[:8]}")
+                                       )
         log.LOGGER(
             f"[CH][{vmachine_id}] process started: pid={process.pid}, api_socket={api_socket_path}, "
             f"stdout={stdout_path}, stderr={stderr_path}"
