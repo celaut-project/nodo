@@ -15,7 +15,7 @@ class VirtualizerFirewallDispatchTests(unittest.TestCase):
         with patch.object(
             vm_firewall.sc, "get_internal_virtualizer", return_value="cloud_hypervisor"
         ), patch(
-            "src.virtualizers.cloud_hypervisor.firewall.allow_connection",
+            "src.virtualizers.ch.firewall.allow_connection",
             return_value=True,
         ) as ch_allow:
             result = vm_firewall.allow_connection(
@@ -57,7 +57,7 @@ class VirtualizerFirewallDispatchTests(unittest.TestCase):
         with patch.object(
             vm_firewall.sc, "get_internal_virtualizer", return_value="cloud_hypervisor"
         ), patch(
-            "src.virtualizers.cloud_hypervisor.firewall.remove_rule",
+            "src.virtualizers.ch.firewall.remove_rule",
             return_value=True,
         ) as ch_remove:
             result = vm_firewall.remove_rule(

@@ -91,7 +91,7 @@ Mapping of `src/virtualizers/interface.py` functions:
 
 * `_is_supported_virtualizer` must accept `cloud_hypervisor`.
 * `TransportProtocol` must be moved to a neutral layer (not under `docker/*`).
-* New configuration keys under `virtualizers.cloud_hypervisor.*`:
+* New configuration keys under `virtualizers.ch.*`:
     * Paths for `KERNEL`, `INITRAMFS`, and `BINARY`.
     * `NETWORK_MODE`, `BRIDGE_NAME`, `SUBNET`.
     * `SECURITY` policies (path confinement, device allowlists).

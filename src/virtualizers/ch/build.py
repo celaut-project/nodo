@@ -25,9 +25,9 @@ from src.virtualizers.architecture import get_arch_tag, UnsupportedArchitectureE
 env_manager = ConfigManager()
 
 CACHE = env_manager.get("CACHE")
-KERNEL_PATHS = env_manager.get("virtualizers.cloud_hypervisor.KERNEL_PATHS") or {}
-INITRAMFS_PATHS = env_manager.get("virtualizers.cloud_hypervisor.INITRAMFS_PATHS") or {}
-SECURITY_CONFIG = env_manager.get("virtualizers.cloud_hypervisor.SECURITY", {}) or {}
+KERNEL_PATHS = env_manager.get("virtualizers.ch.KERNEL_PATHS") or {}
+INITRAMFS_PATHS = env_manager.get("virtualizers.ch.INITRAMFS_PATHS") or {}
+SECURITY_CONFIG = env_manager.get("virtualizers.ch.SECURITY", {}) or {}
 
 OVERHEAD_BYTES = 64 * 1024 * 1024
 MIN_ROOTFS_BYTES = 128 * 1024 * 1024
