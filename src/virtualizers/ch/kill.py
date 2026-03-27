@@ -7,8 +7,8 @@ from typing import Dict, Iterable, List, Optional
 
 from src.utils import logger as log
 from src.utils.config import ConfigManager
-from src.virtualizers.cloud_hypervisor.cgroups import remove_vm_cgroup
-from src.virtualizers.cloud_hypervisor.runtime_state import (
+from src.virtualizers.ch.cgroups import remove_vm_cgroup
+from src.virtualizers.ch.runtime_state import (
     delete_runtime_state,
     load_runtime_state,
 )

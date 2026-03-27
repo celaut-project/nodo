@@ -21,12 +21,12 @@ from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
-from src.virtualizers.cloud_hypervisor.firewall import (
+from src.virtualizers.ch.firewall import (
     allow_connection as ch_allow_connection,
     allow_connection_to_instance as ch_allow_connection_to_instance,
     block_all as ch_block_all,
 )
-from src.virtualizers.cloud_hypervisor.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
+from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
 from src.virtualizers.entry_path import resolve_entrypoint_path
 from src.virtualizers.firewall import TransportProtocol
 

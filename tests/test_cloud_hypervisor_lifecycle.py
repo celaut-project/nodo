@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
-    from src.virtualizers.cloud_hypervisor import kill as ch_kill
-    from src.virtualizers.cloud_hypervisor import maintain as ch_maintain
-    from src.virtualizers.cloud_hypervisor import remove as ch_remove
+    from src.virtualizers.ch import kill as ch_kill
+    from src.virtualizers.ch import maintain as ch_maintain
+    from src.virtualizers.ch import remove as ch_remove
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     ch_kill = None  # type: ignore[assignment]

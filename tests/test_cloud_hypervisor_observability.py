@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 IMPORT_ERROR = None
 try:
-    from src.virtualizers.cloud_hypervisor import observability as ch_obs
+    from src.virtualizers.ch import observability as ch_obs
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     ch_obs = None  # type: ignore[assignment]
