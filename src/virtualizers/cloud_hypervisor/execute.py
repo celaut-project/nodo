@@ -1058,6 +1058,7 @@ def execute(
                 "rootfs_path": str(rootfs_path),
                 "entrypoint": resolved_entrypoint,
                 "dnat_rules": dnat_rules_state,
+                "cleanup_rules": cleanup_rules,
                 "dns_allowlist": [
                     {"domain": domain, "ip": ip}
                     for domain, ip in domain_records
