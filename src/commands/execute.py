@@ -49,7 +49,7 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 4), initial_gas_amount: 
         client_id = next(clients)
     except Exception:
         print("There is no dev client available.")
-        exit()
+        raise RuntimeError("No dev client available.")
     print(f"Client obtained {str(client_id)}")
     try:
         
@@ -82,28 +82,58 @@ def execute(service: str):
         print("No service allowed.")
         return
 
-    g_stub = celaut_pb2_grpc.GatewayStub(
-        grpc.insecure_channel(f"localhost:{GATEWAY_PORT}"),
-    )
+    try:
+        g_stub = celaut_pb2_grpc.GatewayStub(
+            grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
+        )
 
-    print(f"Execute {service}")
-    service = next(client_grpc(
-        method=g_stub.StartService,
-        input=generator(
-            _hash=service,
-            initial_gas_amount=10**16,
-            mem_limit=10**9
-        ),
-        indices_parser=celaut_pb2.ServiceInstance,
-        partitions_message_mode_parser=True,
-        indices_serializer=gateway_bee.StartService_input_indices
-    ))
-    print(f'service partition -> {service}')
-    
-    # Indicate http endpoints to allow more friendly usage.
-    for slot in service.instance.api.slot:
-        if "http" in slot.protocol_stack[0].tags: 
-            for _exp in service.instance.uri_slot:
+        print(f"Execute {service}")
+
+        response = next(client_grpc(
+            method=g_stub.StartService,
+            input=generator(
+                _hash=service,
+                initial_gas_amount=10**16,
+                mem_limit=10**9
+            ),
+            indices_parser=celaut_pb2.ServiceInstance,
+            partitions_message_mode_parser=True,
+            indices_serializer=gateway_bee.StartService_input_indices
+        ))
+
+        print(f"service partition -> {response}")
+
+    except grpc.RpcError as e:
+        # Handle gRPC-specific errors cleanly
+        status_code = e.code()
+        details = e.details()
+
+        FRIENDLY_ERRORS = {
+            grpc.StatusCode.NOT_FOUND: "Service not found.",
+            grpc.StatusCode.UNAVAILABLE: "Gateway is unavailable.",
+            grpc.StatusCode.PERMISSION_DENIED: "Permission denied.",
+            grpc.StatusCode.DEADLINE_EXCEEDED: "Request timed out."
+        }
+
+        print("\n[ERROR] Failed to execute service.")
+        message = FRIENDLY_ERRORS.get(status_code, "Unknown error occurred.")
+        print(f"Reason: {message}")
+
+        if details:
+            print(f"Details: {details}")
+
+        return
+
+    except Exception as e:
+        # Catch any unexpected errors
+        print("\n[ERROR] Unexpected failure while executing service.")
+        print(f"Details: {str(e)}")
+        return
+
+    # Process HTTP endpoints only if execution succeeded
+    for slot in response.instance.api.slot:
+        if "http" in slot.protocol_stack[0].tags:
+            for _exp in response.instance.uri_slot:
                 if _exp.internal_port == slot.port:
                     print("\n" + "="*50)
                     print("="*50 + "\n")
