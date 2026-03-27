@@ -12,9 +12,12 @@ sc = SQLConnection()
 
 
 def _execute_iptables(command: List[str]) -> Tuple[bool, str]:
-    for arg in command:
-        if not re.match(r"^[a-zA-Z0-9_\-.:/@]+$", str(arg)):
-            raise ValueError(f"Invalid iptables argument format: {arg}")
+    for index, arg in enumerate(command):
+        arg_text = str(arg)
+        is_comment_value = index > 0 and command[index - 1] == "--comment"
+        pattern = r"^[a-zA-Z0-9_\-.:/@;=]+$" if is_comment_value else r"^[a-zA-Z0-9_\-.:/@]+$"
+        if not re.match(pattern, arg_text):
+            raise ValueError(f"Invalid iptables argument format: {arg_text}")
 
     # Ensure contains comment
     if "-m" not in command or "comment" not in command:
