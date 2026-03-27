@@ -34,20 +34,20 @@ env_manager = ConfigManager()
 sc = SQLConnection()
 
 CACHE = env_manager.get("CACHE")
-CH_BINARY_PATH = env_manager.get("virtualizers.cloud_hypervisor.BINARY_PATH")
-NETWORK_MODE = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_MODE", "tap_bridge")
-NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_BRIDGE_NAME", "br-ch")
-NETWORK_SUBNET = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_SUBNET", "192.168.200.0/24")
-NETWORK_GATEWAY_IP = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_GATEWAY_IP", "192.168.200.1")
-GUEST_NET_DEVICE = env_manager.get("virtualizers.cloud_hypervisor.GUEST_NET_DEVICE", "auto")
-KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.cloud_hypervisor.KERNEL_CMDLINE_EXTRA", "console=ttyS0")
-CH_SERIAL_MODE = env_manager.get("virtualizers.cloud_hypervisor.SERIAL_MODE", "file")
-CH_CONSOLE_MODE = env_manager.get("virtualizers.cloud_hypervisor.CONSOLE_MODE", "off")
+CH_BINARY_PATH = env_manager.get("virtualizers.ch.BINARY_PATH")
+NETWORK_MODE = env_manager.get("virtualizers.ch.NETWORK_MODE", "tap_bridge")
+NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch")
+NETWORK_SUBNET = env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24")
+NETWORK_GATEWAY_IP = env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1")
+GUEST_NET_DEVICE = env_manager.get("virtualizers.ch.GUEST_NET_DEVICE", "auto")
+KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.ch.KERNEL_CMDLINE_EXTRA", "console=ttyS0")
+CH_SERIAL_MODE = env_manager.get("virtualizers.ch.SERIAL_MODE", "file")
+CH_CONSOLE_MODE = env_manager.get("virtualizers.ch.CONSOLE_MODE", "off")
 GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
-    "virtualizers.cloud_hypervisor.GUEST_NETWORK_READY_TIMEOUT_S",
+    "virtualizers.ch.GUEST_NETWORK_READY_TIMEOUT_S",
     8,
 )
-CONSERVE_RUNTIME_DIR_ON_FAILURE = env_manager.get("virtualizers.cloud_hypervisor.CONSERVE_RUNTIME_DIR_ON_FAILURE", False)
+CONSERVE_RUNTIME_DIR_ON_FAILURE = env_manager.get("virtualizers.ch.CONSERVE_RUNTIME_DIR_ON_FAILURE", False)
 
 def _env_int(key: str, default: int) -> int:
     try:
@@ -57,8 +57,8 @@ def _env_int(key: str, default: int) -> int:
 
 
 DEFAULT_VCPUS = 1
-DEFAULT_MEM_MIB = max(16, _env_int("virtualizers.cloud_hypervisor.DEFAULT_MEM_MIB", 256))
-MIN_MEM_MIB = max(16, _env_int("virtualizers.cloud_hypervisor.MIN_MEM_MIB", 64))
+DEFAULT_MEM_MIB = max(16, _env_int("virtualizers.ch.DEFAULT_MEM_MIB", 256))
+MIN_MEM_MIB = max(16, _env_int("virtualizers.ch.MIN_MEM_MIB", 64))
 if DEFAULT_MEM_MIB < MIN_MEM_MIB:
     DEFAULT_MEM_MIB = MIN_MEM_MIB
 
@@ -114,7 +114,7 @@ def _resolve_ch_binary() -> str:
     resolved = shutil.which("cloud-hypervisor")
     if not resolved:
         raise CHExecuteError(
-            "cloud-hypervisor binary not found. Set virtualizers.cloud_hypervisor.BINARY_PATH or install it in PATH."
+            "cloud-hypervisor binary not found. Set virtualizers.ch.BINARY_PATH or install it in PATH."
         )
     return resolved
 

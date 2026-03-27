@@ -7,7 +7,7 @@ from src.utils.config import ConfigManager
 env_manager = ConfigManager()
 
 CGROUPS_BASE_DIR = str(
-    env_manager.get("virtualizers.cloud_hypervisor.CGROUPS_BASE_DIR", "/sys/fs/cgroup")
+    env_manager.get("virtualizers.ch.CGROUPS_BASE_DIR", "/sys/fs/cgroup")
 ).strip()
 
 

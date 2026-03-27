@@ -55,9 +55,9 @@ From this point on, `install.sh` provisions Cloud Hypervisor assets automaticall
      - includes `/init`, static busybox applets, and marker `etc/nodo-ch-initramfs.marker`
      - this initramfs is independent from host `/boot/initrd.img*`
    - Updates `config.yaml` via `yq`:
-     - `virtualizers.cloud_hypervisor.BINARY_PATH`
-     - `virtualizers.cloud_hypervisor.KERNEL_PATHS."linux/<arch>"`
-     - `virtualizers.cloud_hypervisor.INITRAMFS_PATHS."linux/<arch>"`
+     - `virtualizers.ch.BINARY_PATH`
+     - `virtualizers.ch.KERNEL_PATHS."linux/<arch>"`
+     - `virtualizers.ch.INITRAMFS_PATHS."linux/<arch>"`
 4. Runs in **fail-hard mode**:
    - If binary download, `/boot` asset detection, copy, or `yq` update fails, installation exits with a clear error.
 
@@ -69,9 +69,9 @@ After running `sudo ./install.sh`, validate:
 test -x <TARGET_DIR>/bin/cloud-hypervisor
 test -f <TARGET_DIR>/cloud_hypervisor/kernels/linux/<arch>/vmlinuz
 test -f <TARGET_DIR>/cloud_hypervisor/initramfs/linux/<arch>/initramfs
-yq '.virtualizers.cloud_hypervisor.BINARY_PATH' <TARGET_DIR>/config.yaml
-yq '.virtualizers.cloud_hypervisor.KERNEL_PATHS."linux/<arch>"' <TARGET_DIR>/config.yaml
-yq '.virtualizers.cloud_hypervisor.INITRAMFS_PATHS."linux/<arch>"' <TARGET_DIR>/config.yaml
+yq '.virtualizers.ch.BINARY_PATH' <TARGET_DIR>/config.yaml
+yq '.virtualizers.ch.KERNEL_PATHS."linux/<arch>"' <TARGET_DIR>/config.yaml
+yq '.virtualizers.ch.INITRAMFS_PATHS."linux/<arch>"' <TARGET_DIR>/config.yaml
 ```
 
 Replace:
