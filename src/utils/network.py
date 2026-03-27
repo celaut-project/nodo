@@ -1,29 +1,63 @@
 import socket, subprocess, os
+from src.utils.config import ConfigManager
 
-def get_free_port(open_port: bool = False) -> int:
+env_manager = ConfigManager()
+
+import os
+import random
+import socket
+import subprocess
+
+
+def _is_port_free(port: int) -> bool:
+    """Checks whether a TCP port is available on the local machine."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("", port))
+            return True
+        except OSError:
+            return False
+
+
+def get_free_port() -> int:
     """
-    Finds a free port on the system. If open_port is True, it attempts to open
-    the found port in the firewall using ufw (Linux).
+    Finds a free port on the system.
 
-    Args:
-        open_port (bool): If True, attempts to open the found port in the firewall
-                           using ufw. This might require root privileges on Linux.
-
-    Returns:
-        int: A free port number.
+    If network.FREE_PORTS_RANGE is configured, picks a free port within those ranges.
+    Otherwise, falls back to any free port assigned by the OS.
     """
-    # TODO Control race conditions on get free ports. Maybe using a lock or a port reservation system.
-    with socket.socket() as s:
-        s.bind(('', 0))
-        port = int(s.getsockname()[1])
-        if open_port and os.geteuid() == 0:
-            try:
-                subprocess.run(['ufw', 'allow', str(port) + '/tcp'], check=True, capture_output=True, text=True)
-            except subprocess.CalledProcessError as e:
-                raise Exception(f"Error attempting to open port {port} in the firewall (ufw): {e.stderr}")
-            except FileNotFoundError:
-                raise Exception("ufw command not found. Ensure ufw is installed if you intend to open ports.")
-        return port
+    free_port_ranges = env_manager.get("network.FREE_PORTS_RANGE", [])
+
+    port = None
+
+    # Try configured ranges first
+    if free_port_ranges:
+        candidates = []
+        for r in free_port_ranges:
+            start = int(r["START"])
+            end = int(r["END"])
+            if start > end:
+                continue
+            candidates.extend(range(start, end + 1))
+
+        random.shuffle(candidates)
+
+        for candidate in candidates:
+            if _is_port_free(candidate):
+                port = candidate
+                break
+
+        if port is None:
+            raise RuntimeError("No free port found within configured FREE_PORTS_RANGE.")
+
+    # OS choose any free port in case no free port range is configured.
+    else:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            port = int(s.getsockname()[1])
+
+    return port
     
 def get_local_ip() -> str:
     try:

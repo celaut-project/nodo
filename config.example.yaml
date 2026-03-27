@@ -105,6 +105,10 @@ network:
   # If false, child instances will be published and reachable from the internet (subject to host firewall).
   ISOLATE_INTERNAL_CHILDREN: true
   CONSIDER_DEV_AS_INTERNAL: true  # If true, instances with "dev" in their father_id are considered internal regardless of actual network location. Use false in case node is controlled via ssh session for example.
+  DISABLE_EXPOSE_OUTSIDE: false  # If true, no instances will be exposed outside regardless of other settings. Use for maximum isolation. QUIC tunnel will be need to access services from outside in this case.
+  FREE_PORTS_RANGE:  # Free ports range to use for exposing services. Ports outside this range will not be used for service exposure. Useful to match router forwarding rules. Can be multiple ranges, e.g.: - START: 10000 \n END: 20000 \n - START: 30000 \n END: 40000
+    - START: 50000
+      END: 60000
 
 logs:
   MEMORY_LOGS: false
