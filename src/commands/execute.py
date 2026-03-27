@@ -126,7 +126,7 @@ def execute(service: str):
 
     except Exception as e:
         # Catch any unexpected errors
-        print("\n[ERROR] Unexpected failure while executing service.")
+        print(f"\n[ERROR] Service could not be executed.")
         print(f"Details: {str(e)}")
         return
 
