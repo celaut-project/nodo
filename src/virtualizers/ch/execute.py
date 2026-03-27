@@ -58,7 +58,7 @@ def _env_int(key: str, default: int) -> int:
 
 DEFAULT_VCPUS = 1
 DEFAULT_MEM_MIB = max(16, _env_int("virtualizers.ch.DEFAULT_MEM_MIB", 256))
-MIN_MEM_MIB = max(16, _env_int("virtualizers.ch.MIN_MEM_MIB", 64))
+MIN_MEM_MIB = max(16, _env_int("virtualizers.ch.MIN_MEM_MIB", 128))
 if DEFAULT_MEM_MIB < MIN_MEM_MIB:
     DEFAULT_MEM_MIB = MIN_MEM_MIB
 
