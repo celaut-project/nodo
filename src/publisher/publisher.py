@@ -172,6 +172,48 @@ class GitHubDataProvider:
             **kwargs,
         )
 
+    def ensure_repository_initialized(self):
+        """
+        Git Data API cannot create blobs in an empty repository.
+        If the target branch is missing/empty, bootstrap it with a tiny file commit.
+        """
+        ref_url = self._url(f"git/ref/heads/{self.branch}")
+        response = requests.get(ref_url, headers=self.headers, timeout=30)
+        if response.status_code == 200:
+            return
+        if response.status_code not in (404, 409):
+            raise PublisherError(
+                f"Unable to inspect branch '{self.branch}' (HTTP {response.status_code})."
+            )
+
+        init_path = ".nodo-publisher-init"
+        init_content = (
+            f"Initialized by nodo publisher at {datetime.now(timezone.utc).isoformat()}\n"
+        ).encode()
+        payload = {
+            "message": f"Initialize branch '{self.branch}' for publisher",
+            "content": base64.b64encode(init_content).decode(),
+            "branch": self.branch,
+        }
+        init_response = requests.put(
+            self._url(f"contents/{init_path}"),
+            headers=self.headers,
+            timeout=30,
+            json=payload,
+        )
+        if init_response.status_code in (200, 201):
+            print(
+                f"Repository branch '{self.branch}' initialized for publishing.",
+                flush=True,
+            )
+            return
+
+        body = init_response.text[:500]
+        raise PublisherError(
+            "Could not initialize repository for publishing. "
+            f"HTTP {init_response.status_code}: {body}"
+        )
+
     def create_blob(self, payload: bytes) -> str:
         response = self._request(
             "POST",
@@ -335,6 +377,8 @@ def _upload_file(
     upload_id: Optional[str] = None,
     service_id: Optional[str] = None,
 ) -> Dict:
+    provider.ensure_repository_initialized()
+
     if chunk_size_mb > 95:
         print("Chunk size above 95 MB is not valid for GitHub blobs. Using 95 MB.", flush=True)
         chunk_size_mb = 95
