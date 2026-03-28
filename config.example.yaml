@@ -163,10 +163,14 @@ misc:
 
 publisher:
   PROVIDER: "github"
-  REPOSITORY: ""
+  REPOSITORY: "owner/repo"
   BRANCH: "main"
-  # Environment variable names read by ConfigManager-based scripts.
+  # Direct token in config (optional).
+  TOKEN: ""
+  # Environment variable names read by ConfigManager-based scripts (optional).
   TOKEN_ENV_VAR: "CLOUD_TOKEN"
+  # Optional direct fallback token.
+  FALLBACK_TOKEN: ""
   FALLBACK_TOKEN_ENV_VAR: "GITHUB_TOKEN"
   CHUNK_SIZE_MB: 24
   UPLOADS_PREFIX: "uploads"

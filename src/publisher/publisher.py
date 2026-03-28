@@ -24,11 +24,59 @@ class PublisherError(Exception):
     pass
 
 
+def _validate_repository_format(repo: str):
+    """
+    Ensure repository format is exactly: owner/repo
+    (one and only one slash, and non-empty owner/repo parts).
+    """
+    slash_count = repo.count("/")
+    if slash_count != 1:
+        raise PublisherError(
+            "Invalid publisher.REPOSITORY format. "
+            f"Expected 'owner/repo' with exactly one '/'. Got: '{repo}'. "
+            "Examples: 'octocat/storage-repo', 'my-org/my-bucket-repo'."
+        )
+
+    owner, repo_name = repo.split("/", 1)
+    if not owner.strip() or not repo_name.strip():
+        raise PublisherError(
+            "Invalid publisher.REPOSITORY format. "
+            f"Owner and repository name are required in 'owner/repo'. Got: '{repo}'."
+        )
+
+
 def _env_from_config(manager: ConfigManager, key: str, fallback: str = "") -> str:
     env_var_name = manager.get(key, "")
     if not env_var_name:
         return fallback
     return os.environ.get(env_var_name, fallback)
+
+
+def _resolve_token(config: ConfigManager) -> str:
+    """
+    Resolve publisher token with this priority:
+    1) publisher.TOKEN (direct token in config)
+    2) env var name in publisher.TOKEN_ENV_VAR
+    3) publisher.FALLBACK_TOKEN (direct token in config)
+    4) env var name in publisher.FALLBACK_TOKEN_ENV_VAR
+    """
+    token = str(config.get("publisher.TOKEN", "") or "").strip()
+    if token:
+        return token
+
+    token = _env_from_config(config, "publisher.TOKEN_ENV_VAR")
+    if token:
+        return token
+
+    fallback_token = str(config.get("publisher.FALLBACK_TOKEN", "") or "").strip()
+    if fallback_token:
+        return fallback_token
+
+    fallback_token_env_var = config.get("publisher.FALLBACK_TOKEN_ENV_VAR", "")
+    if fallback_token_env_var:
+        return os.environ.get(fallback_token_env_var, "")
+
+    return ""
 
 
 def _safe_upload_id(seed: str) -> str:
@@ -97,8 +145,7 @@ class GitHubDataProvider:
         max_retry: int,
         backoff_s: int,
     ):
-        if "/" not in repo:
-            raise PublisherError("Publisher repository must be in owner/repo format.")
+        _validate_repository_format(repo)
 
         self.token = token
         self.repo = repo
@@ -201,10 +248,7 @@ class GitHubDataProvider:
 
 def _get_publisher_settings(config: ConfigManager, require_token: bool = True) -> Dict:
     provider_name = config.get("publisher.PROVIDER", "github").lower()
-    token = _env_from_config(config, "publisher.TOKEN_ENV_VAR")
-    fallback_token_env_var = config.get("publisher.FALLBACK_TOKEN_ENV_VAR", "")
-    if not token and fallback_token_env_var:
-        token = os.environ.get(fallback_token_env_var, "")
+    token = _resolve_token(config)
 
     repo = config.get("publisher.REPOSITORY", "")
     branch = config.get("publisher.BRANCH", "main")
@@ -221,10 +265,11 @@ def _get_publisher_settings(config: ConfigManager, require_token: bool = True) -
         raise PublisherError(f"Unsupported publisher provider '{provider_name}'.")
     if require_token and not token:
         raise PublisherError(
-            "Missing publisher token. Set the environment variable from publisher.TOKEN_ENV_VAR."
+            "Missing publisher token. Set publisher.TOKEN or configure publisher.TOKEN_ENV_VAR."
         )
     if not repo:
         raise PublisherError("Missing publisher repository in config key publisher.REPOSITORY.")
+    _validate_repository_format(repo)
 
     return {
         "provider_name": provider_name,
