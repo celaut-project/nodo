@@ -1,6 +1,4 @@
 import base64
-import hashlib
-import json
 import math
 import os
 import tempfile
@@ -8,6 +6,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import requests
 from bee_rpc.client import Dir, write_to_file
@@ -16,9 +15,11 @@ from protos import celaut_pb2
 from src.commands.__by_tag import get_id
 from src.commands.import_bee import import_bee
 from src.utils.config import ConfigManager
+from src.utils.hashing import HASH_FUNCTIONS, SHA3_256_ID
 
 API_BASE_URL = "https://api.github.com"
 RETRYABLE_HTTP_STATUS_CODES = {401, 409, 422, 429, 500, 502, 503, 504}
+DEFAULT_SOURCE_APPLICATION_WEB_PAGE = "https://reputation-systems.github.io/source-application?tab=add"
 
 
 class PublisherError(Exception):
@@ -80,18 +81,25 @@ def _resolve_token(config: ConfigManager) -> str:
     return ""
 
 
-def _safe_upload_id(seed: str) -> str:
-    safe_seed = "".join(c if c.isalnum() or c in "._-" else "_" for c in seed)[:40]
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    return f"{safe_seed}_{timestamp}"
+def _resolve_hash_id(hash_id_hex: str) -> bytes:
+    try:
+        hash_id = bytes.fromhex(hash_id_hex)
+    except ValueError as exc:
+        raise PublisherError(
+            "Invalid publisher.HASH_ID. It must be a hex string."
+        ) from exc
+
+    if hash_id not in HASH_FUNCTIONS:
+        available = ", ".join(h.hex() for h in HASH_FUNCTIONS)
+        raise PublisherError(
+            "Unsupported publisher.HASH_ID. "
+            f"Configured: {hash_id_hex}. Supported: {available}"
+        )
+    return hash_id
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+def _hash_file(path: Path, hash_id: bytes) -> str:
+    return HASH_FUNCTIONS[hash_id](path.read_bytes()).hex()
 
 
 def _request_with_retry(
@@ -302,6 +310,13 @@ def _get_publisher_settings(config: ConfigManager, require_token: bool = True) -
 
     repo = config.get("publisher.REPOSITORY", "")
     branch = config.get("publisher.BRANCH", "main")
+    hash_id_hex = str(config.get("publisher.HASH_ID", SHA3_256_ID.hex()) or "").strip().lower()
+    if not hash_id_hex:
+        hash_id_hex = SHA3_256_ID.hex()
+    hash_id = _resolve_hash_id(hash_id_hex)
+    source_application_web_page = str(
+        config.get("publisher.SOURCE_APPLICATION_WEB_PAGE", DEFAULT_SOURCE_APPLICATION_WEB_PAGE) or ""
+    ).strip() or DEFAULT_SOURCE_APPLICATION_WEB_PAGE
     chunk_size_mb = int(config.get("publisher.CHUNK_SIZE_MB", 24))
     timeout_s = int(config.get("publisher.TIMEOUT_SECONDS", 300))
     max_retry = int(config.get("publisher.MAX_RETRY", 3))
@@ -326,6 +341,9 @@ def _get_publisher_settings(config: ConfigManager, require_token: bool = True) -
         "token": token,
         "repo": repo,
         "branch": branch,
+        "hash_id": hash_id,
+        "hash_id_hex": hash_id_hex,
+        "source_application_web_page": source_application_web_page,
         "chunk_size_mb": chunk_size_mb,
         "timeout_s": timeout_s,
         "max_retry": max_retry,
@@ -382,7 +400,7 @@ def _upload_file(
     provider: GitHubDataProvider,
     chunk_size_mb: int,
     uploads_prefix: str,
-    upload_id: Optional[str] = None,
+    service_hash: str,
     service_id: Optional[str] = None,
 ) -> Dict:
     provider.ensure_repository_initialized()
@@ -396,22 +414,19 @@ def _upload_file(
     chunk_size = chunk_size_mb * 1024 * 1024
     file_size = source_path.stat().st_size
     total_chunks = max(1, math.ceil(file_size / chunk_size))
-    resolved_upload_id = upload_id or _safe_upload_id(source_path.stem)
-    folder = f"{uploads_prefix}/{resolved_upload_id}"
+    folder = f"{uploads_prefix}/{service_hash}"
 
     print(f"Publishing '{source_path.name}' to {provider.repo}:{provider.branch}", flush=True)
-    print(f"Upload id: {resolved_upload_id} | Chunks: {total_chunks}", flush=True)
+    print(f"Service hash: {service_hash} | Chunks: {total_chunks}", flush=True)
 
-    full_hash = _sha256_file(source_path)
     tree_entries: List[Dict] = []
-    chunk_manifest_entries: List[Dict] = []
+    manifest_lines: List[str] = []
 
     with source_path.open("rb") as source:
         for index in range(total_chunks):
             chunk_data = source.read(chunk_size)
             chunk_name = f"chunk_{index:04d}"
             chunk_path = f"{folder}/{chunk_name}"
-            chunk_hash = hashlib.sha256(chunk_data).hexdigest()
             blob_sha = provider.create_blob(chunk_data)
 
             tree_entries.append(
@@ -422,39 +437,14 @@ def _upload_file(
                     "sha": blob_sha,
                 }
             )
-            chunk_manifest_entries.append(
-                {
-                    "index": index,
-                    "filename": chunk_name,
-                    "size": len(chunk_data),
-                    "sha256": chunk_hash,
-                }
-            )
+            manifest_lines.append(provider.raw_url(chunk_path))
             print(f"Uploaded chunk {index + 1}/{total_chunks} ({blob_sha[:8]})", flush=True)
 
-    manifest = {
-        "version": 1,
-        "kind": "nodo_service_publish",
-        "filename": source_path.name,
-        "file_size": file_size,
-        "sha256": full_hash,
-        "chunk_size": chunk_size,
-        "total_chunks": total_chunks,
-        "upload_id": resolved_upload_id,
-        "provider": provider.name,
-        "repo": provider.repo,
-        "branch": provider.branch,
-        "service_id": service_id or "",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "chunks": chunk_manifest_entries,
-    }
-
-    manifest_blob_sha = provider.create_blob(
-        json.dumps(manifest, indent=2, ensure_ascii=False).encode()
-    )
+    manifest_plain = "\n".join(manifest_lines) + "\n"
+    manifest_blob_sha = provider.create_blob(manifest_plain.encode("utf-8"))
     tree_entries.append(
         {
-            "path": f"{folder}/manifest.json",
+            "path": f"{folder}/manifest",
             "mode": "100644",
             "type": "blob",
             "sha": manifest_blob_sha,
@@ -470,13 +460,15 @@ def _upload_file(
     )
     provider.update_ref(commit_sha)
 
-    manifest_url = provider.raw_url(f"{folder}/manifest.json")
-    browse_manifest_url = provider.browse_url(f"{folder}/manifest.json")
+    manifest_url = provider.raw_url(f"{folder}/manifest")
+    browse_manifest_url = provider.browse_url(f"{folder}/manifest")
     return {
-        "manifest": manifest,
+        "manifest": manifest_plain,
         "manifest_url": manifest_url,
         "browse_manifest_url": browse_manifest_url,
-        "upload_id": resolved_upload_id,
+        "service_hash": service_hash,
+        "service_id": service_id or "",
+        "total_chunks": total_chunks,
         "commit_sha": commit_sha,
     }
 
@@ -500,9 +492,7 @@ def _fetch_bytes(
 
 
 def publish_service(
-    service_ref: str,
-    upload_id: Optional[str] = None,
-    chunk_size_mb: Optional[int] = None,
+    service_ref: str
 ) -> Dict:
     config = ConfigManager()
     settings = _get_publisher_settings(config, require_token=True)
@@ -517,13 +507,14 @@ def publish_service(
     )
 
     service_id, service_file_path = _export_service_to_bee(service_ref)
+    service_hash = _hash_file(service_file_path, settings["hash_id"])
     try:
         result = _upload_file(
             source_path=service_file_path,
             provider=provider,
-            chunk_size_mb=chunk_size_mb or settings["chunk_size_mb"],
+            chunk_size_mb=settings["chunk_size_mb"],
             uploads_prefix=settings["uploads_prefix"],
-            upload_id=upload_id,
+            service_hash=service_hash,
             service_id=service_id,
         )
     finally:
@@ -532,9 +523,14 @@ def publish_service(
 
     print("Publish completed successfully.", flush=True)
     print(f"Service id: {service_id}", flush=True)
+    print(f"Service hash: {service_hash}", flush=True)
     print(f"Manifest URL: {result['manifest_url']}", flush=True)
     print(f"Manifest browser URL: {result['browse_manifest_url']}", flush=True)
     print(f"Download command: nodo download {result['manifest_url']}", flush=True)
+    print("Register this source in Source Application:", flush=True)
+    print(f"- Source application URL: {settings['source_application_web_page']}", flush=True)
+    print(f"- Manifest URL: {result['manifest_url']}", flush=True)
+    print(f"- Service hash: {service_hash}", flush=True)
     return result
 
 
@@ -555,32 +551,32 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
         max_retry=settings["max_retry"],
         backoff_s=settings["backoff_s"],
     )
-    manifest = json.loads(manifest_bytes)
+    try:
+        manifest_text = manifest_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise PublisherError("Manifest must be UTF-8 plain text.") from exc
 
-    required_fields = [
-        "upload_id",
-        "filename",
-        "sha256",
-        "total_chunks",
-        "chunks",
-    ]
-    missing = [field for field in required_fields if field not in manifest]
-    if missing:
-        raise PublisherError(f"Manifest is missing required fields: {', '.join(missing)}")
+    chunk_urls = [line.strip() for line in manifest_text.splitlines() if line.strip()]
+    if not chunk_urls:
+        raise PublisherError("Manifest is empty. It must contain one chunk URL per line.")
 
-    repo = manifest.get("repo", settings["repo"])
-    branch = manifest.get("branch", settings["branch"])
-    upload_id = manifest["upload_id"]
-    raw_base = f"https://raw.githubusercontent.com/{repo}/{branch}/{settings['uploads_prefix']}/{upload_id}"
-    output_path = target_dir / manifest["filename"]
+    path_parts = [part for part in urlparse(manifest_url).path.split("/") if part]
+    if len(path_parts) < 2:
+        raise PublisherError(f"Invalid manifest URL path: {manifest_url}")
+    service_hash = path_parts[-2].strip().lower()
+    if not service_hash:
+        raise PublisherError("Could not resolve service hash from manifest URL.")
+    try:
+        bytes.fromhex(service_hash)
+    except ValueError as exc:
+        raise PublisherError(
+            f"Invalid service hash in manifest URL path: '{service_hash}'"
+        ) from exc
 
-    sha_total = hashlib.sha256()
+    output_path = target_dir / f"{service_hash}.celaut.bee"
+
     with output_path.open("wb") as destination:
-        for chunk_meta in manifest["chunks"]:
-            chunk_name = chunk_meta["filename"]
-            expected_size = int(chunk_meta["size"])
-            expected_hash = chunk_meta["sha256"]
-            chunk_url = f"{raw_base}/{chunk_name}"
+        for index, chunk_url in enumerate(chunk_urls):
             data = _fetch_bytes(
                 chunk_url,
                 headers=headers,
@@ -588,25 +584,13 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
                 max_retry=settings["max_retry"],
                 backoff_s=settings["backoff_s"],
             )
-
-            if len(data) != expected_size:
-                raise PublisherError(
-                    f"Chunk {chunk_name} size mismatch: {len(data)} != {expected_size}"
-                )
-            hash_value = hashlib.sha256(data).hexdigest()
-            if hash_value != expected_hash:
-                raise PublisherError(
-                    f"Chunk {chunk_name} hash mismatch: {hash_value} != {expected_hash}"
-                )
-
             destination.write(data)
-            sha_total.update(data)
-            print(f"Downloaded {chunk_name}", flush=True)
+            print(f"Downloaded chunk {index + 1}/{len(chunk_urls)}", flush=True)
 
-    final_hash = sha_total.hexdigest()
-    if final_hash != manifest["sha256"]:
+    final_hash = _hash_file(output_path, settings["hash_id"])
+    if final_hash != service_hash:
         raise PublisherError(
-            f"Final file hash mismatch: {final_hash} != {manifest['sha256']}"
+            f"Final file hash mismatch: {final_hash} != {service_hash}"
         )
 
     imported_service_id = None
@@ -621,7 +605,9 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
 
     print("Download completed successfully.", flush=True)
     return {
-        "manifest": manifest,
+        "manifest": chunk_urls,
+        "manifest_url": manifest_url,
+        "service_hash": service_hash,
         "output_path": str(output_path),
         "service_id": imported_service_id,
     }

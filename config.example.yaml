@@ -165,6 +165,8 @@ publisher:
   PROVIDER: "github"
   REPOSITORY: "owner/repo"
   BRANCH: "main"
+  HASH_ID: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"
+  SOURCE_APPLICATION_WEB_PAGE: "https://reputation-systems.github.io/source-application?tab=add"
   # Direct token in config (optional).
   TOKEN: ""
   # Environment variable names read by ConfigManager-based scripts (optional).
