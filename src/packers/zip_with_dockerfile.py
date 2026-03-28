@@ -383,6 +383,23 @@ class ZipContainerPacker:
         for item in self.json.get('api'):  # iterate slots.
             slot = celaut.Service.Api.Slot()
             slot.port = item.get('port')
+            transport_tags = item.get("transport")
+            if transport_tags is None:
+                transport_tags = ["tcp"]  # Default to TCP if not specified, as it's the most common protocol for API slots.
+                # raise ValueError(
+                #     f"service.json api slot port={slot.port}: missing required 'transport' field."
+                # )
+            if isinstance(transport_tags, str):
+                transport_tags = [transport_tags]
+            if not isinstance(transport_tags, list) or not transport_tags:
+                raise ValueError(
+                    f"service.json api slot port={slot.port}: 'transport' must be a non-empty string or list of strings."
+                )
+            slot.transport.tags.extend([str(tag) for tag in transport_tags if str(tag).strip()])
+            if not slot.transport.tags:
+                raise ValueError(
+                    f"service.json api slot port={slot.port}: 'transport' contains no valid tags."
+                )
             slot.protocol_stack.append(
                 celaut.Service.Api.Protocol(
                     tags=item.get('protocol')

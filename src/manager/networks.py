@@ -72,6 +72,7 @@ def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
         api=celaut.Service.Api(
             slot=[celaut.Service.Api.Slot(
                 port=i_slot,
+                transport=celaut.Service.Api.Protocol(tags=["tcp"]),
                 protocol_stack=client_protocol_stack
             )],
             payment_contracts=[]

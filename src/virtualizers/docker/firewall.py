@@ -1,11 +1,11 @@
-from typing import Optional, List, Tuple, Iterable
+from typing import Optional, List, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 import subprocess
 import re
 from protos import celaut_pb2 as celaut
 from src.utils.logger import LOGGER as logger
-from src.virtualizers.firewall import TransportProtocol
+from src.virtualizers.firewall import TransportProtocol, resolve_slot_transport_protocols
 
 @dataclass
 class NetworkRule:
@@ -58,62 +58,6 @@ def __execute_iptables(command: List[str]) -> Tuple[bool, str]:
         return True, result.stdout
     except subprocess.CalledProcessError as e:
         return False, e.stderr
-
-def _protocol_text(protocol: celaut.Service.Api.Protocol) -> str:
-    parts: List[str] = []
-    if protocol.tags:
-        parts.extend(protocol.tags)
-    if protocol.prose:
-        parts.append(protocol.prose)
-    if protocol.formal:
-        try:
-            parts.append(protocol.formal.decode("utf-8", errors="ignore"))
-        except Exception:
-            pass
-    return " ".join(parts).lower()
-
-def infer_transport_protocols(protocol_stack: Iterable[celaut.Service.Api.Protocol]) -> List[TransportProtocol]:
-    """
-    Infer transport protocols (TCP/UDP) from a protocol stack definition.
-    """
-    has_tcp = False
-    has_udp = False
-    has_tcp_hint = False
-    has_udp_hint = False
-
-    for proto in protocol_stack:
-        text = _protocol_text(proto)
-        if not text:
-            continue
-        # Direct transport tags.
-        if "tcp" in text:
-            has_tcp = True
-        if "udp" in text:
-            has_udp = True
-
-        # Heuristic hints (application protocols or transports).
-        if any(token in text for token in ("http", "https", "grpc", "ws", "wss", "mqtt", "amqp")):
-            has_tcp_hint = True
-        if any(token in text for token in ("quic", "http3", "http/3")):
-            has_udp_hint = True
-
-    protocols: List[TransportProtocol] = []
-    if has_tcp:
-        protocols.append(TransportProtocol.TCP)
-    if has_udp:
-        protocols.append(TransportProtocol.UDP)
-
-    if not protocols:
-        # TODO: Parse protocol_stack/formal schema to infer transport more exhaustively.
-        if has_tcp_hint:
-            protocols.append(TransportProtocol.TCP)
-        if has_udp_hint:
-            protocols.append(TransportProtocol.UDP)
-
-    if not protocols:
-        protocols.append(TransportProtocol.TCP)
-
-    return protocols
 
 def block_all(container_id: str) -> bool:
     """
@@ -181,23 +125,31 @@ def allow_connection_to_instance(container_id: str, instance: celaut.Instance) -
     try:
         slot_protocols = {}
         for slot in instance.api.slot:
-            slot_protocols[slot.port] = infer_transport_protocols(slot.protocol_stack)
+            slot_protocols[slot.port] = resolve_slot_transport_protocols(
+                slot,
+                logger_fn=logger,
+                context=f"[DOCKER][FW][{container_id}]",
+            )
 
         results = []
         for slot in instance.uri_slot:
             i_slot = slot.internal_port
 
             if i_slot not in slot_protocols:
-                logger(f"Internal slot {i_slot} was not defined on api protocol stack. Continue.")
+                logger(f"Internal slot {i_slot} was not defined on instance.api.slot. Continue.")
+                continue
+
+            protocol = slot_protocols[i_slot]
+            if not protocol:
+                logger(f"Internal slot {i_slot} has no host-supported transports. Continue.")
                 continue
 
             for uri in slot.uri:
                 ip, port = uri.ip, uri.port
-                for protocol in slot_protocols[i_slot]:
-                    result = allow_connection(container_id, ip, port, protocol)
-                    if not result:
-                        logger(f"Failed to allow connection to an instance, continues to another slot.")
-                    results.append(result)
+                result = allow_connection(container_id, ip, port, protocol)
+                if not result:
+                    logger(f"Failed to allow connection to an instance, continues to another slot.")
+                results.append(result)
 
         final = any(results)
         if not final:

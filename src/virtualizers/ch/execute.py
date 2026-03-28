@@ -28,6 +28,7 @@ from src.virtualizers.firewall import (
     allow_connection as vm_allow_connection,
     allow_connection_to_instance as vm_allow_connection_to_instance,
     block_all as vm_block_all,
+    resolve_slot_transport_protocols,
 )
 
 env_manager = ConfigManager()
@@ -1062,28 +1063,48 @@ def execute(
 
         dnat_rules_state: List[Dict[str, object]] = []
         if not by_local and assigment_ports:
+            slot_by_port = {slot.port: slot for slot in service.api.slot}
             for internal_port, external_port in assigment_ports.items():
-                for protocol in ("tcp", "udp"):  # TODO
-                    removal_commands = _add_dnat_rule(
-                        vmachine_id=vmachine_id,
-                        protocol=protocol,
-                        external_port=external_port,
-                        vm_ip=vm_ip,
-                        internal_port=internal_port,
-                    )
-                    cleanup_rules.extend(removal_commands)
-                    dnat_rules_state.append(
-                        {
-                            "protocol": protocol,
-                            "external_port": external_port,
-                            "internal_port": internal_port,
-                            "destination_ip": vm_ip,
-                        }
-                    )
+                slot = slot_by_port.get(internal_port)
+                if not slot:
                     log.LOGGER(
-                        f"[CH][{vmachine_id}] DNAT rule added: {protocol} "
-                        f"host:{external_port} -> guest:{vm_ip}:{internal_port}"
+                        f"[CH][{vmachine_id}] skipping DNAT for internal_port={internal_port}: "
+                        "slot not found in service.api.slot"
                     )
+                    continue
+
+                protocol = resolve_slot_transport_protocols(
+                    slot,
+                    logger_fn=log.LOGGER,
+                    context=f"[CH][{vmachine_id}]",
+                )
+                if not protocol:
+                    log.LOGGER(
+                        f"[CH][{vmachine_id}] skipping DNAT for internal_port={internal_port}: "
+                        "no host-supported transports in slot.transport.tags"
+                    )
+                    continue
+
+                removal_commands = _add_dnat_rule(
+                    vmachine_id=vmachine_id,
+                    protocol=protocol.value,
+                    external_port=external_port,
+                    vm_ip=vm_ip,
+                    internal_port=internal_port,
+                )
+                cleanup_rules.extend(removal_commands)
+                dnat_rules_state.append(
+                    {
+                        "protocol": protocol.value,
+                        "external_port": external_port,
+                        "internal_port": internal_port,
+                        "destination_ip": vm_ip,
+                    }
+                )
+                log.LOGGER(
+                    f"[CH][{vmachine_id}] DNAT rule added: {protocol.value} "
+                    f"host:{external_port} -> guest:{vm_ip}:{internal_port}"
+                )
 
         save_runtime_state(
             vmachine_id,
