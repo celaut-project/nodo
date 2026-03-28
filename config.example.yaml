@@ -161,6 +161,22 @@ misc:
   VALIDATE_ON_IMPORT: true
   CONFIGURATION_REQUIRED: false
 
+publisher:
+  PROVIDER: "github"
+  REPOSITORY: ""
+  BRANCH: "main"
+  # Environment variable names read by ConfigManager-based scripts.
+  TOKEN_ENV_VAR: "CLOUD_TOKEN"
+  FALLBACK_TOKEN_ENV_VAR: "GITHUB_TOKEN"
+  CHUNK_SIZE_MB: 24
+  UPLOADS_PREFIX: "uploads"
+  TIMEOUT_SECONDS: 300
+  MAX_RETRY: 3
+  BACKOFF_SECONDS: 2
+  DOWNLOAD_OUTPUT_DIR: "${main.STORAGE}/published_downloads"
+  KEEP_DOWNLOADED_FILE: true
+  AUTO_IMPORT_SERVICE_ON_DOWNLOAD: true
+
 general_flags:
   SIMULATE_PAYMENTS: false
   SUBMIT_REPUTATION_AT_INIT: false
