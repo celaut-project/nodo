@@ -95,13 +95,13 @@ These are the most commonly used commands for daily tasks:
   Exports a local service and publishes it in chunks to the configured GitHub repository.
   **Examples:**  
   `nodo publish 1234567890abcdef`  
-  `nodo publish my_service_tag --id release_v1`
+  `nodo publish my_service_tag`
 
 - **download `<manifest url>`**  
   Downloads a published service from a manifest URL, verifies integrity, and imports it locally.
   **Examples:**  
-  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/id/manifest.json`  
-  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/id/manifest.json -o /tmp/services`
+  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest`  
+  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest -o /tmp/services`
 
 - **instances**  
   Lists all running instances and their details.  
