@@ -18,6 +18,7 @@ from src.commands.import_bee import import_bee
 from src.utils.config import ConfigManager
 
 API_BASE_URL = "https://api.github.com"
+RETRYABLE_HTTP_STATUS_CODES = {401, 409, 422, 429, 500, 502, 503, 504}
 
 
 class PublisherError(Exception):
@@ -114,9 +115,16 @@ def _request_with_retry(
             if response.status_code in (200, 201):
                 return response
 
-            if response.status_code in (409, 422, 502, 503) and attempt < max_retry - 1:
+            if (
+                response.status_code in RETRYABLE_HTTP_STATUS_CODES
+                and attempt < max_retry - 1
+            ):
                 wait_s = backoff_s * (2 ** attempt)
-                print(f"Retrying in {wait_s}s ({method} {url})", flush=True)
+                print(
+                    f"Retrying after HTTP {response.status_code} in {wait_s}s "
+                    f"({method} {url})",
+                    flush=True,
+                )
                 time.sleep(wait_s)
                 continue
 
