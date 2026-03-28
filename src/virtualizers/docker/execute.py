@@ -1,6 +1,6 @@
 import json
 import os
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import docker as docker_lib
 
@@ -16,6 +16,7 @@ from src.virtualizers.firewall import (
     allow_connection,
     allow_connection_to_instance,
     block_all,
+    resolve_slot_transport_protocols,
 )
 from src.gateway.utils import GATEWAY_PORT
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
@@ -106,11 +107,47 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
         raise e
 
 
+def _build_docker_port_bindings(
+    service: celaut.Service,
+    assigment_ports: Optional[Dict[int, int]],
+) -> Dict[str, int]:
+    if not assigment_ports:
+        return {}
+
+    slot_by_port = {slot.port: slot for slot in service.api.slot}
+    docker_ports: Dict[str, int] = {}
+
+    for internal_port, external_port in assigment_ports.items():
+        slot = slot_by_port.get(internal_port)
+        if not slot:
+            log.LOGGER(
+                f"[DOCKER] Internal port {internal_port} has no API slot definition. Skipping published port mapping."
+            )
+            continue
+
+        protocol = resolve_slot_transport_protocols(
+            slot,
+            logger_fn=log.LOGGER,
+            context="[DOCKER]",
+        )
+        if not protocol:
+            log.LOGGER(
+                f"[DOCKER] Internal port {internal_port} has no host-supported transport tags. "
+                "Skipping published port mapping."
+            )
+            continue
+
+        docker_ports[f"{internal_port}/{protocol.value}"] = external_port
+
+    return docker_ports
+
+
 def execute(assigment_ports, by_local, service_id, service, config, initial_system_resources, father_id) -> Tuple[str, str]:
     entry_path = list(service.container.init.entry_path)
     resolved_entrypoint = resolve_entrypoint_path(entry_path=entry_path)
+    published_ports = _build_docker_port_bindings(service=service, assigment_ports=assigment_ports)
     container = create_container(
-        use_other_ports=assigment_ports if not by_local else None,
+        use_other_ports=published_ports if not by_local and published_ports else None,
         id=service_id,
         entrypoint=resolved_entrypoint
     )

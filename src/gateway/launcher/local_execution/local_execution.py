@@ -10,6 +10,7 @@ from src.utils import utils, logger as log
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
 from src.utils.config import ConfigManager
+from src.virtualizers.firewall import resolve_slot_transport_protocols
 
 
 sc = SQLConnection()
@@ -71,10 +72,31 @@ def local_execution(
         + f" (father_id={father_id}, father_ip={father_ip}, by_local={not expose_outside})"
     )
 
+    supported_slot_ports: List[int] = []
+    for slot in service.api.slot:
+        protocol = resolve_slot_transport_protocols(
+            slot,
+            logger_fn=log.LOGGER,
+            context="[LOCAL_EXEC]",
+        )
+        if not protocol:
+            log.LOGGER(
+                f"[LOCAL_EXEC] Slot port={slot.port} ignored because it has no host-supported transports."
+            )
+            continue
+        supported_slot_ports.append(slot.port)
+
+    if not supported_slot_ports:
+        log.LOGGER(
+            "[LOCAL_EXEC] No host-supported API slots found. Service will be started without published URI slots."
+        )
+
     free_port_ranges = env_manager.get("network.FREE_PORTS_RANGE", [])
-    assigment_ports: Optional[Dict[int, int]] = \
-        {slot.port: get_free_port(free_port_ranges=free_port_ranges) for slot in service.api.slot} if expose_outside \
-        else {slot.port: slot.port for slot in service.api.slot}
+    assigment_ports: Optional[Dict[int, int]] = (
+        {port: get_free_port(free_port_ranges=free_port_ranges) for port in supported_slot_ports}
+        if expose_outside
+        else {port: port for port in supported_slot_ports}
+    )
     log.LOGGER(
         f"Execution network mode: by_local={not expose_outside}, "
         f"assigment_ports={assigment_ports}"

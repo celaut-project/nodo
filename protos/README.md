@@ -11,6 +11,7 @@ Status: **implemented in protobuf schema** and adapted in the main Python consum
   - `init` (`entry_path`, `xattrs`)
   - `config_declaration`
 - `Service.Api.Slot`
+  - `transport`
   - `gas_amount_per_call`
 - `Service.Network`
   - `protocol_stack`

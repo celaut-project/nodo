@@ -1,12 +1,12 @@
 import re
 import subprocess
-from typing import Iterable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.utils.logger import LOGGER as logger
 from src.virtualizers.ch.runtime_state import load_runtime_state
-from src.virtualizers.firewall import TransportProtocol
+from src.virtualizers.firewall import TransportProtocol, resolve_slot_transport_protocols
 
 sc = SQLConnection()
 
@@ -50,59 +50,6 @@ def _resolve_vmachine_ip(vmachine_id: str, source_ip: Optional[str] = None) -> s
         return str(ip).strip()
 
     raise RuntimeError(f"Unable to resolve VM IP for firewall rules: {vmachine_id}")
-
-
-def _protocol_text(protocol: celaut.Service.Api.Protocol) -> str:
-    parts: List[str] = []
-    if protocol.tags:
-        parts.extend(protocol.tags)
-    if protocol.prose:
-        parts.append(protocol.prose)
-    if protocol.formal:
-        try:
-            parts.append(protocol.formal.decode("utf-8", errors="ignore"))
-        except Exception:
-            pass
-    return " ".join(parts).lower()
-
-
-def infer_transport_protocols(
-    protocol_stack: Iterable[celaut.Service.Api.Protocol],
-) -> List[TransportProtocol]:
-    has_tcp = False
-    has_udp = False
-    has_tcp_hint = False
-    has_udp_hint = False
-
-    for proto in protocol_stack:
-        text = _protocol_text(proto)
-        if not text:
-            continue
-        if "tcp" in text:
-            has_tcp = True
-        if "udp" in text:
-            has_udp = True
-        if any(token in text for token in ("http", "https", "grpc", "ws", "wss", "mqtt", "amqp")):
-            has_tcp_hint = True
-        if any(token in text for token in ("quic", "http3", "http/3")):
-            has_udp_hint = True
-
-    protocols: List[TransportProtocol] = []
-    if has_tcp:
-        protocols.append(TransportProtocol.TCP)
-    if has_udp:
-        protocols.append(TransportProtocol.UDP)
-
-    if not protocols:
-        if has_tcp_hint:
-            protocols.append(TransportProtocol.TCP)
-        if has_udp_hint:
-            protocols.append(TransportProtocol.UDP)
-
-    if not protocols:
-        protocols.append(TransportProtocol.TCP)
-
-    return protocols
 
 
 def block_all(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
@@ -190,7 +137,11 @@ def allow_connection_to_instance(
 ) -> bool:
     try:
         slot_protocols = {
-            slot.port: infer_transport_protocols(slot.protocol_stack)
+            slot.port: resolve_slot_transport_protocols(
+                slot,
+                logger_fn=logger,
+                context=f"[CH][FW][{vmachine_id}]",
+            )
             for slot in instance.api.slot
         }
 
@@ -199,25 +150,30 @@ def allow_connection_to_instance(
             internal_port = slot.internal_port
             if internal_port not in slot_protocols:
                 logger(
-                    f"[CH][FW] Internal slot {internal_port} not present in protocol stack. Skipping."
+                    f"[CH][FW] Internal slot {internal_port} not present in instance.api.slot. Skipping."
+                )
+                continue
+            protocol = slot_protocols[internal_port]
+            if not protocol:
+                logger(
+                    f"[CH][FW] Internal slot {internal_port} has no host-supported transports. Skipping."
                 )
                 continue
 
             for uri in slot.uri:
-                for protocol in slot_protocols[internal_port]:
-                    result = allow_connection(
-                        vmachine_id=vmachine_id,
-                        ip=uri.ip,
-                        port=uri.port,
-                        protocol=protocol,
-                        source_ip=source_ip,
+                result = allow_connection(
+                    vmachine_id=vmachine_id,
+                    ip=uri.ip,
+                    port=uri.port,
+                    protocol=protocol,
+                    source_ip=source_ip,
+                )
+                if not result:
+                    logger(
+                        f"[CH][FW] Failed allow_connection_to_instance for {vmachine_id} "
+                        f"towards {uri.ip}:{uri.port}/{protocol.value}"
                     )
-                    if not result:
-                        logger(
-                            f"[CH][FW] Failed allow_connection_to_instance for {vmachine_id} "
-                            f"towards {uri.ip}:{uri.port}/{protocol.value}"
-                        )
-                    results.append(result)
+                results.append(result)
 
         if not any(results):
             raise RuntimeError("No allow rule could be applied for any instance slot.")

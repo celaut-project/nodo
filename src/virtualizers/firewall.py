@@ -1,7 +1,7 @@
 from enum import Enum
 import shlex
 import subprocess
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
@@ -31,6 +31,69 @@ class TransportProtocol(Enum):
 
     TCP = "tcp"
     UDP = "udp"
+
+
+SUPPORTED_TRANSPORT_TAGS = {
+    TransportProtocol.TCP.value: TransportProtocol.TCP,
+    TransportProtocol.UDP.value: TransportProtocol.UDP,
+}
+
+
+def serialize_transport_protocol(protocol: Optional[TransportProtocol]) -> bytes:
+    if not protocol:
+        return b""
+    return str(protocol.value).strip().lower().encode("utf-8")
+
+
+def resolve_slot_transport_protocols(
+    slot: celaut.Service.Api.Slot,
+    *,
+    logger_fn: Callable[[str], None] = logger,
+    context: str = "[FW]",
+) -> Optional[TransportProtocol]:
+    if slot is None:
+        raise ValueError(f"{context} Slot is None.")
+
+    if not slot.HasField("transport"):
+        raise ValueError(
+            f"{context} Slot port={slot.port} is missing required transport definition."
+        )
+
+    normalized_tags = [
+        str(tag).strip().lower()
+        for tag in slot.transport.tags
+        if str(tag).strip()
+    ]
+    if not normalized_tags:
+        raise ValueError(
+            f"{context} Slot port={slot.port} has empty transport tags. At least one tag is required."
+        )
+
+    resolved: List[TransportProtocol] = []
+    for tag in normalized_tags:
+        protocol = SUPPORTED_TRANSPORT_TAGS.get(tag)
+        if not protocol:
+            logger_fn(
+                f"{context} Slot port={slot.port} transport tag '{tag}' is unsupported by host. "
+                "Supported tags: tcp, udp. Slot transport tag ignored."
+            )
+            continue
+        if protocol not in resolved:
+            resolved.append(protocol)
+
+    if len(resolved) > 1:
+        raise ValueError(
+            f"{context} Slot port={slot.port} declares multiple transport families ({[p.value for p in resolved]}). "
+            "Each slot must resolve to a single transport."
+        )
+
+    if not resolved:
+        logger_fn(
+            f"{context} Slot port={slot.port} has no host-supported transport tags. Slot will be ignored."
+        )
+        return None
+
+    return resolved[0]
 
 
 def _normalize_virtualizer(name: Optional[str]) -> str:
