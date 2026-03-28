@@ -16,6 +16,7 @@
   "api": [
     {
       "port": 8080,
+      "transport": ["tcp"],
       "protocol": ["http"],
       "gas_amount_per_call": {
         "health": "1",
@@ -51,6 +52,8 @@
 - `init.xattrs` is serialized to `container.init.xattrs` (UTF-8 for text values).
 - `config_declaration.path` is serialized to `container.config_declaration.path`.
 - If `service.json` provides slash-based input (for example `"/config/runtime/node.pb"`), packer normalizes it to segmented form.
+- `api[].transport` is required and serialized to `api.slot[].transport.tags` (host transport, e.g. `tcp`, `udp`).
+- `api[].protocol` is serialized to `api.slot[].protocol_stack[*].tags` (application protocol stack over transport).
 - `api[].gas_amount_per_call` is serialized to `api.slot[].gas_amount_per_call`.
 - `resources.start_time_ms` no longer exists.
 

@@ -7,7 +7,6 @@ from src.virtualizers.architecture import check_supported_architecture, Unsuppor
 from src.virtualizers.interface import is_built
 from src.utils.utils import read_service_from_disk
 from src.utils.verify import get_service_hex_main_hash
-from src.utils.logger import LOGGER as logger
 
 env_manager = ConfigManager()
 

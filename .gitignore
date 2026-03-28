@@ -15,3 +15,4 @@ venv
 tests/script_data.json
 storage/*
 /docker/
+.codex

@@ -45,6 +45,7 @@ def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
 
     slot = celaut.Service.Api.Slot()
     slot.port = GATEWAY_PORT
+    slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
     instance.api.slot.append(slot)
 
     payment_contracts = [e for e in local_payment_methods()]

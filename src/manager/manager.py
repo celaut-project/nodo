@@ -1,5 +1,5 @@
 from uuid import uuid4
-from typing import Optional, Generator, Tuple
+from typing import Dict, List, Optional, Generator, Tuple
 
 import grpc
 from bee_rpc import client as bee
@@ -22,7 +22,11 @@ from src.utils.config import ConfigManager
 from src.virtualizers.interface import remove_firewall_rule
 from src.virtualizers.interface import kill
 from src.virtualizers.interface import hotplug
-from src.virtualizers.firewall import TransportProtocol
+from src.virtualizers.firewall import (
+    TransportProtocol,
+    resolve_slot_transport_protocols,
+    serialize_transport_protocol,
+)
 
 env_manager = ConfigManager()
 
@@ -58,20 +62,50 @@ def add_reputation_proof(contract_ledger, peer_id) -> bool:
     # Stores on DB
     return sc.add_reputation_proof(contract=contract_ledger, peer_id=peer_id)
 
+
+def _peer_slot_transport_payloads(peer: celaut_pb2.Peer, peer_id: str) -> Dict[int, bytes]:
+    payloads_by_port: Dict[int, bytes] = {}
+
+    for api_slot in peer.instance.api.slot:
+        protocol = resolve_slot_transport_protocols(
+            api_slot,
+            logger_fn=log.LOGGER,
+            context=f"[PEER][{peer_id}]",
+        )
+        payloads_by_port[api_slot.port] = serialize_transport_protocol(protocol)
+
+    return payloads_by_port
+
 # Insert the instance if it does not exist.
 def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
     if sc.instance_exists(peer.instance):
         return None
 
     peer_id = str(uuid4())
-    protocol_stack: bytes = peer.instance.api.slot[0].SerializeToString()
+    protocol_stack: bytes = (
+        peer.instance.api.slot[0].SerializeToString()
+        if peer.instance.api.slot
+        else b""
+    )
+    slot_transport_payloads = _peer_slot_transport_payloads(peer=peer, peer_id=peer_id)
 
     if not sc.add_peer(peer_id=peer_id, protocol_stack=protocol_stack):
         return None
 
     # Slots
     for slot in peer.instance.uri_slot:
-        sc.add_slot(slot=slot, peer_id=peer_id)
+        payload = slot_transport_payloads.get(slot.internal_port)
+        if payload is None:
+            log.LOGGER(
+                f"[PEER][{peer_id}] Internal URI slot {slot.internal_port} not present in API slot declaration. Skipping."
+            )
+            continue
+        if not payload:
+            log.LOGGER(
+                f"[PEER][{peer_id}] Internal URI slot {slot.internal_port} has no host-supported transports. Skipping."
+            )
+            continue
+        sc.add_slot(slot=slot, peer_id=peer_id, transport_protocol=payload)
 
     # Contracts
     for gas_price in peer.instance.api.payment_contracts:
@@ -97,10 +131,22 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str):
     log.LOGGER(f"Updating peer {peer_id}")
     # parsed_peer = json.loads(MessageToJson(peer))
     # It is assumed that protocol stack and metadata have not been modified.
+    slot_transport_payloads = _peer_slot_transport_payloads(peer=peer, peer_id=peer_id)
 
     # Slots
     for slot in peer.instance.uri_slot:
-        sc.add_slot(slot=slot, peer_id=peer_id)
+        payload = slot_transport_payloads.get(slot.internal_port)
+        if payload is None:
+            log.LOGGER(
+                f"[PEER][{peer_id}] Internal URI slot {slot.internal_port} not present in API slot declaration. Skipping."
+            )
+            continue
+        if not payload:
+            log.LOGGER(
+                f"[PEER][{peer_id}] Internal URI slot {slot.internal_port} has no host-supported transports. Skipping."
+            )
+            continue
+        sc.add_slot(slot=slot, peer_id=peer_id, transport_protocol=payload)
 
     # Contracts
     for gas_price in peer.instance.api.payment_contracts:
@@ -402,11 +448,32 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
         try:
             instance = celaut_pb2.Instance()
             instance.ParseFromString(serialized_instance)
-            for slot in instance.instance.uri_slot:
-                for uri in slot:
-                    if not remove_firewall_rule(vmachine_id=father_id, ip=uri.ip, port=uri.port, protocol=TransportProtocol.TCP):
+            protocols_by_port: Dict[int, Optional[TransportProtocol]] = {}
+            for api_slot in instance.api.slot:
+                protocols_by_port[api_slot.port] = resolve_slot_transport_protocols(
+                    api_slot,
+                    logger_fn=log.LOGGER,
+                    context=f"[STOP][{father_id}]",
+                )
+
+            for uri_slot in instance.uri_slot:
+                internal_port = uri_slot.internal_port
+                protocol = protocols_by_port.get(internal_port)
+                if not protocol:
+                    log.LOGGER(
+                        f"[STOP][{father_id}] No host-supported transports for internal slot {internal_port}. Skipping firewall cleanup."
+                    )
+                    continue
+                for uri in uri_slot.uri:
+                    if not remove_firewall_rule(
+                        vmachine_id=father_id,
+                        ip=uri.ip,
+                        port=uri.port,
+                        protocol=protocol,
+                    ):
                         log.LOGGER(
-                            f"Firewall remove_rule failed for parent instance {father_id}"
+                            f"Firewall remove_rule failed for parent instance {father_id} "
+                            f"({uri.ip}:{uri.port}/{protocol.value})"
                         )
                         # TODO This should be controlled.
         except Exception as e:

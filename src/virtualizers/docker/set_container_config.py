@@ -5,8 +5,7 @@ from typing import List, Optional
 from protos import celaut_pb2 as celaut
 from src.gateway.utils import generate_node_peer_info
 from src.utils import logger as log
-from src.utils.config import DOCKER_COMMAND, DOCKER_ENV, ConfigManager
-
+from src.utils.runtime import DOCKER_COMMAND, DOCKER_ENV
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()

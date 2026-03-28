@@ -10,6 +10,7 @@ from src.utils import utils, logger as log
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
 from src.utils.config import ConfigManager
+from src.virtualizers.firewall import resolve_slot_transport_protocols
 
 
 sc = SQLConnection()
@@ -61,18 +62,41 @@ def local_execution(
     father_is_local_vmachine = bool(father_id) and sc.internal_instance_exists(id=father_id)
     isolate_internal_children = env_manager.get("network.ISOLATE_INTERNAL_CHILDREN", True)
     is_dev_client = "dev" in father_id and env_manager.get("network.CONSIDER_DEV_AS_INTERNAL", True)
+    disabled_outside = env_manager.get("network.DISABLE_EXPOSE_OUTSIDE", False)
     # In case of dev instances, we consider them as internal.
     # If the father is internal, but isolate internal children is disabled, the child should be exposed outside.
-    expose_outside: bool = not is_dev_client and (not father_is_local_vmachine or not isolate_internal_children)
+    expose_outside: bool = not disabled_outside and not is_dev_client and (not father_is_local_vmachine or not isolate_internal_children)
     log.LOGGER(
         "Internal child isolation is "
         + ("enabled" if isolate_internal_children else "disabled")
         + f" (father_id={father_id}, father_ip={father_ip}, by_local={not expose_outside})"
     )
 
-    assigment_ports: Optional[Dict[int, int]] = \
-        {slot.port: get_free_port() for slot in service.api.slot} if expose_outside \
-        else {slot.port: slot.port for slot in service.api.slot}
+    supported_slot_ports: List[int] = []
+    for slot in service.api.slot:
+        protocol = resolve_slot_transport_protocols(
+            slot,
+            logger_fn=log.LOGGER,
+            context="[LOCAL_EXEC]",
+        )
+        if not protocol:
+            log.LOGGER(
+                f"[LOCAL_EXEC] Slot port={slot.port} ignored because it has no host-supported transports."
+            )
+            continue
+        supported_slot_ports.append(slot.port)
+
+    if not supported_slot_ports:
+        log.LOGGER(
+            "[LOCAL_EXEC] No host-supported API slots found. Service will be started without published URI slots."
+        )
+
+    free_port_ranges = env_manager.get("network.FREE_PORTS_RANGE", [])
+    assigment_ports: Optional[Dict[int, int]] = (
+        {port: get_free_port(free_port_ranges=free_port_ranges) for port in supported_slot_ports}
+        if expose_outside
+        else {port: port for port in supported_slot_ports}
+    )
     log.LOGGER(
         f"Execution network mode: by_local={not expose_outside}, "
         f"assigment_ports={assigment_ports}"

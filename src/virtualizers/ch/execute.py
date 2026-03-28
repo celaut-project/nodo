@@ -21,33 +21,34 @@ from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
-from src.virtualizers.cloud_hypervisor.firewall import (
-    allow_connection as ch_allow_connection,
-    allow_connection_to_instance as ch_allow_connection_to_instance,
-    block_all as ch_block_all,
-)
-from src.virtualizers.cloud_hypervisor.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
+from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
 from src.virtualizers.entry_path import resolve_entrypoint_path
-from src.virtualizers.firewall import TransportProtocol
+from src.virtualizers.firewall import (
+    TransportProtocol,
+    allow_connection as vm_allow_connection,
+    allow_connection_to_instance as vm_allow_connection_to_instance,
+    block_all as vm_block_all,
+    resolve_slot_transport_protocols,
+)
 
 env_manager = ConfigManager()
 sc = SQLConnection()
 
 CACHE = env_manager.get("CACHE")
-CH_BINARY_PATH = env_manager.get("virtualizers.cloud_hypervisor.BINARY_PATH")
-NETWORK_MODE = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_MODE", "tap_bridge")
-NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_BRIDGE_NAME", "br-ch")
-NETWORK_SUBNET = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_SUBNET", "192.168.200.0/24")
-NETWORK_GATEWAY_IP = env_manager.get("virtualizers.cloud_hypervisor.NETWORK_GATEWAY_IP", "192.168.200.1")
-GUEST_NET_DEVICE = env_manager.get("virtualizers.cloud_hypervisor.GUEST_NET_DEVICE", "auto")
-KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.cloud_hypervisor.KERNEL_CMDLINE_EXTRA", "console=ttyS0")
-CH_SERIAL_MODE = env_manager.get("virtualizers.cloud_hypervisor.SERIAL_MODE", "file")
-CH_CONSOLE_MODE = env_manager.get("virtualizers.cloud_hypervisor.CONSOLE_MODE", "off")
+CH_BINARY_PATH = env_manager.get("virtualizers.ch.BINARY_PATH")
+NETWORK_MODE = env_manager.get("virtualizers.ch.NETWORK_MODE", "tap_bridge")
+NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch")
+NETWORK_SUBNET = env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24")
+NETWORK_GATEWAY_IP = env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1")
+GUEST_NET_DEVICE = env_manager.get("virtualizers.ch.GUEST_NET_DEVICE", "auto")
+KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.ch.KERNEL_CMDLINE_EXTRA", "console=ttyS0")
+CH_SERIAL_MODE = env_manager.get("virtualizers.ch.SERIAL_MODE", "file")
+CH_CONSOLE_MODE = env_manager.get("virtualizers.ch.CONSOLE_MODE", "off")
 GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
-    "virtualizers.cloud_hypervisor.GUEST_NETWORK_READY_TIMEOUT_S",
+    "virtualizers.ch.GUEST_NETWORK_READY_TIMEOUT_S",
     8,
 )
-CONSERVE_RUNTIME_DIR_ON_FAILURE = env_manager.get("virtualizers.cloud_hypervisor.CONSERVE_RUNTIME_DIR_ON_FAILURE", False)
+CONSERVE_RUNTIME_DIR_ON_FAILURE = env_manager.get("virtualizers.ch.CONSERVE_RUNTIME_DIR_ON_FAILURE", False)
 
 def _env_int(key: str, default: int) -> int:
     try:
@@ -57,8 +58,8 @@ def _env_int(key: str, default: int) -> int:
 
 
 DEFAULT_VCPUS = 1
-DEFAULT_MEM_MIB = max(16, _env_int("virtualizers.cloud_hypervisor.DEFAULT_MEM_MIB", 256))
-MIN_MEM_MIB = max(16, _env_int("virtualizers.cloud_hypervisor.MIN_MEM_MIB", 64))
+DEFAULT_MEM_MIB = max(16, _env_int("virtualizers.ch.DEFAULT_MEM_MIB", 256))
+MIN_MEM_MIB = max(16, _env_int("virtualizers.ch.MIN_MEM_MIB", 128))
 if DEFAULT_MEM_MIB < MIN_MEM_MIB:
     DEFAULT_MEM_MIB = MIN_MEM_MIB
 
@@ -114,7 +115,7 @@ def _resolve_ch_binary() -> str:
     resolved = shutil.which("cloud-hypervisor")
     if not resolved:
         raise CHExecuteError(
-            "cloud-hypervisor binary not found. Set virtualizers.cloud_hypervisor.BINARY_PATH or install it in PATH."
+            "cloud-hypervisor binary not found. Set virtualizers.ch.BINARY_PATH or install it in PATH."
         )
     return resolved
 
@@ -308,8 +309,13 @@ def _network_preflight() -> ipaddress.IPv4Network:
 
     return network
 
-
+# TODO Use firewall.py
 def _ensure_masquerade(network: ipaddress.IPv4Network) -> None:
+    # The MASQUERADE rule is shared across all VMs in the NETWORK_SUBNET.
+    # It should NOT be added to 'cleanup_rules' or removed when shutting down a single VM,
+    # as doing so could break connectivity for other active machines.
+    # Only DNAT / port-forwarding rules are VM-specific and safe to clean up
+    # when the instance terminates.
     subnet = network.with_prefixlen
     check_cmd = [
         "iptables",
@@ -324,6 +330,8 @@ def _ensure_masquerade(network: ipaddress.IPv4Network) -> None:
         subnet,
         "-j",
         "MASQUERADE",
+        "-m", "comment",
+        "--comment", f"nodo;masquerade;subnet={subnet}",
     ]
     exists = _run(check_cmd, check=False)
     if exists.returncode == 0:
@@ -343,6 +351,8 @@ def _ensure_masquerade(network: ipaddress.IPv4Network) -> None:
             subnet,
             "-j",
             "MASQUERADE",
+            "-m", "comment",
+            "--comment", f"nodo;masquerade;subnet={subnet}",
         ]
     )
 
@@ -444,13 +454,18 @@ def _run_debugfs_write(image_path: Path, host_file: Path, guest_target: str) -> 
     _run(["debugfs", "-w", "-R", write_cmd, str(image_path)])
 
 
-def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port: int) -> List[List[str]]:
+# TODO Use firewall.py
+def _add_dnat_rule(vmachine_id: str, protocol: str, external_port: int, vm_ip: str, internal_port: int) -> List[List[str]]:
     """
     Forwards a host port to a VM.
 
     - PREROUTING: redirects incoming traffic from outside.
     - FORWARD: allows new connections to the VM and the return of the session.
     - OUTPUT is not used because it only affects traffic originating locally on the host.
+
+    Note:
+    - Each iptables rule includes a comment with the VM ID (`vmachine_id`) to allow
+      filtering, coloring, or later removal specific to this VM.
     """
     protocol = protocol.lower().strip()
     if protocol not in {"tcp", "udp"}:
@@ -459,6 +474,7 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
     external_port_s = str(int(external_port))
     internal_port_s = str(int(internal_port))
 
+    # Add DNAT and FORWARD rules with VM-specific comments for easier identification
     add_commands = [
         [
             "iptables", "-t", "nat", "-A", "PREROUTING",
@@ -466,6 +482,8 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "--dport", external_port_s,
             "-j", "DNAT",
             "--to-destination", f"{vm_ip}:{internal_port_s}",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
         [
             "iptables", "-A", "FORWARD",
@@ -475,6 +493,8 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "-m", "conntrack",
             "--ctstate", "NEW,ESTABLISHED,RELATED",
             "-j", "ACCEPT",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
         [
             "iptables", "-A", "FORWARD",
@@ -484,13 +504,15 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "-m", "conntrack",
             "--ctstate", "ESTABLISHED,RELATED",
             "-j", "ACCEPT",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
     ]
 
     for command in add_commands:
         _run(command)
 
-    # Return the commands to remove the rules later
+    # Return the commands to remove the rules later (also including the comment)
     return [
         [
             "iptables", "-t", "nat", "-D", "PREROUTING",
@@ -498,6 +520,8 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "--dport", external_port_s,
             "-j", "DNAT",
             "--to-destination", f"{vm_ip}:{internal_port_s}",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
         [
             "iptables", "-D", "FORWARD",
@@ -507,6 +531,8 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "-m", "conntrack",
             "--ctstate", "NEW,ESTABLISHED,RELATED",
             "-j", "ACCEPT",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
         [
             "iptables", "-D", "FORWARD",
@@ -516,6 +542,8 @@ def _add_dnat_rule(protocol: str, external_port: int, vm_ip: str, internal_port:
             "-m", "conntrack",
             "--ctstate", "ESTABLISHED,RELATED",
             "-j", "ACCEPT",
+            "-m", "comment",
+            "--comment", f"nodo;vm_id={vmachine_id}"
         ],
     ]
 
@@ -738,12 +766,12 @@ def _configure_guest_firewall_policy(
     vm_ip: str,
     network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
 ) -> None:
-    if not ch_block_all(vmachine_id=vmachine_id, source_ip=vm_ip):
+    if not vm_block_all(vmachine_id=vmachine_id, source_ip=vm_ip):
         raise CHExecuteError(
             f"Failed to apply default deny firewall policy for VM {vmachine_id} ({vm_ip})."
         )
 
-    if not ch_allow_connection(
+    if not vm_allow_connection(
         vmachine_id=vmachine_id,
         ip=NETWORK_GATEWAY_IP,
         port=GATEWAY_PORT,
@@ -759,7 +787,7 @@ def _configure_guest_firewall_policy(
     )
 
     for dns_protocol in (TransportProtocol.UDP, TransportProtocol.TCP):
-        if not ch_allow_connection(
+        if not vm_allow_connection(
             vmachine_id=vmachine_id,
             ip=NETWORK_GATEWAY_IP,
             port=53,
@@ -778,7 +806,7 @@ def _configure_guest_firewall_policy(
         tag = net_res.tags[0] if net_res.tags else "<untagged>"
         rule_applied = False
         for instance in net_res.peer_instances:
-            if ch_allow_connection_to_instance(
+            if vm_allow_connection_to_instance(
                 vmachine_id=vmachine_id,
                 instance=instance,
                 source_ip=vm_ip,
@@ -822,6 +850,15 @@ def _tail_file(path: Path, max_lines: int = 40) -> str:
     if not lines:
         return "<empty>"
     return "".join(lines[-max_lines:]).strip()
+
+def _set_process_name(name: str):
+    """Set /proc/self/comm (max 15 chars)."""
+
+    import ctypes
+    import ctypes.util
+    PR_SET_NAME = 15
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    libc.prctl(PR_SET_NAME, name.encode("utf-8")[:15], 0, 0, 0)
 
 
 def execute(
@@ -988,7 +1025,11 @@ def execute(
         with open(stdout_path, "w", encoding="utf-8") as stdout_file, open(
             stderr_path, "w", encoding="utf-8"
         ) as stderr_file:
-            process = subprocess.Popen(start_command, stdout=stdout_file, stderr=stderr_file)
+            process = subprocess.Popen(start_command, 
+                                       stdout=stdout_file, 
+                                       stderr=stderr_file, 
+                                       preexec_fn=lambda: _set_process_name(f"nodo-ch-{vmachine_id[:8]}")
+                                       )
         log.LOGGER(
             f"[CH][{vmachine_id}] process started: pid={process.pid}, api_socket={api_socket_path}, "
             f"stdout={stdout_path}, stderr={stderr_path}"
@@ -1022,27 +1063,48 @@ def execute(
 
         dnat_rules_state: List[Dict[str, object]] = []
         if not by_local and assigment_ports:
+            slot_by_port = {slot.port: slot for slot in service.api.slot}
             for internal_port, external_port in assigment_ports.items():
-                for protocol in ("tcp", "udp"):  # TODO
-                    removal_commands = _add_dnat_rule(
-                        protocol=protocol,
-                        external_port=external_port,
-                        vm_ip=vm_ip,
-                        internal_port=internal_port,
-                    )
-                    cleanup_rules.extend(removal_commands)
-                    dnat_rules_state.append(
-                        {
-                            "protocol": protocol,
-                            "external_port": external_port,
-                            "internal_port": internal_port,
-                            "destination_ip": vm_ip,
-                        }
-                    )
+                slot = slot_by_port.get(internal_port)
+                if not slot:
                     log.LOGGER(
-                        f"[CH][{vmachine_id}] DNAT rule added: {protocol} "
-                        f"host:{external_port} -> guest:{vm_ip}:{internal_port}"
+                        f"[CH][{vmachine_id}] skipping DNAT for internal_port={internal_port}: "
+                        "slot not found in service.api.slot"
                     )
+                    continue
+
+                protocol = resolve_slot_transport_protocols(
+                    slot,
+                    logger_fn=log.LOGGER,
+                    context=f"[CH][{vmachine_id}]",
+                )
+                if not protocol:
+                    log.LOGGER(
+                        f"[CH][{vmachine_id}] skipping DNAT for internal_port={internal_port}: "
+                        "no host-supported transports in slot.transport.tags"
+                    )
+                    continue
+
+                removal_commands = _add_dnat_rule(
+                    vmachine_id=vmachine_id,
+                    protocol=protocol.value,
+                    external_port=external_port,
+                    vm_ip=vm_ip,
+                    internal_port=internal_port,
+                )
+                cleanup_rules.extend(removal_commands)
+                dnat_rules_state.append(
+                    {
+                        "protocol": protocol.value,
+                        "external_port": external_port,
+                        "internal_port": internal_port,
+                        "destination_ip": vm_ip,
+                    }
+                )
+                log.LOGGER(
+                    f"[CH][{vmachine_id}] DNAT rule added: {protocol.value} "
+                    f"host:{external_port} -> guest:{vm_ip}:{internal_port}"
+                )
 
         save_runtime_state(
             vmachine_id,
@@ -1058,6 +1120,7 @@ def execute(
                 "rootfs_path": str(rootfs_path),
                 "entrypoint": resolved_entrypoint,
                 "dnat_rules": dnat_rules_state,
+                "cleanup_rules": cleanup_rules,
                 "dns_allowlist": [
                     {"domain": domain, "ip": ip}
                     for domain, ip in domain_records
