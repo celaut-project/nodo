@@ -20,10 +20,10 @@ virtualizers:
     DOCKER_CONFIG_DIR: "${main.MAIN_DIR}/docker/config"
     DOCKER_NETWORK: "docker0"
     # Security options applied to service containers.
-    SECURITY_APPARMOR_UNCONFINED: true
-    SECURITY_SELINUX_DISABLE_LABEL: true
-    SECURITY_NO_SECCOMP: true  # This option disables seccomp security profiles, use with caution.
-    SECURITY_PRIVILEGED: true  # This option gives the container full access to the host, use with caution.
+    SECURITY_APPARMOR_UNCONFINED: false
+    SECURITY_SELINUX_DISABLE_LABEL: false
+    SECURITY_NO_SECCOMP: false  # This option disables seccomp security profiles, use with caution.
+    SECURITY_PRIVILEGED: false  # This option gives the container full access to the host, use with caution.
   ch:
     BINARY_PATH: ""
     KERNEL_PATHS:
