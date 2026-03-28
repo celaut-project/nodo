@@ -1,10 +1,11 @@
 import os
+import shutil
 from typing import Optional
 from protos import celaut_pb2
 from bee_rpc.client import read_from_file, read_multiblock_directory
 
-from src.gateway.iterables.abstract_input_service_iterable import find_service_hash
 from src.utils.config import ConfigManager
+from src.utils.hashing import get_configured_hash_spec, hash_stream
 
 env_manager = ConfigManager()
 
@@ -16,10 +17,39 @@ VALIDATE_ON_IMPORT = env_manager.get("VALIDATE_ON_IMPORT")
 def read_service_content(service_path):
     if os.path.isfile(service_path):
         with open(service_path, "rb") as f:
-            yield f.read()
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                yield chunk
     else:
         for i in read_multiblock_directory(directory=service_path):
             yield i
+
+
+def _compute_service_hash(service_path: str, hash_spec) -> str:
+    return hash_stream(read_service_content(service_path=service_path), hash_spec).hex()
+
+
+def _upsert_metadata_hash(metadata: celaut_pb2.Metadata, hash_id: bytes, hash_hex: str):
+    hash_bytes = bytes.fromhex(hash_hex)
+    for existing in metadata.hashtag.hash:
+        if existing.type == hash_id:
+            existing.value = hash_bytes
+            return
+
+    metadata.hashtag.hash.append(
+        celaut_pb2.Metadata.HashTag.Hash(
+            type=hash_id,
+            value=hash_bytes,
+        )
+    )
+
+
+def _remove_path(path: str):
+    if not os.path.exists(path):
+        return
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    else:
+        os.remove(path)
 
 
 def import_bee(path: str) -> Optional[str]:
@@ -44,6 +74,8 @@ def import_bee(path: str) -> Optional[str]:
         return
     
     try:
+        hash_spec = get_configured_hash_spec(env_manager)
+
         # Read the file using bee_rpc.client
         it = read_from_file(path=path, indices={
             1: celaut_pb2.Metadata,
@@ -56,49 +88,52 @@ def import_bee(path: str) -> Optional[str]:
         metadata = celaut_pb2.Metadata()
         metadata.ParseFromString(open(metadata_dir, "rb").read())
         
-        # Find the service hash in the metadata
+        # Find the configured service hash in metadata first.
         service_hash = None
+        service_saved = False
         for _hash in metadata.hashtag.hash:
-            service_hash, service_saved = find_service_hash(_hash=_hash)
-            break
+            if _hash.type == hash_spec.id_bytes:
+                service_hash = _hash.value.hex()
+                service_saved = os.path.exists(os.path.join(REGISTRY, service_hash))
+                break
+
+        calculated_hash = _compute_service_hash(service_path=service_dir, hash_spec=hash_spec)
                 
         if not service_hash:
-            try:
-                print("There is no service hash, try to get it from the service specification")
-                from hashlib import sha3_256
-                validate_content = sha3_256()
-                for i in read_service_content(service_dir):
-                    validate_content.update(i)
-                service_hash = validate_content.hexdigest()
-            except Exception as e:
-                print(e)
-                pass
-            if not service_hash:
-                print("Any service hash available")
-                return
+            print(
+                f"There is no configured hash ({hash_spec.name}) in metadata; "
+                "it will be computed from service content."
+            )
+            service_hash = calculated_hash
         
         elif VALIDATE_ON_IMPORT:
-            from hashlib import sha3_256
-            validate_content = sha3_256()
-            for i in read_service_content(service_dir):
-                validate_content.update(i)
-            if service_hash != validate_content.hexdigest():
-                print("Hash sha3-256 is on the service, but is not correct.")
+            if service_hash != calculated_hash:
+                print(
+                    f"Hash {hash_spec.name} exists in metadata, but it is not correct for service content."
+                )
                 if input("Do you want to overwrite it? y/n") not in ["y", "Y", "yes", "YES"]:
                     return
-                service_hash = validate_content.hexdigest()
+                service_hash = calculated_hash
+
+        _upsert_metadata_hash(
+            metadata=metadata,
+            hash_id=hash_spec.id_bytes,
+            hash_hex=service_hash,
+        )
         
         
         # Move metadata to the metadata registry
         metadata_destination = os.path.join(METADATA_REGISTRY, service_hash)
-        os.system(f"mv {metadata_dir} {metadata_destination}")
+        with open(metadata_destination, "wb") as metadata_file:
+            metadata_file.write(metadata.SerializeToString())
+        _remove_path(metadata_dir)
         
         # Move or remove the service file based on whether it's already saved
         if not service_saved:
             service_destination = os.path.join(REGISTRY, service_hash)
-            os.system(f"mv {service_dir} {service_destination}")
+            shutil.move(service_dir, service_destination)
         else:
-            os.system(f"rm -rf {service_dir}")
+            _remove_path(service_dir)
         
         print("Service imported successfully.")
         return service_hash

@@ -15,7 +15,7 @@ from protos import celaut_pb2
 from src.commands.__by_tag import get_id
 from src.commands.import_bee import import_bee
 from src.utils.config import ConfigManager
-from src.utils.hashing import HASH_FUNCTIONS, SHA3_256_ID
+from src.utils.hashing import get_configured_hash_spec, hash_file
 
 API_BASE_URL = "https://api.github.com"
 RETRYABLE_HTTP_STATUS_CODES = {401, 409, 422, 429, 500, 502, 503, 504}
@@ -79,27 +79,6 @@ def _resolve_token(config: ConfigManager) -> str:
         return os.environ.get(fallback_token_env_var, "")
 
     return ""
-
-
-def _resolve_hash_id(hash_id_hex: str) -> bytes:
-    try:
-        hash_id = bytes.fromhex(hash_id_hex)
-    except ValueError as exc:
-        raise PublisherError(
-            "Invalid publisher.HASH_ID. It must be a hex string."
-        ) from exc
-
-    if hash_id not in HASH_FUNCTIONS:
-        available = ", ".join(h.hex() for h in HASH_FUNCTIONS)
-        raise PublisherError(
-            "Unsupported publisher.HASH_ID. "
-            f"Configured: {hash_id_hex}. Supported: {available}"
-        )
-    return hash_id
-
-
-def _hash_file(path: Path, hash_id: bytes) -> str:
-    return HASH_FUNCTIONS[hash_id](path.read_bytes()).hex()
 
 
 def _request_with_retry(
@@ -310,10 +289,10 @@ def _get_publisher_settings(config: ConfigManager, require_token: bool = True) -
 
     repo = config.get("publisher.REPOSITORY", "")
     branch = config.get("publisher.BRANCH", "main")
-    hash_id_hex = str(config.get("publisher.HASH_ID", SHA3_256_ID.hex()) or "").strip().lower()
-    if not hash_id_hex:
-        hash_id_hex = SHA3_256_ID.hex()
-    hash_id = _resolve_hash_id(hash_id_hex)
+    try:
+        hash_spec = get_configured_hash_spec(config)
+    except ValueError as exc:
+        raise PublisherError(f"Invalid hashing.HASH configuration: {exc}") from exc
     source_application_web_page = str(
         config.get("publisher.SOURCE_APPLICATION_WEB_PAGE", DEFAULT_SOURCE_APPLICATION_WEB_PAGE) or ""
     ).strip() or DEFAULT_SOURCE_APPLICATION_WEB_PAGE
@@ -341,8 +320,7 @@ def _get_publisher_settings(config: ConfigManager, require_token: bool = True) -
         "token": token,
         "repo": repo,
         "branch": branch,
-        "hash_id": hash_id,
-        "hash_id_hex": hash_id_hex,
+        "hash_spec": hash_spec,
         "source_application_web_page": source_application_web_page,
         "chunk_size_mb": chunk_size_mb,
         "timeout_s": timeout_s,
@@ -507,7 +485,7 @@ def publish_service(
     )
 
     service_id, service_file_path = _export_service_to_bee(service_ref)
-    service_hash = _hash_file(service_file_path, settings["hash_id"])
+    service_hash = hash_file(service_file_path, settings["hash_spec"]).hex()
     try:
         result = _upload_file(
             source_path=service_file_path,
@@ -587,7 +565,7 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
             destination.write(data)
             print(f"Downloaded chunk {index + 1}/{len(chunk_urls)}", flush=True)
 
-    final_hash = _hash_file(output_path, settings["hash_id"])
+    final_hash = hash_file(output_path, settings["hash_spec"]).hex()
     if final_hash != service_hash:
         raise PublisherError(
             f"Final file hash mismatch: {final_hash} != {service_hash}"

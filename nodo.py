@@ -159,6 +159,7 @@ if __name__ == '__main__':
             "\n- import <path>"
             "\n- publish <service id|service tag>"
             "\n- download <manifest url> [-o <output dir>]"
+            "\n- integrity [<service id|service tag>] [--fix]"
 
             "\n\n Development commands:"
             "\n- update"
@@ -298,6 +299,21 @@ if __name__ == '__main__':
                         sys.exit(1)
 
                 download_command(url=manifest_url, output_dir=output_dir)
+
+            case "integrity":
+                from src.commands.integrity import integrity_command
+                import sys
+
+                args = sys.argv[2:]
+                fix = "--fix" in args
+                args = [arg for arg in args if arg != "--fix"]
+
+                if len(args) > 1:
+                    print("Usage: nodo integrity [<service id|service tag>] [--fix]", flush=True)
+                    sys.exit(1)
+
+                service_ref = args[0] if args else None
+                integrity_command(service_ref=service_ref, fix=fix)
                 
             case "execute":
                 from src.commands.execute import execute
@@ -405,6 +421,19 @@ if __name__ == '__main__':
             case 'serve':
                 if not is_nodo_service_running():
                     from src.serve import serve
+
+                    check_integrity_on_serve = bool(env_manager.get("hashing.CHECK_INTEGRITY_ON_SERVE", False))
+                    if check_integrity_on_serve:
+                        from src.manager.integrity import check_integrity
+
+                        startup_report = check_integrity(fix=True)
+                        if startup_report["issues"]:
+                            print(
+                                f"Integrity startup check found {len(startup_report['issues'])} issue(s). "
+                                f"Fixed: {startup_report['fixed']}",
+                                flush=True,
+                            )
+
                     serve()
                 else:
                     print("Nodo service is already running in the background. Cannot start serve.", flush=True)

@@ -1,7 +1,7 @@
 import hashlib
 from typing import Generator, List
 
-from src.utils.hashing import SHA3_256_ID, SHA3_256, SHAKE_256_ID, SHAKE_256
+from src.utils.hashing import SHA3_256_ID, SHA3_256, SHAKE_256_ID, SHAKE_256, get_configured_hash_id
 from protos.celaut_pb2 import Metadata
 
 
@@ -37,20 +37,31 @@ def calculate_hashes(value: bytes) -> List[Metadata.HashTag.Hash]:
     ]
 
 
-# Return the service's sha3-256 hash on hexadecimal format.
+# Return the configured main service hash on hexadecimal format.
 def get_service_hex_main_hash(
         metadata: Metadata = None,
         other_hashes: list = None
 ) -> str:
+    configured_hash_id = get_configured_hash_id()
+
     # Find if it has the hash.
     if other_hashes is None:
         other_hashes = []
     if metadata is None:
         metadata = Metadata()
 
-    for hash in list(metadata.hashtag.hash) + other_hashes:
+    all_hashes = list(metadata.hashtag.hash) + other_hashes
+    for hash in all_hashes:
+        if hash.type == configured_hash_id:
+            return hash.value.hex()
+
+    # Compatibility fallback for old metadata that has not been migrated yet.
+    for hash in all_hashes:
         if hash.type == SHA3_256_ID:
             return hash.value.hex()
+
+    if all_hashes:
+        return all_hashes[0].value.hex()
 
 
 def get_service_list_of_hashes(service_buffer: bytes) -> List[Metadata.HashTag.Hash]:

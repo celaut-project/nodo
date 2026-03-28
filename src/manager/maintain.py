@@ -16,7 +16,7 @@ from src.reputation_system.interface import update_vmachine_reputation, submit_r
 from src.utils import logger as log
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
-from src.utils.hashing import SHA3_256_ID
+from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
 from src.virtualizers.interface import maintain as vm_maintain
@@ -32,6 +32,7 @@ TOTAL_REFILLED_DEPOSIT = int(env_manager.get("TOTAL_REFILLED_DEPOSIT"))
 MANAGER_ITERATION_TIME = int(env_manager.get("MANAGER_ITERATION_TIME"))
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+CONFIGURED_HASH_ID = get_configured_hash_id(env_manager)
 
 DEBUG_MODE = lambda: env_manager.get("DEBUG_MODE")
 
@@ -54,7 +55,7 @@ def check_wanted_service(wanted: str):
     # Each execution of the function attempts to retrieve one of the services from the set. If the timeout is high or a large number of pairs are being processed, multiple calls might overlap if the function's execution time exceeds MANAGER_ITERATION_TIME; this is not an issue.
     
     _hash = celaut_pb2.Metadata.HashTag.Hash(
-            type=SHA3_256_ID,
+            type=CONFIGURED_HASH_ID,
             value=bytes.fromhex(wanted)
         )
     for peer in peers_id_iterator():
