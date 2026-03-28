@@ -7,7 +7,7 @@ from src.payment_system.contracts.envs import print_payment_info
 from src.utils.config import ConfigManager
 from src.utils.network import get_local_ip
 
-env_manager = ConfigManager()
+env_manager = ConfigManager(log=log.LOGGER)
 
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 MEMORY_LOGS = env_manager.get("MEMORY_LOGS")
@@ -157,6 +157,8 @@ if __name__ == '__main__':
             "\n- export <service> <path>"
             "\n- export <service> <path> --raw"
             "\n- import <path>"
+            "\n- publish <service id|service tag>"
+            "\n- download <manifest url> [-o <output dir>]"
 
             "\n\n Development commands:"
             "\n- update"
@@ -263,6 +265,39 @@ if __name__ == '__main__':
 
                 # Call the import_bee function
                 import_bee(path=absolute_path)
+
+            case "publish":
+                from src.commands.publish import publish_command
+                import sys
+
+                if len(sys.argv) < 3:
+                    print(
+                        "Usage: nodo publish <service id|service tag>",
+                        flush=True,
+                    )
+                    sys.exit(1)
+
+                service_ref = sys.argv[2]
+                publish_command(service_ref=service_ref)
+
+            case "download":
+                from src.commands.download import download_command
+                import sys
+
+                if len(sys.argv) < 3:
+                    print("Usage: nodo download <manifest url> [-o <output dir>]", flush=True)
+                    sys.exit(1)
+
+                manifest_url = sys.argv[2]
+                output_dir = None
+                if "-o" in sys.argv:
+                    try:
+                        output_dir = sys.argv[sys.argv.index("-o") + 1]
+                    except IndexError:
+                        print("Error: -o requires a value", flush=True)
+                        sys.exit(1)
+
+                download_command(url=manifest_url, output_dir=output_dir)
                 
             case "execute":
                 from src.commands.execute import execute
@@ -467,7 +502,7 @@ if __name__ == '__main__':
                     exit()
                 
                 # Execute docker commands in nodo's isolated Docker context
-                from src.utils.config import DOCKER_COMMAND, DOCKER_ENV
+                from src.utils.runtime import DOCKER_COMMAND, DOCKER_ENV
                 docker_args = sys.argv[2:] if len(sys.argv) > 2 else []
                 if not docker_args:
                     print("Usage: nodo docker <docker command>", flush=True)

@@ -5,7 +5,7 @@ from unittest.mock import patch
 IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
-    from src.virtualizers.cloud_hypervisor import execute as ch_execute
+    from src.virtualizers.ch import execute as ch_execute
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     celaut = None  # type: ignore[assignment]

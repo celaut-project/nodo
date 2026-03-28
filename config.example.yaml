@@ -8,7 +8,7 @@ main:
   DATABASE_FILE: "/nodo/storage/database.sqlite"
 
 virtualizers:
-  DEFAULT_VIRTUALIZER: cloud_hypervisor
+  DEFAULT_VIRTUALIZER: ch
   docker:
     DOCKER_CLIENT_TIMEOUT: 480
     DOCKER_MAX_CONNECTIONS: 1000
@@ -20,20 +20,20 @@ virtualizers:
     DOCKER_CONFIG_DIR: "${main.MAIN_DIR}/docker/config"
     DOCKER_NETWORK: "docker0"
     # Security options applied to service containers.
-    SECURITY_APPARMOR_UNCONFINED: true
-    SECURITY_SELINUX_DISABLE_LABEL: true
-    SECURITY_NO_SECCOMP: true  # This option disables seccomp security profiles, use with caution.
-    SECURITY_PRIVILEGED: true  # This option gives the container full access to the host, use with caution.
-  cloud_hypervisor:
+    SECURITY_APPARMOR_UNCONFINED: false
+    SECURITY_SELINUX_DISABLE_LABEL: false
+    SECURITY_NO_SECCOMP: false  # This option disables seccomp security profiles, use with caution.
+    SECURITY_PRIVILEGED: false  # This option gives the container full access to the host, use with caution.
+  ch:
     BINARY_PATH: ""
     KERNEL_PATHS:
-      linux/amd64: "${main.MAIN_DIR}/cloud_hypervisor/kernels/linux/amd64/vmlinuz"
-      linux/arm64: "${main.MAIN_DIR}/cloud_hypervisor/kernels/linux/arm64/vmlinuz"
+      linux/amd64: "${main.MAIN_DIR}/ch/kernels/linux/amd64/vmlinuz"
+      linux/arm64: "${main.MAIN_DIR}/ch/kernels/linux/arm64/vmlinuz"
     INITRAMFS_PATHS:
-      linux/amd64: "${main.MAIN_DIR}/cloud_hypervisor/initramfs/linux/amd64/initramfs"
-      linux/arm64: "${main.MAIN_DIR}/cloud_hypervisor/initramfs/linux/arm64/initramfs"
-    CACHE_DIR: "${main.CACHE}/cloud_hypervisor"
-    API_SOCKETS_DIR: "${main.MAIN_DIR}/cloud_hypervisor/sockets"
+      linux/amd64: "${main.MAIN_DIR}/ch/initramfs/linux/amd64/initramfs"
+      linux/arm64: "${main.MAIN_DIR}/ch/initramfs/linux/arm64/initramfs"
+    CACHE_DIR: "${main.CACHE}/ch"
+    API_SOCKETS_DIR: "${main.MAIN_DIR}/ch/sockets"
     NETWORK_MODE: "tap_bridge"
     NETWORK_BRIDGE_NAME: "br-ch"
     NETWORK_SUBNET: "192.168.200.0/24"
@@ -105,6 +105,10 @@ network:
   # If false, child instances will be published and reachable from the internet (subject to host firewall).
   ISOLATE_INTERNAL_CHILDREN: true
   CONSIDER_DEV_AS_INTERNAL: true  # If true, instances with "dev" in their father_id are considered internal regardless of actual network location. Use false in case node is controlled via ssh session for example.
+  DISABLE_EXPOSE_OUTSIDE: false  # If true, no instances will be exposed outside regardless of other settings. Use for maximum isolation. QUIC tunnel will be need to access services from outside in this case.
+  FREE_PORTS_RANGE:  # Free ports range to use for exposing services. Ports outside this range will not be used for service exposure. Useful to match router forwarding rules. Can be multiple ranges, e.g.: - START: 10000 \n END: 20000 \n - START: 30000 \n END: 40000
+    - START: 50000
+      END: 60000
 
 logs:
   MEMORY_LOGS: false
@@ -156,6 +160,28 @@ misc:
   USE_PRINT: false
   VALIDATE_ON_IMPORT: true
   CONFIGURATION_REQUIRED: false
+
+publisher:
+  PROVIDER: "github"
+  REPOSITORY: "owner/repo"
+  BRANCH: "main"
+  HASH_ID: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"
+  SOURCE_APPLICATION_WEB_PAGE: "https://reputation-systems.github.io/source-application?tab=add"
+  # Direct token in config (optional).
+  TOKEN: ""
+  # Environment variable names read by ConfigManager-based scripts (optional).
+  TOKEN_ENV_VAR: "CLOUD_TOKEN"
+  # Optional direct fallback token.
+  FALLBACK_TOKEN: ""
+  FALLBACK_TOKEN_ENV_VAR: "GITHUB_TOKEN"
+  CHUNK_SIZE_MB: 24
+  UPLOADS_PREFIX: "uploads"
+  TIMEOUT_SECONDS: 300
+  MAX_RETRY: 3
+  BACKOFF_SECONDS: 2
+  DOWNLOAD_OUTPUT_DIR: "${main.STORAGE}/published_downloads"
+  KEEP_DOWNLOADED_FILE: true
+  AUTO_IMPORT_SERVICE_ON_DOWNLOAD: true
 
 general_flags:
   SIMULATE_PAYMENTS: false

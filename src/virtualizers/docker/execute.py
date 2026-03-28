@@ -1,16 +1,23 @@
 import json
 import os
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import docker as docker_lib
 
 from protos import celaut_pb2 as celaut
 
 from src.utils import logger as log
-from src.utils.config import DOCKER_CLIENT, ConfigManager
+from src.utils.runtime import DOCKER_CLIENT
+from src.utils.config import ConfigManager
 from src.virtualizers.entry_path import resolve_entrypoint_path
 
-from src.virtualizers.docker.firewall import allow_connection_to_instance, block_all, allow_connection, TransportProtocol
+from src.virtualizers.firewall import (
+    TransportProtocol,
+    allow_connection,
+    allow_connection_to_instance,
+    block_all,
+    resolve_slot_transport_protocols,
+)
 from src.gateway.utils import GATEWAY_PORT
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.virtualizers.docker.set_container_config import set_config
@@ -100,11 +107,47 @@ def create_container(id: str, entrypoint: str, use_other_ports=None) -> docker_l
         raise e
 
 
+def _build_docker_port_bindings(
+    service: celaut.Service,
+    assigment_ports: Optional[Dict[int, int]],
+) -> Dict[str, int]:
+    if not assigment_ports:
+        return {}
+
+    slot_by_port = {slot.port: slot for slot in service.api.slot}
+    docker_ports: Dict[str, int] = {}
+
+    for internal_port, external_port in assigment_ports.items():
+        slot = slot_by_port.get(internal_port)
+        if not slot:
+            log.LOGGER(
+                f"[DOCKER] Internal port {internal_port} has no API slot definition. Skipping published port mapping."
+            )
+            continue
+
+        protocol = resolve_slot_transport_protocols(
+            slot,
+            logger_fn=log.LOGGER,
+            context="[DOCKER]",
+        )
+        if not protocol:
+            log.LOGGER(
+                f"[DOCKER] Internal port {internal_port} has no host-supported transport tags. "
+                "Skipping published port mapping."
+            )
+            continue
+
+        docker_ports[f"{internal_port}/{protocol.value}"] = external_port
+
+    return docker_ports
+
+
 def execute(assigment_ports, by_local, service_id, service, config, initial_system_resources, father_id) -> Tuple[str, str]:
     entry_path = list(service.container.init.entry_path)
     resolved_entrypoint = resolve_entrypoint_path(entry_path=entry_path)
+    published_ports = _build_docker_port_bindings(service=service, assigment_ports=assigment_ports)
     container = create_container(
-        use_other_ports=assigment_ports if not by_local else None,
+        use_other_ports=published_ports if not by_local and published_ports else None,
         id=service_id,
         entrypoint=resolved_entrypoint
     )
@@ -145,12 +188,12 @@ def execute(assigment_ports, by_local, service_id, service, config, initial_syst
     # Reload this object from the server again and update attrs with the new data.
     container.reload()
 
-    if not block_all(container_id=container.id):
+    if not block_all(vmachine_id=container.id):
         log.LOGGER(f"Docker firewall block all function failed for {container.id}")
 
     # Allow connection to the node gateway.
     if not allow_connection(
-        container_id=container.id, 
+        vmachine_id=container.id,
         ip='172.17.0.1', port=GATEWAY_PORT, # Gateway internal endpoint.
         protocol=TransportProtocol.TCP # Gateway communication is with TCP
     ):
@@ -160,7 +203,7 @@ def execute(assigment_ports, by_local, service_id, service, config, initial_syst
         tag = network_resolution.tags[0]
 
         for instance in network_resolution.peer_instances:
-            if allow_connection_to_instance(container_id=container.id, instance=instance):
+            if allow_connection_to_instance(vmachine_id=container.id, instance=instance):
                 log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
                 break
             else:

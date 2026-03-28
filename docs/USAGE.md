@@ -91,6 +91,18 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo import /service/path`
 
+- **publish `<service id | service tag>`**  
+  Exports a local service and publishes it in chunks to the configured GitHub repository.
+  **Examples:**  
+  `nodo publish 1234567890abcdef`  
+  `nodo publish my_service_tag`
+
+- **download `<manifest url>`**  
+  Downloads a published service from a manifest URL, verifies integrity, and imports it locally.
+  **Examples:**  
+  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest`  
+  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest -o /tmp/services`
+
 - **instances**  
   Lists all running instances and their details.  
   **Example:**  

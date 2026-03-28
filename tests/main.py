@@ -2,7 +2,8 @@ import os.path
 from typing import Optional
 
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
-from src.utils.config import SHA3_256_ID, ConfigManager
+from src.utils.hashing import SHA3_256_ID
+from src.utils.config import ConfigManager
 from src.utils.utils import to_gas_amount
 
 env_manager = ConfigManager()

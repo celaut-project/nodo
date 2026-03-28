@@ -6,7 +6,7 @@ from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
 from src.utils.utils import from_gas_amount
 try:
-    from src.virtualizers.cloud_hypervisor.observability import get_vm_runtime_snapshot
+    from src.virtualizers.ch.observability import get_vm_runtime_snapshot
 except Exception:  # pragma: no cover - defensive fallback for minimal environments
     def get_vm_runtime_snapshot(vmachine_id: str):
         _ = vmachine_id

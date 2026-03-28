@@ -104,13 +104,13 @@ provision_cloud_hypervisor_assets() {
     "$ch_initramfs_builder" "$TARGET_DIR" "$CH_ARCH_TAG" "$ch_initramfs_target"
 
     CH_BINARY_TARGET="$ch_binary_target" yq -i \
-        '.virtualizers.cloud_hypervisor.BINARY_PATH = strenv(CH_BINARY_TARGET)' \
+        '.virtualizers.ch.BINARY_PATH = strenv(CH_BINARY_TARGET)' \
         "$CONFIG_FILE"
     CH_ARCH_TAG="$CH_ARCH_TAG" CH_KERNEL_TARGET="$ch_kernel_target" yq -i \
-        '.virtualizers.cloud_hypervisor.KERNEL_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_KERNEL_TARGET)' \
+        '.virtualizers.ch.KERNEL_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_KERNEL_TARGET)' \
         "$CONFIG_FILE"
     CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$ch_initramfs_target" yq -i \
-        '.virtualizers.cloud_hypervisor.INITRAMFS_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_INITRAMFS_TARGET)' \
+        '.virtualizers.ch.INITRAMFS_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_INITRAMFS_TARGET)' \
         "$CONFIG_FILE"
 
     test -x "$ch_binary_target" || fail "Cloud Hypervisor binary is not executable at ${ch_binary_target}."

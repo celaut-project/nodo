@@ -11,7 +11,7 @@ from src.utils.filesystem_xattrs import encode_filesystem_metadata_xattrs, Files
 IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
-    ch_build = importlib.import_module("src.virtualizers.cloud_hypervisor.build")
+    ch_build = importlib.import_module("src.virtualizers.ch.build")
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     celaut = None  # type: ignore[assignment]

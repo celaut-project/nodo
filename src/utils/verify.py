@@ -1,7 +1,7 @@
 import hashlib
 from typing import Generator, List
 
-from src.utils.config import SHA3_256_ID, SHA3_256, SHAKE_256_ID, SHAKE_256
+from src.utils.hashing import SHA3_256_ID, SHA3_256, SHAKE_256_ID, SHAKE_256
 from protos.celaut_pb2 import Metadata
 
 

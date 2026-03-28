@@ -76,10 +76,12 @@ message Service {
         message Slot {
             // Port number for this slot.
             int32 port = 1;
+            // Transport protocol
+            Protocol transport = 2;
             // Protocol stack definitions for this slot.
-            repeated Protocol protocol_stack = 2;
+            repeated Protocol protocol_stack = 3;
             // Gas amount per declared method in protocol_stack.
-            map<string, GasAmount> gas_amount_per_call = 3;
+            map<string, GasAmount> gas_amount_per_call = 4;
         }
 
         // Environment variables for the container.

@@ -93,7 +93,8 @@ try:
     os.chdir("$TARGET_DIR") # Change cwd so ConfigManager finds config.yaml
 
     from src.database.sql_connection import SQLConnection
-    from src.utils.config import ConfigManager, DOCKER_CLIENT
+    from src.utils.config import ConfigManager
+    from src.utils.runtime import DOCKER_CLIENT
     
     # Force load config
     ConfigManager()

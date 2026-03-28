@@ -963,16 +963,21 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Peer {peer_id} already exists')
             return False
 
-    def add_slot(self, slot: celaut_pb2.Instance.Uri_Slot, peer_id: str):
+    def add_slot(
+        self,
+        slot: celaut_pb2.Instance.Uri_Slot,
+        peer_id: str,
+        transport_protocol: bytes,
+    ):
         """
         Adds a slot to the database.
 
         Args:
             slot (celaut_pb2.Instance.Uri_Slot): The slot to add.
             peer_id (str): The ID of the peer.
+            transport_protocol (bytes): Serialized transport tags for this slot.
         """
         internal_port: int = slot.internal_port
-        transport_protocol: bytes = bytes("tcp", "utf-8")
         cursor = self._execute("INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
                             (internal_port, transport_protocol, peer_id))
         slot_id = cursor.lastrowid
