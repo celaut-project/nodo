@@ -11,7 +11,12 @@ from src.utils.runtime import DOCKER_CLIENT
 from src.utils.config import ConfigManager
 from src.virtualizers.entry_path import resolve_entrypoint_path
 
-from src.virtualizers.docker.firewall import allow_connection_to_instance, block_all, allow_connection, TransportProtocol
+from src.virtualizers.firewall import (
+    TransportProtocol,
+    allow_connection,
+    allow_connection_to_instance,
+    block_all,
+)
 from src.gateway.utils import GATEWAY_PORT
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.virtualizers.docker.set_container_config import set_config
@@ -146,12 +151,12 @@ def execute(assigment_ports, by_local, service_id, service, config, initial_syst
     # Reload this object from the server again and update attrs with the new data.
     container.reload()
 
-    if not block_all(container_id=container.id):
+    if not block_all(vmachine_id=container.id):
         log.LOGGER(f"Docker firewall block all function failed for {container.id}")
 
     # Allow connection to the node gateway.
     if not allow_connection(
-        container_id=container.id, 
+        vmachine_id=container.id,
         ip='172.17.0.1', port=GATEWAY_PORT, # Gateway internal endpoint.
         protocol=TransportProtocol.TCP # Gateway communication is with TCP
     ):
@@ -161,7 +166,7 @@ def execute(assigment_ports, by_local, service_id, service, config, initial_syst
         tag = network_resolution.tags[0]
 
         for instance in network_resolution.peer_instances:
-            if allow_connection_to_instance(container_id=container.id, instance=instance):
+            if allow_connection_to_instance(vmachine_id=container.id, instance=instance):
                 log.LOGGER(f"Container {container.id} allowed to connect with {tag}.")
                 break
             else:

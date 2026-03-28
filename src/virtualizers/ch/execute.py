@@ -21,14 +21,14 @@ from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
-from src.virtualizers.ch.firewall import (
-    allow_connection as ch_allow_connection,
-    allow_connection_to_instance as ch_allow_connection_to_instance,
-    block_all as ch_block_all,
-)
 from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
 from src.virtualizers.entry_path import resolve_entrypoint_path
-from src.virtualizers.firewall import TransportProtocol
+from src.virtualizers.firewall import (
+    TransportProtocol,
+    allow_connection as vm_allow_connection,
+    allow_connection_to_instance as vm_allow_connection_to_instance,
+    block_all as vm_block_all,
+)
 
 env_manager = ConfigManager()
 sc = SQLConnection()
@@ -765,12 +765,12 @@ def _configure_guest_firewall_policy(
     vm_ip: str,
     network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
 ) -> None:
-    if not ch_block_all(vmachine_id=vmachine_id, source_ip=vm_ip):
+    if not vm_block_all(vmachine_id=vmachine_id, source_ip=vm_ip):
         raise CHExecuteError(
             f"Failed to apply default deny firewall policy for VM {vmachine_id} ({vm_ip})."
         )
 
-    if not ch_allow_connection(
+    if not vm_allow_connection(
         vmachine_id=vmachine_id,
         ip=NETWORK_GATEWAY_IP,
         port=GATEWAY_PORT,
@@ -786,7 +786,7 @@ def _configure_guest_firewall_policy(
     )
 
     for dns_protocol in (TransportProtocol.UDP, TransportProtocol.TCP):
-        if not ch_allow_connection(
+        if not vm_allow_connection(
             vmachine_id=vmachine_id,
             ip=NETWORK_GATEWAY_IP,
             port=53,
@@ -805,7 +805,7 @@ def _configure_guest_firewall_policy(
         tag = net_res.tags[0] if net_res.tags else "<untagged>"
         rule_applied = False
         for instance in net_res.peer_instances:
-            if ch_allow_connection_to_instance(
+            if vm_allow_connection_to_instance(
                 vmachine_id=vmachine_id,
                 instance=instance,
                 source_ip=vm_ip,
