@@ -1,5 +1,4 @@
 import os, sys, time, threading, shutil
-from hashlib import sha3_256
 from typing import Optional
 import grpc
 from bee_rpc import client as grpcbb
@@ -9,6 +8,7 @@ from src.commands.packer.zip_with_dockerfile.prepare_directory import prepare_di
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import generate_service_zip
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.utils.config import ConfigManager
+from src.utils.hashing import get_configured_hash_spec, hash_stream
 
 env_manager = ConfigManager()
 
@@ -107,17 +107,22 @@ def __on_peer(peer: str, service_zip_dir: str) -> str:
     print('Compilation complete.')
     print('Service ID -> ', _id)
     print('\nValidating the content...')
-
-    validate_id = sha3_256()
+    hash_spec = get_configured_hash_spec(env_manager)
+    validated_hash_hex = ""
 
     try:
-        for i in grpcbb.read_multiblock_directory(f"{REGISTRY}{_id}/"):
-            validate_id.update(i)
-            
-        if validate_id.hexdigest() == _id:
+        validated_hash_hex = hash_stream(
+            grpcbb.read_multiblock_directory(f"{REGISTRY}{_id}/"),
+            hash_spec
+        ).hex()
+
+        if validated_hash_hex == _id:
             print("Service id validated correctly.")
         else:
-            print(f"Service id validated correctly. \n (validated result: {validate_id.hexdigest()}) \n the reason could be https://github.com/bee-rpc-protocol/bee-rpc/issues/7")
+            print(
+                "Service id mismatch after validation. "
+                f"(validated result: {validated_hash_hex})"
+            )
             
         min_block_size = env_manager.get("MIN_BUFFER_BLOCK_SIZE")
         if min_block_size < 10 **6:

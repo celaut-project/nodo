@@ -161,11 +161,17 @@ misc:
   VALIDATE_ON_IMPORT: true
   CONFIGURATION_REQUIRED: false
 
+hashing:
+  # Main hash selector for service/file identification.
+  # Accepts hash aliases (sha3_256, sha256, shake_256, blake2b) or a hash-id in hex.
+  HASH: "sha3_256"
+  # If true, run integrity check/migration automatically when starting `nodo serve`.
+  CHECK_INTEGRITY_ON_SERVE: false
+
 publisher:
   PROVIDER: "github"
   REPOSITORY: "owner/repo"
   BRANCH: "main"
-  HASH_ID: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"
   SOURCE_APPLICATION_WEB_PAGE: "https://reputation-systems.github.io/source-application?tab=add"
   # Direct token in config (optional).
   TOKEN: ""
