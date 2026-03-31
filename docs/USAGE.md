@@ -292,8 +292,11 @@ nodo docker ps
 ```
 
 The isolated Docker daemon configuration is stored in `{MAIN_DIR}/docker/config/daemon.json`.
+Binary paths for Java/Python/yq/Docker can be overridden in `config.yaml` under `dependencies.*`.
 
 If `buildx` builds inside nodo's isolated Docker can't resolve or reach external hosts (e.g. `github.com`), check that file for a forced `dns` setting that doesn't work in your network (common in corporate/VPN environments). After changing it, restart `nodo.service` (or rerun `{MAIN_DIR}/bash/start_docker_daemon.sh {MAIN_DIR}`).
+
+Cross-architecture builds are intentionally disabled in the default installer profile (no QEMU/binfmt provisioning). If your service is `linux/arm64`, build from an `arm64` host; if it is `linux/amd64`, build from an `amd64` host.
 
 ### Service Container Security Options
 

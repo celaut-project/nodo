@@ -12,6 +12,7 @@ from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
 from src.utils.hashing import SHA3_256_ID, get_configured_hash_spec, hash_stream
+from src.utils.arch_guard import ensure_native_arch
 from src.utils.runtime import DOCKER_COMMAND, DOCKER_ENV, PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.filesystem_xattrs import (
     describe_mode_type,
@@ -61,6 +62,7 @@ class ZipContainerPacker:
         # 1. Architecture detection
         host_arch = platform.machine().lower()
         target_arch = arch
+        ensure_native_arch(target_arch, context="packer build")
 
         # 2. Prepare output path
         dest_path = os.path.join(CACHE, self.aux_id, "filesystem")
@@ -121,14 +123,7 @@ class ZipContainerPacker:
             self.path
         ]
 
-        # 4. Stability Shield (If emulating ARM on Intel, limit threads)
-        if "arm64" in target_arch and "x86" in host_arch:
-            build_cmd.insert(-1, "--build-arg")
-            build_cmd.insert(-1, "CARGO_BUILD_JOBS=1")  # For Rust code
-            build_cmd.insert(-1, "--build-arg")
-            build_cmd.insert(-1, "MAKEFLAGS=-j2")  # For C/C++ code
-
-        # 5. Secure execution
+        # 4. Secure execution
         try:
             log.LOGGER(f"Starting build {target_arch} on host {host_arch}...")
             
