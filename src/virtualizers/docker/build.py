@@ -16,6 +16,7 @@ import src.utils.logger as l
 from protos import celaut_pb2, celaut_pb2
 from src.utils.runtime import DOCKER_COMMAND, DOCKER_ENV
 from src.utils.config import ConfigManager
+from src.utils.arch_guard import ensure_native_arch
 from src.utils.verify import get_service_hex_main_hash
 from src.virtualizers.architecture import get_arch_tag
 
@@ -104,6 +105,7 @@ def __build_container_from_definition(service: celaut_pb2.Service,
 
         # Take architecture.
         arch = get_arch_tag(service=service, metadata=metadata)
+        ensure_native_arch(arch, context="docker build")
         # get_arch_tag, selecciona el tag de la arquitectura definida por el servicio,
         #  en base a la especificación y metadatos, que tiene el nodo para esa arquitectura.
         l.LOGGER('Build process of ' + service_id + ': select the architecture ' + str(arch))

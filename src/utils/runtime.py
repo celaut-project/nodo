@@ -25,16 +25,21 @@ if config.get("builder.X86_SUPPORT"):
 # Docker runtime values.
 _main_dir = config.get("main.MAIN_DIR")
 NODO_ROOT = Path(_main_dir).expanduser().resolve() if _main_dir else Path(__file__).resolve().parents[2]
-BIN_DIR = NODO_ROOT / "bin"
-PLUGIN_DIR = NODO_ROOT / "libexec" / "docker" / "cli-plugins"
+DEFAULT_BIN_DIR = NODO_ROOT / "bin"
 
-DOCKER_BIN = str(BIN_DIR / "docker")
-DOCKERD_BIN = str(BIN_DIR / "dockerd")
+DOCKER_BIN = str(config.get("dependencies.docker.BIN") or (DEFAULT_BIN_DIR / "docker"))
+DOCKERD_BIN = str(config.get("dependencies.docker.DAEMON_BIN") or (DEFAULT_BIN_DIR / "dockerd"))
+BUILDX_BIN = str(
+    config.get("dependencies.docker.BUILDX_BIN")
+    or (NODO_ROOT / "libexec" / "docker" / "cli-plugins" / "docker-buildx")
+)
+BIN_DIR = Path(DOCKER_BIN).resolve().parent
+PLUGIN_DIR = Path(BUILDX_BIN).resolve().parent
 DOCKER_SOCKET = config.get("virtualizers.docker.DOCKER_SOCKET") or str(NODO_ROOT / "docker" / "docker.sock")
 
 if not os.path.isfile(DOCKER_BIN):
     raise RuntimeError(f"Cliente Docker de Nodo no encontrado en {DOCKER_BIN}. Ejecuta el instalador.")
-if not os.path.isfile(str(PLUGIN_DIR / "docker-buildx")):
+if not os.path.isfile(BUILDX_BIN):
     raise RuntimeError(f"Plugin buildx no encontrado en {PLUGIN_DIR}. Ejecuta el instalador.")
 
 DOCKER_ENV = os.environ.copy()

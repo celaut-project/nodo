@@ -1,245 +1,387 @@
-## **Manual Installation Guide for the Node**
+# Manual Installation Guide
 
-This guide will walk you through the node's installation process. It is divided into two main phases:
+This guide is for Linux users who want to bootstrap Nodo manually, without executing `install.sh`.
 
-1.  **Administrator Phase:** Steps requiring `sudo` privileges to prepare your system.
-2.  **User Phase:** Steps you can run as a regular user in your home directory, without `sudo`.
+It follows the current runtime model:
 
-<details>
-<summary><strong>Quick Local-Source Setup (for developers)</strong></summary>
+- Local runtimes and binaries under `MAIN_DIR` (Python, Java, yq, Docker by default).
+- Isolated Docker daemon under `MAIN_DIR/docker`.
+- Cloud Hypervisor assets under `MAIN_DIR/cloud_hypervisor`.
 
-If you already have a local checkout and want `nodo.service` to run directly from it, use:
+## 1) Scope and assumptions
 
-```bash
-cd /home/user/Desktop/nodo
-sudo ./install.sh --source-dir /home/user/Desktop/nodo
-```
-
-This skips `git clone/pull`, rewires `config.yaml` + `nodo.service` to that local path, and keeps the isolated Docker daemon under your checkout.
-
-If you want to install/update directly from a specific branch:
+- OS: Ubuntu 22.04 LTS (or compatible Debian-based distro).
+- Architecture: `x86_64` or `aarch64`.
+- You have `sudo` access.
+- Installation root: `TARGET_DIR` (default `/nodo`).
 
 ```bash
-sudo ./install.sh --branch stable   # production/main branch
-sudo ./install.sh --branch dev      # development branch
-```
-</details>
-
------
-
-### **Cloud Hypervisor Provisioning in `install.sh`**
-
-From this point on, `install.sh` provisions Cloud Hypervisor assets automatically per host architecture.
-
-#### **What the installer now does**
-
-1. Uses a **hardcoded Cloud Hypervisor version** in `install.sh`:
-   - `CH_VERSION="v43.0"`
-   - No public CLI flag (`--ch-version`) is exposed.
-2. Passes that version to the architecture setup script:
-   - `bash/setup_ubuntu_x86.sh` on `x86_64`
-   - `bash/setup_ubuntu_arm.sh` on `arm64`
-3. In each `setup_*` script, after base dependencies:
-   - Downloads the static Cloud Hypervisor binary from GitHub Releases.
-     - `x86_64`: tries `cloud-hypervisor-static`, then `cloud-hypervisor-static-x86_64`
-     - `arm64`: tries `cloud-hypervisor-static-aarch64`, then `cloud-hypervisor-static-arm64`
-   - Installs it at:
-     - `${TARGET_DIR}/bin/cloud-hypervisor`
-   - Detects kernel from `/boot` using deterministic resolution:
-     - First: `/boot/vmlinuz`
-     - Fallback: latest `/boot/vmlinuz-*`
-   - Copies kernel and generates a custom CH initramfs to fixed paths:
-     - `${TARGET_DIR}/cloud_hypervisor/kernels/linux/<arch>/vmlinuz`
-     - `${TARGET_DIR}/cloud_hypervisor/initramfs/linux/<arch>/initramfs`
-   - Builds initramfs with `bash/build_ch_initramfs.sh`:
-     - includes `/init`, static busybox applets, and marker `etc/nodo-ch-initramfs.marker`
-     - this initramfs is independent from host `/boot/initrd.img*`
-   - Updates `config.yaml` via `yq`:
-     - `virtualizers.ch.BINARY_PATH`
-     - `virtualizers.ch.KERNEL_PATHS."linux/<arch>"`
-     - `virtualizers.ch.INITRAMFS_PATHS."linux/<arch>"`
-4. Runs in **fail-hard mode**:
-   - If binary download, `/boot` asset detection, copy, or `yq` update fails, installation exits with a clear error.
-
-#### **Post-install verification**
-
-After running `sudo ./install.sh`, validate:
-
-```bash
-test -x <TARGET_DIR>/bin/cloud-hypervisor
-test -f <TARGET_DIR>/cloud_hypervisor/kernels/linux/<arch>/vmlinuz
-test -f <TARGET_DIR>/cloud_hypervisor/initramfs/linux/<arch>/initramfs
-yq '.virtualizers.ch.BINARY_PATH' <TARGET_DIR>/config.yaml
-yq '.virtualizers.ch.KERNEL_PATHS."linux/<arch>"' <TARGET_DIR>/config.yaml
-yq '.virtualizers.ch.INITRAMFS_PATHS."linux/<arch>"' <TARGET_DIR>/config.yaml
+export TARGET_DIR=/nodo
 ```
 
-Replace:
-- `<TARGET_DIR>` with your installation directory (default: `/nodo`).
-- `<arch>` with `amd64` or `arm64` depending on host.
+## 2) Install base system packages
 
-#### **Expected failure cases (by design)**
-
-- No network access to GitHub Releases.
-- `yq` missing/unusable when writing `config.yaml`.
-- No valid kernel found under `/boot`.
-- Missing tools to build CH initramfs (`busybox-static`, `cpio`, `gzip`).
-
-In all these cases, installer execution stops intentionally to avoid partial CH configuration.
-
------
-
-### **1. Administrator Phase (requires `sudo`)**
-
-These commands must be executed by a user with superuser privileges to install all the necessary system-wide dependencies and tools.
-
-#### **1.1. Install System and Build Dependencies**
-
-First, you need to update your package repositories and install build tools, required libraries, and Git.
+These are host-level packages used by setup/build tools. Python/JRE runtimes for Nodo are installed locally in later steps.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git build-essential zlib1g-dev libncurses5-dev \
-libgdbm-dev libnss3-dev protobuf-compiler libssl-dev libreadline-dev \
-libffi-dev libsqlite3-dev wget libbz2-dev ca-certificates curl gnupg \
-lsb-release
+sudo apt-get install -y \
+  build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
+  protobuf-compiler libssl-dev libreadline-dev libffi-dev libsqlite3-dev \
+  wget libbz2-dev busybox-static cpio gzip initramfs-tools-core iputils-ping \
+  ca-certificates curl gnupg lsb-release git procps locales
 ```
 
-*(This action consolidates the dependency installation from the setup scripts).*
-
-#### **1.2. Install `yq` (YAML Processor)**
-
-Next, download `yq` and make it executable for all users on the system.
+## 3) Get source and create config
 
 ```bash
-sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
-sudo chmod +x /usr/local/bin/yq
+git clone https://github.com/celaut-project/nodo.git "$TARGET_DIR"
+cd "$TARGET_DIR"
+cp -n config.example.yaml config.yaml
 ```
 
-#### **1.3. Install Python 3.11**
+## 4) Bootstrap local yq and set base config
 
-You will add the `deadsnakes` PPA to get recent Python versions and then install `python3.11`.
+Install a bootstrap `yq` binary first (used to edit/read `config.yaml`).
 
 ```bash
-sudo add-apt-repository ppa:deadsnakes/ppa -y
-sudo apt-get update
-sudo apt-get -y install python3.11 python3.11-venv python3.11-distutils
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|amd64) YQ_ASSET=yq_linux_amd64 ;;
+  aarch64|arm64) YQ_ASSET=yq_linux_arm64 ;;
+  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+esac
+
+mkdir -p "$TARGET_DIR/bin"
+curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.44.3/${YQ_ASSET}" -o "$TARGET_DIR/bin/yq"
+chmod +x "$TARGET_DIR/bin/yq"
 ```
 
-#### **1.4. Install OpenJDK 21**
-
-This step installs the Java 21 runtime environment.
+Align `main.*` paths with your installation root:
 
 ```bash
-sudo apt-get -y install openjdk-21-jre-headless
+"$TARGET_DIR/bin/yq" -i \
+  '.main.MAIN_DIR = env(TARGET_DIR) |
+   .main.STORAGE = env(TARGET_DIR) + "/storage" |
+   .main.CACHE = .main.STORAGE + "/__cache__/" |
+   .main.REGISTRY = .main.STORAGE + "/__registry__/" |
+   .main.METADATA_REGISTRY = .main.STORAGE + "/__metadata__/" |
+   .main.BLOCKDIR = .main.STORAGE + "/__block__/" |
+   .main.DATABASE_FILE = .main.STORAGE + "/database.sqlite"' \
+  "$TARGET_DIR/config.yaml"
 ```
 
-#### **1.5. Install Docker and QEMU**
-
-Now, you will set up the official Docker repository, install the Docker Engine, and add multi-architecture support with QEMU.
+Optional: override runtime/binary locations in `dependencies.*` before continuing. Example (custom roots):
 
 ```bash
-# Add Docker's official GPG key
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-
-# Add the Docker repository to your APT sources
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
-  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt-get update
-
-# Install Docker Engine (version 24.* as in the script) and QEMU
-sudo apt-get -y --allow-downgrades install docker-ce=5:24.* docker-ce-cli=5:24.* containerd.io
-sudo apt-get -y install qemu-system binfmt-support qemu-user-static
-
-# Configure QEMU
-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+"$TARGET_DIR/bin/yq" -i \
+  '.dependencies.python.RUNTIME_ROOT = "${main.MAIN_DIR}/runtime/python" |
+   .dependencies.python.RUNTIME_BIN = "${main.MAIN_DIR}/runtime/python/current/bin/python3" |
+   .dependencies.python.VENV_BIN = "${main.MAIN_DIR}/venv/bin/python" |
+   .dependencies.java.RUNTIME_ROOT = "${main.MAIN_DIR}/runtime/java" |
+   .dependencies.java.JAVA_HOME = "${main.MAIN_DIR}/runtime/java/current" |
+   .dependencies.yq.BIN = "${main.MAIN_DIR}/bin/yq" |
+   .dependencies.docker.BIN = "${main.MAIN_DIR}/bin/docker" |
+   .dependencies.docker.DAEMON_BIN = "${main.MAIN_DIR}/bin/dockerd" |
+   .dependencies.docker.BUILDX_BIN = "${main.MAIN_DIR}/libexec/docker/cli-plugins/docker-buildx"' \
+  "$TARGET_DIR/config.yaml"
 ```
 
-Once these administrator steps are complete, the system is ready for you to set up the node.
+## 5) Resolve effective paths from `config.yaml`
 
------
-
-### **2. User Phase (no `sudo`)**
-
-You can now perform the following steps in your personal home directory (`$HOME`).
-
-#### **2.1. Clone the Repository**
-
-Open your terminal and clone the project from GitHub into a folder named `nodo` inside your home directory.
+Run this block once and keep the shell session open. Later commands rely on these variables.
 
 ```bash
-cd ~
-git clone https://github.com/celaut-project/nodo.git
-cd nodo
-```
+expand_main_dir() {
+  printf '%s' "$1" | sed "s|\${main.MAIN_DIR}|$TARGET_DIR|g"
+}
 
-#### **2.2. Create the Configuration File**
+read_cfg_path_or_default() {
+  local query="$1"
+  local fallback="$2"
+  local raw
+  raw="$("$TARGET_DIR/bin/yq" -r "$query // \"\"" "$TARGET_DIR/config.yaml")"
+  if [ -z "$raw" ] || [ "$raw" = "null" ]; then
+    raw="$fallback"
+  fi
+  expand_main_dir "$raw"
+}
 
-If the configuration file does not exist, create it by copying the example file.
-
-```bash
-if [ ! -f "config.yaml" ]; then
-  cp config.example.yaml config.yaml
+YQ_BIN="$(read_cfg_path_or_default '.dependencies.yq.BIN' '${main.MAIN_DIR}/bin/yq')"
+mkdir -p "$(dirname "$YQ_BIN")"
+if [ "$YQ_BIN" != "$TARGET_DIR/bin/yq" ]; then
+  cp "$TARGET_DIR/bin/yq" "$YQ_BIN"
+  chmod +x "$YQ_BIN"
 fi
+
+PY_RUNTIME_ROOT="$(read_cfg_path_or_default '.dependencies.python.RUNTIME_ROOT' '${main.MAIN_DIR}/runtime/python')"
+PY_RUNTIME_BIN="$(read_cfg_path_or_default '.dependencies.python.RUNTIME_BIN' '${main.MAIN_DIR}/runtime/python/current/bin/python3')"
+PY_VENV_BIN="$(read_cfg_path_or_default '.dependencies.python.VENV_BIN' '${main.MAIN_DIR}/venv/bin/python')"
+PY_VENV_DIR="$(dirname "$(dirname "$PY_VENV_BIN")")"
+
+JAVA_RUNTIME_ROOT="$(read_cfg_path_or_default '.dependencies.java.RUNTIME_ROOT' '${main.MAIN_DIR}/runtime/java')"
+JAVA_HOME_PATH="$(read_cfg_path_or_default '.dependencies.java.JAVA_HOME' '${main.MAIN_DIR}/runtime/java/current')"
+
+DOCKER_BIN_TARGET="$(read_cfg_path_or_default '.dependencies.docker.BIN' '${main.MAIN_DIR}/bin/docker')"
+DOCKERD_BIN_TARGET="$(read_cfg_path_or_default '.dependencies.docker.DAEMON_BIN' '${main.MAIN_DIR}/bin/dockerd')"
+BUILDX_BIN_TARGET="$(read_cfg_path_or_default '.dependencies.docker.BUILDX_BIN' '${main.MAIN_DIR}/libexec/docker/cli-plugins/docker-buildx')"
+DOCKER_SOCKET_PATH="$(read_cfg_path_or_default '.virtualizers.docker.DOCKER_SOCKET' '${main.MAIN_DIR}/docker/docker.sock')"
+
+CH_BINARY_PATH="$(read_cfg_path_or_default '.virtualizers.ch.BINARY_PATH' '${main.MAIN_DIR}/bin/cloud-hypervisor')"
 ```
 
-#### **2.3. Set Up the Python Virtual Environment**
+## 6) Install local portable Python runtime
 
-Create a dedicated virtual environment to install the Python dependencies in isolation, and then activate it.
+Pinned versions used by project setup:
+
+- Python: `3.11.15`
+- python-build-standalone tag: `20260325`
 
 ```bash
-python3.11 -m venv venv
-source venv/bin/activate
+PY_VER="3.11.15"
+PY_TAG="20260325"
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|amd64) PY_ARCH="x86_64-unknown-linux-gnu" ;;
+  aarch64|arm64) PY_ARCH="aarch64-unknown-linux-gnu" ;;
+  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+esac
+
+PY_DIST="cpython-${PY_VER}+${PY_TAG}-${PY_ARCH}-install_only_stripped.tar.gz"
+PY_BASE="https://github.com/astral-sh/python-build-standalone/releases/download/${PY_TAG}"
+
+mkdir -p "$PY_RUNTIME_ROOT"
+curl -fsSL "$PY_BASE/$PY_DIST" -o /tmp/nodo-python.tar.gz
+curl -fsSL "$PY_BASE/SHA256SUMS" -o /tmp/nodo-python.SHA256SUMS
+
+EXPECTED="$(awk -v name="$PY_DIST" '{f=$2; gsub(/^\*/,"",f); if (f==name || $NF==name) {print $1; exit}}' /tmp/nodo-python.SHA256SUMS)"
+ACTUAL="$(sha256sum /tmp/nodo-python.tar.gz | awk '{print $1}')"
+[ "$EXPECTED" = "$ACTUAL" ] || { echo "Python checksum mismatch"; exit 1; }
+
+PY_INSTALL_DIR="$PY_RUNTIME_ROOT/${PY_VER}+${PY_TAG}"
+mkdir -p "$PY_INSTALL_DIR"
+TMP_PY_DIR="$(mktemp -d)"
+tar -xzf /tmp/nodo-python.tar.gz -C "$TMP_PY_DIR"
+cp -a "$TMP_PY_DIR"/*/. "$PY_INSTALL_DIR" 2>/dev/null || cp -a "$TMP_PY_DIR"/. "$PY_INSTALL_DIR"
+ln -sfn "$PY_INSTALL_DIR" "$PY_RUNTIME_ROOT/current"
+
+PY_CURRENT_BIN="$PY_RUNTIME_ROOT/current/bin/python3"
+if [ "$PY_RUNTIME_BIN" != "$PY_CURRENT_BIN" ]; then
+  mkdir -p "$(dirname "$PY_RUNTIME_BIN")"
+  ln -sfn "$PY_CURRENT_BIN" "$PY_RUNTIME_BIN"
+fi
+
+rm -rf "$TMP_PY_DIR" /tmp/nodo-python.tar.gz /tmp/nodo-python.SHA256SUMS
 ```
 
-#### **2.4. Install `pip` and Python Dependencies**
+## 7) Install local portable Java runtime (Temurin JRE 21)
 
-Ensure `pip` is installed in your virtual environment and then install the packages listed in the `requirements.txt` file.
+Pinned version used by project setup:
+
+- JRE: `21.0.8_9` (`jdk-21.0.8+9` release tag)
 
 ```bash
-wget https://bootstrap.pypa.io/get-pip.py -O get-pip.py
-sudo python3.11 get-pip.py
-rm get-pip.py
-python3 -m pip install -r "$TARGET_DIR/bash/requirements.txt"
+JRE_VER="21.0.8_9"
+JRE_TAG="jdk-21.0.8%2B9"
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|amd64) JRE_DIST="OpenJDK21U-jre_x64_linux_hotspot_${JRE_VER}.tar.gz" ;;
+  aarch64|arm64) JRE_DIST="OpenJDK21U-jre_aarch64_linux_hotspot_${JRE_VER}.tar.gz" ;;
+  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+esac
+
+JRE_URL="https://github.com/adoptium/temurin21-binaries/releases/download/${JRE_TAG}/${JRE_DIST}"
+
+mkdir -p "$JAVA_RUNTIME_ROOT"
+curl -fsSL "$JRE_URL" -o /tmp/nodo-jre.tar.gz
+curl -fsSL "${JRE_URL}.sha256.txt" -o /tmp/nodo-jre.sha256.txt
+
+EXPECTED="$(awk '{print $1}' /tmp/nodo-jre.sha256.txt | head -n1)"
+ACTUAL="$(sha256sum /tmp/nodo-jre.tar.gz | awk '{print $1}')"
+[ "$EXPECTED" = "$ACTUAL" ] || { echo "JRE checksum mismatch"; exit 1; }
+
+JRE_INSTALL_DIR="$JAVA_RUNTIME_ROOT/${JRE_VER}"
+mkdir -p "$JRE_INSTALL_DIR"
+TMP_JRE_DIR="$(mktemp -d)"
+tar -xzf /tmp/nodo-jre.tar.gz -C "$TMP_JRE_DIR"
+cp -a "$TMP_JRE_DIR"/*/. "$JRE_INSTALL_DIR" 2>/dev/null || cp -a "$TMP_JRE_DIR"/. "$JRE_INSTALL_DIR"
+ln -sfn "$JRE_INSTALL_DIR" "$JAVA_RUNTIME_ROOT/current"
+
+JAVA_CURRENT_HOME="$JAVA_RUNTIME_ROOT/current"
+if [ "$JAVA_HOME_PATH" != "$JAVA_CURRENT_HOME" ] && [ "$JAVA_HOME_PATH" != "$JRE_INSTALL_DIR" ]; then
+  mkdir -p "$(dirname "$JAVA_HOME_PATH")"
+  ln -sfn "$JRE_INSTALL_DIR" "$JAVA_HOME_PATH"
+fi
+
+rm -rf "$TMP_JRE_DIR" /tmp/nodo-jre.tar.gz /tmp/nodo-jre.sha256.txt
 ```
 
-#### **2.5. Run  Migration Script**
-
-Execute the final script to apply database migrations.
-
-python3.11 nodo.py migrate
-```
-
-#### **2.6. Create an Alias for the `nodo` Command (Optional)**
-
-The original installation script creates a global `nodo` command. Since you are not using `sudo`, you can create a personal alias in your terminal's configuration file (e.g., `~/.bashrc` or `~/.zshrc`) for convenience.
-
-Add the following line to the end of your `~/.bashrc`:
+## 8) Create local Python venv and install Python deps
 
 ```bash
-alias nodo="cd $HOME/nodo && source venv/bin/activate && python3 $HOME/nodo/nodo.py"
+mkdir -p "$PY_VENV_DIR"
+"$PY_RUNTIME_BIN" -m venv "$PY_VENV_DIR"
+"$PY_VENV_BIN" -m pip install --upgrade pip
+"$PY_VENV_BIN" -m pip install -r "$TARGET_DIR/bash/requirements.txt"
 ```
 
-Then, reload your shell's configuration with `source ~/.bashrc`.
+## 9) Install local Docker binaries + buildx plugin
 
-#### **2.7. Start the Node**
+Pinned versions used by project setup:
 
-The original script creates a `systemd` service to run the node as a background daemon. To replicate this manually, you can run the following command from your `~/nodo` directory:
+- Docker static: `24.0.9`
+- buildx: `v0.12.1`
 
 ```bash
-# Make sure your virtual environment is activated first
-source venv/bin/activate
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|amd64) DOCKER_ARCH="x86_64"; BUILDX_ARCH="amd64" ;;
+  aarch64|arm64) DOCKER_ARCH="aarch64"; BUILDX_ARCH="arm64" ;;
+  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+esac
 
-# Run the node as a daemon
-python3 nodo.py daemon
+BIN_DIR="$(dirname "$DOCKER_BIN_TARGET")"
+mkdir -p "$BIN_DIR" "$(dirname "$DOCKERD_BIN_TARGET")" "$(dirname "$BUILDX_BIN_TARGET")"
+
+curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-24.0.9.tgz" -o /tmp/nodo-docker.tgz
+tar -xzf /tmp/nodo-docker.tgz -C /tmp/
+
+install -m 0755 /tmp/docker/docker "$DOCKER_BIN_TARGET"
+install -m 0755 /tmp/docker/dockerd "$DOCKERD_BIN_TARGET"
+install -m 0755 /tmp/docker/docker-init "$BIN_DIR/docker-init"
+install -m 0755 /tmp/docker/ctr "$BIN_DIR/ctr"
+install -m 0755 /tmp/docker/runc "$BIN_DIR/runc"
+install -m 0755 /tmp/docker/containerd "$BIN_DIR/containerd"
+install -m 0755 /tmp/docker/containerd-shim-runc-v2 "$BIN_DIR/containerd-shim-runc-v2"
+install -m 0755 /tmp/docker/docker-proxy "$BIN_DIR/docker-proxy"
+
+curl -fsSL "https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0.12.1.linux-${BUILDX_ARCH}" \
+  -o "$BUILDX_BIN_TARGET"
+chmod +x "$BUILDX_BIN_TARGET"
+
+rm -rf /tmp/docker /tmp/nodo-docker.tgz
 ```
 
-To keep it running after you close the terminal, you can use `nohup`:
+## 10) Install Cloud Hypervisor assets
+
+Pinned version used by project setup:
+
+- Cloud Hypervisor: `v51.1`
 
 ```bash
-nohup python3 nodo.py daemon &
+CH_VERSION="v51.1"
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|amd64)
+    CH_ARCH_TAG="linux/amd64"
+    CH_ASSET_CANDIDATES=("cloud-hypervisor-static" "cloud-hypervisor-static-x86_64")
+    ;;
+  aarch64|arm64)
+    CH_ARCH_TAG="linux/arm64"
+    CH_ASSET_CANDIDATES=("cloud-hypervisor-static-aarch64" "cloud-hypervisor-static-arm64")
+    ;;
+  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+esac
+
+mkdir -p "$(dirname "$CH_BINARY_PATH")"
+CH_OK=""
+for A in "${CH_ASSET_CANDIDATES[@]}"; do
+  if curl -fsSL "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${CH_VERSION}/${A}" -o /tmp/cloud-hypervisor.bin; then
+    install -m 0755 /tmp/cloud-hypervisor.bin "$CH_BINARY_PATH"
+    CH_OK=1
+    break
+  fi
+done
+[ -n "$CH_OK" ] || { echo "Unable to download cloud-hypervisor"; exit 1; }
+rm -f /tmp/cloud-hypervisor.bin
+
+KERNEL_SOURCE="$(readlink -f /boot/vmlinuz 2>/dev/null || true)"
+if [ -z "$KERNEL_SOURCE" ] || [ ! -f "$KERNEL_SOURCE" ]; then
+  KERNEL_SOURCE="$(find /boot -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
+fi
+[ -f "$KERNEL_SOURCE" ] || { echo "Kernel not found in /boot"; exit 1; }
+
+CH_KERNEL_TARGET="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
+CH_INITRAMFS_TARGET="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
+mkdir -p "$(dirname "$CH_KERNEL_TARGET")" "$(dirname "$CH_INITRAMFS_TARGET")"
+cp -f "$KERNEL_SOURCE" "$CH_KERNEL_TARGET"
+chmod 0644 "$CH_KERNEL_TARGET"
+
+bash "$TARGET_DIR/bash/build_ch_initramfs.sh" "$TARGET_DIR" "$CH_ARCH_TAG" "$CH_INITRAMFS_TARGET"
+
+CH_BINARY_PATH="$CH_BINARY_PATH" "$YQ_BIN" -i '.virtualizers.ch.BINARY_PATH = strenv(CH_BINARY_PATH)' "$TARGET_DIR/config.yaml"
+CH_ARCH_TAG="$CH_ARCH_TAG" CH_KERNEL_TARGET="$CH_KERNEL_TARGET" "$YQ_BIN" -i \
+  '.virtualizers.ch.KERNEL_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_KERNEL_TARGET)' \
+  "$TARGET_DIR/config.yaml"
+CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$CH_INITRAMFS_TARGET" "$YQ_BIN" -i \
+  '.virtualizers.ch.INITRAMFS_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_INITRAMFS_TARGET)' \
+  "$TARGET_DIR/config.yaml"
 ```
 
-The installation is now complete\! The node is running under your user account.
+## 11) Prepare isolated Docker daemon directories
+
+```bash
+bash "$TARGET_DIR/bash/setup_docker_daemon.sh" "$TARGET_DIR"
+```
+
+## 12) Run DB migration
+
+```bash
+"$PY_VENV_BIN" "$TARGET_DIR/nodo.py" migrate
+```
+
+## 13) Configure service and wrapper
+
+Create the `systemd` unit from template:
+
+```bash
+PY_RUNTIME_DIR="$(dirname "$PY_RUNTIME_BIN")"
+
+sudo sed \
+  -e "s|{{MAIN_DIR}}|$TARGET_DIR|g" \
+  -e "s|{{JAVA_HOME}}|$JAVA_HOME_PATH|g" \
+  -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|$PY_RUNTIME_DIR|g" \
+  -e "s|{{PYTHON_VENV_BIN}}|$PY_VENV_BIN|g" \
+  "$TARGET_DIR/bash/nodo.service.template" > /tmp/nodo.service
+
+sudo install -m 0644 /tmp/nodo.service /etc/systemd/system/nodo.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now nodo.service
+```
+
+Optional wrapper command (`/usr/local/bin/nodo`) with same env as service:
+
+```bash
+sudo tee /usr/local/bin/nodo >/dev/null <<WRAP
+#!/bin/bash
+ORIGINAL_DIR="\$PWD"
+cd "$TARGET_DIR" || exit 1
+export JAVA_HOME="$JAVA_HOME_PATH"
+export PATH="$JAVA_HOME_PATH/bin:$PY_RUNTIME_DIR:$TARGET_DIR/bin:\$PATH"
+source "$PY_VENV_DIR/bin/activate"
+ORIGINAL_DIR="\$ORIGINAL_DIR" "$PY_VENV_BIN" "$TARGET_DIR/nodo.py" "\$@"
+WRAP
+sudo chmod +x /usr/local/bin/nodo
+```
+
+## 14) Post-install checks
+
+```bash
+systemctl status nodo.service --no-pager
+"$PY_VENV_BIN" "$TARGET_DIR/nodo.py" info
+"$DOCKER_BIN_TARGET" -H "unix://$DOCKER_SOCKET_PATH" info
+```
+
+Cloud Hypervisor checks:
+
+```bash
+test -x "$CH_BINARY_PATH"
+test -f "$CH_KERNEL_TARGET"
+test -f "$CH_INITRAMFS_TARGET"
+```
+
+## 15) Operational notes
+
+- Cross-arch builds are disabled in this profile. If target architecture differs from host architecture, build/pack flows fail early with an explicit message.
+- QEMU/binfmt are intentionally not installed.
+- Keep `config.yaml` and actual installed paths aligned. If you move runtimes/binaries, update `dependencies.*` and restart `nodo.service`.

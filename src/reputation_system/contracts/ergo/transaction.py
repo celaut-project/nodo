@@ -16,7 +16,14 @@ from src.utils.logger import LOGGER
 
 from jpype import JPackage
 
-from org.ergoplatform.appkit import Address, ConstantsBuilder, ErgoToken, ErgoValue, NetworkType
+from org.ergoplatform.appkit import Address, ConstantsBuilder, ErgoValue, NetworkType
+
+try:
+    # Older appkit jars expose ErgoToken under org.ergoplatform.appkit
+    from org.ergoplatform.appkit import ErgoToken
+except ImportError:
+    # Newer jars expose ErgoToken under org.ergoplatform.sdk
+    from org.ergoplatform.sdk import ErgoToken
 
 
 # Constants

@@ -26,6 +26,31 @@ DOCKER_CONFIG_DIR="${DOCKER_DIR}/config"
 DOCKER_LOG_FILE="${DOCKER_DIR}/dockerd.log"
 DOCKER_EXEC_ROOT="${DOCKER_DIR}/exec"
 
+expand_main_dir_placeholder() {
+    printf '%s' "$1" | sed "s|\${main.MAIN_DIR}|$TARGET_DIR|g"
+}
+
+read_config_path_or_default() {
+    local query="$1"
+    local default_value="$2"
+    local yq_bin="${TARGET_DIR}/bin/yq"
+    local config_file="${TARGET_DIR}/config.yaml"
+    local value=""
+
+    if [ -x "$yq_bin" ] && [ -f "$config_file" ]; then
+        value="$("$yq_bin" -r "$query // \"\"" "$config_file" 2>/dev/null || true)"
+    fi
+
+    if [ -z "$value" ] || [ "$value" = "null" ]; then
+        value="$default_value"
+    fi
+
+    expand_main_dir_placeholder "$value"
+}
+
+DOCKERD_BIN="$(read_config_path_or_default '.dependencies.docker.DAEMON_BIN' "$DOCKERD_BIN")"
+DOCKER_BIN="$(read_config_path_or_default '.dependencies.docker.BIN' "$DOCKER_BIN")"
+
 if [ ! -x "${DOCKERD_BIN}" ]; then
     echo "Error: isolated dockerd not found at ${DOCKERD_BIN}. Run the installer."
     exit 1
@@ -67,7 +92,7 @@ echo "  Exec root: ${DOCKER_EXEC_ROOT}"
 echo "  Log file: ${DOCKER_LOG_FILE}"
 
 # Start the Docker daemon with isolated configuration
-DOCKER_PATH="${BIN_DIR}:${PATH}"
+DOCKER_PATH="$(dirname "${DOCKERD_BIN}"):$(dirname "${DOCKER_BIN}"):${PATH}"
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"
