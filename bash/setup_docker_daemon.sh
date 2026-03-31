@@ -25,6 +25,30 @@ DOCKER_CONFIG_DIR="${DOCKER_DIR}/config"
 DOCKER_LOG_FILE="${DOCKER_DIR}/dockerd.log"
 DOCKER_EXEC_ROOT="${DOCKER_DIR}/exec"
 
+expand_main_dir_placeholder() {
+    printf '%s' "$1" | sed "s|\${main.MAIN_DIR}|$TARGET_DIR|g"
+}
+
+read_config_path_or_default() {
+    local query="$1"
+    local default_value="$2"
+    local yq_bin="${TARGET_DIR}/bin/yq"
+    local config_file="${TARGET_DIR}/config.yaml"
+    local value=""
+
+    if [ -x "$yq_bin" ] && [ -f "$config_file" ]; then
+        value="$("$yq_bin" -r "$query // \"\"" "$config_file" 2>/dev/null || true)"
+    fi
+
+    if [ -z "$value" ] || [ "$value" = "null" ]; then
+        value="$default_value"
+    fi
+
+    expand_main_dir_placeholder "$value"
+}
+
+DOCKERD_BIN="$(read_config_path_or_default '.dependencies.docker.DAEMON_BIN' "$DOCKERD_BIN")"
+
 echo "Setting up isolated Docker daemon for nodo..."
 echo "  Docker directory: ${DOCKER_DIR}"
 echo "  Data root: ${DOCKER_DATA_ROOT}"

@@ -261,14 +261,52 @@ if [ -z "$SCRIPT_USER" ]; then
   SCRIPT_USER="$(logname 2>/dev/null || echo root)"
 fi
 
+expand_main_dir_placeholder() {
+  printf '%s' "$1" | sed "s|\${main.MAIN_DIR}|$TARGET_DIR|g"
+}
+
+read_config_path_or_default() {
+  local query="$1"
+  local default_value="$2"
+  local yq_bin="$TARGET_DIR/bin/yq"
+  local config_file="$TARGET_DIR/config.yaml"
+  local value=""
+
+  if [ -x "$yq_bin" ] && [ -f "$config_file" ]; then
+    value="$("$yq_bin" -r "$query // \"\"" "$config_file" 2>/dev/null || true)"
+  fi
+
+  if [ -z "$value" ] || [ "$value" = "null" ]; then
+    value="$default_value"
+  fi
+
+  expand_main_dir_placeholder "$value"
+}
+
+JAVA_HOME_PATH="$(read_config_path_or_default '.dependencies.java.JAVA_HOME' "$TARGET_DIR/runtime/java/current")"
+PYTHON_RUNTIME_BIN_PATH="$(read_config_path_or_default '.dependencies.python.RUNTIME_BIN' "$TARGET_DIR/runtime/python/current/bin/python3")"
+PYTHON_VENV_BIN_PATH="$(read_config_path_or_default '.dependencies.python.VENV_BIN' "$TARGET_DIR/venv/bin/python")"
+PYTHON_RUNTIME_BIN_DIR_PATH="$(dirname "$PYTHON_RUNTIME_BIN_PATH")"
+
 create_service_file() {
   local expected_file
   local escaped_target
+  local escaped_java_home
+  local escaped_python_runtime_bin_dir
+  local escaped_python_venv_bin
   expected_file="$(mktemp)"
   escaped_target="$(escape_for_sed "$TARGET_DIR")"
+  escaped_java_home="$(escape_for_sed "$JAVA_HOME_PATH")"
+  escaped_python_runtime_bin_dir="$(escape_for_sed "$PYTHON_RUNTIME_BIN_DIR_PATH")"
+  escaped_python_venv_bin="$(escape_for_sed "$PYTHON_VENV_BIN_PATH")"
 
   # Generate expected service file from template
-  sed "s|{{MAIN_DIR}}|$escaped_target|g" "$TARGET_DIR/bash/nodo.service.template" > "$expected_file"
+  sed \
+    -e "s|{{MAIN_DIR}}|$escaped_target|g" \
+    -e "s|{{JAVA_HOME}}|$escaped_java_home|g" \
+    -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|$escaped_python_runtime_bin_dir|g" \
+    -e "s|{{PYTHON_VENV_BIN}}|$escaped_python_venv_bin|g" \
+    "$TARGET_DIR/bash/nodo.service.template" > "$expected_file"
 
   if [ -f "$SERVICE_FILE" ] && cmp -s "$SERVICE_FILE" "$expected_file"; then
     printf "Service file %s is already up to date.\n" "$SERVICE_FILE"
@@ -318,10 +356,13 @@ create_wrapper_script() {
 ORIGINAL_DIR="\$PWD"
 # Change directory to TARGET_DIR, which was expanded at compile time
 cd "$TARGET_DIR" || exit
+# Use local Java/Python runtimes installed under TARGET_DIR
+export JAVA_HOME="$JAVA_HOME_PATH"
+export PATH="$JAVA_HOME_PATH/bin:$PYTHON_RUNTIME_BIN_DIR_PATH:$TARGET_DIR/bin:\$PATH"
 # Activate the virtual environment in TARGET_DIR
 source "$TARGET_DIR/venv/bin/activate"
 # Execute the Python script with the runtime ORIGINAL_DIR and passed arguments
-ORIGINAL_DIR="\$ORIGINAL_DIR" python3 "$TARGET_DIR/nodo.py" "\$@"
+ORIGINAL_DIR="\$ORIGINAL_DIR" "$PYTHON_VENV_BIN_PATH" "$TARGET_DIR/nodo.py" "\$@"
 EOF
 
   # Make the wrapper script executable

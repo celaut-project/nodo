@@ -58,11 +58,15 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 
 - **Version**: The Nodo version is currently in 'alpha', so it's recommended to use a virtual machine.
 
-- **Sudo Usage**: The installation script requires `sudo` privileges to install various apt packages and Docker. Use it responsibly under your own discretion.
+- **Sudo Usage**: The installation script requires `sudo` privileges for system-level setup (service, base packages, isolated Docker daemon). Python, Java, and `yq` runtimes are installed locally under `MAIN_DIR`.
 
 - **Installation without sudo**: For a manual installation without directly executing the script with sudo, please follow the [manual guide](docs/INSTALL.md).
 
 - **Docker Containers**: The system will create and remove Docker containers as part of its operations.
+
+- **No QEMU/binfmt in installer**: Cross-architecture image builds are not supported by default. Build services on hosts that match the service architecture.
+
+- **Configurable binary paths**: Java, Python, `yq`, and Docker-related binaries can be customized in `config.yaml` under `dependencies.*`.
 
 
 ## Platform Compatibility

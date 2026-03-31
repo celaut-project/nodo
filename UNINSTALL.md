@@ -1,44 +1,154 @@
-# Node Uninstallation
+# Nodo Uninstallation Guide
 
-To uninstall the node and remove all associated files and services, follow these steps.
+This guide covers both automatic and fully manual uninstall.
 
-## Automatic Uninstallation
+It is aligned with the current runtime model:
 
-An `uninstall.sh` script is provided to facilitate the process. This script will:
+- Python/JRE/yq/Docker can be local to `MAIN_DIR`.
+- `nodo.service` exports `JAVA_HOME` and `PATH` from configured local paths.
+- QEMU/binfmt are not part of the install profile.
 
-1.  Stop and disable the `nodo.service`.
-2.  Remove Docker containers created by the node (using the internal database to identify them).
-3.  Remove project files and configuration.
-4.  Remove the wrapper script `/usr/local/bin/nodo`.
+## 1) Automatic uninstall (`uninstall.sh`)
 
-**Note:** This script **WILL NOT** remove system dependencies such as Docker, Python, Java, etc., as they may be needed for other applications.
-
-### Execution
-
-Run the following command in the terminal from the project directory:
+Use this if your installation root is the default `/nodo`.
 
 ```bash
+cd /nodo
 sudo chmod +x uninstall.sh
 sudo ./uninstall.sh
 ```
 
-## Manual Uninstallation
+What it does (best effort):
 
-If you prefer to do it manually:
+- Stops/disables `nodo.service`.
+- Tries to clean node-managed containers.
+- Stops isolated Docker daemon under `/nodo/docker`.
+- Removes `/etc/systemd/system/nodo.service`, `/usr/local/bin/nodo`, and `/nodo`.
 
-1.  **Stop the service:**
-    ```bash
-    sudo systemctl stop nodo.service
-    sudo systemctl disable nodo.service
-    sudo rm /etc/systemd/system/nodo.service
-    sudo systemctl daemon-reload
-    ```
+## 2) Manual uninstall (recommended for custom `MAIN_DIR`)
 
-2.  **Clean up containers (Optional):**
-    If you wish to remove the containers created by the node, you must identify and remove them manually using `docker rm -f <container_id>`.
+Use this flow when:
 
-3.  **Remove files:**
-    ```bash
-    sudo rm -rf /nodo
-    sudo rm /usr/local/bin/nodo
-    ```
+- you installed manually,
+- `MAIN_DIR` is not `/nodo`,
+- or you want full control without trusting uninstall scripts.
+
+### 2.1 Set the installation root
+
+```bash
+export TARGET_DIR=/nodo
+```
+
+If your install root is different, use that path.
+
+### 2.2 Resolve effective paths from `config.yaml` (if present)
+
+```bash
+expand_main_dir() {
+  printf '%s' "$1" | sed "s|\${main.MAIN_DIR}|$TARGET_DIR|g"
+}
+
+read_cfg_path_or_default() {
+  local query="$1"
+  local fallback="$2"
+  local yq_bin="$TARGET_DIR/bin/yq"
+  local cfg="$TARGET_DIR/config.yaml"
+  local raw=""
+
+  if [ -x "$yq_bin" ] && [ -f "$cfg" ]; then
+    raw="$($yq_bin -r "$query // \"\"" "$cfg" 2>/dev/null || true)"
+  fi
+
+  if [ -z "$raw" ] || [ "$raw" = "null" ]; then
+    raw="$fallback"
+  fi
+
+  expand_main_dir "$raw"
+}
+
+DOCKER_BIN_TARGET="$(read_cfg_path_or_default '.dependencies.docker.BIN' '${main.MAIN_DIR}/bin/docker')"
+DOCKERD_BIN_TARGET="$(read_cfg_path_or_default '.dependencies.docker.DAEMON_BIN' '${main.MAIN_DIR}/bin/dockerd')"
+DOCKER_SOCKET_PATH="$(read_cfg_path_or_default '.virtualizers.docker.DOCKER_SOCKET' '${main.MAIN_DIR}/docker/docker.sock')"
+WRAPPER_SCRIPT="/usr/local/bin/nodo"
+SERVICE_FILE="/etc/systemd/system/nodo.service"
+```
+
+### 2.3 Stop and disable service
+
+```bash
+sudo systemctl stop nodo.service 2>/dev/null || true
+sudo systemctl disable nodo.service 2>/dev/null || true
+```
+
+### 2.4 Optional: remove containers from Nodo isolated daemon
+
+If isolated Docker is still reachable, remove containers from that daemon only:
+
+```bash
+if [ -x "$DOCKER_BIN_TARGET" ] && [ -S "$DOCKER_SOCKET_PATH" ]; then
+  IDS="$($DOCKER_BIN_TARGET -H "unix://$DOCKER_SOCKET_PATH" ps -aq 2>/dev/null || true)"
+  if [ -n "$IDS" ]; then
+    $DOCKER_BIN_TARGET -H "unix://$DOCKER_SOCKET_PATH" rm -f $IDS || true
+  fi
+fi
+```
+
+### 2.5 Stop isolated dockerd processes
+
+```bash
+if [ -f "$TARGET_DIR/docker/docker.pid" ]; then
+  PID="$(cat "$TARGET_DIR/docker/docker.pid")"
+  sudo kill "$PID" 2>/dev/null || true
+  sleep 2
+  sudo kill -9 "$PID" 2>/dev/null || true
+fi
+
+PIDS="$(pgrep -f "$TARGET_DIR/.*/dockerd" || true)"
+if [ -n "$PIDS" ]; then
+  sudo kill $PIDS 2>/dev/null || true
+  sleep 2
+  sudo kill -9 $PIDS 2>/dev/null || true
+fi
+```
+
+### 2.6 Unmount leftover Docker netns mounts (if any)
+
+```bash
+NETNS_DIR="$TARGET_DIR/docker/exec/netns"
+if [ -d "$NETNS_DIR" ] && command -v findmnt >/dev/null 2>&1; then
+  while read -r mp; do
+    [ -n "$mp" ] && sudo umount -l "$mp" 2>/dev/null || true
+  done < <(findmnt -R -n -o TARGET "$NETNS_DIR" 2>/dev/null | sort -r)
+fi
+```
+
+### 2.7 Remove service file and wrapper
+
+```bash
+sudo rm -f "$SERVICE_FILE"
+sudo systemctl daemon-reload
+sudo rm -f "$WRAPPER_SCRIPT"
+```
+
+### 2.8 Remove installation directory
+
+```bash
+sudo rm -rf "$TARGET_DIR"
+```
+
+## 3) What is removed vs not removed
+
+Removed (if inside `TARGET_DIR`):
+
+- Local Python runtime and venv.
+- Local Java runtime.
+- Local yq/Docker binaries.
+- Isolated Docker data/sockets.
+- Cloud Hypervisor assets copied under `TARGET_DIR`.
+
+Not removed automatically:
+
+- Host packages installed via `apt` (`build-essential`, `curl`, etc.).
+- Any custom files outside `TARGET_DIR`.
+
+If you want to remove host packages too, do it explicitly with `apt` according to your system policy.

@@ -7,6 +7,21 @@ main:
   BLOCKDIR: "${main.STORAGE}/__block__/"
   DATABASE_FILE: "${main.STORAGE}/database.sqlite"
 
+dependencies:
+  java:
+    RUNTIME_ROOT: "${main.MAIN_DIR}/runtime/java"
+    JAVA_HOME: "${main.MAIN_DIR}/runtime/java/current"
+  python:
+    RUNTIME_BIN: "${main.MAIN_DIR}/runtime/python/current/bin/python3"
+    VENV_BIN: "${main.MAIN_DIR}/venv/bin/python"
+    RUNTIME_ROOT: "${main.MAIN_DIR}/runtime/python"
+  yq:
+    BIN: "${main.MAIN_DIR}/bin/yq"
+  docker:
+    BIN: "${main.MAIN_DIR}/bin/docker"
+    DAEMON_BIN: "${main.MAIN_DIR}/bin/dockerd"
+    BUILDX_BIN: "${main.MAIN_DIR}/libexec/docker/cli-plugins/docker-buildx"
+
 virtualizers:
   DEFAULT_VIRTUALIZER: ch
   docker:
