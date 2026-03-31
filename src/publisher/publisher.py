@@ -6,7 +6,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
+from uuid import uuid4
 
 import requests
 from bee_rpc.client import Dir, write_to_file
@@ -15,7 +16,7 @@ from protos import celaut_pb2
 from src.commands.__by_tag import get_id
 from src.commands.import_bee import import_bee
 from src.utils.config import ConfigManager
-from src.utils.hashing import HASH_FUNCTIONS, SHA3_256_ID
+from src.utils.hashing import get_configured_hash_spec, hash_file
 
 API_BASE_URL = "https://api.github.com"
 RETRYABLE_HTTP_STATUS_CODES = {401, 409, 422, 429, 500, 502, 503, 504}
@@ -79,27 +80,6 @@ def _resolve_token(config: ConfigManager) -> str:
         return os.environ.get(fallback_token_env_var, "")
 
     return ""
-
-
-def _resolve_hash_id(hash_id_hex: str) -> bytes:
-    try:
-        hash_id = bytes.fromhex(hash_id_hex)
-    except ValueError as exc:
-        raise PublisherError(
-            "Invalid publisher.HASH_ID. It must be a hex string."
-        ) from exc
-
-    if hash_id not in HASH_FUNCTIONS:
-        available = ", ".join(h.hex() for h in HASH_FUNCTIONS)
-        raise PublisherError(
-            "Unsupported publisher.HASH_ID. "
-            f"Configured: {hash_id_hex}. Supported: {available}"
-        )
-    return hash_id
-
-
-def _hash_file(path: Path, hash_id: bytes) -> str:
-    return HASH_FUNCTIONS[hash_id](path.read_bytes()).hex()
 
 
 def _request_with_retry(
@@ -310,13 +290,19 @@ def _get_publisher_settings(config: ConfigManager, require_token: bool = True) -
 
     repo = config.get("publisher.REPOSITORY", "")
     branch = config.get("publisher.BRANCH", "main")
-    hash_id_hex = str(config.get("publisher.HASH_ID", SHA3_256_ID.hex()) or "").strip().lower()
-    if not hash_id_hex:
-        hash_id_hex = SHA3_256_ID.hex()
-    hash_id = _resolve_hash_id(hash_id_hex)
+    try:
+        hash_spec = get_configured_hash_spec(config)
+    except ValueError as exc:
+        raise PublisherError(f"Invalid hashing.HASH configuration: {exc}") from exc
     source_application_web_page = str(
         config.get("publisher.SOURCE_APPLICATION_WEB_PAGE", DEFAULT_SOURCE_APPLICATION_WEB_PAGE) or ""
     ).strip() or DEFAULT_SOURCE_APPLICATION_WEB_PAGE
+    content_format = str(config.get("publisher.CONTENT_FORMAT", ".grpcbb") or "").strip() or ".grpcbb"
+    raw_format = str(config.get("publisher.RAW_FORMAT", ".celaut") or "").strip() or ".celaut"
+    if not content_format.startswith("."):
+        content_format = f".{content_format}"
+    if not raw_format.startswith("."):
+        raw_format = f".{raw_format}"
     chunk_size_mb = int(config.get("publisher.CHUNK_SIZE_MB", 24))
     timeout_s = int(config.get("publisher.TIMEOUT_SECONDS", 300))
     max_retry = int(config.get("publisher.MAX_RETRY", 3))
@@ -341,9 +327,10 @@ def _get_publisher_settings(config: ConfigManager, require_token: bool = True) -
         "token": token,
         "repo": repo,
         "branch": branch,
-        "hash_id": hash_id,
-        "hash_id_hex": hash_id_hex,
+        "hash_spec": hash_spec,
         "source_application_web_page": source_application_web_page,
+        "content_format": content_format,
+        "raw_format": raw_format,
         "chunk_size_mb": chunk_size_mb,
         "timeout_s": timeout_s,
         "max_retry": max_retry,
@@ -400,8 +387,7 @@ def _upload_file(
     provider: GitHubDataProvider,
     chunk_size_mb: int,
     uploads_prefix: str,
-    service_hash: str,
-    service_id: Optional[str] = None,
+    service_id: str,
 ) -> Dict:
     provider.ensure_repository_initialized()
 
@@ -414,10 +400,10 @@ def _upload_file(
     chunk_size = chunk_size_mb * 1024 * 1024
     file_size = source_path.stat().st_size
     total_chunks = max(1, math.ceil(file_size / chunk_size))
-    folder = f"{uploads_prefix}/{service_hash}"
+    folder = f"{uploads_prefix}/{service_id}"
 
     print(f"Publishing '{source_path.name}' to {provider.repo}:{provider.branch}", flush=True)
-    print(f"Service hash: {service_hash} | Chunks: {total_chunks}", flush=True)
+    print(f"Service hash: {service_id} | Chunks: {total_chunks}", flush=True)
 
     tree_entries: List[Dict] = []
     manifest_lines: List[str] = []
@@ -466,8 +452,7 @@ def _upload_file(
         "manifest": manifest_plain,
         "manifest_url": manifest_url,
         "browse_manifest_url": browse_manifest_url,
-        "service_hash": service_hash,
-        "service_id": service_id or "",
+        "service_id": service_id,
         "total_chunks": total_chunks,
         "commit_sha": commit_sha,
     }
@@ -491,6 +476,46 @@ def _fetch_bytes(
     return response.content
 
 
+def _build_source_application_prefilled_url(
+    base_url: str,
+    file_hash: str,
+    content_hash: str,
+    hash_function_id: str,
+    url_link: str,
+    content_format: str,
+    raw_format: str,
+    is_chunked: bool = True,
+) -> str:
+    parsed = urlsplit(base_url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.update(
+        {
+            "fileHash": file_hash,
+            "contentHash": content_hash,
+            "hashFunctionId": hash_function_id,
+            "urlLink": url_link,
+            "contentFormat": content_format,
+            "isChunked": "true" if is_chunked else "false",
+        }
+    )
+    if raw_format != content_format:
+        query["rawFormat"] = raw_format
+        query["rawHash"] = file_hash
+    else:
+        query.pop("rawFormat", None)
+        query.pop("rawHash", None)
+
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urlencode(query),
+            parsed.fragment,
+        )
+    )
+
+
 def publish_service(
     service_ref: str
 ) -> Dict:
@@ -507,30 +532,49 @@ def publish_service(
     )
 
     service_id, service_file_path = _export_service_to_bee(service_ref)
-    service_hash = _hash_file(service_file_path, settings["hash_id"])
+    content_hash = hash_file(service_file_path, settings["hash_spec"]).hex()
     try:
         result = _upload_file(
             source_path=service_file_path,
             provider=provider,
             chunk_size_mb=settings["chunk_size_mb"],
             uploads_prefix=settings["uploads_prefix"],
-            service_hash=service_hash,
-            service_id=service_id,
+            service_id=service_id
         )
     finally:
         if service_file_path.exists():
             service_file_path.unlink()
 
+    source_application_prefilled_url = _build_source_application_prefilled_url(
+        base_url=settings["source_application_web_page"],
+        file_hash=service_id,
+        content_hash=content_hash,
+        hash_function_id=settings["hash_spec"].id_bytes.hex(),  # Sending hash function id as hex string for better readability in the source application, could be the name but id is more precise.
+        url_link=result["manifest_url"],
+        content_format=settings["content_format"],
+        raw_format=settings["raw_format"],
+        is_chunked=True,
+    )
+
     print("Publish completed successfully.", flush=True)
     print(f"Service id: {service_id}", flush=True)
-    print(f"Service hash: {service_hash}", flush=True)
+    print(f"File hash: {service_id}", flush=True)
+    print(f"Content hash: {content_hash}", flush=True)
     print(f"Manifest URL: {result['manifest_url']}", flush=True)
     print(f"Manifest browser URL: {result['browse_manifest_url']}", flush=True)
     print(f"Download command: nodo download {result['manifest_url']}", flush=True)
     print("Register this source in Source Application:", flush=True)
     print(f"- Source application URL: {settings['source_application_web_page']}", flush=True)
+    print(f"- Source application prefilled URL: {source_application_prefilled_url}", flush=True)
     print(f"- Manifest URL: {result['manifest_url']}", flush=True)
-    print(f"- Service hash: {service_hash}", flush=True)
+    print(f"- File hash: {service_id}", flush=True)
+    print(f"- Content hash: {content_hash}", flush=True)
+
+    BOLD = "\033[1m"
+    GREEN = "\033[92m"
+    RESET = "\033[0m"
+    print(f"\n\n{BOLD}{GREEN}👉 CLICK TO ADD SOURCE IN ERGO:{RESET}", flush=True)
+    print(f"{GREEN}{source_application_prefilled_url}{RESET}\n", flush=True)
     return result
 
 
@@ -563,17 +607,9 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
     path_parts = [part for part in urlparse(manifest_url).path.split("/") if part]
     if len(path_parts) < 2:
         raise PublisherError(f"Invalid manifest URL path: {manifest_url}")
-    service_hash = path_parts[-2].strip().lower()
-    if not service_hash:
-        raise PublisherError("Could not resolve service hash from manifest URL.")
-    try:
-        bytes.fromhex(service_hash)
-    except ValueError as exc:
-        raise PublisherError(
-            f"Invalid service hash in manifest URL path: '{service_hash}'"
-        ) from exc
 
-    output_path = target_dir / f"{service_hash}.celaut.bee"
+    uuid = uuid4().hex[:8]
+    output_path = target_dir / f"{uuid}.celaut.bee"
 
     with output_path.open("wb") as destination:
         for index, chunk_url in enumerate(chunk_urls):
@@ -587,11 +623,12 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
             destination.write(data)
             print(f"Downloaded chunk {index + 1}/{len(chunk_urls)}", flush=True)
 
-    final_hash = _hash_file(output_path, settings["hash_id"])
-    if final_hash != service_hash:
-        raise PublisherError(
-            f"Final file hash mismatch: {final_hash} != {service_hash}"
-        )
+    service_hash = hash_file(output_path, settings["hash_spec"]).hex()
+    
+    # Move the file to the final location with the service hash as name
+    final_output_path = target_dir / f"{service_hash}.celaut.bee"
+    output_path.rename(final_output_path)
+    output_path = final_output_path
 
     imported_service_id = None
     if settings["auto_import"]:

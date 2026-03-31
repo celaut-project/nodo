@@ -1,5 +1,4 @@
 import base64
-import codecs
 import fcntl
 from typing import Generator, List, Tuple
 
@@ -12,7 +11,7 @@ from bee_rpc.utils import modify_env
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
-from src.utils.hashing import SHA3_256_ID
+from src.utils.hashing import SHA3_256_ID, get_configured_hash_spec, hash_stream
 from src.utils.runtime import DOCKER_COMMAND, DOCKER_ENV, PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.filesystem_xattrs import (
     describe_mode_type,
@@ -423,13 +422,37 @@ class ZipContainerPacker:
             pf_object_with_block_pointers=self.service,
             blocks=self.blocks
         )
-        service_id: str = codecs.encode(bytes_id, 'hex').decode('utf-8')
-        self.metadata.hashtag.hash.extend(
-            [celaut.Metadata.HashTag.Hash(
-                type=SHA3_256_ID,
-                value=bytes_id
-            )]
+        hash_spec = get_configured_hash_spec(env_manager)
+        configured_digest = hash_stream(
+            grpcbb.read_multiblock_directory(directory=service_directory),
+            hash_spec
         )
+        service_id: str = configured_digest.hex()
+
+        updated = False
+        for item in self.metadata.hashtag.hash:
+            if item.type == hash_spec.id_bytes:
+                item.value = configured_digest
+                updated = True
+                break
+        if not updated:
+            self.metadata.hashtag.hash.extend(
+                [celaut.Metadata.HashTag.Hash(
+                    type=hash_spec.id_bytes,
+                    value=configured_digest
+                )]
+            )
+
+        if (
+            hash_spec.id_bytes != SHA3_256_ID
+            and not any(item.type == SHA3_256_ID for item in self.metadata.hashtag.hash)
+        ):
+            self.metadata.hashtag.hash.extend(
+                [celaut.Metadata.HashTag.Hash(
+                    type=SHA3_256_ID,
+                    value=bytes_id
+                )]
+            )
 
         """  <!-- Validation don't needed here -->
         

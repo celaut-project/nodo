@@ -103,6 +103,13 @@ These are the most commonly used commands for daily tasks:
   `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest`  
   `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest -o /tmp/services`
 
+- **integrity `[<service id | service tag>] [--fix]`**  
+  Verifies registry/metadata integrity for all services or a specific one.
+  Use `--fix` to repair detected inconsistencies.
+  **Examples:**  
+  `nodo integrity`  
+  `nodo integrity my_service_tag --fix`
+
 - **instances**  
   Lists all running instances and their details.  
   **Example:**  
@@ -112,6 +119,17 @@ These are the most commonly used commands for daily tasks:
   Lists running instances grouped by their parent service.  
   **Example:**  
   `nodo instances --grouped`
+
+### Hash Configuration
+
+Service/file identification uses `hashing.HASH` from `config.yaml`.
+It accepts aliases (`sha3_256`, `sha256`, `shake_256`, `blake2b`) or a hash-id in hex.
+
+```yaml
+hashing:
+  HASH: "sha3_256"
+  CHECK_INTEGRITY_ON_SERVE: false
+```
 
 ---
 
@@ -312,6 +330,7 @@ Use `sudo nodo doctor` to check and fix the service configuration if issues aris
 ### Manual Execution in Development Mode: `nodo serve`
 
 Use `nodo serve` to run Nodo in a development environment or when you don’t want to use background service mode.
+If `hashing.CHECK_INTEGRITY_ON_SERVE` is set to `true`, Nodo runs an automatic integrity/migration check before starting.
 
 ---
 

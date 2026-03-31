@@ -8,7 +8,7 @@ from protos import celaut_pb2, celaut_pb2_grpc, gateway_bee
 
 from src.commands.__by_tag import get_id
 from src.manager.manager import get_dev_clients
-from src.utils.hashing import SHA3_256_ID
+from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.utils import to_gas_amount
 
@@ -18,8 +18,7 @@ GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 REGISTRY = env_manager.get("REGISTRY")
 DEFAULT_INITIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT")
-
-SHA3_256 = SHA3_256_ID.hex()
+CONFIGURED_HASH_ID = get_configured_hash_id(env_manager)
 
 
 def resolve_service_hash(service: str) -> str:
@@ -66,7 +65,7 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 4), initial_gas_amount: 
 
         print(f"Send hash {_hash}")
         yield celaut_pb2.Metadata.HashTag.Hash(
-                type=bytes.fromhex(SHA3_256),
+                type=CONFIGURED_HASH_ID,
                 value=bytes.fromhex(_hash)
             )
         print(f"Hash {_hash} sent.")

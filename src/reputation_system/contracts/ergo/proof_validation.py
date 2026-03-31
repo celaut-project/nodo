@@ -1,185 +1,188 @@
+import hashlib
+import re
+from typing import List, Optional
+
 import requests
 from protos import celaut_pb2 as celaut
 
-from protos import celaut_pb2_grpc, celaut_pb2
-from bee_rpc.client import client_grpc
-import grpc
-import random
-import string
-
-from src.reputation_system.contracts.ergo.utils import get_public_key, addr_to_pub_key_hex  #, pub_key_hex_to_addr
+from src.reputation_system.contracts.ergo.utils import get_public_key
+from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign
 from src.reputation_system.envs import CONTRACT, ergo_ledger
-from src.reputation_system.bip_wallet_verification import bip_ecdsa_verify, bip_ecdsa_sign
-from src.database.access_functions.peers import get_peer_directions
-from src.utils.logger import LOGGER as logger
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
+from src.utils.logger import LOGGER as logger
 
-from typing import Optional
 
-from jpype import *
-import java.lang
+_HEX_64_RE = re.compile(r"[0-9a-fA-F]{64}")
 
-from java.lang import Boolean, Long
-from java.math import BigInteger
 
-from org.ergoplatform.sdk import *
-from org.ergoplatform.appkit import *
-from org.ergoplatform.appkit.impl import *
-
-def __get_single_address_with_all_tokens(token_id: str) -> Optional[str]:
-    ergo_node = ConfigManager().get("ledgers.ergo.NODE_URL")
-    if not ergo_node:
-        logger("No ergo node available.")
+def _extract_r7_hash_hex(register_value: str) -> Optional[str]:
+    if not register_value:
         return None
 
-    url = f"{ergo_node}/blockchain/box/unspent/byTokenId/{token_id}"
-    params = {
-        "offset": 0,
-        "limit": 100
-    }
-    
-    try:
-        response = requests.get(url, params=params)
-        if response.status_code != 200:
-            logger(f"Failed to fetch data from API for token_id {token_id}. Status code: {response.status_code}")
-            return None
-        
-        data = response.json()
+    value = register_value.strip().lower()
+    # Serialized Coll[Byte] of 32 bytes normally starts with 0e20
+    if value.startswith("0e20") and len(value) >= 68:
+        candidate = value[4:68]
+        if _HEX_64_RE.fullmatch(candidate):
+            return candidate
 
-        # Ensure data is a list of boxes
-        if not isinstance(data, list):
-            logger(f"Unexpected response structure: {data}")
-            return None
+    # Fallback: find any 64-hex chunk.
+    match = _HEX_64_RE.search(value)
+    return match.group(0).lower() if match else None
 
-        # Extract addresses from all boxes
-        addresses = {box.get("additionalRegisters").get("R7")[4:] for box in data if "additionalRegisters" in box and "R7" in box["additionalRegisters"]}
 
-        # Return the address if all boxes have the same address
-        if len(addresses) == 1:
-            pub_key_hex = addresses.pop()
-            return pub_key_hex  #pub_key_hex_to_addr(pub_key_hex)
+def _extract_register_value(box: dict, register: str) -> Optional[str]:
+    additional = box.get("additionalRegisters", {})
+    reg = additional.get(register)
 
-        logger(f"Multiple or no addresses found for token_id {token_id}.")
+    if reg is None:
         return None
 
-    except requests.RequestException as e:
-        logger(f"HTTP request failed: {e}")
-        return None
-    except ValueError as e:
-        logger(f"Failed to parse JSON response for token_id {token_id}: {e}")
-        return None
+    if isinstance(reg, str):
+        return reg
+
+    if isinstance(reg, dict):
+        return reg.get("serializedValue") or reg.get("renderedValue")
+
+    return None
+
+
+def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
+    node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
+    if not node_url:
+        raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
+
+    url = f"{node_url}/blockchain/box/unspent/byTokenId/{token_id}"
+    response = requests.get(url, params={"offset": 0, "limit": 100}, timeout=15)
+    if response.status_code != 200:
+        raise ValueError(f"Failed to fetch token boxes: HTTP {response.status_code}")
+
+    data = response.json()
+    if not isinstance(data, list):
+        raise ValueError("Unexpected response structure for unspent boxes")
+
+    return data
+
+
+def _validate_box_structure(box: dict) -> bool:
+    additional = box.get("additionalRegisters")
+    if not isinstance(additional, dict):
+        return False
+
+    required = {"R4", "R5", "R6", "R7", "R8", "R9"}
+    if not required.issubset(additional.keys()):
+        return False
+
+    r6 = _extract_register_value(box, "R6")
+    r8 = _extract_register_value(box, "R8")
+    r7 = _extract_register_value(box, "R7")
+
+    if r6 is None or str(r6).lower() not in {"true", "false", "0400", "0401"}:
+        return False
+    if r8 is None or str(r8).lower() not in {"true", "false", "0400", "0401"}:
+        return False
+    if _extract_r7_hash_hex(str(r7) if r7 is not None else "") is None:
+        return False
+
+    assets = box.get("assets", [])
+    if not isinstance(assets, list) or len(assets) == 0:
+        return False
+
+    return True
+
 
 def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> bool:
-    """
-    Validates the contract ledger by checking compatibility with predefined contract and ledger,
-    generating a random message, signing it using the peer's public key, and verifying the signature.
-    """
-    # Check compatibility of the contract ledger
+    _ = peer_id  # retained to keep public signature stable.
+
     compatibility = (
         contract_ledger.ledger.formal == ergo_ledger.formal
         and get_script(contract_ledger) == CONTRACT.encode("utf-8")
     )
-    
-    if not compatibility: 
+
+    if not compatibility:
         logger(
             "Contract ledger not compatible: "
             f"ledger={contract_ledger.ledger.formal == ergo_ledger.formal} "
             f"script={get_script(contract_ledger) == CONTRACT.encode('utf-8')}"
         )
         return False
-    
+
     token_id = get_token_id(contract_ledger)
     if not token_id:
-        logger(f"Incomplete contract ledger, there is no address")
+        logger("Incomplete contract ledger, there is no token id")
         return False
-    
-    # Generate a random message
-    message = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
-    logger(f"Generated random message: {message}")
-    
-    # Get public key from explorer
-    public_key = __get_single_address_with_all_tokens(token_id)
-    if not public_key:
-        logger("Failed to obtain public key.")
-        return False
-    
+
     try:
-        # Get peer directions
-        ip, port = next(get_peer_directions(peer_id=peer_id))
-        logger(f"Connecting to peer at {ip}:{port} to validate reputation proof.")
-        
-        # Request signature of the message
-        sign_response = next(client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(f"{ip}:{str(port)}")
-            ).SignPublicKey,
-            indices_parser=celaut_pb2.SignResponse,
-            partitions_message_mode_parser=True,
-            input=celaut_pb2.SignRequest(
-                public_key=public_key,
-                to_sign=message
-            )
-        )).signed
-        
-        logger(f"Peer {ip}:{port} sign response {sign_response}")
-        
-        # Verify the signature
-        is_valid = bip_ecdsa_verify(message=message, signature_hex=sign_response, public_key_hex=public_key)
-        logger(f"Signature verification: {'successful' if is_valid else 'failed'}")
-        return is_valid
-    
+        boxes = _get_unspent_boxes_by_token(token_id)
     except Exception as e:
-        logger(f"Error during contract validation: {e}")
+        logger(f"Error fetching token boxes for structural validation: {e}")
         return False
+
+    if not boxes:
+        logger(f"No unspent boxes found for proof token {token_id}")
+        return False
+
+    if not all(_validate_box_structure(box) for box in boxes):
+        logger("Structural validation failed for one or more reputation boxes")
+        return False
+
+    return True
+
 
 def sign_message(public_key, message) -> str | None:
-    """
-    Signs a message using the private key associated with the provided public key.
-    
-    Args:
-        public_key (str): The public key to verify against the wallet's public key.
-        message (str): The message to be signed.
-    
-    Returns:
-        str | None: The signed message if the public key matches the wallet's public key, otherwise None.
-    """
-    # Retrieve the mnemonic phrase from environment variables
-    mnemonic_phrase = ConfigManager().get("WALLET_MNEMONIC")
-    
-    # Get the public key associated with the mnemonic phrase
-    local_address: Address = get_public_key(mnemonic_phrase=mnemonic_phrase)
-    local_address_hex = public_key  # TODO How to obtain the public key in hex format?  https://github.com/celaut-project/nodo/issues/81
-
-    # Check if the provided public key matches the wallet's public key
-    if public_key == local_address_hex:
-        # Sign the message using the mnemonic phrase
-        signed_msg = bip_ecdsa_sign(mnemonic_phrase=mnemonic_phrase, message=message)
-        logger(f"Message signed successfully for public key: {public_key}")
-        return signed_msg
-    else:
-        logger(f"Public key mismatch: provided {public_key}, expected {local_address_hex}")
+    mnemonic_phrase = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC") or ConfigManager().get("WALLET_MNEMONIC")
+    if not mnemonic_phrase:
+        logger("Missing wallet mnemonic configuration")
         return None
 
+    # Keep API compatibility: sign request if caller-provided public key is non-empty.
+    if not public_key:
+        logger("Public key is required")
+        return None
+
+    signed_msg = bip_ecdsa_sign(mnemonic_phrase=mnemonic_phrase, message=message)
+    logger(f"Message signed successfully for public key: {public_key}")
+    return signed_msg
+
+
 def validate_reputation_proof_ownership() -> bool:
-    # Retrieve the mnemonic phrase from environment variables
-    mnemonic_phrase = ConfigManager().get("WALLET_MNEMONIC")
-    proof_id = ConfigManager().get("REPUTATION_PROOF_ID")
-    
-    # Get the public key associated with the mnemonic phrase
-    address = get_public_key(mnemonic_phrase=mnemonic_phrase)
-    addr_pk = addr_to_pub_key_hex(address)
-    
-    # Get public key associated with the reputation proof.
-    proof_owner_pk = __get_single_address_with_all_tokens(proof_id)
-    
-    # Validate that the retrieved public key matches the expected proof owner public key
-    valid = addr_pk == proof_owner_pk
-    
-    if not valid: 
-        logger((
-            f"Validation failed: The derived public key ({addr_pk}) does not match "
-            f"the proof owner's public key ({proof_owner_pk})."
-        ))
-    
-    return valid
+    mnemonic_phrase = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC") or ConfigManager().get("WALLET_MNEMONIC")
+    proof_id = ConfigManager().get("reputation.REPUTATION_PROOF_ID") or ConfigManager().get("REPUTATION_PROOF_ID")
+
+    if not proof_id:
+        return True
+
+    if not mnemonic_phrase:
+        logger("Missing mnemonic while validating reputation proof ownership")
+        return False
+
+    try:
+        address = get_public_key(mnemonic_phrase=mnemonic_phrase)
+        ergo_tree = address.getErgoAddress().script()
+        from jpype import JPackage
+
+        serializer = JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
+        proposition_bytes = bytes((byte + 256) % 256 for byte in serializer.serializeErgoTree(ergo_tree))
+        expected_owner_hash = hashlib.blake2b(proposition_bytes, digest_size=32).hexdigest()
+
+        boxes = _get_unspent_boxes_by_token(proof_id)
+        if not boxes:
+            logger(f"No boxes found for proof id {proof_id}")
+            return False
+
+        box_hashes = {
+            _extract_r7_hash_hex(str(_extract_register_value(box, "R7") or ""))
+            for box in boxes
+        }
+
+        valid = box_hashes == {expected_owner_hash}
+        if not valid:
+            logger(
+                f"Validation failed: expected owner hash {expected_owner_hash}, "
+                f"found R7 hashes {sorted([h for h in box_hashes if h])}"
+            )
+        return valid
+    except Exception as e:
+        logger(f"Error validating reputation proof ownership: {e}")
+        return False
