@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
+from uuid import uuid4
 
 import requests
 from bee_rpc.client import Dir, write_to_file
@@ -601,7 +602,8 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
     if len(path_parts) < 2:
         raise PublisherError(f"Invalid manifest URL path: {manifest_url}")
 
-    output_path = target_dir / f"{manifest_url}.celaut.bee"
+    uuid = uuid4().hex[:8]
+    output_path = target_dir / f"{uuid}.celaut.bee"
 
     with output_path.open("wb") as destination:
         for index, chunk_url in enumerate(chunk_urls):
