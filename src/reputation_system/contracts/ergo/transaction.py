@@ -6,13 +6,11 @@ import jpype
 import requests
 from ergpy import appkit
 from ergpy.helper_functions import initialize_jvm
-from google.protobuf.json_format import MessageToJson
 
 from src.payment_system.contracts.ergo.interface import get_amount_by_addr
 from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
 from src.reputation_system.contracts.ergo.utils import get_public_key
 from src.reputation_system.envs import CONTRACT
-from src.tunneling_system.tunnels import TunnelSystem
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER
 
@@ -192,11 +190,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         self_info = not obj[0]
         if self_info:
             data = "No IP available."
-            if SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF:
-                try:
-                    data = MessageToJson(TunnelSystem().get_gateway_tunnel().instance)
-                except Exception as e:
-                    LOGGER(f"Exception getting gateway tunnel instance: {str(e)}")
+            # if SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF:
+            #     pass TODO add public ip or DNS.
         else:
             data = obj[2]
 

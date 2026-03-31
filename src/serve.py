@@ -1,11 +1,10 @@
 import threading
 from concurrent import futures
 
-import grpc, json
+import grpc
 
 from protos import celaut_pb2, celaut_pb2_grpc
 from src.gateway.gateway import Gateway
-from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.maintain import manager_thread
 from src.utils.config import ConfigManager
 
