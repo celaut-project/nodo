@@ -1,11 +1,11 @@
 main:
   MAIN_DIR: "/nodo"
   STORAGE: "/nodo/storage"
-  CACHE: "/nodo/storage/__cache__/"
-  REGISTRY: "/nodo/storage/__registry__/"
-  METADATA_REGISTRY: "/nodo/storage/__metadata__/"
-  BLOCKDIR: "/nodo/storage/__block__/"
-  DATABASE_FILE: "/nodo/storage/database.sqlite"
+  CACHE: "${main.STORAGE}/__cache__/"
+  REGISTRY: "${main.STORAGE}/__registry__/"
+  METADATA_REGISTRY: "${main.STORAGE}/__metadata__/"
+  BLOCKDIR: "${main.STORAGE}/__block__/"
+  DATABASE_FILE: "${main.STORAGE}/database.sqlite"
 
 virtualizers:
   DEFAULT_VIRTUALIZER: ch
@@ -218,4 +218,4 @@ ledgers:
     HOT_WALLET_LIMITS: 100
     WALLET_MNEMONIC: ""
     AUXILIARY_MNEMONIC: ""
-    HTTP_PEERS_PATH: "/nodo/storage/ergo_http_peers.json"
+    HTTP_PEERS_PATH: "${main.STORAGE}/ergo_http_peers.json"
