@@ -8,7 +8,6 @@ from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.reputation_system.contracts.ergo.proof_validation import sign_message
 from src.utils.contract_xattrs import get_script, get_address
 from src.tunneling_system.rpc_tunnel import service_tunnel
-from src.tunneling_system.tunnels import TunnelSystem
 from src.gateway.utils import generate_node_peer_info
 from src.manager.manager import add_peer_instance, modify_gas_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_gas, \
     hotplug, get_sysresources
@@ -80,10 +79,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
     def GetPeerInfo(self, request_iterator, context, **kwargs):
         log.LOGGER(f'Request for instance by {context.peer()}')
         ip = get_only_the_ip_from_context(context_peer=context.peer())
-        if TunnelSystem().from_tunnel(ip=ip):
-            gateway_instance = TunnelSystem().get_gateway_tunnel()
-        else:
-            gateway_instance = generate_node_peer_info(
+        gateway_instance = generate_node_peer_info(
                 network=get_network_name(direction=ip)
             )
         yield from bee.serialize_to_buffer(gateway_instance)

@@ -4,7 +4,6 @@ from typing import Optional, Callable, List, Dict
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.interface import build, execute, get_configured_virtualizer
-from src.tunneling_system.tunnels import TunnelSystem
 from src.manager.manager import default_initial_cost, provision_vmachine
 from src.utils import utils, logger as log
 from src.utils.utils import from_gas_amount
