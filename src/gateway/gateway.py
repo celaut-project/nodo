@@ -7,7 +7,7 @@ from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.reputation_system.contracts.ergo.proof_validation import sign_message
 from src.utils.contract_xattrs import get_script, get_address
-from src.tunneling_system.rpc_tunnel import service_tunnel
+from src.tunneling.rpc_tunnel import service_tunnel
 from src.gateway.utils import generate_node_peer_info
 from src.manager.manager import add_peer_instance, modify_gas_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_gas, \
     hotplug, get_sysresources
