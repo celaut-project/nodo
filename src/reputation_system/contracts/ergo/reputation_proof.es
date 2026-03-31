@@ -16,9 +16,7 @@
 * a. AUTHORIZATION: The transaction must be signed by the owner (R7).
 * b. BINDING TO A STANDARD: The "Type NFT" box must be provided
 * in dataInputs[0]. The R4 register must match the token ID of that NFT.
-* c. PROOF OF COMPLETENESS: All "sibling" boxes in the collection must
-* be included in the dataInputs to verify the `totalSupply` (R6).
-* d. OUTPUT RULES: Rules for uniqueness, metadata preservation,
+* c. OUTPUT RULES: Rules for uniqueness, metadata preservation,
 * and locking logic (frozen/mutable) apply.
 *
 * 2. ERG TOP-UP PATH (PUBLIC AND SIGNATURE-FREE):
@@ -39,12 +37,10 @@
 * - Purpose: Data that, together with R4, uniquely identifies this object
 * within the collection.
 *
-* R6: (Boolean, Long)          -> (isLocked, totalSupply)
-* - Purpose: A tuple that stores the lock status and the total token supply
-* of the collection.
+* R6:  Boolean                -> isLocked
+* - Purpose: Lock status
 *
-* R7: SigmaProp                -> ownerPublicKey
-* - Purpose: Public key of the owner who must sign the transaction.
+* R7: Coll[Byte]              -> blake2b256(propositionBytes) of the owner script
 *
 * R8: Boolean                  -> customFlag
 * - Purpose: A boolean flag for custom application logic.
@@ -54,72 +50,114 @@
 * -----------------------------------------------------------------------------------
 */
 {
+
+  val DIGITAL_PUBLIC_GOOD = fromBase16("`+DIGITAL_PUBLIC_GOOD_SCRIPT_HASH+`")
+
   // --- Path 1: Admin Transaction (signed by the owner) ---
   val ownerSignedPath = {
-    // The transaction must be signed by the owner of the key in R7.
-    if (SELF.R7[SigmaProp].isDefined) {
-      // The "Type NFT" box is required in dataInputs(0).
-      val typeNftBox = CONTEXT.dataInputs(0)
-      
-      // TYPE VALIDATION: This box's R4 must match the token ID of the Type NFT.
-      val typeIsValid = SELF.R4[Coll[Byte]].get == typeNftBox.tokens(0)._1
+    val isOwner = INPUTS.exists { (b: Box) => blake2b256(b.propositionBytes) == SELF.R7[Coll[Byte]].get }
+    if (isOwner) {
 
       // Extract data from this box's (SELF) register structure.
-      val r6Tuple = SELF.R6[(Boolean, Long)].get
-      val isLocked = r6Tuple._1
-      val totalSupply = r6Tuple._2
+      val isLocked = SELF.R6[Boolean].get
       val repTokenId = SELF.tokens(0)._1
       
-      // PROOF OF COMPLETENESS:
-      val otherReputationBoxes = CONTEXT.dataInputs.slice(1, CONTEXT.dataInputs.size)
-      val dataInputsAmount = otherReputationBoxes.fold(0L, { (sum: Long, b: Box) =>
-        if (b.tokens.size > 0 && b.tokens(0)._1 == repTokenId) {
-          sum + b.tokens(0)._2
-        } else {
-          sum
+      // PROOF OF COMPLETENESS
+
+      val repBoxesOnInputs = INPUTS.filter { (b: Box) =>
+        blake2b256(b.propositionBytes) == blake2b256(SELF.propositionBytes) &&
+        b.tokens.size > 0 && b.tokens(0)._1 == repTokenId &&
+        b.R7[Coll[Byte]].get == SELF.R7[Coll[Byte]].get &&
+        b.R4[Coll[Byte]].isDefined &&
+        b.R5[Coll[Byte]].isDefined &&
+        b.R8[Boolean].isDefined
+      }
+
+      val repBoxesOnOutputs = OUTPUTS.filter { (b: Box) =>
+        blake2b256(b.propositionBytes) == blake2b256(SELF.propositionBytes) &&
+        b.tokens.size > 0 && b.tokens(0)._1 == repTokenId &&
+        b.R7[Coll[Byte]].get == SELF.R7[Coll[Byte]].get &&
+        b.R4[Coll[Byte]].isDefined &&
+        b.R5[Coll[Byte]].isDefined &&
+        b.R8[Boolean].isDefined
+      }
+
+      val correctManagedSupply = {
+        val inputsAmount = repBoxesOnInputs.fold(0L, { (sum: Long, b: Box) => sum + b.tokens(0)._2 })
+        val outputsAmount = repBoxesOnOutputs.fold(0L, { (sum: Long, b: Box) => sum + b.tokens(0)._2 })
+
+        val valuePreserved = {
+
+          val tokensArePreserved = {
+            val secondaryInputTokens = repBoxesOnInputs.flatMap({ (b: Box) =>
+              if (b.tokens.size > 1) { b.tokens.slice(1, b.tokens.size) } else { Coll[(Coll[Byte], Long)]() }
+            })
+            val secondaryOutputTokens = repBoxesOnOutputs.flatMap({ (b: Box) =>
+              if (b.tokens.size > 1) { b.tokens.slice(1, b.tokens.size) } else { Coll[(Coll[Byte], Long)]() }
+            })
+            
+            val uniqueTokenIds = secondaryInputTokens.fold(Coll[Coll[Byte]](), { (acc: Coll[Coll[Byte]], t: (Coll[Byte], Long)) =>
+              if (acc.exists({ (x: Coll[Byte]) => x == t._1 })) acc else acc.append(Coll(t._1))
+            })
+            
+            uniqueTokenIds.forall({ (tokenId: Coll[Byte]) =>
+              val totalIn = secondaryInputTokens
+                .filter({ (t: (Coll[Byte], Long)) => t._1 == tokenId })
+                .fold(0L, { (sum: Long, t: (Coll[Byte], Long)) => sum + t._2 })
+              val totalOut = secondaryOutputTokens
+                .filter({ (t: (Coll[Byte], Long)) => t._1 == tokenId })
+                .fold(0L, { (sum: Long, t: (Coll[Byte], Long)) => sum + t._2 })
+              totalOut >= totalIn
+            })
+          }
+
+          val nativeErgIsPreserved = {
+            val totalNativeIn = repBoxesOnInputs.fold(0L, { (sum: Long, b: Box) => sum + b.value })
+            val totalNativeOut = repBoxesOnOutputs.fold(0L, { (sum: Long, b: Box) => sum + b.value })
+            totalNativeOut >= totalNativeIn
+          }
+
+          tokensArePreserved && nativeErgIsPreserved
         }
-      })
-      val allBoxesArePresent = (SELF.tokens(0)._2 + dataInputsAmount) == totalSupply
+
+        inputsAmount == outputsAmount &&  // Reputation proof tokens are preserved.
+        valuePreserved
+      }
       
-      val validationLogic = OUTPUTS.forall { (x: Box) =>
-        !(x.tokens.exists { (token: (Coll[Byte], Long)) => token._1 == repTokenId }) || {
-          val uniqueInDataInputs = otherReputationBoxes.forall { (d: Box) =>
-              (d.id == SELF.id) || ((d.R4[Coll[Byte]].get, d.R5[Coll[Byte]].get) != (x.R4[Coll[Byte]].get, x.R5[Coll[Byte]].get))
-          }
-          val uniqueInOutputs = OUTPUTS.forall { (otherOut: Box) =>
-              (otherOut.id == x.id) || !(otherOut.tokens.exists { (t: (Coll[Byte], Long)) => t._1 == repTokenId }) ||
-              ((otherOut.R4[Coll[Byte]].get, otherOut.R5[Coll[Byte]].get) != (x.R4[Coll[Byte]].get, x.R5[Coll[Byte]].get))
-          }
-          val objectIsUnique = uniqueInDataInputs && uniqueInOutputs
-          
-          val outputR6Tuple = x.R6[(Boolean, Long)].get
-          val totalSupplyIsPreserved = outputR6Tuple._2 == totalSupply
-          val ownerIsPreserved = x.R7[SigmaProp].get == SELF.R7[SigmaProp].get
-          
-          val lockResult = {
-            if (isLocked) {
-              x.tokens(0)._2 == SELF.tokens(0)._2 &&
-              x.propositionBytes == SELF.propositionBytes &&
-              x.R4[Coll[Byte]].get == SELF.R4[Coll[Byte]].get &&
-              x.R5[Coll[Byte]].get == SELF.R5[Coll[Byte]].get &&
-              outputR6Tuple._1 == isLocked &&
-              x.R8[Boolean].get == SELF.R8[Boolean].get &&
-              x.R9[Coll[Byte]].get == SELF.R9[Coll[Byte]].get
-            } else {
-              x.propositionBytes == SELF.propositionBytes &&
-              x.R4[Coll[Byte]].isDefined &&
-              x.R5[Coll[Byte]].isDefined &&
-              x.R6[(Boolean, Long)].isDefined &&
-              x.R8[Boolean].isDefined
-            }
-          }
-          objectIsUnique && totalSupplyIsPreserved && ownerIsPreserved && lockResult
+      val typeExists: Boolean = {
+        // Get the token ID to check from the box's register R4
+        val typeTokenIdToCheck: Coll[Byte] = SELF.R4[Coll[Byte]].get
+
+        // Extract the token IDs from the collection of type NFT boxes
+        val availableTypeTokenIds: Coll[Coll[Byte]] = CONTEXT.dataInputs.filter { (b: Box) =>
+          blake2b256(b.propositionBytes) == DIGITAL_PUBLIC_GOOD &&
+          b.creationInfo._1 < CONTEXT.HEIGHT
+        }.map { (b: Box) => 
+          b.tokens(0)._1
+        }
+
+        availableTypeTokenIds.exists { (id: Coll[Byte]) => 
+          id == typeTokenIdToCheck
         }
       }
-      typeIsValid && allBoxesArePresent && validationLogic
-    } else {
-      false
-    }
+
+      // LOCKING LOGIC
+      val correctLock =  {
+        if (isLocked) {
+          repBoxesOnOutputs.exists { (x: Box) => {
+            x.tokens(0)._2 >= SELF.tokens(0)._2 &&              // Preserve token amount or increase it.
+            x.R4[Coll[Byte]].get == SELF.R4[Coll[Byte]].get &&  // Preserve type NFT ID.
+            x.R5[Coll[Byte]].get == SELF.R5[Coll[Byte]].get &&  // Preserve unique object data.
+            x.R6[Boolean].get == true &&                        // Once locked, always locked.
+            x.R9[Coll[Byte]].get == SELF.R9[Coll[Byte]].get     // Preserve reserved data.
+          }}
+        }
+        else { true }
+      }
+
+      correctManagedSupply && typeExists && correctLock
+    } 
+    else { false }
   }
 
   // --- Path 2: ERG Top-Up (public, no signature) ---
@@ -139,9 +177,9 @@
       val registersAreImmutable = (
         successor.R4[Coll[Byte]] == SELF.R4[Coll[Byte]] &&
         successor.R5[Coll[Byte]] == SELF.R5[Coll[Byte]] &&
-        successor.R6[(Boolean, Long)] == SELF.R6[(Boolean, Long)] &&
-        successor.R7[SigmaProp] == SELF.R7[SigmaProp] &&
-        successor.R8[Boolean] == SELF.R8[Boolean] &&
+        successor.R6[Boolean]    == SELF.R6[Boolean]    &&
+        successor.R7[Coll[Byte]] == SELF.R7[Coll[Byte]] &&
+        successor.R8[Boolean]    == SELF.R8[Boolean]    &&
         successor.R9[Coll[Byte]] == SELF.R9[Coll[Byte]]
       )
       

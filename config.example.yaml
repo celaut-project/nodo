@@ -1,11 +1,11 @@
 main:
   MAIN_DIR: "/nodo"
   STORAGE: "/nodo/storage"
-  CACHE: "/nodo/storage/__cache__/"
-  REGISTRY: "/nodo/storage/__registry__/"
-  METADATA_REGISTRY: "/nodo/storage/__metadata__/"
-  BLOCKDIR: "/nodo/storage/__block__/"
-  DATABASE_FILE: "/nodo/storage/database.sqlite"
+  CACHE: "${main.STORAGE}/__cache__/"
+  REGISTRY: "${main.STORAGE}/__registry__/"
+  METADATA_REGISTRY: "${main.STORAGE}/__metadata__/"
+  BLOCKDIR: "${main.STORAGE}/__block__/"
+  DATABASE_FILE: "${main.STORAGE}/database.sqlite"
 
 virtualizers:
   DEFAULT_VIRTUALIZER: ch
@@ -161,12 +161,21 @@ misc:
   VALIDATE_ON_IMPORT: true
   CONFIGURATION_REQUIRED: false
 
+hashing:
+  # Main hash selector for service/file identification.
+  # Accepts hash aliases (sha3_256, sha256, shake_256, blake2b) or a hash-id in hex.
+  HASH: "sha3_256"
+  # If true, run integrity check/migration automatically when starting `nodo serve`.
+  CHECK_INTEGRITY_ON_SERVE: false
+
 publisher:
   PROVIDER: "github"
   REPOSITORY: "owner/repo"
   BRANCH: "main"
-  HASH_ID: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"
   SOURCE_APPLICATION_WEB_PAGE: "https://reputation-systems.github.io/source-application?tab=add"
+  # Formats can be file extensions (tags) or ergo box ids that define the format uniquely.
+  CONTENT_FORMAT: ".grpcbb"
+  RAW_FORMAT: ".celaut"
   # Direct token in config (optional).
   TOKEN: ""
   # Environment variable names read by ConfigManager-based scripts (optional).
@@ -193,6 +202,8 @@ reputation:
   LEDGER_REPUTATION_SUBMISSION_THRESHOLD: 10
   TOTAL_REPUTATION_TOKEN_AMOUNT: 1000000000
   REPUTATION_PROOF_ID: ""
+  PLAIN_TEXT_TYPE_NFT_ID: "8299d98e15ebee7fa39ad716de7c8bb191790a1bf4b7c3f91af35a0e36187706"
+  CELAUT_NODE_TYPE_NFT_ID: "64060577c3393e0e3cf8938ec8e6a2002ded27ece17750aa5add7d5c3e1227ba"
 
 payments:
   PAYMENT_MANAGER_ITERATION_TIME: 86400
@@ -209,4 +220,4 @@ ledgers:
     HOT_WALLET_LIMITS: 100
     WALLET_MNEMONIC: ""
     AUXILIARY_MNEMONIC: ""
-    HTTP_PEERS_PATH: "/node/storage/ergo_http_peers.json"
+    HTTP_PEERS_PATH: "${main.STORAGE}/ergo_http_peers.json"

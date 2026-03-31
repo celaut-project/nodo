@@ -9,7 +9,7 @@ from protos.gateway_bee import StartService_input_indices, \
     StartService_input_message_mode
 from src.gateway.utils import save_service
 from src.utils import logger as log
-from src.utils.hashing import SHA3_256_ID
+from src.utils.hashing import get_configured_hash_id
 from src.manager.maintain import add_wanted
 from src.utils.config import ConfigManager
 
@@ -17,6 +17,7 @@ env_manager = ConfigManager()
 
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+CONFIGURED_HASH_ID = get_configured_hash_id(env_manager)
 
 
 class BreakIteration(Exception):
@@ -25,7 +26,7 @@ class BreakIteration(Exception):
 
 def find_service_hash(_hash: celaut.Metadata.HashTag.Hash) \
         -> Tuple[Optional[str], bool]:
-    if SHA3_256_ID == _hash.type:
+    if CONFIGURED_HASH_ID == _hash.type:
         value = _hash.value.hex()
         registry = os.listdir(REGISTRY)
         return value, value in registry

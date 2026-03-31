@@ -246,7 +246,7 @@ fi
 
 printf "Running setup script $SETUP_SCRIPT...\n"
 if ! /bin/bash "$SETUP_SCRIPT" "$TARGET_DIR" "$CH_VERSION"; then
-  printf "Error: The setup script $SETUP_SCRIPT failed to execute.\n" >&2
+  printf "Error: The setup script %s failed to execute.\nPlease try running it at least once more. If the issue persists, contact the developers.\n" "$SETUP_SCRIPT" >&2
   exit 1
 fi
 

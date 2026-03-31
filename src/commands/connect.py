@@ -4,7 +4,6 @@ from bee_rpc.client import client_grpc as client
 import grpc
 
 from src.manager.manager import add_peer_instance
-from src.tunneling_system.tunnels import TunnelSystem
 from src.gateway.utils import generate_node_peer_info
 from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
@@ -41,11 +40,7 @@ def connect(peer: str):
             print(f'Sending instance to peer: {peer}')
             
             try:
-                # Could be refactored with Gateway.GetPeerInfo
-                if TunnelSystem().from_tunnel(ip=peer):
-                    gateway_instance = TunnelSystem().get_gateway_tunnel()
-                else:
-                    gateway_instance = generate_node_peer_info(
+                gateway_instance = generate_node_peer_info(
                         network=get_network_name(direction=peer)
                     )
             except Exception as e:
