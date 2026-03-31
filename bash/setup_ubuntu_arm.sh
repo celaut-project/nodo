@@ -11,13 +11,147 @@ if [ -z "$TARGET_DIR" ]; then
     echo "Error: You must pass the project root directory as the first argument."
     exit 1
 fi
+
 CH_VERSION="${2:-v51.1}"
 CONFIG_FILE="$TARGET_DIR/config.yaml"
 CH_ARCH_TAG="linux/arm64"
 
+# Pinned portable runtimes.
+PYTHON_VERSION="3.11.15"
+PYTHON_BUILD_TAG="20260325"
+PYTHON_ARCH="aarch64-unknown-linux-gnu"
+PYTHON_DIST="cpython-${PYTHON_VERSION}+${PYTHON_BUILD_TAG}-${PYTHON_ARCH}-install_only_stripped.tar.gz"
+PYTHON_BASE_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD_TAG}"
+PYTHON_URL="${PYTHON_BASE_URL}/${PYTHON_DIST}"
+PYTHON_CHECKSUMS_URL="${PYTHON_BASE_URL}/SHA256SUMS"
+
+JRE_VERSION="21.0.8_9"
+JRE_RELEASE_TAG="jdk-21.0.8%2B9"
+JRE_DIST="OpenJDK21U-jre_aarch64_linux_hotspot_${JRE_VERSION}.tar.gz"
+JRE_BASE_URL="https://github.com/adoptium/temurin21-binaries/releases/download/${JRE_RELEASE_TAG}"
+JRE_URL="${JRE_BASE_URL}/${JRE_DIST}"
+JRE_SHA_URL="${JRE_URL}.sha256.txt"
+
+YQ_VERSION="v4.44.3"
+YQ_URL="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_arm64"
+YQ_BIN_DEFAULT="$TARGET_DIR/bin/yq"
+YQ_BIN="$YQ_BIN_DEFAULT"
+
+RUNTIME_DIR="$TARGET_DIR/runtime"
+PYTHON_RUNTIME_ROOT_DEFAULT="$RUNTIME_DIR/python"
+PYTHON_RUNTIME_ROOT="$PYTHON_RUNTIME_ROOT_DEFAULT"
+JAVA_RUNTIME_ROOT_DEFAULT="$RUNTIME_DIR/java"
+JAVA_RUNTIME_ROOT="$JAVA_RUNTIME_ROOT_DEFAULT"
+DOCKER_BIN_TARGET="${TARGET_DIR}/bin/docker"
+DOCKERD_BIN_TARGET="${TARGET_DIR}/bin/dockerd"
+BUILDX_BIN_TARGET="${TARGET_DIR}/libexec/docker/cli-plugins/docker-buildx"
+
 fail() {
     echo "Error: $1"
     exit 1
+}
+
+expand_main_dir_placeholder() {
+    printf '%s' "$1" | sed "s|\${main.MAIN_DIR}|$TARGET_DIR|g"
+}
+
+read_config_path_or_default() {
+    local query="$1"
+    local default_value="$2"
+    local value=""
+
+    if [ -x "$YQ_BIN" ] && [ -f "$CONFIG_FILE" ]; then
+        value="$("$YQ_BIN" -r "$query // \"\"" "$CONFIG_FILE" 2>/dev/null || true)"
+    fi
+
+    if [ -z "$value" ] || [ "$value" = "null" ]; then
+        value="$default_value"
+    fi
+
+    expand_main_dir_placeholder "$value"
+}
+
+apply_configured_dependency_paths() {
+    local configured_yq_bin
+
+    configured_yq_bin="$(read_config_path_or_default '.dependencies.yq.BIN' "$YQ_BIN_DEFAULT")"
+    if [ "$configured_yq_bin" != "$YQ_BIN" ]; then
+        mkdir -p "$(dirname "$configured_yq_bin")"
+        cp -f "$YQ_BIN" "$configured_yq_bin"
+        chmod +x "$configured_yq_bin"
+        YQ_BIN="$configured_yq_bin"
+    fi
+
+    PYTHON_RUNTIME_ROOT="$(read_config_path_or_default '.dependencies.python.RUNTIME_ROOT' "$PYTHON_RUNTIME_ROOT_DEFAULT")"
+    JAVA_RUNTIME_ROOT="$(read_config_path_or_default '.dependencies.java.RUNTIME_ROOT' "$JAVA_RUNTIME_ROOT_DEFAULT")"
+    DOCKER_BIN_TARGET="$(read_config_path_or_default '.dependencies.docker.BIN' "$DOCKER_BIN_TARGET")"
+    DOCKERD_BIN_TARGET="$(read_config_path_or_default '.dependencies.docker.DAEMON_BIN' "$DOCKERD_BIN_TARGET")"
+    BUILDX_BIN_TARGET="$(read_config_path_or_default '.dependencies.docker.BUILDX_BIN' "$BUILDX_BIN_TARGET")"
+}
+
+download_file() {
+    local url="$1"
+    local destination="$2"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$url" -o "$destination"
+        return 0
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -qO "$destination" "$url"
+        return 0
+    fi
+    fail "Neither curl nor wget is available to download ${url}"
+}
+
+extract_archive() {
+    local archive="$1"
+    local destination="$2"
+    local tmp_dir
+
+    tmp_dir="$(mktemp -d)"
+    tar -xzf "$archive" -C "$tmp_dir"
+
+    shopt -s nullglob
+    local entries=("$tmp_dir"/*)
+    shopt -u nullglob
+
+    rm -rf "$destination"
+    mkdir -p "$destination"
+
+    if [ "${#entries[@]}" -eq 1 ] && [ -d "${entries[0]}" ]; then
+        cp -a "${entries[0]}/." "$destination/"
+    else
+        cp -a "$tmp_dir/." "$destination/"
+    fi
+
+    rm -rf "$tmp_dir"
+}
+
+verify_archive_sha256_from_checksums() {
+    local archive_path="$1"
+    local checksums_path="$2"
+    local artifact_name="$3"
+
+    local expected
+    local actual
+
+    expected="$(awk -v name="$artifact_name" '{
+        file=$2
+        gsub(/^\*/, "", file)
+        if (file == name || $NF == name) {
+            print $1
+            exit
+        }
+    }' "$checksums_path")"
+    if [ -z "$expected" ]; then
+        fail "Unable to find SHA256 for ${artifact_name} in ${checksums_path}."
+    fi
+
+    actual="$(sha256sum "$archive_path" | awk '{print $1}')"
+    if [ "$actual" != "$expected" ]; then
+        fail "SHA256 mismatch for ${artifact_name}. expected=${expected} actual=${actual}"
+    fi
 }
 
 resolve_boot_asset() {
@@ -58,7 +192,7 @@ download_ch_binary() {
 
     tmp_file="$(mktemp /tmp/cloud-hypervisor.XXXXXX)"
     for asset in "${assets[@]}"; do
-        if wget -qO "$tmp_file" "${base_url}/${asset}"; then
+        if download_file "${base_url}/${asset}" "$tmp_file"; then
             install -m 0755 "$tmp_file" "$destination"
             rm -f "$tmp_file"
             return 0
@@ -67,6 +201,71 @@ download_ch_binary() {
 
     rm -f "$tmp_file"
     return 1
+}
+
+install_local_yq() {
+    mkdir -p "$(dirname "$YQ_BIN_DEFAULT")"
+    download_file "$YQ_URL" "$YQ_BIN_DEFAULT"
+    chmod +x "$YQ_BIN_DEFAULT"
+    YQ_BIN="$YQ_BIN_DEFAULT"
+    test -x "$YQ_BIN" || fail "yq local binary is not executable at ${YQ_BIN}"
+}
+
+install_portable_python() {
+    local archive
+    local checksums
+    local install_dir
+
+    archive="$(mktemp /tmp/nodo-python.XXXXXX.tar.gz)"
+    checksums="$(mktemp /tmp/nodo-python-sha.XXXXXX)"
+    install_dir="${PYTHON_RUNTIME_ROOT}/${PYTHON_VERSION}+${PYTHON_BUILD_TAG}"
+
+    mkdir -p "$PYTHON_RUNTIME_ROOT"
+
+    echo "Installing portable Python ${PYTHON_VERSION} (${PYTHON_BUILD_TAG})..."
+    download_file "$PYTHON_URL" "$archive"
+    download_file "$PYTHON_CHECKSUMS_URL" "$checksums"
+
+    verify_archive_sha256_from_checksums "$archive" "$checksums" "$PYTHON_DIST"
+    extract_archive "$archive" "$install_dir"
+
+    ln -sfn "$install_dir" "${PYTHON_RUNTIME_ROOT}/current"
+    test -x "${PYTHON_RUNTIME_ROOT}/current/bin/python3" \
+        || fail "Portable Python not found at ${PYTHON_RUNTIME_ROOT}/current/bin/python3"
+
+    rm -f "$archive" "$checksums"
+}
+
+install_portable_jre() {
+    local archive
+    local checksum
+    local install_dir
+
+    archive="$(mktemp /tmp/nodo-jre.XXXXXX.tar.gz)"
+    checksum="$(mktemp /tmp/nodo-jre-sha.XXXXXX)"
+    install_dir="${JAVA_RUNTIME_ROOT}/${JRE_VERSION}"
+
+    mkdir -p "$JAVA_RUNTIME_ROOT"
+
+    echo "Installing portable Temurin JRE ${JRE_VERSION}..."
+    download_file "$JRE_URL" "$archive"
+    download_file "$JRE_SHA_URL" "$checksum"
+
+    local expected
+    local actual
+    expected="$(awk '{print $1}' "$checksum" | head -n1)"
+    [ -n "$expected" ] || fail "Failed to read expected SHA256 from ${JRE_SHA_URL}"
+
+    actual="$(sha256sum "$archive" | awk '{print $1}')"
+    [ "$actual" = "$expected" ] || fail "SHA256 mismatch for ${JRE_DIST}. expected=${expected} actual=${actual}"
+
+    extract_archive "$archive" "$install_dir"
+
+    ln -sfn "$install_dir" "${JAVA_RUNTIME_ROOT}/current"
+    test -x "${JAVA_RUNTIME_ROOT}/current/bin/java" \
+        || fail "Portable Java not found at ${JAVA_RUNTIME_ROOT}/current/bin/java"
+
+    rm -f "$archive" "$checksum"
 }
 
 provision_cloud_hypervisor_assets() {
@@ -79,8 +278,8 @@ provision_cloud_hypervisor_assets() {
     if [ ! -f "$CONFIG_FILE" ]; then
         fail "config.yaml not found at ${CONFIG_FILE}."
     fi
-    if ! command -v yq >/dev/null 2>&1; then
-        fail "yq is required to update ${CONFIG_FILE}."
+    if [ ! -x "$YQ_BIN" ]; then
+        fail "Local yq binary is required at ${YQ_BIN}."
     fi
     if [ ! -x "$ch_initramfs_builder" ]; then
         fail "Missing executable initramfs builder at ${ch_initramfs_builder}."
@@ -103,13 +302,13 @@ provision_cloud_hypervisor_assets() {
 
     "$ch_initramfs_builder" "$TARGET_DIR" "$CH_ARCH_TAG" "$ch_initramfs_target"
 
-    CH_BINARY_TARGET="$ch_binary_target" yq -i \
+    CH_BINARY_TARGET="$ch_binary_target" "$YQ_BIN" -i \
         '.virtualizers.ch.BINARY_PATH = strenv(CH_BINARY_TARGET)' \
         "$CONFIG_FILE"
-    CH_ARCH_TAG="$CH_ARCH_TAG" CH_KERNEL_TARGET="$ch_kernel_target" yq -i \
+    CH_ARCH_TAG="$CH_ARCH_TAG" CH_KERNEL_TARGET="$ch_kernel_target" "$YQ_BIN" -i \
         '.virtualizers.ch.KERNEL_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_KERNEL_TARGET)' \
         "$CONFIG_FILE"
-    CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$ch_initramfs_target" yq -i \
+    CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$ch_initramfs_target" "$YQ_BIN" -i \
         '.virtualizers.ch.INITRAMFS_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_INITRAMFS_TARGET)' \
         "$CONFIG_FILE"
 
@@ -144,24 +343,44 @@ echo "Installing build dependencies and basic tools..."
 apt-get install -y --no-install-recommends \
     build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
     libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev \
-    ca-certificates curl gnupg lsb-release software-properties-common \
-    git procps locales busybox-static cpio gzip initramfs-tools-core iputils-ping \
+    ca-certificates curl gnupg lsb-release git procps locales \
+    busybox-static cpio gzip initramfs-tools-core iputils-ping \
     > /dev/null || { handle_apt_error $?; exit 1; }
 
 echo "Ensuring UTF-8 locale support..."
 locale-gen en_US.UTF-8 >/dev/null || true
 update-locale LANG=en_US.UTF-8
 
-echo "Installing yq..."
-if ! command -v yq >/dev/null; then
-    wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_arm64
-    chmod +x /usr/local/bin/yq
-fi
+echo "Installing local yq runtime..."
+install_local_yq
+apply_configured_dependency_paths
 
 echo "Provisioning Cloud Hypervisor..."
 provision_cloud_hypervisor_assets
 
-# --- Función de instalación segura de binarios ---
+install_portable_python
+install_portable_jre
+
+echo "Creating and preparing Python virtualenv..."
+"${PYTHON_RUNTIME_ROOT}/current/bin/python3" -m venv "$TARGET_DIR/venv"
+
+REQ_FILE="$TARGET_DIR/bash/requirements.txt"
+if [ ! -f "$REQ_FILE" ]; then
+    fail "requirements.txt not found at $REQ_FILE"
+fi
+
+"$TARGET_DIR/venv/bin/python" -m pip install --upgrade pip >/dev/null
+if ! "$TARGET_DIR/venv/bin/python" -m pip install -r "$REQ_FILE" >/dev/null; then
+    fail "Failed to install Python packages."
+fi
+
+echo "Downloading isolated Docker 24.0.9 binaries..."
+BIN_DIR="$(dirname "$DOCKER_BIN_TARGET")"
+PLUGIN_DIR="$(dirname "$BUILDX_BIN_TARGET")"
+mkdir -p "$BIN_DIR" "$PLUGIN_DIR"
+
+pkill -f "$DOCKERD_BIN_TARGET" 2>/dev/null || true
+
 install_tmp() {
     local src="$1"
     local dst="$2"
@@ -170,49 +389,6 @@ install_tmp() {
     chmod +x "$tmp"
     mv -f "$tmp" "$dst"
 }
-
-echo "Adding Deadsnakes PPA for Python 3.11..."
-add-apt-repository ppa:deadsnakes/ppa -y >/dev/null
-apt-get update -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false \
-    || { handle_apt_error $?; apt-get update; }
-
-echo "Installing Python 3.11 and venv modules..."
-apt-get install -y python3.11 python3.11-venv python3.11-distutils >/dev/null
-
-echo "Installing pip for Python 3.11..."
-wget -qO get-pip.py https://bootstrap.pypa.io/get-pip.py
-python3.11 get-pip.py >/dev/null
-rm get-pip.py
-
-echo "Creating and activating Python virtualenv..."
-python3.11 -m venv "$TARGET_DIR/venv"
-source "$TARGET_DIR/venv/bin/activate"
-
-REQ_FILE="$TARGET_DIR/bash/requirements.txt"
-if [ ! -f "$REQ_FILE" ]; then
-    echo "Error: requirements.txt not found at $REQ_FILE"
-    deactivate
-    exit 1
-fi
-
-echo "Installing Python dependencies..."
-pip install --upgrade pip >/dev/null
-if ! pip install -r "$REQ_FILE" >/dev/null; then
-    echo "Failed to install Python packages."
-    deactivate
-    exit 1
-fi
-
-echo "Installing OpenJDK 21..."
-apt-get install -y openjdk-21-jre-headless >/dev/null
-
-echo "Downloading isolated Docker 24.0.9 binaries..."
-BIN_DIR="${TARGET_DIR}/bin"
-PLUGIN_DIR="${TARGET_DIR}/libexec/docker/cli-plugins"
-mkdir -p "$BIN_DIR" "$PLUGIN_DIR"
-
-# Detener dockerd si está corriendo
-pkill -f "${TARGET_DIR}/bin/dockerd" 2>/dev/null || true
 
 ARCH=$(uname -m)
 DOCKER_ARCH="$ARCH"
@@ -230,8 +406,8 @@ DOCKER_TGZ="docker-24.0.9.tgz"
 curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/${DOCKER_TGZ}" -o "/tmp/${DOCKER_TGZ}"
 tar -xzf "/tmp/${DOCKER_TGZ}" -C "/tmp/"
 
-install_tmp "/tmp/docker/docker" "$BIN_DIR/docker"
-install_tmp "/tmp/docker/dockerd" "$BIN_DIR/dockerd"
+install_tmp "/tmp/docker/docker" "$DOCKER_BIN_TARGET"
+install_tmp "/tmp/docker/dockerd" "$DOCKERD_BIN_TARGET"
 
 cp /tmp/docker/containerd* "$BIN_DIR/" 2>/dev/null || true
 cp /tmp/docker/ctr "$BIN_DIR/" 2>/dev/null || true
@@ -242,27 +418,18 @@ chmod +x "$BIN_DIR"/*
 
 echo "Downloading buildx plugin..."
 curl -fsSL "https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0.12.1.linux-${BUILDX_ARCH}" \
-    -o "${PLUGIN_DIR}/docker-buildx"
-chmod +x "${PLUGIN_DIR}/docker-buildx"
+    -o "$BUILDX_BIN_TARGET"
+chmod +x "$BUILDX_BIN_TARGET"
 
-echo "Installing QEMU/binfmt for multi-architecture containers..."
-apt-get install -y qemu-user-static binfmt-support >/dev/null
-DOCKER_SOCKET="${TARGET_DIR}/docker/docker.sock"
-/bin/bash "$TARGET_DIR/bash/start_docker_daemon.sh" "$TARGET_DIR" >/dev/null
-"${TARGET_DIR}/bin/docker" -H "unix://${DOCKER_SOCKET}" run --rm --privileged multiarch/qemu-user-static --reset -p yes >/dev/null
-
-echo "Installing Rust (cargo)…"
+echo "Installing Rust (cargo)..."
 if ! command -v cargo >/dev/null; then
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     source "$HOME/.cargo/env"
 fi
 
 echo "Running Python database migrations..."
-python3.11 "$TARGET_DIR/nodo.py" migrate >/dev/null || {
-    echo "Migration failed."
-    deactivate
-    exit 1
+"$TARGET_DIR/venv/bin/python" "$TARGET_DIR/nodo.py" migrate >/dev/null || {
+    fail "Migration failed."
 }
 
 echo "ARM setup completed successfully!"
-deactivate
