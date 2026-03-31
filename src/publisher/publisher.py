@@ -569,6 +569,12 @@ def publish_service(
     print(f"- Manifest URL: {result['manifest_url']}", flush=True)
     print(f"- File hash: {service_id}", flush=True)
     print(f"- Content hash: {content_hash}", flush=True)
+
+    BOLD = "\033[1m"
+    GREEN = "\033[92m"
+    RESET = "\033[0m"
+    print(f"\n\n{BOLD}{GREEN}👉 CLICK TO ADD SOURCE IN ERGO:{RESET}", flush=True)
+    print(f"{GREEN}{source_application_prefilled_url}{RESET}\n", flush=True)
     return result
 
 
