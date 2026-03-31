@@ -218,4 +218,4 @@ ledgers:
     HOT_WALLET_LIMITS: 100
     WALLET_MNEMONIC: ""
     AUXILIARY_MNEMONIC: ""
-    HTTP_PEERS_PATH: "/node/storage/ergo_http_peers.json"
+    HTTP_PEERS_PATH: "/nodo/storage/ergo_http_peers.json"
