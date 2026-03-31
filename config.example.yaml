@@ -173,6 +173,9 @@ publisher:
   REPOSITORY: "owner/repo"
   BRANCH: "main"
   SOURCE_APPLICATION_WEB_PAGE: "https://reputation-systems.github.io/source-application?tab=add"
+  # Formats can be file extensions (tags) or ergo box ids that define the format uniquely.
+  CONTENT_FORMAT: ".grpcbb"
+  RAW_FORMAT: ".celaut"
   # Direct token in config (optional).
   TOKEN: ""
   # Environment variable names read by ConfigManager-based scripts (optional).
