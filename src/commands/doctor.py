@@ -138,7 +138,7 @@ def _resolve_config_paths(main_dir: str):
 
     main_cfg = raw.get("main", {})
     main_dir_cfg = main_cfg.get("MAIN_DIR", main_dir)
-    ch_cfg = raw.get("virtualizers", {}).get("cloud_hypervisor", {})
+    ch_cfg = raw.get("virtualizers", {}).get("ch", {})
 
     def _interpolate(value):
         if not isinstance(value, str):
