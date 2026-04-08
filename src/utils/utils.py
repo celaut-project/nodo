@@ -131,7 +131,39 @@ def __get_only_the_ip_from_context_method(context_peer: str) -> str:
         raise Exception('Error getting the ip from the context: ' + str(e))
 
 
-get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
+def _clean_ip_value(value: str) -> str:
+    return str(value).split("%", 1)[0]
+
+
+def _extract_direction_host(direction: str) -> str:
+    normalized = str(direction or "").replace("http://", "").replace("https://", "").strip()
+    if not normalized:
+        return ""
+
+    if normalized.startswith("[") and "]" in normalized:
+        return _clean_ip_value(normalized[1:normalized.index("]")])
+
+    # IPv6 literals may contain multiple ":" and optional zone ids. Only split host:port for clear IPv4/hostnames.
+    if normalized.count(":") == 1:
+        return _clean_ip_value(normalized.split(":", 1)[0])
+
+    return _clean_ip_value(normalized)
+
+
+def get_local_ip_from_network(network: str) -> str:
+    addresses = ni.ifaddresses(network)
+
+    ipv4_addresses = addresses.get(ni.AF_INET, [])
+    if ipv4_addresses:
+        return ipv4_addresses[0]["addr"]
+
+    ipv6_addresses = addresses.get(ni.AF_INET6, [])
+    for address in ipv6_addresses:
+        candidate = _clean_ip_value(address.get("addr", ""))
+        if candidate:
+            return candidate
+
+    raise KeyError(f"No usable IPv4/IPv6 address found for interface {network}")
 
 longestSublistFinder = lambda string1, string2, split: split.join(
     [a for a in string1.split(split) for b in string2.split(split) if a == b]) + split
@@ -170,7 +202,7 @@ def get_network_name(direction: str) -> str:
     Raises:
         Exception: If there's an error processing the network interfaces
     """
-    direction = direction.replace("http://", "").replace("https://", "").split(':')[0]
+    direction = _extract_direction_host(direction)
     
     # If is localhost
     if "::1" in direction or '0.0.0.0' == direction:
