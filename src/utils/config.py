@@ -47,6 +47,44 @@ class ConfigManager(metaclass=Singleton):
                 return
             self.load_config()
 
+    def _allow_gateway_port_with_iptables(self, port: int):
+        rule = [
+            "-p",
+            "tcp",
+            "--dport",
+            str(port),
+            "-j",
+            "ACCEPT",
+            "-m",
+            "comment",
+            "--comment",
+            "nodo;gateway;auto_port",
+        ]
+        try:
+            check_result = subprocess.run(
+                ["iptables", "-C", "INPUT", *rule],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if check_result.returncode == 0:
+                return
+
+            subprocess.run(
+                ["iptables", "-I", "INPUT", *rule],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise Exception(
+                f"Error attempting to open port {port} in the firewall (iptables): {e.stderr}"
+            )
+        except FileNotFoundError:
+            raise Exception(
+                "iptables command not found. Ensure iptables is installed if you intend to open ports."
+            )
+
     def load_config(self, force_reload: bool = False):
         """
         Loads the YAML file, processes dynamic values, and interpolates paths.
@@ -70,19 +108,7 @@ class ConfigManager(metaclass=Singleton):
                 free_port_ranges = self._get_nested(self._config, ["network", "FREE_PORTS_RANGE"]) or []
                 port = get_free_port(free_port_ranges=free_port_ranges)
                 if port and os.geteuid() == 0:
-                    try:
-                        subprocess.run(
-                            ["ufw", "allow", f"{port}/tcp"],
-                            check=True,
-                            capture_output=True,
-                            text=True,
-                        )
-                    except subprocess.CalledProcessError as e:
-                        raise Exception(
-                            f"Error attempting to open port {port} in the firewall (ufw): {e.stderr}"
-                        )
-                    except FileNotFoundError:
-                        raise Exception("ufw command not found. Ensure ufw is installed if you intend to open ports.")
+                    self._allow_gateway_port_with_iptables(port=port)
                 self._set_nested(self._config, ["network", "GATEWAY_PORT"], port)
                 self.log(f"Dynamically assigned Gateway Port: {port}")
 
