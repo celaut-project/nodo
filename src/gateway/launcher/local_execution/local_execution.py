@@ -45,7 +45,7 @@ def _find_any_host_interface_ip() -> str:
         if interface in {"lo", "localhost"}:
             continue
         try:
-            return utils.get_local_ip_from_network(network=interface)
+            return utils.get_local_ip_from_network(network=interface, allow_link_local=False)
         except Exception:
             continue
     raise RuntimeError("Unable to find any host interface IP to advertise.")
@@ -58,15 +58,15 @@ def _get_external_advertised_host_ip(father_ip: str) -> str:
 
     configured_interface = str(env_manager.get("network.EXTERNAL_INTERFACE", "") or "").strip()
     if configured_interface:
-        return utils.get_local_ip_from_network(network=configured_interface)
+        return utils.get_local_ip_from_network(network=configured_interface, allow_link_local=False)
 
     default_interface = _resolve_default_ipv4_interface()
     if default_interface:
-        return utils.get_local_ip_from_network(network=default_interface)
+        return utils.get_local_ip_from_network(network=default_interface, allow_link_local=False)
 
     default_ipv6_interface = _resolve_default_ipv6_interface()
     if default_ipv6_interface:
-        return utils.get_local_ip_from_network(network=default_ipv6_interface)
+        return utils.get_local_ip_from_network(network=default_ipv6_interface, allow_link_local=False)
 
     try:
         return _find_any_host_interface_ip()
@@ -76,9 +76,12 @@ def _get_external_advertised_host_ip(father_ip: str) -> str:
     if father_ip:
         resolved_network = utils.get_network_name(direction=father_ip)
         if resolved_network:
-            return utils.get_local_ip_from_network(network=resolved_network)
+            return utils.get_local_ip_from_network(network=resolved_network, allow_link_local=False)
 
-    raise RuntimeError("Unable to resolve an external host IP to advertise.")
+    raise RuntimeError(
+        "Unable to resolve an external host IP to advertise. "
+        "Configure network.PUBLIC_IP or network.EXTERNAL_INTERFACE."
+    )
 
 def local_execution(
         config: Optional[celaut_pb2.Configuration],
@@ -207,7 +210,7 @@ def local_execution(
             _ip: str = (
                 _get_external_advertised_host_ip(father_ip=father_ip)
                 if force_external_exposure and expose_outside
-                else utils.get_local_ip_from_network(network=resolved_network)
+                else utils.get_local_ip_from_network(network=resolved_network, allow_link_local=False)
                 if expose_outside
                 else vmachine_ip
             )
