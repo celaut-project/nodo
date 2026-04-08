@@ -3,7 +3,6 @@ from bee_rpc.utils import modify_env
 from psutil import virtual_memory
 from src.utils import logger as log
 import src.manager.resources as iobd
-from src.payment_system.contracts.envs import print_payment_info
 from src.utils.config import ConfigManager
 from src.utils.network import get_local_ip
 
@@ -190,6 +189,7 @@ if __name__ == '__main__':
         match sys.argv[1]:
 
             case "info":
+                from src.payment_system.contracts.envs import print_payment_info
                 
                 try:
                     status = "running" if is_nodo_service_running() else "not running"

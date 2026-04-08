@@ -82,10 +82,10 @@ def execute(service: str):
         print("No service allowed.")
         return
 
+    channel = None
     try:
-        g_stub = celaut_pb2_grpc.GatewayStub(
-            grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
-        )
+        channel = grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
+        g_stub = celaut_pb2_grpc.GatewayStub(channel)
 
         print(f"Execute {service}")
 
@@ -129,6 +129,9 @@ def execute(service: str):
         print(f"\n[ERROR] Service could not be executed.")
         print(f"Details: {str(e)}")
         return
+    finally:
+        if channel is not None:
+            channel.close()
 
     # Process HTTP endpoints only if execution succeeded
     for slot in response.instance.api.slot:

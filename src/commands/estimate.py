@@ -43,9 +43,8 @@ def estimate(service: str) -> None:
         initial_gas_amount=to_gas_amount(gas_amount=ESTIMATION_INITIAL_GAS_AMOUNT)
     )
 
-    g_stub = celaut_pb2_grpc.GatewayStub(
-        grpc.insecure_channel(f"localhost:{GATEWAY_PORT}"),
-    )
+    channel = grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
+    g_stub = celaut_pb2_grpc.GatewayStub(channel)
 
     print(f"Estimate {service}")
     print("Querying gateway for estimated cost (uses real-time locked RAM)...")
@@ -67,6 +66,8 @@ def estimate(service: str) -> None:
         print("Execution feasibility: NO")
         print(f"Reason: gateway error — {str(e)}")
         return
+    finally:
+        channel.close()
 
     if not estimated_cost:
         print("Execution feasibility: NO")
