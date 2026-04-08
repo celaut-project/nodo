@@ -228,7 +228,7 @@ def is_service_built(service_hash: str) -> bool:
                 continue
     except (IndexError, AttributeError) as e:
         # Log the error, handle exceptions for missing attributes or invalid indexing
-        logger(f"An error occurred while checking if service is built: {e}")
+        l.LOGGER(f"An error occurred while checking if service is built: {e}")
     except Exception as e:
-        logger(f"Unexpected error in __is_service_built: {e}")
+        l.LOGGER(f"Unexpected error in __is_service_built: {e}")
     return False
