@@ -71,6 +71,27 @@ class ExecuteCommandTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:18080", rendered)
         mock_channel.return_value.close.assert_called_once()
 
+    def test_execute_external_uses_external_execute_client(self):
+        response = self._response_with_slot(transport_tags=["http"])
+
+        with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
+            execute_cmd.grpc, "insecure_channel"
+        ) as mock_channel, patch.object(
+            execute_cmd.celaut_pb2_grpc, "GatewayStub"
+        ) as mock_stub_cls, patch.object(
+            execute_cmd, "client_grpc", return_value=iter([response])
+        ), patch.object(
+            execute_cmd, "get_execute_client", return_value="dev-external-1"
+        ) as mock_get_execute_client:
+            mock_stub_cls.return_value.StartService = object()
+            execute_cmd.execute("svc", external=True)
+
+        mock_get_execute_client.assert_called_once_with(
+            gas_amount=10**16,
+            external=True,
+        )
+        mock_channel.return_value.close.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

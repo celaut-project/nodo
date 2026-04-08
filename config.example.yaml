@@ -116,6 +116,8 @@ packer:
 network:
   GATEWAY_PORT: auto
   LOCAL_NETWORK: "lo"
+  PUBLIC_IP: ""  # Optional public IP or DNS name to advertise for `nodo execute --external`. Leave empty to auto-detect from the default outbound interface.
+  EXTERNAL_INTERFACE: ""  # Optional interface name to use when PUBLIC_IP is empty, e.g. "eth0".
   # If true, child instances launched by internal instances are NOT exposed on the host.
   # If false, child instances will be published and reachable from the internet (subject to host firewall).
   ISOLATE_INTERNAL_CHILDREN: true
@@ -168,6 +170,7 @@ communication:
 client:
   MIN_SLOTS_OPEN_PER_PEER: 1
   CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME: 1.0e+3
+  DEV_EXTERNAL_CLIENT_POOL_SIZE: 3
 
 misc:
   MIN_BUFFER_BLOCK_SIZE: 1.0e+7
