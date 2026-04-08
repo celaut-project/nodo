@@ -58,6 +58,14 @@ def _get_external_dev_clients() -> List[str]:
     return [client_id for client_id in sc.get_dev_clients() if is_external_execute_client(client_id)]
 
 
+def _get_client_gas_amount(client_id: str) -> Optional[int]:
+    client_gas = sc.get_client_gas(client_id=client_id)
+    if not client_gas:
+        log.LOGGER(f"Client {client_id} has no readable gas entry. Skipping.")
+        return None
+    return client_gas[0]
+
+
 def ensure_dev_client_pools() -> None:
     clients = _get_standard_dev_clients()
     if len(clients) == 0:
@@ -79,7 +87,8 @@ def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
     ensure_dev_client_pools()
     clients = _get_standard_dev_clients()
     for client_id in clients:
-        if sc.get_client_gas(client_id=client_id)[0] > gas_amount:
+        client_gas = _get_client_gas_amount(client_id=client_id)
+        if client_gas is not None and client_gas > gas_amount:
             yield client_id
 
 
@@ -91,14 +100,31 @@ def get_execute_client(gas_amount: int, external: bool = False) -> str:
     external_clients = _get_external_dev_clients()
 
     for client_id in external_clients:
-        if sc.get_client_gas(client_id=client_id)[0] > gas_amount:
+        client_gas = _get_client_gas_amount(client_id=client_id)
+        if client_gas is not None and client_gas > gas_amount:
             return client_id
 
-    if not external_clients:
-        raise RuntimeError("No external dev client available.")
+    usable_external_clients = [
+        client_id for client_id in external_clients if _get_client_gas_amount(client_id=client_id) is not None
+    ]
+    if not usable_external_clients:
+        log.LOGGER("External dev client pool is empty or invalid. Re-seeding and retrying.")
+        sc.add_client(
+            client_id=f"{EXTERNAL_DEV_CLIENT_PREFIX}{uuid4()}",
+            gas=DEV_CLIENT_GAS_AMOUNT,
+            last_usage=None,
+        )
+        usable_external_clients = [
+            client_id for client_id in _get_external_dev_clients()
+            if _get_client_gas_amount(client_id=client_id) is not None
+        ]
+        if not usable_external_clients:
+            raise RuntimeError("No external dev client available.")
 
-    client_id = external_clients[0]
-    current_gas, _, _ = sc.get_client_gas(client_id=client_id)
+    client_id = usable_external_clients[0]
+    current_gas = _get_client_gas_amount(client_id=client_id)
+    if current_gas is None:
+        raise RuntimeError(f"External dev client {client_id} has no readable gas entry.")
     if current_gas < gas_amount:
         sc.add_gas(client_id=client_id, gas=DEV_CLIENT_GAS_AMOUNT - current_gas)
     return client_id
