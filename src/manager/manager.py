@@ -1,4 +1,5 @@
 from uuid import uuid4
+from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Generator, Tuple
 
 import grpc
@@ -37,11 +38,19 @@ DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT_
 DEFAULT_INITIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT")
 USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
 MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
-FEE_TRIAL_GAS_AMOUNT = int(env_manager.get("FREE_TRIAL_GAS_AMOUNT"))
-DEV_CLIENT_GAS_AMOUNT = env_manager.get("DEV_CLIENT_GAS_AMOUNT")
+def _parse_config_int(value, *, name: str) -> int:
+    try:
+        return int(Decimal(str(value)))
+    except (ValueError, InvalidOperation) as e:
+        raise ValueError(f"Invalid integer-like config value for {name}: {value}") from e
+
+
+FEE_TRIAL_GAS_AMOUNT = _parse_config_int(env_manager.get("FREE_TRIAL_GAS_AMOUNT"), name="FREE_TRIAL_GAS_AMOUNT")
+DEV_CLIENT_GAS_AMOUNT = _parse_config_int(env_manager.get("DEV_CLIENT_GAS_AMOUNT"), name="DEV_CLIENT_GAS_AMOUNT")
 DEV_CLIENT_PREFIX = "dev-"
 EXTERNAL_DEV_CLIENT_PREFIX = "dev-external-"
-DEV_EXTERNAL_CLIENT_POOL_SIZE = int(env_manager.get("client.DEV_EXTERNAL_CLIENT_POOL_SIZE", 3))
+STANDARD_DEV_CLIENT_POOL_SIZE = int(env_manager.get("client.DEV_CLIENT_POOL_SIZE", 1))
+DEV_EXTERNAL_CLIENT_POOL_SIZE = int(env_manager.get("client.DEV_EXTERNAL_CLIENT_POOL_SIZE", 1))
 
 sc = SQLConnection()
 
@@ -50,12 +59,10 @@ def is_external_execute_client(client_id: str) -> bool:
     return str(client_id).startswith(EXTERNAL_DEV_CLIENT_PREFIX)
 
 
-def _get_standard_dev_clients() -> List[str]:
-    return [client_id for client_id in sc.get_dev_clients() if not is_external_execute_client(client_id)]
-
-
-def _get_external_dev_clients() -> List[str]:
-    return [client_id for client_id in sc.get_dev_clients() if is_external_execute_client(client_id)]
+def _get_dev_clients_by_prefix(prefix: str) -> List[str]:
+    if prefix == DEV_CLIENT_PREFIX:
+        return [client_id for client_id in sc.get_dev_clients() if not is_external_execute_client(client_id)]
+    return [client_id for client_id in sc.get_dev_clients() if str(client_id).startswith(prefix)]
 
 
 def _get_client_gas_amount(client_id: str) -> Optional[int]:
@@ -66,38 +73,77 @@ def _get_client_gas_amount(client_id: str) -> Optional[int]:
     return client_gas[0]
 
 
-def _create_dev_client(prefix: str) -> str:
+def _target_dev_client_gas(gas_amount: int) -> int:
+    return max(DEV_CLIENT_GAS_AMOUNT, int(gas_amount) + 1)
+
+
+def _create_dev_client(prefix: str, gas_amount: Optional[int] = None) -> str:
     client_id = f"{prefix}{uuid4()}"
-    sc.add_client(client_id=client_id, gas=DEV_CLIENT_GAS_AMOUNT, last_usage=None)
+    sc.add_client(
+        client_id=client_id,
+        gas=_target_dev_client_gas(gas_amount or 0),
+        last_usage=None,
+    )
     return client_id
 
 
-def _create_verified_external_dev_client() -> str:
+def _create_verified_dev_client(prefix: str, gas_amount: int) -> str:
     for _ in range(3):
-        client_id = _create_dev_client(EXTERNAL_DEV_CLIENT_PREFIX)
+        client_id = _create_dev_client(prefix, gas_amount=gas_amount)
         client_gas = _get_client_gas_amount(client_id=client_id)
-        if client_gas is not None:
+        if client_gas is not None and client_gas > gas_amount:
             return client_id
-        log.LOGGER(f"External dev client {client_id} was created but not readable. Retrying.")
-    raise RuntimeError("No external dev client available.")
+        log.LOGGER(f"Dev client {client_id} was created but not readable. Retrying.")
+    raise RuntimeError(f"No dev client available for prefix {prefix}.")
+
+
+def _ensure_dev_client_pool(prefix: str, pool_size: int) -> List[str]:
+    clients = _get_dev_clients_by_prefix(prefix)
+    readable_clients: List[str] = []
+    for client_id in clients:
+        client_gas = _get_client_gas_amount(client_id=client_id)
+        if client_gas is None:
+            continue
+        target_gas = _target_dev_client_gas(0)
+        if client_gas < target_gas:
+            sc.add_gas(client_id=client_id, gas=target_gas - client_gas)
+        readable_clients.append(client_id)
+    missing_clients = max(0, pool_size - len(readable_clients))
+    for _ in range(missing_clients):
+        log.LOGGER(f"Adds dev client for prefix {prefix}.")
+        readable_clients.append(_create_verified_dev_client(prefix, gas_amount=0))
+    return readable_clients
 
 
 def ensure_dev_client_pools() -> None:
-    clients = _get_standard_dev_clients()
-    if len(clients) == 0:
-        log.LOGGER("Adds dev client.")
-        _create_dev_client(DEV_CLIENT_PREFIX)
+    _ensure_dev_client_pool(DEV_CLIENT_PREFIX, STANDARD_DEV_CLIENT_POOL_SIZE)
+    _ensure_dev_client_pool(EXTERNAL_DEV_CLIENT_PREFIX, DEV_EXTERNAL_CLIENT_POOL_SIZE)
 
-    external_clients = _get_external_dev_clients()
-    missing_external_clients = max(0, DEV_EXTERNAL_CLIENT_POOL_SIZE - len(external_clients))
-    for _ in range(missing_external_clients):
-        log.LOGGER("Adds external dev client.")
-        _create_dev_client(EXTERNAL_DEV_CLIENT_PREFIX)
+
+def _acquire_dev_client(prefix: str, pool_size: int, gas_amount: int) -> str:
+    clients = _ensure_dev_client_pool(prefix, pool_size)
+
+    for client_id in clients:
+        client_gas = _get_client_gas_amount(client_id=client_id)
+        if client_gas is not None and client_gas > gas_amount:
+            return client_id
+
+    if not clients:
+        return _create_verified_dev_client(prefix, gas_amount=gas_amount)
+
+    client_id = clients[0]
+    current_gas = _get_client_gas_amount(client_id=client_id)
+    if current_gas is None:
+        return _create_verified_dev_client(prefix, gas_amount=gas_amount)
+
+    target_gas = _target_dev_client_gas(gas_amount)
+    if current_gas < target_gas:
+        sc.add_gas(client_id=client_id, gas=target_gas - current_gas)
+    return client_id
 
 
 def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
-    ensure_dev_client_pools()
-    clients = _get_standard_dev_clients()
+    clients = _ensure_dev_client_pool(DEV_CLIENT_PREFIX, STANDARD_DEV_CLIENT_POOL_SIZE)
     for client_id in clients:
         client_gas = _get_client_gas_amount(client_id=client_id)
         if client_gas is not None and client_gas > gas_amount:
@@ -105,31 +151,9 @@ def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
 
 
 def get_execute_client(gas_amount: int, external: bool = False) -> str:
-    if not external:
-        return next(get_dev_clients(gas_amount=gas_amount))
-
-    ensure_dev_client_pools()
-    external_clients = _get_external_dev_clients()
-
-    for client_id in external_clients:
-        client_gas = _get_client_gas_amount(client_id=client_id)
-        if client_gas is not None and client_gas > gas_amount:
-            return client_id
-
-    usable_external_clients = [
-        client_id for client_id in external_clients if _get_client_gas_amount(client_id=client_id) is not None
-    ]
-    if not usable_external_clients:
-        log.LOGGER("External dev client pool is empty or invalid. Re-seeding and retrying.")
-        return _create_verified_external_dev_client()
-
-    client_id = usable_external_clients[0]
-    current_gas = _get_client_gas_amount(client_id=client_id)
-    if current_gas is None:
-        raise RuntimeError(f"External dev client {client_id} has no readable gas entry.")
-    if current_gas < gas_amount:
-        sc.add_gas(client_id=client_id, gas=DEV_CLIENT_GAS_AMOUNT - current_gas)
-    return client_id
+    prefix = EXTERNAL_DEV_CLIENT_PREFIX if external else DEV_CLIENT_PREFIX
+    pool_size = DEV_EXTERNAL_CLIENT_POOL_SIZE if external else STANDARD_DEV_CLIENT_POOL_SIZE
+    return _acquire_dev_client(prefix, pool_size, gas_amount)
             
 def add_reputation_proof(contract_ledger, peer_id) -> bool:
     # Verify contract and ledger compatibility and ownership

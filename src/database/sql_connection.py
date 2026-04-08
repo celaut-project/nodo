@@ -4,6 +4,7 @@ import math
 import uuid
 import sqlite3
 import time
+from decimal import Decimal, InvalidOperation
 from hashlib import sha3_256
 from threading import Lock
 from typing import Callable, Dict, Generator, List, Tuple, Optional
@@ -192,8 +193,8 @@ class SQLConnection(metaclass=Singleton):
         row = result.fetchone()
         if row:
             try:
-                gas = int(row['gas'])
-            except ValueError:
+                gas = int(Decimal(str(row['gas'])))
+            except (ValueError, InvalidOperation):
                 logger.LOGGER(f'Invalid gas value for client {client_id}: {row["gas"]}')
                 return None
             return (
