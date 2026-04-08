@@ -135,7 +135,13 @@ def execute(service: str):
 
     # Process HTTP endpoints only if execution succeeded
     for slot in response.instance.api.slot:
-        if "http" in slot.protocol_stack[0].tags:
+        protocol_tags = {
+            tag.lower()
+            for protocol in slot.protocol_stack
+            for tag in protocol.tags
+        }
+        transport_tags = {tag.lower() for tag in slot.transport.tags}
+        if "http" in protocol_tags or "http" in transport_tags:
             for _exp in response.instance.uri_slot:
                 if _exp.internal_port == slot.port:
                     print("\n" + "="*50)
