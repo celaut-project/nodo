@@ -39,19 +39,69 @@ USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get("USE_DEFAULT_INITIAL_GAS
 MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
 FEE_TRIAL_GAS_AMOUNT = int(env_manager.get("FREE_TRIAL_GAS_AMOUNT"))
 DEV_CLIENT_GAS_AMOUNT = env_manager.get("DEV_CLIENT_GAS_AMOUNT")
+DEV_CLIENT_PREFIX = "dev-"
+EXTERNAL_DEV_CLIENT_PREFIX = "dev-external-"
+DEV_EXTERNAL_CLIENT_POOL_SIZE = int(env_manager.get("client.DEV_EXTERNAL_CLIENT_POOL_SIZE", 3))
 
 sc = SQLConnection()
 
 
-def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
-    clients = sc.get_dev_clients()
+def is_external_execute_client(client_id: str) -> bool:
+    return str(client_id).startswith(EXTERNAL_DEV_CLIENT_PREFIX)
+
+
+def _get_standard_dev_clients() -> List[str]:
+    return [client_id for client_id in sc.get_dev_clients() if not is_external_execute_client(client_id)]
+
+
+def _get_external_dev_clients() -> List[str]:
+    return [client_id for client_id in sc.get_dev_clients() if is_external_execute_client(client_id)]
+
+
+def ensure_dev_client_pools() -> None:
+    clients = _get_standard_dev_clients()
     if len(clients) == 0:
         log.LOGGER("Adds dev client.")
-        sc.add_client(client_id=f"dev-{uuid4()}", gas=DEV_CLIENT_GAS_AMOUNT, last_usage=None)
-        clients = sc.get_dev_clients()
+        sc.add_client(client_id=f"{DEV_CLIENT_PREFIX}{uuid4()}", gas=DEV_CLIENT_GAS_AMOUNT, last_usage=None)
+
+    external_clients = _get_external_dev_clients()
+    missing_external_clients = max(0, DEV_EXTERNAL_CLIENT_POOL_SIZE - len(external_clients))
+    for _ in range(missing_external_clients):
+        log.LOGGER("Adds external dev client.")
+        sc.add_client(
+            client_id=f"{EXTERNAL_DEV_CLIENT_PREFIX}{uuid4()}",
+            gas=DEV_CLIENT_GAS_AMOUNT,
+            last_usage=None,
+        )
+
+
+def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
+    ensure_dev_client_pools()
+    clients = _get_standard_dev_clients()
     for client_id in clients:
         if sc.get_client_gas(client_id=client_id)[0] > gas_amount:
             yield client_id
+
+
+def get_execute_client(gas_amount: int, external: bool = False) -> str:
+    if not external:
+        return next(get_dev_clients(gas_amount=gas_amount))
+
+    ensure_dev_client_pools()
+    external_clients = _get_external_dev_clients()
+
+    for client_id in external_clients:
+        if sc.get_client_gas(client_id=client_id)[0] > gas_amount:
+            return client_id
+
+    if not external_clients:
+        raise RuntimeError("No external dev client available.")
+
+    client_id = external_clients[0]
+    current_gas, _, _ = sc.get_client_gas(client_id=client_id)
+    if current_gas < gas_amount:
+        sc.add_gas(client_id=client_id, gas=DEV_CLIENT_GAS_AMOUNT - current_gas)
+    return client_id
             
 def add_reputation_proof(contract_ledger, peer_id) -> bool:
     # Verify contract and ledger compatibility and ownership
