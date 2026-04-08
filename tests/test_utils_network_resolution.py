@@ -17,9 +17,18 @@ class UtilsNetworkResolutionTests(unittest.TestCase):
             "ifaddresses",
             return_value={utils.ni.AF_INET6: [{"addr": "fe80::1234%eth0"}]},
         ):
-            ip = utils.get_local_ip_from_network("eth0")
+            ip = utils.get_local_ip_from_network("eth0", allow_link_local=True)
 
         self.assertEqual(ip, "fe80::1234")
+
+    def test_get_local_ip_from_network_rejects_link_local_when_not_allowed(self):
+        with patch.object(
+            utils.ni,
+            "ifaddresses",
+            return_value={utils.ni.AF_INET6: [{"addr": "fe80::1234%eth0"}]},
+        ):
+            with self.assertRaisesRegex(KeyError, "without link-local"):
+                utils.get_local_ip_from_network("eth0", allow_link_local=False)
 
     def test_get_network_name_handles_raw_ipv6_without_truncating_on_colon(self):
         with patch.object(utils.ni, "interfaces", return_value=["eth0"]), patch.object(

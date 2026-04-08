@@ -1,6 +1,7 @@
 import os
 import socket
 import typing
+import ipaddress
 from typing import Generator, Optional
 
 import netifaces as ni
@@ -150,20 +151,41 @@ def _extract_direction_host(direction: str) -> str:
     return _clean_ip_value(normalized)
 
 
-def get_local_ip_from_network(network: str) -> str:
+def _is_link_local_ip(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(_clean_ip_value(ip)).is_link_local
+    except ValueError:
+        return False
+
+
+def get_local_ip_from_network(network: str, *, allow_link_local: bool = True) -> str:
     addresses = ni.ifaddresses(network)
 
     ipv4_addresses = addresses.get(ni.AF_INET, [])
     if ipv4_addresses:
-        return ipv4_addresses[0]["addr"]
+        for address in ipv4_addresses:
+            candidate = _clean_ip_value(address.get("addr", ""))
+            if candidate and (allow_link_local or not _is_link_local_ip(candidate)):
+                return candidate
 
     ipv6_addresses = addresses.get(ni.AF_INET6, [])
+    fallback_link_local_ipv6 = ""
     for address in ipv6_addresses:
         candidate = _clean_ip_value(address.get("addr", ""))
-        if candidate:
+        if not candidate:
+            continue
+        if not _is_link_local_ip(candidate):
             return candidate
+        if allow_link_local and not fallback_link_local_ipv6:
+            fallback_link_local_ipv6 = candidate
 
-    raise KeyError(f"No usable IPv4/IPv6 address found for interface {network}")
+    if fallback_link_local_ipv6:
+        return fallback_link_local_ipv6
+
+    raise KeyError(
+        f"No usable IPv4/IPv6 address found for interface {network}"
+        + ("" if allow_link_local else " without link-local addresses")
+    )
 
 longestSublistFinder = lambda string1, string2, split: split.join(
     [a for a in string1.split(split) for b in string2.split(split) if a == b]) + split
