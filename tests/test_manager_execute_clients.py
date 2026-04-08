@@ -28,6 +28,28 @@ class ManagerExecuteClientTests(unittest.TestCase):
 
         self.assertEqual(client_id, "dev-external-ok")
 
+    def test_get_execute_client_external_creates_new_client_when_pool_is_invalid(self):
+        client_gas = {
+            "dev-external-broken": None,
+            "dev-external-new": (10**18, None, "1e+18"),
+        }
+
+        with patch.object(manager, "ensure_dev_client_pools"), patch.object(
+            manager, "_get_external_dev_clients", return_value=["dev-external-broken"]
+        ), patch.object(
+            manager,
+            "_create_verified_external_dev_client",
+            return_value="dev-external-new",
+        ) as mock_create_verified, patch.object(
+            manager.sc,
+            "get_client_gas",
+            side_effect=lambda client_id: client_gas.get(client_id),
+        ):
+            client_id = manager.get_execute_client(gas_amount=10**16, external=True)
+
+        self.assertEqual(client_id, "dev-external-new")
+        mock_create_verified.assert_called_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()
