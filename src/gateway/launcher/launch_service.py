@@ -11,8 +11,54 @@ from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_gas_amount, to_gas_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.firewall import allow_connection_to_instance
+from src.utils.cost_functions.generate_estimated_cost import (
+    generate_estimated_cost,
+    get_resource_availability,
+)
+from src.virtualizers.architecture import UnsupportedArchitectureException
 
 sc = SQLConnection()
+
+
+def _detect_local_preflight_failure(
+        service: celaut.Service,
+        metadata: celaut.Metadata,
+        configuration: celaut_pb2.Configuration,
+) -> Optional[str]:
+    try:
+        estimated_cost = generate_estimated_cost(
+            resources=service.container.resources,
+            metadata=metadata,
+            config=configuration,
+        )
+        if estimated_cost:
+            return None
+
+        availability = get_resource_availability(service.container.resources)
+        return availability.get("reason") or "Local execution was rejected due to insufficient resources."
+    except UnsupportedArchitectureException as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Local preflight failed with {type(exc).__name__}: {exc}"
+
+
+def _format_launch_failure(
+        service_id: Optional[str],
+        launch_failures: list[str],
+        local_preflight_failure: Optional[str] = None,
+) -> str:
+    details = []
+    if local_preflight_failure:
+        details.append(f"local preflight: {local_preflight_failure}")
+    details.extend(launch_failures)
+
+    if not details:
+        return (
+            f"Unable to launch service {service_id}: no eligible local executor or peer "
+            f"was available at this time."
+        )
+
+    return f"Unable to launch service {service_id}. Attempt details: {' | '.join(details[:8])}"
 
 
 def launch_service(
@@ -46,6 +92,14 @@ def launch_service(
 
         if not configuration.HasField('initial_gas_amount') or not configuration.initial_gas_amount:
             configuration.initial_gas_amount.CopyFrom(to_gas_amount(default_initial_cost()))
+
+        local_preflight_failure = _detect_local_preflight_failure(
+            service=service,
+            metadata=metadata,
+            configuration=configuration,
+        )
+        launch_failures = []
+        local_attempted = False
 
         for peer, estimated_cost in execution_balancer(
                 resources=service.container.resources,
@@ -81,6 +135,7 @@ def launch_service(
                     )
 
                 else:
+                    local_attempted = True
                     instance = local_execution(
                         config=configuration,
                         resources=service.container.resources,
@@ -110,8 +165,16 @@ def launch_service(
             except Exception as e:
                log.LOGGER(f"Exception launching service on peer {peer}: {str(e)}")
                log.LOGGER(traceback.format_exc())
+               launch_failures.append(f"{peer}: {type(e).__name__}: {e}")
                continue
 
-        _err_msg = f"Unable to launch service {service_id}: cannot run locally due to architecture incompatibility or insufficient resources, and no available peer could execute the service at this time."
+        if local_attempted:
+            local_preflight_failure = None
+
+        _err_msg = _format_launch_failure(
+            service_id=service_id,
+            launch_failures=launch_failures,
+            local_preflight_failure=local_preflight_failure,
+        )
         log.LOGGER(_err_msg)
         raise Exception(_err_msg)
