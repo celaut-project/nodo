@@ -29,6 +29,28 @@ def _resolve_default_ipv4_interface() -> str:
     return ""
 
 
+def _resolve_default_ipv6_interface() -> str:
+    try:
+        default_gateway = ni.gateways().get("default", {})
+        default_route = default_gateway.get(ni.AF_INET6)
+        if default_route and len(default_route) > 1:
+            return str(default_route[1])
+    except Exception as e:
+        log.LOGGER(f"Unable to resolve default IPv6 interface: {e}")
+    return ""
+
+
+def _find_any_host_interface_ip() -> str:
+    for interface in ni.interfaces():
+        if interface in {"lo", "localhost"}:
+            continue
+        try:
+            return utils.get_local_ip_from_network(network=interface)
+        except Exception:
+            continue
+    raise RuntimeError("Unable to find any host interface IP to advertise.")
+
+
 def _get_external_advertised_host_ip(father_ip: str) -> str:
     configured_public_ip = str(env_manager.get("network.PUBLIC_IP", "") or "").strip()
     if configured_public_ip:
@@ -42,9 +64,19 @@ def _get_external_advertised_host_ip(father_ip: str) -> str:
     if default_interface:
         return utils.get_local_ip_from_network(network=default_interface)
 
+    default_ipv6_interface = _resolve_default_ipv6_interface()
+    if default_ipv6_interface:
+        return utils.get_local_ip_from_network(network=default_ipv6_interface)
+
+    try:
+        return _find_any_host_interface_ip()
+    except Exception as e:
+        log.LOGGER(f"Unable to resolve host IP from available interfaces: {e}")
+
     if father_ip:
         resolved_network = utils.get_network_name(direction=father_ip)
-        return utils.get_local_ip_from_network(network=resolved_network)
+        if resolved_network:
+            return utils.get_local_ip_from_network(network=resolved_network)
 
     raise RuntimeError("Unable to resolve an external host IP to advertise.")
 
