@@ -1,13 +1,15 @@
+from hashlib import sha3_256
 from typing import Generator
 from protos import celaut_pb2 as celaut
 from src.database.access_functions.ledgers import get_peer_contract_instances
-from src.payment_system.contracts.ergo.interface import CONTRACT_HASH, CONTRACT
 from src.utils.config import ConfigManager
 from src.utils.utils import to_gas_amount
 from src.utils.logger import LOGGER
 from src.utils.contract_xattrs import set_address, set_script, set_token_id
 
 GAS_PER_ERG = int(ConfigManager().get("ledgers.ergo.GAS_PER_ERG"))
+CONTRACT = "proveDlog(decodePoint())"
+CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
  
 def local_payment_methods() -> Generator[celaut.GasPrice, None, None]:
     for script, ledger in get_peer_contract_instances(CONTRACT_HASH): 

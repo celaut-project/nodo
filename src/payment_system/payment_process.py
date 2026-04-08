@@ -279,7 +279,7 @@ def __manage_interfaces():
 
 
 def init_interfaces():
-    Thread(target=__manage_interfaces).start()
+    Thread(target=__manage_interfaces, daemon=True).start()
     for key, _init in INIT_INTERFACES.items():
         if callable(_init):
             try:
