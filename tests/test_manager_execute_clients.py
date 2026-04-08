@@ -11,44 +11,27 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ManagerExecuteClientTests(unittest.TestCase):
-    def test_get_execute_client_external_skips_clients_without_gas_row(self):
-        client_gas = {
-            "dev-external-broken": None,
-            "dev-external-ok": (10**18, None, "1e+18"),
-        }
+    def test_get_execute_client_uses_shared_acquire_path_for_standard_clients(self):
+        with patch.object(manager, "_acquire_dev_client", return_value="dev-1") as mock_acquire:
+            client_id = manager.get_execute_client(gas_amount=10**16, external=False)
 
-        with patch.object(manager, "ensure_dev_client_pools"), patch.object(
-            manager, "_get_external_dev_clients", return_value=["dev-external-broken", "dev-external-ok"]
-        ), patch.object(
-            manager.sc,
-            "get_client_gas",
-            side_effect=lambda client_id: client_gas.get(client_id),
-        ):
+        self.assertEqual(client_id, "dev-1")
+        mock_acquire.assert_called_once_with(
+            manager.DEV_CLIENT_PREFIX,
+            manager.STANDARD_DEV_CLIENT_POOL_SIZE,
+            10**16,
+        )
+
+    def test_get_execute_client_uses_shared_acquire_path_for_external_clients(self):
+        with patch.object(manager, "_acquire_dev_client", return_value="dev-external-1") as mock_acquire:
             client_id = manager.get_execute_client(gas_amount=10**16, external=True)
 
-        self.assertEqual(client_id, "dev-external-ok")
-
-    def test_get_execute_client_external_creates_new_client_when_pool_is_invalid(self):
-        client_gas = {
-            "dev-external-broken": None,
-            "dev-external-new": (10**18, None, "1e+18"),
-        }
-
-        with patch.object(manager, "ensure_dev_client_pools"), patch.object(
-            manager, "_get_external_dev_clients", return_value=["dev-external-broken"]
-        ), patch.object(
-            manager,
-            "_create_verified_external_dev_client",
-            return_value="dev-external-new",
-        ) as mock_create_verified, patch.object(
-            manager.sc,
-            "get_client_gas",
-            side_effect=lambda client_id: client_gas.get(client_id),
-        ):
-            client_id = manager.get_execute_client(gas_amount=10**16, external=True)
-
-        self.assertEqual(client_id, "dev-external-new")
-        mock_create_verified.assert_called_once_with()
+        self.assertEqual(client_id, "dev-external-1")
+        mock_acquire.assert_called_once_with(
+            manager.EXTERNAL_DEV_CLIENT_PREFIX,
+            manager.DEV_EXTERNAL_CLIENT_POOL_SIZE,
+            10**16,
+        )
 
 
 if __name__ == "__main__":
