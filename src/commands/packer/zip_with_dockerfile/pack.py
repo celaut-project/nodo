@@ -47,15 +47,17 @@ def __spinner(event):
 
 
 def __pack(zip, node: str):
-    yield from grpcbb.client_grpc(
-        method=celaut_pb2_grpc.GatewayStub(
-            grpc.insecure_channel(node)
-        ).Pack,
-        input=grpcbb.Dir(dir=zip, _type=bytes),
-        indices_serializer={0: bytes},
-        indices_parser=gateway_bee.PackOutput_indices,
-        partitions_message_mode_parser={1: True, 2: True, 3: False}
-    )
+    channel = grpc.insecure_channel(node)
+    try:
+        yield from grpcbb.client_grpc(
+            method=celaut_pb2_grpc.GatewayStub(channel).Pack,
+            input=grpcbb.Dir(dir=zip, _type=bytes),
+            indices_serializer={0: bytes},
+            indices_parser=gateway_bee.PackOutput_indices,
+            partitions_message_mode_parser={1: True, 2: True, 3: False}
+        )
+    finally:
+        channel.close()
 
 
 def __on_peer(peer: str, service_zip_dir: str) -> str:

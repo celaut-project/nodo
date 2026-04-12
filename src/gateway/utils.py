@@ -4,7 +4,6 @@ from typing import Generator, Optional
 
 import netifaces as ni
 
-from src.payment_system.contracts.ergo.interface import LEDGER as ERGO_LEDGER
 from src.reputation_system.fetch import local_proofs
 from src.payment_system.ledgers import local_payment_methods
 from protos import celaut_pb2 as celaut, celaut_pb2
