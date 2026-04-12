@@ -22,6 +22,18 @@ def _service_with_entrypoint(*entrypoints: str):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class CloudHypervisorExecuteHelpersTests(unittest.TestCase):
+    def test_build_ch_process_args_exposes_nodo_name_in_argv0(self):
+        args = ch_execute._build_ch_process_args(
+            start_command=[
+                "/nodo/bin/cloud-hypervisor",
+                "--api-socket",
+                "/tmp/ch.sock",
+            ],
+            vmachine_id="f47b647a-eb0f-4518-8c8e-da40654bec4d",
+        )
+        self.assertEqual(args[0], "nodo-ch-f47b647a")
+        self.assertEqual(args[1:], ["--api-socket", "/tmp/ch.sock"])
+
     def test_validate_entrypoint_strict_accepts_single_absolute_path(self):
         service = _service_with_entrypoint("/bin/server")
         self.assertEqual(ch_execute._validate_entrypoint_strict(service), "/bin/server")
