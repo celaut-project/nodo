@@ -3,7 +3,6 @@ from bee_rpc.utils import modify_env
 from psutil import virtual_memory
 from src.utils import logger as log
 import src.manager.resources as iobd
-from src.payment_system.contracts.envs import print_payment_info
 from src.utils.config import ConfigManager
 from src.utils.network import get_local_ip
 
@@ -133,7 +132,7 @@ if __name__ == '__main__':
 
     if len(sys.argv) == 1:
         print("Command needed: "
-            "\n- execute <service id> | <service tag> | <'.celaut' file path>"
+            "\n- execute [--external] <service id> | <service tag> | <'.celaut' file path>"
             "\n- estimate <service id> | <service tag> | <'.celaut' file path>"
             "\n- inspect <service id> | <service tag>"
             "\n- remove <service id> | <service tag>"
@@ -190,6 +189,7 @@ if __name__ == '__main__':
         match sys.argv[1]:
 
             case "info":
+                from src.payment_system.contracts.envs import print_payment_info
                 
                 try:
                     status = "running" if is_nodo_service_running() else "not running"
@@ -319,13 +319,21 @@ if __name__ == '__main__':
                 from src.commands.execute import execute
                 import sys
 
+                args = sys.argv[2:]
+                external = "--external" in args
+                args = [arg for arg in args if arg != "--external"]
+
+                if len(args) != 1:
+                    print("Usage: nodo execute [--external] <service id|service tag|'.celaut' file path>", flush=True)
+                    sys.exit(1)
+
                 try:
-                    arg = resolve_service_input(sys.argv[2])
+                    arg = resolve_service_input(args[0])
                 except FileNotFoundError as e:
                     print(f"Error: {str(e)}")
                     sys.exit(1)
 
-                execute(service=arg)
+                execute(service=arg, external=external)
 
             case "estimate":
                 from src.commands.estimate import estimate

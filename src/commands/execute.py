@@ -7,7 +7,7 @@ from bee_rpc.client import client_grpc
 from protos import celaut_pb2, celaut_pb2_grpc, gateway_bee
 
 from src.commands.__by_tag import get_id
-from src.manager.manager import get_dev_clients
+from src.manager.manager import get_execute_client
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.utils import to_gas_amount
@@ -42,14 +42,18 @@ def resolve_service_hash(service: str) -> str:
     return ""
 
 
-def generator(_hash: str, mem_limit: int = 50 * pow(10, 4), initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT) -> Generator[Any, None, None]:
+def generator(
+    _hash: str,
+    mem_limit: int = 50 * pow(10, 4),
+    initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT,
+    external: bool = False,
+) -> Generator[Any, None, None]:
     print("Get clients")
-    clients = get_dev_clients(gas_amount=initial_gas_amount)
     try:
-        client_id = next(clients)
+        client_id = get_execute_client(gas_amount=initial_gas_amount, external=external)
     except Exception:
-        print("There is no dev client available.")
-        raise RuntimeError("No dev client available.")
+        print("There is no execute client available.")
+        raise RuntimeError("No execute client available.")
     print(f"Client obtained {str(client_id)}")
     try:
         
@@ -76,16 +80,16 @@ def generator(_hash: str, mem_limit: int = 50 * pow(10, 4), initial_gas_amount: 
         print(f"Exception on executing {_hash[:6]}: {e}")
 
 
-def execute(service: str):
+def execute(service: str, external: bool = False):
     service = resolve_service_hash(service)
     if not service:
         print("No service allowed.")
         return
 
+    channel = None
     try:
-        g_stub = celaut_pb2_grpc.GatewayStub(
-            grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
-        )
+        channel = grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
+        g_stub = celaut_pb2_grpc.GatewayStub(channel)
 
         print(f"Execute {service}")
 
@@ -94,7 +98,8 @@ def execute(service: str):
             input=generator(
                 _hash=service,
                 initial_gas_amount=10**16,
-                mem_limit=10**9
+                mem_limit=10**9,
+                external=external,
             ),
             indices_parser=celaut_pb2.ServiceInstance,
             partitions_message_mode_parser=True,
@@ -129,10 +134,19 @@ def execute(service: str):
         print(f"\n[ERROR] Service could not be executed.")
         print(f"Details: {str(e)}")
         return
+    finally:
+        if channel is not None:
+            channel.close()
 
     # Process HTTP endpoints only if execution succeeded
     for slot in response.instance.api.slot:
-        if "http" in slot.protocol_stack[0].tags:
+        protocol_tags = {
+            tag.lower()
+            for protocol in slot.protocol_stack
+            for tag in protocol.tags
+        }
+        transport_tags = {tag.lower() for tag in slot.transport.tags}
+        if "http" in protocol_tags or "http" in transport_tags:
             for _exp in response.instance.uri_slot:
                 if _exp.internal_port == slot.port:
                     print("\n" + "="*50)

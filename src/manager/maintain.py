@@ -1,5 +1,4 @@
 from time import sleep
-from uuid import uuid4
 import os
 
 import grpc
@@ -8,7 +7,7 @@ from bee_rpc import client as beerpc
 from protos import celaut_pb2 as celaut, celaut_pb2_grpc, celaut_pb2
 from protos.gateway_bee import StartService_input_indices, StartService_input_message_mode
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import stop_instance, spend_gas, update_peer_instance
+from src.manager.manager import ensure_dev_client_pools, stop_instance, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.payment_process import increase_deposit_on_peer, init_interfaces
@@ -27,7 +26,6 @@ SHORT_INTERVAL_COUNT = env_manager.get("SHORT_INTERVAL_COUNT")
 SUBMIT_REPUTATION_AT_INIT = env_manager.get("SUBMIT_REPUTATION_AT_INIT")
 MIN_SLOTS_OPEN_PER_PEER = int(env_manager.get("MIN_SLOTS_OPEN_PER_PEER"))
 MIN_DEPOSIT_PEER = int(env_manager.get("MIN_DEPOSIT_PEER"))
-DEV_CLIENT_GAS_AMOUNT = int(env_manager.get("DEV_CLIENT_GAS_AMOUNT"))
 TOTAL_REFILLED_DEPOSIT = int(env_manager.get("TOTAL_REFILLED_DEPOSIT"))
 MANAGER_ITERATION_TIME = int(env_manager.get("MANAGER_ITERATION_TIME"))
 REGISTRY = env_manager.get("REGISTRY")
@@ -224,16 +222,7 @@ def peer_deposits(debug_mode: bool = False):
 
 
 def check_dev_clients():
-    sc = SQLConnection()
-    clients = sc.get_dev_clients()
-    if len(clients) == 0:
-        log.LOGGER("Adds dev client.")
-        sc.add_client(client_id=f"dev-{uuid4()}", gas=DEV_CLIENT_GAS_AMOUNT, last_usage=None)
-    else:
-        client_gas, _, _ = sc.get_client_gas(client_id=clients[0])
-        if client_gas < DEV_CLIENT_GAS_AMOUNT:
-            gas_to_add = DEV_CLIENT_GAS_AMOUNT - client_gas
-            sc.add_gas(client_id=clients[0], gas=gas_to_add)
+    ensure_dev_client_pools()
 
 
 def manager_thread():

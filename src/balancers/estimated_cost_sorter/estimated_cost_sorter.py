@@ -1,3 +1,4 @@
+from hashlib import sha3_256
 from math import log
 from typing import Dict, Tuple, Generator
 from statistics import mean
@@ -9,13 +10,14 @@ from src.utils.config import ConfigManager
 from src.utils.utils import from_gas_amount
 from src.utils.logger import LOGGER as logger
 from src.database.sql_connection import SQLConnection
-from src.payment_system.contracts.ergo.interface import LEDGER as ERGO_LEDGER, CONTRACT_HASH as ERGO_CONTRACT_HASH
 
 env_manager = ConfigManager()
 SOCIALIZATION_FACTOR = float(env_manager.get("SOCIALIZATION_FACTOR"))
 INIT_COST_CONFIGURATION_FACTOR = env_manager.get("INIT_COST_CONFIGURATION_FACTOR")
 MAINTENANCE_COST_CONFIGURATION_FACTOR = env_manager.get("MAINTENANCE_COST_CONFIGURATION_FACTOR")
 GAS_PER_ERG = int(env_manager.get("ledgers.ergo.GAS_PER_ERG"))
+ERGO_LEDGER = "ergo"
+ERGO_CONTRACT_HASH = sha3_256("proveDlog(decodePoint())".encode("utf-8")).hexdigest()
 
 sq = SQLConnection()
 

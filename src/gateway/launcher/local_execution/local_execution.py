@@ -1,10 +1,12 @@
 import traceback
 from typing import Optional, Callable, List, Dict
 
+import netifaces as ni
+
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.interface import build, execute, get_configured_virtualizer
-from src.manager.manager import default_initial_cost, provision_vmachine
+from src.manager.manager import default_initial_cost, is_external_execute_client, provision_vmachine
 from src.utils import utils, logger as log
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
@@ -14,6 +16,72 @@ from src.virtualizers.firewall import resolve_slot_transport_protocols
 
 sc = SQLConnection()
 env_manager = ConfigManager()
+
+
+def _resolve_default_ipv4_interface() -> str:
+    try:
+        default_gateway = ni.gateways().get("default", {})
+        default_route = default_gateway.get(ni.AF_INET)
+        if default_route and len(default_route) > 1:
+            return str(default_route[1])
+    except Exception as e:
+        log.LOGGER(f"Unable to resolve default IPv4 interface: {e}")
+    return ""
+
+
+def _resolve_default_ipv6_interface() -> str:
+    try:
+        default_gateway = ni.gateways().get("default", {})
+        default_route = default_gateway.get(ni.AF_INET6)
+        if default_route and len(default_route) > 1:
+            return str(default_route[1])
+    except Exception as e:
+        log.LOGGER(f"Unable to resolve default IPv6 interface: {e}")
+    return ""
+
+
+def _find_any_host_interface_ip() -> str:
+    for interface in ni.interfaces():
+        if interface in {"lo", "localhost"}:
+            continue
+        try:
+            return utils.get_local_ip_from_network(network=interface, allow_link_local=False)
+        except Exception:
+            continue
+    raise RuntimeError("Unable to find any host interface IP to advertise.")
+
+
+def _get_external_advertised_host_ip(father_ip: str) -> str:
+    configured_public_ip = str(env_manager.get("network.PUBLIC_IP", "") or "").strip()
+    if configured_public_ip:
+        return configured_public_ip
+
+    configured_interface = str(env_manager.get("network.EXTERNAL_INTERFACE", "") or "").strip()
+    if configured_interface:
+        return utils.get_local_ip_from_network(network=configured_interface, allow_link_local=False)
+
+    default_interface = _resolve_default_ipv4_interface()
+    if default_interface:
+        return utils.get_local_ip_from_network(network=default_interface, allow_link_local=False)
+
+    default_ipv6_interface = _resolve_default_ipv6_interface()
+    if default_ipv6_interface:
+        return utils.get_local_ip_from_network(network=default_ipv6_interface, allow_link_local=False)
+
+    try:
+        return _find_any_host_interface_ip()
+    except Exception as e:
+        log.LOGGER(f"Unable to resolve host IP from available interfaces: {e}")
+
+    if father_ip:
+        resolved_network = utils.get_network_name(direction=father_ip)
+        if resolved_network:
+            return utils.get_local_ip_from_network(network=resolved_network, allow_link_local=False)
+
+    raise RuntimeError(
+        "Unable to resolve an external host IP to advertise. "
+        "Configure network.PUBLIC_IP or network.EXTERNAL_INTERFACE."
+    )
 
 def local_execution(
         config: Optional[celaut_pb2.Configuration],
@@ -62,13 +130,24 @@ def local_execution(
     isolate_internal_children = env_manager.get("network.ISOLATE_INTERNAL_CHILDREN", True)
     is_dev_client = "dev" in father_id and env_manager.get("network.CONSIDER_DEV_AS_INTERNAL", True)
     disabled_outside = env_manager.get("network.DISABLE_EXPOSE_OUTSIDE", False)
+    force_external_exposure = is_external_execute_client(father_id)
     # In case of dev instances, we consider them as internal.
     # If the father is internal, but isolate internal children is disabled, the child should be exposed outside.
-    expose_outside: bool = not disabled_outside and not is_dev_client and (not father_is_local_vmachine or not isolate_internal_children)
+    expose_outside: bool = not disabled_outside and (
+        force_external_exposure
+        or (not is_dev_client and (not father_is_local_vmachine or not isolate_internal_children))
+    )
+    if force_external_exposure and disabled_outside:
+        log.LOGGER(
+            "External exposure requested by configuration, but network.DISABLE_EXPOSE_OUTSIDE is enabled."
+        )
     log.LOGGER(
         "Internal child isolation is "
         + ("enabled" if isolate_internal_children else "disabled")
-        + f" (father_id={father_id}, father_ip={father_ip}, by_local={not expose_outside})"
+        + (
+            f" (father_id={father_id}, father_ip={father_ip}, by_local={not expose_outside}, "
+            f"force_external_exposure={force_external_exposure})"
+        )
     )
 
     supported_slot_ports: List[int] = []
@@ -119,7 +198,7 @@ def local_execution(
     uri_slots: List[celaut.Instance.Uri_Slot] = []
     resolved_network = ""
     try:
-        if expose_outside: 
+        if expose_outside and not force_external_exposure:
             resolved_network = utils.get_network_name(direction=father_ip)
         log.LOGGER(f"Preparing published URI slots: resolved_network={resolved_network} and father IP={father_ip if father_ip else 'N/A'}")
 
@@ -128,9 +207,13 @@ def local_execution(
             uri_slot.internal_port = internal
 
             # get the host ip to be published for this instance. If the instance doesn't require to be exposed, publish the vmachine_ip, otherwise publish the local IP of this node.:
-            _ip: str = utils.get_local_ip_from_network(
-                    network=resolved_network,
-                ) if expose_outside else vmachine_ip
+            _ip: str = (
+                _get_external_advertised_host_ip(father_ip=father_ip)
+                if force_external_exposure and expose_outside
+                else utils.get_local_ip_from_network(network=resolved_network, allow_link_local=False)
+                if expose_outside
+                else vmachine_ip
+            )
             _port: int = external
 
             uri_slot.uri.append(

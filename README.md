@@ -56,15 +56,9 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 
 - **Requirements**: Needs Ubuntu 22.04.5 LTS and curl package installed.
 
-- **Version**: The Nodo version is currently in 'alpha', so it's recommended to use a virtual machine.
-
-- **Sudo Usage**: The installation script requires `sudo` privileges for system-level setup (service, base packages, isolated Docker daemon). Python, Java, and `yq` runtimes are installed locally under `MAIN_DIR`.
+- **Sudo Usage**: The installation script requires `sudo` privileges for system-level setup. Python, Java, and `yq` runtimes are installed locally under `MAIN_DIR`.
 
 - **Installation without sudo**: For a manual installation without directly executing the script with sudo, please follow the [manual guide](docs/INSTALL.md).
-
-- **Docker Containers**: The system will create and remove Docker containers as part of its operations.
-
-- **No QEMU/binfmt in installer**: Cross-architecture image builds are not supported by default. Build services on hosts that match the service architecture.
 
 - **Configurable binary paths**: Java, Python, `yq`, and Docker-related binaries can be customized in `config.yaml` under `dependencies.*`.
 
@@ -73,12 +67,12 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 
 Below is a breakdown of **Nodo** feature support across different operating systems. Since the project is still under development, capability levels vary by platform.
 
-| Functionality         | Linux    | Mac              | Windows          |
-| --------------------- | -------- | ---------------- | ---------------- |
-| Local execution       | 🟢 Beta  | 🔴 Not supported | 🟢 Beta          |
-| Packaging             | 🟢 Beta  | 🔴 Not supported | 🟢 Beta          |
-| Local network         | 🟡 Alpha | 🔴 Not supported | 🟡 Alpha         |
-| Trustless network     | 🟡 Alpha | 🔴 Not supported | 🟡 Alpha         |
+| Functionality         | Linux     | Windows          | Mac              |
+|---------------------- |---------- |------------------|------------------|
+| Local execution       | 🟢 Beta  | 🟢 Beta          | 🔴 Not supported |
+| Packaging             | 🟢 Beta  | 🟢 Beta          | 🔴 Not supported |
+| Local network         | 🟡 Alpha | 🟡 Alpha         | 🔴 Not supported |
+| Trustless network     | 🟡 Alpha | 🟡 Alpha         | 🔴 Not supported |
 
 * 🟢 **Beta**: Functionality implemented and relatively stable.
 * 🟡 **Alpha**: Functionality under active development and subject to change.

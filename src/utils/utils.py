@@ -1,6 +1,7 @@
 import os
 import socket
 import typing
+import ipaddress
 from typing import Generator, Optional
 
 import netifaces as ni
@@ -131,7 +132,60 @@ def __get_only_the_ip_from_context_method(context_peer: str) -> str:
         raise Exception('Error getting the ip from the context: ' + str(e))
 
 
-get_local_ip_from_network = lambda network: ni.ifaddresses(network)[ni.AF_INET][0]['addr']
+def _clean_ip_value(value: str) -> str:
+    return str(value).split("%", 1)[0]
+
+
+def _extract_direction_host(direction: str) -> str:
+    normalized = str(direction or "").replace("http://", "").replace("https://", "").strip()
+    if not normalized:
+        return ""
+
+    if normalized.startswith("[") and "]" in normalized:
+        return _clean_ip_value(normalized[1:normalized.index("]")])
+
+    # IPv6 literals may contain multiple ":" and optional zone ids. Only split host:port for clear IPv4/hostnames.
+    if normalized.count(":") == 1:
+        return _clean_ip_value(normalized.split(":", 1)[0])
+
+    return _clean_ip_value(normalized)
+
+
+def _is_link_local_ip(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(_clean_ip_value(ip)).is_link_local
+    except ValueError:
+        return False
+
+
+def get_local_ip_from_network(network: str, *, allow_link_local: bool = True) -> str:
+    addresses = ni.ifaddresses(network)
+
+    ipv4_addresses = addresses.get(ni.AF_INET, [])
+    if ipv4_addresses:
+        for address in ipv4_addresses:
+            candidate = _clean_ip_value(address.get("addr", ""))
+            if candidate and (allow_link_local or not _is_link_local_ip(candidate)):
+                return candidate
+
+    ipv6_addresses = addresses.get(ni.AF_INET6, [])
+    fallback_link_local_ipv6 = ""
+    for address in ipv6_addresses:
+        candidate = _clean_ip_value(address.get("addr", ""))
+        if not candidate:
+            continue
+        if not _is_link_local_ip(candidate):
+            return candidate
+        if allow_link_local and not fallback_link_local_ipv6:
+            fallback_link_local_ipv6 = candidate
+
+    if fallback_link_local_ipv6:
+        return fallback_link_local_ipv6
+
+    raise KeyError(
+        f"No usable IPv4/IPv6 address found for interface {network}"
+        + ("" if allow_link_local else " without link-local addresses")
+    )
 
 longestSublistFinder = lambda string1, string2, split: split.join(
     [a for a in string1.split(split) for b in string2.split(split) if a == b]) + split
@@ -170,7 +224,7 @@ def get_network_name(direction: str) -> str:
     Raises:
         Exception: If there's an error processing the network interfaces
     """
-    direction = direction.replace("http://", "").replace("https://", "").split(':')[0]
+    direction = _extract_direction_host(direction)
     
     # If is localhost
     if "::1" in direction or '0.0.0.0' == direction:
