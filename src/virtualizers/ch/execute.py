@@ -851,14 +851,9 @@ def _tail_file(path: Path, max_lines: int = 40) -> str:
         return "<empty>"
     return "".join(lines[-max_lines:]).strip()
 
-def _set_process_name(name: str):
-    """Set /proc/self/comm (max 15 chars)."""
-
-    import ctypes
-    import ctypes.util
-    PR_SET_NAME = 15
-    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
-    libc.prctl(PR_SET_NAME, name.encode("utf-8")[:15], 0, 0, 0)
+def _build_ch_process_args(start_command: List[str], vmachine_id: str) -> List[str]:
+    visible_name = f"nodo-ch-{vmachine_id[:8]}"
+    return [visible_name, *start_command[1:]] if start_command else [visible_name]
 
 
 def execute(
@@ -1022,16 +1017,23 @@ def execute(
         start_command.extend(stream_args)
         log.LOGGER(f"[CH][{vmachine_id}] launching cloud-hypervisor: {' '.join(start_command)}")
 
+        process_args = _build_ch_process_args(
+            start_command=start_command,
+            vmachine_id=vmachine_id,
+        )
+
         with open(stdout_path, "w", encoding="utf-8") as stdout_file, open(
             stderr_path, "w", encoding="utf-8"
         ) as stderr_file:
-            process = subprocess.Popen(start_command, 
-                                       stdout=stdout_file, 
-                                       stderr=stderr_file, 
-                                       preexec_fn=lambda: _set_process_name(f"nodo-ch-{vmachine_id[:8]}")
-                                       )
+            process = subprocess.Popen(
+                process_args,
+                executable=ch_binary,
+                stdout=stdout_file,
+                stderr=stderr_file,
+            )
         log.LOGGER(
-            f"[CH][{vmachine_id}] process started: pid={process.pid}, api_socket={api_socket_path}, "
+            f"[CH][{vmachine_id}] process started: pid={process.pid}, visible_name={process_args[0]}, "
+            f"api_socket={api_socket_path}, "
             f"stdout={stdout_path}, stderr={stderr_path}"
         )
 
