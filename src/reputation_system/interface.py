@@ -1,7 +1,6 @@
 from src.utils.config import ConfigManager
 from src.database.sql_connection import SQLConnection
 from src.utils.logger import LOGGER
-from src.reputation_system.contracts.ergo.transaction import submit_reputation_proof
 
 sc = SQLConnection()
 env_manager = ConfigManager()
@@ -47,6 +46,8 @@ def compute_reputation(peer_id) -> float:
     return _result
 
 def submit_reputation(force_submit: bool = False) -> bool:
+    from src.reputation_system.contracts.ergo.transaction import submit_reputation_proof
+
     return sc.submit_to_ledger(
         submit=lambda objects: submit_reputation_proof(objects=objects),
         force_submit=force_submit

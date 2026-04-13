@@ -3,8 +3,8 @@ from typing import Callable, Dict
 from protos import celaut_pb2
 
 from src.payment_system.contracts.simulator import interface as simulated
-from src.payment_system.contracts.ergo import interface as ergo
 from src.utils.config import ConfigManager
+from src.utils.java_dependency import JavaDependencyMissing, build_java_dependency_message
 
 SIMULATED = ConfigManager().get("SIMULATE_PAYMENTS")
 
@@ -17,32 +17,55 @@ amount = int
 validate_token = Callable[[token], bool]
 contract_ledger = celaut_pb2.Contract
 
-PAYMENT_PROCESS_VALIDATORS = {
-    **({simulated.CONTRACT_HASH: simulated.payment_process_validator} if SIMULATED else {}),
-    ergo.CONTRACT_HASH: ergo.payment_process_validator
-}
+def _ergo_interface():
+    try:
+        from src.payment_system.contracts.ergo import interface as ergo
+        return ergo
+    except (ImportError, ModuleNotFoundError, OSError) as exc:
+        raise JavaDependencyMissing(build_java_dependency_message(feature="Ergo payments or reputation")) from exc
 
-AVAILABLE_PAYMENT_PROCESS: Dict[contract_hash, Callable[[amount, token, ledger, script], contract_ledger]] = {
-    **({simulated.CONTRACT_HASH: simulated.process_payment} if SIMULATED else {}),
-    ergo.CONTRACT_HASH: ergo.process_payment
-}
 
-CHECK_SENDER_BALANCE: Dict[contract_hash, Callable[[amount], bool]] = {
-    **({simulated.CONTRACT_HASH: simulated.check_sender_balance} if SIMULATED else {}),
-    ergo.CONTRACT_HASH: ergo.check_sender_balance
-}
+def payment_process_validators() -> Dict[contract_hash, validate_token]:
+    ergo = _ergo_interface()
+    return {
+        **({simulated.CONTRACT_HASH: simulated.payment_process_validator} if SIMULATED else {}),
+        ergo.CONTRACT_HASH: ergo.payment_process_validator
+    }
 
-INIT_INTERFACES: Dict[contract_hash, Callable[[], None]] = {
-    ergo.CONTRACT_HASH: ergo.init
-}
 
-MANAGE_INTERFACES: Dict[contract_hash, Callable[[], None]] = {
-    ergo.CONTRACT_HASH: ergo.manager
-}
+def available_payment_process() -> Dict[contract_hash, Callable[[amount, token, ledger, script], contract_ledger]]:
+    ergo = _ergo_interface()
+    return {
+        **({simulated.CONTRACT_HASH: simulated.process_payment} if SIMULATED else {}),
+        ergo.CONTRACT_HASH: ergo.process_payment
+    }
+
+
+def check_sender_balances() -> Dict[contract_hash, Callable[[amount], bool]]:
+    ergo = _ergo_interface()
+    return {
+        **({simulated.CONTRACT_HASH: simulated.check_sender_balance} if SIMULATED else {}),
+        ergo.CONTRACT_HASH: ergo.check_sender_balance
+    }
+
+
+def init_interfaces() -> Dict[contract_hash, Callable[[], None]]:
+    ergo = _ergo_interface()
+    return {
+        ergo.CONTRACT_HASH: ergo.init
+    }
+
+
+def manage_interfaces() -> Dict[contract_hash, Callable[[], None]]:
+    ergo = _ergo_interface()
+    return {
+        ergo.CONTRACT_HASH: ergo.manager
+    }
 
 DEMOS = [simulated.CONTRACT_HASH] if SIMULATED else []
 
 def print_payment_info() -> str:
+    ergo = _ergo_interface()
     main, aux = ergo.get_balances()
     ergo_addr, ergo_amount = main
     aux_addr, aux_amount = aux
@@ -54,4 +77,3 @@ def print_payment_info() -> str:
         f"Total: {total_amount} ERGs \n"
        #  "\n**Important Note**: The node periodically transfers funds from the Receiver Wallet to the Sending Wallet, where most deposits accumulate. To increase the node's deposit, please send funds to the Sending Wallet Address."
     )
-

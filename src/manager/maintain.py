@@ -10,13 +10,12 @@ from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ensure_dev_client_pools, stop_instance, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
-from src.payment_system.payment_process import increase_deposit_on_peer, init_interfaces
-from src.reputation_system.interface import update_vmachine_reputation, submit_reputation, update_peer_reputation
 from src.utils import logger as log
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
+from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
 from src.virtualizers.interface import maintain as vm_maintain
 
@@ -42,6 +41,16 @@ sc = SQLConnection()
 
 wanted_services = set()
 wanted_services_retry = set()
+
+
+def _payment_process_module():
+    from src.payment_system import payment_process
+    return payment_process
+
+
+def _reputation_interface():
+    from src.reputation_system import interface
+    return interface
 
 def add_wanted(service_id: str):
     if service_id not in wanted_services and service_id not in wanted_services_retry:
@@ -106,7 +115,7 @@ def check_wanted_service(wanted: str):
 
 def maintain_vmachines(debug_mode: bool=False):
     def remove_and_penalize_vmachine(vmachine_id: str):
-        update_vmachine_reputation(vmachine_id=vmachine_id, amount=-100)
+        _reputation_interface().update_vmachine_reputation(vmachine_id=vmachine_id, amount=-100)
         log.LOGGER(f"Prunning container {vmachine_id} from the registry because the docker container does not exist.")
         try:
             stop_instance(token=vmachine_id)
@@ -132,14 +141,14 @@ def maintain_vmachines(debug_mode: bool=False):
         
         if not spend_gas(id=vmachine_id, gas_to_spend=gas_cost, debug_mode=debug_mode):
             try:
-                update_vmachine_reputation(container_id=vmachine_id, amount=-10)
+                _reputation_interface().update_vmachine_reputation(vmachine_id=vmachine_id, amount=-10)
                 log.LOGGER(f"Pruning container {vmachine_id} due to insufficient gas.")
                 stop_instance(token=vmachine_id)
             except Exception as e:
                 log.LOGGER(f'Error purging {vmachine_id}: {str(e)}')
                 raise Exception(f'Error purging {vmachine_id}: {str(e)}')
         else:
-            update_vmachine_reputation(container_id=vmachine_id, amount=10)
+            _reputation_interface().update_vmachine_reputation(vmachine_id=vmachine_id, amount=10)
             if debug_mode: log.LOGGER(f"Updated reputation for {vmachine_id} due to successful maintenance.")
 
     # Cloud Hypervisor janitor: cleanup stale/orphan runtime resources not tracked by DB.
@@ -180,7 +189,7 @@ def peer_deposits(debug_mode: bool = False):
                 ), None)
                 if debug_mode: log.LOGGER(f"Successfully fetched info for peer {peer_id}.")
             except Exception as fetch_exception:
-                update_peer_reputation(peer_id=peer_id, amount=-100)
+                _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=-100)
                 continue
 
             if not peer:
@@ -213,7 +222,13 @@ def peer_deposits(debug_mode: bool = False):
                     f"    - Amount to refill: {log.ssformat(to_increase)}"
                 )
 
-            if not increase_deposit_on_peer(peer_id=peer_id, amount=to_increase):
+            try:
+                increased = _payment_process_module().increase_deposit_on_peer(peer_id=peer_id, amount=to_increase)
+            except JavaDependencyMissing:
+                log_java_dependency_warning(log.LOGGER, feature="Ergo payments or reputation")
+                increased = False
+
+            if not increased:
                 log.LOGGER(f"[ERROR] Manager error: the peer {peer_id} could not be increased.")
             else:
                 if debug_mode: log.LOGGER(f"Successfully increased deposit for {peer_id}.")
@@ -231,10 +246,17 @@ def manager_thread():
     print("Starting manager thread...")
     
     # Functions to be executed at the beginning
-    init_interfaces()
+    try:
+        _payment_process_module().init_interfaces()
+    except JavaDependencyMissing:
+        log_java_dependency_warning(log.LOGGER, feature="Ergo payments or reputation")
     check_dev_clients()
     check_ergo_node_availability()
-    if SUBMIT_REPUTATION_AT_INIT: submit_reputation(force_submit=True)
+    if SUBMIT_REPUTATION_AT_INIT:
+        try:
+            _reputation_interface().submit_reputation(force_submit=True)
+        except JavaDependencyMissing:
+            log_java_dependency_warning(log.LOGGER, feature="Ergo payments or reputation")
     
     short_interval_count = 0
     while True:

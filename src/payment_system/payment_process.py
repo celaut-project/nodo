@@ -9,20 +9,15 @@ from bee_rpc import client as bee
 from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.payment_system.ledger_balancer import ledger_balancer
 
-from src.payment_system.contracts.envs import AVAILABLE_PAYMENT_PROCESS, INIT_INTERFACES, MANAGE_INTERFACES, PAYMENT_PROCESS_VALIDATORS, DEMOS, CHECK_SENDER_BALANCE
-from src.payment_system.contracts.ergo import interface as ergo
-
 from protos import celaut_pb2_grpc, celaut_pb2
 
-from src.reputation_system.interface import update_vmachine_reputation, update_peer_reputation
-
-from src.manager.manager import get_client_id_on_other_peer, increase_local_gas_for_client
 from src.database.sql_connection import SQLConnection
 
 from src.utils import logger as _l
 from src.utils.utils import to_gas_amount, generate_uris_by_peer_id
 from src.database.access_functions.ledgers import get_peer_contract_instances
 from src.utils.config import ConfigManager
+from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
 
 env_manager = ConfigManager()
 
@@ -36,6 +31,21 @@ deposit_generation_locked = False
 
 auxiliar_script_reputation = {}
 auxiliar_script_reputation_lock = Lock()
+
+
+def _payment_envs():
+    from src.payment_system.contracts import envs
+    return envs
+
+
+def _reputation_interface():
+    from src.reputation_system import interface
+    return interface
+
+
+def _manager_module():
+    from src.manager import manager
+    return manager
 
 def generate_deposit_token(client_id: str) -> str:
     if deposit_generation_locked:
@@ -55,7 +65,7 @@ def __get_grpc_stub(peer_id):
 
 
 def __obtain_deposit_token(peer_id) -> Optional[str]:
-    client_id: str = get_client_id_on_other_peer(peer_id=peer_id)
+    client_id: str = _manager_module().get_client_id_on_other_peer(peer_id=peer_id)
     if not client_id:
         _l.LOGGER("No client available.")
         return
@@ -80,15 +90,15 @@ def __obtain_deposit_token(peer_id) -> Optional[str]:
         return
 
 def __peer_payment_process(peer_id: str, amount: int) -> bool:
-    
+    payment_envs = _payment_envs()
     deposit_token = None
 
     # Attempt payment processing for each available payment process
-    for contract_hash, process_payment in AVAILABLE_PAYMENT_PROCESS.items():  # type: ignore
+    for contract_hash, process_payment in payment_envs.available_payment_process().items():
         
         # In the case where we have different payment methods for the same ledger, ex: other payment method on Ergo, we should reorganize the envs dictionaries to avoid check sender balances multiple times.
         
-        check_balance = CHECK_SENDER_BALANCE[contract_hash]
+        check_balance = payment_envs.check_sender_balances()[contract_hash]
         if not check_balance(amount):
             _l.LOGGER(f"Insufficient balance for contract {contract_hash[:6]}.")
             continue
@@ -105,7 +115,7 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
             # Get all available ledgers for this peer and contract
             
             scripts = get_peer_contract_instances(contract_hash, peer_id)
-            ledgers = ledger_balancer(ledger_generator=scripts) if contract_hash not in DEMOS else [("", "")]
+            ledgers = ledger_balancer(ledger_generator=scripts) if contract_hash not in payment_envs.DEMOS else [("", "")]
             
             for script, ledger in ledgers:
                 
@@ -158,13 +168,16 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 
                 # Handle communication attempts to peer
                 if __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
-                    update_peer_reputation(peer_id=peer_id, amount=10)  # TODO On envs.
+                    _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=10)  # TODO On envs.
                     return True
                 else:
                     _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
-                    update_peer_reputation(peer_id=peer_id, amount=-100)  # TODO On envs.
+                    _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=-100)  # TODO On envs.
 
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
+        except JavaDependencyMissing:
+            log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")
+            return False
         except Exception as e:
             _l.LOGGER(f"Unhandled exception on payment process for {contract_hash}: {e}")
 
@@ -195,7 +208,7 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
             _l.LOGGER(f"Payment of {amount} to {peer_id} communicated successfully.")
             return True
         except Exception as e:
-            update_vmachine_reputation(container_id=peer_id, amount=-1)  # TODO On envs.
+            _reputation_interface().update_vmachine_reputation(vmachine_id=peer_id, amount=-1)  # TODO On envs.
             attempt += 1
             _l.LOGGER(f"Communication attempt {attempt} failed: {str(e)}")
             if attempt >= COMMUNICATION_ATTEMPTS:
@@ -231,7 +244,7 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
         _r = __check_payment_process(
             amount=amount, ledger=ledger, token=token,
             contract=contract, script=script
-        ) and increase_local_gas_for_client(client_id=sc.client_id_from_deposit_token(token_id=token), amount=amount)  # TODO allow for containers too.
+        ) and _manager_module().increase_local_gas_for_client(client_id=sc.client_id_from_deposit_token(token_id=token), amount=amount)  # TODO allow for containers too.
     except: _r = False
     sc.update_deposit_token(token_id=token, status="payed" if _r else "rejected")
     _l.LOGGER(f"Pending deposit tokens updated, there are still {len(sc.get_deposit_tokens(status='pending'))} tokens in the queue.")
@@ -249,7 +262,7 @@ def __check_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, tok
         _l.LOGGER(f"Client id {client_id} not in clients.")
         return False
 
-    _validator = PAYMENT_PROCESS_VALIDATORS[sha3_256(contract).hexdigest()]
+    _validator = _payment_envs().payment_process_validators()[sha3_256(contract).hexdigest()]
     return _validator(amount, token, ledger, script)
 
 
@@ -266,10 +279,12 @@ def __manage_interfaces():
                 _l.LOGGER("Any pending deposit token, now payment interfaces can be managed.")
                 break
 
-        for key, _manage in MANAGE_INTERFACES.items():
+        for key, _manage in _payment_envs().manage_interfaces().items():
             if callable(_manage):
                 try:
                     _manage()
+                except JavaDependencyMissing:
+                    log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")
                 except Exception as e:
                     _l.LOGGER(f"Exception on manage interface {key}. {str(e)}")
             else:
@@ -280,10 +295,12 @@ def __manage_interfaces():
 
 def init_interfaces():
     Thread(target=__manage_interfaces, daemon=True).start()
-    for key, _init in INIT_INTERFACES.items():
+    for key, _init in _payment_envs().init_interfaces().items():
         if callable(_init):
             try:
                 _init()
+            except JavaDependencyMissing:
+                log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")
             except Exception as e:
                 _l.LOGGER(f"Exception on init interface {key}. {str(e)}")
         else:

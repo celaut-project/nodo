@@ -3,23 +3,27 @@ from typing import Optional, List, Tuple
 from protos import celaut_pb2, celaut_pb2
 import requests
 from hashlib import sha3_256
-from ergpy import appkit
-from ergpy.helper_functions import simple_send
 from src.database import sql_connection
 from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.utils.logger import LOGGER
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import set_address, set_script, set_token_id
+from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 from threading import Lock
 from time import sleep
 
-from jpype import *
-import java.lang
+def clamp(value: float, maximum: float, minimum: float) -> float:
+    return max(minimum, min(value, maximum))
 
-import jpype
-from org.ergoplatform.sdk import *
-from org.ergoplatform.appkit import *
-from org.ergoplatform.appkit.impl import *
+
+def _ergo_runtime():
+    ensure_ergpy_jvm(feature="Ergo payments")
+    appkit = require_java_module("ergpy.appkit", feature="Ergo payments")
+    helper_functions = require_java_module("ergpy.helper_functions", feature="Ergo payments")
+    jpype = require_java_module("jpype", feature="Ergo payments")
+    org_appkit = jpype.JPackage("org").ergoplatform.appkit
+    return appkit, helper_functions.simple_send, jpype, org_appkit
+
 
 # Initialize environment and global variables
 env_manager = ConfigManager()
@@ -55,12 +59,13 @@ def __nanoerg_to_erg(amount: int) -> float:
     return amount / 1_000_000_000  # type: ignore
 
 def __init_ergo():
+    appkit, _, _, _ = _ergo_runtime()
     node_url = ERGO_NODE_URL()
     if not node_url.endswith('/'):
         node_url += '/'
     return appkit.ErgoAppKit(node_url=node_url)
 
-def __get_sender_addr(mnemonic: str) -> Address:
+def __get_sender_addr(mnemonic: str):
     # Initialize ErgoAppKit and get the sender's address
     ergo = __init_ergo()
 
@@ -92,7 +97,7 @@ def __get_input_boxes(amount: int) -> List[dict]:
         inputs.append(box_dict)  # TODO Should convert dict -> InputBox.
     return inputs
 
-def __balance_total(address: Address) -> Optional[dict]:
+def __balance_total(address) -> Optional[dict]:
     # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
     ergo = __init_ergo()
     explorer_api = ergo.get_api_url()
@@ -162,6 +167,7 @@ def manager():
     LOGGER("Exec ergo interface manager")
     # Move the available outputs from AUXILIAR_MNEMONIC to WALLET_MNEMONIC.
     try:
+        _, simple_send, _, _ = _ergo_runtime()
         aux_confirmed_amount = __balance_total(__get_sender_addr(AUXILIAR_MNEMONIC))["confirmed"]["nanoErgs"]
         # Funds that may have been sent in the iteration prior to the main wallet but have not yet been confirmed on the network are taken into account.
         wallet_unconfirmed_amount = __balance_total(__get_sender_addr(WALLET_MNEMONIC()))["unconfirmed"]["nanoErgs"]
@@ -221,6 +227,7 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
         LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount}")
 
         try:
+            _, _, jpype, org_appkit = _ergo_runtime()
             # Initialize ErgoAppKit and get the sender's address
             ergo = __init_ergo()
             sender_address = __get_sender_addr(WALLET_MNEMONIC())
@@ -239,9 +246,9 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
                         .outBoxBuilder() \
                         .value(amount) \
                         .registers([
-                            ErgoValue.of(jpype.JString(deposit_token).getBytes("utf-8"))  # Store token in R4
+                            org_appkit.ErgoValue.of(jpype.JString(deposit_token).getBytes("utf-8"))  # Store token in R4
                         ]) \
-                        .contract(Address.create(script.decode('utf-8')).toErgoContract()) \
+                        .contract(org_appkit.Address.create(script.decode('utf-8')).toErgoContract()) \
                         .build()  # Build the output box
 
             # Create the unsigned transaction

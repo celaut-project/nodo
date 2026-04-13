@@ -4,6 +4,7 @@ from psutil import virtual_memory
 from src.utils import logger as log
 import src.manager.resources as iobd
 from src.utils.config import ConfigManager
+from src.utils.java_dependency import JavaDependencyMissing
 from src.utils.network import get_local_ip
 
 env_manager = ConfigManager(log=log.LOGGER)
@@ -93,6 +94,11 @@ def resolve_service_input(service_input: str) -> str:
         raise FileNotFoundError(f"The file {absolute_path} does not exist")
 
     return import_bee(path=absolute_path)
+
+
+def print_java_dependency_error(exc: JavaDependencyMissing) -> None:
+    log.LOGGER(str(exc))
+    print(str(exc), flush=True)
 
 if __name__ == '__main__':
 
@@ -189,8 +195,6 @@ if __name__ == '__main__':
         match sys.argv[1]:
 
             case "info":
-                from src.payment_system.contracts.envs import print_payment_info
-                
                 try:
                     status = "running" if is_nodo_service_running() else "not running"
                     print(f"Nodo service is currently {status}.", flush=True)
@@ -204,7 +208,11 @@ if __name__ == '__main__':
                 reputation_proof_id = env_manager.get('REPUTATION_PROOF_ID')
                 
                 try:
+                    from src.payment_system.contracts.envs import print_payment_info
                     payment_info = print_payment_info()
+                except JavaDependencyMissing as e:
+                    log.LOGGER(f"Payment info unavailable without Java: {e}.")
+                    payment_info = str(e)
                 except Exception as e:
                     log.LOGGER(f"Error getting payment info and reputation proof {e}.")
                     payment_info = "N/A"
@@ -407,16 +415,24 @@ if __name__ == '__main__':
                 disconnect(sys.argv[2])
 
             case 'submit_reputation':
-                from src.reputation_system.interface import submit_reputation
-                result: bool = submit_reputation(force_submit=True)
+                try:
+                    from src.reputation_system.interface import submit_reputation
+                    result: bool = submit_reputation(force_submit=True)
+                except JavaDependencyMissing as e:
+                    print_java_dependency_error(e)
+                    os._exit(1)
                 if result:
                     print("Reputation proof submitted successfully.", flush=True)
                 else:
                     print("Failed to submit reputation proof.", flush=True)
 
             case 'validate_reputation_proof_ownership':
-                from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
-                is_valid = validate_reputation_proof_ownership()
+                try:
+                    from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
+                    is_valid = validate_reputation_proof_ownership()
+                except JavaDependencyMissing as e:
+                    print_java_dependency_error(e)
+                    os._exit(1)
                 if is_valid:
                     print("Reputation proof ownership is valid.", flush=True)
                 else:
@@ -447,13 +463,18 @@ if __name__ == '__main__':
                     print("Nodo service is already running in the background. Cannot start serve.", flush=True)
 
             case 'config':
-                from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
                 os.system("/bin/bash bash/reconfig.sh")
-                if env_manager.get("REPUTATION_PROOF_ID") and not validate_reputation_proof_ownership():
-                    _msg = "The reputation proof is not associated with the provided main address. It will be removed from the node environment registry."
-                    log.LOGGER(_msg)
-                    print(_msg)
-                    env_manager.set("REPUTATION_PROOF_ID", "")
+                if env_manager.get("REPUTATION_PROOF_ID"):
+                    try:
+                        from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
+
+                        if not validate_reputation_proof_ownership():
+                            _msg = "The reputation proof is not associated with the provided main address. It will be removed from the node environment registry."
+                            log.LOGGER(_msg)
+                            print(_msg)
+                            env_manager.set("REPUTATION_PROOF_ID", "")
+                    except JavaDependencyMissing as e:
+                        print_java_dependency_error(e)
 
             case 'envs':
                 os.system(f"yq . {MAIN_DIR}/config.yaml")
@@ -525,8 +546,12 @@ if __name__ == '__main__':
                 peer_deposits(debug_mode=True)
 
             case "tx_history":
-                from src.commands.tx_history import tx_history
-                tx_history()
+                try:
+                    from src.commands.tx_history import tx_history
+                    tx_history()
+                except JavaDependencyMissing as e:
+                    print_java_dependency_error(e)
+                    os._exit(1)
 
             case "increase_peer_deposit":
                 from src.commands.increase_peer_deposit import increase_peer_deposit
