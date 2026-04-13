@@ -25,10 +25,10 @@ def get_java_install_command() -> str:
 
 
 def build_java_dependency_message(feature: Optional[str] = None) -> str:
-    feature_text = f" para usar {feature}" if feature else ""
+    feature_text = f" to use {feature}" if feature else ""
     return (
-        f"Java no esta instalado o disponible{feature_text}. "
-        f"Instalalo con `{get_java_install_command()}`."
+        f"Java is not installed {feature_text}. "
+        f"Install it with `{get_java_install_command()}`."
     )
 
 

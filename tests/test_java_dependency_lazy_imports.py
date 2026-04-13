@@ -78,7 +78,7 @@ class JavaDependencyLazyImportTests(unittest.TestCase):
             with redirect_stdout(stdout):
                 increase_peer_deposit("peer-1", 5)
 
-        self.assertIn("Java no esta instalado o disponible", stdout.getvalue())
+        self.assertIn("Java is not installed", stdout.getvalue())
 
 
 if __name__ == "__main__":
