@@ -33,6 +33,13 @@ def _purge_modules(prefix: str) -> None:
 
 
 class JavaDependencyLazyImportTests(unittest.TestCase):
+    def test_java_runtime_requires_configured_java_home_instead_of_system_java(self):
+        from src.utils.java_dependency import ensure_java_runtime
+
+        with mock.patch.dict("os.environ", {"JAVA_HOME": "/definitely/missing/java-home"}, clear=False):
+            with self.assertRaises(JavaDependencyMissing):
+                ensure_java_runtime(feature="pagos Ergo o reputacion")
+
     def test_startup_modules_do_not_have_eager_java_imports(self):
         targets = {
             "src/gateway/gateway.py": [
