@@ -8,11 +8,12 @@ This guide will help you understand and use the available commands in **Nodo**, 
 
 These are the most commonly used commands for daily tasks:
 
-- **execute `[--external] <service id | service tag | '.celaut' file path>`**  
-  Launches a service instance. Use `--external` to advertise the host-facing IP instead of the internal VM/container IP when running from a local `dev-*` client.  
+- **execute `[--remote] [-e key value] <service id | service tag | '.celaut' file path>`**  
+  Launches a service instance. Use `--remote` to advertise the host-facing IP instead of the internal VM/container IP. Use `-e` to add service enviroment variables.  
   **Example:**  
   `nodo execute 1234567890abcdef`
-  `nodo execute --external 1234567890abcdef`
+  `nodo execute --remote 1234567890abcdef`
+  `nodo execute --remote -e workers 8 -e timeout 20 1234567890abcdef`
 
 - **estimate `<service id | service tag | '.celaut' file path>`**  
   Estimates service execution cost without launching it.  
