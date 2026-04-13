@@ -1,6 +1,5 @@
 import importlib
 import os
-import shutil
 from typing import Optional
 
 from src.utils.config import ConfigManager
@@ -45,10 +44,19 @@ def raise_java_dependency_missing(feature: Optional[str] = None) -> None:
 
 def ensure_java_runtime(feature: Optional[str] = None) -> None:
     java_home = os.environ.get("JAVA_HOME")
-    if java_home and os.path.exists(os.path.join(java_home, "bin", "java")):
+    if java_home:
+        if os.path.exists(os.path.join(java_home, "bin", "java")):
+            return
+        raise_java_dependency_missing(feature=feature)
+
+    try:
+        configured_java_home = ConfigManager().get("dependencies.java.JAVA_HOME")
+    except Exception:
+        configured_java_home = None
+
+    if configured_java_home and os.path.exists(os.path.join(str(configured_java_home), "bin", "java")):
         return
-    if shutil.which("java"):
-        return
+
     raise_java_dependency_missing(feature=feature)
 
 
