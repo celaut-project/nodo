@@ -47,6 +47,7 @@ def generator(
     mem_limit: int = 50 * pow(10, 4),
     initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT,
     external: bool = False,
+    envs: dict[str, str] | None = None
 ) -> Generator[Any, None, None]:
     print("Get clients")
     try:
@@ -62,9 +63,12 @@ def generator(
         print("Client sent")
 
         print("Send configuration")
-        yield celaut_pb2.Configuration(
+        config = celaut_pb2.Configuration(
             initial_gas_amount=to_gas_amount(initial_gas_amount)
         )
+        if envs:
+            config.environment_variables = {k: v.encode() for k, v in envs.items()}
+        yield config
         print("Configuration sent")
 
         print(f"Send hash {_hash}")
@@ -80,7 +84,7 @@ def generator(
         print(f"Exception on executing {_hash[:6]}: {e}")
 
 
-def execute(service: str, external: bool = False):
+def execute(service: str, external: bool = False, envs: dict[str, str] | None = None):
     service = resolve_service_hash(service)
     if not service:
         print("No service allowed.")
@@ -100,6 +104,7 @@ def execute(service: str, external: bool = False):
                 initial_gas_amount=10**16,
                 mem_limit=10**9,
                 external=external,
+                envs=envs
             ),
             indices_parser=celaut_pb2.ServiceInstance,
             partitions_message_mode_parser=True,

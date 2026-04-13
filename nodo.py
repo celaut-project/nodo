@@ -138,7 +138,7 @@ if __name__ == '__main__':
 
     if len(sys.argv) == 1:
         print("Command needed: "
-            "\n- execute [--external] <service id> | <service tag> | <'.celaut' file path>"
+            "\n- execute [--remote] [-e key value] <service id> | <service tag> | <'.celaut' file path>"
             "\n- estimate <service id> | <service tag> | <'.celaut' file path>"
             "\n- inspect <service id> | <service tag>"
             "\n- remove <service id> | <service tag>"
@@ -328,11 +328,26 @@ if __name__ == '__main__':
                 import sys
 
                 args = sys.argv[2:]
-                external = "--external" in args
-                args = [arg for arg in args if arg != "--external"]
+                external = "--remote" in args
+                args = [arg for arg in args if arg != "--remote"]
+
+                if "-e" in args:
+                    # Foreach -e get the subsequent key and value and add to envs dict
+                    envs = {}
+                    while "-e" in args:
+                        try:
+                            e_index = args.index("-e")
+                            key = args[e_index + 1]
+                            value = args[e_index + 2]
+                            envs[key] = value
+                            # Remove the processed -e, key, and value from args
+                            args = args[:e_index] + args[e_index + 3:]
+                        except IndexError:
+                            print("Error: -e requires a key and a value", flush=True)
+                            sys.exit(1)
 
                 if len(args) != 1:
-                    print("Usage: nodo execute [--external] <service id|service tag|'.celaut' file path>", flush=True)
+                    print("Usage: nodo execute [--remote] [-e key value] <service id|service tag|'.celaut' file path>", flush=True)
                     sys.exit(1)
 
                 try:
@@ -341,7 +356,7 @@ if __name__ == '__main__':
                     print(f"Error: {str(e)}")
                     sys.exit(1)
 
-                execute(service=arg, external=external)
+                execute(service=arg, external=external, envs=envs)
 
             case "estimate":
                 from src.commands.estimate import estimate
