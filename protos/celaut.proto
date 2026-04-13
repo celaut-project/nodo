@@ -85,12 +85,12 @@ message Service {
         }
 
         // Environment variables for the container.
-        map<string, DataFormat> environment_variables = 3;
+        map<string, DataFormat> environment_variables = 1;
 
-        repeated Slot slot = 4;
+        repeated Slot slot = 2;
 
         // Accepted payment contracts with conversion to gas.
-        repeated GasPrice payment_contracts = 5;
+        repeated GasPrice payment_contracts = 3;
         
         /*
          The cost of the service is measured in "gas":
