@@ -4,7 +4,6 @@ from typing import Generator, Optional
 
 import netifaces as ni
 
-from src.reputation_system.fetch import local_proofs
 from src.payment_system.ledgers import local_payment_methods
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
@@ -51,6 +50,8 @@ def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
     log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
     if payment_contracts:
         instance.api.payment_contracts.extend(payment_contracts)
+
+    from src.reputation_system.fetch import local_proofs
 
     reputation_proofs = list(local_proofs())
     log.LOGGER(f'Using {len(reputation_proofs)} local reputation proofs')

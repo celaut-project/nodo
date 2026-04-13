@@ -1,6 +1,7 @@
 # Manual Installation Guide
 
 This guide is for Linux users who want to bootstrap Nodo manually, without executing `install.sh`.
+Java is optional and only required for Ergo-backed payment/reputation features.
 
 It follows the current runtime model:
 

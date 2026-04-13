@@ -1,13 +1,6 @@
 import requests
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
-from src.payment_system.contracts.ergo.interface import (
-    __get_sender_addr, 
-    __init_ergo, 
-    __nanoerg_to_erg,
-    WALLET_MNEMONIC,
-    AUXILIAR_MNEMONIC
-)
 from src.utils.logger import LOGGER
 
 
@@ -44,6 +37,12 @@ def _get_wallet_addresses() -> Tuple[str, str]:
         Exception: If wallet configuration is missing or invalid
     """
     try:
+        from src.payment_system.contracts.ergo.interface import (
+            __get_sender_addr,
+            WALLET_MNEMONIC,
+            AUXILIAR_MNEMONIC
+        )
+
         # Get sending wallet address
         sending_addr = __get_sender_addr(WALLET_MNEMONIC())
         sending_address = str(sending_addr.toString())
@@ -102,6 +101,8 @@ def _get_address_transactions(address: str, limit: int = 10) -> List[Dict]:
         Exception: If API request fails or returns invalid data
     """
     try:
+        from src.payment_system.contracts.ergo.interface import __init_ergo
+
         # Get Explorer API URL from existing Ergo utilities
         ergo = __init_ergo()
         explorer_api = ergo.get_api_url()
@@ -145,6 +146,8 @@ def _display_transaction(tx: Dict, address: str):
         address: Wallet address to determine transaction direction
     """
     try:
+        from src.payment_system.contracts.ergo.interface import __nanoerg_to_erg
+
         # Extract transaction details
         tx_id = tx.get('id', 'N/A')
         timestamp = tx.get('timestamp', 0)

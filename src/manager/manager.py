@@ -7,7 +7,6 @@ from bee_rpc import client as bee
 
 from src.manager.resources import IOBigData
 from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc
-from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_reputation_contract_ledger
 
 from src.database.sql_connection import SQLConnection, is_peer_available
 
@@ -156,6 +155,8 @@ def get_execute_client(gas_amount: int, external: bool = False) -> str:
     return _acquire_dev_client(prefix, pool_size, gas_amount)
             
 def add_reputation_proof(contract_ledger, peer_id) -> bool:
+    from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_reputation_contract_ledger
+
     # Verify contract and ledger compatibility and ownership
     if not validate_reputation_contract_ledger(contract_ledger, peer_id):
         log.LOGGER(f"Not supported reputation contract.")

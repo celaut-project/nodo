@@ -5,7 +5,6 @@ from src.packers.zip_with_dockerfile import pack_zip
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
-from src.reputation_system.contracts.ergo.proof_validation import sign_message
 from src.utils.contract_xattrs import get_script, get_address
 from src.tunneling.rpc_tunnel import service_tunnel
 from src.gateway.utils import generate_node_peer_info
@@ -214,6 +213,8 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 raise Exception("Invalid input for SignPublicKey method.")
             
             # Use the sign_message method to sign the public key
+            from src.reputation_system.contracts.ergo.proof_validation import sign_message
+
             signed_message = sign_message(
                 public_key=sign_request.public_key,
                 message=sign_request.to_sign

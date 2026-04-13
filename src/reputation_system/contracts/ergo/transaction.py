@@ -2,28 +2,12 @@ import hashlib
 import json
 from typing import List, Optional, Tuple, TypedDict
 
-import jpype
 import requests
-from ergpy import appkit
-from ergpy.helper_functions import initialize_jvm
 
-from src.payment_system.contracts.ergo.interface import get_amount_by_addr
-from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
-from src.reputation_system.contracts.ergo.utils import get_public_key
 from src.reputation_system.envs import CONTRACT
 from src.utils.config import ConfigManager
+from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 from src.utils.logger import LOGGER
-
-from jpype import JPackage
-
-from org.ergoplatform.appkit import Address, ConstantsBuilder, ErgoValue, NetworkType
-
-try:
-    # Older appkit jars expose ErgoToken under org.ergoplatform.appkit
-    from org.ergoplatform.appkit import ErgoToken
-except ImportError:
-    # Newer jars expose ErgoToken under org.ergoplatform.sdk
-    from org.ergoplatform.sdk import ErgoToken
 
 
 # Constants
@@ -48,7 +32,7 @@ class ProofObject(TypedDict):
     value: str
 
 
-def __input_box_to_dict(input_box: 'org.ergoplatform.appkit.InputBoxImpl') -> dict:
+def __input_box_to_dict(input_box) -> dict:
     return json.loads(str(input_box.toJson(True)))
 
 
@@ -56,9 +40,10 @@ def _java_bytes_to_python_bytes(java_bytes) -> bytes:
     return bytes((byte + 256) % 256 for byte in java_bytes)
 
 
-def _owner_script_hash(sender_address: Address) -> bytes:
+def _owner_script_hash(sender_address) -> bytes:
+    jpype = require_java_module("jpype", feature="Ergo reputation")
     ergo_tree = sender_address.getErgoAddress().script()
-    serializer = JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
+    serializer = jpype.JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
     proposition_bytes = _java_bytes_to_python_bytes(serializer.serializeErgoTree(ergo_tree))
     return hashlib.blake2b(proposition_bytes, digest_size=32).digest()
 
@@ -89,37 +74,49 @@ def _get_type_nft_boxes(node_url: str, type_nft_ids: List[str]) -> list:
 
 
 def __build_proof_box(
-    ergo: appkit.ErgoAppKit,
+    ergo,
     proof_id: str,
-    sender_address: Address,
+    sender_address,
     token_amount: int = DEFAULT_TOKEN_AMOUNT,
     assigned_object: Optional[ProofObject] = None,
     data: str = ""
 ):
+    jpype = require_java_module("jpype", feature="Ergo reputation")
+    org_appkit = jpype.JPackage("org").ergoplatform.appkit
     LOGGER(f"Building proof box with token amount {token_amount}")
     type_nft_id = assigned_object['type'] if assigned_object else PLAIN_TEXT_TYPE_NFT_ID
     object_to_assign = assigned_object['value'] if assigned_object else ""
 
     owner_hash = _owner_script_hash(sender_address)
+    try:
+        ergo_token_cls = org_appkit.ErgoToken
+    except AttributeError:
+        ergo_token_cls = jpype.JPackage("org").ergoplatform.sdk.ErgoToken
 
     return ergo._ctx.newTxBuilder() \
             .outBoxBuilder() \
                 .value(SAFE_MIN_BOX_VALUE) \
-                .tokens([ErgoToken(proof_id, jpype.JLong(abs(int(token_amount))))]) \
+                .tokens([ergo_token_cls(proof_id, jpype.JLong(abs(int(token_amount))))]) \
                 .registers([
-                    ErgoValue.of(jpype.JString(type_nft_id).getBytes("utf-8")),         # R4: typeNftTokenId
-                    ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),    # R5: uniqueObjectData
-                    ErgoValue.of(jpype.JBoolean(False)),                                  # R6: isLocked
-                    ErgoValue.of(owner_hash),                                             # R7: blake2b256(propositionBytes)
-                    ErgoValue.of(jpype.JBoolean(int(token_amount) >= 0)),                # R8: positive/negative
-                    ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                 # R9: content
+                    org_appkit.ErgoValue.of(jpype.JString(type_nft_id).getBytes("utf-8")),         # R4: typeNftTokenId
+                    org_appkit.ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),    # R5: uniqueObjectData
+                    org_appkit.ErgoValue.of(jpype.JBoolean(False)),                                  # R6: isLocked
+                    org_appkit.ErgoValue.of(owner_hash),                                             # R7: blake2b256(propositionBytes)
+                    org_appkit.ErgoValue.of(jpype.JBoolean(int(token_amount) >= 0)),                # R8: positive/negative
+                    org_appkit.ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                 # R9: content
                 ]) \
-                .contract(ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)) \
+                .contract(ergo._ctx.compileContract(org_appkit.ConstantsBuilder.empty(), CONTRACT)) \
                 .build()
 
 
-@initialize_jvm
 def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: Optional[str], objects: List[Tuple[Optional[str], int, Optional[str]]]):
+    ensure_ergpy_jvm(feature="Ergo reputation")
+    appkit = require_java_module("ergpy.appkit", feature="Ergo reputation")
+    jpype = require_java_module("jpype", feature="Ergo reputation")
+    org_appkit = jpype.JPackage("org").ergoplatform.appkit
+    from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
+    from src.reputation_system.contracts.ergo.utils import get_public_key
+
     ergo = appkit.ErgoAppKit(node_url=node_url)
     fee = DEFAULT_FEE
     safe_min_out_box = (len(objects) + 1) * SAFE_MIN_BOX_VALUE
@@ -160,9 +157,9 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     if proof_id:
         try:
-            compiled_contract = ergo._ctx.compileContract(ConstantsBuilder.empty(), CONTRACT)
+            compiled_contract = ergo._ctx.compileContract(org_appkit.ConstantsBuilder.empty(), CONTRACT)
             ergo_tree = compiled_contract.getErgoTree()
-            script_address = Address.fromErgoTree(ergo_tree, NetworkType.MAINNET)
+            script_address = org_appkit.Address.fromErgoTree(ergo_tree, org_appkit.NetworkType.MAINNET)
             input_list = ergo.getInputBoxCovering(
                 amount_list=[SAFE_MIN_BOX_VALUE],
                 sender_address=script_address,
@@ -253,6 +250,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
 def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
     try:
+        from src.payment_system.contracts.ergo.interface import get_amount_by_addr
+
         proof_id = env_manager.get('reputation.REPUTATION_PROOF_ID') or env_manager.get('REPUTATION_PROOF_ID')
         mnemonic = env_manager.get('ledgers.ergo.WALLET_MNEMONIC') or env_manager.get('WALLET_MNEMONIC')
         node_url = ERGO_NODE_URL()

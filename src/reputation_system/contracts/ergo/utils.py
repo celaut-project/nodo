@@ -1,17 +1,7 @@
 from binascii import hexlify
-from ergpy import appkit as ergpy
-from ergpy.helper_functions import initialize_jvm
-
-from jpype import *
-from jpype.types import JByte
-import java.lang
-
-from org.ergoplatform.sdk import *
-from org.ergoplatform.appkit import *
-from org.ergoplatform.appkit.impl import *
-from org.ergoplatform import *
 
 from src.utils.config import ConfigManager
+from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 
 def get_public_key(mnemonic_phrase: str) -> str:
     """
@@ -20,6 +10,7 @@ def get_public_key(mnemonic_phrase: str) -> str:
     :param mnemonic_phrase: BIP-39 mnemonic phrase.
     :return: Public key in hexadecimal format.
     """
+    ergpy = require_java_module("ergpy.appkit", feature="Ergo reputation")
     ergo = ergpy.ErgoAppKit(node_url=ConfigManager().get("ledgers.ergo.NODE_URL"))
     mnemonic = ergo.getMnemonic(wallet_mnemonic=mnemonic_phrase, mnemonic_password=None)
     return ergo.getSenderAddress(index=0, wallet_mnemonic=mnemonic[1], wallet_password=mnemonic[2])
@@ -39,11 +30,14 @@ def pub_key_hex_to_addr(pub_key_hex: str) -> str:
     return address
 """
 
-@initialize_jvm
 def addr_to_pub_key_hex(address: str) -> str:
+    ensure_ergpy_jvm(feature="Ergo reputation")
+    jpype = require_java_module("jpype", feature="Ergo reputation")
+    org_ergoplatform = jpype.JPackage("org").ergoplatform
+
     pk = address.getPublicKey()
     ec_point = pk.value()
-    group_element = JavaHelpers.SigmaDsl().GroupElement(ec_point)
+    group_element = org_ergoplatform.JavaHelpers.SigmaDsl().GroupElement(ec_point)
     java_bytes = group_element.getEncoded()  # sigma.data.CollOverArray$mcB$sp
     java_byte_array = java_bytes.toArray()
     python_bytes = bytes([(byte + 256) % 256 for byte in java_byte_array])

@@ -5,11 +5,11 @@ from typing import List, Optional
 import requests
 from protos import celaut_pb2 as celaut
 
-from src.reputation_system.contracts.ergo.utils import get_public_key
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign
 from src.reputation_system.envs import CONTRACT, ergo_ledger
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
+from src.utils.java_dependency import require_java_module
 from src.utils.logger import LOGGER as logger
 
 
@@ -158,11 +158,13 @@ def validate_reputation_proof_ownership() -> bool:
         return False
 
     try:
+        from src.reputation_system.contracts.ergo.utils import get_public_key
+
         address = get_public_key(mnemonic_phrase=mnemonic_phrase)
         ergo_tree = address.getErgoAddress().script()
-        from jpype import JPackage
+        jpype = require_java_module("jpype", feature="Ergo reputation")
 
-        serializer = JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
+        serializer = jpype.JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
         proposition_bytes = bytes((byte + 256) % 256 for byte in serializer.serializeErgoTree(ergo_tree))
         expected_owner_hash = hashlib.blake2b(proposition_bytes, digest_size=32).hexdigest()
 

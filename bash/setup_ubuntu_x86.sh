@@ -21,13 +21,6 @@ PYTHON_BASE_URL="https://github.com/astral-sh/python-build-standalone/releases/d
 PYTHON_URL="${PYTHON_BASE_URL}/${PYTHON_DIST}"
 PYTHON_CHECKSUMS_URL="${PYTHON_BASE_URL}/SHA256SUMS"
 
-JRE_VERSION="21.0.8_9"
-JRE_RELEASE_TAG="jdk-21.0.8%2B9"
-JRE_DIST="OpenJDK21U-jre_x64_linux_hotspot_${JRE_VERSION}.tar.gz"
-JRE_BASE_URL="https://github.com/adoptium/temurin21-binaries/releases/download/${JRE_RELEASE_TAG}"
-JRE_URL="${JRE_BASE_URL}/${JRE_DIST}"
-JRE_SHA_URL="${JRE_URL}.sha256.txt"
-
 YQ_VERSION="v4.44.3"
 YQ_URL="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
 YQ_BIN_DEFAULT="$TARGET_DIR/bin/yq"
@@ -37,7 +30,6 @@ RUNTIME_DIR="$TARGET_DIR/runtime"
 PYTHON_RUNTIME_ROOT_DEFAULT="$RUNTIME_DIR/python"
 PYTHON_RUNTIME_ROOT="$PYTHON_RUNTIME_ROOT_DEFAULT"
 JAVA_RUNTIME_ROOT_DEFAULT="$RUNTIME_DIR/java"
-JAVA_RUNTIME_ROOT="$JAVA_RUNTIME_ROOT_DEFAULT"
 DOCKER_BIN_TARGET="${TARGET_DIR}/bin/docker"
 DOCKERD_BIN_TARGET="${TARGET_DIR}/bin/dockerd"
 BUILDX_BIN_TARGET="${TARGET_DIR}/libexec/docker/cli-plugins/docker-buildx"
@@ -79,7 +71,6 @@ apply_configured_dependency_paths() {
     fi
 
     PYTHON_RUNTIME_ROOT="$(read_config_path_or_default '.dependencies.python.RUNTIME_ROOT' "$PYTHON_RUNTIME_ROOT_DEFAULT")"
-    JAVA_RUNTIME_ROOT="$(read_config_path_or_default '.dependencies.java.RUNTIME_ROOT' "$JAVA_RUNTIME_ROOT_DEFAULT")"
     DOCKER_BIN_TARGET="$(read_config_path_or_default '.dependencies.docker.BIN' "$DOCKER_BIN_TARGET")"
     DOCKERD_BIN_TARGET="$(read_config_path_or_default '.dependencies.docker.DAEMON_BIN' "$DOCKERD_BIN_TARGET")"
     BUILDX_BIN_TARGET="$(read_config_path_or_default '.dependencies.docker.BUILDX_BIN' "$BUILDX_BIN_TARGET")"
@@ -232,38 +223,6 @@ install_portable_python() {
     rm -f "$archive" "$checksums"
 }
 
-install_portable_jre() {
-    local archive
-    local checksum
-    local install_dir
-
-    archive="$(mktemp /tmp/nodo-jre.XXXXXX.tar.gz)"
-    checksum="$(mktemp /tmp/nodo-jre-sha.XXXXXX)"
-    install_dir="${JAVA_RUNTIME_ROOT}/${JRE_VERSION}"
-
-    mkdir -p "$JAVA_RUNTIME_ROOT"
-
-    echo "Installing portable Temurin JRE ${JRE_VERSION}..."
-    download_file "$JRE_URL" "$archive"
-    download_file "$JRE_SHA_URL" "$checksum"
-
-    local expected
-    local actual
-    expected="$(awk '{print $1}' "$checksum" | head -n1)"
-    [ -n "$expected" ] || fail "Failed to read expected SHA256 from ${JRE_SHA_URL}"
-
-    actual="$(sha256sum "$archive" | awk '{print $1}')"
-    [ "$actual" = "$expected" ] || fail "SHA256 mismatch for ${JRE_DIST}. expected=${expected} actual=${actual}"
-
-    extract_archive "$archive" "$install_dir"
-
-    ln -sfn "$install_dir" "${JAVA_RUNTIME_ROOT}/current"
-    test -x "${JAVA_RUNTIME_ROOT}/current/bin/java" \
-        || fail "Portable Java not found at ${JAVA_RUNTIME_ROOT}/current/bin/java"
-
-    rm -f "$archive" "$checksum"
-}
-
 provision_cloud_hypervisor_assets() {
     local ch_binary_target="$TARGET_DIR/bin/cloud-hypervisor"
     local ch_kernel_target="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
@@ -351,7 +310,6 @@ echo "Provisioning Cloud Hypervisor assets..."
 provision_cloud_hypervisor_assets
 
 install_portable_python
-install_portable_jre
 
 echo "Creating Python virtual environment in ${TARGET_DIR}/venv..."
 "${PYTHON_RUNTIME_ROOT}/current/bin/python3" -m venv "$TARGET_DIR/venv"

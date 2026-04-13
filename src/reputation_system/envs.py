@@ -39,12 +39,8 @@ def _compile_script_hash(script: str, node_url: str) -> Optional[str]:
 
 
 def _resolve_digital_public_good_script_hash(dpg_contract: str) -> str:
-    node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
-    if node_url:
-        compiled_hash = _compile_script_hash(script=dpg_contract, node_url=node_url)
-        if compiled_hash:
-            return compiled_hash
-    # Fallback only for offline scenarios: deterministic hash from source bytes.
+    # Keep module import Java-free; the deterministic source hash is enough until
+    # an Ergo-backed operation explicitly needs the JVM.
     return hashlib.blake2b(dpg_contract.encode("utf-8"), digest_size=32).hexdigest()
 
 
