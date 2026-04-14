@@ -1,202 +1,225 @@
+# Nodo on WSL2 (Windows)
 
-# Creación
+This guide covers two workflows:
 
-## 1️⃣ Crear carpeta para la distro
+1. **Installation** — Set up Nodo inside WSL2 on any Windows machine.
+2. **Distribution** — Package the configured WSL distro as an `.appx` for one-click installation by end users.
+
+---
+
+# Installation
+
+## Prerequisites
+
+- **Windows 10 (build 19041+)** or **Windows 11**
+- **WSL2** enabled. If not already installed:
 
 ```powershell
-mkdir C:\WSL\nodo-wsl
-mkdir C:\WSL\nodo-wsl\rootfs
-cd C:\WSL\nodo-wsl
+wsl --install
+```
+
+> Restart your machine if prompted. This installs WSL2 with the default Ubuntu distribution.
+
+- **Hardware virtualization (VT-x / AMD-V)** must be enabled in BIOS/UEFI.
+
+---
+
+## 1️⃣ Install Ubuntu 22.04 on WSL2
+
+If you already have Ubuntu 22.04 on WSL, skip this step.
+
+```powershell
+wsl --install -d Ubuntu-22.04
+```
+
+After installation, WSL will open the distro and ask you to create a UNIX user. Pick any username and password.
+
+Verify it is running WSL2:
+
+```powershell
+wsl -l -v
+```
+
+If the VERSION column shows `1`, convert it:
+
+```powershell
+wsl --set-version Ubuntu-22.04 2
 ```
 
 ---
 
-## 2️⃣ Descargar rootfs Debian minimal
+## 2️⃣ Enter the distro and install dependencies
 
 ```powershell
-curl -L -o rootfs.tar.gz https://deb.debian.org/debian/dists/bookworm/main/installer-amd64/current/images/netboot/debian-installer/amd64/root.tar.gz
+wsl -d Ubuntu-22.04
 ```
 
----
-
-## 3️⃣ Extraer el rootfs
-
-```powershell
-tar -xzf rootfs.tar.gz -C rootfs
-```
-
----
-
-## 4️⃣ Crear `/boot` dentro del rootfs
-
-```powershell
-mkdir rootfs\boot
-cd rootfs\boot
-```
-
----
-
-## 5️⃣ Descargar kernel (`vmlinuz`) e initramfs (`initrd.img`)
-
-* Para ejemplo usamos kernel de Ubuntu mainline:
-
-```powershell
-curl -L -o vmlinuz https://kernel.ubuntu.com/~kernel-ppa/mainline/v6.6.1/amd64/linux-image-6.6.1-amd64
-curl -L -o initrd.img https://kernel.ubuntu.com/~kernel-ppa/mainline/v6.6.1/amd64/linux-initrd.img-6.6.1-amd64
-```
-
-> Ahora tienes `/boot/vmlinuz` y `/boot/initrd.img` dentro de tu rootfs.
-
----
-
-## 6️⃣ Empaquetar rootfs para WSL
-
-```powershell
-cd C:\WSL\nodo-wsl
-tar -C rootfs -czf rootfs-wsl.tar .
-```
-
----
-
-## 7️⃣ Registrar la distro en WSL
-
-```powershell
-wsl --import nodo-wsl C:\WSL\nodo-wsl rootfs-wsl.tar
-```
-
-* `nodo-wsl` → nombre de la distro
-* `C:\WSL\nodo-wsl` → carpeta de instalación
-* `rootfs-wsl.tar` → archivo tar del rootfs
-
----
-
-## 8️⃣ Entrar en la distro y crear usuario rootless
-
-```powershell
-wsl -d nodo-wsl
-```
-
-Dentro de la distro:
+Inside the distro, install `curl` (needed by the installer):
 
 ```bash
-adduser --disabled-password --gecos '' nodo
-usermod -aG sudo nodo
-exit
+sudo apt update && sudo apt install -y curl
 ```
 
 ---
 
-## 9️⃣ Configurar la distro para iniciar como `nodo`
+## 3️⃣ Install Nodo
 
-Crear archivo `wsl.conf` en la carpeta de instalación de la distro (`C:\WSL\nodo-wsl\wsl.conf`):
+Run the official installer:
 
-```ini
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash
+```
+
+This will:
+- Clone the Nodo repository to `/nodo`
+- Install a portable Python 3.11, Java JRE 21, and yq
+- Create a Python virtual environment with all dependencies
+- Download Cloud Hypervisor v51 with a custom kernel (`vmlinuz`) and initramfs
+- Install Docker (isolated daemon)
+- Set up the `nodo` systemd service
+
+> ⏳ The installation takes several minutes. If it fails on the first run (e.g. network timeout), run it again — the script is idempotent.
+
+> ⚠️ **Known issue (Ubuntu 22.04):** The Python virtual environment creation may fail with an `ensurepip` error. If this happens:
+> ```bash
+> sudo rm -rf /nodo/venv
+> /nodo/runtime/python/current/bin/python3 -m venv /nodo/venv
+> /nodo/venv/bin/pip install --upgrade pip
+> /nodo/venv/bin/pip install -r /nodo/bash/requirements.txt
+> ```
+> Then re-run the install script.
+
+---
+
+## 4️⃣ Verify the installation
+
+```bash
+sudo nodo doctor
+```
+
+You should see all `[OK]` checks:
+
+```
+Virtualization checks (Cloud Hypervisor/KVM):
+[OK] CPU virtualization flags detected (vmx/svm matches: ...).
+[OK] KVM kernel modules appear to be loaded.
+[OK] /dev/kvm exists ...
+...
+Cloud Hypervisor KVM smoke test:
+[OK] Cloud Hypervisor vCPU is running (process alive after 2s).
+```
+
+If `/dev/kvm` is missing, make sure:
+1. Hardware virtualization is enabled in BIOS.
+2. You are running WSL2 (not WSL1).
+3. Windows Hyper-V and Virtual Machine Platform features are enabled.
+
+---
+
+## 5️⃣ Start the Nodo daemon
+
+```bash
+sudo nodo daemon start
+```
+
+Check status:
+
+```bash
+sudo nodo daemon status
+```
+
+---
+
+## 6️⃣ (Optional) Configure WSL to start as root
+
+Nodo requires root to manage Docker and Cloud Hypervisor. You can configure the distro to default to root:
+
+Create `/etc/wsl.conf` inside the distro:
+
+```bash
+sudo tee /etc/wsl.conf << 'EOF'
 [user]
-default=nodo
+default=root
+EOF
+```
+
+Then restart the distro from PowerShell:
+
+```powershell
+wsl --shutdown
+wsl -d Ubuntu-22.04
 ```
 
 ---
 
-## 10️⃣ Verificar `/boot` y usuario
+# Distribution
 
-Volver a entrar:
+To distribute a pre-configured Nodo WSL distro as a `.appx` / `.msixbundle` package that users can install with a double click:
+
+---
+
+## 1️⃣ Prepare and export the distro
+
+After completing the installation above and verifying `nodo doctor` passes:
 
 ```powershell
-wsl -d nodo-wsl
+wsl --export Ubuntu-22.04 nodo-distro.tar
 ```
 
-Dentro:
+This creates a portable tarball of the entire WSL filesystem.
+
+---
+
+## 2️⃣ Build the Appx package
+
+Microsoft provides an open-source WSL distribution launcher template:
+
+👉 [WSL-DistroLauncher (GitHub)](https://github.com/microsoft/WSL-DistroLauncher)
+
+1. Clone the repository.
+2. Open `DistroLauncher.sln` in **Visual Studio 2019 or 2022**.
+3. Replace `install.tar.gz` in the project with your `nodo-distro.tar` (rename accordingly).
+4. Edit the project configuration:
+   - **Display name** → e.g. "Nodo WSL"
+   - **Package identity** → unique name for your distribution
+   - **Icons and metadata** as desired
+5. Set build to **Release > x64**.
+6. Build → **Project → Publish → Create App Packages**.
+7. Select **Sideloading** (not Microsoft Store).
+8. The output `.appx` or `.msixbundle` is ready for distribution.
+
+---
+
+## 3️⃣ User installation
+
+End users only need to:
+
+1. Enable WSL2 (if not already): `wsl --install` in PowerShell (admin).
+2. Double-click the `.appx` / `.msixbundle` file.
+3. The distro appears in the Start menu and can be launched like any app.
+
+> **Note:** If the user has never enabled WSL, Windows will prompt them to enable it and may require a restart.
+
+---
+
+## 4️⃣ Post-install (for the end user)
+
+After launching the distro for the first time:
 
 ```bash
-whoami        # Debe mostrar: nodo
-ls /boot      # Debe mostrar: vmlinuz  initrd.img
+sudo nodo doctor     # Verify everything is OK
+sudo nodo daemon start  # Start the Nodo service
 ```
 
 ---
 
-Con esto ya tienes:
+# Troubleshooting
 
-* Una distro Debian llamada **nodo-wsl**
-* Usuario **nodo**, rootless con sudo
-* `/boot` con `vmlinuz` e `initrd.img` para usar con **Cloud-Hypervisor**
-
----
-
-
-
-# Distribución
-
-Perfecto, vamos a centrarnos en la **Opción A: crear un paquete `.appx` / `.msixbundle` de tu distro WSL**, que permite al usuario instalarla **con un doble clic**, sin usar la línea de comandos. Te doy la guía completa paso a paso.
-
----
-
-## **Guía para crear un paquete Appx de una distro WSL**
-
-### **1. Preparar tu distro WSL**
-
-1. Instala y configura la distro base (por ejemplo Ubuntu) en WSL.
-2. Personaliza lo que quieras: paquetes, scripts, configuraciones.
-3. Exporta la distro a un archivo `.tar` (solo para ti, en tu máquina):
-
-```powershell
-wsl --export Ubuntu custom-distro.tar
-```
-
-* `Ubuntu` es el nombre de tu distro.
-* `custom-distro.tar` es el archivo que usarás para crear el Appx.
-
----
-
-### **2. Descargar WSL Distro Launcher**
-
-* Microsoft proporciona una plantilla para crear paquetes WSL:
-  [WSL Distro Launcher GitHub](https://github.com/microsoft/WSL-DistroLauncher)
-
-1. Clona o descarga el repositorio.
-2. Dentro encontrarás un proyecto de **Visual Studio** (`DistroLauncher.sln`) que sirve como base para tu paquete Appx.
-
----
-
-### **3. Reemplazar la imagen de la distro**
-
-1. Dentro del proyecto de Visual Studio hay una carpeta llamada `rootfs`.
-2. Copia tu `custom-distro.tar` allí, reemplazando el ejemplo que viene con la plantilla.
-3. Modifica `DistroLauncher.vcxproj` o los archivos de configuración si quieres cambiar:
-
-   * Nombre de la distro.
-   * ID del paquete.
-   * Icono y metadatos.
-
-> Esto controla cómo aparecerá la aplicación en el menú inicio y en la tienda si decides publicarla.
-
----
-
-### **4. Compilar el paquete Appx**
-
-1. Abre el proyecto `DistroLauncher.sln` en **Visual Studio 2019 o 2022**.
-2. Cambia la configuración a **Release > x64** (u otra arquitectura según tu distro).
-3. Ve a **Proyecto → Publicar → Crear paquete Appx**.
-4. Marca **No, no quiero subir al Microsoft Store**.
-5. Define la carpeta donde se guardará el paquete `.appx` o `.msixbundle`.
-6. Visual Studio compilará el paquete listo para distribución.
-
----
-
-### **5. Distribuir el paquete**
-
-* El usuario solo necesita:
-
-  1. Hacer doble clic en el `.appx` o `.msixbundle`.
-  2. Windows instalará la distro WSL automáticamente.
-  3. Aparecerá en el menú inicio como una aplicación normal (por ejemplo: “Custom Ubuntu”).
-
-> Opción extra: puedes incluir un **icono personalizado** y nombre de la distro amigable en la interfaz de Windows.
-
----
-
-### **6. Notas importantes**
-
-* Esta forma funciona para **WSL2**.
-* Si el usuario no tiene WSL habilitado, el paquete le indicará que lo habilite.
-* Puedes distribuir el paquete por web, USB o red corporativa.
-* No requiere scripts ni terminal para el usuario final.
+| Problem | Solution |
+|---------|----------|
+| `ensurepip` fails during install | See the workaround in Step 3 above |
+| `/dev/kvm` not found | Enable VT-x/AMD-V in BIOS, ensure WSL2 + Hyper-V enabled |
+| `nodo doctor` shows kernel incompatible | Update WSL kernel: `wsl --update` from PowerShell |
+| Docker daemon won't start | Check `sudo /nodo/bash/start_docker_daemon.sh /nodo` output |
+| Install script fails with network errors | Re-run the install command — it is idempotent |
+| WSL version is 1 instead of 2 | `wsl --set-version <distro-name> 2` |
