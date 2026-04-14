@@ -331,9 +331,9 @@ if __name__ == '__main__':
                 external = "--remote" in args
                 args = [arg for arg in args if arg != "--remote"]
 
+                envs = {}
                 if "-e" in args:
                     # Foreach -e get the subsequent key and value and add to envs dict
-                    envs = {}
                     while "-e" in args:
                         try:
                             e_index = args.index("-e")
