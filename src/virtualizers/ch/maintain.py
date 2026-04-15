@@ -50,9 +50,10 @@ def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[
         remove_and_penalize(vmachine_id=vmachine_id)
         return
 
-    log.LOGGER(
-        f"[CH][{vmachine_id}] event=maintain healthy pid={pid}, api_socket={api_socket or '<none>'}"
-    )
+    if debug_mode:
+        log.LOGGER(
+            f"[CH][{vmachine_id}] event=maintain healthy pid={pid}, api_socket={api_socket or '<none>'}"
+        )
 
 
 def janitor_cleanup_orphans(debug_mode: bool = False) -> None:
