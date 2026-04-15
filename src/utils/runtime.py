@@ -6,6 +6,7 @@ import docker as docker_lib
 from protos import celaut_pb2
 
 from src.utils.config import ConfigManager
+from src.utils import logger as log
 
 config = ConfigManager()
 
@@ -91,11 +92,29 @@ def _create_docker_client():
     """Creates a Docker client connected to nodo's isolated daemon."""
     socket_path = DOCKER_SOCKET
     _ensure_docker_daemon_running()
-    return docker_lib.DockerClient(
-        base_url=f"unix://{socket_path}",
-        timeout=config.get("virtualizers.docker.DOCKER_CLIENT_TIMEOUT", 480),
-        max_pool_size=config.get("virtualizers.docker.DOCKER_MAX_CONNECTIONS", 1000),
-    )
+    base_url = f"unix://{socket_path}" if socket_path else None
+    try:
+        log.LOGGER(f"[DOCKER] Creating DockerClient. base_url={base_url}, DOCKER_HOST_env={os.environ.get('DOCKER_HOST')}")
+    except Exception:
+        pass
+
+    try:
+        client = docker_lib.DockerClient(
+            base_url=base_url,
+            timeout=config.get("virtualizers.docker.DOCKER_CLIENT_TIMEOUT", 480),
+            max_pool_size=config.get("virtualizers.docker.DOCKER_MAX_CONNECTIONS", 1000),
+        )
+        return client
+    except Exception as e:
+        err_str = str(e)
+        if "Not supported URL scheme" in err_str and "http+docker" in err_str:
+            advice = (
+                "Docker client failed due to unsupported URL scheme 'http+docker'. "
+                "Install 'requests-unixsocket' or ensure DOCKER_HOST/DOCKER_SOCKET is a valid unix or tcp URL."
+            )
+            log.LOGGER(f"[DOCKER] {err_str}. {advice}")
+            raise RuntimeError(f"Unable to create Docker client for socket {socket_path}: {err_str}\n{advice}")
+        raise
 
 
 DOCKER_CLIENT = _create_docker_client
