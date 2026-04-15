@@ -102,7 +102,7 @@ def _create_docker_client():
         client = docker_lib.DockerClient(
             base_url=base_url,
             timeout=config.get("virtualizers.docker.DOCKER_CLIENT_TIMEOUT", 480),
-            max_pool_size=config.get("virtualizers.docker.DOCKER_MAX_CONNECTIONS", 1000),
+            max_pool_size=config.get("virtualizers.docker.DOCKER_MAX_CONNECTIONS", 1000)
         )
         return client
     except Exception as e:
