@@ -18,7 +18,7 @@ ensure_daemon_config() {
         "max-file": "3"
     },
     "ipv6": false,
-    "default-cgroupns-mode": "host"
+    "default-cgroupns-mode": "private"
 }
 EOF
     fi
