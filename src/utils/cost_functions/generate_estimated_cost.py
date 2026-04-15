@@ -46,6 +46,7 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
             f"Requested: {requested_mem_limit} bytes, "
             f"available in service memory pool: {service_memory_pool_available} bytes, "
             f"total service memory pool: {service_memory_pool_total} bytes."
+            f"\n Try `sudo nodo daemon restart` to free up memory or increase the memory pool size if possible."
         )
 
     return {
