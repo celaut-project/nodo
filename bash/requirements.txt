@@ -5,8 +5,8 @@ psutil==5.9.5
 netifaces2==0.0.16
 ecdsa==0.19.0
 python-dotenv==1.0.0
-pyngrok==7.1.6
 mnemonic==0.21
 bip32==4.0
+requests-unixsocket==0.4.1
 git+https://github.com/bee-rpc-protocol/bee-rpc-over-grpc-py
 git+https://github.com/reputation-systems/ergpy
