@@ -8,5 +8,6 @@ python-dotenv==1.0.0
 mnemonic==0.21
 bip32==4.0
 requests-unixsocket==0.4.1
+PyYAML==6.0.1
 git+https://github.com/bee-rpc-protocol/bee-rpc-over-grpc-py
 git+https://github.com/reputation-systems/ergpy
