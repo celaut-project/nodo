@@ -141,6 +141,10 @@ verify_archive_sha256_from_checksums() {
     fi
 }
 
+is_wsl() {
+    grep -qi microsoft /proc/version 2>/dev/null
+}
+
 resolve_boot_asset() {
     local preferred_path="$1"
     local fallback_pattern="$2"
@@ -154,15 +158,17 @@ resolve_boot_asset() {
         fi
     fi
 
-    resolved_path="$(
-        find /boot -maxdepth 1 -type f -name "$fallback_pattern" -printf '%T@ %p\n' \
-            | sort -nr \
-            | head -n1 \
-            | cut -d' ' -f2-
-    )"
-    if [ -n "$resolved_path" ] && [ -f "$resolved_path" ]; then
-        printf '%s\n' "$resolved_path"
-        return 0
+    if [ -d /boot ]; then
+        resolved_path="$(
+            find /boot -maxdepth 1 -type f -name "$fallback_pattern" -printf '%T@ %p\n' \
+                | sort -nr \
+                | head -n1 \
+                | cut -d' ' -f2-
+        )"
+        if [ -n "$resolved_path" ] && [ -f "$resolved_path" ]; then
+            printf '%s\n' "$resolved_path"
+            return 0
+        fi
     fi
 
     return 1
@@ -249,8 +255,17 @@ provision_cloud_hypervisor_assets() {
         fail "Unable to download Cloud Hypervisor ${CH_VERSION} release asset for x86_64."
     fi
 
-    kernel_source="$(resolve_boot_asset "/boot/vmlinuz" "vmlinuz-*")" \
-        || fail "Unable to locate kernel in /boot (checked /boot/vmlinuz and vmlinuz-*)."
+    kernel_source="$(resolve_boot_asset "/boot/vmlinuz" "vmlinuz-*")" || {
+        if is_wsl; then
+            echo "WSL detected: no kernel in /boot. Installing linux-image-virtual for CH guest kernel..."
+            apt-get install -y --no-install-recommends linux-image-virtual > /dev/null 2>&1 \
+                || fail "Failed to install linux-image-virtual. Install a kernel package manually: apt-get install linux-image-virtual"
+            kernel_source="$(resolve_boot_asset "/boot/vmlinuz" "vmlinuz-*")" \
+                || fail "Still unable to locate kernel in /boot after installing linux-image-virtual."
+        else
+            fail "Unable to locate kernel in /boot (checked /boot/vmlinuz and vmlinuz-*)."
+        fi
+    }
 
     cp -f "$kernel_source" "$ch_kernel_target"
     chmod 0644 "$ch_kernel_target"
