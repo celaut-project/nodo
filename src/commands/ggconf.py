@@ -9,6 +9,7 @@ import socket
 from typing import Dict
 from pathlib import Path
 from src.utils.config import ConfigManager
+from protos.celaut_pb2 import Configuration
 
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import (
     SERVICE_DEPENDENCIES_DIRECTORY,
@@ -136,7 +137,7 @@ def get_local_ip():
         s.close()
     return ip
 
-def generate_gateway_config_dev(path: str):
+def generate_gateway_config_dev(path: str, envs: Dict[str, str]):
     """
     Generates a gateway configuration and the dependencies file for development.
 
@@ -150,7 +151,12 @@ def generate_gateway_config_dev(path: str):
     if not config_dir_path.exists():
         print("Creating configuration file for development...")
         os.makedirs(path, exist_ok=True)
-        config= get_config(config=None, resources=None)
+        config = Configuration()
+        if envs:
+            config.environment_variables.update({
+                k: v.encode() for k, v in envs.items()
+            })
+        config= get_config(config=config, resources=None)
         print(f"Writing the configuration {config} to the path: '{path}'")
         write_config(path=path, config=config)
     else:

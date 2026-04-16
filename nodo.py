@@ -544,7 +544,23 @@ if __name__ == '__main__':
                     print(f"Error: The directory {absolute_path} does not exist")
                     sys.exit(1)
 
-                generate_gateway_config_dev(path=absolute_path)
+                args = sys.argv[3:]
+                envs = {}
+                if "-e" in args:
+                    # Foreach -e get the subsequent key and value and add to envs dict
+                    while "-e" in args:
+                        try:
+                            e_index = args.index("-e")
+                            key = args[e_index + 1]
+                            value = args[e_index + 2]
+                            envs[key] = value
+                            # Remove the processed -e, key, and value from args
+                            args = args[:e_index] + args[e_index + 3:]
+                        except IndexError:
+                            print("Error: -e requires a key and a value", flush=True)
+                            sys.exit(1)
+
+                generate_gateway_config_dev(path=absolute_path, envs=envs)
                 
             case "prune_containers":
                 # Check if script is run as root
