@@ -67,7 +67,9 @@ def generator(
             initial_gas_amount=to_gas_amount(initial_gas_amount)
         )
         if envs:
-            config.environment_variables = {k: v.encode() for k, v in envs.items()}
+            config.environment_variables.update({
+                k: v.encode() for k, v in envs.items()
+            })
         yield config
         print("Configuration sent")
 
