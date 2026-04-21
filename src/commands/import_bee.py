@@ -135,7 +135,7 @@ def import_bee(path: str) -> Optional[str]:
         else:
             _remove_path(service_dir)
         
-        print("Service imported successfully.")
+        print("\n\nService imported successfully.")
         return service_hash
     
     except Exception as e:
