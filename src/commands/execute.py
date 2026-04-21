@@ -198,3 +198,5 @@ def execute(service: str, external: bool = False, envs: dict[str, str] | None = 
         print("🌐 Endpoints available:\n")
         for endpoint in endpoints:
             print(f"  • {endpoint}")
+    else:
+        print("No endpoints available")
