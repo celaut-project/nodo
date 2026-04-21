@@ -18,6 +18,39 @@ sc = SQLConnection()
 env_manager = ConfigManager()
 
 
+_INTERFACE_PREFIX_PRIORITY = (
+    "wl",
+    "ww",
+    "en",
+    "eth",
+)
+
+_VIRTUAL_INTERFACE_PREFIXES = (
+    "docker",
+    "br-",
+    "veth",
+    "virbr",
+    "zt",
+    "tailscale",
+    "tun",
+    "tap",
+    "wg",
+    "vmnet",
+    "vboxnet",
+)
+
+
+def _interface_priority(interface: str) -> tuple[int, int, str]:
+    normalized = (interface or "").strip().lower()
+    if normalized in {"lo", "localhost"}:
+        return (3, len(normalized), normalized)
+    if normalized.startswith(_VIRTUAL_INTERFACE_PREFIXES):
+        return (2, len(normalized), normalized)
+    if normalized.startswith(_INTERFACE_PREFIX_PRIORITY):
+        return (0, len(normalized), normalized)
+    return (1, len(normalized), normalized)
+
+
 def _resolve_default_ipv4_interface() -> str:
     try:
         default_gateway = ni.gateways().get("default", {})
@@ -41,7 +74,9 @@ def _resolve_default_ipv6_interface() -> str:
 
 
 def _find_any_host_interface_ip() -> str:
-    for interface in ni.interfaces():
+    for interface in sorted(ni.interfaces(), key=_interface_priority):
+        if _interface_priority(interface)[0] >= 2:
+            continue
         if interface in {"lo", "localhost"}:
             continue
         try:

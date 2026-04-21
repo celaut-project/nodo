@@ -15,6 +15,22 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class LocalExecutionNetworkModeTests(unittest.TestCase):
+    def test_find_any_host_interface_ip_prefers_physical_interfaces_over_docker(self):
+        with patch.object(
+            local_execute.ni,
+            "interfaces",
+            return_value=["docker0", "lo", "wlp3s0", "enp0s31f6"],
+        ), patch.object(
+            local_execute.utils,
+            "get_local_ip_from_network",
+            side_effect=lambda network, allow_link_local=False: {
+                "wlp3s0": "192.168.0.5",
+                "enp0s31f6": "192.168.0.6",
+                "docker0": "172.17.0.1",
+            }[network],
+        ):
+            self.assertEqual(local_execute._find_any_host_interface_ip(), "192.168.0.6")
+
     def test_external_execute_advertises_host_ip_for_reserved_external_dev_client(self):
         config = celaut.Configuration(
             initial_gas_amount=to_gas_amount(1234),
