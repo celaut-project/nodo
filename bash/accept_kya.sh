@@ -3,8 +3,28 @@
 # --- Configuration ---
 KYA_DOC_NAME="KyA.md"
 KYA_DOC_RELATIVE_PATH="docs/$KYA_DOC_NAME"
+FAST_GUIDE_DOC_NAME="QUICK_GUIDE.md"
+FAST_GUIDE_DOC_RELATIVE_PATH="docs/$FAST_GUIDE_DOC_NAME"
 ACCEPTANCE_MARKER_DIR_RELATIVE_PATH="storage"
 ACCEPTANCE_MARKER_FILENAME=".acceptedkya"
+
+display_doc() {
+    local doc_file="$1"
+    local doc_name="$2"
+
+    if [[ ! -f "$doc_file" ]]; then
+        echo "Error: $doc_name file not found at '$doc_file'." >&2
+        exit 1
+    fi
+
+    if command -v less &> /dev/null; then
+        less --quit-if-one-screen --RAW-CONTROL-CHARS "$doc_file"
+    else
+        cat "$doc_file"
+        echo
+        echo "(Info: 'less' not found, displayed with 'cat')"
+    fi
+}
 
 # --- Script Logic ---
 if [[ -z "$1" ]]; then
@@ -20,6 +40,7 @@ if [[ -z "$TARGET_DIR" ]]; then
 fi
 
 kya_file="$TARGET_DIR/$KYA_DOC_RELATIVE_PATH"
+fast_guide_file="$TARGET_DIR/$FAST_GUIDE_DOC_RELATIVE_PATH"
 accepted_marker_dir="$TARGET_DIR/$ACCEPTANCE_MARKER_DIR_RELATIVE_PATH"
 accepted_marker_file="$accepted_marker_dir/$ACCEPTANCE_MARKER_FILENAME"
 
@@ -34,19 +55,19 @@ if [[ ! -f "$kya_file" ]]; then
     exit 1
 fi
 
+if [[ ! -f "$fast_guide_file" ]]; then
+    echo "Error: QUICK_GUIDE file not found at '$fast_guide_file'." >&2
+    exit 1
+fi
+
 echo "------------------------------------------------------------"
-echo " Please review the 'Know Your Assumptions' (KyA)"
+echo " Know Your Assumptions (KyA)"
+echo " Please review this document before continuing."
 echo " Source: $kya_file"
 echo "------------------------------------------------------------"
 echo
 
-if command -v less &> /dev/null; then
-    less --quit-if-one-screen --RAW-CONTROL-CHARS "$kya_file"
-else
-    cat "$kya_file"
-    echo
-    echo "(Info: 'less' not found, displayed with 'cat')"
-fi
+display_doc "$kya_file" "KyA"
 
 echo "------------------------------------------------------------"
 read -r -p "Do you accept the Know Your Assumptions? (yes/no): " response
@@ -63,6 +84,15 @@ if [[ "${response,,}" == "yes" || "${response,,}" == "y" ]]; then
         exit 1
     }
     echo "Acceptance recorded in '$accepted_marker_file'."
+    echo
+    echo "------------------------------------------------------------"
+    echo " KyA accepted"
+    echo " Next step: quick guide for using Nodo"
+    echo " Source: $fast_guide_file"
+    echo "------------------------------------------------------------"
+    echo
+    display_doc "$fast_guide_file" "FAST_GUIDE"
+    echo
     echo "KyA process completed for '$TARGET_DIR'."
     exit 0
 else
