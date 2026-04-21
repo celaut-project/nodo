@@ -1,5 +1,6 @@
 # I/O Big Data utils.
 import gc
+import os
 from time import sleep
 from threading import Lock, RLock
 
@@ -77,6 +78,34 @@ class IOBigData(metaclass=Singleton):
             return "%s %s" % (s, size_name[i])
         except ValueError:
             return "%s %s" % (size_bytes, size_name[0])
+
+    def snapshot(self) -> dict:
+        system_available = int(psutil.virtual_memory().available)
+        with self.amount_lock:
+            ram_locked = int(self.ram_locked)
+            pool_available = int(self.ram_pool())
+            effective_available = int(self.get_ram_avaliable())
+            waiting = int(sum(self.wait))
+        return {
+            "pid": os.getpid(),
+            "system_available": system_available,
+            "pool_available": pool_available,
+            "ram_locked": ram_locked,
+            "effective_available": effective_available,
+            "waiting": waiting,
+        }
+
+    def log_snapshot(self, context: str) -> None:
+        snapshot = self.snapshot()
+        self.log(
+            "[MEM] "
+            f"{context} | pid={snapshot['pid']} | "
+            f"system_available={IOBigData.convert_size(snapshot['system_available'])} | "
+            f"pool_available={IOBigData.convert_size(snapshot['pool_available'])} | "
+            f"ram_locked={IOBigData.convert_size(snapshot['ram_locked'])} | "
+            f"effective_available={IOBigData.convert_size(snapshot['effective_available'])} | "
+            f"waiting={IOBigData.convert_size(snapshot['waiting'])}"
+        )
 
     def __stats(self, message: str, comments: bool = True):
         if comments:

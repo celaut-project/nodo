@@ -483,21 +483,25 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, str]:
     
     # Check if there was an error during initialization
     if spec_file.error_msg:
-        return None, None, spec_file.error_msg
+        return "", None, spec_file.error_msg
 
-    
+    iobd = IOBigData()
+    iobd.log_snapshot(context=f"pack-worker:start aux_id={aux_id}")
     _memory = int(PACKER_MEMORY_SIZE_FACTOR) * spec_file.buffer_len
-    log.LOGGER(f"Try to lock {_memory / (1024**2):.2f} MB of RAM for packing process (filesystem size: {spec_file.buffer_len / (1024**2):.2f} MB). RAM avaliable before locking: {IOBigData().get_ram_avaliable() / (1024**2):.2f} MB")
+    log.LOGGER(f"Try to lock {_memory / (1024**2):.2f} MB of RAM for packing process (filesystem size: {spec_file.buffer_len / (1024**2):.2f} MB). RAM avaliable before locking: {iobd.get_ram_avaliable() / (1024**2):.2f} MB")
     with resources.mem_manager(len=_memory):
         # TODO Check Try to lock 57.98 MB of RAM for packing process (filesystem size: 28.99 MB). RAM avaliable before locking: 8506.90 MB
-        log.LOGGER(f"RAM locked successfully for packing process. RAM avaliable after locking: {IOBigData().get_ram_avaliable() / (1024**2):.2f} MB")
+        iobd.log_snapshot(context=f"pack-worker:after-lock aux_id={aux_id} requested={_memory}")
+        log.LOGGER(f"RAM locked successfully for packing process. RAM avaliable after locking: {iobd.get_ram_avaliable() / (1024**2):.2f} MB")
         spec_file.parseContainer()
         spec_file.parseApi()
         spec_file.parseNetwork()
 
         identifier, metadata, service = spec_file.save()
+        iobd.log_snapshot(context=f"pack-worker:before-unlock aux_id={aux_id} service_id={identifier}")
 
     # os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')  <-- This avoids rebuilding the container on the first run, but it causes file permission issues since it inherits them as they were on the host. Preferably, if using Docker, it is better to rebuild it.
+    iobd.log_snapshot(context=f"pack-worker:after-unlock aux_id={aux_id} service_id={identifier}")
     os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier, metadata, service
 
@@ -518,6 +522,7 @@ def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, str]:
 
 def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
     log.LOGGER('Compiling zip ' + str(zip))
+    IOBigData().log_snapshot(context=f"pack-daemon:before-worker zip={zip}")
     lock_file = _acquire_pack_lock()
     try:
         result_path = os.path.join(CACHE, f"pack_result_{uuid.uuid4().hex}.json")
@@ -527,6 +532,9 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
             "--worker", zip, result_path
         ]
         proc = subprocess.run(cmd, cwd=main_dir)
+        IOBigData().log_snapshot(
+            context=f"pack-daemon:after-worker zip={zip} returncode={proc.returncode}"
+        )
 
         if proc.returncode != 0:
             yield from grpcbb.serialize_to_buffer(

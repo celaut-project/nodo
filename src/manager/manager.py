@@ -492,9 +492,17 @@ def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
 def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     log.LOGGER('Kill service ' + token)
     father_id, serialized_instance = None, None
+    reserved_mem_limit = 0
     
     if sc.internal_instance_exists(id=token):  # Is internal
         log.LOGGER(f"Token {token} is internal; let's stop it.")
+        try:
+            reserved_mem_limit = int(sc.get_sys_req(id=token)['mem_limit'] or 0)
+        except Exception as e:
+            log.LOGGER(f"Unable to read reserved memory for {token}: {e}")
+        IOBigData().log_snapshot(
+            context=f"stop-instance:before-kill token={token} reserved_mem_limit={reserved_mem_limit}"
+        )
         
         kill(vmachine_id=token)
         
@@ -503,6 +511,11 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
         
         try:
             refund = sc.get_container_gas(id=token)
+            if reserved_mem_limit > 0:
+                IOBigData().unlock_ram(ram_amount=reserved_mem_limit)
+                IOBigData().log_snapshot(
+                    context=f"stop-instance:after-unlock token={token} released_mem_limit={reserved_mem_limit}"
+                )
             sc.purge_internal(id=token)
             
         except Exception as e:
