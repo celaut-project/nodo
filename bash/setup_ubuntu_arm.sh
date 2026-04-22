@@ -309,17 +309,63 @@ handle_apt_error() {
     esac
 }
 
+resolve_apt_package() {
+    local preferred="$1"
+    local fallback="${2:-}"
+
+    if apt-cache policy "$preferred" 2>/dev/null | grep -q "Candidate: (none)"; then
+        if [ -n "$fallback" ]; then
+            echo "$fallback"
+            return 0
+        fi
+        fail "APT package '${preferred}' is unavailable on this system."
+    fi
+
+    echo "$preferred"
+}
+
+install_build_dependencies() {
+    local ncurses_pkg
+    local packages
+
+    ncurses_pkg="$(resolve_apt_package "libncurses5-dev" "libncurses-dev")"
+    packages=(
+        build-essential
+        zlib1g-dev
+        "$ncurses_pkg"
+        libgdbm-dev
+        libnss3-dev
+        libssl-dev
+        libreadline-dev
+        libffi-dev
+        libsqlite3-dev
+        wget
+        libbz2-dev
+        ca-certificates
+        curl
+        gnupg
+        lsb-release
+        git
+        procps
+        locales
+        busybox-static
+        cpio
+        gzip
+        initramfs-tools-core
+        iputils-ping
+    )
+
+    echo "Installing build dependencies and basic tools: ${packages[*]}"
+    if ! apt-get install -y --no-install-recommends "${packages[@]}"; then
+        fail "Failed to install required build dependencies. See apt output above."
+    fi
+}
+
 echo "Updating package lists..."
 apt-get update -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false \
     || { handle_apt_error $?; apt-get update; }
 
-echo "Installing build dependencies and basic tools..."
-apt-get install -y --no-install-recommends \
-    build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
-    libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev \
-    ca-certificates curl gnupg lsb-release git procps locales \
-    busybox-static cpio gzip initramfs-tools-core iputils-ping \
-    > /dev/null || { handle_apt_error $?; exit 1; }
+install_build_dependencies
 
 echo "Ensuring UTF-8 locale support..."
 locale-gen en_US.UTF-8 >/dev/null || true
