@@ -62,7 +62,7 @@ def __pack(zip, node: str):
 
 def __on_peer(peer: str, service_zip_dir: str) -> str:
     _id: Optional[str] = None
-    print(f'Starting compilation on {peer}...')
+    print(f'Starting packing your project on {peer}...')
     
     # Create an event to control the spinner thread
     stop_event = threading.Event()
