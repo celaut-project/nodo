@@ -288,7 +288,8 @@ class SQLConnection(metaclass=Singleton):
         gas: int,
         serialized_instance: str,
         service_id: str,
-        virtualizer: Optional[str] = None
+        virtualizer: Optional[str] = None,
+        disk_space: Optional[int] = None,
     ):
         """
         Adds an internal container to the database.
@@ -301,31 +302,38 @@ class SQLConnection(metaclass=Singleton):
             serialized_instance (str): Serialized celaut instance
             service_id (str): Service id
             virtualizer (Optional[str]): Virtualizer backend name
+            disk_space (Optional[int]): Disk resource limit for the instance
         """
         gas = str(gas)
         if virtualizer is None:
             virtualizer = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "docker")
         self._execute('''
-            INSERT INTO local_instances (id, ip, father_id, gas, mem_limit, serialized_instance, service_id, virtualizer)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (container_id, container_ip, father_id, gas, 0, serialized_instance, service_id, virtualizer))
+            INSERT INTO local_instances (id, ip, father_id, gas, mem_limit, disk_space, serialized_instance, service_id, virtualizer)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (container_id, container_ip, father_id, gas, 0, disk_space, serialized_instance, service_id, virtualizer))
         log.LOGGER(f'Saved instance {container_id} as dependency of {father_id}')
 
-    def update_sys_req(self, id: str, mem_limit: Optional[int]) -> bool:
+    def update_sys_req(
+        self,
+        id: str,
+        mem_limit: Optional[int],
+        disk_space: Optional[int] = None,
+    ) -> bool:
         """
         Updates system requirements for an internal container.
 
         Args:
             id (str): The id of the internal container.
             mem_limit (Optional[int]): The new memory limit.
+            disk_space (Optional[int]): The new disk limit.
 
         Returns:
             bool: True if update was successful, False otherwise.
         """
         try:
             self._execute('''
-                UPDATE local_instances SET mem_limit = ? WHERE id = ?
-            ''', (mem_limit, id))
+                UPDATE local_instances SET mem_limit = ?, disk_space = ? WHERE id = ?
+            ''', (mem_limit, disk_space, id))
             return True
         except:
             return False
@@ -395,7 +403,7 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit FROM local_instances WHERE id = ?
+            SELECT mem_limit, disk_space FROM local_instances WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:

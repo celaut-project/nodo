@@ -102,6 +102,7 @@ def create_tables(cursor):
                 father_id TEXT,
                 gas TEXT,
                 mem_limit INTEGER,
+                disk_space INTEGER,
                 serialized_instance TEXT,
                 service_id TEXT,
                 virtualizer TEXT DEFAULT NULL

@@ -455,7 +455,12 @@ def provision_vmachine(
         virtualizer: Optional[str] = None,
         system_requirements_range: celaut_pb2.ModifyServiceSystemResourcesInput = None
 ):
-    
+    disk_space = None
+    if system_requirements_range and system_requirements_range.max_sysreq:
+        sysreq = system_requirements_range.max_sysreq
+        if sysreq.HasField("disk_space"):
+            disk_space = int(sysreq.disk_space)
+
     log.LOGGER(f'Add service for {father_id}')
     initial_gas_amount = initial_gas_amount if initial_gas_amount \
         else default_initial_cost(father_id=father_id)
@@ -468,6 +473,7 @@ def provision_vmachine(
         serialized_instance=serialized_instance,
         service_id=service_id,
         virtualizer=virtualizer,
+        disk_space=disk_space,
     )
 
     if not hotplug(
@@ -482,6 +488,7 @@ def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     return celaut_pb2.ModifyServiceSystemResourcesOutput(
         sysreq=celaut_pb2.Sysresources(
             mem_limit=sys_req["mem_limit"],
+            disk_space=sys_req["disk_space"],
         ),
         gas=to_gas_amount(
             gas_amount=sc.get_container_gas(id=id)
