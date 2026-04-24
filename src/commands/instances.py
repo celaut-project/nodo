@@ -108,9 +108,9 @@ def list_instances(groupable: bool = False, search: str = ""):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT id, father_id, gas, serialized_instance, service_id, mem_limit, virtualizer FROM local_instances"
+                "SELECT id, father_id, gas, serialized_instance, service_id, mem_limit, disk_space, virtualizer FROM local_instances"
             )
-            for id_, father_id, gas, si, service, mem_limit, virtualizer in cursor.fetchall():
+            for id_, father_id, gas, si, service, mem_limit, disk_space, virtualizer in cursor.fetchall():
                 parent_type = (
                     'internal_service' if father_id in internal_ids else
                     'client' if father_id in client_ids else
@@ -152,6 +152,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'location': 'local',
                     'virtualizer': runtime_virtualizer,
                     'mem_limit': bytes_to_readable(mem_limit),
+                    'disk_space': bytes_to_readable(disk_space),
                     'vm_pid': vm_pid,
                     'vm_uptime': vm_uptime,
                     'vm_mem_rss': vm_mem_rss,
@@ -184,6 +185,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'location': peer_id or 'Unknown Peer',
                     'virtualizer': 'delegated',
                     'mem_limit': 'N/A',
+                    'disk_space': 'N/A',
                     'vm_pid': 'N/A',
                     'vm_uptime': 'N/A',
                     'vm_mem_rss': 'N/A',
@@ -235,7 +237,8 @@ def list_instances(groupable: bool = False, search: str = ""):
             ("Gas", "gas"),
             ("Location", "location"),
             ("Virtualizer", "virtualizer"),
-            ("Memory limit", "mem_limit")
+            ("Memory limit", "mem_limit"),
+            ("Disk limit", "disk_space"),
         ]
         if include_runtime and inst.get("virtualizer") == "cloud_hypervisor":
             fields.extend(
