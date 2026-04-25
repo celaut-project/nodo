@@ -1,6 +1,7 @@
 import subprocess
 import unittest
 from unittest.mock import patch
+import string
 
 IMPORT_ERROR = None
 try:
@@ -85,6 +86,11 @@ class CloudHypervisorExecuteHelpersTests(unittest.TestCase):
         service = celaut.Service()
         service.container.config_declaration.path.extend(["some", "nested", "dir"])
         self.assertEqual(ch_execute._resolve_guest_config_targets(service), ["/__config__"])
+
+    def test_generate_vmachine_id_returns_hex_hash_not_uuid(self):
+        vmachine_id = ch_execute._generate_vmachine_id()
+        self.assertEqual(len(vmachine_id), 64)
+        self.assertTrue(all(ch in string.hexdigits for ch in vmachine_id))
 
     def test_resolve_domain_allowlist_records_uses_domain_tags_and_ipv4(self):
         net_res = celaut.ConfigurationFile.NetworkResolution()

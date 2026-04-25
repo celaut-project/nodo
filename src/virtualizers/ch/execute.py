@@ -4,6 +4,7 @@ import json
 import math
 import os
 import posixpath
+import secrets
 import shutil
 import subprocess
 import time
@@ -11,7 +12,6 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from uuid import uuid4
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
@@ -20,6 +20,7 @@ from src.gateway.utils import generate_node_peer_info
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.utils import logger as log
 from src.utils.config import ConfigManager
+from src.utils.hashing import get_configured_hash_spec, hash_bytes
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
 from src.virtualizers.entry_path import resolve_entrypoint_path
@@ -33,6 +34,7 @@ from src.virtualizers.firewall import (
 
 env_manager = ConfigManager()
 sc = SQLConnection()
+HASH_SPEC = get_configured_hash_spec(env_manager)
 
 CACHE = env_manager.get("CACHE")
 CH_BINARY_PATH = env_manager.get("virtualizers.ch.BINARY_PATH")
@@ -856,6 +858,10 @@ def _build_ch_process_args(start_command: List[str], vmachine_id: str) -> List[s
     return [visible_name, *start_command[1:]] if start_command else [visible_name]
 
 
+def _generate_vmachine_id() -> str:
+    return hash_bytes(secrets.token_bytes(32), HASH_SPEC).hex()
+
+
 def execute(
     assigment_ports: Optional[Dict[int, int]],
     by_local: bool,
@@ -865,7 +871,7 @@ def execute(
     initial_system_resources: celaut.Sysresources,
     father_id: str,
 ) -> Tuple[str, str]:
-    vmachine_id = str(uuid4())
+    vmachine_id = _generate_vmachine_id()
     runtime_dir = _runtime_vm_dir(vmachine_id)
     cleanup_rules: List[List[str]] = []
     tap_name: Optional[str] = None

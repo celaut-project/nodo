@@ -6,8 +6,14 @@ import netifaces as ni
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.interface import build, execute, get_configured_virtualizer
-from src.manager.manager import default_initial_cost, is_external_execute_client, provision_vmachine
+from src.manager.manager import (
+    default_initial_cost,
+    is_external_execute_client,
+    provision_vmachine,
+    reserve_instance_name,
+)
 from src.utils import utils, logger as log
+from src.utils.instance_names import extract_instance_name
 from src.utils.utils import from_gas_amount
 from src.utils.network import get_free_port
 from src.utils.config import ConfigManager
@@ -128,10 +134,13 @@ def local_execution(
         service_id: Optional[str],
         refund_gas: List[Callable]
 ) -> celaut_pb2.ServiceInstance:
+    requested_instance_name, sanitized_config = extract_instance_name(config)
+    config = sanitized_config or celaut_pb2.Configuration()
+    instance_name = reserve_instance_name(requested_name=requested_instance_name)
     configured_virtualizer = get_configured_virtualizer()
     log.LOGGER(
         f"Local execution start: service_id={service_id}, father_id={father_id}, "
-        f"father_ip={father_ip}, virtualizer={configured_virtualizer}"
+        f"father_ip={father_ip}, virtualizer={configured_virtualizer}, instance_name={instance_name}"
     )
 
     #  TODO check this.
@@ -277,6 +286,7 @@ def local_execution(
         service_id=service_id,
         father_id=father_id,
         vmachine_id=vmachine_id,
+        instance_name=instance_name,
         vmachine_ip=vmachine_ip,
         initial_gas_amount=initial_gas_amount,
         serialized_instance=instance.SerializeToString(),

@@ -108,9 +108,9 @@ def list_instances(groupable: bool = False, search: str = ""):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT id, father_id, gas, serialized_instance, service_id, mem_limit, disk_space, virtualizer FROM local_instances"
+                "SELECT id, name, father_id, gas, serialized_instance, service_id, mem_limit, disk_space, virtualizer FROM local_instances"
             )
-            for id_, father_id, gas, si, service, mem_limit, disk_space, virtualizer in cursor.fetchall():
+            for id_, name, father_id, gas, si, service, mem_limit, disk_space, virtualizer in cursor.fetchall():
                 parent_type = (
                     'internal_service' if father_id in internal_ids else
                     'client' if father_id in client_ids else
@@ -143,6 +143,7 @@ def list_instances(groupable: bool = False, search: str = ""):
 
                 instances.append({
                     'id': id_ or 'N/A',
+                    'name': name or 'N/A',
                     'external_token': 'N/A',
                     'service': get_tag(service),
                     'ip': get_http_ip(si) if si else "N/A",
@@ -229,6 +230,7 @@ def list_instances(groupable: bool = False, search: str = ""):
 
         fields = [
             ("ID", "id"),
+            ("Name", "name"),
             ("Service", "service"),
             ("External token", "external_token"),
             ("API", "ip"),
