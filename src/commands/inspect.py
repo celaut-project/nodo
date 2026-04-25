@@ -83,7 +83,7 @@ def inspect(service: str):
     print("\n")
 
     # Container Configuration
-    print_rule("⚙ Container Configuration")
+    print_rule("⚙ Machine Configuration")
     print(f"Architecture: {', '.join([tag for tag in service_obj.container.architecture.tags])}")
     print(f"Prose: {service_obj.container.architecture.prose}")
     print(f"Init entry_path: {list(service_obj.container.init.entry_path)}")
