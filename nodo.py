@@ -226,6 +226,9 @@ if __name__ == '__main__':
                 os.system(f"tail -f {MAIN_DIR}/storage/app.log")
 
             case "export":
+                if len(sys.argv) < 4:
+                    print("Missing export path. Usage: nodo export <service> <path> [--raw]")
+                    os._exit(1)
 
                 if len(sys.argv) > 4 and sys.argv[4] == "--raw":
 
