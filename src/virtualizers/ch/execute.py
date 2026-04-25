@@ -46,6 +46,7 @@ GUEST_NET_DEVICE = env_manager.get("virtualizers.ch.GUEST_NET_DEVICE", "auto")
 KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.ch.KERNEL_CMDLINE_EXTRA", "console=ttyS0")
 CH_SERIAL_MODE = env_manager.get("virtualizers.ch.SERIAL_MODE", "file")
 CH_CONSOLE_MODE = env_manager.get("virtualizers.ch.CONSOLE_MODE", "off")
+CH_API_SOCKET_DIR = env_manager.get("virtualizers.ch.API_SOCKET_DIR", "/tmp/nodo-ch")
 GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
     "virtualizers.ch.GUEST_NETWORK_READY_TIMEOUT_S",
     8,
@@ -104,6 +105,12 @@ def _runtime_vm_dir(vmachine_id: str) -> Path:
     if not CACHE:
         raise CHExecuteError("CACHE path is not configured.")
     return Path(CACHE) / "cloud_hypervisor" / "runtime" / vmachine_id
+
+
+def _api_socket_path(vmachine_id: str) -> Path:
+    socket_dir = Path(CH_API_SOCKET_DIR)
+    socket_name = f"ch-{vmachine_id[:16]}.sock"
+    return socket_dir / socket_name
 
 
 def _resolve_ch_binary() -> str:
@@ -877,7 +884,7 @@ def execute(
     tap_name: Optional[str] = None
     process: Optional[subprocess.Popen] = None
     rootfs_path = runtime_dir / "rootfs.ext4"
-    api_socket_path = runtime_dir / "cloud-hypervisor.sock"
+    api_socket_path = _api_socket_path(vmachine_id)
     config_host_path = runtime_dir / "__config__"
     entrypoint_host_path = runtime_dir / ".__nodo_entrypoint"
     stdout_path = runtime_dir / "cloud-hypervisor.stdout.log"
@@ -918,6 +925,15 @@ def execute(
 
         runtime_dir.mkdir(parents=True, exist_ok=True)
         log.LOGGER(f"[CH][{vmachine_id}] runtime dir prepared: {runtime_dir}")
+        api_socket_path.parent.mkdir(parents=True, exist_ok=True)
+        log.LOGGER(f"[CH][{vmachine_id}] API socket dir prepared: {api_socket_path.parent}")
+
+        try:
+            api_socket_path.unlink(missing_ok=True)
+        except Exception as e:
+            raise CHExecuteError(
+                f"Unable to prepare API socket path {api_socket_path}: {e}"
+            ) from e
 
         shutil.copy2(bundle["rootfs_path"], rootfs_path)
         log.LOGGER(f"[CH][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")

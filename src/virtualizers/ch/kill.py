@@ -15,12 +15,17 @@ from src.virtualizers.ch.runtime_state import (
 
 env_manager = ConfigManager()
 CACHE = env_manager.get("CACHE")
+CH_API_SOCKET_DIR = env_manager.get("virtualizers.ch.API_SOCKET_DIR", "/tmp/nodo-ch")
 
 
 def _runtime_dir(vmachine_id: str) -> Optional[Path]:
     if not CACHE:
         return None
     return Path(CACHE) / "cloud_hypervisor" / "runtime" / vmachine_id
+
+
+def _api_socket_path(vmachine_id: str) -> Path:
+    return Path(CH_API_SOCKET_DIR) / f"ch-{vmachine_id[:16]}.sock"
 
 # TODO CHExecuteError and _run is duplicated in kill.py and execute.py, consider refactoring to a common utils module.
 class CHExecuteError(RuntimeError):
@@ -87,12 +92,20 @@ def kill(vmachine_id: str) -> bool:
     cleanup_rules = state.get("cleanup_rules") or []
     cgroup_path = str(state.get("cgroup_path") or "")
     runtime_dir = _runtime_dir(vmachine_id)
+    api_socket = str(state.get("api_socket") or "").strip()
 
     log.LOGGER(f"[CH][{vmachine_id}] event=kill requested")
     _kill_pid(vmachine_id=vmachine_id, pid=pid)
     _cleanup_dnat_rules(vmachine_id=vmachine_id, cleanup_rules=cleanup_rules)
     _cleanup_tap(vmachine_id=vmachine_id, tap_name=tap_name)
     remove_vm_cgroup(vmachine_id=vmachine_id, cgroup_path=cgroup_path)
+
+    socket_path = Path(api_socket) if api_socket else _api_socket_path(vmachine_id)
+    try:
+        socket_path.unlink(missing_ok=True)
+        log.LOGGER(f"[CH][{vmachine_id}] event=cleanup api_socket_removed={socket_path}")
+    except Exception as e:
+        log.LOGGER(f"[CH][{vmachine_id}] failed removing API socket {socket_path}: {e}")
 
     try:
         if runtime_dir and runtime_dir.exists():

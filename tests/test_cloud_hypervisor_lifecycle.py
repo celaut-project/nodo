@@ -22,6 +22,7 @@ class CloudHypervisorLifecycleTests(unittest.TestCase):
             "pid": 12345,
             "tap": "tapabc",
             "cgroup_path": "/sys/fs/cgroup/nodo-ch/vm-1",
+            "api_socket": "",
             "dnat_rules": [
                 {
                     "protocol": "tcp",
@@ -34,10 +35,17 @@ class CloudHypervisorLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             runtime_dir = Path(tmpdir) / "runtime-vm"
             runtime_dir.mkdir(parents=True, exist_ok=True)
+            socket_dir = Path(tmpdir) / "sockets"
+            socket_dir.mkdir(parents=True, exist_ok=True)
+            socket_path = socket_dir / "ch-vm-1.sock"
+            socket_path.touch()
             self.assertTrue(runtime_dir.exists())
+            self.assertTrue(socket_path.exists())
 
             with patch.object(ch_kill, "load_runtime_state", return_value=state), patch.object(
                 ch_kill, "_runtime_dir", return_value=runtime_dir
+            ), patch.object(
+                ch_kill, "_api_socket_path", return_value=socket_path
             ), patch.object(
                 ch_kill.os, "kill", side_effect=ProcessLookupError
             ) as os_kill, patch.object(
@@ -55,6 +63,7 @@ class CloudHypervisorLifecycleTests(unittest.TestCase):
         )
         delete_runtime_state.assert_called_once_with("vm-1")
         self.assertFalse(runtime_dir.exists())
+        self.assertFalse(socket_path.exists())
 
     def test_maintain_penalizes_when_state_or_pid_invalid(self):
         removed = []
