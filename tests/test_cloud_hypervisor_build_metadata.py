@@ -3,6 +3,7 @@ import stat
 import tempfile
 import unittest
 import importlib
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -295,6 +296,82 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
                 )
 
             self.assertTrue((root_dir / "app-link").is_symlink())
+
+    def test_resolve_initial_rootfs_size_bytes_respects_requested_disk_space(self):
+        service = celaut.Service(
+            container=celaut.Service.Container(
+                resources=celaut.Service.Container.Resources(
+                    at_init=celaut.Sysresources(disk_space=256),
+                    at_most=celaut.Sysresources(disk_space=4096),
+                )
+            )
+        )
+
+        size_bytes = ch_build._resolve_initial_rootfs_size_bytes(
+            service=service,
+            total_bytes=1024,
+        )
+
+        self.assertEqual(size_bytes, 4096)
+
+    def test_resolve_initial_rootfs_size_bytes_keeps_filesystem_overhead_floor(self):
+        service = celaut.Service(
+            container=celaut.Service.Container(
+                resources=celaut.Service.Container.Resources(
+                    at_most=celaut.Sysresources(disk_space=1024),
+                )
+            )
+        )
+
+        total_bytes = 10 * 1024 * 1024
+        size_bytes = ch_build._resolve_initial_rootfs_size_bytes(
+            service=service,
+            total_bytes=total_bytes,
+        )
+
+        self.assertEqual(size_bytes, total_bytes + ch_build.OVERHEAD_BYTES)
+
+    def test_is_service_built_for_arch_rejects_bundle_smaller_than_requested_disk(self):
+        service = celaut.Service(
+            container=celaut.Service.Container(
+                resources=celaut.Service.Container.Resources(
+                    at_most=celaut.Sysresources(disk_space=4096),
+                )
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bundle_dir = Path(tmpdir) / "cloud_hypervisor" / "svc" / "x86_64"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "rootfs.ext4").write_bytes(b"x" * 2048)
+            with open(bundle_dir / "bundle.json", "w", encoding="utf-8") as f:
+                json.dump({"rootfs_size_bytes": 2048}, f)
+
+            with patch.object(ch_build, "CACHE", tmpdir):
+                self.assertFalse(
+                    ch_build._is_service_built_for_arch("svc", "x86_64", service=service)
+                )
+
+    def test_is_service_built_for_arch_accepts_bundle_large_enough_for_requested_disk(self):
+        service = celaut.Service(
+            container=celaut.Service.Container(
+                resources=celaut.Service.Container.Resources(
+                    at_most=celaut.Sysresources(disk_space=4096),
+                )
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bundle_dir = Path(tmpdir) / "cloud_hypervisor" / "svc" / "x86_64"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "rootfs.ext4").write_bytes(b"x" * 8192)
+            with open(bundle_dir / "bundle.json", "w", encoding="utf-8") as f:
+                json.dump({"rootfs_size_bytes": 8192}, f)
+
+            with patch.object(ch_build, "CACHE", tmpdir):
+                self.assertTrue(
+                    ch_build._is_service_built_for_arch("svc", "x86_64", service=service)
+                )
 
 
 if __name__ == "__main__":
