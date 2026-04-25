@@ -92,6 +92,35 @@ class ExecuteCommandTests(unittest.TestCase):
         )
         mock_channel.return_value.close.assert_called_once()
 
+    def test_execute_prints_inspect_before_starting_service_loading(self):
+        response = self._response_with_slot(transport_tags=["http"])
+        events = []
+
+        def fake_inspect(service):
+            events.append(("inspect", service))
+
+        def fake_client_grpc(*args, **kwargs):
+            events.append(("start_service", None))
+            return iter([response])
+
+        with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
+            execute_cmd, "inspect_service", side_effect=fake_inspect
+        ), patch.object(
+            execute_cmd.grpc, "insecure_channel"
+        ) as mock_channel, patch.object(
+            execute_cmd.celaut_pb2_grpc, "GatewayStub"
+        ) as mock_stub_cls, patch.object(
+            execute_cmd, "client_grpc", side_effect=fake_client_grpc
+        ):
+            mock_stub_cls.return_value.StartService = object()
+            execute_cmd.execute("svc")
+
+        self.assertEqual(
+            events[:2],
+            [("inspect", "svc"), ("start_service", None)],
+        )
+        mock_channel.return_value.close.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
