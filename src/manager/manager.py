@@ -1,6 +1,7 @@
 from uuid import uuid4
 from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Generator, Tuple
+import secrets
 
 import grpc
 from bee_rpc import client as bee
@@ -13,6 +14,7 @@ from src.database.sql_connection import SQLConnection, is_peer_available
 from src.utils import logger as log
 from src.utils import utils
 from src.utils.config import ConfigManager
+from src.utils.instance_names import normalize_instance_name, random_instance_name
 from src.utils.utils import (
     from_gas_amount,
     to_gas_amount,
@@ -52,6 +54,34 @@ STANDARD_DEV_CLIENT_POOL_SIZE = int(env_manager.get("client.DEV_CLIENT_POOL_SIZE
 DEV_EXTERNAL_CLIENT_POOL_SIZE = int(env_manager.get("client.DEV_EXTERNAL_CLIENT_POOL_SIZE", 1))
 
 sc = SQLConnection()
+_INSTANCE_NAME_RANDOM = secrets.SystemRandom()
+
+
+def resolve_local_instance_reference(reference: str) -> Optional[str]:
+    return sc.resolve_local_instance_reference(reference=reference)
+
+
+def resolve_instance_token(reference: str, *, allow_uri_fallback: bool = False) -> Optional[str]:
+    resolved = resolve_local_instance_reference(reference=reference)
+    if resolved:
+        return resolved
+    if allow_uri_fallback:
+        return sc.get_local_instance_id_by_uri(uri=reference)
+    return None
+
+
+def reserve_instance_name(requested_name: Optional[str] = None) -> str:
+    if requested_name:
+        normalized = normalize_instance_name(requested_name)
+        if sc.local_instance_name_exists(normalized):
+            raise ValueError(f"Instance name '{normalized}' is already in use.")
+        return normalized
+
+    for _ in range(256):
+        candidate = random_instance_name(_INSTANCE_NAME_RANDOM.randrange)
+        if not sc.local_instance_name_exists(candidate):
+            return candidate
+    raise RuntimeError("Unable to generate a unique random instance name.")
 
 
 def is_external_execute_client(client_id: str) -> bool:
@@ -345,7 +375,7 @@ def spend_gas(
         else:
             is_id = sc.internal_instance_exists(id=id)
             if not is_id:
-                resolved_id = sc.get_local_instance_id_by_uri(uri=id)
+                resolved_id = resolve_instance_token(id, allow_uri_fallback=True)
                 if not resolved_id:
                     return False
                 id = resolved_id
@@ -449,6 +479,7 @@ def provision_vmachine(
         service_id: str,
         father_id: str,
         vmachine_id: str,
+        instance_name: str,
         vmachine_ip: str,
         initial_gas_amount: Optional[int],
         serialized_instance: str,
@@ -468,6 +499,7 @@ def provision_vmachine(
     sc.add_local_instance(
         father_id=father_id,
         container_id=vmachine_id,
+        name=instance_name,
         container_ip=vmachine_ip,
         gas=initial_gas_amount,
         serialized_instance=serialized_instance,
@@ -497,6 +529,7 @@ def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
 
 
 def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
+    token = resolve_instance_token(token) or token
     log.LOGGER('Kill service ' + token)
     father_id, serialized_instance = None, None
     reserved_mem_limit = 0
@@ -609,6 +642,7 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
 
 # Modify Gas Deposit
 def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
+    service_token = resolve_instance_token(service_token) or service_token
     
     log.LOGGER(f"Modify {gas_amount} gas of the service {service_token}")
     

@@ -15,6 +15,19 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ExecuteCommandTests(unittest.TestCase):
+    def test_generator_injects_internal_instance_name(self):
+        with patch.object(execute_cmd, "get_execute_client", return_value="dev-1"):
+            messages = list(
+                execute_cmd.generator(
+                    _hash="ab" * 32,
+                    initial_gas_amount=123,
+                    instance_name="My Instance",
+                )
+            )
+
+        config = messages[1]
+        self.assertEqual(config.environment_variables["__nodo_instance_name"], b"my-instance")
+
     def _response_with_slot(self, *, protocol_tags=None, transport_tags=None):
         response = celaut.ServiceInstance()
         slot = response.instance.api.slot.add()

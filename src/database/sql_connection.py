@@ -285,6 +285,7 @@ class SQLConnection(metaclass=Singleton):
         father_id: str,
         container_ip: str,
         container_id: str,
+        name: str,
         gas: int,
         serialized_instance: str,
         service_id: str,
@@ -298,6 +299,7 @@ class SQLConnection(metaclass=Singleton):
             father_id (str): The father ID.
             container_ip (str): The IP address of the container.
             container_id (str): The container ID.
+            name (str): Friendly instance name.
             gas (int): The gas amount.
             serialized_instance (str): Serialized celaut instance
             service_id (str): Service id
@@ -308,10 +310,10 @@ class SQLConnection(metaclass=Singleton):
         if virtualizer is None:
             virtualizer = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "docker")
         self._execute('''
-            INSERT INTO local_instances (id, ip, father_id, gas, mem_limit, disk_space, serialized_instance, service_id, virtualizer)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (container_id, container_ip, father_id, gas, 0, disk_space, serialized_instance, service_id, virtualizer))
-        log.LOGGER(f'Saved instance {container_id} as dependency of {father_id}')
+            INSERT INTO local_instances (id, name, ip, father_id, gas, mem_limit, disk_space, serialized_instance, service_id, virtualizer)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (container_id, name, container_ip, father_id, gas, 0, disk_space, serialized_instance, service_id, virtualizer))
+        log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
     def update_sys_req(
         self,
@@ -391,6 +393,15 @@ class SQLConnection(metaclass=Singleton):
         ''', (id,))
         result = cursor.fetchone()
         return result[0] if result else None
+
+    def get_internal_name(self, id: str) -> Optional[str]:
+        result = self._execute('''
+            SELECT name
+            FROM local_instances
+            WHERE id = ?
+        ''', (id,))
+        row = result.fetchone()
+        return row['name'] if row else None
 
     def get_sys_req(self, id: str) -> dict:
         """
@@ -477,6 +488,14 @@ class SQLConnection(metaclass=Singleton):
         ''')
         return [row['id'] for row in result.fetchall()]
 
+    def local_instance_name_exists(self, name: str) -> bool:
+        result = self._execute('''
+            SELECT COUNT(*)
+            FROM local_instances
+            WHERE name = ?
+        ''', (name,))
+        return result.fetchone()[0] > 0
+
     def update_gas_to_container(self, id: str, gas: int):
         """
         Updates the gas amount for a container.
@@ -507,6 +526,22 @@ class SQLConnection(metaclass=Singleton):
             WHERE id = ?
         ''', (id,))
         return result.fetchone()[0] > 0
+
+    def get_local_instance_id_by_name(self, name: str) -> Optional[str]:
+        result = self._execute('''
+            SELECT id FROM local_instances WHERE name = ?
+        ''', (name,))
+        row = result.fetchone()
+        if row:
+            return row['id']
+
+    def resolve_local_instance_reference(self, reference: str) -> Optional[str]:
+        if self.internal_instance_exists(id=reference):
+            return reference
+        resolved_by_name = self.get_local_instance_id_by_name(name=reference)
+        if resolved_by_name:
+            return resolved_by_name
+        return None
 
     def purge_internal(self, id: str):
         """

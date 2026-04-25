@@ -80,6 +80,7 @@ impl Identifiable for Client {
 #[derive(Debug)]
 pub struct Container {
     pub id: String,
+    pub name: String,
     pub ip: String,
     pub gas: String
 }
@@ -166,16 +167,17 @@ fn get_instances() -> Result<Vec<Container>> {
     let conn = Connection::open(DATABASE_FILE)?;
 
     let internal_instances = conn
-        .prepare("SELECT id, ip, gas FROM local_instances")?
+        .prepare("SELECT id, name, ip, gas FROM local_instances")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
-            let ip: String = row.get(1)?;
-            let gas_str: String = row.get(2)?;
+            let name: String = row.get(1)?;
+            let ip: String = row.get(2)?;
+            let gas_str: String = row.get(3)?;
 
             let gas = format!("{:e}", gas_str.parse::<f64>().unwrap());
 
             Ok(Container {
-                id, ip, gas 
+                id, name, ip, gas 
             })
         })?
         .collect::<Result<Vec<Container>>>()?;
@@ -184,7 +186,12 @@ fn get_instances() -> Result<Vec<Container>> {
         .prepare("SELECT token FROM delegated_instances")?
         .query_map([], |row| {
             let id: String = row.get(0)?;
-            Ok(Container { id })
+            Ok(Container {
+                id,
+                name: String::new(),
+                ip: String::new(),
+                gas: String::new(),
+            })
         })?
         .collect::<Result<Vec<Container>>>()?;
     */

@@ -14,6 +14,7 @@ from src.commands.__by_tag import get_id
 from src.manager.manager import get_execute_client
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
+from src.utils.instance_names import inject_instance_name
 from src.utils.utils import to_gas_amount
 
 env_manager = ConfigManager()
@@ -51,7 +52,8 @@ def generator(
     mem_limit: int = 50 * pow(10, 4),
     initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT,
     external: bool = False,
-    envs: dict[str, str] | None = None
+    envs: dict[str, str] | None = None,
+    instance_name: str | None = None,
 ) -> Generator[Any, None, None]:
     try:
         client_id = get_execute_client(gas_amount=initial_gas_amount, external=external)
@@ -68,6 +70,7 @@ def generator(
             config.environment_variables.update({
                 k: v.encode() for k, v in envs.items()
             })
+        inject_instance_name(config=config, instance_name=instance_name)
         yield config
 
         yield celaut_pb2.Metadata.HashTag.Hash(
@@ -109,7 +112,12 @@ def rocket_animation(stop_event: threading.Event):
     sys.stdout.flush()
 
 
-def execute(service: str, external: bool = False, envs: dict[str, str] | None = None):
+def execute(
+    service: str,
+    external: bool = False,
+    envs: dict[str, str] | None = None,
+    instance_name: str | None = None,
+):
     service = resolve_service_hash(service)
     if not service:
         print("❌ Service not allowed.")
@@ -136,7 +144,8 @@ def execute(service: str, external: bool = False, envs: dict[str, str] | None = 
                 initial_gas_amount=10**16,
                 mem_limit=10**9,
                 external=external,
-                envs=envs
+                envs=envs,
+                instance_name=instance_name,
             ),
             indices_parser=celaut_pb2.ServiceInstance,
             partitions_message_mode_parser=True,

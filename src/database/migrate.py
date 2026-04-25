@@ -98,6 +98,7 @@ def create_tables(cursor):
         "local_instances": '''
             CREATE TABLE IF NOT EXISTS local_instances (
                 id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
                 ip TEXT,
                 father_id TEXT,
                 gas TEXT,

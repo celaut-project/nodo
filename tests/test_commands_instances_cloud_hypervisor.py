@@ -35,6 +35,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                 """
                 CREATE TABLE local_instances (
                     id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
                     ip TEXT,
                     father_id TEXT,
                     gas TEXT,
@@ -62,11 +63,12 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
             cur.execute(
                 """
                 INSERT INTO local_instances
-                (id, ip, father_id, gas, mem_limit, serialized_instance, service_id, virtualizer)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, name, ip, father_id, gas, mem_limit, serialized_instance, service_id, virtualizer)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "vm-ch",
+                    "steady-falcon",
                     "192.168.200.10",
                     "client-1",
                     "1000",
@@ -79,11 +81,12 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
             cur.execute(
                 """
                 INSERT INTO local_instances
-                (id, ip, father_id, gas, mem_limit, serialized_instance, service_id, virtualizer)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, name, ip, father_id, gas, mem_limit, serialized_instance, service_id, virtualizer)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "vm-docker",
+                    "brisk-orbit",
                     "172.17.0.2",
                     "client-1",
                     "900",
@@ -120,6 +123,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                     instances_cmd.list_instances(groupable=False)
 
         rendered = out.getvalue()
+        self.assertIn("Name: steady-falcon", rendered)
         self.assertIn("Virtualizer: cloud_hypervisor", rendered)
         self.assertIn("Virtualizer: docker", rendered)
         self.assertNotIn("VM PID:", rendered)
