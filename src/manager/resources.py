@@ -163,9 +163,8 @@ class IOBigData(metaclass=Singleton):
 
     def prevent_kill(self, len: int) -> bool:
         with self.amount_lock:
-            self.__stats('prevent kill ' + IOBigData.convert_size(len))
             b = self.get_ram_avaliable() > len
-            self.__stats('prevent kill ' + IOBigData.convert_size(len) + ' -> ' + str(b))
+            self.__stats('[prevent kill] Try to take ' + IOBigData.convert_size(len) + '. Takes it:' + str(b))
         return b
 
     def wait_to_prevent_kill(self, len: int) -> None:

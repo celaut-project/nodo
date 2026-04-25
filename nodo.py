@@ -123,9 +123,7 @@ if __name__ == '__main__':
     if not os.path.exists(BLOCKDIR):
         os.makedirs(BLOCKDIR)
 
-    iobd.IOBigData(
-        ram_pool_method=lambda: virtual_memory().available
-    ).set_log(
+    iobd.IOBigData().set_log(
         log=log.LOGGER if MEMORY_LOGS else lambda message: None
     )
 
