@@ -48,7 +48,8 @@ virtualizers:
       linux/amd64: "${main.MAIN_DIR}/ch/initramfs/linux/amd64/initramfs"
       linux/arm64: "${main.MAIN_DIR}/ch/initramfs/linux/arm64/initramfs"
     CACHE_DIR: "${main.CACHE}/ch"
-    API_SOCKETS_DIR: "${main.MAIN_DIR}/ch/sockets"
+    # Keep this path short to avoid Unix socket SUN_LEN limits.
+    API_SOCKET_DIR: "/tmp/nodo-ch"
     NETWORK_MODE: "tap_bridge"
     NETWORK_BRIDGE_NAME: "br-ch"
     NETWORK_SUBNET: "192.168.200.0/24"

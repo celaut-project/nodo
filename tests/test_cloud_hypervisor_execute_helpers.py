@@ -92,6 +92,14 @@ class CloudHypervisorExecuteHelpersTests(unittest.TestCase):
         self.assertEqual(len(vmachine_id), 64)
         self.assertTrue(all(ch in string.hexdigits for ch in vmachine_id))
 
+    def test_api_socket_path_uses_short_tmp_path_for_long_hash_ids(self):
+        vmachine_id = "a" * 64
+        with patch.object(ch_execute, "CH_API_SOCKET_DIR", "/tmp/nodo-ch"):
+            socket_path = ch_execute._api_socket_path(vmachine_id)
+
+        self.assertEqual(str(socket_path), "/tmp/nodo-ch/ch-aaaaaaaaaaaaaaaa.sock")
+        self.assertLess(len(str(socket_path)), 108)
+
     def test_resolve_domain_allowlist_records_uses_domain_tags_and_ipv4(self):
         net_res = celaut.ConfigurationFile.NetworkResolution()
         net_res.tags.extend(["google.com", "www.google.com"])
