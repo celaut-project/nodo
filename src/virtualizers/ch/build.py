@@ -839,11 +839,84 @@ def _mkfs_ext4(rootfs_dir: Path, image_path: Path, size_bytes: int) -> int:
     raise RuntimeError("mkfs.ext4 failed after exhausting retries.")
 
 
-def _is_service_built_for_arch(service_hash: str, arch: str) -> bool:
+def _resolve_requested_disk_space_bytes(service: celaut_pb2.Service) -> Optional[int]:
+    try:
+        resources = service.container.resources
+    except Exception:
+        return None
+
+    requested_bytes = 0
+    for scope_name in ("at_init", "at_most"):
+        scope = getattr(resources, scope_name, None)
+        if scope is None:
+            continue
+        try:
+            value = int(getattr(scope, "disk_space", 0) or 0)
+            return value if value > 0 else None  # if disk_space is set in at_init, we use it directly as the requested size
+        except Exception:
+            value = 0
+        if value > requested_bytes:
+            requested_bytes = value
+
+    return requested_bytes if requested_bytes > 0 else None
+
+
+def _resolve_initial_rootfs_size_bytes(
+    service: celaut_pb2.Service,
+    total_bytes: int,
+) -> int:
+    requested_disk_space_bytes = _resolve_requested_disk_space_bytes(service)
+    return max(
+        MIN_ROOTFS_BYTES,
+        int(total_bytes) + OVERHEAD_BYTES,
+        int(requested_disk_space_bytes or 0),
+    )
+
+
+def _read_built_rootfs_size_bytes(bundle_dir: Path) -> Optional[int]:
+    bundle_path = bundle_dir / "bundle.json"
+    rootfs_path = bundle_dir / "rootfs.ext4"
+    if not bundle_path.is_file() or not rootfs_path.is_file():
+        return None
+
+    try:
+        with open(bundle_path, "r", encoding="utf-8") as f:
+            bundle = json.load(f)
+        rootfs_size_bytes = int(bundle.get("rootfs_size_bytes") or 0)
+        if rootfs_size_bytes > 0:
+            return rootfs_size_bytes
+    except Exception:
+        pass
+
+    try:
+        return int(rootfs_path.stat().st_size)
+    except Exception:
+        return None
+
+
+def _is_service_built_for_arch(
+    service_hash: str,
+    arch: str,
+    service: Optional[celaut_pb2.Service] = None,
+) -> bool:
     if not CACHE:
         return False
     bundle_dir = Path(CACHE) / "cloud_hypervisor" / service_hash / arch
-    return (bundle_dir / "rootfs.ext4").is_file() and (bundle_dir / "bundle.json").is_file()
+    if not (bundle_dir / "rootfs.ext4").is_file() or not (bundle_dir / "bundle.json").is_file():
+        return False
+
+    if service is None:
+        return True
+
+    requested_disk_space_bytes = _resolve_requested_disk_space_bytes(service)
+    if not requested_disk_space_bytes:
+        return True
+
+    built_rootfs_size_bytes = _read_built_rootfs_size_bytes(bundle_dir)
+    if built_rootfs_size_bytes is None:
+        return False
+
+    return built_rootfs_size_bytes >= requested_disk_space_bytes
 
 
 def is_service_built(service_hash: str) -> bool:
@@ -873,7 +946,7 @@ def build(
     if not arch:
         raise UnsupportedArchitectureException(arch=str(metadata))
 
-    if _is_service_built_for_arch(service_id, arch):
+    if _is_service_built_for_arch(service_id, arch, service=service):
         return service_id
 
     security_context = _build_security_context(service_id=service_id)
@@ -927,7 +1000,11 @@ def build(
     )
 
     total_bytes = _dir_size_bytes(rootfs_dir)
-    initial_size_bytes = max(MIN_ROOTFS_BYTES, total_bytes + OVERHEAD_BYTES)
+    requested_disk_space_bytes = _resolve_requested_disk_space_bytes(service)
+    initial_size_bytes = _resolve_initial_rootfs_size_bytes(
+        service=service,
+        total_bytes=total_bytes,
+    )
 
     rootfs_path = bundle_dir / "rootfs.ext4"
     if rootfs_path.exists():
@@ -945,6 +1022,7 @@ def build(
         "kernel_path": kernel_path,
         "initramfs_path": initramfs_path,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "requested_disk_space_bytes": requested_disk_space_bytes,
         "rootfs_size_bytes": size_bytes,
     }
 
