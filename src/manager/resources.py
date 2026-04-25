@@ -25,6 +25,7 @@ class Singleton(type):
 
 mem_manager = lambda len: IOBigData().lock(len=len)
 
+PREVENT_KILL_WAIT_TIME = 5 # seconds
 
 class IOBigData(metaclass=Singleton):
     class RamLocker(object):
@@ -50,7 +51,7 @@ class IOBigData(metaclass=Singleton):
                  ) -> None:
 
         self.ram_pool = ram_pool_method if ram_pool_method is not None \
-            else lambda: psutil.virtual_memory().available
+            else lambda: psutil.virtual_memory().available - _nodo_ch_rss_bytes()
 
         self.log = log
         self.ram_locked = 0
@@ -170,9 +171,20 @@ class IOBigData(metaclass=Singleton):
     def wait_to_prevent_kill(self, len: int) -> None:
         while True:
             if not self.prevent_kill(len=len):
-                sleep(1)
+                sleep(PREVENT_KILL_WAIT_TIME)
             else:
                 return
 
 def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
     return IOBigData().prevent_kill(len=sysreq.mem_limit)  # Prevent kill says that is not actually possible.
+
+def _nodo_ch_rss_bytes() -> int:
+    total = 0
+    for p in psutil.process_iter(["name", "cmdline", "memory_info"]):
+        try:
+            cmdline = " ".join(p.info["cmdline"] or [])
+            if "nodo-ch" in cmdline:
+                total += p.info["memory_info"].rss
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+    return total
