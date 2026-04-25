@@ -1,10 +1,12 @@
 # I/O Big Data utils.
 import gc
 import os
+import time
 from time import sleep
 from threading import Lock, RLock
 
 import threading
+from typing import Optional
 import psutil
 from protos import celaut_pb2
 
@@ -23,18 +25,19 @@ class Singleton(type):
         return cls._instances[cls]
 
 
-mem_manager = lambda len: IOBigData().lock(len=len)
+mem_manager = lambda len, timeout=None: IOBigData().lock(len=len, timeout=timeout)
 
 PREVENT_KILL_WAIT_TIME = 5 # seconds
 
 class IOBigData(metaclass=Singleton):
     class RamLocker(object):
-        def __init__(self, len, iobd):
+        def __init__(self, len, iobd, timeout=None):
             self.len = len
             self.iobd = iobd
+            self.timeout = timeout
 
         def __enter__(self):
-            self.iobd.lock_ram(ram_amount=self.len)
+            self.iobd.lock_ram(ram_amount=self.len, timeout=self.timeout)
             return self
 
         def unlock(self, amount: int):
@@ -129,28 +132,32 @@ class IOBigData(metaclass=Singleton):
 
     # Manage resources methods.
 
-    def lock(self, len):
-        return self.RamLocker(len=len, iobd=self)
+    def lock(self, len, timeout=None):
+        return self.RamLocker(len=len, iobd=self, timeout=timeout)
 
-    def lock_ram(self, ram_amount: int, wait: bool = True):
+    def lock_ram(self, ram_amount: int, wait: bool = True, timeout: Optional[float] = None):
         self.__stats('want lock ' + IOBigData.convert_size(ram_amount))
         self.__push_wait_list(l=ram_amount)
-        while True:
-            self.__stats('go to lock ' + IOBigData.convert_size(ram_amount))
-            if wait:
-                self.wait_to_prevent_kill(len=ram_amount)
+        deadline = None if timeout is None else time.monotonic() + timeout
+        try:
+            while True:
+                self.__stats('go to lock ' + IOBigData.convert_size(ram_amount))
+                if wait:
+                    self.wait_to_prevent_kill(len=ram_amount, deadline=deadline)
 
-            elif not self.prevent_kill(len=ram_amount):
-                self.__pop_wait_list(l=ram_amount)
-                raise Exception
+                elif not self.prevent_kill(len=ram_amount):
+                    raise Exception
 
-            with self.amount_lock:
-                if self.get_ram_avaliable() > ram_amount:
-                    self.ram_locked += ram_amount
-                else:
-                    continue
+                with self.amount_lock:
+                    if self.get_ram_avaliable() > ram_amount:
+                        self.ram_locked += ram_amount
+                    else:
+                        continue
+                break
+        except Exception:
             self.__pop_wait_list(l=ram_amount)
-            break
+            raise
+        self.__pop_wait_list(l=ram_amount)
         self.__stats('locked ' + IOBigData.convert_size(ram_amount))
 
     def unlock_ram(self, ram_amount: int):
@@ -168,9 +175,13 @@ class IOBigData(metaclass=Singleton):
             self.__stats('[prevent kill] Try to take ' + IOBigData.convert_size(len) + '. Takes it:' + str(b))
         return b
 
-    def wait_to_prevent_kill(self, len: int) -> None:
+    def wait_to_prevent_kill(self, len: int, deadline: Optional[float] = None) -> None:
         while True:
             if not self.prevent_kill(len=len):
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"Timed out waiting to unlock memory for {IOBigData.convert_size(len)}"
+                    )
                 sleep(PREVENT_KILL_WAIT_TIME)
             else:
                 return

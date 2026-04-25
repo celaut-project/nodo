@@ -20,6 +20,7 @@ env_manager = ConfigManager()
 
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+WAIT_FOR_UNLOCK_MEMORY = env_manager.get("builder.WAIT_FOR_UNLOCK_MEMORY")
 
 def read_file(filename) -> bytes:
     def generator(file):
@@ -58,11 +59,16 @@ def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
     try:
         mem_size = 2 * os.path.getsize(filename)
         log.LOGGER(f"Wait to unlock memory {mem_size}")
-        with mem_manager(2 * os.path.getsize(filename)) as iolock:
+        with mem_manager(mem_size, timeout=WAIT_FOR_UNLOCK_MEMORY) as iolock:
             service = celaut.Service()
             service.ParseFromString(read_file(filename=filename))
             log.LOGGER(f"Service {service_hash} loaded.")
             return service
+    except TimeoutError:
+        log.LOGGER(
+            f"Timed out after {WAIT_FOR_UNLOCK_MEMORY}s waiting to unlock memory for service {service_hash}."
+        )
+        return None
     except (IOError, FileNotFoundError):
         log.LOGGER('The service was not on registry.')
         return None
