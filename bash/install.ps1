@@ -1,71 +1,199 @@
 #Requires -RunAsAdministrator
 
+# ====================== PARAMETERS ======================
+param(
+    [switch]$VerboseMode
+)
+
+# Suppress streams that ps2exe converts into popups
+$ErrorActionPreference = "SilentlyContinue"
+$WarningPreference = "SilentlyContinue"
+$VerbosePreference = "SilentlyContinue"
+$ProgressPreference = "SilentlyContinue"
+$InformationPreference = "SilentlyContinue"
+
+<#
+.SYNOPSIS
+    Non-interactive installation and configuration script for WSL2 + Nodo on Windows 11
+
+.DESCRIPTION
+    This script automates the full installation of WSL2 with a custom kernel
+    and a WSL distribution named Nodo based on a clean Debian image. The process does not
+    require user interaction and always creates the requested user/password.
+
+.NOTES
+    Author: Automated Setup
+    Requirements: Windows 11, Administrator privileges
+
+.COMPILE
+    Invoke-ps2exe "C:\Users\josem\Desktop\project\install.ps1" "C:\Users\josem\Desktop\Nodo-Setup.exe" `
+        -requireAdmin `
+        -noConsole `
+        -iconFile "C:\Users\josem\Desktop\project\favicon.ico" `
+        -title "Nodo Installer" `
+        -version "1.0.0" `
+        -company "Celaut Project"
+
+.RUN
+    powershell -ExecutionPolicy Bypass -File "C:\Users\josem\Desktop\project\install.ps1" -VerboseMode
+#>
+
+
+# ====================== UI: LOADING SCREEN ======================
+[System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") | Out-Null
+[System.Reflection.Assembly]::LoadWithPartialName("System.Drawing") | Out-Null
+[System.Windows.Forms.Application]::EnableVisualStyles()
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Nodo WSL Installer"
+$form.Size = New-Object System.Drawing.Size(520, 320)
+$form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = "FixedSingle"
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.ControlBox = $false
+$form.BackColor = [System.Drawing.Color]::FromArgb(18, 18, 18)
+$form.ShowInTaskbar = $true
+$form.TopMost       = $false
+
+$titleLabel = New-Object System.Windows.Forms.Label
+$titleLabel.Text = "Nodo WSL Installer"
+$titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 16, [System.Drawing.FontStyle]::Bold)
+$titleLabel.ForeColor = [System.Drawing.Color]::White
+$titleLabel.Size = New-Object System.Drawing.Size(480, 36)
+$titleLabel.Location = New-Object System.Drawing.Point(20, 24)
+
+$statusLabel = New-Object System.Windows.Forms.Label
+$statusLabel.Text = "Starting..."
+$statusLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+$statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(180, 180, 180)
+$statusLabel.Size = New-Object System.Drawing.Size(480, 24)
+$statusLabel.Location = New-Object System.Drawing.Point(20, 80)
+
+$progressBar = New-Object System.Windows.Forms.ProgressBar
+$progressBar.Minimum = 0
+$progressBar.Maximum = 100
+$progressBar.Value = 0
+$progressBar.Size = New-Object System.Drawing.Size(472, 18)
+$progressBar.Location = New-Object System.Drawing.Point(20, 116)
+$progressBar.Style = "Continuous"
+
+$logBox = New-Object System.Windows.Forms.RichTextBox
+$logBox.Size = New-Object System.Drawing.Size(472, 110)
+$logBox.Location = New-Object System.Drawing.Point(20, 150)
+$logBox.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
+$logBox.ForeColor = [System.Drawing.Color]::FromArgb(140, 140, 140)
+$logBox.Font = New-Object System.Drawing.Font("Consolas", 8)
+$logBox.ReadOnly = $true
+$logBox.BorderStyle = "None"
+$logBox.ScrollBars = "Vertical"
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class WinAPI {
+    [DllImport("user32.dll")]
+    public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+    [DllImport("user32.dll")]
+    public static extern bool ReleaseCapture();
+}
+"@
+
+$form.Add_MouseDown({
+    if ($_.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+        [WinAPI]::ReleaseCapture()
+        [WinAPI]::SendMessage($form.Handle, 0xA1, 0x2, 0)
+    }
+})
+
+$titleLabel.Add_MouseDown({
+    if ($_.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+        [WinAPI]::ReleaseCapture()
+        [WinAPI]::SendMessage($form.Handle, 0xA1, 0x2, 0)
+    }
+})
+
+$form.Controls.AddRange(@($titleLabel, $statusLabel, $progressBar, $logBox))
+$form.Show()
+[System.Windows.Forms.Application]::DoEvents()
+
+# ====================== LOG FUNCTIONS ======================
+function Update-UI {
+    param(
+        [string]$Status,
+        [int]$Progress,
+        [string]$Log = "",
+        [System.Drawing.Color]$Color = [System.Drawing.Color]::FromArgb(180, 180, 180)
+    )
+
+    if ($Status) {
+        $statusLabel.Text = $Status
+    }
+
+    if ($PSBoundParameters.ContainsKey('Progress')) {
+        $progressBar.Value = [Math]::Min([Math]::Max($Progress, 0), 100)
+    }
+
+    if ($Log) {
+        $logBox.SelectionStart = $logBox.TextLength
+        $logBox.SelectionLength = 0
+        $logBox.SelectionColor = $Color
+        $logBox.AppendText("$Log`r`n")
+        $logBox.ScrollToCaret()
+    }
+
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Write-Info {
+    param($msg)
+    Update-UI -Log $msg
+}
+
+function Write-Success {
+    param($msg)
+    Update-UI -Log $msg -Color ([System.Drawing.Color]::FromArgb(80, 200, 80))
+}
+
+function Write-Warning {
+    param($msg)
+    Update-UI -Log "[!] $msg" -Color ([System.Drawing.Color]::FromArgb(255, 200, 0))
+}
+
+function Write-Err {
+    param($msg)
+    Update-UI -Log "[ERROR] $msg" -Color ([System.Drawing.Color]::FromArgb(255, 80, 80))
+}
+
 # =============================================
-# Prevención de ejecución múltiple
+# Single-instance guard
 # =============================================
 $mutexName = "Global\NodoWSL-Installer-Mutex"
 $createdNew = $false
 
 try {
     $mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
-    
     if (-not $createdNew) {
-        # Usamos Write-Host directamente porque las funciones aún no están definidas
-        Write-Host "================================================================" -ForegroundColor Yellow
-        Write-Host "El instalador de Nodo ya se está ejecutando." -ForegroundColor Yellow
-        Write-Host "Espera a que termine la instalación actual." -ForegroundColor Yellow
-        Write-Host "================================================================" -ForegroundColor Yellow
-        Start-Sleep -Seconds 4
+        $form.Close()
+        [System.Windows.Forms.MessageBox]::Show(
+            "Nodo installer is already running.`nPlease wait for the current installation to finish.",
+            "Nodo WSL Installer",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
         exit 1
     }
 }
 catch {
-    Write-Host "No se pudo verificar si ya hay otra instancia ejecutándose." -ForegroundColor Yellow
+    Write-Warning "Could not verify whether another instance is running."
 }
 
-<#
-.SYNOPSIS
-    Script de instalacion y configuracion no interactiva de WSL2 + Nodo en Windows 11
-
-.DESCRIPTION
-    Este script automatiza la instalacion completa de WSL2 con kernel personalizado
-    y una distro WSL llamada Nodo basada en un Debian limpio. El proceso no requiere
-    interaccion del usuario y siempre crea el usuario/password solicitados.
-
-.NOTES
-    Autor: Setup Automatizado
-    Requisitos: Windows 11, Permisos de Administrador
-
-.COMPILE
-    Invoke-ps2exe "C:\Users\josem\Desktop\project\install.ps1" "C:\Users\josem\Desktop\Nodo-Setup.exe" `
-        -requireAdmin `
-        -noConsole `
-        -iconFile "C:\Users\josem\Desktop\nodo.ico" `
-        -title "Nodo WSL Installer" `
-        -version "1.0.0" `
-        -company "Celaut Project"
-#>
-
 $ErrorActionPreference = "Stop"
-
-# ====================== PARÁMETROS ======================
-param(
-    [switch]$VerboseMode
-)
-
 $Verbose = $VerboseMode.IsPresent
 
-# ====================== FUNCIONES DE LOG ======================
-function Write-Info     { param($msg) if ($Verbose) { Write-Host "[INFO] $msg" -ForegroundColor Cyan } }
-function Write-Success  { param($msg) if ($Verbose) { Write-Host "[OK]  $msg" -ForegroundColor Green } }
-function Write-Warning  { param($msg) Write-Host "[!]  $msg" -ForegroundColor Yellow }
-function Write-Err      { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Red }
-
-# ======================== CONSTANTES ================================
+# ======================== CONSTANTS ================================
 
 $DistroName = "Nodo"
-$DistroUser = "user"
-$DistroPassword = "password"
 $KernelDir = "C:\wsl-kernel"
 $KernelPath = Join-Path $KernelDir "bzImage"
 $KernelUrl = "https://github.com/celaut-project/nodo/releases/download/v1/bzImage"
@@ -75,7 +203,7 @@ $NodoRootfsPath = Join-Path $NodoImageDir "debian-nodo.tar"
 $NodoRootfsUrl = "https://github.com/celaut-project/nodo/releases/download/v1/debian.tar"
 
 function Get-RegisteredDistros {
-    $output = wsl --list --quiet 2>&1
+    $output = wsl --list --quiet *>&1
     if ($LASTEXITCODE -ne 0) {
         return @()
     }
@@ -90,82 +218,101 @@ function Get-RegisteredDistros {
 function Remove-DistroIfExists([string]$Name) {
     $distros = Get-RegisteredDistros
     if ($distros -contains $Name) {
-        Write-Warning "La distribucion '$Name' ya existe. Se eliminara para continuar en modo no interactivo..."
-        wsl --shutdown
-        wsl --unregister $Name
-        Write-Success "[OK] Distribucion '$Name' eliminada"
+        Write-Warning "Distribution '$Name' already exists. It will be removed to continue in non-interactive mode..."
+        wsl --shutdown *>&1 | Out-Null
+        wsl --unregister $Name *>&1 | Out-Null
+        Write-Success "[OK] Distribution '$Name' removed"
     }
 }
 
 function Invoke-Wsl([string]$Command) {
-    & wsl -d $DistroName -u root -- bash -lc $Command
+    # Temporarily suspend Stop preference so WSL stderr
+    # (e.g. git progress messages) does not throw NativeCommandError
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+
+    $output = & wsl -d $DistroName -u root -- bash -lc $Command *>&1 | Out-String
+
+    $ErrorActionPreference = $prevPref
+
     if ($LASTEXITCODE -ne 0) {
-        throw "Fallo al ejecutar comando en WSL: $Command"
+        throw "Failed to run command in WSL:`n$output"
+    }
+
+    if ($output.Trim()) {
+        foreach ($line in ($output -split "`r?`n")) {
+            if ($line.Trim()) {
+                Write-Info $line.TrimEnd()
+            }
+        }
     }
 }
 
 Write-Info "======================================================================="
-Write-Info "  WSL2 + Windows 11 + Nodo Setup - Script de Instalacion Automatizado"
+Write-Info "  WSL2 + Windows 11 + Nodo Setup - Automated Installation Script"
 Write-Info "======================================================================="
 Write-Info ""
 
-Write-Info "[PASO 1/8] Verificando requisitos del sistema..."
+Update-UI -Status "Checking system requirements..." -Progress 10
+Write-Info "[STEP 1/8] Checking system requirements..."
 
 $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem
 $buildNumber = [int]$osInfo.BuildNumber
 
-Write-Info "Sistema operativo detectado: $($osInfo.Caption)"
-Write-Info "Numero de build: $buildNumber"
+Write-Info "Detected operating system: $($osInfo.Caption)"
+Write-Info "Build number: $buildNumber"
 
 if ($buildNumber -lt 22000) {
-    Write-Warning "Se recomienda Windows 11 (build 22000+). Continuando automaticamente..."
+    Write-Warning "Windows 11 (build 22000+) is recommended. Continuing automatically..."
 }
 
 $hyperV = Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object -ExpandProperty HypervisorPresent
 if (-not $hyperV) {
-    Write-Err "ERROR: La virtualizacion no esta habilitada en BIOS/UEFI"
-    Write-Err "Habilite Intel VT-x o AMD-V en BIOS/UEFI y vuelva a ejecutar el script."
+    Write-Err "ERROR: Virtualization is not enabled in BIOS/UEFI"
+    Write-Err "Enable Intel VT-x or AMD-V in BIOS/UEFI and run the script again."
     exit 1
 }
-Write-Success "[OK] Virtualizacion habilitada"
+Write-Success "[OK] Virtualization enabled"
 
 try {
-    $null = wsl --version 2>&1
-    Write-Success "[OK] WSL instalado"
+    wsl --version *>&1 | Out-Null
+    Write-Success "[OK] WSL installed"
 }
 catch {
-    Write-Warning "WSL no esta instalado. Instalando WSL sin distribucion..."
-    wsl --install --no-distribution
-    Write-Info "WSL instalado. Reinicie Windows y ejecute este script de nuevo."
+    Write-Warning "WSL is not installed. Installing WSL without a distribution..."
+    wsl --install --no-distribution *>&1 | Out-Null
+    Write-Info "WSL installed. Restart Windows and run this script again."
     exit 0
 }
 
-Write-Info "Configurando WSL2 como version predeterminada..."
-wsl --set-default-version 2
-Write-Success "[OK] WSL2 configurado como predeterminado"
+Write-Info "Setting WSL2 as the default version..."
+wsl --set-default-version 2 *>&1 | Out-Null
+Write-Success "[OK] WSL2 set as default"
 
-Write-Info "Estado actual de WSL:"
-wsl --status
+Write-Info "Current WSL status:"
+wsl --status *>&1 | Out-Null
+Write-Info "[OK] WSL status queried"
 
 Write-Info ""
-Write-Info "[PASO 2/8] Descargando e instalando kernel personalizado..."
+Update-UI -Status "Downloading custom kernel..." -Progress 25
+Write-Info "[STEP 2/8] Downloading and installing custom kernel..."
 
 if (-not (Test-Path $KernelDir)) {
     New-Item -Path $KernelDir -ItemType Directory -Force | Out-Null
-    Write-Success "[OK] Directorio creado: $KernelDir"
+    Write-Success "[OK] Directory created: $KernelDir"
 }
 
 if (Test-Path $KernelPath) {
     $fileInfo = Get-Item $KernelPath
-    Write-Info "Kernel existente detectado en: $KernelPath"
-    Write-Info "Tamano actual: $([math]::Round($fileInfo.Length / 1MB, 2)) MB"
-    Write-Info "Fecha actual: $($fileInfo.LastWriteTime)"
-    Write-Info "Apagando WSL para reemplazar el kernel..."
-    wsl --shutdown
+    Write-Info "Existing kernel detected at: $KernelPath"
+    Write-Info "Current size: $([math]::Round($fileInfo.Length / 1MB, 2)) MB"
+    Write-Info "Last modified: $($fileInfo.LastWriteTime)"
+    Write-Info "Shutting down WSL to replace the kernel..."
+    wsl --shutdown *>&1 | Out-Null
     Start-Sleep -Seconds 5
 }
 
-Write-Info "Descargando kernel desde: $KernelUrl"
+Write-Info "Downloading kernel from: $KernelUrl"
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $tempKernelPath = Join-Path $KernelDir "bzImage.tmp"
@@ -177,19 +324,20 @@ try {
             Remove-Item $backupPath -Force
         }
         Move-Item $KernelPath $backupPath -Force
-        Write-Info "Kernel anterior respaldado en: $backupPath"
+        Write-Info "Previous kernel backed up at: $backupPath"
     }
 
     Move-Item $tempKernelPath $KernelPath -Force
-    Write-Success "[OK] Kernel descargado: $KernelPath"
+    Write-Success "[OK] Kernel downloaded: $KernelPath"
 }
 catch {
-    Write-Err "ERROR al descargar el kernel: $_"
+    Write-Err "ERROR downloading kernel: $_"
     exit 1
 }
 
 Write-Info ""
-Write-Info "[PASO 3/8] Configurando settings de WSL2..."
+Update-UI -Status "Configuring WSL2..." -Progress 35
+Write-Info "[STEP 3/8] Configuring WSL2 settings..."
 
 $wslConfigPath = Join-Path $env:USERPROFILE ".wslconfig"
 $wslConfigContent = @"
@@ -199,17 +347,18 @@ kernel=C:\\wsl-kernel\\bzImage
 "@
 
 Set-Content -Path $wslConfigPath -Value $wslConfigContent -Force
-Write-Success "[OK] Archivo .wslconfig creado/actualizado en: $wslConfigPath"
-Write-Info "Contenido aplicado:"
+Write-Success "[OK] .wslconfig created/updated at: $wslConfigPath"
+Write-Info "Applied content:"
 Write-Info $wslConfigContent
 
-Write-Info "Apagando WSL para aplicar configuracion..."
-wsl --shutdown
+Write-Info "Shutting down WSL to apply configuration..."
+wsl --shutdown *>&1 | Out-Null
 Start-Sleep -Seconds 3
-Write-Success "[OK] Configuracion aplicada"
+Write-Success "[OK] Configuration applied"
 
 Write-Info ""
-Write-Info "[PASO 4/8] Creando la distro $DistroName desde la imagen Debian publicada..."
+Update-UI -Status "Creating Nodo distribution..." -Progress 50
+Write-Info "[STEP 4/8] Creating the $DistroName distribution from the published Debian image..."
 
 Remove-DistroIfExists -Name $DistroName
 
@@ -220,23 +369,24 @@ if (Test-Path $NodoRootfsPath) {
     Remove-Item -Path $NodoRootfsPath -Force
 }
 
-Write-Info "Descargando rootfs Debian desde: $NodoRootfsUrl"
+    Write-Info "Downloading Debian rootfs from: $NodoRootfsUrl"
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest -Uri $NodoRootfsUrl -OutFile $NodoRootfsPath -UseBasicParsing
-    Write-Success "[OK] Rootfs descargado en: $NodoRootfsPath"
+    Write-Success "[OK] Rootfs downloaded to: $NodoRootfsPath"
 }
 catch {
-    Write-Err "ERROR al descargar el rootfs Debian: $_"
+    Write-Err "ERROR downloading Debian rootfs: $_"
     exit 1
 }
 
-Write-Info "Importando distro $DistroName..."
-wsl --import $DistroName $NodoBaseDir $NodoRootfsPath --version 2
-Write-Success "[OK] Distro $DistroName creada desde la imagen Debian publicada"
+Write-Info "Importing distribution $DistroName..."
+wsl --import $DistroName $NodoBaseDir $NodoRootfsPath --version 2 *>&1 | Out-Null
+Write-Success "[OK] Distribution $DistroName created from the published Debian image"
 
 Write-Info ""
-Write-Info "[PASO 5/8] Configurando usuario, password y entorno interno..."
+Update-UI -Status "Configuring internal environment..." -Progress 65
+Write-Info "[STEP 5/8] Configuring user, password, and internal environment..."
 
 $wslSetupScript = @'
 #!/bin/bash
@@ -252,22 +402,22 @@ WSL_USER="user"
 WSL_PASSWORD="password"
 
 echo -e "${CYAN}=======================================================================${NC}"
-echo -e "${CYAN}  Configuracion interna de WSL - Nodo Setup${NC}"
+echo -e "${CYAN}  WSL internal configuration - Nodo Setup${NC}"
 echo -e "${CYAN}=======================================================================${NC}"
 
-echo -e "\n${CYAN}[PASO 5.1] Creando usuario por defecto...${NC}"
+echo -e "\n${CYAN}[STEP 5.1] Creating default user...${NC}"
 if ! id -u "${WSL_USER}" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "${WSL_USER}"
-    echo -e "${GREEN}[OK] Usuario ${WSL_USER} creado${NC}"
+    echo -e "${GREEN}[OK] User ${WSL_USER} created${NC}"
 else
-    echo -e "${YELLOW}El usuario ${WSL_USER} ya existe${NC}"
+    echo -e "${YELLOW}User ${WSL_USER} already exists${NC}"
 fi
 
 echo "${WSL_USER}:${WSL_PASSWORD}" | chpasswd
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y git curl sudo iptables bc
+apt-get install -y -qq git curl sudo iptables bc
 usermod -aG sudo "${WSL_USER}"
 
 mkdir -p /etc
@@ -276,39 +426,41 @@ cat > /etc/wsl.conf <<EOF
 systemd=true
 
 [user]
-default=${WSL_USER}
+default=root
 EOF
-echo -e "${GREEN}[OK] Usuario por defecto configurado como '${WSL_USER}'${NC}"
+echo -e "${GREEN}[OK] Default user configured as '${WSL_USER}'${NC}"
 
-echo -e "\n${CYAN}[PASO 5.2] Configurando hostname...${NC}"
+echo "nodo" >> /root/.bashrc
+
+echo -e "\n${CYAN}[STEP 5.2] Configuring hostname...${NC}"
 echo "Nodo" > /etc/hostname
 if grep -q '^127\.0\.1\.1' /etc/hosts 2>/dev/null; then
     sed -i 's/^127\.0\.1\.1.*/127.0.1.1\tNodo/' /etc/hosts
 else
     echo -e "127.0.1.1\tNodo" >> /etc/hosts
 fi
-echo -e "${GREEN}[OK] Hostname configurado como 'Nodo'${NC}"
+echo -e "${GREEN}[OK] Hostname configured as 'Nodo'${NC}"
 
-echo -e "\n${CYAN}[PASO 5.3] Descargando kernel interno...${NC}"
+echo -e "\n${CYAN}[STEP 5.3] Downloading internal kernel...${NC}"
 mkdir -p /boot
-curl -L https://github.com/celaut-project/nodo/releases/download/v1/vmlinuz -o /boot/vmlinuz
-curl -L https://github.com/celaut-project/nodo/releases/download/v1/initramfs -o /boot/initramfs
-echo -e "${GREEN}[OK] vmlinuz e initramfs instalados${NC}"
+curl -sSL https://github.com/celaut-project/nodo/releases/download/v1/vmlinuz -o /boot/vmlinuz
+curl -sSL https://github.com/celaut-project/nodo/releases/download/v1/initramfs -o /boot/initramfs
+echo -e "${GREEN}[OK] vmlinuz and initramfs installed${NC}"
 
-echo -e "\n${CYAN}[PASO 5.4] Instalando sistema Nodo...${NC}"
+echo -e "\n${CYAN}[STEP 5.4] Installing Nodo system...${NC}"
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | bash
-echo -e "${GREEN}[OK] Sistema Nodo instalado${NC}"
+echo -e "${GREEN}[OK] Nodo system installed${NC}"
 
-echo -e "\n${CYAN}[PASO 5.5] Ajustando permisos de Nodo...${NC}"
+echo -e "\n${CYAN}[STEP 5.5] Adjusting Nodo permissions...${NC}"
 mkdir -p /nodo/storage
 touch /nodo/storage/app.log
 chown -R "${WSL_USER}:${WSL_USER}" /nodo
 find /nodo -type d -exec chmod 777 {} \;
 find /nodo -type f -exec chmod 777 {} \;
 chmod +x /nodo/nodo.py 2>/dev/null || true
-echo -e "${GREEN}[OK] Permisos de /nodo configurados para ${WSL_USER}${NC}"
+echo -e "${GREEN}[OK] /nodo permissions configured for ${WSL_USER}${NC}"
 
-echo -e "\n${CYAN}[PASO 5.6] Configurando networking para microVM...${NC}"
+echo -e "\n${CYAN}[STEP 5.6] Configuring networking for the microVM...${NC}"
 iptables -C FORWARD -d 192.168.200.0/24 -j ACCEPT 2>/dev/null || iptables -A FORWARD -d 192.168.200.0/24 -j ACCEPT
 iptables -C FORWARD -s 192.168.200.0/24 -j ACCEPT 2>/dev/null || iptables -A FORWARD -s 192.168.200.0/24 -j ACCEPT
 mkdir -p /etc/iptables
@@ -330,77 +482,57 @@ EOF
 systemctl enable iptables-restore.service 2>/dev/null || true
 
 echo -e "\n${GREEN}=======================================================================${NC}"
-echo -e "${GREEN}  [OK] Configuracion completada exitosamente${NC}"
+echo -e "${GREEN}  [OK] Configuration completed successfully${NC}"
 echo -e "${GREEN}=======================================================================${NC}"
 '@
 
 $tempScriptPath = Join-Path $env:TEMP "wsl-nodo-setup.sh"
 Set-Content -Path $tempScriptPath -Value $wslSetupScript -Force -Encoding UTF8
-Write-Info "Script temporal de configuracion creado en: $tempScriptPath"
+Write-Info "Temporary configuration script created at: $tempScriptPath"
 
-Write-Info "Copiando y ejecutando configuracion dentro de WSL..."
+Write-Info "Copying and running configuration inside WSL..."
 $setupScriptBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($wslSetupScript))
 Invoke-Wsl "echo $setupScriptBase64 | base64 -d > /tmp/setup.sh && chmod +x /tmp/setup.sh && /tmp/setup.sh"
-Write-Success "[OK] Configuracion interna completada"
+Write-Success "[OK] Internal configuration completed"
 
 Write-Info ""
-Write-Info "[PASO 6/8] Configurando enrutamiento de red de Windows a WSL..."
+Update-UI -Status "Configuring network..." -Progress 80
+Write-Info "[STEP 6/8] Configuring Windows-to-WSL network routing..."
 
 try {
-    $wslIP = & wsl -d $DistroName -- hostname -I 2>&1
+    $wslIP = & wsl -d $DistroName -- hostname -I *>&1 | Out-String
     $wslIP = ($wslIP -split " ")[0].Trim()
 
     if ($wslIP -and $wslIP -match '^\d+\.\d+\.\d+\.\d+$') {
-        Write-Info "IP de WSL detectada: $wslIP"
+        Write-Info "Detected WSL IP: $wslIP"
 
         try {
-            route delete 192.168.200.0 2>$null | Out-Null
-            route add 192.168.200.0 mask 255.255.255.0 $wslIP
-            Write-Success "[OK] Ruta agregada: 192.168.200.0/24 -> $wslIP"
+            route delete 192.168.200.0 *>&1 | Out-Null
+            route add 192.168.200.0 mask 255.255.255.0 $wslIP *>&1 | Out-Null
+            Write-Success "[OK] Route added: 192.168.200.0/24 -> $wslIP"
         }
         catch {
-            Write-Warning "No se pudo configurar la ruta de Windows: $_"
+            Write-Warning "Could not configure the Windows route: $_"
         }
     }
     else {
-        Write-Warning "No se pudo obtener una IP valida de la distro $DistroName"
+        Write-Warning "Could not obtain a valid IP from distribution $DistroName"
     }
 }
 catch {
-    Write-Warning "Error al obtener IP de WSL: $_"
+    Write-Warning "Error getting WSL IP: $_"
 }
 
 Write-Info ""
-Write-Info "[PASO 7/8] Apagando WSL para aplicar el usuario por defecto y systemd..."
-wsl --shutdown
-Write-Success "[OK] WSL apagado"
+Update-UI -Status "Finalizing installation..." -Progress 95
+Write-Info "[STEP 7/8] Shutting down WSL to apply the default user and systemd..."
+wsl --shutdown *>&1 | Out-Null
+Write-Success "[OK] WSL shut down"
 
 
-# === CREAR SHORTCUT EN ESCRITORIO ===
-$DesktopPath = [Environment]::GetFolderPath("Desktop")
-$ShortcutPath = Join-Path $DesktopPath "Nodo Terminal.lnk"
-
-try {
-    $WScriptShell = New-Object -ComObject WScript.Shell
-    $Shortcut = $WScriptShell.CreateShortcut($ShortcutPath)
-
-    $Shortcut.TargetPath      = "wsl.exe"
-    $Shortcut.Arguments       = "-d Nodo --cd ~"
-    $Shortcut.WorkingDirectory = "%USERPROFILE%"
-    $Shortcut.Description     = "Terminal Nodo - WSL2"
-    $Shortcut.IconLocation    = "C:\Windows\System32\wsl.exe,0"
-    
-    $Shortcut.Save()
-
-    Write-Success "[OK] Acceso directo creado en el Escritorio"
-}
-catch {
-    Write-Warning "No se pudo crear el acceso directo en el Escritorio."
-}
-
-# === CREAR SHORTCUT EN ESCRITORIO ===
+# === CREATE DESKTOP SHORTCUT ===
 Write-Info ""
-Write-Info "[FINAL] Creando acceso directo en el Escritorio..."
+Write-Info "[FINAL] Creating desktop shortcut..."
 
 $DesktopPath = [Environment]::GetFolderPath("Desktop")
 $ShortcutPath = Join-Path $DesktopPath "Nodo Terminal.lnk"
@@ -412,25 +544,31 @@ try {
     $Shortcut.TargetPath      = "wsl.exe"
     $Shortcut.Arguments       = "-d Nodo --cd ~"
     $Shortcut.WorkingDirectory = "%USERPROFILE%"
-    $Shortcut.Description     = "Abrir Terminal Nodo (WSL2)"
-    $Shortcut.IconLocation    = "C:\Windows\System32\wsl.exe,0"
+    $Shortcut.Description     = "Open Nodo Terminal (WSL2)"
+    $Shortcut.IconLocation    = "C:\Windows\System32\wsl.exe,0"  # "$PSScriptRoot\Nodo-Setup.exe,0" (does not work reliably)
     $Shortcut.Save()
 
-    Write-Success "Acceso directo creado: Nodo Terminal.lnk"
+    Write-Success "Desktop shortcut created: Nodo Terminal.lnk"
 }
 catch {
-    Write-Warning "No se pudo crear el acceso directo en el Escritorio."
+    Write-Warning "Could not create the desktop shortcut."
 }
 
-# ====================== MENSAJE FINAL ======================
-[System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") | Out-Null
+# ====================== FINAL MESSAGE ======================
+Update-UI -Status "Installation completed" -Progress 100
+Write-Success "[OK] Installation completed successfully"
+Start-Sleep -Seconds 1
+$form.Close()
 
 [System.Windows.Forms.MessageBox]::Show(
-    "¡Instalación de Nodo completada exitosamente!`n`nAcceso directo creado en el Escritorio.`n`nUsuario: user`nPassword: password", 
-    "Nodo WSL Installer - Éxito",
+    "Nodo installation completed successfully.`n`nDesktop shortcut created.",
+    "Nodo WSL Installer - Success",
     [System.Windows.Forms.MessageBoxButtons]::OK,
     [System.Windows.Forms.MessageBoxIcon]::Information
 ) | Out-Null
 
-# Liberar Mutex
+# Launch Nodo terminal  TODO Se abre, pero al presionar q se cierra ¿?
+#Start-Process "wsl.exe" -ArgumentList "-d Nodo --cd ~ -- nodo"
+
+# Release mutex
 if ($mutex) { $mutex.ReleaseMutex() }
