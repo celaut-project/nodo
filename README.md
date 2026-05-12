@@ -30,10 +30,46 @@ a Dockerfile along with a configuration file and get a specification for that se
 
 ## Installation
 
+### Linux
+
 Basic installation:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash
 ```
+
+<details>
+<summary>Linux installation notes</summary>
+
+- **Requirements**: `git`, `curl`, `sudo`, `iptables`, `bc`.
+
+- **Supported distributions**: Nodo has only been tested on Debian-based distributions so far.
+
+- **Sudo Usage**: The installation script requires `sudo` privileges for system-level setup. Python, Java, and `yq` runtimes are installed locally under `MAIN_DIR`.
+
+- **Installation without sudo**: For a manual installation without directly executing the script with sudo, please follow the [manual guide](docs/INSTALL.md).
+
+- **Configurable binary paths**: Java, Python, and `yq` binaries can be customized in `config.yaml` under `dependencies.*`.
+  
+> Future versions of Nodo aim to progressively reduce the number of external system dependencies.
+
+</details>
+
+### Windows 11
+
+Windows users should download and run the official installer:
+
+[Nodo Windows Installer (.exe)](https://github.com/celaut-project/nodo/releases/download/v1/Nodo-Setup.exe)
+
+<details>
+<summary>Windows installation details</summary>
+
+The installer automatically creates an isolated Linux distribution dedicated to **Nodo**, allowing the node to run separated from the rest of the operating system and user environment.
+
+No manual Linux environment setup is required.
+
+</details>
+
+### Development
 
 <details>
 <summary>Developer installation (click to expand)</summary>
@@ -44,23 +80,14 @@ cd /home/user/Desktop/nodo
 sudo ./install.sh --source-dir /home/user/Desktop/nodo
 ```
 
-This mode keeps `nodo.service` and the isolated Docker daemon pointed to your local checkout, so code changes can be tested by restarting the service (no push/reinstall cycle needed).
+This mode keeps `nodo.service` pointed to your local checkout, so code changes can be tested by restarting the service (no push/reinstall cycle needed).
 
 Branch-based installation (default branch is `stable`):
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/dev/install.sh | sudo bash -s -- --branch dev
 ```
+
 </details>
-
-### Note on Installation
-
-- **Requirements**: Needs Ubuntu 22.04.5 LTS and curl package installed.
-
-- **Sudo Usage**: The installation script requires `sudo` privileges for system-level setup. Python, Java, and `yq` runtimes are installed locally under `MAIN_DIR`.
-
-- **Installation without sudo**: For a manual installation without directly executing the script with sudo, please follow the [manual guide](docs/INSTALL.md).
-
-- **Configurable binary paths**: Java, Python, `yq`, and Docker-related binaries can be customized in `config.yaml` under `dependencies.*`.
 
 
 ## Platform Compatibility
