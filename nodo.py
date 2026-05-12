@@ -135,62 +135,103 @@ if __name__ == '__main__':
     )
 
     if len(sys.argv) == 1:
-        print("Command needed: "
-            "\n- execute [--remote] [--name instance-name] [-e key value] <service id> | <service tag> | <'.celaut' file path>"
-            "\n- estimate <service id> | <service tag> | <'.celaut' file path>"
-            "\n- inspect <service id> | <service tag>"
-            "\n- remove <service id> | <service tag>"
-            "\n- kill <instance id>"
-            "\n- increase_gas <instance id> <gas to add>"
-            "\n- decrease_gas <instance id> <gas to retire>"
-            "\n- services"
-            "\n- tag <service id|tag> <new tag>"
-            "\n- clients"
-            "\n- peers"
-            "\n- instances"
-            "\n- instances --grouped"
-            "\n- connect <ip:url>"
-            "\n- disconnect <peer_id>"
-            "\n- pack <project directory>"
-            "\n- config"
-            "\n- envs"
-            "\n- tui"
-            "\n- info"
-            "\n- logs"
-            "\n- export <service> <path>"
-            "\n- export <service> <path> --raw"
-            "\n- import <path>"
-            "\n- publish <service id|service tag>"
-            "\n- download <manifest url> [-o <output dir>]"
-            "\n- integrity [<service id|service tag>] [--fix]"
+        # Quick guide about commands and check if nodo.service is running.
+        print(
+            "Welcome to Nodo! Please provide a command. "
+            "Use 'nodo help' to see available commands.\n",
+            flush=True
+        )
 
-            "\n\n Development commands:"
-            "\n- update"
-            "\n- serve"
-            "\n- migrate"
-            "\n- storage:prune_blocks"
-            "\n- test <test name>"
-            "\n- ggconf <repository path>"
-            "\n- submit_reputation"
-            "\n- validate_reputation_proof_ownership"
-            "\n- refresh_ergo_nodes"
-            "\n- prune_containers"
-            "\n- refresh_clients"
-            "\n- tx_history"
-            "\n- increase_peer_deposit <peer id> <gas to add>"
-            "\n- docker <docker args>  (runs docker commands in nodo's isolated context)"
-            "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
-            "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
-            "\n\n",
-              flush=True)
+        print("""
+        Getting started
+
+        nodo config
+            Configure your node and runtime.
+
+        nodo download <url>
+            Download and import a published service.
+
+        nodo pack <folder>
+            Package a local project into a service.
+
+        nodo publish <service>
+            Publish a local service.
+
+        nodo execute <service>
+            Run a local or packaged service.
+
+        nodo import <path>
+            Import a packaged service file.
+
+        nodo export <service> <path>
+            Export a packaged service artifact.
+        """, flush=True)
+            
         try:
             if not is_nodo_service_running():
                 print("\nNote: Nodo service is not running.", flush=True)
         except Exception as e:
             print(f"Error checking nodo.service status: {e}", flush=True)
 
+
+
     else:
         match sys.argv[1]:
+
+            case "help":
+                print("Command needed: "
+                    "\n- execute [--remote] [--name instance-name] [-e key value] <service id> | <service tag> | <'.celaut' file path>"
+                    "\n- estimate <service id> | <service tag> | <'.celaut' file path>"
+                    "\n- inspect <service id> | <service tag>"
+                    "\n- remove <service id> | <service tag>"
+                    "\n- kill <instance id>"
+                    "\n- increase_gas <instance id> <gas to add>"
+                    "\n- decrease_gas <instance id> <gas to retire>"
+                    "\n- services"
+                    "\n- tag <service id|tag> <new tag>"
+                    "\n- clients"
+                    "\n- peers"
+                    "\n- instances"
+                    "\n- instances --grouped"
+                    "\n- connect <ip:url>"
+                    "\n- disconnect <peer_id>"
+                    "\n- pack <project directory>"
+                    "\n- config"
+                    "\n- envs"
+                    "\n- tui"
+                    "\n- info"
+                    "\n- logs"
+                    "\n- export <service> <path>"
+                    "\n- export <service> <path> --raw"
+                    "\n- import <path>"
+                    "\n- publish <service id|service tag>"
+                    "\n- download <manifest url> [-o <output dir>]"
+                    "\n- integrity [<service id|service tag>] [--fix]"
+
+                    "\n\n Development commands:"
+                    "\n- update"
+                    "\n- serve"
+                    "\n- migrate"
+                    "\n- storage:prune_blocks"
+                    "\n- test <test name>"
+                    "\n- ggconf <repository path>"
+                    "\n- submit_reputation"
+                    "\n- validate_reputation_proof_ownership"
+                    "\n- refresh_ergo_nodes"
+                    "\n- prune_containers"
+                    "\n- refresh_clients"
+                    "\n- tx_history"
+                    "\n- increase_peer_deposit <peer id> <gas to add>"
+                    "\n- docker <docker args>  (runs docker commands in nodo's isolated context)"
+                    "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
+                    "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
+                    "\n\n",
+                    flush=True)
+                try:
+                    if not is_nodo_service_running():
+                        print("\nNote: Nodo service is not running.", flush=True)
+                except Exception as e:
+                    print(f"Error checking nodo.service status: {e}", flush=True)
 
             case "info":
                 try:
