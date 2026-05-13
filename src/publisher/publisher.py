@@ -641,6 +641,7 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
         print(f"Removed downloaded artifact: {output_path}", flush=True)
 
     print("Download completed successfully.", flush=True)
+    print(f"\nRun it with:\n   nodo execute {service_hash}\n(--remote in case you are in a ssh session)", flush=True)
     return {
         "manifest": chunk_urls,
         "manifest_url": manifest_url,
