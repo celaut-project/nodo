@@ -623,13 +623,6 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
             destination.write(data)
             print(f"Downloaded chunk {index + 1}/{len(chunk_urls)}", flush=True)
 
-    service_hash = hash_file(output_path, settings["hash_spec"]).hex()
-    
-    # Move the file to the final location with the service hash as name
-    final_output_path = target_dir / f"{service_hash}.celaut.bee"
-    output_path.rename(final_output_path)
-    output_path = final_output_path
-
     imported_service_id = None
     if settings["auto_import"]:
         imported_service_id = import_bee(str(output_path))
@@ -639,13 +632,18 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
     if not settings["keep_artifacts"] and output_path.exists():
         output_path.unlink()
         print(f"Removed downloaded artifact: {output_path}", flush=True)
+    elif output_path.exists() and imported_service_id:
+            final_output_path = target_dir / f"{imported_service_id}.celaut.bee"
+            output_path.rename(final_output_path)
+            print(f"Downloaded artifact kept at: {final_output_path}", flush=True)
 
     print("Download completed successfully.", flush=True)
-    print(f"\nRun it with:\n   nodo execute {service_hash}\n(--remote in case you are in a ssh session)", flush=True)
+    if imported_service_id:
+        print(f"\nRun it with:\n   nodo execute {imported_service_id}\n(--remote in case you are in a ssh session)", flush=True)
     return {
         "manifest": chunk_urls,
         "manifest_url": manifest_url,
-        "service_hash": service_hash,
+        "service_hash": imported_service_id,
         "output_path": str(output_path),
         "service_id": imported_service_id,
     }
