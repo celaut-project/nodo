@@ -340,18 +340,32 @@ Update-UI -Status "Configuring WSL2..." -Progress 35
 Write-Info "[STEP 3/8] Configuring WSL2 settings..."
 
 $wslConfigPath = Join-Path $env:USERPROFILE ".wslconfig"
+
 $wslConfigContent = @"
 [wsl2]
 nestedVirtualization=true
 kernel=C:\\wsl-kernel\\bzImage
 "@
 
+# Backup existing .wslconfig only if it exists and differs from what we are about to write
+if (Test-Path $wslConfigPath) {
+    $existingRaw = Get-Content -Path $wslConfigPath -Raw
+    if ($existingRaw -eq $null) { $existingContent = "" } else { $existingContent = $existingRaw }
+    if ($existingContent.Trim() -ne $wslConfigContent.Trim()) {
+        $wslConfigOldPath = Join-Path $env:USERPROFILE ".wslconfig.old"
+        Copy-Item -Path $wslConfigPath -Destination $wslConfigOldPath -Force
+        Write-Info "Existing .wslconfig differs — backed up to: $wslConfigOldPath"
+    } else {
+        Write-Info ".wslconfig already matches target content — no backup needed"
+    }
+}
+
 Set-Content -Path $wslConfigPath -Value $wslConfigContent -Force
 Write-Success "[OK] .wslconfig created/updated at: $wslConfigPath"
 Write-Info "Applied content:"
 Write-Info $wslConfigContent
 
-Write-Info "Shutting down WSL to apply configuration..."Set-Content -Path $wslConfigPath -Value 
+Write-Info "Shutting down WSL to apply configuration..."
 wsl --shutdown *>&1 | Out-Null
 Start-Sleep -Seconds 3
 Write-Success "[OK] Configuration applied"
@@ -369,7 +383,7 @@ if (Test-Path $NodoRootfsPath) {
     Remove-Item -Path $NodoRootfsPath -Force
 }
 
-    Write-Info "Downloading Debian rootfs from: $NodoRootfsUrl"
+Write-Info "Downloading Debian rootfs from: $NodoRootfsUrl"
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest -Uri $NodoRootfsUrl -OutFile $NodoRootfsPath -UseBasicParsing
@@ -461,27 +475,34 @@ chmod +x /nodo/nodo.py 2>/dev/null || true
 echo -e "${GREEN}[OK] /nodo permissions configured for ${WSL_USER}${NC}"
 
 echo -e "\n${CYAN}[STEP 5.5b] Configuring Nodo network for Windows access...${NC}"
-
 NODO_CONFIG="/nodo/config.yaml"
-YQ="${MAIN_DIR:-/nodo}/bin/yq"
+YQ="/nodo/bin/yq"
 
-# Detect the WSL2 network interface (the one with the 172.x.x.x IP)
+# Detect the WSL2 outbound interface (carries the 172.x.x.x IP reachable from Windows)
 WSL_IFACE=$(ip route | awk '/^default/{print $5; exit}')
 echo "Detected WSL2 outbound interface: $WSL_IFACE"
 
-# Patch config.yaml
+# Patch config.yaml so Nodo exposes services on the WSL2 interface
 $YQ -i "
   .network.EXTERNAL_INTERFACE = \"$WSL_IFACE\" |
   .network.DISABLE_EXPOSE_OUTSIDE = false |
   .network.ISOLATE_INTERNAL_CHILDREN = true |
-  .network.DEFAULT_EXECUTE_REMOTE = true
+  .network.CONSIDER_DEV_AS_INTERNAL = false
 " "$NODO_CONFIG"
-
 echo -e "${GREEN}[OK] Nodo will expose services on $WSL_IFACE (reachable from Windows)${NC}"
 
-echo -e "\n${CYAN}[STEP 5.6] Configuring networking for the microVM...${NC}"
-iptables -C FORWARD -d 192.168.200.0/24 -j ACCEPT 2>/dev/null || iptables -A FORWARD -d 192.168.200.0/24 -j ACCEPT
-iptables -C FORWARD -s 192.168.200.0/24 -j ACCEPT 2>/dev/null || iptables -A FORWARD -s 192.168.200.0/24 -j ACCEPT
+echo -e "\n${CYAN}[STEP 5.6] Configuring iptables forwarding for microVMs...${NC}"
+
+# Enable IP forwarding
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+sysctl -w net.ipv4.ip_forward=1
+
+# Accept forwarded traffic to/from microVM subnets
+for SUBNET in 192.168.200.0/24 192.168.0.0/24; do
+    iptables -C FORWARD -d $SUBNET -j ACCEPT 2>/dev/null || iptables -A FORWARD -d $SUBNET -j ACCEPT
+    iptables -C FORWARD -s $SUBNET -j ACCEPT 2>/dev/null || iptables -A FORWARD -s $SUBNET -j ACCEPT
+done
+
 mkdir -p /etc/iptables
 iptables-save > /etc/iptables/rules.v4
 
@@ -499,6 +520,7 @@ WantedBy=multi-user.target
 EOF
 
 systemctl enable iptables-restore.service 2>/dev/null || true
+echo -e "${GREEN}[OK] iptables forwarding configured and persisted${NC}"
 
 echo -e "\n${GREEN}=======================================================================${NC}"
 echo -e "${GREEN}  [OK] Configuration completed successfully${NC}"
@@ -510,6 +532,7 @@ Set-Content -Path $tempScriptPath -Value $wslSetupScript -Force -Encoding UTF8
 Write-Info "Temporary configuration script created at: $tempScriptPath"
 
 Write-Info "Copying and running configuration inside WSL..."
+# Normalize to Unix line endings (LF only) before encoding — prevents \r breaking the shebang
 $wslSetupScriptUnix = $wslSetupScript -replace "`r`n", "`n" -replace "`r", "`n"
 $setupScriptBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($wslSetupScriptUnix))
 Invoke-Wsl "echo $setupScriptBase64 | base64 -d > /tmp/setup.sh && chmod +x /tmp/setup.sh && /tmp/setup.sh"
@@ -565,7 +588,7 @@ try {
     $Shortcut.Arguments       = "-d Nodo --cd ~"
     $Shortcut.WorkingDirectory = "%USERPROFILE%"
     $Shortcut.Description     = "Open Nodo Terminal (WSL2)"
-    $Shortcut.IconLocation    = "C:\Windows\System32\wsl.exe,0"  # "$PSScriptRoot\Nodo-Setup.exe,0" (does not work reliably)
+    $Shortcut.IconLocation    = "C:\Windows\System32\wsl.exe,0"
     $Shortcut.Save()
 
     Write-Success "Desktop shortcut created: Nodo Terminal.lnk"
