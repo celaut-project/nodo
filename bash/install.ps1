@@ -351,7 +351,7 @@ Write-Success "[OK] .wslconfig created/updated at: $wslConfigPath"
 Write-Info "Applied content:"
 Write-Info $wslConfigContent
 
-Write-Info "Shutting down WSL to apply configuration..."
+Write-Info "Shutting down WSL to apply configuration..."Set-Content -Path $wslConfigPath -Value 
 wsl --shutdown *>&1 | Out-Null
 Start-Sleep -Seconds 3
 Write-Success "[OK] Configuration applied"
@@ -451,7 +451,7 @@ echo -e "\n${CYAN}[STEP 5.4] Installing Nodo system...${NC}"
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | bash
 echo -e "${GREEN}[OK] Nodo system installed${NC}"
 
-echo -e "\n${CYAN}[STEP 5.5] Adjusting Nodo permissions...${NC}"
+echo -e "\n${CYAN}[STEP 5.5a] Adjusting Nodo permissions...${NC}"
 mkdir -p /nodo/storage
 touch /nodo/storage/app.log
 chown -R "${WSL_USER}:${WSL_USER}" /nodo
@@ -459,6 +459,25 @@ find /nodo -type d -exec chmod 777 {} \;
 find /nodo -type f -exec chmod 777 {} \;
 chmod +x /nodo/nodo.py 2>/dev/null || true
 echo -e "${GREEN}[OK] /nodo permissions configured for ${WSL_USER}${NC}"
+
+echo -e "\n${CYAN}[STEP 5.5b] Configuring Nodo network for Windows access...${NC}"
+
+NODO_CONFIG="/nodo/config.yaml"
+YQ="${MAIN_DIR:-/nodo}/bin/yq"
+
+# Detect the WSL2 network interface (the one with the 172.x.x.x IP)
+WSL_IFACE=$(ip route | awk '/^default/{print $5; exit}')
+echo "Detected WSL2 outbound interface: $WSL_IFACE"
+
+# Patch config.yaml
+$YQ -i "
+  .network.EXTERNAL_INTERFACE = \"$WSL_IFACE\" |
+  .network.DISABLE_EXPOSE_OUTSIDE = false |
+  .network.ISOLATE_INTERNAL_CHILDREN = true |
+  .network.DEFAULT_EXECUTE_REMOTE = true
+" "$NODO_CONFIG"
+
+echo -e "${GREEN}[OK] Nodo will expose services on $WSL_IFACE (reachable from Windows)${NC}"
 
 echo -e "\n${CYAN}[STEP 5.6] Configuring networking for the microVM...${NC}"
 iptables -C FORWARD -d 192.168.200.0/24 -j ACCEPT 2>/dev/null || iptables -A FORWARD -d 192.168.200.0/24 -j ACCEPT
@@ -491,7 +510,8 @@ Set-Content -Path $tempScriptPath -Value $wslSetupScript -Force -Encoding UTF8
 Write-Info "Temporary configuration script created at: $tempScriptPath"
 
 Write-Info "Copying and running configuration inside WSL..."
-$setupScriptBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($wslSetupScript))
+$wslSetupScriptUnix = $wslSetupScript -replace "`r`n", "`n" -replace "`r", "`n"
+$setupScriptBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($wslSetupScriptUnix))
 Invoke-Wsl "echo $setupScriptBase64 | base64 -d > /tmp/setup.sh && chmod +x /tmp/setup.sh && /tmp/setup.sh"
 Write-Success "[OK] Internal configuration completed"
 
