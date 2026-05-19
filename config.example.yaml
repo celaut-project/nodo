@@ -128,6 +128,7 @@ network:
   FREE_PORTS_RANGE:  # Free ports range to use for exposing services. Ports outside this range will not be used for service exposure. Useful to match router forwarding rules. Can be multiple ranges, e.g.: - START: 10000 \n END: 20000 \n - START: 30000 \n END: 40000
     - START: 50000
       END: 60000
+  DEFAULT_EXECUTE_REMOTE: false  # If true, `nodo execute` will default to remote execution. Use for nodes running in environments without reliable public IPs or with strict isolation requirements, e.g. on-premises servers behind NAT or in private cloud VPCs, or WSL2 Windows nodes.
 
 logs:
   MEMORY_LOGS: false
