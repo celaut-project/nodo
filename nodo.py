@@ -370,7 +370,7 @@ if __name__ == '__main__':
                 import sys
 
                 args = sys.argv[2:]
-                external = "--remote" in args
+                external = "--remote" in args or env_manager.get("network.DEFAULT_EXECUTE_REMOTE", False)
                 args = [arg for arg in args if arg != "--remote"]
 
                 envs = {}
