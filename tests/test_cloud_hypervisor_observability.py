@@ -28,7 +28,9 @@ class CloudHypervisorObservabilityTests(unittest.TestCase):
         proc.create_time.return_value = 1000.0
         proc.memory_info.return_value = MagicMock(rss=123456789)
 
-        with patch.object(ch_obs.psutil, "Process", return_value=proc), patch.object(
+        with patch.object(ch_obs, "pid_alive", return_value=True), patch.object(
+            ch_obs.psutil, "Process", return_value=proc
+        ), patch.object(
             ch_obs.time,
             "time",
             return_value=1060.0,
@@ -59,12 +61,27 @@ class CloudHypervisorObservabilityTests(unittest.TestCase):
 
     def test_snapshot_handles_psutil_errors_safely(self):
         state = {"pid": 654}
-        with patch.object(ch_obs.psutil, "Process", side_effect=Exception("boom")):
+        with patch.object(ch_obs, "pid_alive", return_value=True), patch.object(
+            ch_obs.psutil, "Process", side_effect=Exception("boom")
+        ):
             snapshot = ch_obs.get_vm_runtime_snapshot(vmachine_id="vm-3", state=state)
 
         self.assertEqual(snapshot["pid"], 654)
         self.assertFalse(snapshot["alive"])
         self.assertIsNone(snapshot["mem_rss_bytes"])
+
+    def test_snapshot_rejects_reused_pid(self):
+        state = {"pid": 654}
+        with patch.object(ch_obs, "pid_alive", return_value=False), patch.object(
+            ch_obs.psutil,
+            "Process",
+        ) as process_mock:
+            snapshot = ch_obs.get_vm_runtime_snapshot(vmachine_id="vm-reused", state=state)
+
+        self.assertEqual(snapshot["pid"], 654)
+        self.assertFalse(snapshot["alive"])
+        self.assertIsNone(snapshot["mem_rss_bytes"])
+        process_mock.assert_not_called()
 
     def test_snapshot_reads_cgroup_memory_limit_and_current(self):
         with TemporaryDirectory() as tmpdir:

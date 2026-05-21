@@ -75,7 +75,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                     128 * 1024 * 1024,
                     _serialized_instance(),
                     "svc-ch",
-                    "cloud_hypervisor",
+                    "ch",
                 ),
             )
             cur.execute(
@@ -124,7 +124,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
 
         rendered = out.getvalue()
         self.assertIn("Name: steady-falcon", rendered)
-        self.assertIn("Virtualizer: cloud_hypervisor", rendered)
+        self.assertIn("Virtualizer: ch", rendered)
         self.assertIn("Virtualizer: docker", rendered)
         self.assertNotIn("VM PID:", rendered)
 
@@ -164,7 +164,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                     instances_cmd.list_instances(groupable=True)
 
         rendered = out.getvalue()
-        self.assertIn("Virtualizer: cloud_hypervisor", rendered)
+        self.assertIn("Virtualizer: ch", rendered)
         self.assertIn("VM PID: 1234", rendered)
         self.assertIn("VM Uptime: 1m 5s", rendered)
         self.assertIn("VM Memory (RSS): 9.00 MB", rendered)

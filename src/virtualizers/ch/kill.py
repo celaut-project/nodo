@@ -8,6 +8,7 @@ from typing import Dict, Iterable, List, Optional
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.virtualizers.ch.cgroups import remove_vm_cgroup
+from src.virtualizers.ch.process import pid_matches_vmachine
 from src.virtualizers.ch.runtime_state import (
     delete_runtime_state,
     load_runtime_state,
@@ -73,6 +74,12 @@ def _cleanup_tap(vmachine_id: str, tap_name: Optional[str]) -> None:
 
 def _kill_pid(vmachine_id: str, pid: int) -> None:
     if pid <= 0:
+        return
+    if not pid_matches_vmachine(pid=pid, vmachine_id=vmachine_id):
+        log.LOGGER(
+            f"[CH][{vmachine_id}] skip SIGKILL for pid={pid}: "
+            "process is missing or no longer matches this VM"
+        )
         return
     try:
         os.kill(pid, signal.SIGKILL)

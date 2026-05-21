@@ -7,11 +7,13 @@ IMPORT_ERROR = None
 try:
     from src.virtualizers.ch import kill as ch_kill
     from src.virtualizers.ch import maintain as ch_maintain
+    from src.virtualizers.ch import process as ch_process
     from src.virtualizers.ch import remove as ch_remove
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     ch_kill = None  # type: ignore[assignment]
     ch_maintain = None  # type: ignore[assignment]
+    ch_process = None  # type: ignore[assignment]
     ch_remove = None  # type: ignore[assignment]
 
 
@@ -47,6 +49,10 @@ class CloudHypervisorLifecycleTests(unittest.TestCase):
             ), patch.object(
                 ch_kill, "_api_socket_path", return_value=socket_path
             ), patch.object(
+                ch_kill,
+                "pid_matches_vmachine",
+                return_value=True,
+            ), patch.object(
                 ch_kill.os, "kill", side_effect=ProcessLookupError
             ) as os_kill, patch.object(
                 ch_kill, "remove_vm_cgroup"
@@ -64,6 +70,27 @@ class CloudHypervisorLifecycleTests(unittest.TestCase):
         delete_runtime_state.assert_called_once_with("vm-1")
         self.assertFalse(runtime_dir.exists())
         self.assertFalse(socket_path.exists())
+
+    def test_kill_does_not_signal_reused_pid(self):
+        state = {"pid": 12345, "tap": "", "api_socket": "", "cleanup_rules": []}
+        with patch.object(ch_kill, "load_runtime_state", return_value=state), patch.object(
+            ch_kill,
+            "pid_matches_vmachine",
+            return_value=False,
+        ), patch.object(
+            ch_kill.os,
+            "kill",
+        ) as os_kill, patch.object(
+            ch_kill,
+            "remove_vm_cgroup",
+        ), patch.object(
+            ch_kill,
+            "delete_runtime_state",
+        ):
+            result = ch_kill.kill(vmachine_id="vm-reused")
+
+        self.assertTrue(result)
+        os_kill.assert_not_called()
 
     def test_maintain_penalizes_when_state_or_pid_invalid(self):
         removed = []
@@ -110,6 +137,35 @@ class CloudHypervisorLifecycleTests(unittest.TestCase):
             )
 
         self.assertEqual(removed, ["vm-socket"])
+
+    def test_pid_alive_rejects_zombie_process(self):
+        with patch.object(ch_process.os, "kill", return_value=None), patch.object(
+            ch_process,
+            "proc_state",
+            return_value="Z",
+        ), patch.object(
+            ch_process,
+            "pid_matches_vmachine",
+            return_value=True,
+        ) as pid_matches:
+            alive = ch_process.pid_alive(pid=222, vmachine_id="vm-zombie")
+
+        self.assertFalse(alive)
+        pid_matches.assert_not_called()
+
+    def test_pid_alive_rejects_reused_pid_for_another_process(self):
+        with patch.object(ch_process.os, "kill", return_value=None), patch.object(
+            ch_process,
+            "proc_state",
+            return_value="S",
+        ), patch.object(
+            ch_process,
+            "pid_matches_vmachine",
+            return_value=False,
+        ):
+            alive = ch_process.pid_alive(pid=222, vmachine_id="vm-reused")
+
+        self.assertFalse(alive)
 
     def test_remove_dual_mode_runtime_prefers_kill(self):
         with patch.object(
@@ -167,7 +223,7 @@ class CloudHypervisorLifecycleTests(unittest.TestCase):
             return_value=True,
         ), patch.object(
             ch_maintain,
-            "_pid_alive",
+            "pid_alive",
             return_value=False,
         ), patch.object(
             ch_maintain,
@@ -189,7 +245,7 @@ class CloudHypervisorLifecycleTests(unittest.TestCase):
             return_value=True,
         ), patch.object(
             ch_maintain,
-            "_pid_alive",
+            "pid_alive",
             return_value=True,
         ), patch.object(
             ch_maintain,

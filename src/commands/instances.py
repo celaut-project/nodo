@@ -26,6 +26,9 @@ DATABASE_FILE = env_manager.get("DATABASE_FILE")
 METADATA = env_manager.get("METADATA_REGISTRY")
 DEFAULT_VIRTUALIZER = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "docker")
 
+def _is_ch_virtualizer(virtualizer: str) -> bool:
+    return str(virtualizer or "").strip().lower() == "ch"
+
 def list_instances(groupable: bool = False, search: str = ""):
     conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
@@ -130,7 +133,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                 vm_mem_rss = "N/A"
                 vm_mem_limit_cgroup = "N/A"
                 vm_mem_current_cgroup = "N/A"
-                if groupable and runtime_virtualizer == "cloud_hypervisor" and id_:
+                if groupable and _is_ch_virtualizer(runtime_virtualizer) and id_:
                     snapshot = get_vm_runtime_snapshot(vmachine_id=id_)
                     vm_pid = str(snapshot.get("pid")) if snapshot.get("pid") is not None else "N/A"
                     vm_uptime = seconds_to_readable(snapshot.get("uptime_s"))
@@ -242,7 +245,7 @@ def list_instances(groupable: bool = False, search: str = ""):
             ("Memory limit", "mem_limit"),
             ("Disk limit", "disk_space"),
         ]
-        if include_runtime and inst.get("virtualizer") == "cloud_hypervisor":
+        if include_runtime and _is_ch_virtualizer(inst.get("virtualizer")):
             fields.extend(
                 [
                     ("VM PID", "vm_pid"),

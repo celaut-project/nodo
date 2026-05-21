@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 import psutil
 
 from src.virtualizers.ch.cgroups import CGROUPS_BASE_DIR
+from src.virtualizers.ch.process import pid_alive
 from src.virtualizers.ch.runtime_state import load_runtime_state
 
 
@@ -31,8 +32,10 @@ def _uptime_from_created_at(created_at: str) -> Optional[int]:
     return max(0, delta_s)
 
 
-def _process_snapshot(pid: int) -> Dict[str, Optional[Any]]:
+def _process_snapshot(pid: int, vmachine_id: str = "") -> Dict[str, Optional[Any]]:
     if pid <= 0:
+        return {"alive": False, "uptime_s": None, "mem_rss_bytes": None}
+    if vmachine_id and not pid_alive(pid=pid, vmachine_id=vmachine_id):
         return {"alive": False, "uptime_s": None, "mem_rss_bytes": None}
 
     try:
@@ -127,7 +130,7 @@ def get_vm_runtime_snapshot(
 ) -> Dict[str, Any]:
     runtime_state = dict(state or load_runtime_state(vmachine_id) or {})
     pid = int(runtime_state.get("pid") or 0)
-    proc = _process_snapshot(pid)
+    proc = _process_snapshot(pid, vmachine_id=vmachine_id)
     cgroup_memory = _cgroup_memory_snapshot(vmachine_id=vmachine_id, runtime_state=runtime_state)
 
     uptime_s = proc["uptime_s"]
