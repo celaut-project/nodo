@@ -29,7 +29,65 @@ DEFAULT_VIRTUALIZER = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "docke
 def _is_ch_virtualizer(virtualizer: str) -> bool:
     return str(virtualizer or "").strip().lower() == "ch"
 
+def _direct_purge_local_instance(instance_id: str) -> None:
+    conn = sqlite3.connect(DATABASE_FILE)
+    try:
+        conn.execute("DELETE FROM local_instances WHERE id = ?", (instance_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+def _ch_instance_is_stale(instance_id: str) -> bool:
+    try:
+        from src.virtualizers.ch.process import pid_alive
+        from src.virtualizers.ch.runtime_state import load_runtime_state
+
+        state = load_runtime_state(instance_id)
+        if not state:
+            return True
+        pid = int(state.get("pid") or 0)
+        if pid <= 0 or not pid_alive(pid=pid, vmachine_id=instance_id):
+            return True
+        api_socket = str(state.get("api_socket") or "").strip()
+        return bool(api_socket) and not os.path.exists(api_socket)
+    except Exception:
+        return False
+
+def _prune_stale_ch_instances() -> None:
+    conn = sqlite3.connect(DATABASE_FILE)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, virtualizer FROM local_instances")
+        candidates = [
+            instance_id
+            for instance_id, virtualizer in cursor.fetchall()
+            if _is_ch_virtualizer(virtualizer or DEFAULT_VIRTUALIZER)
+        ]
+    except sqlite3.Error:
+        return
+    finally:
+        conn.close()
+
+    for instance_id in candidates:
+        if not _ch_instance_is_stale(instance_id):
+            continue
+        try:
+            from src.manager.manager import stop_instance
+
+            if stop_instance(token=instance_id) is None:
+                _direct_purge_local_instance(instance_id)
+        except Exception:
+            try:
+                from src.virtualizers.ch.kill import kill as kill_ch_vm
+
+                kill_ch_vm(vmachine_id=instance_id)
+            except Exception:
+                pass
+            _direct_purge_local_instance(instance_id)
+
 def list_instances(groupable: bool = False, search: str = ""):
+    _prune_stale_ch_instances()
+
     conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
 
