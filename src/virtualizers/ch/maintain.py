@@ -4,23 +4,11 @@ from typing import Callable
 from src.database.sql_connection import SQLConnection
 from src.utils import logger as log
 from src.virtualizers.ch.kill import kill as kill_ch_vm
+from src.virtualizers.ch.process import pid_alive
 from src.virtualizers.ch.runtime_state import load_runtime_state
 from src.virtualizers.ch.runtime_state import list_runtime_states
 
 sc = SQLConnection()
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # If we cannot signal it, the process still exists.
-        return True
-    except Exception:
-        return False
 
 
 def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[str], None]) -> None:
@@ -36,7 +24,7 @@ def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[
         remove_and_penalize(vmachine_id=vmachine_id)
         return
 
-    if not _pid_alive(pid):
+    if not pid_alive(pid, vmachine_id=vmachine_id):
         log.LOGGER(f"[CH][{vmachine_id}] event=maintain unhealthy reason=process_dead pid={pid}")
         remove_and_penalize(vmachine_id=vmachine_id)
         return
@@ -64,7 +52,7 @@ def janitor_cleanup_orphans(debug_mode: bool = False) -> None:
     for vmachine_id, state in states.items():
         pid = int((state or {}).get("pid") or 0)
         in_db = sc.internal_instance_exists(id=vmachine_id)
-        alive = _pid_alive(pid) if pid > 0 else False
+        alive = pid_alive(pid, vmachine_id=vmachine_id) if pid > 0 else False
 
         reason = None
         if not in_db:

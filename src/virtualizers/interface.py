@@ -32,24 +32,37 @@ sc = SQLConnection()
 def _get_default_virtualizer() -> str:
     return env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "ch")
 
+def _normalize_virtualizer(name: Optional[str]) -> str:
+    if not isinstance(name, str):
+        raise ValueError(f"Invalid virtualizer value: {name!r}")
+    v = name.strip().lower()
+    if not v:
+        raise ValueError("Virtualizer value is empty.")
+    if v == "ch":
+        return "ch"
+    if v == "docker":
+        return "docker"
+    raise ValueError(f"Unknown or unsupported virtualizer '{name}'. Supported: docker, ch.")
+
 def _resolve_virtualizer_for_instance(vmachine_id: str) -> str:
+    v = None
     try:
         v = sc.get_internal_virtualizer(id=vmachine_id)
-        if v:
-            v = str(v).strip()
-            if v:
-                return v
     except Exception as e:
         log(f"Error reading virtualizer for {vmachine_id}: {e}")
-    return _get_default_virtualizer()
+    if v:
+        return _normalize_virtualizer(v)
+    return _normalize_virtualizer(_get_default_virtualizer())
 
 def _is_supported_virtualizer(name: str) -> bool:
-    return name in {"docker", "ch"}
+    try:
+        _normalize_virtualizer(name)
+        return True
+    except ValueError:
+        return False
 
 def _ensure_usable_virtualizer(name: str) -> str:
-    if not _is_supported_virtualizer(name):
-        raise ValueError(f"Unknown or unsupported virtualizer '{name}'. Supported: docker, ch.")
-    return name
+    return _normalize_virtualizer(name)
 
 def get_configured_virtualizer() -> str:
     return _ensure_usable_virtualizer(
