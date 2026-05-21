@@ -108,6 +108,10 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                 instances_cmd, "METADATA", tmpdir
             ), patch.object(
                 instances_cmd,
+                "_prune_stale_ch_instances",
+                return_value=None,
+            ), patch.object(
+                instances_cmd,
                 "get_vm_runtime_snapshot",
                 return_value={
                     "pid": 1234,
@@ -156,6 +160,10 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                 instances_cmd, "METADATA", tmpdir
             ), patch.object(
                 instances_cmd,
+                "_prune_stale_ch_instances",
+                return_value=None,
+            ), patch.object(
+                instances_cmd,
                 "get_vm_runtime_snapshot",
                 side_effect=_snapshot,
             ):
@@ -172,6 +180,30 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
         self.assertIn("VM Memory current (cgroup): 11.00 MB", rendered)
         self.assertIn("Virtualizer: docker", rendered)
         self.assertNotIn("VM PID: N/A", rendered)
+
+    def test_list_instances_prunes_stale_ch_before_rendering(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "instances.sqlite")
+            self._build_db(db_path)
+
+            with patch.object(instances_cmd, "DATABASE_FILE", db_path), patch.object(
+                instances_cmd,
+                "_ch_instance_is_stale",
+                side_effect=lambda instance_id: instance_id == "vm-ch",
+            ), patch(
+                "src.manager.manager.stop_instance",
+                side_effect=Exception("cleanup failed"),
+            ), patch(
+                "src.virtualizers.ch.kill.kill",
+                return_value=True,
+            ):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    instances_cmd.list_instances(groupable=False)
+
+        rendered = out.getvalue()
+        self.assertNotIn("ID: vm-ch", rendered)
+        self.assertIn("ID: vm-docker", rendered)
 
 
 if __name__ == "__main__":

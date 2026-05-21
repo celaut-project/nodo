@@ -68,8 +68,11 @@ def _cleanup_dnat_rules(vmachine_id: str, cleanup_rules: List[List[str]]) -> Non
 def _cleanup_tap(vmachine_id: str, tap_name: Optional[str]) -> None:
     if not tap_name:
         return
-    _run(["ip", "link", "del", str(tap_name)])
-    log.LOGGER(f"[CH][{vmachine_id}] cleanup tap attempted: {tap_name}")
+    try:
+        _run(["ip", "link", "del", str(tap_name)])
+        log.LOGGER(f"[CH][{vmachine_id}] cleanup tap attempted: {tap_name}")
+    except Exception as e:
+        log.LOGGER(f"[CH][{vmachine_id}] error cleaning tap {tap_name}: {e}")
 
 
 def _kill_pid(vmachine_id: str, pid: int) -> None:
