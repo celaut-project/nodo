@@ -131,10 +131,17 @@ def maintain_vmachines(debug_mode: bool=False):
 
         if debug_mode: log.LOGGER(f"Checking vmachine: {vmachine_id}")
         vm_maintain(vmachine_id=vmachine_id, debug_mode=debug_mode, remove_and_penalize=remove_and_penalize_vmachine)
+        
+        try:
+            sys_req = sc.get_sys_req(id=vmachine_id)
+        except Exception as e:
+            # The vmachine may have been removed between get_all_internal_containers_ids() and get_sys_req()
+            if debug_mode: log.LOGGER(f"Vmachine {vmachine_id} no longer exists in database: {e}")
+            continue
             
         gas_cost = compute_maintenance_cost(
             system_resources=celaut.Sysresources(
-                mem_limit=sc.get_sys_req(id=vmachine_id)['mem_limit']
+                mem_limit=sys_req['mem_limit']
             )
         )
         if debug_mode: log.LOGGER(f"Computed gas cost for {vmachine_id}: {gas_cost:e}")
