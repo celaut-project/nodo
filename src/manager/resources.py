@@ -122,10 +122,13 @@ class IOBigData(metaclass=Singleton):
         if comments:
             with self.amount_lock:
                 self.log('\n--------- ' + message + ' -------------')
-                self.log('RAM POOL       -> ' + IOBigData.convert_size(self.ram_pool()))
-                self.log('RAM LOCKED     -> ' + IOBigData.convert_size(self.ram_locked))
-                self.log('RAM AVAILABLE  -> ' + IOBigData.convert_size(self.get_ram_avaliable()))
-                self.log('RAM WAITING    -> ' + IOBigData.convert_size(sum(self.wait)))
+                self.log('SYSTEM AVAILABLE -> ' + IOBigData.convert_size(psutil.virtual_memory().available))
+                self.log('VMACHINES RSS     -> ' + IOBigData.convert_size(_nodo_ch_rss_bytes()))
+                self.log('DAEMON RSS      -> ' + IOBigData.convert_size(_python_rss_bytes()))
+                self.log('RAM POOL        -> ' + IOBigData.convert_size(self.ram_pool()))
+                self.log('RAM LOCKED      -> ' + IOBigData.convert_size(self.ram_locked))
+                self.log('RAM AVAILABLE   -> ' + IOBigData.convert_size(self.get_ram_avaliable()))
+                self.log('RAM WAITING     -> ' + IOBigData.convert_size(sum(self.wait)))
                 self.log('-----------------------------------------\n')
 
     # Gas manager methods.
