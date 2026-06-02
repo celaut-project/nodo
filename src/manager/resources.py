@@ -58,8 +58,7 @@ class IOBigData(metaclass=Singleton):
             if ram_pool_method is not None
             else lambda: (
                 psutil.virtual_memory().available
-                - _nodo_ch_rss_bytes()
-                - _python_rss_bytes()
+
             )
         )
 
