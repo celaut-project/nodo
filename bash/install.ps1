@@ -485,9 +485,8 @@ echo "Detected WSL2 outbound interface: $WSL_IFACE"
 # Patch config.yaml so Nodo exposes services on the WSL2 interface
 $YQ -i "
   .network.EXTERNAL_INTERFACE = \"$WSL_IFACE\" |
-  .network.DISABLE_EXPOSE_OUTSIDE = false |
   .network.ISOLATE_INTERNAL_CHILDREN = true |
-  .network.CONSIDER_DEV_AS_INTERNAL = false
+  .network.DEFAULT_EXECUTE_REMOTE = true
 " "$NODO_CONFIG"
 echo -e "${GREEN}[OK] Nodo will expose services on $WSL_IFACE (reachable from Windows)${NC}"
 
