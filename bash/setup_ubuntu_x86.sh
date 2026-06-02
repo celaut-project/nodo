@@ -349,6 +349,7 @@ install_build_dependencies() {
         git
         procps
         locales
+        zip
     )
 
     echo "Installing required build dependencies: ${packages[*]}"

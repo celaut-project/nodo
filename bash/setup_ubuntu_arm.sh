@@ -353,6 +353,7 @@ install_build_dependencies() {
         gzip
         initramfs-tools-core
         iputils-ping
+        zip
     )
 
     echo "Installing build dependencies and basic tools: ${packages[*]}"
