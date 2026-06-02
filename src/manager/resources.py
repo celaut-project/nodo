@@ -53,8 +53,15 @@ class IOBigData(metaclass=Singleton):
                  ram_pool_method=None
                  ) -> None:
 
-        self.ram_pool = ram_pool_method if ram_pool_method is not None \
-            else lambda: psutil.virtual_memory().available - _nodo_ch_rss_bytes()
+        self.ram_pool = (
+            ram_pool_method
+            if ram_pool_method is not None
+            else lambda: (
+                psutil.virtual_memory().available
+                - _nodo_ch_rss_bytes()
+                - _python_rss_bytes()
+            )
+        )
 
         self.log = log
         self.ram_locked = 0
@@ -130,6 +137,11 @@ class IOBigData(metaclass=Singleton):
         with self.wait_lock:
             self.wait.remove(l)
 
+    def __can_lock_ram(self, ram_amount: int, *, inclusive: bool) -> bool:
+        with self.amount_lock:
+            available = self.get_ram_avaliable()
+            return available >= ram_amount if inclusive else available > ram_amount
+
     # Manage resources methods.
 
     def lock(self, len, timeout=None):
@@ -145,11 +157,11 @@ class IOBigData(metaclass=Singleton):
                 if wait:
                     self.wait_to_prevent_kill(len=ram_amount, deadline=deadline)
 
-                elif not self.prevent_kill(len=ram_amount):
+                elif not self.__can_lock_ram(ram_amount=ram_amount, inclusive=True):
                     raise Exception
 
                 with self.amount_lock:
-                    if self.get_ram_avaliable() > ram_amount:
+                    if self.__can_lock_ram(ram_amount=ram_amount, inclusive=True):
                         self.ram_locked += ram_amount
                     else:
                         continue
@@ -170,14 +182,13 @@ class IOBigData(metaclass=Singleton):
         self.__stats('unlocked ' + IOBigData.convert_size(ram_amount))
 
     def prevent_kill(self, len: int) -> bool:
-        with self.amount_lock:
-            b = self.get_ram_avaliable() > len
-            self.__stats('[prevent kill] Try to take ' + IOBigData.convert_size(len) + '. Takes it:' + str(b))
+        b = self.__can_lock_ram(ram_amount=len, inclusive=False)
+        self.__stats('[prevent kill] Try to take ' + IOBigData.convert_size(len) + '. Takes it:' + str(b))
         return b
 
     def wait_to_prevent_kill(self, len: int, deadline: Optional[float] = None) -> None:
         while True:
-            if not self.prevent_kill(len=len):
+            if not self.__can_lock_ram(ram_amount=len, inclusive=True):
                 if deadline is not None and time.monotonic() >= deadline:
                     raise TimeoutError(
                         f"Timed out waiting to unlock memory for {IOBigData.convert_size(len)}"
@@ -199,3 +210,6 @@ def _nodo_ch_rss_bytes() -> int:
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
     return total
+
+def _python_rss_bytes():
+    return psutil.Process(os.getpid()).memory_info().rss
