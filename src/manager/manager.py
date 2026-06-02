@@ -552,7 +552,7 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
         try:
             refund = sc.get_container_gas(id=token)
             if reserved_mem_limit > 0:
-                IOBigData().unlock_ram(ram_amount=reserved_mem_limit)
+                #  IOBigData().unlock_ram(ram_amount=reserved_mem_limit)
                 IOBigData().log_snapshot(
                     context=f"stop-instance:after-unlock token={token} released_mem_limit={reserved_mem_limit}"
                 )

@@ -1,10 +1,10 @@
 # I/O Big Data utils.
 import gc
 import os
+import re
 import time
 from time import sleep
 from threading import Lock, RLock
-
 import threading
 from typing import Optional
 import psutil
@@ -53,21 +53,28 @@ class IOBigData(metaclass=Singleton):
                  ram_pool_method=None
                  ) -> None:
 
-        self.ram_pool = (
-            ram_pool_method
-            if ram_pool_method is not None
-            else lambda: (
-                psutil.virtual_memory().available
+        self._initial_python_rss_bytes = _python_rss_bytes()  # Consumo del intérprete de python al iniciar el proceso, tomado como referencia de uso base para evitar el doble conteo con ram_locked. Se considera que esto es lo que gasta fuera del locked.
 
-            )
-        )
+        def default_ram_pool():
+            sys_available = psutil.virtual_memory().available
+            nodo_rss, nodo_reserved = _get_nodo_ch_memory_stats()
+            
+            # Solo restamos el crecimiento potencial de las VMs
+            potential_vm_growth = max(0, nodo_reserved - nodo_rss) 
+            
+            # Compensamos el consumo actual del daemon para evitar el doble conteo con ram_locked
+            daemon_growth = min(self.ram_locked, _python_rss_bytes() - self._initial_python_rss_bytes)  #  El min se usa para evitar que se hubiera restado ram_locked pero aún no se reflejara en el RSS del proceso, lo que podría llevar a un conteo negativo (mas disponible del que realmente hay).
+            
+            return sys_available - potential_vm_growth + daemon_growth
+
+        self.ram_pool = ram_pool_method if ram_pool_method is not None else default_ram_pool
 
         self.log = log
-        self.ram_locked = 0
+        self.ram_locked = 0  
         self.get_ram_avaliable = lambda: self.ram_pool() - self.ram_locked
         self.amount_lock = RLock()
 
-        self.wait = []
+        self.waiting_bytes = 0
         self.wait_lock = Lock()
 
     # General methods.
@@ -95,7 +102,9 @@ class IOBigData(metaclass=Singleton):
             ram_locked = int(self.ram_locked)
             pool_available = int(self.ram_pool())
             effective_available = int(self.get_ram_avaliable())
-            waiting = int(sum(self.wait))
+            with self.wait_lock:
+                waiting = int(self.waiting_bytes)
+                
         return {
             "pid": os.getpid(),
             "system_available": system_available,
@@ -120,24 +129,34 @@ class IOBigData(metaclass=Singleton):
     def __stats(self, message: str, comments: bool = True):
         if comments:
             with self.amount_lock:
+                nodo_rss, nodo_reserved = _get_nodo_ch_memory_stats()
+                current_python_rss = _python_rss_bytes()
+                
                 self.log('\n--------- ' + message + ' -------------')
                 self.log('SYSTEM AVAILABLE -> ' + IOBigData.convert_size(psutil.virtual_memory().available))
-                self.log('VMACHINES RSS     -> ' + IOBigData.convert_size(_nodo_ch_rss_bytes()))
-                self.log('DAEMON RSS      -> ' + IOBigData.convert_size(_python_rss_bytes()))
+                self.log('VMACHINES RSS     -> ' + IOBigData.convert_size(nodo_rss))
+                self.log('VMACHINES RESERVED -> ' + IOBigData.convert_size(nodo_reserved))
+                self.log('VMACHINES NOT USED   -> ' + IOBigData.convert_size(max(0, nodo_reserved - nodo_rss)))
+                self.log('DAEMON RSS      -> ' + IOBigData.convert_size(current_python_rss))
+                self.log('DAEMON RSS INI  -> ' + IOBigData.convert_size(self._initial_python_rss_bytes))
+                self.log('DAEMON RSS ON LOCK -> ' + IOBigData.convert_size(max(0, current_python_rss - self._initial_python_rss_bytes)))
                 self.log('RAM POOL        -> ' + IOBigData.convert_size(self.ram_pool()))
                 self.log('RAM LOCKED      -> ' + IOBigData.convert_size(self.ram_locked))
                 self.log('RAM AVAILABLE   -> ' + IOBigData.convert_size(self.get_ram_avaliable()))
-                self.log('RAM WAITING     -> ' + IOBigData.convert_size(sum(self.wait)))
+                with self.wait_lock:
+                    self.log('RAM WAITING     -> ' + IOBigData.convert_size(self.waiting_bytes))
                 self.log('-----------------------------------------\n')
 
     # Gas manager methods.
     def __push_wait_list(self, l: int):
         with self.wait_lock:
-            self.wait.append(l)
+            self.waiting_bytes += l
 
     def __pop_wait_list(self, l: int):
         with self.wait_lock:
-            self.wait.remove(l)
+            self.waiting_bytes -= l
+            if self.waiting_bytes < 0:
+                self.waiting_bytes = 0
 
     def __can_lock_ram(self, ram_amount: int, *, inclusive: bool) -> bool:
         with self.amount_lock:
@@ -149,6 +168,7 @@ class IOBigData(metaclass=Singleton):
     def lock(self, len, timeout=None):
         return self.RamLocker(len=len, iobd=self, timeout=timeout)
 
+    # Lock_ram y unlock_Ram son usados en __enter__ y __exit__ de RamLocker.
     def lock_ram(self, ram_amount: int, wait: bool = True, timeout: Optional[float] = None):
         self.__stats('want lock ' + IOBigData.convert_size(ram_amount))
         self.__push_wait_list(l=ram_amount)
@@ -200,18 +220,41 @@ class IOBigData(metaclass=Singleton):
                 return
 
 def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
-    return IOBigData().prevent_kill(len=sysreq.mem_limit)  # Prevent kill says that is not actually possible.
+    return IOBigData().prevent_kill(len=sysreq.mem_limit)  
 
-def _nodo_ch_rss_bytes() -> int:
-    total = 0
+def _get_nodo_ch_memory_stats() -> tuple[int, int]:
+    """Devuelve una tupla con (total_rss_bytes, total_reserved_bytes) en una sola pasada."""
+    total_rss = 0
+    total_reserved = 0
     for p in psutil.process_iter(["name", "cmdline", "memory_info"]):
         try:
-            cmdline = " ".join(p.info["cmdline"] or [])
+            cmdline = " ".join(p.info.get("cmdline") or [])
             if "nodo-ch" in cmdline:
-                total += p.info["memory_info"].rss
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                mem_info = p.info.get("memory_info")
+                if mem_info:
+                    total_rss += mem_info.rss
+                total_reserved += __parse_memory_from_cmdline(cmdline)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, TypeError):
             continue
-    return total
+    return total_rss, total_reserved
 
 def _python_rss_bytes():
     return psutil.Process(os.getpid()).memory_info().rss
+
+def __parse_memory_from_cmdline(cmdline: str) -> int:
+    """Parsea la memoria reservada del cmdline de nodo-ch."""
+    match = re.search(r'--memory\s+size=(\d+)([KMGT]?)', cmdline, re.IGNORECASE)
+    if not match:
+        return 0
+    
+    value = int(match.group(1))
+    unit = match.group(2).upper() if match.group(2) else 'M'  
+    
+    multipliers = {
+        'K': 1024,
+        'M': 1024 ** 2,
+        'G': 1024 ** 3,
+        'T': 1024 ** 4,
+    }
+    
+    return value * multipliers.get(unit, 1024 ** 2)

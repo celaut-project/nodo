@@ -1,6 +1,5 @@
 import sys, os, subprocess
 from bee_rpc.utils import modify_env
-from psutil import virtual_memory
 from src.utils import logger as log
 import src.manager.resources as iobd
 from src.utils.config import ConfigManager
