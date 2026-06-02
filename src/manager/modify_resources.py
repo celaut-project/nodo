@@ -25,12 +25,11 @@ def modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
             log.LOGGER("Insufficient memory.")
             return False
         
-        if variation > 0:
-            IOBigData().lock_ram(ram_amount=abs(variation))
+        # if variation > 0:
+        #     IOBigData().lock_ram(ram_amount=abs(variation))
 
-        elif variation < 0:
-            IOBigData().unlock_ram(ram_amount=abs(variation))
-
+        # elif variation < 0:
+        #     IOBigData().unlock_ram(ram_amount=abs(variation))
         IOBigData().log_snapshot(
             context=f"modify-sysreq:after id={id} current={current_mem_limit} target={sys_req.mem_limit}"
         )
