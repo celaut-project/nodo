@@ -40,7 +40,7 @@
 * R6:  Boolean                -> isLocked
 * - Purpose: Lock status
 *
-* R7: Coll[Byte]              -> blake2b256(propositionBytes) of the owner script
+* R7: Coll[Byte]              -> propositionBytes of the owner (must be spent one box with this script to confirm ownership)
 *
 * R8: Boolean                  -> customFlag
 * - Purpose: A boolean flag for custom application logic.
@@ -55,7 +55,7 @@
 
   // --- Path 1: Admin Transaction (signed by the owner) ---
   val ownerSignedPath = {
-    val isOwner = INPUTS.exists { (b: Box) => blake2b256(b.propositionBytes) == SELF.R7[Coll[Byte]].get }
+    val isOwner = INPUTS.exists { (b: Box) => b.propositionBytes == SELF.R7[Coll[Byte]].get }
     if (isOwner) {
 
       // Extract data from this box's (SELF) register structure.
