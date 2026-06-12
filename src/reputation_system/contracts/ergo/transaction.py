@@ -73,6 +73,60 @@ def _get_type_nft_boxes(node_url: str, type_nft_ids: List[str]) -> list:
     return data_inputs
 
 
+def _explorer_box_to_input_box(box_payload: dict):
+    jpype = require_java_module("jpype", feature="Ergo reputation")
+    org = jpype.JPackage("org")
+
+    output_info_cls = org.ergoplatform.explorer.client.model.OutputInfo
+    input_box_impl_cls = org.ergoplatform.appkit.impl.InputBoxImpl
+    gson = org.ergoplatform.restapi.client.JSON.createGson().create()
+    output_info = gson.fromJson(json.dumps(box_payload), output_info_cls)
+    return input_box_impl_cls(output_info)
+
+
+def _attach_data_inputs(tx_builder, data_inputs) -> None:
+    for method_name in ("withDataInputs", "addDataInputs"):
+        method = getattr(tx_builder, method_name, None)
+        if not method:
+            continue
+
+        call_attempts = [
+            lambda: method(data_inputs),
+            lambda: method(*data_inputs),
+        ]
+        for attempt in call_attempts:
+            try:
+                attempt()
+                return
+            except TypeError:
+                continue
+
+    raise RuntimeError("AppKit transaction builder does not expose withDataInputs/addDataInputs")
+
+
+def _build_unsigned_transaction(ergo, input_boxes, outputs, fee: int, sender_address, data_inputs: Optional[list] = None):
+    tx_kwargs = dict(
+        input_box=input_boxes,
+        outBox=outputs,
+        fee=fee / 10**9,
+        sender_address=sender_address,
+    )
+
+    if not data_inputs:
+        return ergo.buildUnsignedTransaction(**tx_kwargs)
+
+    # Prefer the higher-level ergpy API when available.
+    for kwarg in ("dataInput", "dataInputs"):
+        try:
+            return ergo.buildUnsignedTransaction(**tx_kwargs, **{kwarg: data_inputs})
+        except TypeError:
+            pass
+
+    tx_builder = ergo._ctx.newTxBuilder()         .boxesToSpend(input_boxes)         .outputs(outputs)         .fee(fee)         .sendChangeTo(sender_address.asP2PK())
+    _attach_data_inputs(tx_builder, data_inputs)
+    return tx_builder.build()
+
+
 def __build_proof_box(
     ergo,
     proof_id: str,
@@ -216,26 +270,19 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     outputs.extend(output_boxes)
 
     # Resolve and attach DPG type boxes as dataInputs.
-    data_inputs = _get_type_nft_boxes(
+    data_input_payloads = _get_type_nft_boxes(
         node_url=node_url,
         type_nft_ids=[CELAUT_NODE_TYPE_NFT_ID],
     )
-
-    tx_kwargs = dict(
-        input_box=java_input_boxes,
-        outBox=outputs,
-        fee=fee / 10**9,
+    java_data_inputs = [_explorer_box_to_input_box(box_payload) for box_payload in data_input_payloads]
+    unsigned_tx = _build_unsigned_transaction(
+        ergo=ergo,
+        input_boxes=java_input_boxes,
+        outputs=outputs,
+        fee=fee,
         sender_address=sender_address,
+        data_inputs=java_data_inputs,
     )
-
-    # API compatibility across ergpy/appkit versions.
-    try:
-        unsigned_tx = ergo.buildUnsignedTransaction(dataInput=data_inputs, **tx_kwargs)
-    except TypeError:
-        try:
-            unsigned_tx = ergo.buildUnsignedTransaction(dataInputs=data_inputs, **tx_kwargs)
-        except TypeError:
-            raise RuntimeError("AppKit does not expose dataInput/dataInputs argument; cannot satisfy Type NFT dataInputs requirement")
 
     mnemonic = ergo.getMnemonic(wallet_mnemonic=wallet_mnemonic, mnemonic_password=None)
     signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
