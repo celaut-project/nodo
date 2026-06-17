@@ -40,12 +40,12 @@ def _java_bytes_to_python_bytes(java_bytes) -> bytes:
     return bytes((byte + 256) % 256 for byte in java_bytes)
 
 
-def _owner_proposition_bytes(sender_address) -> bytes:
+def _owner_script_hash(sender_address) -> bytes:
     jpype = require_java_module("jpype", feature="Ergo reputation")
     ergo_tree = sender_address.getErgoAddress().script()
     serializer = jpype.JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
     proposition_bytes = _java_bytes_to_python_bytes(serializer.serializeErgoTree(ergo_tree))
-    return proposition_bytes
+    return hashlib.blake2b(proposition_bytes, digest_size=32).digest()
 
 
 def _get_type_nft_boxes(node_url: str, type_nft_ids: List[str]) -> list:
@@ -73,6 +73,60 @@ def _get_type_nft_boxes(node_url: str, type_nft_ids: List[str]) -> list:
     return data_inputs
 
 
+def _explorer_box_to_input_box(box_payload: dict):
+    jpype = require_java_module("jpype", feature="Ergo reputation")
+    org = jpype.JPackage("org")
+
+    output_info_cls = org.ergoplatform.explorer.client.model.OutputInfo
+    input_box_impl_cls = org.ergoplatform.appkit.impl.InputBoxImpl
+    gson = org.ergoplatform.restapi.client.JSON.createGson().create()
+    output_info = gson.fromJson(json.dumps(box_payload), output_info_cls)
+    return input_box_impl_cls(output_info)
+
+
+def _attach_data_inputs(tx_builder, data_inputs) -> None:
+    for method_name in ("withDataInputs", "addDataInputs"):
+        method = getattr(tx_builder, method_name, None)
+        if not method:
+            continue
+
+        call_attempts = [
+            lambda: method(data_inputs),
+            lambda: method(*data_inputs),
+        ]
+        for attempt in call_attempts:
+            try:
+                attempt()
+                return
+            except TypeError:
+                continue
+
+    raise RuntimeError("AppKit transaction builder does not expose withDataInputs/addDataInputs")
+
+
+def _build_unsigned_transaction(ergo, input_boxes, outputs, fee: int, sender_address, data_inputs: Optional[list] = None):
+    tx_kwargs = dict(
+        input_box=input_boxes,
+        outBox=outputs,
+        fee=fee / 10**9,
+        sender_address=sender_address,
+    )
+
+    if not data_inputs:
+        return ergo.buildUnsignedTransaction(**tx_kwargs)
+
+    # Prefer the higher-level ergpy API when available.
+    for kwarg in ("dataInput", "dataInputs"):
+        try:
+            return ergo.buildUnsignedTransaction(**tx_kwargs, **{kwarg: data_inputs})
+        except TypeError:
+            pass
+
+    tx_builder = ergo._ctx.newTxBuilder().boxesToSpend(input_boxes).outputs(outputs).fee(fee).sendChangeTo(sender_address.asP2PK())
+    _attach_data_inputs(tx_builder, data_inputs)
+    return tx_builder.build()
+
+
 def __build_proof_box(
     ergo,
     proof_id: str,
@@ -87,7 +141,7 @@ def __build_proof_box(
     type_nft_id = assigned_object['type'] if assigned_object else PLAIN_TEXT_TYPE_NFT_ID
     object_to_assign = assigned_object['value'] if assigned_object else ""
 
-    owner_pb = _owner_proposition_bytes(sender_address)
+    owner_hash = _owner_script_hash(sender_address)
     try:
         ergo_token_cls = org_appkit.ErgoToken
     except AttributeError:
@@ -100,9 +154,9 @@ def __build_proof_box(
                 .registers([
                     org_appkit.ErgoValue.of(jpype.JString(type_nft_id).getBytes("utf-8")),         # R4: typeNftTokenId
                     org_appkit.ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),    # R5: uniqueObjectData
-                    org_appkit.ErgoValue.of(jpype.JBoolean(False)),                                # R6: isLocked
-                    org_appkit.ErgoValue.of(owner_pb),                                             # R7: propositionBytes
-                    org_appkit.ErgoValue.of(jpype.JBoolean(int(token_amount) >= 0)),               # R8: positive/negative
+                    org_appkit.ErgoValue.of(jpype.JBoolean(False)),                                  # R6: isLocked
+                    org_appkit.ErgoValue.of(owner_hash),                                             # R7: blake2b256(propositionBytes)
+                    org_appkit.ErgoValue.of(jpype.JBoolean(int(token_amount) >= 0)),                # R8: positive/negative
                     org_appkit.ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                 # R9: content
                 ]) \
                 .contract(ergo._ctx.compileContract(org_appkit.ConstantsBuilder.empty(), CONTRACT)) \
@@ -216,26 +270,19 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     outputs.extend(output_boxes)
 
     # Resolve and attach DPG type boxes as dataInputs.
-    data_inputs = _get_type_nft_boxes(
+    data_input_payloads = _get_type_nft_boxes(
         node_url=node_url,
         type_nft_ids=[CELAUT_NODE_TYPE_NFT_ID],
     )
-
-    tx_kwargs = dict(
-        input_box=java_input_boxes,
-        outBox=outputs,
-        fee=fee / 10**9,
+    java_data_inputs = [_explorer_box_to_input_box(box_payload) for box_payload in data_input_payloads]
+    unsigned_tx = _build_unsigned_transaction(
+        ergo=ergo,
+        input_boxes=java_input_boxes,
+        outputs=outputs,
+        fee=fee,
         sender_address=sender_address,
+        data_inputs=java_data_inputs,
     )
-
-    # API compatibility across ergpy/appkit versions.
-    try:
-        unsigned_tx = ergo.buildUnsignedTransaction(dataInput=data_inputs, **tx_kwargs)
-    except TypeError:
-        try:
-            unsigned_tx = ergo.buildUnsignedTransaction(dataInputs=data_inputs, **tx_kwargs)
-        except TypeError:
-            raise RuntimeError("AppKit does not expose dataInput/dataInputs argument; cannot satisfy Type NFT dataInputs requirement")
 
     mnemonic = ergo.getMnemonic(wallet_mnemonic=wallet_mnemonic, mnemonic_password=None)
     signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
