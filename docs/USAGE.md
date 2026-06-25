@@ -107,10 +107,13 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo logs`
 
-- **export `<service> <dir>`**  
-  Exports a service into the specified directory.  
+- **export `<service> <dir> [--raw]`**  
+  Exports a service into the specified directory. Two modes:
+  - **`nodo export <service> <dir>`** (default) → writes `<service>.celaut.bee`, a beerpc-framed package. This is the **importable / transmittable** artifact — share it and feed it to `nodo import`.
+  - **`nodo export <service> <dir> --raw`** → writes a raw `<service>.celaut`. This is for **manual hash verification only** and is **NOT importable** — running `nodo import` on it fails with `Invalid file format: Incomplete message data`.  
   **Example:**  
-  `nodo export MyService /export/dir`
+  `nodo export MyService /export/dir`  
+  `nodo export MyService /export/dir --raw`  *(verify-only, not importable)*
 
 - **import `<path>`**  
   Imports a service from the specified path.  
