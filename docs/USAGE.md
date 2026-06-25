@@ -62,6 +62,7 @@ These are the most commonly used commands for daily tasks:
   Packages a project to create a service specification.  
   **Example:**  
   `nodo pack /path/to/project`
+  > Check [detailed documentation](../src/commands/packer/zip_with_dockerfile/README.md)
 
 - **config**  
   Opens environment and runtime configuration options.  
