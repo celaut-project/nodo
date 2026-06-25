@@ -307,6 +307,12 @@ create_service_file() {
     -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|$escaped_python_runtime_bin_dir|g" \
     -e "s|{{PYTHON_VENV_BIN}}|$escaped_python_venv_bin|g" \
     "$TARGET_DIR/bash/nodo.service.template" > "$expected_file"
+  if grep -q '{{[A-Z_][A-Z_]*}}' "$expected_file"; then
+    printf "Error: Unresolved placeholders remain in generated service file:\n" >&2
+    grep -o '{{[A-Z_][A-Z_]*}}' "$expected_file" | sort -u >&2
+    rm -f "$expected_file"
+    exit 1
+  fi
 
   if [ -f "$SERVICE_FILE" ] && cmp -s "$SERVICE_FILE" "$expected_file"; then
     printf "Service file %s is already up to date.\n" "$SERVICE_FILE"
