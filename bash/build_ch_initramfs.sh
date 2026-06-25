@@ -4,6 +4,7 @@ set -euo pipefail
 TARGET_DIR="${1:-}"
 ARCH_TAG="${2:-}"
 OUTPUT_PATH="${3:-}"
+KERNEL_PATH="${4:-}"
 
 fail() {
     echo "Error: $1" >&2
@@ -11,7 +12,7 @@ fail() {
 }
 
 if [ -z "$TARGET_DIR" ] || [ -z "$ARCH_TAG" ] || [ -z "$OUTPUT_PATH" ]; then
-    fail "Usage: $0 <TARGET_DIR> <ARCH_TAG> <OUTPUT_PATH>"
+    fail "Usage: $0 <TARGET_DIR> <ARCH_TAG> <OUTPUT_PATH> [KERNEL_PATH]"
 fi
 if [ ! -d "$TARGET_DIR" ]; then
     fail "TARGET_DIR does not exist: $TARGET_DIR"
@@ -43,6 +44,9 @@ fi
 if ! command -v gzip >/dev/null 2>&1; then
     fail "gzip is required to build initramfs."
 fi
+if ! command -v modprobe >/dev/null 2>&1; then
+    fail "modprobe is required to discover guest kernel module dependencies."
+fi
 
 WORKDIR="$(mktemp -d)"
 ROOT="$WORKDIR/root"
@@ -54,9 +58,131 @@ trap cleanup EXIT
 mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/etc" "$ROOT/newroot" "$ROOT/proc" "$ROOT/sys"
 
 install -m 0755 "$BUSYBOX_BIN" "$ROOT/bin/busybox"
-for applet in sh mount switch_root sleep cat echo mkdir ln test chmod ip; do
+for applet in sh mount switch_root sleep cat echo mkdir ln test chmod ip insmod; do
     ln -sf /bin/busybox "$ROOT/bin/$applet"
 done
+
+kernel_release_from_path() {
+    local kernel_path="$1"
+    local resolved
+    local base
+
+    if [ -n "$kernel_path" ]; then
+        resolved="$(readlink -f "$kernel_path" 2>/dev/null || printf '%s' "$kernel_path")"
+        base="${resolved##*/}"
+        case "$base" in
+            vmlinuz-*) printf '%s\n' "${base#vmlinuz-}"; return 0 ;;
+            vmlinux-*) printf '%s\n' "${base#vmlinux-}"; return 0 ;;
+        esac
+    fi
+
+    uname -r
+}
+
+is_builtin_module() {
+    local kernel_release="$1"
+    local module_name="$2"
+    local module_file_underscore="${module_name}.ko"
+    local module_file_hyphen="${module_name//_/-}.ko"
+
+    for modules_dir in "/lib/modules/$kernel_release" "/usr/lib/modules/$kernel_release"; do
+        if [ -f "$modules_dir/modules.builtin" ] \
+            && grep -Eq "(^|/)(${module_file_underscore}|${module_file_hyphen})(\.xz|\.gz|\.zst)?$" "$modules_dir/modules.builtin"; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+copy_kernel_module() {
+    local source_path="$1"
+    local rel_path="${source_path#/}"
+    local dest_path
+
+    case "$rel_path" in
+        *.ko)
+            dest_path="$ROOT/$rel_path"
+            mkdir -p "$(dirname "$dest_path")"
+            cp -f "$source_path" "$dest_path"
+            ;;
+        *.ko.xz)
+            command -v xz >/dev/null 2>&1 || fail "xz is required to decompress $source_path"
+            dest_path="$ROOT/${rel_path%.xz}"
+            mkdir -p "$(dirname "$dest_path")"
+            xz -dc "$source_path" > "$dest_path"
+            ;;
+        *.ko.gz)
+            dest_path="$ROOT/${rel_path%.gz}"
+            mkdir -p "$(dirname "$dest_path")"
+            gzip -dc "$source_path" > "$dest_path"
+            ;;
+        *.ko.zst)
+            command -v zstd >/dev/null 2>&1 || fail "zstd is required to decompress $source_path"
+            dest_path="$ROOT/${rel_path%.zst}"
+            mkdir -p "$(dirname "$dest_path")"
+            zstd -dc "$source_path" > "$dest_path"
+            ;;
+        *)
+            fail "Unsupported kernel module compression for $source_path"
+            ;;
+    esac
+
+    chmod 0644 "$dest_path"
+    printf '/%s\n' "${dest_path#$ROOT/}"
+}
+
+install_virtio_modules() {
+    local kernel_release
+    local required_module
+    local deps
+    local source_path
+    local initramfs_path
+    local module_list="$ROOT/etc/nodo-virtio-modules.list"
+
+    kernel_release="$(kernel_release_from_path "$KERNEL_PATH")"
+    [ -n "$kernel_release" ] || fail "Unable to determine guest kernel release."
+
+    : > "$module_list"
+
+    for required_module in virtio_blk virtio_net; do
+        deps="$(modprobe --set-version "$kernel_release" --show-depends "$required_module" 2>/dev/null || true)"
+        if [ -z "$deps" ]; then
+            if is_builtin_module "$kernel_release" "$required_module"; then
+                continue
+            fi
+            fail "Unable to find $required_module for guest kernel $kernel_release. Install matching linux-modules for the copied guest kernel."
+        fi
+
+        while IFS= read -r dep_line; do
+            case "$dep_line" in
+                insmod\ *)
+                    source_path="${dep_line#insmod }"
+                    [ -f "$source_path" ] || fail "modprobe returned missing module path: $source_path"
+                    initramfs_path="$(copy_kernel_module "$source_path")"
+                    if ! grep -Fxq "$initramfs_path" "$module_list"; then
+                        printf '%s\n' "$initramfs_path" >> "$module_list"
+                    fi
+                    ;;
+                builtin\ *)
+                    ;;
+            esac
+        done <<EOF
+$deps
+EOF
+    done
+
+    if [ ! -s "$module_list" ]; then
+        rm -f "$module_list"
+        echo "Guest kernel $kernel_release has virtio block/net built in; no initramfs modules needed."
+        return
+    fi
+
+    echo "Included Cloud Hypervisor virtio modules for guest kernel $kernel_release:"
+    sed 's/^/  /' "$module_list"
+}
+
+install_virtio_modules
 
 cat > "$ROOT/init" <<'INIT_EOF'
 #!/bin/sh
@@ -221,6 +347,15 @@ mount -t devtmpfs devtmpfs /dev || mount -t tmpfs tmpfs /dev || fatal "cannot mo
 mkdir -p /dev/shm
 mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /dev/shm || fatal "cannot mount /dev/shm"
 
+if [ -f /etc/nodo-virtio-modules.list ]; then
+    while IFS= read -r module_path; do
+        [ -n "$module_path" ] || continue
+        [ -f "$module_path" ] || fatal "missing initramfs module '$module_path'"
+        insmod "$module_path" || fatal "cannot load initramfs module '$module_path'"
+        log "loaded module $module_path"
+    done < /etc/nodo-virtio-modules.list
+fi
+
 WAIT_SECONDS=20
 i=0
 while [ "$i" -lt "$WAIT_SECONDS" ]; do
@@ -282,6 +417,12 @@ if command -v lsinitramfs >/dev/null 2>&1; then
     printf '%s\n' "$listing" | grep -qx 'init' || fail "generated initramfs misses /init"
     printf '%s\n' "$listing" | grep -qx 'bin/busybox' || fail "generated initramfs misses /bin/busybox"
     printf '%s\n' "$listing" | grep -qx 'etc/nodo-ch-initramfs.marker' || fail "generated initramfs misses marker"
+    if printf '%s\n' "$listing" | grep -qx 'etc/nodo-virtio-modules.list'; then
+        printf '%s\n' "$listing" | grep -Eq '(^|/)virtio_blk\.ko$' \
+            || fail "generated initramfs has module list but misses virtio_blk.ko"
+        printf '%s\n' "$listing" | grep -Eq '(^|/)virtio_net\.ko$' \
+            || fail "generated initramfs has module list but misses virtio_net.ko"
+    fi
 fi
 
 echo "Generated Cloud Hypervisor initramfs: $OUTPUT_PATH"
