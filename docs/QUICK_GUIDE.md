@@ -23,7 +23,7 @@ Remote run:
    nodo execute --remote <service>
 
 Export package:
-   nodo export <service> <path>
+   nodo export <service> <dir>
 
 Raw .celaut:
-   nodo export <service> <path> --raw
+   nodo export <service> <dir> --raw
