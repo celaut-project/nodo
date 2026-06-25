@@ -22,8 +22,8 @@ EXTRAS
 Remote run:
    nodo execute --remote <service>
 
-Export package:
+Export package (importable .celaut.bee — share this, feed it to `nodo import`):
    nodo export <service> <dir>
 
-Raw .celaut:
+Raw .celaut (verify hash only — NOT importable):
    nodo export <service> <dir> --raw
