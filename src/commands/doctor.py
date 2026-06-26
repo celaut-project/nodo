@@ -159,6 +159,76 @@ def _resolve_config_paths(main_dir: str):
     }
 
 
+def _get_nested_config(raw, path: str, default):
+    value = raw
+    for key in path.split("."):
+        if not isinstance(value, dict) or key not in value:
+            return default
+        value = value[key]
+    return value
+
+
+def _expand_main_dir_placeholder(value, main_dir: str):
+    if not isinstance(value, str):
+        return value
+    return value.replace("${main.MAIN_DIR}", main_dir)
+
+
+def _render_service_template(template_content: str, main_dir: str) -> str:
+    """Render nodo.service.template using the same config keys as install.sh."""
+    import yaml
+
+    config_path = os.path.join(main_dir, "config.yaml")
+    raw = {}
+    if os.path.isfile(config_path):
+        with open(config_path, "r") as f:
+            raw = yaml.safe_load(f) or {}
+
+    java_home = _expand_main_dir_placeholder(
+        _get_nested_config(
+            raw,
+            "dependencies.java.JAVA_HOME",
+            os.path.join(main_dir, "runtime", "java", "current"),
+        ),
+        main_dir,
+    )
+    python_runtime_bin = _expand_main_dir_placeholder(
+        _get_nested_config(
+            raw,
+            "dependencies.python.RUNTIME_BIN",
+            os.path.join(main_dir, "runtime", "python", "current", "bin", "python3"),
+        ),
+        main_dir,
+    )
+    python_venv_bin = _expand_main_dir_placeholder(
+        _get_nested_config(
+            raw,
+            "dependencies.python.VENV_BIN",
+            os.path.join(main_dir, "venv", "bin", "python"),
+        ),
+        main_dir,
+    )
+
+    replacements = {
+        "{{MAIN_DIR}}": main_dir,
+        "{{JAVA_HOME}}": java_home,
+        "{{PYTHON_RUNTIME_BIN_DIR}}": os.path.dirname(python_runtime_bin),
+        "{{PYTHON_VENV_BIN}}": python_venv_bin,
+    }
+
+    rendered = template_content
+    for placeholder, value in replacements.items():
+        rendered = rendered.replace(placeholder, value)
+
+    unresolved = sorted(set(re.findall(r"{{[A-Z_]+}}", rendered)))
+    if unresolved:
+        raise ValueError(
+            "Unresolved placeholders in nodo.service.template: " + ", ".join(unresolved)
+        )
+
+    return rendered
+
+
 def _get_host_arch_tag() -> str:
     machine = platform.machine().lower()
     if machine in ("x86_64", "amd64"):
@@ -512,7 +582,11 @@ def doctor_command(main_dir):
         return
 
     with open(template_file, "r") as f:
-        expected_content = f.read().replace("{{MAIN_DIR}}", main_dir)
+        try:
+            expected_content = _render_service_template(f.read(), main_dir)
+        except ValueError as e:
+            print(f"Error: {e}", flush=True)
+            return
     expected_service_user = _parse_unit_user(expected_content)
 
     needs_fix = False
