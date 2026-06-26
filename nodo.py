@@ -267,7 +267,7 @@ if __name__ == '__main__':
 
             case "export":
                 if len(sys.argv) < 4:
-                    print("Missing export path. Usage: nodo export <service> <path> [--raw]")
+                    print("Missing export dir. Usage: nodo export <service> <dir> [--raw]")
                     os._exit(1)
 
                 if len(sys.argv) > 4 and sys.argv[4] == "--raw":

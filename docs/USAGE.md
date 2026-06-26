@@ -4,6 +4,29 @@ This guide will help you understand and use the available commands in **Nodo**, 
 
 ---
 
+## Non-interactive use (automation / agents) ⚙️
+
+The first time you run Nodo it shows the **Know Your Assumptions (KyA)** document and waits for an interactive `yes/no` acceptance before any command runs. In headless or automated environments (CI, agents, scripts) there is no TTY to answer that prompt.
+
+You can **pre-accept the KyA and skip the gate** by creating an empty marker file at:
+
+```
+<MAIN_DIR>/storage/.acceptedkya
+```
+
+`MAIN_DIR` is the Nodo main directory configured in `config.yaml` (`main.MAIN_DIR`, default `/nodo`), so by default the marker is:
+
+```bash
+mkdir -p /nodo/storage
+touch /nodo/storage/.acceptedkya
+```
+
+When this file exists, Nodo treats the KyA as already accepted and starts without prompting. This is the same marker the interactive accept flow writes once you answer `yes`.
+
+> ⚠️ Creating this file means you accept the Know Your Assumptions ([`docs/KyA.md`](KyA.md)) without reading the interactive prompt. Only do this in environments you control.
+
+---
+
 ## Basic Commands
 
 These are the most commonly used commands for daily tasks:
@@ -84,10 +107,13 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo logs`
 
-- **export `<service> <path>`**  
-  Exports a service to a specified path.  
+- **export `<service> <dir> [--raw]`**  
+  Exports a service into the specified directory. Two modes:
+  - **`nodo export <service> <dir>`** (default) → writes `<service>.celaut.bee`, a beerpc-framed package. This is the **importable / transmittable** artifact — share it and feed it to `nodo import`.
+  - **`nodo export <service> <dir> --raw`** → writes a raw `<service>.celaut`. This is for **manual hash verification only** and is **NOT importable** — running `nodo import` on it fails with `Invalid file format: Incomplete message data`.  
   **Example:**  
-  `nodo export MyService /export/path`
+  `nodo export MyService /export/dir`  
+  `nodo export MyService /export/dir --raw`  *(verify-only, not importable)*
 
 - **import `<path>`**  
   Imports a service from the specified path.  
