@@ -274,7 +274,7 @@ provision_cloud_hypervisor_assets() {
     cp -f "$kernel_source" "$ch_kernel_target"
     chmod 0644 "$ch_kernel_target"
 
-    "$ch_initramfs_builder" "$TARGET_DIR" "$CH_ARCH_TAG" "$ch_initramfs_target"
+    "$ch_initramfs_builder" "$TARGET_DIR" "$CH_ARCH_TAG" "$ch_initramfs_target" "$kernel_source"
 
     CH_BINARY_TARGET="$ch_binary_target" "$YQ_BIN" -i \
         '.virtualizers.ch.BINARY_PATH = strenv(CH_BINARY_TARGET)' \
