@@ -35,7 +35,13 @@ COLD_WALLET = lambda: env_manager.get('PAYMENTS_RECIVER_WALLET')
 ERGO_DONATION_WALLET = lambda: env_manager.get('ledgers.ergo.DONATION_WALLET')
 DONATION_PERCENTAGE = lambda: clamp(float(env_manager.get('ledgers.ergo.DONATION_PERCENTAGE')), 1.0, 0.0)  # type: ignore
 HOT_LIMITS = int(env_manager.get("ledgers.ergo.HOT_WALLET_LIMITS"))  # type: ignore
-AUXILIAR_MNEMONIC = env_manager.get("ledgers.ergo.AUXILIAR_MNEMONIC")  # Receiver wallet
+# Receiver wallet. The documented/config key is AUXILIARY_MNEMONIC (see config.example.yaml
+# and the auto-generation in src/utils/config.py); fall back to the legacy AUXILIAR_MNEMONIC
+# spelling for back-compat with any node that already set the misspelled key.
+AUXILIAR_MNEMONIC = (
+    env_manager.get("ledgers.ergo.AUXILIARY_MNEMONIC")
+    or env_manager.get("ledgers.ergo.AUXILIAR_MNEMONIC")
+)
 WALLET_MNEMONIC = lambda: env_manager.get('ledgers.ergo.WALLET_MNEMONIC')  # Sender wallet
 GAS_PER_ERG_L = lambda: int(env_manager.get("ledgers.ergo.GAS_PER_ERG"))
 WAIT_TX_TIME = 240  # 20 minutes (each 5 seconds)
