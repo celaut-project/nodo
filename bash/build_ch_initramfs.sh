@@ -158,6 +158,10 @@ install_virtio_modules() {
             case "$dep_line" in
                 insmod\ *)
                     source_path="${dep_line#insmod }"
+                    # modprobe --show-depends on Ubuntu 22.04 emits a trailing space after
+                    # the .ko path; strip trailing whitespace so the [ -f ] test sees the
+                    # real file instead of failing on "<path> " with a phantom trailing space.
+                    source_path="${source_path%"${source_path##*[![:space:]]}"}"
                     [ -f "$source_path" ] || fail "modprobe returned missing module path: $source_path"
                     initramfs_path="$(copy_kernel_module "$source_path")"
                     if ! grep -Fxq "$initramfs_path" "$module_list"; then
