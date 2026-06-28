@@ -202,7 +202,7 @@ class ZipContainerPacker:
             def recursive_parsing(directory: str) -> celaut.Service.Container.Filesystem:
                 host_dir = CACHE + self.aux_id + "/filesystem"
                 filesystem = celaut.Service.Container.Filesystem()
-                for b_name in os.listdir(host_dir + directory):
+                for b_name in sorted(os.listdir(host_dir + directory)):
                     if b_name == '.wh..wh..opq':
                         # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
                         continue
