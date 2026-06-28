@@ -29,6 +29,7 @@ from src.virtualizers.firewall import (
     allow_connection as vm_allow_connection,
     allow_connection_to_instance as vm_allow_connection_to_instance,
     block_all as vm_block_all,
+    allow_all_egress as vm_allow_all_egress,
     resolve_slot_transport_protocols,
 )
 
@@ -810,6 +811,17 @@ def _configure_guest_firewall_policy(
     log.LOGGER(
         f"[CH][{vmachine_id}] firewall allow DNS: {vm_ip} -> {NETWORK_GATEWAY_IP}:53/tcp,udp"
     )
+
+    # Network tag "*" => open-internet egress. Allow-all is inserted at the head
+    # of FORWARD so it takes precedence over the default-deny block_all rule.
+    if any(tag == "*" for net_res in network_resolution for tag in net_res.tags):
+        if not vm_allow_all_egress(vmachine_id=vmachine_id, source_ip=vm_ip):
+            raise CHExecuteError(
+                f"Failed to apply allow-all egress (network tag '*') for VM {vmachine_id} ({vm_ip})."
+            )
+        log.LOGGER(
+            f"[CH][{vmachine_id}] firewall allow-all egress (network tag '*')"
+        )
 
     for net_res in network_resolution:
         tag = net_res.tags[0] if net_res.tags else "<untagged>"
