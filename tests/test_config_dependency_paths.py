@@ -13,9 +13,9 @@ class ConfigDependencyPathsTests(unittest.TestCase):
         self.assertIn("VENV_BIN:", content)
         self.assertIn("yq:", content)
         self.assertIn("BIN:", content)
-        self.assertIn("docker:", content)
-        self.assertIn("DAEMON_BIN:", content)
-        self.assertIn("BUILDX_BIN:", content)
+        # Docker dependency paths were removed (no local Docker); packing is
+        # delegated to the external packer-service.
+        self.assertIn("PACKER_SERVICE_URL:", content)
 
 
 if __name__ == "__main__":

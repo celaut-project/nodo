@@ -17,28 +17,11 @@ dependencies:
     RUNTIME_ROOT: "${main.MAIN_DIR}/runtime/python"
   yq:
     BIN: "${main.MAIN_DIR}/bin/yq"
-  docker:
-    BIN: "${main.MAIN_DIR}/bin/docker"
-    DAEMON_BIN: "${main.MAIN_DIR}/bin/dockerd"
-    BUILDX_BIN: "${main.MAIN_DIR}/libexec/docker/cli-plugins/docker-buildx"
 
 virtualizers:
+  # Cloud Hypervisor is the only virtualizer. The Docker virtualizer was removed
+  # so the node no longer needs a local Docker install.
   DEFAULT_VIRTUALIZER: ch
-  docker:
-    DOCKER_CLIENT_TIMEOUT: 480
-    DOCKER_MAX_CONNECTIONS: 1000
-    CONCURRENT_CONTAINER_CREATIONS: 10
-    REMOVE_CONTAINERS: true
-    # Isolated Docker configuration - uses a separate daemon from user's Docker
-    DOCKER_SOCKET: "${main.MAIN_DIR}/docker/docker.sock"
-    DOCKER_DATA_ROOT: "${main.MAIN_DIR}/docker/data"
-    DOCKER_CONFIG_DIR: "${main.MAIN_DIR}/docker/config"
-    DOCKER_NETWORK: "docker0"
-    # Security options applied to service containers.
-    SECURITY_APPARMOR_UNCONFINED: false
-    SECURITY_SELINUX_DISABLE_LABEL: false
-    SECURITY_NO_SECCOMP: false  # This option disables seccomp security profiles, use with caution.
-    SECURITY_PRIVILEGED: false  # This option gives the container full access to the host, use with caution.
   ch:
     BINARY_PATH: ""
     KERNEL_PATHS:
@@ -105,15 +88,16 @@ builder:
   TRUST_METADATA_ARCHITECTURE: false
 
 packer:
-  SAVE_ALL: false
-  PACKER_MEMORY_SIZE_FACTOR: 2.0
+  # nodo no longer builds services locally. `nodo pack` sends the project to an
+  # external packer-service microVM (it runs Docker/buildx inside a sealed VM,
+  # so Docker is never installed on this host) and imports the returned
+  # `.celaut.bee`. Set this to the ip:port of a running packer-service instance
+  # (its HTTP API listens on :8080). The PACKER_SERVICE_URL environment variable
+  # overrides this. Leave empty to disable `nodo pack`.
+  PACKER_SERVICE_URL: ""
+  # Architectures `nodo pack` will accept / announce.
   ARM_PACKER_SUPPORT: true
   X86_PACKER_SUPPORT: true
-  docker:
-    # Network used for docker buildx builds. "host" helps ensure DNS is reachable.
-    BUILDX_NETWORK: "host"
-    # Buildx builder name used for builds (created if missing).
-    BUILDX_BUILDER: "nodo-hostnet"
 
 network:
   GATEWAY_PORT: auto

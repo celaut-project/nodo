@@ -6,13 +6,11 @@ try:
     from protos import celaut_pb2 as celaut
     from src.virtualizers import firewall as vm_firewall
     from src.virtualizers.ch import firewall as ch_firewall
-    from src.virtualizers.docker import firewall as docker_firewall
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     celaut = None  # type: ignore[assignment]
     vm_firewall = None  # type: ignore[assignment]
     ch_firewall = None  # type: ignore[assignment]
-    docker_firewall = None  # type: ignore[assignment]
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -90,31 +88,6 @@ class TransportFirewallApplicationTests(unittest.TestCase):
             api=celaut.Service.Api(slot=[slot]),
             uri_slot=[uri_slot],
         )
-
-    def test_docker_firewall_applies_only_supported_transport(self):
-        instance = self._instance_with_transport(["udp"])
-        with patch.object(docker_firewall, "allow_connection", return_value=True) as allow_connection_mock:
-            result = docker_firewall.allow_connection_to_instance(
-                container_id="docker-1",
-                instance=instance,
-            )
-        self.assertTrue(result)
-        allow_connection_mock.assert_called_once_with(
-            "docker-1",
-            "1.1.1.1",
-            80,
-            vm_firewall.TransportProtocol.UDP,
-        )
-
-    def test_docker_firewall_returns_false_when_all_transports_unsupported(self):
-        instance = self._instance_with_transport(["sctp"])
-        with patch.object(docker_firewall, "allow_connection", return_value=True) as allow_connection_mock:
-            result = docker_firewall.allow_connection_to_instance(
-                container_id="docker-1",
-                instance=instance,
-            )
-        self.assertFalse(result)
-        allow_connection_mock.assert_not_called()
 
     def test_ch_firewall_applies_supported_transport_in_mixed_tags(self):
         instance = self._instance_with_transport(["tcp", "sctp"])

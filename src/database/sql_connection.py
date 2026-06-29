@@ -308,7 +308,7 @@ class SQLConnection(metaclass=Singleton):
         """
         gas = str(gas)
         if virtualizer is None:
-            virtualizer = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "docker")
+            virtualizer = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "ch")
         self._execute('''
             INSERT INTO local_instances (id, name, ip, father_id, gas, mem_limit, disk_space, serialized_instance, service_id, virtualizer)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
