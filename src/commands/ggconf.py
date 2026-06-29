@@ -1,7 +1,7 @@
 from src.database.sql_connection import SQLConnection
 from src.manager.manager import get_dev_clients
-from src.virtualizers.docker.set_container_config import write_config
-from src.virtualizers.docker.set_container_config import get_config
+from src.utils.configuration_file import write_config
+from src.utils.configuration_file import get_config
 from src.commands.__by_tag import get_id
 import json
 import os

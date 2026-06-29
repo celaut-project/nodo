@@ -82,7 +82,11 @@ These are the most commonly used commands for daily tasks:
   `nodo connect 192.168.1.10:4040`
 
 - **pack `<project directory>`**  
-  Packages a project to create a service specification.  
+  Packages a project into a service. nodo does **not** build locally — it sends
+  the project to an external **packer-service** (a microVM that runs
+  Docker/buildx in a sealed VM, so Docker is never installed on your host) and
+  imports the returned `.celaut.bee`. Configure the endpoint first:  
+  `export PACKER_SERVICE_URL=http://<ip>:8080`  (or set `packer.PACKER_SERVICE_URL` in `config.yaml`)  
   **Example:**  
   `nodo pack /path/to/project`
   > Check [detailed documentation](../src/commands/packer/zip_with_dockerfile/README.md)
@@ -278,67 +282,26 @@ These are intended for development or advanced maintenance environments:
   `nodo refresh_ergo_nodes`
 
 - **prune_containers**  
-  Removes unused containers (requires superuser privileges).  
+  Removes unused service instances (requires superuser privileges).  
   **Example:**  
   `sudo nodo prune_containers`
 
-- **docker `<docker args>`**  
-  Executes Docker commands in nodo's isolated Docker context. This allows you to inspect containers, images, and other Docker resources that belong to nodo without seeing your personal Docker environment.  
-  **Examples:**  
-  ```bash
-  nodo docker ps                    # List nodo's running containers
-  nodo docker images                # List nodo's Docker images
-  nodo docker logs <container_id>   # View logs of a nodo container
-  nodo docker stats                 # View resource usage of nodo containers
-  ```
-
 ---
 
-## Isolated Docker Environment
+## No local Docker
 
-Nodo uses an **isolated Docker daemon** that is completely separate from your personal Docker environment. This means:
+nodo does **not** install or run Docker on the host. Services run as
+**Cloud Hypervisor** microVMs, and packing is delegated to an external
+**packer-service** (which runs Docker/buildx inside its own sealed microVM).
+There is no `nodo docker` command and no isolated Docker daemon to manage.
 
-- **Containers created by nodo** are not visible when you run `docker ps` on your system
-- **Your personal containers** are not visible to nodo
-- **Images and volumes** are stored separately in `{MAIN_DIR}/docker/data`
-
-### Why Isolated Docker?
-
-1. **Clean separation**: Your development containers won't interfere with nodo's service containers
-2. **Security**: Nodo's operations are sandboxed from your personal Docker environment
-3. **Easy cleanup**: Uninstalling nodo removes all its Docker resources without affecting your personal containers
-
-### Accessing Nodo's Docker
-
-Use the `nodo docker` command to interact with nodo's isolated Docker daemon:
+To pack, point nodo at a packer service and run `nodo pack` (see the **pack**
+command above):
 
 ```bash
-# Instead of:
-docker ps
-
-# Use:
-nodo docker ps
+export PACKER_SERVICE_URL=http://<ip>:8080   # or packer.PACKER_SERVICE_URL in config.yaml
+nodo pack /path/to/project
 ```
-
-The isolated Docker daemon configuration is stored in `{MAIN_DIR}/docker/config/daemon.json`.
-Binary paths for Java/Python/yq/Docker can be overridden in `config.yaml` under `dependencies.*`.
-
-If `buildx` builds inside nodo's isolated Docker can't resolve or reach external hosts (e.g. `github.com`), check that file for a forced `dns` setting that doesn't work in your network (common in corporate/VPN environments). After changing it, restart `nodo.service` (or rerun `{MAIN_DIR}/bash/start_docker_daemon.sh {MAIN_DIR}`).
-
-Cross-architecture builds are intentionally disabled in the default installer profile (no QEMU/binfmt provisioning). If your service is `linux/arm64`, build from an `arm64` host; if it is `linux/amd64`, build from an `amd64` host.
-
-### Service Container Security Options
-
-Nodo applies Docker `security_opt` values when creating service containers:
-
-- `seccomp={MAIN_DIR}/src/virtualizers/docker/seccomp.json`
-- `apparmor=unconfined` (when AppArmor is enabled on the host)
-- `label=disable` (when SELinux is enabled on the host)
-
-You can tune these options in `config.yaml` under:
-
-- `docker.SECURITY_APPARMOR_UNCONFINED`
-- `docker.SECURITY_SELINUX_DISABLE_LABEL`
 
 ---
 

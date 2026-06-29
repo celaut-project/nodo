@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - defensive fallback for minimal environme
 env_manager = ConfigManager()
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 METADATA = env_manager.get("METADATA_REGISTRY")
-DEFAULT_VIRTUALIZER = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "docker")
+DEFAULT_VIRTUALIZER = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "ch")
 
 def _is_ch_virtualizer(virtualizer: str) -> bool:
     return str(virtualizer or "").strip().lower() == "ch"

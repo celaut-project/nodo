@@ -250,11 +250,8 @@ if ! /bin/bash "$SETUP_SCRIPT" "$TARGET_DIR" "$CH_VERSION"; then
   exit 1
 fi
 
-# Setup isolated Docker daemon for nodo
-printf "Setting up isolated Docker daemon for nodo...\n"
-if ! /bin/bash "$TARGET_DIR/bash/setup_docker_daemon.sh" "$TARGET_DIR"; then
-  printf "Warning: Docker daemon setup failed. Nodo will use the default Docker daemon.\n"
-fi
+# No local Docker setup: nodo runs services under Cloud Hypervisor and delegates
+# packing to the external packer-service. Docker is never installed on this host.
 
 SCRIPT_USER="${SUDO_USER:-}"
 if [ -z "$SCRIPT_USER" ]; then

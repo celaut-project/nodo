@@ -5,9 +5,9 @@ Java is optional and only required for Ergo-backed payment/reputation features.
 
 It follows the current runtime model:
 
-- Local runtimes and binaries under `MAIN_DIR` (Python, Java, yq, Docker by default).
-- Isolated Docker daemon under `MAIN_DIR/docker`.
-- Cloud Hypervisor assets under `MAIN_DIR/cloud_hypervisor`.
+- Local runtimes and binaries under `MAIN_DIR` (Python, Java, yq).
+- Cloud Hypervisor assets under `MAIN_DIR/cloud_hypervisor` (services run as microVMs).
+- No local Docker: packing is delegated to an external packer-service.
 
 ## 1) Scope and assumptions
 
@@ -81,10 +81,7 @@ Optional: override runtime/binary locations in `dependencies.*` before continuin
    .dependencies.python.VENV_BIN = "${main.MAIN_DIR}/venv/bin/python" |
    .dependencies.java.RUNTIME_ROOT = "${main.MAIN_DIR}/runtime/java" |
    .dependencies.java.JAVA_HOME = "${main.MAIN_DIR}/runtime/java/current" |
-   .dependencies.yq.BIN = "${main.MAIN_DIR}/bin/yq" |
-   .dependencies.docker.BIN = "${main.MAIN_DIR}/bin/docker" |
-   .dependencies.docker.DAEMON_BIN = "${main.MAIN_DIR}/bin/dockerd" |
-   .dependencies.docker.BUILDX_BIN = "${main.MAIN_DIR}/libexec/docker/cli-plugins/docker-buildx"' \
+   .dependencies.yq.BIN = "${main.MAIN_DIR}/bin/yq"' \
   "$TARGET_DIR/config.yaml"
 ```
 
@@ -122,11 +119,6 @@ PY_VENV_DIR="$(dirname "$(dirname "$PY_VENV_BIN")")"
 
 JAVA_RUNTIME_ROOT="$(read_cfg_path_or_default '.dependencies.java.RUNTIME_ROOT' '${main.MAIN_DIR}/runtime/java')"
 JAVA_HOME_PATH="$(read_cfg_path_or_default '.dependencies.java.JAVA_HOME' '${main.MAIN_DIR}/runtime/java/current')"
-
-DOCKER_BIN_TARGET="$(read_cfg_path_or_default '.dependencies.docker.BIN' '${main.MAIN_DIR}/bin/docker')"
-DOCKERD_BIN_TARGET="$(read_cfg_path_or_default '.dependencies.docker.DAEMON_BIN' '${main.MAIN_DIR}/bin/dockerd')"
-BUILDX_BIN_TARGET="$(read_cfg_path_or_default '.dependencies.docker.BUILDX_BIN' '${main.MAIN_DIR}/libexec/docker/cli-plugins/docker-buildx')"
-DOCKER_SOCKET_PATH="$(read_cfg_path_or_default '.virtualizers.docker.DOCKER_SOCKET' '${main.MAIN_DIR}/docker/docker.sock')"
 
 CH_BINARY_PATH="$(read_cfg_path_or_default '.virtualizers.ch.BINARY_PATH' '${main.MAIN_DIR}/bin/cloud-hypervisor')"
 ```
@@ -226,42 +218,13 @@ mkdir -p "$PY_VENV_DIR"
 "$PY_VENV_BIN" -m pip install -r "$TARGET_DIR/bash/requirements.txt"
 ```
 
-## 9) Install local Docker binaries + buildx plugin
+## 9) (Removed) Local Docker install
 
-Pinned versions used by project setup:
-
-- Docker static: `24.0.9`
-- buildx: `v0.12.1`
-
-```bash
-ARCH="$(uname -m)"
-case "$ARCH" in
-  x86_64|amd64) DOCKER_ARCH="x86_64"; BUILDX_ARCH="amd64" ;;
-  aarch64|arm64) DOCKER_ARCH="aarch64"; BUILDX_ARCH="arm64" ;;
-  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
-esac
-
-BIN_DIR="$(dirname "$DOCKER_BIN_TARGET")"
-mkdir -p "$BIN_DIR" "$(dirname "$DOCKERD_BIN_TARGET")" "$(dirname "$BUILDX_BIN_TARGET")"
-
-curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-24.0.9.tgz" -o /tmp/nodo-docker.tgz
-tar -xzf /tmp/nodo-docker.tgz -C /tmp/
-
-install -m 0755 /tmp/docker/docker "$DOCKER_BIN_TARGET"
-install -m 0755 /tmp/docker/dockerd "$DOCKERD_BIN_TARGET"
-install -m 0755 /tmp/docker/docker-init "$BIN_DIR/docker-init"
-install -m 0755 /tmp/docker/ctr "$BIN_DIR/ctr"
-install -m 0755 /tmp/docker/runc "$BIN_DIR/runc"
-install -m 0755 /tmp/docker/containerd "$BIN_DIR/containerd"
-install -m 0755 /tmp/docker/containerd-shim-runc-v2 "$BIN_DIR/containerd-shim-runc-v2"
-install -m 0755 /tmp/docker/docker-proxy "$BIN_DIR/docker-proxy"
-
-curl -fsSL "https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0.12.1.linux-${BUILDX_ARCH}" \
-  -o "$BUILDX_BIN_TARGET"
-chmod +x "$BUILDX_BIN_TARGET"
-
-rm -rf /tmp/docker /tmp/nodo-docker.tgz
-```
+nodo no longer installs Docker. Services run under Cloud Hypervisor, and
+packing is delegated to an external **packer-service** (it runs Docker/buildx
+inside its own sealed microVM). To pack, set `packer.PACKER_SERVICE_URL` in
+`config.yaml` (or the `PACKER_SERVICE_URL` env var) to a running packer-service
+instance's `ip:8080`.
 
 ## 10) Install Cloud Hypervisor assets
 
@@ -319,11 +282,9 @@ CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$CH_INITRAMFS_TARGET" "$YQ_BIN" 
   "$TARGET_DIR/config.yaml"
 ```
 
-## 11) Prepare isolated Docker daemon directories
+## 11) (Removed) Isolated Docker daemon directories
 
-```bash
-bash "$TARGET_DIR/bash/setup_docker_daemon.sh" "$TARGET_DIR"
-```
+Not applicable — nodo no longer runs a local Docker daemon.
 
 ## 12) Run DB migration
 
@@ -370,7 +331,6 @@ sudo chmod +x /usr/local/bin/nodo
 ```bash
 systemctl status nodo.service --no-pager
 "$PY_VENV_BIN" "$TARGET_DIR/nodo.py" info
-"$DOCKER_BIN_TARGET" -H "unix://$DOCKER_SOCKET_PATH" info
 ```
 
 Cloud Hypervisor checks:

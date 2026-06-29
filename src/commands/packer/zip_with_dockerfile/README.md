@@ -1,5 +1,14 @@
 # Service Configuration Guide
 
+> **Where the build happens:** nodo no longer builds services locally. `nodo pack`
+> sends your project archive to an external **packer-service** (a Celaut microVM
+> that runs `docker buildx` inside a sealed VM) and imports the returned
+> `.celaut.bee`. You still author a `Dockerfile`/`service.json` exactly as
+> described below — the `docker buildx` mechanics in *Service Preparation
+> Process* now run inside that microVM, not on your host. Point nodo at a packer
+> service with `PACKER_SERVICE_URL` (or `packer.PACKER_SERVICE_URL` in
+> `config.yaml`).
+
 ## Table of Contents
 1. [Directory Structure](#directory-structure)
 2. [Configuration Files](#configuration-files)

@@ -156,8 +156,8 @@ class ConfigManager(metaclass=Singleton):
     def get(self, key: str, default: Any = None) -> Any:
         """
         Retrieves a configuration value.
-        Nested values can be accessed using dot notation (e.g., 'virtualizers.docker.DOCKER_CLIENT_TIMEOUT').
-        Also allows top-level lookups (e.g., 'DOCKER_CLIENT_TIMEOUT').
+        Nested values can be accessed using dot notation (e.g., 'virtualizers.ch.NETWORK_BRIDGE_NAME').
+        Also allows top-level lookups (e.g., 'GATEWAY_PORT').
         """
         with self._lock:
             self.ensure_loaded()

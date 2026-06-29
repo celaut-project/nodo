@@ -75,7 +75,6 @@ This will:
 - Install a portable Python 3.11, Java JRE 21, and yq
 - Create a Python virtual environment with all dependencies
 - Download Cloud Hypervisor v51 with a custom kernel (`vmlinuz`) and initramfs
-- Install Docker (isolated daemon)
 - Set up the `nodo` systemd service
 
 > ⏳ The installation takes several minutes. If it fails on the first run (e.g. network timeout), run it again — the script is idempotent.
@@ -132,7 +131,7 @@ sudo nodo daemon status
 
 ## 6️⃣ (Optional) Configure WSL to start as root
 
-Nodo requires root to manage Docker and Cloud Hypervisor. You can configure the distro to default to root:
+Nodo requires root to manage Cloud Hypervisor (networking, microVMs). You can configure the distro to default to root:
 
 Create `/etc/wsl.conf` inside the distro:
 
@@ -220,6 +219,5 @@ sudo nodo daemon start  # Start the Nodo service
 | `ensurepip` fails during install | See the workaround in Step 3 above |
 | `/dev/kvm` not found | Enable VT-x/AMD-V in BIOS, ensure WSL2 + Hyper-V enabled |
 | `nodo doctor` shows kernel incompatible | Update WSL kernel: `wsl --update` from PowerShell |
-| Docker daemon won't start | Check `sudo /nodo/bash/start_docker_daemon.sh /nodo` output |
 | Install script fails with network errors | Re-run the install command — it is idempotent |
 | WSL version is 1 instead of 2 | `wsl --set-version <distro-name> 2` |

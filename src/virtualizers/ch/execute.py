@@ -1161,7 +1161,6 @@ def execute(
             state_path = Path(CACHE) / "cloud_hypervisor" / "runtime" / f"{vmachine_id}.json"
             log.LOGGER(f"[CH][{vmachine_id}] runtime state persisted: {state_path}")
 
-        # Keep gateway egress behavior aligned with Docker semantics for now.
         log.LOGGER(
             f"Cloud Hypervisor VM started: {vmachine_id} ({vm_ip}), runtime_dir={runtime_dir}"
         )
