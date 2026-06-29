@@ -11,6 +11,7 @@ from protos import celaut_pb2, celaut_pb2_grpc, gateway_bee
 
 from src.commands.inspect import inspect as inspect_service
 from src.commands.__by_tag import get_id
+from src.core_services.source_application import acquire_service
 from src.manager.manager import get_execute_client
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
@@ -118,10 +119,21 @@ def execute(
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
 ):
-    service = resolve_service_hash(service)
-    if not service:
+    resolved = resolve_service_hash(service)
+    if not resolved:
+        # The service isn't in the local registry. Before refusing, try to acquire it
+        # through the 'source-application' core service: it maps the requested service id
+        # to its published sources and downloads it via the existing download/import path.
+        # This only succeeds when a trusted source-application is configured in
+        # 'core_services'; otherwise it's a no-op and we fall through to the error below.
+        if acquire_service(service):
+            resolved = resolve_service_hash(service)
+
+    if not resolved:
         print("❌ Service not allowed.")
         return
+
+    service = resolved
 
     channel = None
     stop_event = threading.Event()
