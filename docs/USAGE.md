@@ -85,8 +85,11 @@ These are the most commonly used commands for daily tasks:
   Packages a project into a service. nodo does **not** build locally — it sends
   the project to an external **packer-service** (a microVM that runs
   Docker/buildx in a sealed VM, so Docker is never installed on your host) and
-  imports the returned `.celaut.bee`. Configure the endpoint first:  
-  `export PACKER_SERVICE_URL=http://<ip>:8080`  (or set `packer.PACKER_SERVICE_URL` in `config.yaml`)  
+  imports the returned `.celaut.bee`. Configure the packer by its published
+  service id first, then `nodo execute` it so a running instance exists:  
+  `export PACKER_SERVICE_ID=<packer-service id>`  (or set `packer.PACKER_SERVICE_ID` in `config.yaml`)  
+  nodo resolves the running instance's `ip:port` automatically. To override with
+  an out-of-band packer instead: `export PACKER_SERVICE_URL=http://<ip>:8080`  (or `packer.PACKER_SERVICE_URL`)  
   **Example:**  
   `nodo pack /path/to/project`
   > Check [detailed documentation](../src/commands/packer/zip_with_dockerfile/README.md)
@@ -299,7 +302,9 @@ To pack, point nodo at a packer service and run `nodo pack` (see the **pack**
 command above):
 
 ```bash
-export PACKER_SERVICE_URL=http://<ip>:8080   # or packer.PACKER_SERVICE_URL in config.yaml
+export PACKER_SERVICE_ID=<packer-service id>   # or packer.PACKER_SERVICE_ID in config.yaml
+nodo execute <packer-service id>               # start a running instance nodo resolves by id
+# override only: export PACKER_SERVICE_URL=http://<ip>:8080  (packer.PACKER_SERVICE_URL)
 nodo pack /path/to/project
 ```
 

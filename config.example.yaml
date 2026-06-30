@@ -88,12 +88,20 @@ builder:
   TRUST_METADATA_ARCHITECTURE: false
 
 packer:
-  # nodo no longer builds services locally. `nodo pack` sends the project to an
-  # external packer-service microVM (it runs Docker/buildx inside a sealed VM,
-  # so Docker is never installed on this host) and imports the returned
-  # `.celaut.bee`. Set this to the ip:port of a running packer-service instance
-  # (its HTTP API listens on :8080). The PACKER_SERVICE_URL environment variable
-  # overrides this. Leave empty to disable `nodo pack`.
+  # nodo no longer builds services locally. `nodo pack` sends the project to a
+  # packer-service microVM (it runs Docker/buildx inside a sealed VM, so Docker
+  # is never installed on this host) and imports the returned `.celaut.bee`.
+  #
+  # PRIMARY: reference the packer by its published content hash (service id).
+  # nodo resolves a *running* instance of that service on this node — the one
+  # you started with `nodo execute <packer-service id>` — and packs against its
+  # ip:port. The PACKER_SERVICE_ID environment variable overrides this value.
+  PACKER_SERVICE_ID: ""
+  # OPTIONAL override: the ip:port base URL of a packer-service running
+  # out-of-band (somewhere other than as a local instance of the id above).
+  # Used only when PACKER_SERVICE_ID is empty, or when no running instance of
+  # that id can be found. The PACKER_SERVICE_URL environment variable overrides
+  # this value. Leave both empty to disable `nodo pack`.
   PACKER_SERVICE_URL: ""
   # Architectures `nodo pack` will accept / announce.
   ARM_PACKER_SUPPORT: true

@@ -5,9 +5,12 @@
 > that runs `docker buildx` inside a sealed VM) and imports the returned
 > `.celaut.bee`. You still author a `Dockerfile`/`service.json` exactly as
 > described below — the `docker buildx` mechanics in *Service Preparation
-> Process* now run inside that microVM, not on your host. Point nodo at a packer
-> service with `PACKER_SERVICE_URL` (or `packer.PACKER_SERVICE_URL` in
-> `config.yaml`).
+> Process* now run inside that microVM, not on your host. Reference the packer
+> by its published service id with `PACKER_SERVICE_ID` (or
+> `packer.PACKER_SERVICE_ID` in `config.yaml`) and `nodo execute` it so a running
+> instance exists — nodo resolves that instance's `ip:port` automatically. Use
+> `PACKER_SERVICE_URL` (or `packer.PACKER_SERVICE_URL`) only to override with an
+> out-of-band packer.
 
 ## Table of Contents
 1. [Directory Structure](#directory-structure)
