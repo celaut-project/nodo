@@ -14,16 +14,21 @@ Flow:
   4. import_bee        — import the `.bee` into this node's REGISTRY /
      METADATA_REGISTRY (reuses nodo's existing import logic).
 
-Configuring the packer endpoint (first match wins):
-  * env var   PACKER_SERVICE_URL                 (e.g. http://10.0.0.5:8080)
-  * config    packer.PACKER_SERVICE_URL  in config.yaml
-The URL is the `ip:port` of a running packer-service instance (its API listens
-on :8080). Point nodo at one you run yourself, or at a shared/community packer.
-If unset, `nodo pack` fails with an actionable message instead of trying to use
-a local Docker that no longer exists.
+Configuring the packer (resolution order):
+  1. service id   PACKER_SERVICE_ID  (env var or config packer.PACKER_SERVICE_ID)
+     — the published content hash of the packer-service. nodo looks up a
+     *running* instance of that service on this node (the one you started with
+     `nodo execute <packer>`) and packs against its `ip:port`.
+  2. url override  PACKER_SERVICE_URL (env var or config packer.PACKER_SERVICE_URL)
+     — only needed to point at an out-of-band packer (one running elsewhere,
+     not as a local instance). Used when no service id is set, or when no
+     running instance of the configured id can be found.
+If neither yields an endpoint, `nodo pack` fails with an actionable message
+instead of trying to use a local Docker that no longer exists.
 """
 import os
 import sys
+import sqlite3
 import tempfile
 from typing import Optional
 
@@ -31,8 +36,11 @@ import requests
 
 from src.commands.packer.zip_with_dockerfile.prepare_directory import prepare_directory
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import generate_service_zip
-from src.commands.import_bee import import_bee
 from src.utils.config import ConfigManager
+
+# `import_bee` pulls in the bee_rpc runtime (only needed when actually importing a
+# packed .bee). Imported lazily inside pack() so endpoint resolution / config
+# helpers don't require the full runtime stack.
 
 env_manager = ConfigManager()
 
@@ -41,12 +49,78 @@ env_manager = ConfigManager()
 _CONNECT_TIMEOUT = 30
 
 
+def _resolve_packer_id() -> Optional[str]:
+    """Resolve the packer-service id (content hash): env var first, then config."""
+    service_id = os.environ.get("PACKER_SERVICE_ID") or env_manager.get("packer.PACKER_SERVICE_ID")
+    if isinstance(service_id, str):
+        service_id = service_id.strip()
+    return service_id or None
+
+
 def _resolve_packer_url() -> Optional[str]:
-    """Resolve the packer-service base URL: env var first, then config."""
+    """Resolve the packer-service base URL override: env var first, then config."""
     url = os.environ.get("PACKER_SERVICE_URL") or env_manager.get("packer.PACKER_SERVICE_URL")
     if isinstance(url, str):
         url = url.strip()
     return url.rstrip("/") if url else None
+
+
+def _resolve_packer_endpoint_by_id(service_id: str) -> Optional[str]:
+    """Find a running local instance of `service_id` and return its `http://ip:port`.
+
+    Looks up `local_instances` in the node's sqlite DATABASE_FILE, parses each
+    matching row's serialized `celaut.Instance` protobuf, and returns the first
+    `http://ip:port` it can build from `uri_slot[*].uri[*]`. Fully defensive: any
+    problem (no DB, no table, no rows, parse error, no uri) returns None.
+    """
+    if not service_id:
+        return None
+
+    # Imported lazily/inside the guard so a missing protobuf module can't crash
+    # the whole resolution path.
+    try:
+        from protos import celaut_pb2 as celaut
+    except Exception:
+        return None
+
+    conn = None
+    try:
+        database_file = env_manager.get("DATABASE_FILE")
+        if not database_file:
+            return None
+        conn = sqlite3.connect(database_file)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT serialized_instance FROM local_instances WHERE service_id = ?",
+            (service_id,),
+        )
+        rows = cursor.fetchall()
+    except Exception:
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    for row in rows:
+        serialized = row[0] if row else None
+        if not serialized:
+            continue
+        try:
+            inst = celaut.Instance()
+            inst.ParseFromString(serialized)
+            for _slot in inst.uri_slot:
+                for _uri in _slot.uri:
+                    ip = str(_uri.ip).strip()
+                    port = _uri.port
+                    if ip and port:
+                        return f"http://{ip}:{port}"
+        except Exception:
+            continue
+
+    return None
 
 
 def _no_packer_configured_message() -> str:
@@ -55,14 +129,16 @@ def _no_packer_configured_message() -> str:
         "nodo does not build services locally anymore — packing is done by a\n"
         "packer-service microVM (it runs Docker/buildx inside a sealed VM, so you\n"
         "never install Docker on this host).\n\n"
-        "Point nodo at a running packer service, then re-run `nodo pack`:\n"
-        "  • env var:  export PACKER_SERVICE_URL=http://<ip>:8080\n"
-        "  • or config.yaml:\n"
+        "Configure the packer by its published service id, then `nodo execute` it\n"
+        "so a running instance exists, and re-run `nodo pack`:\n"
+        "  • config.yaml:\n"
         "        packer:\n"
-        "          PACKER_SERVICE_URL: \"http://<ip>:8080\"\n\n"
-        "The URL is the ip:port of a packer-service instance (API on :8080). Run\n"
-        "your own (celaut-packer-service) and `nodo execute` it to get its IP, or\n"
-        "use a shared one.\n"
+        "          PACKER_SERVICE_ID: \"<packer-service published id>\"\n"
+        "    (or env var:  export PACKER_SERVICE_ID=<packer-service published id>)\n"
+        "  • then:  nodo execute <packer-service published id>\n\n"
+        "nodo resolves a running instance of that id (its `ip:port`) and packs\n"
+        "against it. To point at an out-of-band packer instead, set the override\n"
+        "URL:  export PACKER_SERVICE_URL=http://<ip>:8080  (or packer.PACKER_SERVICE_URL).\n"
     )
 
 
@@ -73,8 +149,22 @@ def __remove_path(path):
         print(f"Removed: '{path}'")
 
 
+def _resolve_packer_endpoint() -> Optional[str]:
+    """Resolve the packer endpoint: by service id (running instance) first, then URL override."""
+    service_id = _resolve_packer_id()
+    if service_id:
+        endpoint = _resolve_packer_endpoint_by_id(service_id)
+        if endpoint:
+            return endpoint
+        print(
+            f"No running instance of packer service id {service_id} was found; "
+            "falling back to PACKER_SERVICE_URL if set."
+        )
+    return _resolve_packer_url()
+
+
 def pack(directory: str) -> Optional[str]:
-    packer_url = _resolve_packer_url()
+    packer_url = _resolve_packer_endpoint()
     if not packer_url:
         print(_no_packer_configured_message())
         return None
@@ -124,6 +214,7 @@ def pack(directory: str) -> Optional[str]:
             print("Service ID -> ", service_id_header)
         print("\nImporting the packed service into the local registry...")
 
+        from src.commands.import_bee import import_bee
         _id = import_bee(path=bee_path)
 
         if not _id:
@@ -140,7 +231,8 @@ def pack(directory: str) -> Optional[str]:
     except requests.exceptions.ConnectionError as e:
         print(
             f"\nCould not reach the packer service at {packer_url}: {e}\n"
-            "Check PACKER_SERVICE_URL / packer.PACKER_SERVICE_URL and that the "
+            "Check packer.PACKER_SERVICE_ID (and that its instance is running via "
+            "`nodo execute`) or the PACKER_SERVICE_URL override, and that the "
             "packer-service instance is running and reachable."
         )
         return None

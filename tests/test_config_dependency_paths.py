@@ -14,7 +14,9 @@ class ConfigDependencyPathsTests(unittest.TestCase):
         self.assertIn("yq:", content)
         self.assertIn("BIN:", content)
         # Docker dependency paths were removed (no local Docker); packing is
-        # delegated to the external packer-service.
+        # delegated to the packer-service, referenced by service id
+        # (PACKER_SERVICE_URL kept as an override).
+        self.assertIn("PACKER_SERVICE_ID:", content)
         self.assertIn("PACKER_SERVICE_URL:", content)
 
 
