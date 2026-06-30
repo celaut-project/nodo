@@ -196,7 +196,7 @@ hashing:
 # `nodo execute` is asked to run but doesn't have locally.
 #
 # This is an array of {name, id} entries. `name` is the well-known role the node looks up
-# (currently: "source-application"); `id` is the published service hash for that role.
+# (currently: "source-application" and "packer"); `id` is the published service hash for that role.
 #
 # Trust model: the auto-download fallback in `nodo execute` will only resolve+run a missing
 # service if it is reachable through one of these *configured* core services. An empty list
@@ -209,9 +209,11 @@ core_services:
   # activates. The read endpoint is derived from publisher.SOURCE_APPLICATION_WEB_PAGE below.
   - name: "source-application"
     id: "<SET_ME>"
-  # The packer core service id is added in a follow-up PR:
-  # - name: "packer"
-  #   id: "<SET_ME>"
+  # packer: the packer-service core service used by `nodo pack` to build services in a
+  # sealed microVM. The published id is not wired yet; leave as "<SET_ME>" until it is
+  # available, then `nodo pack` can resolve a running packer instance by this id.
+  - name: "packer"
+    id: "<SET_ME>"
 
 publisher:
   PROVIDER: "github"
