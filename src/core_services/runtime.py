@@ -25,7 +25,7 @@ Fail-closed / best-effort contract (mirrors source-application's tone):
 """
 
 import sqlite3
-from typing import Optional
+from typing import Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.utils.config import ConfigManager
@@ -79,6 +79,63 @@ def find_running_endpoint(service_id: str) -> Optional[str]:
         except Exception:
             # Unparseable blob for this row — try the next one.
             continue
+
+    return None
+
+
+def find_running_instance(service_id: str) -> Optional[Tuple[str, Optional[str]]]:
+    """Return ``(instance_token, endpoint)`` for a running instance of ``service_id``.
+
+    Symmetric to :func:`find_running_endpoint` but also returns the instance's
+    ``id`` (its stop token, as accepted by :func:`src.manager.manager.stop_instance`)
+    so a caller can *preempt* the instance, not just talk to it. ``endpoint`` may be
+    ``None`` if the instance is running but has no resolvable uri yet.
+
+    Returns ``None`` when no instance of ``service_id`` is running or its row can't be
+    read. Fully defensive: a missing database/table, an unparseable serialized
+    instance, or no matching rows all yield ``None`` — this never raises.
+    """
+    try:
+        database_file = _env_manager.get("DATABASE_FILE")
+        if not database_file:
+            return None
+
+        conn = sqlite3.connect(database_file)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, serialized_instance FROM local_instances WHERE service_id = ?",
+                (service_id,),
+            )
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        # Missing db/table, locked db, bad query, etc. — fail closed.
+        return None
+
+    for row in rows:
+        token = str(row[0]) if row and row[0] else None
+        if not token:
+            continue
+        endpoint = None
+        serialized_instance = row[1] if len(row) > 1 else None
+        if serialized_instance:
+            try:
+                instance = celaut.Instance()
+                instance.ParseFromString(serialized_instance)
+                for _exp in instance.uri_slot:
+                    for _uri in _exp.uri:
+                        ip = str(_uri.ip or "").strip()
+                        port = _uri.port
+                        if ip and port:
+                            endpoint = f"http://{ip}:{port}"
+                            break
+                    if endpoint:
+                        break
+            except Exception:
+                endpoint = None
+        return token, endpoint
 
     return None
 
