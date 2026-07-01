@@ -36,6 +36,7 @@ Status / contract
   question 5 in the design doc.
 """
 
+import time
 from typing import Optional
 
 from src.core_services import LOW_DEMAND_FALLBACK, get_core_service_id
@@ -48,6 +49,30 @@ _DEFAULT_ENABLED = False
 _DEFAULT_POLL_INTERVAL = 30
 _DEFAULT_CPU_MAX_PERCENT = 40.0
 _DEFAULT_MEM_MAX_PERCENT = 60.0
+# Hysteresis: how many consecutive below-threshold, idle polls are required before the
+# fallback is actually started, to avoid flapping on brief resource dips.
+_DEFAULT_CONSECUTIVE_POLLS = 3
+
+
+class _SchedulerState:
+    """In-memory scheduler state for the manager-loop-driven fallback tick.
+
+    Kept as a module singleton (mirrors ``ConfigManager()`` / ``IOBigData()`` usage
+    elsewhere) so the tick can carry hysteresis + the launched instance's stop token
+    across manager iterations without a new thread or persistent storage.
+    """
+
+    def __init__(self) -> None:
+        # Consecutive below-threshold, idle polls observed so far (hysteresis counter).
+        self.consecutive_below = 0
+        # Monotonic timestamp of the last tick that actually ran, or ``None`` if never.
+        self.last_tick_monotonic: Optional[float] = None
+        # Stop token of the fallback instance we launched, so we can (a) exclude it when
+        # counting "real" workloads and (b) STOP it on preemption. ``None`` if not running.
+        self.running_token: Optional[str] = None
+
+
+_state = _SchedulerState()
 
 
 def _get_float(key: str, default: float) -> float:
@@ -88,6 +113,19 @@ def poll_interval_seconds() -> int:
         return _DEFAULT_POLL_INTERVAL
 
 
+def consecutive_polls() -> int:
+    """Return the hysteresis depth (``low_demand.LOW_DEMAND_CONSECUTIVE_POLLS``).
+
+    The number of consecutive below-threshold, idle polls required before the fallback
+    is started. Never raises; falls back to the default and clamps to a minimum of 1
+    (1 == no hysteresis, start on the first clean poll).
+    """
+    try:
+        return max(1, int(_get_float("LOW_DEMAND_CONSECUTIVE_POLLS", _DEFAULT_CONSECUTIVE_POLLS)))
+    except Exception:
+        return _DEFAULT_CONSECUTIVE_POLLS
+
+
 def _current_cpu_percent() -> Optional[float]:
     """Best-effort current system CPU usage percent, or ``None`` if unavailable.
 
@@ -107,10 +145,9 @@ def _current_cpu_percent() -> Optional[float]:
 def _current_mem_percent() -> Optional[float]:
     """Best-effort current system memory usage percent, or ``None`` if unavailable.
 
-    Uses the simple system-wide ``psutil.virtual_memory().percent``. TODO (open
-    question 1): optionally compare against the node's own RAM pool via
-    ``src.manager.resources.IOBigData().get_ram_avaliable()`` /
-    ``snapshot()['effective_available']``, which accounts for VM reservations.
+    Uses the simple system-wide ``psutil.virtual_memory().percent``. This is the
+    *system-wide* half of the RAM gate; it is cross-checked against the node's own
+    reservation accounting in :func:`_iobigdata_has_headroom` (Josemi decision #1).
     Never raises.
     """
     try:
@@ -121,6 +158,28 @@ def _current_mem_percent() -> Optional[float]:
         return None
 
 
+def _iobigdata_has_headroom() -> bool:
+    """Return ``True`` iff the node's own RAM pool still has positive availability.
+
+    RAM gate, part 2 (Josemi decision #1): cross-check the system-wide
+    ``psutil.virtual_memory().percent`` against the node's ``IOBigData`` reservation
+    accounting. Even when the system-wide percent looks fine, the node's pool may
+    already be fully reserved by in-flight VM locks; ``snapshot()['effective_available']``
+    (pool minus locked) captures that. We require it to be strictly positive.
+
+    Fail-closed: any error (import failure, singleton/snapshot error, missing key)
+    yields ``False`` so the fallback is not started on incomplete information. Never
+    raises.
+    """
+    try:
+        from src.manager.resources import IOBigData
+
+        snapshot = IOBigData().snapshot()
+        return int(snapshot.get("effective_available", 0)) > 0
+    except Exception:
+        return False
+
+
 def resources_below_threshold() -> bool:
     """Return ``True`` iff EVERY tracked resource is at/under its configured threshold.
 
@@ -128,6 +187,14 @@ def resources_below_threshold() -> bool:
     thresholds and compares them against the current system readings. The design is
     an **AND of per-resource checks**, so adding a new resource later (e.g. GPU) is
     a localized change: add its threshold + reading and ``and`` it in here.
+
+    Gates (Josemi decision #1 — FINAL):
+        * **CPU:** ``psutil.cpu_percent`` <= ``CPU_MAX_PERCENT``.
+        * **RAM:** BOTH ``psutil.virtual_memory().percent`` <= ``MEM_MAX_PERCENT``
+          AND the node's own ``IOBigData`` pool has positive ``effective_available``
+          (:func:`_iobigdata_has_headroom`) — the system-wide percent is cross-checked
+          against the node's reservation accounting so a fully-reserved pool blocks the
+          start even when system RAM looks free.
 
     Fail-closed: if a resource reading is unavailable (``None``), that resource is
     treated as *not* satisfying its threshold, so the fallback is not started on
@@ -143,30 +210,39 @@ def resources_below_threshold() -> bool:
     if cpu is None or mem is None:
         return False
 
-    return cpu <= cpu_max and mem <= mem_max
+    if cpu > cpu_max or mem > mem_max:
+        return False
+
+    # RAM cross-check against the node's own reservation accounting.
+    if not _iobigdata_has_headroom():
+        return False
+
+    return True
 
 
 def _real_workload_present() -> bool:
-    """Best-effort: is the node currently serving a real workload?
+    """Best-effort: is the node currently serving a *real* workload?
 
-    Preemption trigger. First-cut (polled) implementation counts running internal
-    instances via ``SQLConnection().get_all_internal_containers_ids()``
-    (``src/database/sql_connection.py:479``). Any real workload means the fallback
-    must not run.
+    Preemption trigger, **polled** (Josemi decision #3 — FINAL): count running
+    internal instances via ``SQLConnection().get_all_internal_containers_ids()``
+    (``src/database/sql_connection.py:479``) on each tick. No gateway hooks/callbacks.
+    Any real workload means the fallback must not run.
 
-    TODO (open question 3): (a) this counts the fallback's OWN instance too — tag
-    the fallback instance (known ``instance_name``/father id) and exclude it here;
-    (b) the lower-latency alternative is a reactive hook in
-    ``Gateway.StartService`` (``src/gateway/gateway.py:28``) that stops the
-    fallback immediately when a real request arrives, rather than waiting for the
-    next poll tick. Never raises; on error assume "busy" (fail closed).
+    The fallback's OWN instance is excluded: when we launch it we record its stop
+    token in :data:`_state.running_token` (see :func:`_start_fallback`), and that
+    token is filtered out here so the fallback never counts itself as a real
+    workload (which would otherwise make it preempt itself and flap).
+
+    Never raises; on error assume "busy" (fail closed) so we never contend with a
+    possible real workload.
     """
     try:
         from src.database.sql_connection import SQLConnection
 
         ids = SQLConnection().get_all_internal_containers_ids() or []
-        # TODO: exclude the fallback's own instance id/token once it is tagged.
-        return len(ids) > 0
+        own = _state.running_token
+        real = [i for i in ids if i != own]
+        return len(real) > 0
     except Exception:
         # Unknown -> assume busy so we never contend with a possible real workload.
         return True
@@ -199,41 +275,21 @@ def should_run_fallback() -> bool:
 
 
 def run_fallback_once() -> Optional[str]:
-    """One scheduler tick: start the fallback if it should run; report its endpoint.
+    """Idempotently (re)launch the fallback if it should run; report its endpoint.
 
     Behaviour:
         * If :func:`should_run_fallback` is ``True``, best-effort launch/resume the
           fallback via
           :func:`src.core_services.runtime.ensure_core_service_running`
           (idempotent — it returns an already-running instance's endpoint without
-          relaunching), and return that endpoint (or ``None`` if it couldn't be
-          brought up).
+          relaunching), record the launched instance's stop token for preemption,
+          and return that endpoint (or ``None`` if it couldn't be brought up).
         * Otherwise return ``None`` and do nothing here.
 
-    **Preemption is NOT yet implemented in this scaffold.** When
-    :func:`should_run_fallback` is false and a fallback instance is running, a real
-    implementation must STOP it via ``stop_instance(token=...)``
-    (``src/manager/manager.py:531``). That needs the fallback's instance token,
-    which ``ensure_core_service_running``/``find_running_endpoint`` do not return
-    today — see open question 2 (propose a ``find_running_instance(service_id)``
-    helper in ``runtime.py``, or have the scheduler remember the token it launched).
-
-    INTEGRATION TODO (not wired yet — needs Josemi's sign-off):
-        Drive this from the manager loop in
-        ``src/manager/maintain.py`` — inside ``manager_thread``'s ``while True:``
-        at ``src/manager/maintain.py:269`` (which already sleeps
-        ``MANAGER_ITERATION_TIME`` at line 288). Add a guarded call roughly like::
-
-            from src.core_services.low_demand import run_fallback_once
-            try:
-                run_fallback_once()
-            except Exception:
-                pass
-
-        (respecting ``poll_interval_seconds()`` cadence), plus the preemption
-        branch once the stop path (open question 2) is decided. Reusing the
-        existing manager thread avoids spawning another thread; alternatively a
-        dedicated scheduler thread could be started in ``src/serve.py:12``.
+    This is the *stateless launch primitive*. The hysteresis + preemption policy and
+    the ``POLL_INTERVAL`` cadence live in :func:`scheduler_tick`, which is what the
+    manager loop drives; ``run_fallback_once`` is the "make it running now" building
+    block it and the tests use.
 
     Never raises.
     """
@@ -247,6 +303,128 @@ def run_fallback_once() -> Optional[str]:
 
         from src.core_services.runtime import ensure_core_service_running
 
-        return ensure_core_service_running(service_id, launch=True)
+        endpoint = ensure_core_service_running(service_id, launch=True)
+        # Record the running instance's stop token so the tick can (a) exclude it from
+        # "real workload" counting and (b) STOP it on preemption. Best-effort.
+        _record_running_token(service_id)
+        return endpoint
     except Exception:
         return None
+
+
+# --- Scheduler tick (wired into src/manager/maintain.py:manager_thread) ------------
+
+
+def _reset_hysteresis() -> None:
+    """Reset the consecutive-below-threshold counter (call on any preemption/abort)."""
+    _state.consecutive_below = 0
+
+
+def _record_running_token(service_id: str) -> None:
+    """Best-effort: remember the running fallback instance's stop token in ``_state``.
+
+    Uses :func:`src.core_services.runtime.find_running_instance`. Never raises; on
+    failure it simply leaves the previously known token in place.
+    """
+    try:
+        from src.core_services.runtime import find_running_instance
+
+        info = find_running_instance(service_id)
+        if info and info[0]:
+            _state.running_token = info[0]
+    except Exception:
+        pass
+
+
+def _stop_running_fallback() -> None:
+    """STOP (never pause) the running fallback instance, if any (Josemi decision #2).
+
+    There is no suspend/pause primitive in Celaut, so preemption is always a full
+    ``stop_instance(token=...)`` (``src/manager/manager.py:531``). Uses the token we
+    recorded at launch; if we don't have one, best-effort discovers a running fallback
+    instance via :func:`src.core_services.runtime.find_running_instance`. Never raises.
+    """
+    token = _state.running_token
+    if not token:
+        try:
+            service_id = get_core_service_id(LOW_DEMAND_FALLBACK)
+            if service_id:
+                from src.core_services.runtime import find_running_instance
+
+                info = find_running_instance(service_id)
+                if info and info[0]:
+                    token = info[0]
+        except Exception:
+            token = None
+
+    if not token:
+        _state.running_token = None
+        return
+
+    try:
+        from src.manager.manager import stop_instance
+
+        stop_instance(token=token)
+    except Exception:
+        # Stop failed (no daemon, already gone, …) — nothing else we can safely do.
+        pass
+    finally:
+        _state.running_token = None
+
+
+def scheduler_tick() -> None:
+    """One manager-loop iteration of the opportunistic fallback scheduler.
+
+    Called every ``manager_thread`` iteration (``src/manager/maintain.py``); it
+    self-gates to the configured ``POLL_INTERVAL`` cadence so calling it more often
+    than that is a cheap no-op. Implements the three FINAL decisions:
+
+    #1 (resource signals): start only after
+       :data:`consecutive_polls` consecutive polls with
+       :func:`resources_below_threshold` true (CPU% + system RAM% + IOBigData pool
+       headroom) AND no real workload — hysteresis to avoid flapping.
+    #2 (stop vs pause): preemption ALWAYS STOPS via :func:`_stop_running_fallback`
+       (there is no pause primitive).
+    #3 (request detection): POLLED — :func:`_real_workload_present` reads node state
+       each tick; no gateway hooks.
+
+    Fully defensive: any failure is swallowed so the manager loop is never disturbed.
+    Never raises.
+    """
+    try:
+        if not is_enabled():
+            return
+
+        # Cadence gate: only do real work every POLL_INTERVAL seconds, independent of
+        # the (faster) MANAGER_ITERATION_TIME the manager loop ticks at.
+        now = time.monotonic()
+        last = _state.last_tick_monotonic
+        if last is not None and (now - last) < poll_interval_seconds():
+            return
+        _state.last_tick_monotonic = now
+
+        # No configured id -> nothing to run; make sure nothing lingers and reset.
+        if get_core_service_id(LOW_DEMAND_FALLBACK) is None:
+            _reset_hysteresis()
+            _stop_running_fallback()
+            return
+
+        busy = _real_workload_present()
+        under_threshold = resources_below_threshold()
+
+        # Preemption: a real workload OR resources over threshold => STOP immediately
+        # and reset the hysteresis counter (decisions #2 + #3).
+        if busy or not under_threshold:
+            _reset_hysteresis()
+            _stop_running_fallback()
+            return
+
+        # Idle + under threshold: require N consecutive clean polls before starting.
+        _state.consecutive_below += 1
+        if _state.consecutive_below < consecutive_polls():
+            return
+
+        # Hysteresis satisfied — (idempotently) ensure the fallback is running.
+        run_fallback_once()
+    except Exception:
+        return

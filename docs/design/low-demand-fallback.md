@@ -1,10 +1,12 @@
-# Low-Demand Fallback Core Service — Design (WIP / DRAFT)
+# Low-Demand Fallback Core Service — Design
 
-Status: **proposal for Josemi's sign-off.** This document specifies a new core
-service and its node-side scheduler. The scaffold that accompanies it
-(`src/core_services/low_demand.py`, config entries, tests) is intentionally
-**not wired into the serve loop** — the exact scheduling/preemption mechanism is
-the thing we want to agree on before implementing it for real.
+Status: **decisions FINAL (Josemi signed off); scheduler wired.** This document
+specifies a new core service and its node-side scheduler. The three previously-open
+design questions (resource signals, stop-vs-pause, request detection) are now
+resolved — see §5. The scheduler is **wired into the manager loop**
+(`src/manager/maintain.py:manager_thread`) and is a no-op unless
+`low_demand.ENABLED` is set, so existing nodes are unaffected until an operator opts
+in.
 
 This design builds on the `core_services` framework introduced in
 **PR #120** (branch `feat/core-services-execute-source-application`).
@@ -60,10 +62,10 @@ is concrete rather than hand-wavy.
   maintenance (`maintain_vmachines`, `maintain_clients`, `peer_deposits`, …) and
   sleeps `MANAGER_ITERATION_TIME` seconds (`src/manager/maintain.py:288`).
 
-  **This is the natural home for the fallback scheduler tick.** A single call
-  such as `run_fallback_once()` added inside that loop (guarded, best-effort)
-  gives us a periodic idle-check without spawning another thread. See the
-  integration TODO in `src/core_services/low_demand.py`.
+  **This is the home for the fallback scheduler tick (now wired).** A single
+  guarded `scheduler_tick()` call is added inside that loop; it self-gates to
+  `low_demand.POLL_INTERVAL` and gives a periodic idle-check without spawning
+  another thread.
 
 ### 2.2 Resource signals the node already measures
 
@@ -117,17 +119,16 @@ is concrete rather than hand-wavy.
 - `src/gateway/gateway.py:28` — `Gateway.StartService` is *the* entrypoint for
   an incoming (real) execute request; it delegates to `StartServiceIterable`.
 
-  This is the signal that must preempt the fallback. Options (open question 3):
+  This is the signal that must preempt the fallback. Two options were considered:
   - **(a) Reactive:** hook `StartService` so that, before/at the start of a real
     launch, it stops any running fallback instance. Lowest-latency preemption.
   - **(b) Polled:** the scheduler in `manager_thread` notices a new real
-    internal instance (via `get_all_internal_containers_ids()` growing, or a
-    dedicated "real workload present" flag) and stops the fallback on the next
-    tick (≤ `MANAGER_ITERATION_TIME`, default 10s). Simpler, but up to one tick
-    of contention.
+    internal instance (via `get_all_internal_containers_ids()` growing) and stops
+    the fallback on the next poll (≤ `POLL_INTERVAL`). Simpler, purely additive.
 
-  The scaffold assumes (b) for the first cut (no gateway edits, purely additive)
-  and leaves (a) as the low-latency upgrade for Josemi to choose.
+  **Decision (§5.3, FINAL): (b) polled.** No gateway edits; the fallback's own
+  instance is excluded from the "real workload" count via its recorded launch
+  token. (a) remains a possible low-latency upgrade later.
 
 ### 2.6 Config / env-var convention
 
@@ -200,53 +201,70 @@ Key properties:
 
 ---
 
-## 5. Open questions for Josemi (decisions needed)
+## 5. Resolved decisions (Josemi — FINAL)
 
-1. **Exact resource signals & thresholds.** Confirm CPU% + MEM% are the right
-   first cut, and whether the RAM threshold should compare against
-   `psutil.virtual_memory().percent` (simple, system-wide) or the node's own
-   `IOBigData().get_ram_avaliable()` pool (accounts for VM reservations). The
-   scaffold uses the simple system-wide `psutil` percent and TODOs the pool
-   variant.
-2. **Stop vs. pause.** Should preemption fully `stop_instance()` the fallback
-   (losing in-flight work, freeing all resources) or *pause/suspend* it (keep
-   state, resume cheaply)? The node currently only has `stop_instance`
-   (`manager.py:531`) + `kill`; there is no suspend primitive. If pause is
-   required we need a new virtualizer capability. Also: to stop it we need the
-   fallback's **instance token** — propose a `find_running_instance(service_id)`
-   helper in `runtime.py` (open item 2.4).
-3. **How to detect "a real request arrived."** Reactive hook into
-   `Gateway.StartService` (`gateway.py:28`, lowest latency) vs. polled detection
-   in `manager_thread` (simplest, ≤1 tick latency). Which do you want first?
-   And how do we distinguish a *real* request from the fallback's own launch
-   (which also goes through the execute path)? Proposal: tag the fallback
-   instance (e.g. a known `instance_name`/father id) so the scheduler and the
-   preemption check ignore it when counting "real" workloads.
-4. **CPU sampling cost.** `psutil.cpu_percent(interval=1)` blocks 1s
-   (as in `power.py:48`). For a poll loop we'd prefer the non-blocking
-   `cpu_percent(interval=None)` (needs a warm-up call). Confirm acceptable.
-5. **Config vs. literal env vars.** `ConfigManager.get()` has no process-env
-   override today; the spec's "environment-variable threshold" is implemented as
-   `config.yaml` keys under `low_demand:` (consistent with every other tunable).
-   If you want real `LOW_DEMAND_CPU_MAX_PERCENT`-style OS env overrides, that's a
-   separate ConfigManager enhancement — say the word.
+The three design questions below were put to maintainer Josemi and are now
+**decided and implemented**. Items 4–7 are recorded for completeness.
+
+1. **Resource signals & thresholds — FINAL: CPU% + RAM% + hysteresis, delegated
+   to us.** Poll every `POLL_INTERVAL` (default 30s) *inside the existing
+   `manager_thread` loop* (no new thread). Gate the low-demand start on BOTH:
+   - **CPU:** `psutil.cpu_percent` `<=` `CPU_MAX_PERCENT` (default 40), and
+   - **RAM:** the node's `IOBigData` reservation accounting
+     (`snapshot()['effective_available'] > 0`, pool minus VM locks) **cross-checked
+     with** `psutil.virtual_memory().percent <= MEM_MAX_PERCENT` (default 60).
+
+   Plus **hysteresis**: require `LOW_DEMAND_CONSECUTIVE_POLLS` (default 3)
+   consecutive below-threshold, idle polls before starting, to avoid flapping.
+   Implemented in `resources_below_threshold()` / `_iobigdata_has_headroom()` and
+   the hysteresis counter in `scheduler_tick()`.
+
+2. **Stop vs. pause — FINAL: ALWAYS STOP.** There is no suspend/pause primitive in
+   Celaut today. When a real `execute` request arrives, or resources exceed a
+   threshold, the low-demand instance is **stopped immediately** via
+   `stop_instance()` (`manager.py:531`) — never paused/suspended. To get the
+   instance's stop token we added `find_running_instance(service_id) -> (token,
+   endpoint)` to `runtime.py`, and the scheduler also remembers the token it
+   launched. Implemented in `_stop_running_fallback()`.
+
+3. **Request detection — FINAL: POLLED, not reactive.** Pending/running real
+   `execute` requests are detected by polling node state each tick
+   (`SQLConnection().get_all_internal_containers_ids()`); **no** gateway
+   event hooks/callbacks are added. The fallback's own instance is excluded from
+   the count via the recorded launch token so it never preempts itself.
+   Implemented in `_real_workload_present()`.
+
+### Recorded for completeness (not blocking)
+
+4. **CPU sampling cost.** The poll uses the non-blocking
+   `psutil.cpu_percent(interval=None)` form (cheap per tick; the blocking
+   `interval=1` form in `power.py:48` is avoided).
+5. **Config vs. literal env vars.** Thresholds live as `config.yaml` keys under
+   `low_demand:` (consistent with every other tunable). Literal OS-env overrides
+   would be a separate `ConfigManager` change and are out of scope.
 6. **GPU / other resources.** Out of scope for the first cut; the
    `resources_below_threshold()` design is a per-resource AND-of-checks so adding
    `GPU_MAX_PERCENT` later is a localized change.
-7. **Where to drive the tick.** Reuse `manager_thread` (`maintain.py:269`, no new
-   thread — preferred) vs. a dedicated scheduler thread started in `serve.py:12`.
-   Scaffold assumes the former.
+7. **Where to drive the tick — FINAL: reuse `manager_thread`.** The tick is a
+   single guarded `scheduler_tick()` call in the existing loop
+   (`maintain.py`), which self-gates to `POLL_INTERVAL`. No dedicated thread.
 
 ---
 
-## 6. What ships in this PR (scaffold only)
+## 6. What ships in this PR
 
 - `LOW_DEMAND_FALLBACK` role constant in `src/core_services/__init__.py`.
 - `low-demand-fallback` entry (`<SET_ME>`) + a documented `low_demand:` block in
-  `config.example.yaml`.
-- `src/core_services/low_demand.py` — skeleton: `resources_below_threshold()`,
-  `should_run_fallback()`, `run_fallback_once()`. Heavily documented, never
-  raises, **not wired into the serve loop** (integration TODO points at
-  `src/manager/maintain.py:269`).
-- `tests/test_low_demand.py` — unit tests with mocked resource readings and a
-  mocked `ensure_core_service_running` (no real launch/network).
+  `config.example.yaml`, including `LOW_DEMAND_CONSECUTIVE_POLLS`.
+- `src/core_services/low_demand.py` — `resources_below_threshold()` (CPU + RAM +
+  IOBigData cross-check), `_real_workload_present()` (polled, excludes the
+  fallback's own instance), `should_run_fallback()`, `run_fallback_once()`, and the
+  stateful `scheduler_tick()` (hysteresis + always-stop preemption + `POLL_INTERVAL`
+  cadence). Heavily documented, never raises.
+- `src/core_services/runtime.py` — `find_running_instance(service_id) -> (token,
+  endpoint)` so preemption can `stop_instance()` the fallback.
+- `src/manager/maintain.py` — a single guarded `scheduler_tick()` call wired into
+  the existing `manager_thread` loop (no new thread; no-op unless `ENABLED`).
+- `tests/test_low_demand.py` — unit tests with mocked resource readings, a mocked
+  `ensure_core_service_running`, and coverage of hysteresis start, over-threshold
+  no-start, real-request-preempts-STOP, and polled detection (no real launch/network).
