@@ -241,6 +241,20 @@ publisher:
   REPOSITORY: "owner/repo"
   BRANCH: "main"
   SOURCE_APPLICATION_WEB_PAGE: "https://reputation-systems.github.io/source-application?tab=add"
+  # How a freshly-published source gets registered, resolved across four levels:
+  #   1. AUTO_PUBLISH_TX true  + a running "source-application" core-service instance
+  #      -> the source transaction is submitted directly via that instance's API,
+  #         signed with the node wallet seed (ledgers.ergo.WALLET_MNEMONIC). No click.
+  #   2. AUTO_PUBLISH_TX false + a running instance
+  #      -> prints a click-to-add link against the instance's web page.
+  #   3. no running instance but SOURCE_APPLICATION_WEB_PAGE set (above)
+  #      -> prints a click-to-add link against that page (pre-existing behaviour).
+  #   4. no instance and SOURCE_APPLICATION_WEB_PAGE empty
+  #      -> prints a manual-registration message (file hash + content hash + manifest URL).
+  # The instance is the "source-application" entry under core_services (resolved by id).
+  # AUTO_PUBLISH_TX transmits the wallet seed to the LOCAL on-node instance; keep it
+  # false unless you run a trusted source-application instance on this node.
+  AUTO_PUBLISH_TX: false
   # Formats can be file extensions (tags) or ergo box ids that define the format uniquely.
   CONTENT_FORMAT: ".grpcbb"
   RAW_FORMAT: ".celaut"

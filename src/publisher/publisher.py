@@ -294,9 +294,19 @@ def _get_publisher_settings(config: ConfigManager, require_token: bool = True) -
         hash_spec = get_configured_hash_spec(config)
     except ValueError as exc:
         raise PublisherError(f"Invalid hashing.HASH configuration: {exc}") from exc
+    # Raw configured value (may be empty). We deliberately do NOT fall back to
+    # DEFAULT_SOURCE_APPLICATION_WEB_PAGE here: an unset web page is a meaningful
+    # signal to the publish flow — it selects the level-4 "register manually"
+    # message rather than silently pointing at the public default page
+    # (see _announce_source_registration). The default is still used as the read
+    # base by src/core_services/source_application.py.
     source_application_web_page = str(
-        config.get("publisher.SOURCE_APPLICATION_WEB_PAGE", DEFAULT_SOURCE_APPLICATION_WEB_PAGE) or ""
-    ).strip() or DEFAULT_SOURCE_APPLICATION_WEB_PAGE
+        config.get("publisher.SOURCE_APPLICATION_WEB_PAGE", "") or ""
+    ).strip()
+    # When enabled AND a source-application core-service instance is running, the
+    # publish flow submits the source transaction directly through that instance's
+    # API (signed with the node wallet seed) instead of printing a click-to-add link.
+    auto_publish_tx = bool(config.get("publisher.AUTO_PUBLISH_TX", False))
     content_format = str(config.get("publisher.CONTENT_FORMAT", ".grpcbb") or "").strip() or ".grpcbb"
     raw_format = str(config.get("publisher.RAW_FORMAT", ".celaut") or "").strip() or ".celaut"
     if not content_format.startswith("."):
@@ -329,6 +339,7 @@ def _get_publisher_settings(config: ConfigManager, require_token: bool = True) -
         "branch": branch,
         "hash_spec": hash_spec,
         "source_application_web_page": source_application_web_page,
+        "auto_publish_tx": auto_publish_tx,
         "content_format": content_format,
         "raw_format": raw_format,
         "chunk_size_mb": chunk_size_mb,
@@ -516,6 +527,222 @@ def _build_source_application_prefilled_url(
     )
 
 
+# Provisional write route on a running source-application instance's API. Like the
+# read route in src/core_services/source_application.py (``<base>/sources/<id>``),
+# this contract must be confirmed against the deployed source-application service
+# before the AUTO_PUBLISH_TX path leaves DRAFT.
+SOURCE_APPLICATION_PUBLISH_ROUTE = "publish"
+
+
+def _resolve_source_application_endpoint() -> Optional[str]:
+    """Return the endpoint of a *running* source-application core-service instance.
+
+    Requires a configured (non-placeholder) ``source-application`` id under
+    ``core_services`` AND a currently-running instance of it; returns ``None``
+    otherwise. Detection only — it never downloads or launches the service, so a
+    publish never triggers heavy side effects. Fully defensive: never raises.
+    """
+    try:
+        from src.core_services import SOURCE_APPLICATION, get_core_service_id
+        from src.core_services.runtime import find_running_endpoint
+
+        source_application_id = get_core_service_id(SOURCE_APPLICATION)
+        if not source_application_id:
+            return None
+        return find_running_endpoint(source_application_id)
+    except Exception:
+        # Missing core_services infra / db / parse error — treat as "no instance".
+        return None
+
+
+def _submit_source_via_instance_api(
+    endpoint: str,
+    *,
+    seed: str,
+    file_hash: str,
+    content_hash: str,
+    hash_function_id: str,
+    manifest_url: str,
+    content_format: str,
+    raw_format: str,
+    timeout_s: int,
+    max_retry: int,
+    backoff_s: int,
+    is_chunked: bool = True,
+) -> bool:
+    """AUTO_PUBLISH_TX: hand the source + the node wallet seed to the running
+    source-application instance so it signs and submits the on-chain source
+    transaction directly (no manual click-to-add step).
+
+    The seed (``ledgers.ergo.WALLET_MNEMONIC``) is sent to the *local, on-node*
+    source-application instance, which acts as the seed signer. Provisional write
+    contract — confirm the route/payload against the deployed service. Best-effort:
+    returns ``False`` on any failure so the caller falls back to a registration link.
+    """
+    url = f"{endpoint.rstrip('/')}/{SOURCE_APPLICATION_PUBLISH_ROUTE}"
+    payload = {
+        "fileHash": file_hash,
+        "contentHash": content_hash,
+        "hashFunctionId": hash_function_id,
+        "urlLink": manifest_url,
+        "contentFormat": content_format,
+        "isChunked": is_chunked,
+        "seed": seed,
+    }
+    if raw_format != content_format:
+        payload["rawFormat"] = raw_format
+        payload["rawHash"] = file_hash
+
+    try:
+        _request_with_retry(
+            "POST",
+            url,
+            headers={"Content-Type": "application/json"},
+            timeout_s=timeout_s,
+            max_retry=max_retry,
+            backoff_s=backoff_s,
+            json=payload,
+        )
+        return True
+    except PublisherError as exc:
+        print(f"⚠️  Auto source-tx submit failed: {exc}", flush=True)
+        return False
+    except Exception as exc:  # defensive: the auto path must never break publish
+        print(f"⚠️  Auto source-tx submit errored: {exc}", flush=True)
+        return False
+
+
+def _print_click_to_add(
+    base_url: str,
+    *,
+    file_hash: str,
+    content_hash: str,
+    hash_function_id: str,
+    manifest_url: str,
+    content_format: str,
+    raw_format: str,
+) -> None:
+    """Print the manual "click to add source" block against ``base_url``."""
+    prefilled_url = _build_source_application_prefilled_url(
+        base_url=base_url,
+        file_hash=file_hash,
+        content_hash=content_hash,
+        hash_function_id=hash_function_id,
+        url_link=manifest_url,
+        content_format=content_format,
+        raw_format=raw_format,
+        is_chunked=True,
+    )
+    print("Register this source in Source Application:", flush=True)
+    print(f"- Source application URL: {base_url}", flush=True)
+    print(f"- Source application prefilled URL: {prefilled_url}", flush=True)
+    print(f"- Manifest URL: {manifest_url}", flush=True)
+    print(f"- File hash: {file_hash}", flush=True)
+    print(f"- Content hash: {content_hash}", flush=True)
+
+    BOLD = "\033[1m"
+    GREEN = "\033[92m"
+    RESET = "\033[0m"
+    print(f"\n\n{BOLD}{GREEN}👉 CLICK TO ADD SOURCE IN ERGO:{RESET}", flush=True)
+    print(f"{GREEN}{prefilled_url}{RESET}\n", flush=True)
+
+
+def _announce_source_registration(
+    settings: Dict,
+    *,
+    service_id: str,
+    content_hash: str,
+    manifest_url: str,
+) -> None:
+    """Decide, across four levels, how the freshly-published source is registered.
+
+    1. ``AUTO_PUBLISH_TX`` on **and** a running source-application instance →
+       submit the source transaction through the instance API, signed with the
+       node wallet seed (no manual step).
+    2. A running instance but ``AUTO_PUBLISH_TX`` off (or the auto submit fell
+       back) → print a click-to-add link against the instance's web page.
+    3. No instance, but ``publisher.SOURCE_APPLICATION_WEB_PAGE`` is set → print a
+       click-to-add link against that page (the pre-existing behaviour).
+    4. No instance and no web page configured → a manual-registration message.
+    """
+    hash_function_id = settings["hash_spec"].id_bytes.hex()
+    endpoint = _resolve_source_application_endpoint()
+    web_page = settings["source_application_web_page"]
+
+    # Level 1 — auto-submit via the running instance, signed with the node seed.
+    if endpoint and settings["auto_publish_tx"]:
+        seed = str(ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC", "") or "").strip()
+        if not seed:
+            print(
+                "⚠️  AUTO_PUBLISH_TX is enabled but ledgers.ergo.WALLET_MNEMONIC is empty — "
+                "cannot sign the source transaction. Falling back to a registration link.",
+                flush=True,
+            )
+        else:
+            print(
+                "AUTO_PUBLISH_TX enabled — submitting the source transaction via the running "
+                "source-application instance (signed with the node wallet seed)...",
+                flush=True,
+            )
+            submitted = _submit_source_via_instance_api(
+                endpoint,
+                seed=seed,
+                file_hash=service_id,
+                content_hash=content_hash,
+                hash_function_id=hash_function_id,
+                manifest_url=manifest_url,
+                content_format=settings["content_format"],
+                raw_format=settings["raw_format"],
+                timeout_s=settings["timeout_s"],
+                max_retry=settings["max_retry"],
+                backoff_s=settings["backoff_s"],
+            )
+            if submitted:
+                print(
+                    "✅ Source transaction submitted directly via the source-application instance.",
+                    flush=True,
+                )
+                return
+            print(
+                "↩️  Auto submit unsuccessful — showing a manual registration link instead.",
+                flush=True,
+            )
+
+    # Level 2 — a running instance exists: link against its web page.
+    if endpoint:
+        _print_click_to_add(
+            endpoint,
+            file_hash=service_id,
+            content_hash=content_hash,
+            hash_function_id=hash_function_id,
+            manifest_url=manifest_url,
+            content_format=settings["content_format"],
+            raw_format=settings["raw_format"],
+        )
+        return
+
+    # Level 3 — no instance, but a source-application web page is configured.
+    if web_page:
+        _print_click_to_add(
+            web_page,
+            file_hash=service_id,
+            content_hash=content_hash,
+            hash_function_id=hash_function_id,
+            manifest_url=manifest_url,
+            content_format=settings["content_format"],
+            raw_format=settings["raw_format"],
+        )
+        return
+
+    # Level 4 — nothing configured: tell the user how to register manually.
+    print(
+        "ℹ️  Source uploaded, but no source-application instance is running and "
+        "publisher.SOURCE_APPLICATION_WEB_PAGE is not set. Register the source manually "
+        "using the file hash, content hash and manifest URL above.",
+        flush=True,
+    )
+
+
 def publish_service(
     service_ref: str
 ) -> Dict:
@@ -545,17 +772,6 @@ def publish_service(
         if service_file_path.exists():
             service_file_path.unlink()
 
-    source_application_prefilled_url = _build_source_application_prefilled_url(
-        base_url=settings["source_application_web_page"],
-        file_hash=service_id,
-        content_hash=content_hash,
-        hash_function_id=settings["hash_spec"].id_bytes.hex(),  # Sending hash function id as hex string for better readability in the source application, could be the name but id is more precise.
-        url_link=result["manifest_url"],
-        content_format=settings["content_format"],
-        raw_format=settings["raw_format"],
-        is_chunked=True,
-    )
-
     print("Publish completed successfully.", flush=True)
     print(f"Service id: {service_id}", flush=True)
     print(f"File hash: {service_id}", flush=True)
@@ -563,18 +779,15 @@ def publish_service(
     print(f"Manifest URL: {result['manifest_url']}", flush=True)
     print(f"Manifest browser URL: {result['browse_manifest_url']}", flush=True)
     print(f"Download command: nodo download {result['manifest_url']}", flush=True)
-    print("Register this source in Source Application:", flush=True)
-    print(f"- Source application URL: {settings['source_application_web_page']}", flush=True)
-    print(f"- Source application prefilled URL: {source_application_prefilled_url}", flush=True)
-    print(f"- Manifest URL: {result['manifest_url']}", flush=True)
-    print(f"- File hash: {service_id}", flush=True)
-    print(f"- Content hash: {content_hash}", flush=True)
 
-    BOLD = "\033[1m"
-    GREEN = "\033[92m"
-    RESET = "\033[0m"
-    print(f"\n\n{BOLD}{GREEN}👉 CLICK TO ADD SOURCE IN ERGO:{RESET}", flush=True)
-    print(f"{GREEN}{source_application_prefilled_url}{RESET}\n", flush=True)
+    # Four-level source registration (auto-tx via instance / instance link /
+    # configured web page link / manual message). See _announce_source_registration.
+    _announce_source_registration(
+        settings,
+        service_id=service_id,
+        content_hash=content_hash,
+        manifest_url=result["manifest_url"],
+    )
     return result
 
 
