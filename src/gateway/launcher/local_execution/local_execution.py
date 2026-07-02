@@ -1,3 +1,4 @@
+import json
 import traceback
 from typing import Optional, Callable, List, Dict
 
@@ -22,6 +23,24 @@ from src.virtualizers.firewall import resolve_slot_transport_protocols
 
 sc = SQLConnection()
 env_manager = ConfigManager()
+
+
+def _serialize_envs(config: Optional[celaut.Configuration]) -> Optional[str]:
+    """Serialize a Configuration's ``environment_variables`` map to JSON text.
+
+    The instance is launched with these envs (see ``execute()``), so persisting them
+    lets the node later tell how an instance was configured — e.g. whether a
+    source-application was started as a seed signer (``SOURCE_SIGNER_MODE=seed``).
+    Values are protobuf ``bytes``; they are decoded as UTF-8 (env vars are text).
+    Returns ``None`` when there are no env vars, so the DB column stays NULL.
+    """
+    if config is None or not config.environment_variables:
+        return None
+    envs = {
+        key: value.decode("utf-8", errors="replace")
+        for key, value in config.environment_variables.items()
+    }
+    return json.dumps(envs, sort_keys=True) if envs else None
 
 
 _INTERFACE_PREFIX_PRIORITY = (
@@ -292,9 +311,10 @@ def local_execution(
         serialized_instance=instance.SerializeToString(),
         virtualizer=configured_virtualizer,
         system_requirements_range=celaut_pb2.ModifyServiceSystemResourcesInput(
-                min_sysreq=initial_system_resources, 
+                min_sysreq=initial_system_resources,
                 max_sysreq=initial_system_resources
-            )
+            ),
+        envs=_serialize_envs(config),
         )
     log.LOGGER(
         f"Instance provisioned in DB: vmachine_id={vmachine_id}, virtualizer={configured_virtualizer}, "

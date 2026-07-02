@@ -106,7 +106,8 @@ def create_tables(cursor):
                 disk_space INTEGER,
                 serialized_instance TEXT,
                 service_id TEXT,
-                virtualizer TEXT DEFAULT NULL
+                virtualizer TEXT DEFAULT NULL,
+                envs TEXT DEFAULT NULL
             )
         ''',
         "delegated_instances": '''
@@ -161,6 +162,29 @@ def create_tables(cursor):
             print(f"Created or updated '{table_name}' table.")
         except sqlite3.Error as e:
             print(f"Error creating '{table_name}' table: {e}")
+
+    # Additive column migrations for databases created before a column existed.
+    # `CREATE TABLE IF NOT EXISTS` never alters an existing table, so new columns
+    # must be back-filled here. Each entry is idempotent (skipped when present).
+    ensure_columns(cursor, "local_instances", {"envs": "TEXT DEFAULT NULL"})
+
+
+def ensure_columns(cursor, table_name: str, columns: dict) -> None:
+    """Add any missing ``columns`` to ``table_name`` (idempotent).
+
+    ``columns`` maps column name -> its SQL declaration (e.g. ``"TEXT DEFAULT NULL"``).
+    A column already present is left untouched. Safe to run on every startup.
+    """
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    existing = {row[1] for row in cursor.fetchall()}  # row[1] = column name
+    for column, declaration in columns.items():
+        if column in existing:
+            continue
+        try:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column} {declaration}")
+            print(f"Added column '{column}' to '{table_name}' table.")
+        except sqlite3.Error as e:
+            print(f"Error adding column '{column}' to '{table_name}': {e}")
 
 def migrate():
     """Run the migration script."""
