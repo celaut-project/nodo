@@ -172,7 +172,7 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
 
         self.assertIsNone(result)
         acquire.assert_called_once_with("svc")
-        launch.assert_called_once_with("svc")
+        launch.assert_called_once_with("svc", envs=None)
 
     def test_launch_error_is_swallowed_and_returns_none(self):
         acquire = MagicMock(return_value=False)
@@ -184,7 +184,7 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
             result = runtime.ensure_core_service_running("svc")
 
         self.assertIsNone(result)
-        launch.assert_called_once_with("svc")
+        launch.assert_called_once_with("svc", envs=None)
 
     def test_endpoint_appears_after_launch(self):
         # First check (top) returns None, second check (bottom) returns endpoint.
@@ -198,7 +198,7 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
             result = runtime.ensure_core_service_running("svc")
 
         self.assertEqual(result, "http://10.0.0.9:7000")
-        launch.assert_called_once_with("svc")
+        launch.assert_called_once_with("svc", envs=None)
 
 
 if __name__ == "__main__":
