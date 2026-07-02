@@ -1,8 +1,8 @@
 """Tests for the four-level source registration in ``nodo publish``.
 
 Covers :func:`src.publisher.publisher._announce_source_registration` (the
-AUTO_PUBLISH_TX / instance-link / web-page-link / manual-message decision) and
-:func:`_submit_source_via_instance_api` (the provisional auto-submit payload).
+AUTO_PUBLISH_TX / web-page-link / manual-message decision) and
+:func:`_submit_source_via_instance_api` (the confirmed ``POST /api/sources`` payload).
 
 Follows the repo convention of guarding the import so the suite skips cleanly when
 the runtime dependencies (bee_rpc, mnemonic, protos, a loadable config) are absent.
@@ -53,47 +53,48 @@ def _announce(settings):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class AnnounceSourceRegistrationTests(unittest.TestCase):
-    # ---- Level 1: AUTO_PUBLISH_TX + running instance -> auto submit ----
+    # ---- Level 1: AUTO_PUBLISH_TX + running instance + profile box -> auto submit ----
     def test_level1_auto_submit_success_skips_link(self):
         with patch.object(publisher, "_resolve_source_application_endpoint", return_value="http://10.0.0.2:9000"), \
              patch.object(publisher, "_submit_source_via_instance_api", return_value=True) as submit, \
              patch.object(publisher, "_print_click_to_add") as link, \
              patch.object(publisher, "ConfigManager") as cfg:
-            cfg.return_value.get.return_value = "word word word"
+            cfg.return_value.get.return_value = "profilebox64hex"
             out = _announce(_settings(auto_publish_tx=True))
 
         submit.assert_called_once()
-        # The node wallet seed is forwarded to the instance signer.
-        self.assertEqual(submit.call_args.kwargs["seed"], "word word word")
+        # The node's PROFILE box id is forwarded as the opinion author; no seed over HTTP.
+        self.assertEqual(submit.call_args.kwargs["main_box_id"], "profilebox64hex")
         self.assertEqual(submit.call_args.kwargs["file_hash"], "svcid")
+        self.assertNotIn("seed", submit.call_args.kwargs)
         link.assert_not_called()
         self.assertIn("submitted directly", out)
 
-    def test_level1_missing_seed_falls_back_to_instance_link(self):
+    def test_level1_missing_profile_box_falls_back_to_web_link(self):
         with patch.object(publisher, "_resolve_source_application_endpoint", return_value="http://10.0.0.2:9000"), \
              patch.object(publisher, "_submit_source_via_instance_api") as submit, \
              patch.object(publisher, "_print_click_to_add") as link, \
              patch.object(publisher, "ConfigManager") as cfg:
-            cfg.return_value.get.return_value = ""  # empty WALLET_MNEMONIC
+            cfg.return_value.get.return_value = ""  # empty SOURCE_PROFILE_BOX_ID
             _announce(_settings(auto_publish_tx=True))
 
         submit.assert_not_called()
         link.assert_called_once()
-        self.assertEqual(link.call_args.args[0], "http://10.0.0.2:9000")
+        self.assertEqual(link.call_args.args[0], "https://web.example/source?tab=add")
 
-    def test_level1_submit_failure_falls_back_to_instance_link(self):
+    def test_level1_submit_failure_falls_back_to_web_link(self):
         with patch.object(publisher, "_resolve_source_application_endpoint", return_value="http://10.0.0.2:9000"), \
              patch.object(publisher, "_submit_source_via_instance_api", return_value=False), \
              patch.object(publisher, "_print_click_to_add") as link, \
              patch.object(publisher, "ConfigManager") as cfg:
-            cfg.return_value.get.return_value = "seed here"
+            cfg.return_value.get.return_value = "profilebox64hex"
             _announce(_settings(auto_publish_tx=True))
 
         link.assert_called_once()
-        self.assertEqual(link.call_args.args[0], "http://10.0.0.2:9000")
+        self.assertEqual(link.call_args.args[0], "https://web.example/source?tab=add")
 
-    # ---- Level 2: running instance, auto disabled -> instance link ----
-    def test_level2_instance_link_when_auto_disabled(self):
+    # ---- Level 2: running instance, auto disabled -> web-page link (NOT the instance) ----
+    def test_level2_web_link_when_auto_disabled(self):
         with patch.object(publisher, "_resolve_source_application_endpoint", return_value="http://10.0.0.2:9000"), \
              patch.object(publisher, "_submit_source_via_instance_api") as submit, \
              patch.object(publisher, "_print_click_to_add") as link:
@@ -101,7 +102,8 @@ class AnnounceSourceRegistrationTests(unittest.TestCase):
 
         submit.assert_not_called()
         link.assert_called_once()
-        self.assertEqual(link.call_args.args[0], "http://10.0.0.2:9000")
+        # The instance serves only /api + /mcp; the prefill link must target the web app.
+        self.assertEqual(link.call_args.args[0], "https://web.example/source?tab=add")
 
     # ---- Level 3: no instance, web page configured -> web-page link ----
     def test_level3_web_page_link_when_no_instance(self):
@@ -124,9 +126,17 @@ class AnnounceSourceRegistrationTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class SubmitSourceViaInstanceApiTests(unittest.TestCase):
+    @staticmethod
+    def _response(body):
+        """A stand-in for _request_with_retry's return: an object with .content bytes."""
+        import json as _json
+        resp = MagicMock()
+        resp.content = _json.dumps(body).encode("utf-8")
+        return resp
+
     def _call(self, request_mock, **overrides):
         kwargs = dict(
-            seed="node seed",
+            main_box_id="profilebox64hex",
             file_hash="svcid",
             content_hash="chash",
             hash_function_id="abcd",
@@ -141,27 +151,35 @@ class SubmitSourceViaInstanceApiTests(unittest.TestCase):
         with patch.object(publisher, "_request_with_retry", request_mock):
             return publisher._submit_source_via_instance_api("http://10.0.0.2:9000/", **kwargs)
 
-    def test_posts_to_publish_route_with_seed_and_returns_true(self):
-        request_mock = MagicMock(return_value=MagicMock())
+    def test_posts_to_api_sources_with_source_entry_and_returns_true(self):
+        request_mock = MagicMock(return_value=self._response({"submitted": True, "txId": "tx1"}))
         ok = self._call(request_mock)
 
         self.assertTrue(ok)
         args, kwargs = request_mock.call_args
         self.assertEqual(args[0], "POST")
-        self.assertEqual(args[1], "http://10.0.0.2:9000/publish")  # trailing slash collapsed
+        self.assertEqual(args[1], "http://10.0.0.2:9000/api/sources")  # trailing slash collapsed
         payload = kwargs["json"]
-        self.assertEqual(payload["seed"], "node seed")
+        self.assertEqual(payload["mainBoxId"], "profilebox64hex")
         self.assertEqual(payload["fileHash"], "svcid")
-        # raw != content -> raw fields present
-        self.assertEqual(payload["rawFormat"], ".celaut")
-        self.assertEqual(payload["rawHash"], "svcid")
+        self.assertNotIn("seed", payload)  # the mnemonic is never sent over HTTP
+        entry = payload["sourceEntry"]
+        self.assertEqual(entry["hashFunctionId"], "abcd")
+        self.assertEqual(entry["contentHash"], "chash")
+        self.assertEqual(entry["rawFormat"], ".celaut")
+        self.assertEqual(entry["urlLink"], "https://raw.example/manifest")
+        self.assertIs(entry["isChunked"], True)
 
-    def test_omits_raw_fields_when_formats_match(self):
-        request_mock = MagicMock(return_value=MagicMock())
-        self._call(request_mock, raw_format=".grpcbb", content_format=".grpcbb")
-        payload = request_mock.call_args.kwargs["json"]
-        self.assertNotIn("rawFormat", payload)
-        self.assertNotIn("rawHash", payload)
+    def test_unsigned_response_returns_false(self):
+        # An unsigned-mode instance returns an unsigned tx: not a real submit.
+        request_mock = MagicMock(
+            return_value=self._response({"submitted": False, "unsignedTransaction": {"inputs": []}})
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ok = self._call(request_mock)
+        self.assertFalse(ok)
+        self.assertIn("unsigned mode", buf.getvalue())
 
     def test_returns_false_on_publisher_error(self):
         request_mock = MagicMock(side_effect=publisher.PublisherError("boom"))

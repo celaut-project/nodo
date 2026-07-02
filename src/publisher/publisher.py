@@ -1,4 +1,5 @@
 import base64
+import json
 import math
 import os
 import tempfile
@@ -527,11 +528,14 @@ def _build_source_application_prefilled_url(
     )
 
 
-# Provisional write route on a running source-application instance's API. Like the
-# read route in src/core_services/source_application.py (``<base>/sources/<id>``),
-# this contract must be confirmed against the deployed source-application service
-# before the AUTO_PUBLISH_TX path leaves DRAFT.
-SOURCE_APPLICATION_PUBLISH_ROUTE = "publish"
+# Write route on a running source-application instance's REST API, confirmed against
+# the deployed service (``.service/server-http.mjs`` + ``mcp/writes.mjs``): a FILE_SOURCE
+# opinion is published via ``POST /api/sources`` with ``{mainBoxId, fileHash, sourceEntry}``.
+# The instance signs + submits itself when it was launched in seed mode
+# (``SOURCE_SIGNER_MODE=seed`` + ``SOURCE_MNEMONIC`` in its env); the mnemonic is NEVER
+# sent in the request body. In unsigned mode the instance instead returns an unsigned
+# EIP-12 tx (``{submitted:false,...}``) and we fall back to a manual link.
+SOURCE_APPLICATION_PUBLISH_ROUTE = "api/sources"
 
 
 def _resolve_source_application_endpoint() -> Optional[str]:
@@ -558,7 +562,7 @@ def _resolve_source_application_endpoint() -> Optional[str]:
 def _submit_source_via_instance_api(
     endpoint: str,
     *,
-    seed: str,
+    main_box_id: str,
     file_hash: str,
     content_hash: str,
     hash_function_id: str,
@@ -570,31 +574,38 @@ def _submit_source_via_instance_api(
     backoff_s: int,
     is_chunked: bool = True,
 ) -> bool:
-    """AUTO_PUBLISH_TX: hand the source + the node wallet seed to the running
+    """AUTO_PUBLISH_TX: publish the FILE_SOURCE opinion through the running
     source-application instance so it signs and submits the on-chain source
     transaction directly (no manual click-to-add step).
 
-    The seed (``ledgers.ergo.WALLET_MNEMONIC``) is sent to the *local, on-node*
-    source-application instance, which acts as the seed signer. Provisional write
-    contract — confirm the route/payload against the deployed service. Best-effort:
-    returns ``False`` on any failure so the caller falls back to a registration link.
+    Confirmed contract (``.service/server-http.mjs`` → ``mcp/writes.mjs``):
+    ``POST /api/sources`` with ``{mainBoxId, fileHash, sourceEntry}``, where
+    ``sourceEntry = {hashFunctionId, contentFormat, contentHash, rawFormat, urlLink,
+    isChunked}``. ``mainBoxId`` is the node's reputation PROFILE box (its on-chain
+    author identity). The instance signs with its *own* env-configured seed
+    (``SOURCE_SIGNER_MODE=seed`` + ``SOURCE_MNEMONIC``) — the mnemonic is never sent
+    here. The response is ``{submitted:true,txId}`` when signed, or
+    ``{submitted:false,unsignedTransaction,...}`` when the instance runs unsigned; only
+    the former counts as success. Best-effort: returns ``False`` on any failure (or an
+    unsigned result) so the caller falls back to a registration link.
     """
     url = f"{endpoint.rstrip('/')}/{SOURCE_APPLICATION_PUBLISH_ROUTE}"
-    payload = {
-        "fileHash": file_hash,
-        "contentHash": content_hash,
+    source_entry = {
         "hashFunctionId": hash_function_id,
-        "urlLink": manifest_url,
         "contentFormat": content_format,
+        "contentHash": content_hash,
+        "rawFormat": raw_format,
+        "urlLink": manifest_url,
         "isChunked": is_chunked,
-        "seed": seed,
     }
-    if raw_format != content_format:
-        payload["rawFormat"] = raw_format
-        payload["rawHash"] = file_hash
+    payload = {
+        "mainBoxId": main_box_id,
+        "fileHash": file_hash,
+        "sourceEntry": source_entry,
+    }
 
     try:
-        _request_with_retry(
+        response = _request_with_retry(
             "POST",
             url,
             headers={"Content-Type": "application/json"},
@@ -603,13 +614,33 @@ def _submit_source_via_instance_api(
             backoff_s=backoff_s,
             json=payload,
         )
-        return True
     except PublisherError as exc:
         print(f"⚠️  Auto source-tx submit failed: {exc}", flush=True)
         return False
     except Exception as exc:  # defensive: the auto path must never break publish
         print(f"⚠️  Auto source-tx submit errored: {exc}", flush=True)
         return False
+
+    # The instance only actually signed + submitted when running in seed mode; an
+    # unsigned instance returns {submitted:false, unsignedTransaction}. Treat only a
+    # confirmed submit as success so the caller can fall back to a manual link.
+    try:
+        body = json.loads(response.content.decode("utf-8", errors="strict"))
+    except Exception:
+        # No parseable body but the POST itself succeeded — assume the instance
+        # accepted it (older/leaner instances may return an empty 200).
+        return True
+    if isinstance(body, dict) and body.get("submitted") is False:
+        tx = body.get("unsignedTransaction")
+        if tx is not None:
+            print(
+                "↩️  source-application instance is in unsigned mode (returned an "
+                "unsigned tx) — it cannot auto-submit. Launch it with "
+                "SOURCE_SIGNER_MODE=seed + SOURCE_MNEMONIC to enable AUTO_PUBLISH_TX.",
+                flush=True,
+            )
+        return False
+    return True
 
 
 def _print_click_to_add(
@@ -656,37 +687,45 @@ def _announce_source_registration(
 ) -> None:
     """Decide, across four levels, how the freshly-published source is registered.
 
-    1. ``AUTO_PUBLISH_TX`` on **and** a running source-application instance →
-       submit the source transaction through the instance API, signed with the
-       node wallet seed (no manual step).
-    2. A running instance but ``AUTO_PUBLISH_TX`` off (or the auto submit fell
-       back) → print a click-to-add link against the instance's web page.
-    3. No instance, but ``publisher.SOURCE_APPLICATION_WEB_PAGE`` is set → print a
-       click-to-add link against that page (the pre-existing behaviour).
-    4. No instance and no web page configured → a manual-registration message.
+    1. ``AUTO_PUBLISH_TX`` on, a running source-application instance, **and** a
+       configured PROFILE box (``publisher.SOURCE_PROFILE_BOX_ID``) → publish the
+       FILE_SOURCE opinion through the instance's ``POST /api/sources``. The instance
+       signs with its own env-configured seed (see ``_submit_source_via_instance_api``).
+    2. A running instance but auto-submit off/unavailable, and a web page is
+       configured → a prefilled click-to-add link on the **web app** (the running
+       instance serves only ``/api`` + ``/mcp`` JSON, never the prefill UI).
+    3. No instance, but ``publisher.SOURCE_APPLICATION_WEB_PAGE`` is set → the same
+       prefilled click-to-add link (the pre-existing behaviour).
+    4. Nothing usable → a manual-registration message.
+
+    The manual link (levels 2–3) always targets the configured web app, never a bare
+    instance endpoint, because only the static web app renders the prefilled add form.
     """
     hash_function_id = settings["hash_spec"].id_bytes.hex()
     endpoint = _resolve_source_application_endpoint()
     web_page = settings["source_application_web_page"]
 
-    # Level 1 — auto-submit via the running instance, signed with the node seed.
+    # Level 1 — auto-submit the FILE_SOURCE opinion via the running instance's REST API.
     if endpoint and settings["auto_publish_tx"]:
-        seed = str(ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC", "") or "").strip()
-        if not seed:
+        main_box_id = str(ConfigManager().get("publisher.SOURCE_PROFILE_BOX_ID", "") or "").strip()
+        if not main_box_id:
             print(
-                "⚠️  AUTO_PUBLISH_TX is enabled but ledgers.ergo.WALLET_MNEMONIC is empty — "
-                "cannot sign the source transaction. Falling back to a registration link.",
+                "⚠️  AUTO_PUBLISH_TX is enabled but publisher.SOURCE_PROFILE_BOX_ID is unset — "
+                "the on-chain opinion needs the node's reputation PROFILE box id as its author. "
+                "Mint a profile once (source-application web app or POST /api/profile) and set "
+                "its box id in config. Falling back to a registration link.",
                 flush=True,
             )
         else:
             print(
-                "AUTO_PUBLISH_TX enabled — submitting the source transaction via the running "
-                "source-application instance (signed with the node wallet seed)...",
+                "AUTO_PUBLISH_TX enabled — publishing the source opinion via the running "
+                "source-application instance (POST /api/sources; the instance signs with its "
+                "own seed)...",
                 flush=True,
             )
             submitted = _submit_source_via_instance_api(
                 endpoint,
-                seed=seed,
+                main_box_id=main_box_id,
                 file_hash=service_id,
                 content_hash=content_hash,
                 hash_function_id=hash_function_id,
@@ -708,20 +747,8 @@ def _announce_source_registration(
                 flush=True,
             )
 
-    # Level 2 — a running instance exists: link against its web page.
-    if endpoint:
-        _print_click_to_add(
-            endpoint,
-            file_hash=service_id,
-            content_hash=content_hash,
-            hash_function_id=hash_function_id,
-            manifest_url=manifest_url,
-            content_format=settings["content_format"],
-            raw_format=settings["raw_format"],
-        )
-        return
-
-    # Level 3 — no instance, but a source-application web page is configured.
+    # Levels 2 & 3 — a prefilled click-to-add link on the configured web app. A running
+    # instance does not change the target: only the static web app renders the add form.
     if web_page:
         _print_click_to_add(
             web_page,
@@ -736,8 +763,8 @@ def _announce_source_registration(
 
     # Level 4 — nothing configured: tell the user how to register manually.
     print(
-        "ℹ️  Source uploaded, but no source-application instance is running and "
-        "publisher.SOURCE_APPLICATION_WEB_PAGE is not set. Register the source manually "
+        "ℹ️  Source uploaded, but no source registration path is available "
+        "(publisher.SOURCE_APPLICATION_WEB_PAGE is not set). Register the source manually "
         "using the file hash, content hash and manifest URL above.",
         flush=True,
     )

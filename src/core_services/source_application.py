@@ -18,33 +18,18 @@ never downloads from an arbitrary, unconfigured source.
 
 import json
 from typing import List
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote
 
 from src.core_services import SOURCE_APPLICATION, get_core_service_id
 from src.publisher.publisher import (
-    DEFAULT_SOURCE_APPLICATION_WEB_PAGE,
     PublisherError,
     _fetch_bytes,
+    _resolve_source_application_endpoint,
     download_from_manifest_url,
 )
 from src.utils.config import ConfigManager
 
 _env_manager = ConfigManager()
-
-
-def _source_application_read_base() -> str:
-    """Origin+path of the source-application, derived from the publisher config.
-
-    ``publisher.SOURCE_APPLICATION_WEB_PAGE`` points at the source-application web app
-    (used by ``nodo publish`` to register sources). We reuse the same deployment for the
-    read side, stripping any query/fragment (e.g. ``?tab=add``) to get the base.
-    """
-    web_page = str(
-        _env_manager.get("publisher.SOURCE_APPLICATION_WEB_PAGE", DEFAULT_SOURCE_APPLICATION_WEB_PAGE)
-        or DEFAULT_SOURCE_APPLICATION_WEB_PAGE
-    ).strip()
-    parts = urlsplit(web_page)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/"), "", ""))
 
 
 def _parse_sources(payload: bytes) -> List[str]:
@@ -94,15 +79,19 @@ def lookup_sources(service_id: str) -> List[str]:
     """Query the source-application for the manifest URLs of ``service_id``.
 
     Returns a list of manifest URLs (possibly empty). This is the single integration
-    seam with the published source-application service; the read route below is the
-    provisional contract and must be confirmed against the deployed service (tracked by
-    the ``"<SET_ME>"`` id in ``core_services``). All HTTP I/O reuses the publisher's
+    seam with the published source-application service. The read route is confirmed
+    against the deployed service (``.service/server-http.mjs``): a running instance
+    exposes a JSON REST mirror under ``/api/*`` on port 8080; sources for a file are
+    fetched via ``GET /api/sources?hash=<fileHash>`` (``fetchFileSourcesByHash``). The
+    static web app (``SOURCE_APPLICATION_WEB_PAGE``) has no server API, so reads require
+    a *running* on-node instance — not the web page. All HTTP I/O reuses the publisher's
     retrying fetch helper rather than introducing a new HTTP client.
     """
-    base = _source_application_read_base()
-    # Provisional read route: ``<base>/sources/<service_id>``. Confirm against the
-    # published source-application service before un-drafting the PR.
-    url = f"{base}/sources/{service_id}"
+    endpoint = _resolve_source_application_endpoint()
+    if not endpoint:
+        # No running instance to answer /api reads (the static web app cannot).
+        return []
+    url = f"{endpoint.rstrip('/')}/api/sources?hash={quote(service_id, safe='')}"
     try:
         payload = _fetch_bytes(url)
     except PublisherError:
