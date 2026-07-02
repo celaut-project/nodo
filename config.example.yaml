@@ -242,19 +242,29 @@ publisher:
   BRANCH: "main"
   SOURCE_APPLICATION_WEB_PAGE: "https://reputation-systems.github.io/source-application?tab=add"
   # How a freshly-published source gets registered, resolved across four levels:
-  #   1. AUTO_PUBLISH_TX true  + a running "source-application" core-service instance
-  #      -> the source transaction is submitted directly via that instance's API,
-  #         signed with the node wallet seed (ledgers.ergo.WALLET_MNEMONIC). No click.
-  #   2. AUTO_PUBLISH_TX false + a running instance
-  #      -> prints a click-to-add link against the instance's web page.
+  #   1. AUTO_PUBLISH_TX true + a running "source-application" instance + SOURCE_PROFILE_BOX_ID
+  #      -> the FILE_SOURCE opinion is published directly via the instance's REST API
+  #         (POST /api/sources {mainBoxId, fileHash, sourceEntry}). The instance signs +
+  #         submits itself using its OWN env-configured seed (see note below). No click.
+  #   2. running instance but auto-submit off/unavailable, SOURCE_APPLICATION_WEB_PAGE set
+  #      -> prints a prefilled click-to-add link on the web app (the instance serves only
+  #         /api + /mcp JSON, never the prefill form).
   #   3. no running instance but SOURCE_APPLICATION_WEB_PAGE set (above)
-  #      -> prints a click-to-add link against that page (pre-existing behaviour).
-  #   4. no instance and SOURCE_APPLICATION_WEB_PAGE empty
-  #      -> prints a manual-registration message (file hash + content hash + manifest URL).
+  #      -> prints the same prefilled click-to-add link (pre-existing behaviour).
+  #   4. nothing usable -> a manual-registration message (file hash + content hash + manifest URL).
   # The instance is the "source-application" entry under core_services (resolved by id).
-  # AUTO_PUBLISH_TX transmits the wallet seed to the LOCAL on-node instance; keep it
-  # false unless you run a trusted source-application instance on this node.
+  #
+  # AUTO_PUBLISH_TX does NOT send the wallet seed over HTTP. The on-node source-application
+  # instance must itself be launched in seed mode with the mnemonic in its environment
+  # (SOURCE_SIGNER_MODE=seed, SOURCE_MNEMONIC=...); otherwise it returns an unsigned tx and
+  # the publisher falls back to a link. Keep AUTO_PUBLISH_TX false unless you run a trusted,
+  # seed-mode source-application instance on this node.
   AUTO_PUBLISH_TX: false
+  # The node's reputation PROFILE box id (its on-chain author identity). Required for
+  # AUTO_PUBLISH_TX: every FILE_SOURCE opinion is split from this box. Mint a profile once
+  # (source-application web app, or POST /api/profile on a seed-mode instance, then look up
+  # the resulting box), and paste its 64-hex box id here. Leave empty to disable level 1.
+  SOURCE_PROFILE_BOX_ID: ""
   # Formats can be file extensions (tags) or ergo box ids that define the format uniquely.
   CONTENT_FORMAT: ".grpcbb"
   RAW_FORMAT: ".celaut"
