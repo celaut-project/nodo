@@ -25,7 +25,7 @@ Fail-closed / best-effort contract (mirrors source-application's tone):
 """
 
 import sqlite3
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.utils.config import ConfigManager
@@ -140,7 +140,9 @@ def find_running_instance(service_id: str) -> Optional[Tuple[str, Optional[str]]
     return None
 
 
-def ensure_core_service_running(service_id: str, *, launch: bool = True) -> Optional[str]:
+def ensure_core_service_running(
+    service_id: str, *, launch: bool = True, envs: Optional[Dict[str, str]] = None
+) -> Optional[str]:
     """Ensure a core service is running and return its endpoint, or ``None``.
 
     Resolution order:
@@ -149,7 +151,13 @@ def ensure_core_service_running(service_id: str, *, launch: bool = True) -> Opti
             the source-application (:func:`acquire_service`) so it can be launched.
         (c) Otherwise (when ``launch`` is ``True``), best-effort *launch* the service
             by id by reusing the existing ``nodo execute`` path
-            (:func:`src.commands.execute.execute`).
+            (:func:`src.commands.execute.execute`), injecting ``envs`` into the new
+            instance's environment (e.g. ``SOURCE_SIGNER_MODE``/``SOURCE_MNEMONIC`` to
+            run the source-application as an autonomous seed signer).
+
+    Note: ``envs`` only applies to a *newly launched* instance (c). If an instance is
+    already running (a), its existing environment is used as-is — this never relaunches
+    to change env.
 
     After a download and/or launch attempt, :func:`find_running_endpoint` is re-checked
     and its result returned.
@@ -185,7 +193,7 @@ def ensure_core_service_running(service_id: str, *, launch: bool = True) -> Opti
             # Reuse the canonical launch path; broadly guarded because execute() is
             # side-effectful and depends on a running gateway daemon. BaseException is
             # caught so a stray SystemExit from the execute path can't escape either.
-            execute(service_id)
+            execute(service_id, envs=envs)
         except BaseException:
             # Any launch failure → fall through and re-check below; never raise.
             pass

@@ -559,6 +559,50 @@ def _resolve_source_application_endpoint() -> Optional[str]:
         return None
 
 
+def _build_source_signer_envs() -> Optional[Dict[str, str]]:
+    """Seed-signer environment for an auto-launched source-application instance.
+
+    Maps the node's Ergo wallet into the env the service reads (see the deployed
+    service's ``mcp/lib.mjs``): ``SOURCE_SIGNER_MODE=seed`` + ``SOURCE_MNEMONIC`` so the
+    instance signs + submits the source transaction itself, and ``SOURCE_NODE_URI`` for
+    submission. Returns ``None`` when no wallet mnemonic is configured (can't run a seed
+    signer), so the caller degrades to a manual link.
+    """
+    cfg = ConfigManager()
+    mnemonic = str(cfg.get("ledgers.ergo.WALLET_MNEMONIC", "") or "").strip()
+    if not mnemonic:
+        return None
+    envs = {"SOURCE_SIGNER_MODE": "seed", "SOURCE_MNEMONIC": mnemonic}
+    node_url = str(cfg.get("ledgers.ergo.NODE_URL", "") or "").strip()
+    if node_url:
+        envs["SOURCE_NODE_URI"] = node_url
+    return envs
+
+
+def _ensure_seed_mode_source_application() -> Optional[str]:
+    """Return a running source-application endpoint, auto-launching one in seed mode.
+
+    For AUTO_PUBLISH_TX: reuse an already-running instance if present, otherwise launch
+    the configured ``source-application`` core service with the node's seed injected into
+    its environment (``_build_source_signer_envs``) so it can sign + submit autonomously.
+    Fully defensive — a missing core-service id, no wallet mnemonic, or any launch failure
+    yields ``None`` and the caller falls back to a manual registration link.
+    """
+    try:
+        from src.core_services import SOURCE_APPLICATION, get_core_service_id
+        from src.core_services.runtime import ensure_core_service_running
+
+        source_application_id = get_core_service_id(SOURCE_APPLICATION)
+        if not source_application_id:
+            return None
+        envs = _build_source_signer_envs()
+        if not envs:
+            return None  # no seed to run the instance as a signer
+        return ensure_core_service_running(source_application_id, envs=envs)
+    except Exception:
+        return None
+
+
 def _submit_source_via_instance_api(
     endpoint: str,
     *,
@@ -687,10 +731,11 @@ def _announce_source_registration(
 ) -> None:
     """Decide, across four levels, how the freshly-published source is registered.
 
-    1. ``AUTO_PUBLISH_TX`` on, a running source-application instance, **and** a
-       configured PROFILE box (``publisher.SOURCE_PROFILE_BOX_ID``) → publish the
-       FILE_SOURCE opinion through the instance's ``POST /api/sources``. The instance
-       signs with its own env-configured seed (see ``_submit_source_via_instance_api``).
+    1. ``AUTO_PUBLISH_TX`` on **and** a configured PROFILE box
+       (``publisher.SOURCE_PROFILE_BOX_ID``) → publish the FILE_SOURCE opinion through
+       a source-application instance's ``POST /api/sources``. The node **auto-launches**
+       the instance in seed mode (node wallet mnemonic injected into its env) if one
+       isn't already running, so it signs + submits the tx itself.
     2. A running instance but auto-submit off/unavailable, and a web page is
        configured → a prefilled click-to-add link on the **web app** (the running
        instance serves only ``/api`` + ``/mcp`` JSON, never the prefill UI).
@@ -702,11 +747,11 @@ def _announce_source_registration(
     instance endpoint, because only the static web app renders the prefilled add form.
     """
     hash_function_id = settings["hash_spec"].id_bytes.hex()
-    endpoint = _resolve_source_application_endpoint()
     web_page = settings["source_application_web_page"]
 
-    # Level 1 — auto-submit the FILE_SOURCE opinion via the running instance's REST API.
-    if endpoint and settings["auto_publish_tx"]:
+    # Level 1 — auto-submit the FILE_SOURCE opinion via a seed-mode instance (launching
+    # one with the node seed in its env if necessary).
+    if settings["auto_publish_tx"]:
         main_box_id = str(ConfigManager().get("publisher.SOURCE_PROFILE_BOX_ID", "") or "").strip()
         if not main_box_id:
             print(
@@ -718,34 +763,42 @@ def _announce_source_registration(
             )
         else:
             print(
-                "AUTO_PUBLISH_TX enabled — publishing the source opinion via the running "
-                "source-application instance (POST /api/sources; the instance signs with its "
-                "own seed)...",
+                "AUTO_PUBLISH_TX enabled — ensuring a seed-mode source-application instance "
+                "and publishing the source opinion (POST /api/sources)...",
                 flush=True,
             )
-            submitted = _submit_source_via_instance_api(
-                endpoint,
-                main_box_id=main_box_id,
-                file_hash=service_id,
-                content_hash=content_hash,
-                hash_function_id=hash_function_id,
-                manifest_url=manifest_url,
-                content_format=settings["content_format"],
-                raw_format=settings["raw_format"],
-                timeout_s=settings["timeout_s"],
-                max_retry=settings["max_retry"],
-                backoff_s=settings["backoff_s"],
-            )
-            if submitted:
+            endpoint = _ensure_seed_mode_source_application()
+            if not endpoint:
                 print(
-                    "✅ Source transaction submitted directly via the source-application instance.",
+                    "⚠️  Could not start a seed-mode source-application instance "
+                    "(need a configured 'source-application' core service + "
+                    "ledgers.ergo.WALLET_MNEMONIC + a running gateway). Falling back to a link.",
                     flush=True,
                 )
-                return
-            print(
-                "↩️  Auto submit unsuccessful — showing a manual registration link instead.",
-                flush=True,
-            )
+            else:
+                submitted = _submit_source_via_instance_api(
+                    endpoint,
+                    main_box_id=main_box_id,
+                    file_hash=service_id,
+                    content_hash=content_hash,
+                    hash_function_id=hash_function_id,
+                    manifest_url=manifest_url,
+                    content_format=settings["content_format"],
+                    raw_format=settings["raw_format"],
+                    timeout_s=settings["timeout_s"],
+                    max_retry=settings["max_retry"],
+                    backoff_s=settings["backoff_s"],
+                )
+                if submitted:
+                    print(
+                        "✅ Source transaction submitted directly via the source-application instance.",
+                        flush=True,
+                    )
+                    return
+                print(
+                    "↩️  Auto submit unsuccessful — showing a manual registration link instead.",
+                    flush=True,
+                )
 
     # Levels 2 & 3 — a prefilled click-to-add link on the configured web app. A running
     # instance does not change the target: only the static web app renders the add form.

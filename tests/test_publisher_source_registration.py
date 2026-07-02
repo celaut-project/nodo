@@ -53,15 +53,16 @@ def _announce(settings):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class AnnounceSourceRegistrationTests(unittest.TestCase):
-    # ---- Level 1: AUTO_PUBLISH_TX + running instance + profile box -> auto submit ----
+    # ---- Level 1: AUTO_PUBLISH_TX + profile box -> auto-launch seed instance + submit ----
     def test_level1_auto_submit_success_skips_link(self):
-        with patch.object(publisher, "_resolve_source_application_endpoint", return_value="http://10.0.0.2:9000"), \
+        with patch.object(publisher, "_ensure_seed_mode_source_application", return_value="http://10.0.0.2:8080") as ensure, \
              patch.object(publisher, "_submit_source_via_instance_api", return_value=True) as submit, \
              patch.object(publisher, "_print_click_to_add") as link, \
              patch.object(publisher, "ConfigManager") as cfg:
             cfg.return_value.get.return_value = "profilebox64hex"
             out = _announce(_settings(auto_publish_tx=True))
 
+        ensure.assert_called_once()  # the node auto-launches a seed-mode instance
         submit.assert_called_once()
         # The node's PROFILE box id is forwarded as the opinion author; no seed over HTTP.
         self.assertEqual(submit.call_args.kwargs["main_box_id"], "profilebox64hex")
@@ -71,19 +72,32 @@ class AnnounceSourceRegistrationTests(unittest.TestCase):
         self.assertIn("submitted directly", out)
 
     def test_level1_missing_profile_box_falls_back_to_web_link(self):
-        with patch.object(publisher, "_resolve_source_application_endpoint", return_value="http://10.0.0.2:9000"), \
+        with patch.object(publisher, "_ensure_seed_mode_source_application") as ensure, \
              patch.object(publisher, "_submit_source_via_instance_api") as submit, \
              patch.object(publisher, "_print_click_to_add") as link, \
              patch.object(publisher, "ConfigManager") as cfg:
             cfg.return_value.get.return_value = ""  # empty SOURCE_PROFILE_BOX_ID
             _announce(_settings(auto_publish_tx=True))
 
+        ensure.assert_not_called()  # no author identity -> don't even launch
         submit.assert_not_called()
         link.assert_called_once()
         self.assertEqual(link.call_args.args[0], "https://web.example/source?tab=add")
 
+    def test_level1_no_seed_instance_falls_back_to_web_link(self):
+        with patch.object(publisher, "_ensure_seed_mode_source_application", return_value=None), \
+             patch.object(publisher, "_submit_source_via_instance_api") as submit, \
+             patch.object(publisher, "_print_click_to_add") as link, \
+             patch.object(publisher, "ConfigManager") as cfg:
+            cfg.return_value.get.return_value = "profilebox64hex"
+            _announce(_settings(auto_publish_tx=True))
+
+        submit.assert_not_called()  # couldn't launch a seed-mode instance
+        link.assert_called_once()
+        self.assertEqual(link.call_args.args[0], "https://web.example/source?tab=add")
+
     def test_level1_submit_failure_falls_back_to_web_link(self):
-        with patch.object(publisher, "_resolve_source_application_endpoint", return_value="http://10.0.0.2:9000"), \
+        with patch.object(publisher, "_ensure_seed_mode_source_application", return_value="http://10.0.0.2:8080"), \
              patch.object(publisher, "_submit_source_via_instance_api", return_value=False), \
              patch.object(publisher, "_print_click_to_add") as link, \
              patch.object(publisher, "ConfigManager") as cfg:
@@ -93,32 +107,23 @@ class AnnounceSourceRegistrationTests(unittest.TestCase):
         link.assert_called_once()
         self.assertEqual(link.call_args.args[0], "https://web.example/source?tab=add")
 
-    # ---- Level 2: running instance, auto disabled -> web-page link (NOT the instance) ----
+    # ---- Level 2: auto disabled -> web-page link, never launches/submits ----
     def test_level2_web_link_when_auto_disabled(self):
-        with patch.object(publisher, "_resolve_source_application_endpoint", return_value="http://10.0.0.2:9000"), \
+        with patch.object(publisher, "_ensure_seed_mode_source_application") as ensure, \
              patch.object(publisher, "_submit_source_via_instance_api") as submit, \
              patch.object(publisher, "_print_click_to_add") as link:
             _announce(_settings(auto_publish_tx=False))
 
+        ensure.assert_not_called()
         submit.assert_not_called()
         link.assert_called_once()
         # The instance serves only /api + /mcp; the prefill link must target the web app.
         self.assertEqual(link.call_args.args[0], "https://web.example/source?tab=add")
 
-    # ---- Level 3: no instance, web page configured -> web-page link ----
-    def test_level3_web_page_link_when_no_instance(self):
-        with patch.object(publisher, "_resolve_source_application_endpoint", return_value=None), \
-             patch.object(publisher, "_print_click_to_add") as link:
-            _announce(_settings(auto_publish_tx=True))  # auto on but no instance
-
-        link.assert_called_once()
-        self.assertEqual(link.call_args.args[0], "https://web.example/source?tab=add")
-
-    # ---- Level 4: no instance, no web page -> manual message ----
+    # ---- Level 4: nothing configured -> manual message ----
     def test_level4_manual_message_when_nothing_configured(self):
-        with patch.object(publisher, "_resolve_source_application_endpoint", return_value=None), \
-             patch.object(publisher, "_print_click_to_add") as link:
-            out = _announce(_settings(source_application_web_page=""))
+        with patch.object(publisher, "_print_click_to_add") as link:
+            out = _announce(_settings(auto_publish_tx=False, source_application_web_page=""))
 
         link.assert_not_called()
         self.assertIn("Register the source manually", out)
