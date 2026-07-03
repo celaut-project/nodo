@@ -109,6 +109,11 @@ packer:
   PACKER_MEMORY_SIZE_FACTOR: 2.0
   ARM_PACKER_SUPPORT: true
   X86_PACKER_SUPPORT: true
+  # Optional URL of a remote celaut-packer-service. When set, `nodo pack` uploads
+  # any registry-hash dependencies to that service's /registry/<id> endpoint
+  # before packing (the packer's own registry is otherwise empty). Leave empty
+  # for local packing via the gateway.
+  PACKER_SERVICE_URL: ""
   docker:
     # Network used for docker buildx builds. "host" helps ensure DNS is reachable.
     BUILDX_NETWORK: "host"
