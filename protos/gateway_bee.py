@@ -16,3 +16,13 @@ PackOutput_indices = {
     3: pack_pb2.Service,
     4: pack_pb2.PackOutputError
 }
+
+# GetNetworkInstances: shared-disk (virtiofs) network peer discovery.
+# Input: the content id / anchor hash of the requested network.
+# Output: the co-located instances of that network on the answering node.
+GetNetworkInstances_input_indices = {
+    1: celaut_pb2.GetNetworkInstancesInput,
+}
+GetNetworkInstances_output_indices = {
+    1: celaut_pb2.GetNetworkInstancesOutput,
+}

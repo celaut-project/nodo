@@ -107,7 +107,8 @@ def launch_service(
                 metadata=metadata,
                 ignore_network=utils.get_network_name(direction=father_ip),
                 configuration=configuration,
-                recursion_guard_token=recursion_guard_token
+                recursion_guard_token=recursion_guard_token,
+                service=service
         ):
             try:
                 log.LOGGER(f'Service balancer select peer {peer}')

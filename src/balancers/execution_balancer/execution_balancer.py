@@ -12,10 +12,13 @@ from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.utils import service_extended, peers_id_iterator, \
-    generate_uris_by_peer_id
+    generate_uris_by_peer_id, read_service_from_disk
+from src.utils.networks import filter_placements_for_colocation, local_node_hosts_network
+from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
+sc = SQLConnection()
 
 SEND_ONLY_HASHES_ASKING_COST = env_manager.get("SEND_ONLY_HASHES_ASKING_COST")
 EXTERNAL_COST_TIMEOUT = env_manager.get("EXTERNAL_COST_TIMEOUT")
@@ -52,6 +55,15 @@ def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
     lines += [f"- Peer {peer_id}:{format_estimated_cost_simple(cost_proto)}" for peer_id, cost_proto in peers.items()]
     return "\n".join(lines)
 
+def _local_hosts_network(network_id: bytes) -> bool:
+    """Does this node already run an instance of the given shared-disk network?"""
+    return local_node_hosts_network(
+        network_id,
+        local_rows=sc.get_local_instances_with_service(),
+        load_service=read_service_from_disk,
+    )
+
+
 def execution_balancer(
         service_id: str,
         resources: celaut.Service.Container.Resources,
@@ -59,8 +71,9 @@ def execution_balancer(
         configuration: celaut_pb2.Configuration,
         ignore_network: str = None,
         recursion_guard_token: str = None,
+        service: celaut.Service = None,
 ) -> Generator[tuple[str, celaut_pb2.EstimatedCost], None, None]:
-    
+
     # sorted by cost, tuple of celaut.Instances or 'local' and cost
     peers: Dict[str, celaut_pb2.EstimatedCost] = {}
     
@@ -109,6 +122,20 @@ def execution_balancer(
                 log.LOGGER('Exception taking the cost for ' + peer_id + ': ' + str(e) + " (maybe it doesn't have the service)")
     except Exception as e:
         log.LOGGER('Error iterating peers on service balancer:' + str(e))
+
+    # Co-location gating for shared-disk (virtiofs) networks: an instance that
+    # declares a virtiofs network can only run where its network can be
+    # co-located (same node), so drop placements that would break disk sharing.
+    if service is not None:
+        try:
+            peers = filter_placements_for_colocation(
+                service=service,
+                peers=peers,
+                local_hosts_network=_local_hosts_network,
+                logger_fn=log.LOGGER,
+            )
+        except Exception as e:
+            log.LOGGER('Error applying virtiofs co-location placement gating: ' + str(e))
 
     try:
         log.LOGGER(f"Collected costs of execution {__pretty_format_peers(peers)}")

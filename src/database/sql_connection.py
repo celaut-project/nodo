@@ -488,6 +488,26 @@ class SQLConnection(metaclass=Singleton):
         ''')
         return [row['id'] for row in result.fetchall()]
 
+    def get_local_instances_with_service(self) -> List[dict]:
+        """
+        Fetches all internal instances together with the data needed to resolve
+        which shared-disk network they belong to.
+
+        Returns:
+            List[dict]: rows with keys id, service_id and serialized_instance.
+        """
+        result = self._execute('''
+            SELECT id, service_id, serialized_instance FROM local_instances
+        ''')
+        return [
+            {
+                "id": row["id"],
+                "service_id": row["service_id"],
+                "serialized_instance": row["serialized_instance"],
+            }
+            for row in result.fetchall()
+        ]
+
     def local_instance_name_exists(self, name: str) -> bool:
         result = self._execute('''
             SELECT COUNT(*)

@@ -329,6 +329,30 @@ message ModifyGasDepositOutput {
 }
 
 // -----------------------
+// SHARED-DISK / CO-LOCATION NETWORKS
+// A shared-disk network (e.g. virtiofs) is identified by its content, think
+// H(ABCD): the hash of the fixed anchor blob that instances holding the same
+// data write to disk. Instances that resolve to the same network_id are meant
+// to share disk, which requires them to be co-located on the same node.
+// -----------------------
+
+// Request an instance sends to its node: "give me the instances of network X".
+// The node only answers if network_id is among the networks declared in the
+// calling instance's own service spec (capability grant by declaration).
+message GetNetworkInstancesInput {
+    // Content id / anchor hash of the requested network (H(ABCD)).
+    bytes network_id = 1;
+}
+
+// Co-located instances of the requested shared-disk network.
+message GetNetworkInstancesOutput {
+    // Content id / anchor hash of the network these instances belong to.
+    bytes network_id = 1;
+    // Instances of the network that live on this node (co-located peers).
+    repeated Instance instances = 2;
+}
+
+// -----------------------
 // GATEWAY SERVICE DEFINITION
 // -----------------------
 
@@ -349,4 +373,5 @@ service Gateway {
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash -> Service
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage | bytes -> bytes
+    rpc GetNetworkInstances(stream buffer.Buffer) returns (stream buffer.Buffer) {} // GetNetworkInstancesInput -> GetNetworkInstancesOutput  (gated: caller must declare the network)
 }

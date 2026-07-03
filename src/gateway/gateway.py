@@ -13,10 +13,14 @@ from src.manager.manager import add_peer_instance, modify_gas_deposit, stop_inst
 from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import logger as log
-from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name
+from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name, \
+    read_service_from_disk
+from src.utils.networks import service_declares_network, find_local_network_instances
+from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
+sc = SQLConnection()
 MODIFY_RESOURCES_COST = env_manager.get("MODIFY_RESOURCES_COST")
 
 
@@ -197,6 +201,64 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 ),
                 indices=celaut_pb2.Metrics,
         )
+
+    def GetNetworkInstances(self, request_iterator, context, **kwargs):
+        """
+        Peer-discovery for shared-disk (virtiofs) networks.
+
+        The calling instance asks "give me the instances of network X". The node
+        answers ONLY if X is declared in the caller's own service spec (the
+        capability grant); otherwise it refuses. The returned instances are the
+        co-located instances of that network on this node, so the caller can set
+        up virtio-fs disk sharing with them.
+        """
+        try:
+            _input = next(bee.parse_from_buffer(
+                request_iterator=request_iterator,
+                indices=celaut_pb2.GetNetworkInstancesInput,
+                partitions_message_mode=True
+            ), None)
+            if _input is None:
+                raise Exception("Invalid input for GetNetworkInstances method.")
+            network_id = _input.network_id
+            log.LOGGER(f'Request for instances of network {network_id.hex()} by {context.peer()}')
+
+            # Identify the calling instance from its IP and load its service spec.
+            caller_ip = get_only_the_ip_from_context(context_peer=context.peer())
+            caller_id = get_internal_service_id_by_uri(uri=caller_ip)
+            if not caller_id:
+                raise Exception(
+                    f'GetNetworkInstances denied: caller {caller_ip} is not a known local instance.'
+                )
+            caller_service = read_service_from_disk(
+                service_hash=sc.get_service_id_by_container_id(id=caller_id)
+            )
+
+            # Capability gate: the node grants nothing outside the caller's own
+            # declared networks.
+            if caller_service is None or not service_declares_network(caller_service, network_id):
+                raise Exception(
+                    f'GetNetworkInstances denied: instance {caller_id} does not declare '
+                    f'network {network_id.hex()} in its service spec.'
+                )
+
+            instances = find_local_network_instances(
+                network_id,
+                local_rows=sc.get_local_instances_with_service(),
+                load_service=read_service_from_disk,
+            )
+            log.LOGGER(
+                f'Returning {len(instances)} co-located instance(s) for network {network_id.hex()}.'
+            )
+
+            yield from bee.serialize_to_buffer(
+                message_iterator=celaut_pb2.GetNetworkInstancesOutput(
+                    network_id=network_id,
+                    instances=instances,
+                )
+            )
+        except Exception as e:
+            raise Exception('Error in GetNetworkInstances method: ' + str(e))
 
     def SignPublicKey(self, request_iterator, context, **kwargs):
         try:

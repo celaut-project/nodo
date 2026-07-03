@@ -114,6 +114,60 @@ IPs and MACs are derived from the `vmachine_id` without DHCP to ensure stability
 
 ---
 
+## Shared-Disk (virtiofs) Networks — Virtualizer Requirements
+
+Some services need to **share a disk** between instances (e.g. one instance
+writes data and another, with read-only access, analyzes it; or Hadoop/Spark
+clusters). This is modeled as a **shared-disk network**: a service declares a
+`Service.Network` whose `protocol_stack` advertises the `virtiofs` tag, and
+whose content id — think `H(ABCD)` — is the sha256 of the fixed anchor blob
+(`Service.Network.formal`) that each participating service writes to disk.
+
+The **node-side** logic for this already exists (independent of the backend):
+
+* Network identity, virtiofs detection and membership resolution:
+  `src/utils/networks.py`.
+* **Placement/co-location gating:** `execution_balancer` pins an instance that
+  declares a virtiofs network to a host that can co-locate it with the other
+  instances of that network (same node). See
+  `filter_placements_for_colocation`.
+* **Peer discovery:** the `GetNetworkInstances` Gateway rpc returns the
+  co-located instances of a network to a caller, gated so the node only answers
+  for networks the caller declares in its own spec.
+
+What remains is **backend-specific** and MUST be implemented in the CH
+`execute`/lifecycle path to actually complete the mount (flagged as follow-up —
+this repo does not fake it):
+
+1. **virtiofsd daemon per shared-disk network.** When the first instance of a
+   virtiofs network is placed on this host, start a `virtiofsd` (or CH built-in
+   virtio-fs) backend exporting the network's shared directory on the host
+   (keyed by the network content id). Reuse the same daemon/socket for
+   subsequent co-located instances of that network.
+2. **virtio-fs device per guest.** Attach a `--fs tag=<network-id>,socket=…`
+   device to each participating microVM so the guest can mount the shared
+   directory (e.g. `mount -t virtiofs <network-id> /shared`). Read-only members
+   must be exported/mounted read-only.
+3. **Anchor placement.** Ensure the service's fixed `ABCD` anchor blob is
+   present in the shared directory so instances holding the same data resolve to
+   the same network id (this is how membership is established).
+4. **Lifecycle & cleanup.** Tear down the `virtiofsd` daemon and its socket when
+   the last instance of the network on this host is removed; account for the
+   shared directory in `remove`/cleanup.
+5. **Security.** Confine each `virtiofsd` export to its own directory and apply
+   the same "deny by default" posture used for networking (path confinement,
+   no cross-network access).
+
+> **Open question / assumption:** the current placement gate is
+> *local-authoritative* — it pins virtiofs instances to the local node and drops
+> remote peers, which is always safe (never breaks disk sharing) but means a
+> virtiofs network cannot yet be *seeded onto a remote peer* that already hosts
+> it. Distributed seeding would query peers via `GetNetworkInstances` during
+> placement and route to the peer that owns the network; that negotiation is
+> intentionally left as future work.
+
+---
+
 ## Success Criteria
 * Services run with strong isolation without changes to the system API.
 * `interface.py` supports both `docker` and `cloud_hypervisor` via configuration.
