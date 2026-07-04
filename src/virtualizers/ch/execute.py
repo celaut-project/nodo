@@ -23,6 +23,7 @@ from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_bytes
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
+from src.virtualizers.ch import virtiofs as ch_virtiofs
 from src.virtualizers.entry_path import resolve_entrypoint_path
 from src.virtualizers.firewall import (
     TransportProtocol,
@@ -47,6 +48,9 @@ KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.ch.KERNEL_CMDLINE_EXTRA", "
 CH_SERIAL_MODE = env_manager.get("virtualizers.ch.SERIAL_MODE", "file")
 CH_CONSOLE_MODE = env_manager.get("virtualizers.ch.CONSOLE_MODE", "off")
 CH_API_SOCKET_DIR = env_manager.get("virtualizers.ch.API_SOCKET_DIR", "/tmp/nodo-ch")
+# Shared-disk (virtiofs) networks.
+VIRTIOFSD_PATH = env_manager.get("virtualizers.ch.VIRTIOFSD_PATH", "virtiofsd")
+VIRTIOFS_SANDBOX = env_manager.get("virtualizers.ch.VIRTIOFS_SANDBOX", "chroot")
 GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
     "virtualizers.ch.GUEST_NETWORK_READY_TIMEOUT_S",
     8,
@@ -891,6 +895,7 @@ def execute(
     stderr_path = runtime_dir / "cloud-hypervisor.stderr.log"
     serial_log_path: Optional[Path] = None
     resolved_entrypoint: Optional[str] = None
+    virtiofs_mounts_state: List[Dict[str, object]] = []
 
     try:
         log.LOGGER(f"[CH][{vmachine_id}] event=start")
@@ -996,6 +1001,34 @@ def execute(
         )
         log.LOGGER(f"[CH][{vmachine_id}] guest entrypoint injection completed: /.__nodo_entrypoint")
 
+        # Shared-disk (virtiofs) networks: start/reuse a virtiofsd daemon per
+        # declared network, splice a virtio-fs device per network into the CH
+        # command, and hand the guest a mount plan. No-op when the service
+        # declares no virtiofs network.
+        virtiofs_base_dir = str(Path(CACHE) / "cloud_hypervisor" / "virtiofs")
+        fs_device_args, virtiofs_mounts_state, virtiofs_mounts = ch_virtiofs.attach_virtiofs_backends(
+            service,
+            base_dir=virtiofs_base_dir,
+            socket_dir=CH_API_SOCKET_DIR,
+            virtiofsd_binary=VIRTIOFSD_PATH,
+            sandbox=VIRTIOFS_SANDBOX,
+            logger_fn=log.LOGGER,
+        )
+        if virtiofs_mounts:
+            mount_plan_host_path = runtime_dir / ".__nodo_virtiofs"
+            with open(mount_plan_host_path, "w", encoding="utf-8") as f:
+                f.write(ch_virtiofs.build_guest_mount_plan(virtiofs_mounts))
+            _run_debugfs_write(
+                image_path=rootfs_path,
+                host_file=mount_plan_host_path,
+                guest_target=ch_virtiofs.GUEST_MOUNT_PLAN_PATH,
+            )
+            log.LOGGER(
+                f"[CH][{vmachine_id}] virtiofs: {len(virtiofs_mounts)} shared-disk "
+                f"network(s) attached; guest mount plan injected at "
+                f"{ch_virtiofs.GUEST_MOUNT_PLAN_PATH}"
+            )
+
         tap_name = _create_tap(vmachine_id)
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
@@ -1036,6 +1069,8 @@ def execute(
             "--cmdline",
             kernel_cmdline,
         ]
+        if fs_device_args:
+            start_command.extend(fs_device_args)
         start_command.extend(stream_args)
         log.LOGGER(f"[CH][{vmachine_id}] launching cloud-hypervisor: {' '.join(start_command)}")
 
@@ -1143,6 +1178,7 @@ def execute(
                 "mac": mac,
                 "rootfs_path": str(rootfs_path),
                 "entrypoint": resolved_entrypoint,
+                "virtiofs": virtiofs_mounts_state,
                 "dnat_rules": dnat_rules_state,
                 "cleanup_rules": cleanup_rules,
                 "dns_allowlist": [
@@ -1194,6 +1230,21 @@ def execute(
         if tap_name:
             log.LOGGER(f"[CH][{vmachine_id}] deleting TAP interface: {tap_name}")
             _delete_tap(tap_name)
+
+        if virtiofs_mounts_state:
+            log.LOGGER(f"[CH][{vmachine_id}] releasing {len(virtiofs_mounts_state)} virtiofs backend(s)")
+            try:
+                # Runtime state for this VM was never persisted (failure before
+                # save), so list_runtime_states() reflects only the other VMs.
+                ch_virtiofs.teardown_virtiofs_for_vm(
+                    vmachine_id,
+                    virtiofs_mounts_state,
+                    list_runtime_states(),
+                    base_dir=str(Path(CACHE) / "cloud_hypervisor" / "virtiofs"),
+                    logger_fn=log.LOGGER,
+                )
+            except Exception as vfs_e:
+                log.LOGGER(f"[CH][{vmachine_id}] virtiofs teardown error during cleanup: {vfs_e}")
 
         log.LOGGER(f"[CH][{vmachine_id}] deleting runtime state entry")
         delete_runtime_state(vmachine_id)

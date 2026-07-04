@@ -22,6 +22,12 @@ sc = SQLConnection()
 
 SEND_ONLY_HASHES_ASKING_COST = env_manager.get("SEND_ONLY_HASHES_ASKING_COST")
 EXTERNAL_COST_TIMEOUT = env_manager.get("EXTERNAL_COST_TIMEOUT")
+# Opt-in: route a virtiofs instance to a remote peer that already hosts its
+# shared-disk network (co-locate there) instead of always seeding locally.
+# Off by default: it probes peers via the GetNetworkInstances rpc, which the
+# peer authorizes per its own policy — where the probe is denied/unavailable the
+# placement safely falls back to local seeding (see filter_placements_for_colocation).
+VIRTIOFS_DISTRIBUTED_SEEDING = env_manager.get("virtualizers.ch.VIRTIOFS_DISTRIBUTED_SEEDING", False)
 
 def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
     
@@ -62,6 +68,35 @@ def _local_hosts_network(network_id: bytes) -> bool:
         local_rows=sc.get_local_instances_with_service(),
         load_service=read_service_from_disk,
     )
+
+
+def _remote_hosts_network(peer_id: str, network_id: bytes) -> bool:
+    """
+    Best-effort: does ``peer_id`` already host an instance of the shared-disk
+    network? Probes the peer's GetNetworkInstances rpc. Any error / denial is
+    treated as 'does not host', so distributed seeding only ever adds a valid
+    co-location target and never breaks disk sharing on failure.
+    """
+    try:
+        uri = next(generate_uris_by_peer_id(peer_id), None)
+        if not uri:
+            return False
+        output = next(bee.client_grpc(
+            method=celaut_pb2_grpc.GatewayStub(
+                grpc.insecure_channel(uri)
+            ).GetNetworkInstances,
+            indices_parser=celaut_pb2.GetNetworkInstancesOutput,
+            partitions_message_mode_parser=True,
+            input=celaut_pb2.GetNetworkInstancesInput(network_id=network_id),
+            timeout=EXTERNAL_COST_TIMEOUT,
+        ), None)
+        return output is not None and len(output.instances) > 0
+    except Exception as e:
+        log.LOGGER(
+            f"Virtiofs distributed-seeding probe to peer {peer_id} failed "
+            f"(treating as not hosting): {e}"
+        )
+        return False
 
 
 def execution_balancer(
@@ -132,6 +167,7 @@ def execution_balancer(
                 service=service,
                 peers=peers,
                 local_hosts_network=_local_hosts_network,
+                remote_hosts_network=_remote_hosts_network if VIRTIOFS_DISTRIBUTED_SEEDING else None,
                 logger_fn=log.LOGGER,
             )
         except Exception as e:

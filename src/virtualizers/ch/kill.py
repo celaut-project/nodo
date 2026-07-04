@@ -7,10 +7,12 @@ from typing import Dict, Iterable, List, Optional
 
 from src.utils import logger as log
 from src.utils.config import ConfigManager
+from src.virtualizers.ch import virtiofs as ch_virtiofs
 from src.virtualizers.ch.cgroups import remove_vm_cgroup
 from src.virtualizers.ch.process import pid_matches_vmachine
 from src.virtualizers.ch.runtime_state import (
     delete_runtime_state,
+    list_runtime_states,
     load_runtime_state,
 )
 
@@ -101,6 +103,7 @@ def kill(vmachine_id: str) -> bool:
     tap_name = str(state.get("tap") or "")
     cleanup_rules = state.get("cleanup_rules") or []
     cgroup_path = str(state.get("cgroup_path") or "")
+    virtiofs_mounts = state.get("virtiofs") or []
     runtime_dir = _runtime_dir(vmachine_id)
     api_socket = str(state.get("api_socket") or "").strip()
 
@@ -109,6 +112,21 @@ def kill(vmachine_id: str) -> bool:
     _cleanup_dnat_rules(vmachine_id=vmachine_id, cleanup_rules=cleanup_rules)
     _cleanup_tap(vmachine_id=vmachine_id, tap_name=tap_name)
     remove_vm_cgroup(vmachine_id=vmachine_id, cgroup_path=cgroup_path)
+
+    if virtiofs_mounts and CACHE:
+        # Reference-counted: stop each network's virtiofsd only if no other live
+        # VM still uses it. list_runtime_states() still includes this VM, but the
+        # teardown skips it by vmachine_id when counting other users.
+        try:
+            ch_virtiofs.teardown_virtiofs_for_vm(
+                vmachine_id,
+                virtiofs_mounts,
+                list_runtime_states(),
+                base_dir=str(Path(CACHE) / "cloud_hypervisor" / "virtiofs"),
+                logger_fn=log.LOGGER,
+            )
+        except Exception as e:
+            log.LOGGER(f"[CH][{vmachine_id}] error releasing virtiofs backends: {e}")
 
     socket_path = Path(api_socket) if api_socket else _api_socket_path(vmachine_id)
     try:

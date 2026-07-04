@@ -135,36 +135,54 @@ The **node-side** logic for this already exists (independent of the backend):
   co-located instances of a network to a caller, gated so the node only answers
   for networks the caller declares in its own spec.
 
-What remains is **backend-specific** and MUST be implemented in the CH
-`execute`/lifecycle path to actually complete the mount (flagged as follow-up —
-this repo does not fake it):
+The **backend-specific** mount is implemented in `src/virtualizers/ch/virtiofs.py`
+and wired into the CH `execute`/`kill` lifecycle. Per virtiofs network an
+instance declares:
 
-1. **virtiofsd daemon per shared-disk network.** When the first instance of a
-   virtiofs network is placed on this host, start a `virtiofsd` (or CH built-in
-   virtio-fs) backend exporting the network's shared directory on the host
-   (keyed by the network content id). Reuse the same daemon/socket for
-   subsequent co-located instances of that network.
-2. **virtio-fs device per guest.** Attach a `--fs tag=<network-id>,socket=…`
-   device to each participating microVM so the guest can mount the shared
-   directory (e.g. `mount -t virtiofs <network-id> /shared`). Read-only members
-   must be exported/mounted read-only.
-3. **Anchor placement.** Ensure the service's fixed `ABCD` anchor blob is
-   present in the shared directory so instances holding the same data resolve to
-   the same network id (this is how membership is established).
-4. **Lifecycle & cleanup.** Tear down the `virtiofsd` daemon and its socket when
-   the last instance of the network on this host is removed; account for the
-   shared directory in `remove`/cleanup.
-5. **Security.** Confine each `virtiofsd` export to its own directory and apply
-   the same "deny by default" posture used for networking (path confinement,
-   no cross-network access).
+1. **virtiofsd daemon per shared-disk network.** *(done)* The first instance of
+   a network on this host starts a `virtiofsd` exporting the network's shared
+   directory (under `${CACHE}/cloud_hypervisor/virtiofs/<network-id>/shared`),
+   keyed by the network content id. Co-located siblings reuse the same daemon
+   and socket (`ensure_network_backend` is idempotent).
+2. **virtio-fs device per guest.** *(done)* `execute` splices a
+   `--fs tag=<vfs-…>,socket=…` device per network into the cloud-hypervisor
+   command and injects a guest mount plan (`/.__nodo_virtiofs`) listing
+   `{tag, path, ro}` for each disk. **Guest-init contract:** the initramfs
+   mounts each entry (`mount -t virtiofs <tag> <path>`, adding `-o ro` when
+   `ro` is set) — the one remaining guest-side step.
+3. **Anchor placement.** *(done)* The service's fixed `ABCD` anchor blob
+   (`Service.Network.formal`) is written into the shared directory once, so
+   instances holding the same data resolve to the same network id.
+4. **Lifecycle & cleanup.** *(done)* `kill` reference-counts the network across
+   the CH runtime states and stops the `virtiofsd` + removes its socket only
+   when the last instance on this host goes away. The shared directory (the
+   data) is preserved.
+5. **Security.** *(done)* Each `virtiofsd` is confined to its own export dir via
+   `--sandbox chroot` (configurable), directories are `0700`, deny-by-default —
+   no cross-network access.
 
-> **Open question / assumption:** the current placement gate is
-> *local-authoritative* — it pins virtiofs instances to the local node and drops
-> remote peers, which is always safe (never breaks disk sharing) but means a
-> virtiofs network cannot yet be *seeded onto a remote peer* that already hosts
-> it. Distributed seeding would query peers via `GetNetworkInstances` during
-> placement and route to the peer that owns the network; that negotiation is
-> intentionally left as future work.
+### Read-only shared disks
+A service asks for a **read-only** mount by adding a read-only tag
+(`readonly` / `ro`, see `networks.READONLY_PROTOCOL_TAGS`) to its own virtiofs
+network declaration — no proto change, since network/protocol `tags` are
+free-form (the same mechanism virtiofs itself rides on). Read-only is a property
+of *this service's declaration*, not of the network identity: a read-write
+writer and a read-only reader still resolve to the same `H(ABCD)` and share one
+daemon + directory; the `ro` flag only changes that guest's mount options.
+
+### Distributed seeding (opt-in)
+`filter_placements_for_colocation` is now peer-aware. By default placement stays
+*local-authoritative* (pin/seed locally — always safe). With
+`virtualizers.ch.VIRTIOFS_DISTRIBUTED_SEEDING=true` the balancer probes peers
+via `GetNetworkInstances`; if a peer already hosts *all* the declared virtiofs
+networks the new instance is routed there to co-locate. Probes are best-effort —
+a denied/unavailable peer is treated as "not hosting", so placement degrades to
+the safe local-seed path and never breaks disk sharing.
+
+> **Still open (intentionally unsolved):** *who* launches the very first
+> instance of a network when **no** node hosts `H(ABCD)` yet (cross-node seed
+> election). We simply seed locally, which is always safe; global seed election
+> is left as future work.
 
 ---
 
