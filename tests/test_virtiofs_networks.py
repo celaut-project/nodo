@@ -201,108 +201,72 @@ class LocalMembershipTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class PlacementGatingTests(unittest.TestCase):
-    def _cost(self):
-        return celaut.EstimatedCost()
+class GuestDeclarationTests(unittest.TestCase):
+    """Guest membership: 'never seed, only join where the network exists'."""
 
-    def test_non_virtiofs_service_placement_unchanged(self):
+    def test_default_network_is_seed_not_guest(self):
+        self.assertFalse(networks.network_is_guest(_virtiofs_network()))
+
+    def test_guest_via_network_tag(self):
+        self.assertTrue(networks.network_is_guest(_virtiofs_network(tags=("shared-disk", "guest"))))
+
+    def test_guest_via_protocol_tag_case_insensitive(self):
+        self.assertTrue(networks.network_is_guest(_virtiofs_network(protocol_tags=("virtiofs", "GUEST"))))
+
+    def test_guest_does_not_change_identity(self):
+        seed = _virtiofs_network(anchor=ABCD, tags=("shared-disk",))
+        guest = _virtiofs_network(anchor=ABCD, tags=("shared-disk", "guest"))
+        self.assertEqual(networks.network_content_id(seed), networks.network_content_id(guest))
+
+    def test_declared_networks_surfaces_guest_flag(self):
+        [d] = networks.declared_networks(_service([_virtiofs_network(tags=("shared-disk", "guest"))]))
+        self.assertTrue(d.guest)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class NodeAdmissibilityTests(unittest.TestCase):
+    """
+    Whether a node can host a service given its virtiofs networks. This is the
+    self-check each node applies (locally and when a peer asks for its cost).
+    """
+
+    def test_non_virtiofs_service_always_admissible(self):
         svc = _service([_http_network()])
-        peers = {"local": self._cost(), "peerA": self._cost()}
-        out = networks.filter_placements_for_colocation(
-            svc, peers, local_hosts_network=lambda _nid: False
-        )
-        self.assertEqual(set(out), {"local", "peerA"})
+        self.assertTrue(networks.node_can_host_service(svc, lambda _nid: False))
 
-    def test_virtiofs_already_local_pins_local(self):
+    def test_seed_network_admissible_anywhere(self):
+        # No guest tag -> node may create the disk -> admissible even if absent.
         svc = _service([_virtiofs_network()])
-        peers = {"local": self._cost(), "peerA": self._cost(), "peerB": self._cost()}
-        out = networks.filter_placements_for_colocation(
-            svc, peers, local_hosts_network=lambda _nid: True
-        )
-        self.assertEqual(set(out), {"local"})
+        self.assertTrue(networks.node_can_host_service(svc, lambda _nid: False))
+        self.assertTrue(networks.node_can_host_service(svc, lambda _nid: True))
 
-    def test_virtiofs_seed_prefers_local_and_drops_peers(self):
-        svc = _service([_virtiofs_network()])
-        peers = {"local": self._cost(), "peerA": self._cost()}
-        out = networks.filter_placements_for_colocation(
-            svc, peers, local_hosts_network=lambda _nid: False
-        )
-        self.assertEqual(set(out), {"local"})
+    def test_guest_network_requires_local_presence(self):
+        svc = _service([_virtiofs_network(tags=("shared-disk", "guest"))])
+        self.assertFalse(networks.node_can_host_service(svc, lambda _nid: False))
+        self.assertTrue(networks.node_can_host_service(svc, lambda _nid: True))
 
-    def test_virtiofs_without_local_capacity_yields_no_placement(self):
-        svc = _service([_virtiofs_network()])
-        peers = {"peerA": self._cost(), "peerB": self._cost()}
-        messages = []
-        out = networks.filter_placements_for_colocation(
-            svc, peers, local_hosts_network=lambda _nid: False, logger_fn=messages.append
-        )
-        self.assertEqual(out, {})
-        self.assertTrue(any("co-location" in m.lower() for m in messages))
+    def test_guest_only_checks_its_own_network(self):
+        # Guest network present locally, but only THAT id counts.
+        guest_net = _virtiofs_network(anchor=b"g", tags=("shared-disk", "guest"))
+        gid = networks.network_content_id(guest_net)
+        svc = _service([guest_net])
+        self.assertTrue(networks.node_can_host_service(svc, lambda nid: nid == gid))
+        self.assertFalse(networks.node_can_host_service(svc, lambda nid: nid != gid))
 
-    def test_input_dict_not_mutated(self):
-        svc = _service([_virtiofs_network()])
-        peers = {"local": self._cost(), "peerA": self._cost()}
-        networks.filter_placements_for_colocation(
-            svc, peers, local_hosts_network=lambda _nid: True
-        )
-        self.assertEqual(set(peers), {"local", "peerA"})
+    def test_mixed_seed_and_guest(self):
+        seed = _virtiofs_network(anchor=b"seed")
+        guest = _virtiofs_network(anchor=b"guest-net", tags=("shared-disk", "guest"))
+        gid = networks.network_content_id(guest)
+        svc = _service([seed, guest])
+        # Admissible only where the guest network already exists.
+        self.assertTrue(networks.node_can_host_service(svc, lambda nid: nid == gid))
+        self.assertFalse(networks.node_can_host_service(svc, lambda _nid: False))
 
-    def test_local_hosting_beats_remote_hosting(self):
-        # If the local node hosts the network it wins even when a peer hosts it.
-        svc = _service([_virtiofs_network()])
-        peers = {"local": self._cost(), "peerA": self._cost()}
-        out = networks.filter_placements_for_colocation(
-            svc, peers,
-            local_hosts_network=lambda _nid: True,
-            remote_hosts_network=lambda _pid, _nid: True,
-        )
-        self.assertEqual(set(out), {"local"})
-
-    def test_distributed_seeding_routes_to_hosting_peer(self):
-        # Local doesn't host it, peerB does -> co-locate on peerB, drop the rest.
-        svc = _service([_virtiofs_network()])
-        peers = {"local": self._cost(), "peerA": self._cost(), "peerB": self._cost()}
-        out = networks.filter_placements_for_colocation(
-            svc, peers,
-            local_hosts_network=lambda _nid: False,
-            remote_hosts_network=lambda pid, _nid: pid == "peerB",
-        )
-        self.assertEqual(set(out), {"peerB"})
-
-    def test_distributed_seeding_can_place_without_local(self):
-        # No local candidate at all, but a peer hosts the network: placeable.
-        svc = _service([_virtiofs_network()])
-        peers = {"peerA": self._cost(), "peerB": self._cost()}
-        out = networks.filter_placements_for_colocation(
-            svc, peers,
-            local_hosts_network=lambda _nid: False,
-            remote_hosts_network=lambda pid, _nid: pid == "peerA",
-        )
-        self.assertEqual(set(out), {"peerA"})
-
-    def test_no_host_anywhere_falls_back_to_local_seed(self):
-        svc = _service([_virtiofs_network()])
-        peers = {"local": self._cost(), "peerA": self._cost()}
-        out = networks.filter_placements_for_colocation(
-            svc, peers,
-            local_hosts_network=lambda _nid: False,
-            remote_hosts_network=lambda _pid, _nid: False,
-        )
-        self.assertEqual(set(out), {"local"})
-
-    def test_multi_network_requires_a_single_node_hosting_all(self):
-        # Two virtiofs disks; peerA hosts only one -> not a valid target; seed local.
-        net1 = _virtiofs_network(anchor=b"one")
-        net2 = _virtiofs_network(anchor=b"two")
-        id1 = networks.network_content_id(net1)
-        svc = _service([net1, net2])
-        peers = {"local": self._cost(), "peerA": self._cost()}
-        out = networks.filter_placements_for_colocation(
-            svc, peers,
-            local_hosts_network=lambda _nid: False,
-            remote_hosts_network=lambda pid, nid: pid == "peerA" and nid == id1,
-        )
-        self.assertEqual(set(out), {"local"})
+    def test_declines_are_logged(self):
+        svc = _service([_virtiofs_network(tags=("shared-disk", "guest"))])
+        msgs = []
+        networks.node_can_host_service(svc, lambda _nid: False, logger_fn=msgs.append)
+        self.assertTrue(any("guest" in m.lower() for m in msgs))
 
 
 if __name__ == "__main__":

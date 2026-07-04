@@ -46,6 +46,17 @@ VIRTIOFS_PROTOCOL_TAGS = frozenset({"virtiofs", "virtio-fs", "virtio_fs", "virti
 # So the read-only tag is intentionally excluded from the content id.
 READONLY_PROTOCOL_TAGS = frozenset({"readonly", "read-only", "read_only", "ro"})
 
+# Guest membership convention.
+#
+# A shared-disk network member is a *guest* when it never wants to CREATE the
+# disk — i.e. it must never be the first/seed instance of the network. It may
+# only run where instances of that network already exist. A member without this
+# tag is a *seed*: it is willing to create the disk and can run anywhere.
+#
+# Like read-only, this is a free-form tag on the service's own network
+# declaration (no proto change) and does NOT affect the network content id.
+GUEST_PROTOCOL_TAGS = frozenset({"guest"})
+
 
 def _normalized_tags(tags: Iterable[str]) -> List[str]:
     return [str(t).strip().lower() for t in tags if str(t).strip()]
@@ -73,6 +84,21 @@ def network_is_readonly(network: celaut.Service.Network) -> bool:
         return True
     return any(
         any(tag in READONLY_PROTOCOL_TAGS for tag in _normalized_tags(p.tags))
+        for p in network.protocol_stack
+    )
+
+
+def network_is_guest(network: celaut.Service.Network) -> bool:
+    """
+    True when this service joins the shared-disk network only as a *guest* — it
+    must never be the first/seed instance and may only run where the network
+    already exists. Detected from a ``guest`` tag on the network's own ``tags``
+    or any entry of its ``protocol_stack`` (case-insensitive).
+    """
+    if any(tag in GUEST_PROTOCOL_TAGS for tag in _normalized_tags(network.tags)):
+        return True
+    return any(
+        any(tag in GUEST_PROTOCOL_TAGS for tag in _normalized_tags(p.tags))
         for p in network.protocol_stack
     )
 
@@ -126,6 +152,7 @@ class DeclaredNetwork(NamedTuple):
     network_id_hex: str     # hex form, handy for paths / logs / rpc display
     virtiofs: bool          # shared-disk (virtiofs) network?
     readonly: bool          # does this service want it mounted read-only?
+    guest: bool             # guest-only (never seeds) — runs only where it exists
     tags: List[str]         # the network's own declared tags (normalized)
 
 
@@ -156,6 +183,7 @@ def declared_networks(
                 network_id_hex=nid.hex(),
                 virtiofs=virtiofs,
                 readonly=network_is_readonly(network),
+                guest=network_is_guest(network),
                 tags=_normalized_tags(network.tags),
             )
         )
@@ -219,103 +247,36 @@ def local_node_hosts_network(
     ) > 0
 
 
-def filter_placements_for_colocation(
+def node_can_host_service(
     service: celaut.Service,
-    peers: dict,
-    *,
     local_hosts_network: Callable[[bytes], bool],
-    remote_hosts_network: Optional[Callable[[str, bytes], bool]] = None,
+    *,
     logger_fn: Callable[[str], None] = lambda _msg: None,
-) -> dict:
+) -> bool:
     """
-    Restrict candidate placements so that virtiofs shared-disk networks stay
-    co-located on a single node.
+    Can THIS node run ``service`` given its shared-disk (virtiofs) networks?
 
-    ``peers`` maps ``peer_id`` (or the literal ``'local'``) to its EstimatedCost.
+    This is the co-location admissibility check every node applies to itself when
+    asked (locally, or by a peer via the normal ``GetServiceEstimatedCost`` call).
+    A node that returns ``False`` simply reports no cost, so the launcher never
+    selects it — there is no separate placement negotiation.
 
-    A valid placement is a single node that already hosts *every* virtiofs
-    network the service declares (an instance that shares two disks must run
-    where BOTH live), or — when nobody hosts them yet — a seed node.
+    Rules, per declared virtiofs network:
+      * **seed** (no ``guest`` tag): the node is willing to CREATE the disk, so it
+        can host the service anywhere — hosting is allowed regardless of whether
+        the network already exists here.
+      * **guest** (``guest`` tag): the service must never be the first instance,
+        so the node may host it ONLY if it already hosts that network locally
+        (virtio-fs is host-local, so "already exists" means on this node).
 
-    Policy:
-      * If the service declares no virtiofs network, placement is unchanged.
-      * If THIS node already hosts all the declared virtiofs networks, the new
-        instance MUST run locally to share their disk: every remote peer is
-        dropped, leaving only ``'local'``.
-      * Else, when ``remote_hosts_network`` is supplied (distributed seeding),
-        query peers and, if any peer already hosts all the declared virtiofs
-        networks, co-locate the instance THERE — restrict placement to those
-        peers and drop everything else. This is how a virtiofs network is seeded
-        onto a remote peer that already owns it.
-      * Otherwise this is the very first seed of the network. virtio-fs needs a
-        same-host shared disk, so the instance is pinned to the local node and
-        remote peers are dropped (if the local node has no capacity, no
-        co-locating placement exists and an empty set is returned).
-
-    NOTE: *who* launches the first-ever instance of a network when no node hosts
-    it yet (cross-node seed election) is deliberately out of scope — we simply
-    seed locally, which is always safe.
-
-    ``remote_hosts_network(peer_id, network_id) -> bool`` is best-effort: any
-    peer it can't answer for is treated as not hosting the network, so failures
-    only ever fall back to the safe local-seed path (never break disk sharing).
-
-    Returns the filtered ``peers`` dict (never mutates the input).
+    A service with no virtiofs network is always admissible.
     """
-    virtiofs_ids = declared_network_ids(service, only_virtiofs=True)
-    if not virtiofs_ids:
-        return peers
-
-    # A node is a valid co-location target only if it hosts ALL declared
-    # virtiofs networks (their instances must share every one of those disks).
-    def _node_hosts_all(probe: Callable[[bytes], bool]) -> bool:
-        return all(probe(nid) for nid in virtiofs_ids)
-
-    if _node_hosts_all(local_hosts_network):
-        if "local" in peers:
+    for summary in declared_networks(service, only_virtiofs=True):
+        if summary.guest and not local_hosts_network(summary.network_id):
             logger_fn(
-                "Virtiofs co-location: network already hosted locally; pinning "
-                "instance to the local node and dropping remote peers."
+                f"Virtiofs: cannot host service — guest-only network "
+                f"{summary.network_id_hex} is not present on this node; a guest "
+                "instance may only run where the network already exists."
             )
-            return {"local": peers["local"]}
-        # We host the network locally but have no local execution capacity, and
-        # a remote peer cannot share this node's disk. No safe placement.
-        logger_fn(
-            "Virtiofs co-location: network hosted locally but the local node "
-            "has no execution capacity; no co-locating placement is available."
-        )
-        return {}
-
-    # Distributed seeding: route to a peer that already owns the whole network.
-    if remote_hosts_network is not None:
-        remote_targets = {
-            peer_id: cost
-            for peer_id, cost in peers.items()
-            if peer_id != "local"
-            and all(remote_hosts_network(peer_id, nid) for nid in virtiofs_ids)
-        }
-        if remote_targets:
-            logger_fn(
-                "Virtiofs co-location: shared-disk network already hosted by "
-                f"peer(s) {sorted(remote_targets)}; routing instance there to "
-                "co-locate and dropping non-hosting candidates."
-            )
-            return remote_targets
-
-    if "local" in peers:
-        logger_fn(
-            "Virtiofs co-location: seeding shared-disk network locally so "
-            "future siblings can co-locate; dropping remote peers."
-        )
-        return {"local": peers["local"]}
-
-    # No local capacity for a virtiofs service and no peer already hosts it. We
-    # refuse to delegate to a peer that cannot be guaranteed to co-locate the
-    # whole network. Return no candidates so the launcher surfaces a placement
-    # failure rather than silently breaking disk sharing.
-    logger_fn(
-        "Virtiofs co-location: service declares a shared-disk network but the "
-        "local node cannot host it and no peer already owns it; no co-locating "
-        f"placement is available (dropped {len(peers)} remote peer candidate(s))."
-    )
-    return {}
+            return False
+    return True

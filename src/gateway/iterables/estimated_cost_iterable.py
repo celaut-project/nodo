@@ -10,7 +10,19 @@ from src.gateway.iterables.abstract_input_service_iterable import AbstractInputS
 from src.manager.manager import default_initial_cost
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.logger import LOGGER as logger
+from src.utils.networks import node_can_host_service, local_node_hosts_network
 from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount
+from src.database.sql_connection import SQLConnection
+
+_sc = SQLConnection()
+
+
+def _local_hosts_network(network_id: bytes) -> bool:
+    return local_node_hosts_network(
+        network_id,
+        local_rows=_sc.get_local_instances_with_service(),
+        load_service=read_service_from_disk,
+    )
 
 
 class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
@@ -48,6 +60,17 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
 
                 if not service:
                     raise Exception(f"Service {self.service_hash} not on local registry.")
+
+                # Shared-disk (virtiofs) admissibility: decline (no cost) if this
+                # node cannot host the service — a guest-only network must already
+                # exist here; a seed network may run anywhere. The caller treats a
+                # cost error as "this node can't run it", which is exactly the
+                # co-location decision (no separate placement negotiation).
+                if not node_can_host_service(service, _local_hosts_network, logger_fn=logger):
+                    raise Exception(
+                        "Node cannot host the service: a declared guest-only "
+                        "virtiofs network is not present on this node."
+                    )
 
                 resources = service.container.resources
                 del service

@@ -81,12 +81,6 @@ virtualizers:
     # virtiofsd confinement for the exported directory: none|chroot|namespace.
     # Default chroot (deny-by-default, no cross-network access).
     VIRTIOFS_SANDBOX: "chroot"
-    # Opt-in: seed a virtiofs instance onto a REMOTE peer that already hosts its
-    # shared-disk network (co-locate there) instead of always seeding locally.
-    # Probes peers via GetNetworkInstances; denied/unavailable probes fall back
-    # to safe local seeding. Leave false unless peers authorize node-to-node
-    # network discovery.
-    VIRTIOFS_DISTRIBUTED_SEEDING: false
     SECURITY:
       # Enforce rootfs destination confinement for all filesystem paths.
       PATH_CONFINEMENT: true

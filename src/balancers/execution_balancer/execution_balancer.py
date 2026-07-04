@@ -13,7 +13,7 @@ from src.utils import logger as log
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.utils import service_extended, peers_id_iterator, \
     generate_uris_by_peer_id, read_service_from_disk
-from src.utils.networks import filter_placements_for_colocation, local_node_hosts_network
+from src.utils.networks import node_can_host_service, local_node_hosts_network
 from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
 
@@ -22,12 +22,6 @@ sc = SQLConnection()
 
 SEND_ONLY_HASHES_ASKING_COST = env_manager.get("SEND_ONLY_HASHES_ASKING_COST")
 EXTERNAL_COST_TIMEOUT = env_manager.get("EXTERNAL_COST_TIMEOUT")
-# Opt-in: route a virtiofs instance to a remote peer that already hosts its
-# shared-disk network (co-locate there) instead of always seeding locally.
-# Off by default: it probes peers via the GetNetworkInstances rpc, which the
-# peer authorizes per its own policy — where the probe is denied/unavailable the
-# placement safely falls back to local seeding (see filter_placements_for_colocation).
-VIRTIOFS_DISTRIBUTED_SEEDING = env_manager.get("virtualizers.ch.VIRTIOFS_DISTRIBUTED_SEEDING", False)
 
 def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
     
@@ -70,35 +64,6 @@ def _local_hosts_network(network_id: bytes) -> bool:
     )
 
 
-def _remote_hosts_network(peer_id: str, network_id: bytes) -> bool:
-    """
-    Best-effort: does ``peer_id`` already host an instance of the shared-disk
-    network? Probes the peer's GetNetworkInstances rpc. Any error / denial is
-    treated as 'does not host', so distributed seeding only ever adds a valid
-    co-location target and never breaks disk sharing on failure.
-    """
-    try:
-        uri = next(generate_uris_by_peer_id(peer_id), None)
-        if not uri:
-            return False
-        output = next(bee.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(uri)
-            ).GetNetworkInstances,
-            indices_parser=celaut_pb2.GetNetworkInstancesOutput,
-            partitions_message_mode_parser=True,
-            input=celaut_pb2.GetNetworkInstancesInput(network_id=network_id),
-            timeout=EXTERNAL_COST_TIMEOUT,
-        ), None)
-        return output is not None and len(output.instances) > 0
-    except Exception as e:
-        log.LOGGER(
-            f"Virtiofs distributed-seeding probe to peer {peer_id} failed "
-            f"(treating as not hosting): {e}"
-        )
-        return False
-
-
 def execution_balancer(
         service_id: str,
         resources: celaut.Service.Container.Resources,
@@ -115,13 +80,24 @@ def execution_balancer(
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
 
     try:
-        _local = generate_estimated_cost(
-            resources=resources,
-            metadata=metadata,
-            config=configuration
-        )
-        if _local:
-            peers['local'] = _local
+        # Shared-disk (virtiofs) admissibility: this node offers a local cost
+        # only if it can host the service's networks — a guest-only network must
+        # already exist here, a seed network may run anywhere. Peers apply the
+        # same check to themselves when asked for their cost (see the
+        # GetServiceEstimatedCost handler), so co-location needs no separate
+        # negotiation: a node that can't host simply reports no cost.
+        if service is not None and not node_can_host_service(
+            service, _local_hosts_network, logger_fn=log.LOGGER
+        ):
+            log.LOGGER('Local node cannot host the service (virtiofs co-location); skipping local cost.')
+        else:
+            _local = generate_estimated_cost(
+                resources=resources,
+                metadata=metadata,
+                config=configuration
+            )
+            if _local:
+                peers['local'] = _local
     except UnsupportedArchitectureException as e:
         log.LOGGER(e.__str__())
         pass
@@ -157,21 +133,6 @@ def execution_balancer(
                 log.LOGGER('Exception taking the cost for ' + peer_id + ': ' + str(e) + " (maybe it doesn't have the service)")
     except Exception as e:
         log.LOGGER('Error iterating peers on service balancer:' + str(e))
-
-    # Co-location gating for shared-disk (virtiofs) networks: an instance that
-    # declares a virtiofs network can only run where its network can be
-    # co-located (same node), so drop placements that would break disk sharing.
-    if service is not None:
-        try:
-            peers = filter_placements_for_colocation(
-                service=service,
-                peers=peers,
-                local_hosts_network=_local_hosts_network,
-                remote_hosts_network=_remote_hosts_network if VIRTIOFS_DISTRIBUTED_SEEDING else None,
-                logger_fn=log.LOGGER,
-            )
-        except Exception as e:
-            log.LOGGER('Error applying virtiofs co-location placement gating: ' + str(e))
 
     try:
         log.LOGGER(f"Collected costs of execution {__pretty_format_peers(peers)}")

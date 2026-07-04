@@ -127,13 +127,14 @@ The **node-side** logic for this already exists (independent of the backend):
 
 * Network identity, virtiofs detection and membership resolution:
   `src/utils/networks.py`.
-* **Placement/co-location gating:** `execution_balancer` pins an instance that
-  declares a virtiofs network to a host that can co-locate it with the other
-  instances of that network (same node). See
-  `filter_placements_for_colocation`.
-* **Peer discovery:** the `GetNetworkInstances` Gateway rpc returns the
+* **Placement/co-location:** decided through the *normal* cost call. Each node
+  self-checks admissibility with `networks.node_can_host_service` when asked for
+  its `GetServiceEstimatedCost`; a node that can't host reports no cost and is
+  simply not selected — there is no separate placement negotiation.
+* **Peer discovery (runtime):** the `GetNetworkInstances` Gateway rpc returns the
   co-located instances of a network to a caller, gated so the node only answers
-  for networks the caller declares in its own spec.
+  for networks the caller declares in its own spec. Used by instances at runtime
+  to wire up sharing — not used for placement.
 
 The **backend-specific** mount is implemented in `src/virtualizers/ch/virtiofs.py`
 and wired into the CH `execute`/`kill` lifecycle. Per virtiofs network an
@@ -170,19 +171,26 @@ of *this service's declaration*, not of the network identity: a read-write
 writer and a read-only reader still resolve to the same `H(ABCD)` and share one
 daemon + directory; the `ro` flag only changes that guest's mount options.
 
-### Distributed seeding (opt-in)
-`filter_placements_for_colocation` is now peer-aware. By default placement stays
-*local-authoritative* (pin/seed locally — always safe). With
-`virtualizers.ch.VIRTIOFS_DISTRIBUTED_SEEDING=true` the balancer probes peers
-via `GetNetworkInstances`; if a peer already hosts *all* the declared virtiofs
-networks the new instance is routed there to co-locate. Probes are best-effort —
-a denied/unavailable peer is treated as "not hosting", so placement degrades to
-the safe local-seed path and never breaks disk sharing.
+### Seed vs guest membership (who may launch the first instance)
+Placement is decided entirely through the normal `GetServiceEstimatedCost` call —
+no extra negotiation. When a node is asked whether it can run a virtiofs service
+it applies `networks.node_can_host_service` to itself, per declared network:
 
-> **Still open (intentionally unsolved):** *who* launches the very first
-> instance of a network when **no** node hosts `H(ABCD)` yet (cross-node seed
-> election). We simply seed locally, which is always safe; global seed election
-> is left as future work.
+* **seed** (default, no `guest` tag): the node is willing to *create* the disk,
+  so it can host the service **anywhere** — whether or not the network already
+  exists there. This is how the first instance of a network gets launched: any
+  node that accepts the cost seeds it.
+* **guest** (`guest` tag on the network declaration): the service must **never**
+  be the first instance, so a node may host it **only if it already hosts that
+  network locally** (virtio-fs is host-local, so "exists" means on this node).
+  A guest therefore lands on a node that already owns the disk and co-locates
+  with it automatically.
+
+Like read-only, `guest` is a free-form tag on the service's own network
+declaration (`networks.GUEST_PROTOCOL_TAGS`), so no proto change is needed, and
+it does not affect the network content id. A node that isn't admissible simply
+reports no cost, so the launcher never selects it — peers self-report through the
+usual gateway check and that is the whole placement decision.
 
 ---
 
