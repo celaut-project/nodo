@@ -119,3 +119,13 @@ IPs and MACs are derived from the `vmachine_id` without DHCP to ensure stability
 * `interface.py` supports both `docker` and `cloud_hypervisor` via configuration.
 * Network and firewall maintain existing functional behavior.
 * The system can operate entirely without Docker when CH is enabled.
+
+## Shared Filesystems (VirtioFS backend)
+
+`virtiofs.py` materializes **parent → child shared filesystems** for CH microVMs.
+This is purely a backend: the semantics (the `shared`/`guest`/`access` xattrs,
+share identity, node co-location) live in `src/utils/shared_filesystems.py`, and
+the service specification never mentions VirtioFS. See
+[`docs/SHARED_FILESYSTEMS.md`](../../../docs/SHARED_FILESYSTEMS.md) for the full
+model. Configure the daemon binary with `virtualizers.ch.VIRTIOFSD_BINARY`
+(default `virtiofsd`).

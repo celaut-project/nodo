@@ -20,6 +20,7 @@ from src.utils.filesystem_xattrs import (
     is_supported_filesystem_entry_mode,
     metadata_from_lstat,
 )
+from src.utils.shared_filesystems import declarations_for_service
 from src.utils.verify import calculate_hashes, calculate_hashes_by_stream
 from src.utils.config import ConfigManager
 from src.manager.resources import IOBigData
@@ -498,6 +499,15 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, str]:
         spec_file.parseContainer()
         spec_file.parseApi()
         spec_file.parseNetwork()
+
+        # Validate shared-filesystem declarations (shared/guest/access xattrs).
+        # Rejects contradictory (shared+guest), misplaced (on a file), or malformed
+        # declarations before the service is ever published.
+        try:
+            declarations_for_service(spec_file.service)
+        except ValueError as e:
+            os.system('rm -rf ' + CACHE + aux_id + '/')
+            return "", None, f"Invalid shared-filesystem declaration: {e}"
 
         identifier, metadata, service = spec_file.save()
         iobd.log_snapshot(context=f"pack-worker:before-unlock aux_id={aux_id} service_id={identifier}")

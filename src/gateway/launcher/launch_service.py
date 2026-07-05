@@ -16,6 +16,7 @@ from src.utils.cost_functions.generate_estimated_cost import (
     get_resource_availability,
 )
 from src.virtualizers.architecture import UnsupportedArchitectureException
+from src.utils.shared_filesystems import service_requires_parent_colocation
 
 sc = SQLConnection()
 
@@ -101,6 +102,17 @@ def launch_service(
         launch_failures = []
         local_attempted = False
 
+        # A service that inherits any directory from its parent (a `guest=true`
+        # xattr) must run on the same node as that parent, because the shared
+        # filesystem is materialized locally from the parent's export. The parent
+        # launching the child is the authorization; there is no cross-node attach.
+        require_parent_colocation = service_requires_parent_colocation(service)
+        if require_parent_colocation:
+            log.LOGGER(
+                f"Service {service_id} inherits a shared filesystem from its parent "
+                f"{father_id}; pinning execution to the local node (no delegation)."
+            )
+
         for peer, estimated_cost in execution_balancer(
                 resources=service.container.resources,
                 service_id=service_id,
@@ -110,6 +122,12 @@ def launch_service(
                 recursion_guard_token=recursion_guard_token
         ):
             try:
+                if require_parent_colocation and peer != 'local':
+                    log.LOGGER(
+                        f"Skipping peer {peer}: service must be co-located with its parent."
+                    )
+                    continue
+
                 log.LOGGER(f'Service balancer select peer {peer}')
 
                 refund_gas = []
@@ -170,6 +188,13 @@ def launch_service(
 
         if local_attempted:
             local_preflight_failure = None
+
+        if require_parent_colocation and not local_attempted:
+            launch_failures.append(
+                "co-location: service inherits a shared filesystem from its parent "
+                "but the local node could not execute it, and delegation is not "
+                "allowed for parent-inherited filesystems."
+            )
 
         _err_msg = _format_launch_failure(
             service_id=service_id,

@@ -23,6 +23,15 @@ from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_bytes
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
+from src.virtualizers.ch.virtiofs import (
+    attach_virtiofs_backends,
+    build_guest_mount_plan,
+    child_guest_mounts,
+    parent_export_mounts,
+    shared_fs_base_dir,
+    GUEST_MOUNT_PLAN_PATH,
+)
+from src.utils.shared_filesystems import exported_dirs, share_id
 from src.virtualizers.entry_path import resolve_entrypoint_path
 from src.virtualizers.firewall import (
     TransportProtocol,
@@ -47,6 +56,7 @@ KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.ch.KERNEL_CMDLINE_EXTRA", "
 CH_SERIAL_MODE = env_manager.get("virtualizers.ch.SERIAL_MODE", "file")
 CH_CONSOLE_MODE = env_manager.get("virtualizers.ch.CONSOLE_MODE", "off")
 CH_API_SOCKET_DIR = env_manager.get("virtualizers.ch.API_SOCKET_DIR", "/tmp/nodo-ch")
+VIRTIOFSD_BINARY = env_manager.get("virtualizers.ch.VIRTIOFSD_BINARY", "virtiofsd")
 GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
     "virtualizers.ch.GUEST_NETWORK_READY_TIMEOUT_S",
     8,
@@ -1004,6 +1014,51 @@ def execute(
         )
         log.LOGGER(f"[CH][{vmachine_id}] guest entrypoint injection completed: /.__nodo_entrypoint")
 
+        # Shared filesystems (parent -> child inheritance). A service exports its
+        # `shared=true` directories to the children it launches, and inherits its
+        # parent's exports for its own `guest=true` directories. The exporting
+        # parent owns the share (share id = H(this_instance_id, path)); a child
+        # reconstructs the same id from its `father_id`, so it can only attach to a
+        # directory its own parent exported. VirtioFS is the backend here only —
+        # the service spec never mentions it. Ordinary services declare neither and
+        # this whole block is a no-op.
+        shared_fs_dir = str(shared_fs_base_dir(CACHE)) if CACHE else None
+        virtiofs_mounts = []
+        exported_share_ids: List[str] = []
+        if shared_fs_dir:
+            export_mounts = parent_export_mounts(service, vmachine_id, shared_fs_dir)
+            guest_mounts = child_guest_mounts(service, father_id, shared_fs_dir)
+            share_mounts = export_mounts + guest_mounts
+            if share_mounts:
+                log.LOGGER(
+                    f"[CH][{vmachine_id}] shared filesystems: {len(export_mounts)} exported, "
+                    f"{len(guest_mounts)} inherited from father={father_id}"
+                )
+                fs_device_args, virtiofs_mounts, _ = attach_virtiofs_backends(
+                    share_mounts,
+                    base_dir=shared_fs_dir,
+                    socket_dir=CH_API_SOCKET_DIR,
+                    virtiofsd_binary=VIRTIOFSD_BINARY,
+                    logger_fn=log.LOGGER,
+                )
+                exported_share_ids = [m.share_id_hex for m in export_mounts]
+                mount_plan_host_path = runtime_dir / ".__nodo_virtiofs"
+                with open(mount_plan_host_path, "w", encoding="utf-8") as f:
+                    f.write(build_guest_mount_plan(share_mounts))
+                _run_debugfs_write(
+                    image_path=rootfs_path,
+                    host_file=mount_plan_host_path,
+                    guest_target=GUEST_MOUNT_PLAN_PATH,
+                )
+                log.LOGGER(
+                    f"[CH][{vmachine_id}] virtiofs devices attached: {len(share_mounts)}; "
+                    f"guest mount plan injected: {GUEST_MOUNT_PLAN_PATH}"
+                )
+            else:
+                fs_device_args = []
+        else:
+            fs_device_args = []
+
         tap_name = _create_tap(vmachine_id)
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
@@ -1044,6 +1099,7 @@ def execute(
             "--cmdline",
             kernel_cmdline,
         ]
+        start_command.extend(fs_device_args)
         start_command.extend(stream_args)
         log.LOGGER(f"[CH][{vmachine_id}] launching cloud-hypervisor: {' '.join(start_command)}")
 
@@ -1158,6 +1214,8 @@ def execute(
                     for domain, ip in domain_records
                 ],
                 "cgroup_path": "",
+                "virtiofs": virtiofs_mounts,
+                "exported_shares": exported_share_ids,
                 "bridge": NETWORK_BRIDGE_NAME,
                 "serial_log": str(serial_log_path) if serial_log_path else "",
                 "stdout_log": str(stdout_path),
