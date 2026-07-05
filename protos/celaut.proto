@@ -84,8 +84,10 @@ message Service {
             map<string, GasAmount> gas_amount_per_call = 4;
         }
 
-        // Environment variables for the container.
-        map<string, DataFormat> environment_variables = 1;
+        // Environment variables moved to Service.Container (field 7): they
+        // describe the execution environment, not the communication interface.
+        reserved 1;
+        reserved "environment_variables";
 
         repeated Slot slot = 2;
 
@@ -163,15 +165,37 @@ message Service {
         
         // Expected node protocol stack for internal node logic.
         repeated Api.Protocol node_protocol_stack = 6;
+
+        // Environment variables for the execution environment.
+        // (Moved here from Service.Api: env vars belong to the container that
+        // runs the code, not to the communication interface.)
+        map<string, DataFormat> environment_variables = 7;
     }
 
+    // A Network is a *logical communication domain* between service
+    // instances. It only describes:
+    //   - which peers the service wants to communicate with (tags/prose/formal);
+    //   - which protocols those peers are expected to expose (protocol_stack).
+    //
+    // Shared disks / VirtioFS / filesystem inheritance are NOT networks.
+    // Those are an execution-environment concern expressed through
+    // Container.Filesystem.ItemBranch.xattrs (see shared/guest/access).
     message Network {
         repeated string tags = 1;
         string prose = 2;
         bytes formal = 3;
 
-        // Protocol stack for external clients.
+        // Protocol stack expected from the peers in this communication domain.
         repeated Api.Protocol protocol_stack = 4;
+
+        // Name of an environment variable used to filter compatible peer
+        // instances during ConfigurationFile.NetworkResolution. Only peers
+        // whose value for this environment variable matches the requesting
+        // instance's value are returned. Empty => no env-based filtering.
+        //
+        // Example: many PostgreSQL instances may exist on the network, but
+        // only those sharing the same value of e.g. "PG_CLUSTER" are peers.
+        string environment_variable = 5;
     }
 
     // Natural language description.
