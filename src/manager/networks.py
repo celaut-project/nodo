@@ -52,6 +52,10 @@ def resolve_ergo_network() -> List[celaut.Instance.Uri]:
         return []
 
 def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
+    # Wildcard "*" (open-internet egress) and any unresolved tag resolve to no
+    # concrete peer instances; initialise uris so an unmatched loop cannot raise
+    # UnboundLocalError (it previously did for tag "*").
+    uris: List[celaut.Instance.Uri] = []
     for tag in network.tags:
         if "ergo" in tag:
             uris = resolve_ergo_network()
@@ -64,6 +68,11 @@ def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
         uris = resolve_domain(tag)
         if uris:
             break
+
+    if not uris:
+        # No concrete peer URIs (e.g. wildcard "*"): the tag is honoured at the
+        # firewall layer (allow-all egress); there is no peer instance to advertise.
+        return []
 
     client_protocol_stack = network.protocol_stack
     i_slot = 1  # Default slot id (because internal port usage is irrelevant here)
