@@ -2,22 +2,24 @@
 Cloud Hypervisor backend for shared-disk (virtiofs) networks.
 
 The node-side semantics of shared-disk networks live in ``src/utils/networks.py``
-(identity ``H(ABCD)``, virtiofs detection, co-location placement, the
-``GetNetworkInstances`` discovery rpc). This module is the **backend** half: it
-actually wires the virtio-fs mount for Cloud Hypervisor microVMs so co-located
-instances of a network share a directory on the host.
+(identity = the explicit ``@handle`` identity tag, virtiofs detection,
+co-location placement, the ``GetNetworkInstances`` discovery rpc). This module is
+the **backend** half: it actually wires the virtio-fs mount for Cloud Hypervisor
+microVMs so co-located instances of a network share a directory on the host.
 
 For each virtiofs network an instance declares we:
 
 1. **virtiofsd daemon per shared-disk network.** Export the network's shared
-   directory over a Unix socket, keyed by the network content id. One daemon
-   per network on this host, reused by every co-located instance of it.
+   directory over a Unix socket, keyed by the network id (derived from the
+   ``@handle``). One daemon per network on this host, reused by every co-located
+   instance of it.
 2. **virtio-fs device per guest.** Emit a ``--fs tag=<…>,socket=<…>`` device for
    the microVM so the guest can ``mount -t virtiofs <tag> <path>``. Read-only
    members mount with ``-o ro`` (see below).
-3. **Anchor placement.** Drop the network's fixed ``ABCD`` anchor blob
-   (``Service.Network.formal``) into the shared directory so every instance
-   holding the same data resolves to the same network id.
+3. **Anchor placement.** Drop the network's fixed ``formal`` anchor/seed blob
+   into the shared directory (unchanged behavior). The anchor is DATA now, not
+   identity: two instances resolve to the same network because they share the
+   same ``@handle``, not because they share the anchor bytes.
 4. **Lifecycle & cleanup.** Tear the daemon + socket down when the last instance
    of the network on this host goes away (reference counted from the CH runtime
    state); the shared directory (the data) is preserved.
@@ -47,11 +49,13 @@ from protos import celaut_pb2 as celaut
 from src.utils.networks import (
     is_virtiofs_network,
     network_content_id,
+    network_identity_handle,
     network_is_readonly,
 )
 
-# Anchor filename inside the shared directory. Holding the same anchor bytes is
-# what makes two instances resolve to the same network (see network_content_id).
+# Anchor filename inside the shared directory. The anchor is the network's
+# ``formal`` seed/data blob; it is written once for seeding, but network identity
+# comes from the ``@handle`` tag, not the anchor (see network_content_id).
 ANCHOR_FILENAME = ".celaut-network-anchor"
 
 # Guest metadata file injected into the rootfs: a JSON list of the virtiofs
@@ -65,11 +69,12 @@ GUEST_MOUNT_ROOT = "/shared"
 
 class VirtiofsMount(NamedTuple):
     """One shared-disk mount an instance participates in."""
-    network_id_hex: str  # content id H(ABCD), hex
+    network_id_hex: str  # identity id (sha256 of the @handle), hex
     tag: str             # virtio-fs tag (CH --fs tag= / guest mount tag)
     readonly: bool       # this service wants the disk mounted read-only
-    anchor: bytes        # Service.Network.formal (may be b"")
+    anchor: bytes        # Service.Network.formal seed/data blob (may be b"")
     guest_path: str      # mount point inside the guest
+    disk_handle: str     # the @handle identity of the network (human-readable)
 
 
 # --------------------------------------------------------------------------- #
@@ -97,6 +102,9 @@ def virtiofs_mounts_for_service(service: celaut.Service) -> List[VirtiofsMount]:
     for network in service.network:
         if not is_virtiofs_network(network):
             continue
+        # network_content_id raises ValueError on an invalid @handle declaration
+        # (zero or >1 distinct handles); an invalid virtiofs network is rejected.
+        handle = network_identity_handle(network)
         nid_hex = network_content_id(network).hex()
         readonly = network_is_readonly(network)
         anchor = bytes(network.formal or b"")
@@ -113,6 +121,7 @@ def virtiofs_mounts_for_service(service: celaut.Service) -> List[VirtiofsMount]:
             readonly=readonly,
             anchor=anchor,
             guest_path=guest_mount_point(nid_hex),
+            disk_handle=handle,
         )
     return list(by_id.values())
 
@@ -300,6 +309,7 @@ def ensure_network_backend(
     be persisted idempotently by the caller.
     """
     nid = mount.network_id_hex
+    handle = mount.disk_handle
     export_dir = shared_dir(base_dir, nid)
     socket_path = virtiofs_socket_path(socket_dir, nid)
     state_path = daemon_state_path(base_dir, nid)
@@ -330,6 +340,7 @@ def ensure_network_backend(
         logger_fn(f"[CH][virtiofs] network={nid} reusing daemon pid={existing.get('pid')}")
         return {
             "network_id_hex": nid,
+            "disk_handle": handle,
             "tag": mount.tag,
             "socket": str(socket_path),
             "shared_dir": str(export_dir),
@@ -348,7 +359,7 @@ def ensure_network_backend(
         virtiofsd_binary, socket_path, export_dir, sandbox=sandbox
     )
     log_path = network_state_dir(base_dir, nid) / "virtiofsd.log"
-    logger_fn(f"[CH][virtiofs] network={nid} starting daemon: {' '.join(command)}")
+    logger_fn(f"[CH][virtiofs] network={handle} ({nid}) starting daemon: {' '.join(command)}")
     pid = spawn_fn(command, log_path)
 
     _save_daemon_state(
@@ -362,6 +373,7 @@ def ensure_network_backend(
     )
     return {
         "network_id_hex": nid,
+        "disk_handle": handle,
         "tag": mount.tag,
         "socket": str(socket_path),
         "shared_dir": str(export_dir),

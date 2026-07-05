@@ -8,10 +8,15 @@ with read-only access analyzes it; or Hadoop/Spark-style clusters). In microVMs
 (Cloud Hypervisor) disk sharing is done with virtio-fs, which REQUIRES the
 participating instances to run on the same physical node (co-location).
 
-A network is identified by its *content*, think ``H(ABCD)``: the sha256 of the
-fixed anchor blob (``Service.Network.formal``) that every participating service
-writes to disk. Two instances that hold the same anchor data resolve to the same
-``network_id``, so they can discover each other and share disk.
+A shared-disk (virtiofs) network is identified by an explicit **@handle**: a
+required identity tag on the network declaration (``Service.Network.tags``)
+matching ``^@\\S+$`` — e.g. ``@photos-nate``, ``@llama3-8b``. The id is derived
+from that handle, NOT from ``Service.Network.formal``: two services that declare
+the same @handle resolve to the SAME ``network_id`` even if their ``formal``
+anchor blobs differ, so they discover each other and share disk. ``formal`` is
+still carried as the seed/anchor DATA blob written into the shared dir, but it no
+longer affects identity. (Non-virtiofs networks keep the legacy content
+identity — the sha256 of ``formal`` — and are unaffected by the @handle rule.)
 
 Declaring a network in the spec is the capability grant: an instance may ask its
 node "give me the instances of network X" and the node obeys ONLY if X is among
@@ -19,6 +24,7 @@ the networks declared in that instance's own service spec. The node grants an
 instance nothing outside its declared networks.
 """
 import hashlib
+import re
 from typing import Callable, Iterable, List, NamedTuple, Optional, Set
 
 from protos import celaut_pb2 as celaut
@@ -40,10 +46,12 @@ VIRTIOFS_PROTOCOL_TAGS = frozenset({"virtiofs", "virtio-fs", "virtio_fs", "virti
 # free-form repeated strings (the same mechanism virtiofs itself rides on).
 #
 # Semantics: read-only is a property of *this service's* declaration of the
-# network, NOT of the network identity. Two services that share ``H(ABCD)``
-# resolve to the SAME network id (see ``network_content_id``), but each side
-# independently declares whether it wants the disk rw (writer) or ro (reader).
-# So the read-only tag is intentionally excluded from the content id.
+# network, NOT of the network identity. Two services that share the same
+# @handle resolve to the SAME network id (see ``network_content_id``), but each
+# side independently declares whether it wants the disk rw (writer) or ro
+# (reader). So the read-only tag is intentionally excluded from the identity.
+# The read-only tag is a plain free-form tag, distinct from the @handle identity
+# tag that lives on the same declaration.
 READONLY_PROTOCOL_TAGS = frozenset({"readonly", "read-only", "read_only", "ro"})
 
 # Guest membership convention.
@@ -57,9 +65,63 @@ READONLY_PROTOCOL_TAGS = frozenset({"readonly", "read-only", "read_only", "ro"})
 # declaration (no proto change) and does NOT affect the network content id.
 GUEST_PROTOCOL_TAGS = frozenset({"guest"})
 
+# Identity-handle convention (shared-disk networks only).
+#
+# A virtiofs shared-disk network's identity is an explicit "@handle" tag on the
+# network's own ``tags`` (NOT its ``formal`` anchor). The handle is any tag that,
+# after the usual tag normalization, matches ``^@\S+$`` — e.g. ``@photos-nate``.
+# This is what Josemi's directive means by "el id debe ser parte de los tags":
+# the id must come from the tags, not from H(formal). The handle is a NEW tag
+# distinct from the readonly/guest tags that may sit on the same declaration.
+IDENTITY_HANDLE_RE = re.compile(r"^@\S+$")
+
+# Domain-separation prefix so the @handle-derived id can't collide with the
+# legacy ``H(formal)`` ids used by non-virtiofs networks.
+VIRTIOFS_DISK_ID_PREFIX = b"celaut-virtiofs-disk\x00"
+
 
 def _normalized_tags(tags: Iterable[str]) -> List[str]:
     return [str(t).strip().lower() for t in tags if str(t).strip()]
+
+
+def _identity_handles(network: celaut.Service.Network) -> List[str]:
+    """
+    The distinct ``@handle`` identity tags declared on this network's own tags.
+
+    Handles are normalized the same way every other tag is (strip + lowercase,
+    see ``_normalized_tags``) so ``@Photos`` and ``@photos`` are the same handle.
+    Duplicates collapse; order of first appearance is preserved.
+    """
+    handles: List[str] = []
+    for tag in _normalized_tags(network.tags):
+        if IDENTITY_HANDLE_RE.match(tag) and tag not in handles:
+            handles.append(tag)
+    return handles
+
+
+def network_identity_handle(network: celaut.Service.Network) -> str:
+    """
+    The single ``@handle`` that identifies a virtiofs shared-disk network.
+
+    Strict, mirroring Josemi's "must match exactly or it's invalid": a virtiofs
+    network MUST declare exactly one distinct ``@handle`` identity tag. Zero
+    handles, or more than one distinct handle, is an invalid declaration and
+    raises ``ValueError`` (the same way a malformed network declaration is
+    rejected rather than silently accepted). The @handle is normalized
+    (stripped + lowercased) before it is returned.
+    """
+    handles = _identity_handles(network)
+    if not handles:
+        raise ValueError(
+            "virtiofs shared-disk network must declare exactly one '@handle' "
+            "identity tag (matching '^@\\S+$'); found none"
+        )
+    if len(handles) > 1:
+        raise ValueError(
+            "virtiofs shared-disk network must declare exactly one '@handle' "
+            f"identity tag; found {len(handles)} distinct: {handles}"
+        )
+    return handles[0]
 
 
 def is_virtiofs_protocol(protocol: celaut.Service.Api.Protocol) -> bool:
@@ -105,13 +167,27 @@ def network_is_guest(network: celaut.Service.Network) -> bool:
 
 def network_content_id(network: celaut.Service.Network) -> bytes:
     """
-    Content id of a network, ``H(ABCD)``.
+    Identity id of a network (32 bytes).
 
-    The identity is the sha256 of the network's fixed anchor blob
-    (``Service.Network.formal``). When no anchor is declared we fall back to a
-    deterministic hash of the network's identifying fields so that identical
-    declarations still collide to the same id.
+    * **virtiofs shared-disk networks**: the id is derived from the explicit
+      ``@handle`` identity tag — ``sha256(VIRTIOFS_DISK_ID_PREFIX + handle)`` —
+      NOT from ``formal``. Two declarations with the same @handle but different
+      ``formal`` therefore resolve to the SAME id (the whole point). An invalid
+      declaration (zero or >1 distinct @handle) raises ``ValueError`` via
+      ``network_identity_handle``.
+    * **all other networks**: unchanged legacy content id — the sha256 of the
+      network's fixed anchor blob (``Service.Network.formal``), falling back to a
+      deterministic hash of the network's identifying fields when no anchor is
+      declared, so identical declarations still collide to the same id.
+
+    Hashing the @handle (rather than using the raw string as the id) keeps every
+    downstream consumer that expects a 32-byte id — paths, the virtio-fs tag,
+    sockets, DB keys, capability equality — working unchanged.
     """
+    if is_virtiofs_network(network):
+        handle = network_identity_handle(network)
+        return hashlib.sha256(VIRTIOFS_DISK_ID_PREFIX + handle.encode("utf-8")).digest()
+
     if network.formal:
         return hashlib.sha256(network.formal).digest()
 
@@ -148,12 +224,13 @@ def service_declares_network(service: celaut.Service, network_id: bytes) -> bool
 
 class DeclaredNetwork(NamedTuple):
     """A summary of one network declared in a service spec."""
-    network_id: bytes       # content id H(ABCD)
+    network_id: bytes       # identity id (32 bytes)
     network_id_hex: str     # hex form, handy for paths / logs / rpc display
     virtiofs: bool          # shared-disk (virtiofs) network?
     readonly: bool          # does this service want it mounted read-only?
     guest: bool             # guest-only (never seeds) — runs only where it exists
     tags: List[str]         # the network's own declared tags (normalized)
+    disk_handle: str        # the @handle identity of a virtiofs disk ("" if none)
 
 
 def declared_networks(
@@ -185,6 +262,7 @@ def declared_networks(
                 readonly=network_is_readonly(network),
                 guest=network_is_guest(network),
                 tags=_normalized_tags(network.tags),
+                disk_handle=network_identity_handle(network) if virtiofs else "",
             )
         )
     return out
@@ -275,8 +353,9 @@ def node_can_host_service(
         if summary.guest and not local_hosts_network(summary.network_id):
             logger_fn(
                 f"Virtiofs: cannot host service — guest-only network "
-                f"{summary.network_id_hex} is not present on this node; a guest "
-                "instance may only run where the network already exists."
+                f"{summary.disk_handle} ({summary.network_id_hex}) is not present "
+                "on this node; a guest instance may only run where the network "
+                "already exists."
             )
             return False
     return True

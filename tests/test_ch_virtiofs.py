@@ -25,9 +25,14 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 ABCD = b"ABCD-anchor-blob"
 
 
-def _virtiofs_network(anchor=ABCD, tags=("shared-disk",), protocol_tags=("virtiofs",)):
+def _virtiofs_network(anchor=ABCD, tags=("shared-disk",), protocol_tags=("virtiofs",), handle="@disk"):
+    # A virtiofs network's identity now comes from a required "@handle" tag on
+    # its own tags (not H(formal)); append it unless a test opts out (handle=None).
+    all_tags = list(tags)
+    if handle is not None:
+        all_tags.append(handle)
     return celaut.Service.Network(
-        tags=list(tags),
+        tags=all_tags,
         formal=anchor,
         protocol_stack=[celaut.Service.Api.Protocol(tags=list(protocol_tags))],
     )

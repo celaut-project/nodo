@@ -14,9 +14,16 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 ABCD = b"ABCD-anchor-blob"
 
 
-def _virtiofs_network(anchor: bytes = ABCD, tags=("shared-disk",), protocol_tags=("virtiofs",)):
+def _virtiofs_network(
+    anchor: bytes = ABCD, tags=("shared-disk",), protocol_tags=("virtiofs",), handle="@disk"
+):
+    # A virtiofs network's identity now comes from a required "@handle" tag on
+    # its own tags (not H(formal)); append it unless a test opts out (handle=None).
+    all_tags = list(tags)
+    if handle is not None:
+        all_tags.append(handle)
     return celaut.Service.Network(
-        tags=list(tags),
+        tags=all_tags,
         formal=anchor,
         protocol_stack=[celaut.Service.Api.Protocol(tags=list(protocol_tags))],
     )
@@ -44,28 +51,65 @@ def _instance(ip="10.0.0.9", port=5000):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class NetworkIdentityTests(unittest.TestCase):
-    def test_content_id_is_hash_of_anchor(self):
-        net = _virtiofs_network(anchor=ABCD)
-        self.assertEqual(networks.network_content_id(net), hashlib.sha256(ABCD).digest())
+    """A virtiofs network's identity is derived from its explicit @handle tag."""
 
-    def test_same_anchor_same_id_regardless_of_prose(self):
-        a = _virtiofs_network(anchor=ABCD)
-        b = _virtiofs_network(anchor=ABCD)
+    def test_virtiofs_id_is_hash_of_handle_not_formal(self):
+        net = _virtiofs_network(anchor=ABCD, handle="@photos-nate")
+        expected = hashlib.sha256(
+            networks.VIRTIOFS_DISK_ID_PREFIX + b"@photos-nate"
+        ).digest()
+        self.assertEqual(networks.network_content_id(net), expected)
+        # NOT the legacy H(formal).
+        self.assertNotEqual(networks.network_content_id(net), hashlib.sha256(ABCD).digest())
+
+    def test_same_handle_different_formal_same_id(self):
+        # (a) The whole point: same @handle, different anchor -> SAME network id.
+        a = _virtiofs_network(anchor=b"AAAA", handle="@shared")
+        b = _virtiofs_network(anchor=b"BBBB", handle="@shared")
+        self.assertEqual(networks.network_content_id(a), networks.network_content_id(b))
+
+    def test_same_handle_same_id_regardless_of_prose(self):
+        a = _virtiofs_network(anchor=ABCD, handle="@shared")
+        b = _virtiofs_network(anchor=ABCD, handle="@shared")
         b.prose = "a different human description"
         self.assertEqual(networks.network_content_id(a), networks.network_content_id(b))
 
-    def test_different_anchor_different_id(self):
+    def test_different_handle_different_id(self):
+        # (b) Different @handle -> different id, even with identical formal.
         self.assertNotEqual(
-            networks.network_content_id(_virtiofs_network(anchor=b"AAAA")),
-            networks.network_content_id(_virtiofs_network(anchor=b"BBBB")),
+            networks.network_content_id(_virtiofs_network(anchor=ABCD, handle="@one")),
+            networks.network_content_id(_virtiofs_network(anchor=ABCD, handle="@two")),
         )
 
-    def test_fallback_id_is_deterministic_without_anchor(self):
-        net = celaut.Service.Network(
-            tags=["shared-disk"],
-            protocol_stack=[celaut.Service.Api.Protocol(tags=["virtiofs"])],
+    def test_handle_is_case_insensitive_like_other_tags(self):
+        self.assertEqual(
+            networks.network_content_id(_virtiofs_network(handle="@Photos")),
+            networks.network_content_id(_virtiofs_network(handle="@photos")),
         )
-        self.assertEqual(networks.network_content_id(net), networks.network_content_id(net))
+
+    def test_missing_handle_is_invalid(self):
+        # (c) A virtiofs network with zero @handle tags is invalid.
+        net = _virtiofs_network(handle=None)
+        with self.assertRaises(ValueError):
+            networks.network_content_id(net)
+
+    def test_multiple_distinct_handles_is_invalid(self):
+        # (d) More than one distinct @handle on one network is invalid.
+        net = _virtiofs_network(tags=("shared-disk", "@a", "@b"), handle=None)
+        with self.assertRaises(ValueError):
+            networks.network_content_id(net)
+
+    def test_repeated_same_handle_is_valid(self):
+        # Same @handle listed twice collapses to one distinct handle -> valid.
+        net = _virtiofs_network(tags=("shared-disk", "@dup", "@dup"), handle=None)
+        self.assertEqual(networks.network_identity_handle(net), "@dup")
+
+    def test_non_virtiofs_network_keeps_formal_identity(self):
+        # Non-virtiofs networks are unaffected: still H(formal), no @handle needed.
+        net = _http_network(anchor=b"http-anchor")
+        self.assertEqual(
+            networks.network_content_id(net), hashlib.sha256(b"http-anchor").digest()
+        )
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -121,8 +165,8 @@ class DeclaredNetworksHelperTests(unittest.TestCase):
     """'List my declared networks' helper."""
 
     def test_lists_all_networks_with_flags(self):
-        vfs = _virtiofs_network(anchor=ABCD)
-        ro = _virtiofs_network(anchor=b"other", tags=("shared-disk", "ro"))
+        vfs = _virtiofs_network(anchor=ABCD, handle="@vfs")
+        ro = _virtiofs_network(anchor=b"other", tags=("shared-disk", "ro"), handle="@ro-disk")
         http = _http_network()
         summary = networks.declared_networks(_service([vfs, ro, http]))
         self.assertEqual(len(summary), 3)
@@ -131,6 +175,10 @@ class DeclaredNetworksHelperTests(unittest.TestCase):
         self.assertFalse(by_id[networks.network_content_id(vfs)].readonly)
         self.assertTrue(by_id[networks.network_content_id(ro)].readonly)
         self.assertFalse(by_id[networks.network_content_id(http)].virtiofs)
+        # The raw @handle is surfaced as a human-readable field on virtiofs nets.
+        self.assertEqual(by_id[networks.network_content_id(vfs)].disk_handle, "@vfs")
+        self.assertEqual(by_id[networks.network_content_id(ro)].disk_handle, "@ro-disk")
+        self.assertEqual(by_id[networks.network_content_id(http)].disk_handle, "")
 
     def test_only_virtiofs_filter(self):
         summary = networks.declared_networks(
@@ -160,8 +208,10 @@ class AuthorizationGateTests(unittest.TestCase):
         self.assertTrue(networks.service_declares_network(svc, networks.network_content_id(net)))
 
     def test_caller_not_declaring_network_is_denied(self):
-        svc = _service([_virtiofs_network(anchor=b"mine")])
-        other_id = networks.network_content_id(_virtiofs_network(anchor=b"someone-elses"))
+        svc = _service([_virtiofs_network(anchor=b"mine", handle="@mine")])
+        other_id = networks.network_content_id(
+            _virtiofs_network(anchor=b"someone-elses", handle="@theirs")
+        )
         self.assertFalse(networks.service_declares_network(svc, other_id))
 
     def test_empty_network_id_is_denied(self):
@@ -195,7 +245,7 @@ class LocalMembershipTests(unittest.TestCase):
         net, rows, loader = self._rows_and_loader()
         self.assertTrue(networks.local_node_hosts_network(
             networks.network_content_id(net), local_rows=rows, load_service=loader))
-        absent = networks.network_content_id(_virtiofs_network(anchor=b"absent"))
+        absent = networks.network_content_id(_virtiofs_network(anchor=b"absent", handle="@absent"))
         self.assertFalse(networks.local_node_hosts_network(
             absent, local_rows=rows, load_service=loader))
 
@@ -254,8 +304,8 @@ class NodeAdmissibilityTests(unittest.TestCase):
         self.assertFalse(networks.node_can_host_service(svc, lambda nid: nid != gid))
 
     def test_mixed_seed_and_guest(self):
-        seed = _virtiofs_network(anchor=b"seed")
-        guest = _virtiofs_network(anchor=b"guest-net", tags=("shared-disk", "guest"))
+        seed = _virtiofs_network(anchor=b"seed", handle="@seed")
+        guest = _virtiofs_network(anchor=b"guest-net", tags=("shared-disk", "guest"), handle="@guest-net")
         gid = networks.network_content_id(guest)
         svc = _service([seed, guest])
         # Admissible only where the guest network already exists.
