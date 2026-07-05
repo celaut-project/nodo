@@ -402,15 +402,23 @@ def _resolve_initial_resources(resources: celaut.Sysresources) -> Tuple[int, int
     return vcpus, mem_mib
 
 
-def _build_network_resolution(service: celaut.Service, father_id: str) -> List[celaut.ConfigurationFile.NetworkResolution]:
+def _build_network_resolution(
+    service: celaut.Service,
+    father_id: str,
+    config: Optional[celaut.Configuration] = None,
+) -> List[celaut.ConfigurationFile.NetworkResolution]:
     networks = service.network
     if father_id and sc.internal_instance_exists(id=father_id):
         networks = filter_networks_with_ancestors(networks=networks, father_id=father_id)
 
+    # The requesting instance's own environment values drive Network peer
+    # filtering (Service.Network.environment_variable).
+    requester_env_values = dict(config.environment_variables) if config else None
+
     return [
         celaut.ConfigurationFile.NetworkResolution(
             tags=network.tags,
-            peer_instances=resolve_network(network),
+            peer_instances=resolve_network(network, requester_env_values=requester_env_values),
         )
         for network in networks
         if len(network.tags) > 0
@@ -938,7 +946,7 @@ def execute(
         shutil.copy2(bundle["rootfs_path"], rootfs_path)
         log.LOGGER(f"[CH][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")
 
-        network_resolution = _build_network_resolution(service=service, father_id=father_id)
+        network_resolution = _build_network_resolution(service=service, father_id=father_id, config=config)
         log.LOGGER(f"[CH][{vmachine_id}] network resolution entries: {len(network_resolution)}")
         cfg = _build_configuration_file(
             config=config,

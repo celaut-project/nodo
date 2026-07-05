@@ -158,11 +158,15 @@ def execute(assigment_ports, by_local, service_id, service, config, initial_syst
     if SQLConnection().internal_instance_exists(id=father_id):
         networks = filter_networks_with_ancestors(networks=networks, father_id=father_id)
 
+    # The requesting instance's own environment values drive Network peer
+    # filtering (Service.Network.environment_variable).
+    requester_env_values = dict(config.environment_variables) if config else None
+
     # Obtain instances to connect to the available networks.
     networks_resolved: List[celaut.ConfigurationFile.NetworkResolution] = [
         celaut.ConfigurationFile.NetworkResolution(
-            tags=network.tags, 
-            peer_instances=resolve_network(network)
+            tags=network.tags,
+            peer_instances=resolve_network(network, requester_env_values=requester_env_values)
         )
         for network in networks if len(network.tags) > 0
     ]
