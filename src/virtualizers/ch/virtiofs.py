@@ -37,6 +37,7 @@ fakes rather than a live cloud-hypervisor.
 """
 import json
 import os
+import shutil
 import signal
 import subprocess
 from pathlib import Path
@@ -359,13 +360,19 @@ def teardown_virtiofs_for_vm(
     runtime_states: Dict[str, dict],
     *,
     base_dir: str,
+    delete_disk_on_last: bool = True,
     kill_fn: Callable[[int], None] = lambda pid: os.kill(pid, signal.SIGTERM),
     logger_fn: Callable[[str], None] = lambda _m: None,
 ) -> None:
     """
     Release the virtiofs backends a VM used; stop a daemon only when this was the
-    last instance of its network on the host. The shared directory (data) and
-    its anchor are preserved.
+    last instance of its network on the host.
+
+    When this was the last instance of a network and ``delete_disk_on_last`` is
+    True (the default), the network's shared disk directory — the exported data
+    plus its anchor and daemon state — is removed from the server. Set
+    ``delete_disk_on_last`` to False to preserve the shared disk for reuse by a
+    future instance of the same network.
 
     ``runtime_states`` must be the CH runtime states with ``vmachine_id`` ALREADY
     removed (i.e. the states of the *other* live VMs), so the reference count
@@ -403,6 +410,21 @@ def teardown_virtiofs_for_vm(
             state_path.unlink(missing_ok=True)
         except OSError:
             pass
+
+        # Last instance of this network on the host: optionally remove the shared
+        # disk from the server. Default is to delete; keeping it lets a later
+        # instance of the same network re-attach the existing data.
+        if delete_disk_on_last:
+            disk_dir = network_state_dir(base_dir, nid)
+            try:
+                shutil.rmtree(disk_dir, ignore_errors=False)
+                logger_fn(f"[CH][virtiofs] network={nid} shared disk removed ({disk_dir}).")
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger_fn(f"[CH][virtiofs] network={nid} error removing shared disk {disk_dir}: {e}")
+        else:
+            logger_fn(f"[CH][virtiofs] network={nid} shared disk preserved (delete_disk_on_last=False).")
 
 
 def _load_daemon_state(path: Path) -> Optional[dict]:

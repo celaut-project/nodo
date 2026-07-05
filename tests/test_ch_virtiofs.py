@@ -209,6 +209,42 @@ class OrchestrationTests(unittest.TestCase):
         # Data preserved regardless.
         self.assertTrue((virtiofs.shared_dir(self.base, nid) / virtiofs.ANCHOR_FILENAME).is_file())
 
+    def test_teardown_deletes_disk_on_last_by_default(self):
+        svc = _service([_virtiofs_network(anchor=ABCD)])
+        _args, state, _mounts = virtiofs.attach_virtiofs_backends(
+            svc, base_dir=self.base, socket_dir=self.sock, virtiofsd_binary="virtiofsd",
+            spawn_fn=self._spawn, pid_alive_fn=lambda _pid: False,
+        )
+        nid = state[0]["network_id_hex"]
+        self.assertTrue(virtiofs.shared_dir(self.base, nid).is_dir())
+        virtiofs.teardown_virtiofs_for_vm(
+            "vm1", state, {},  # last user
+            base_dir=self.base,
+            kill_fn=lambda _pid: None,
+        )
+        # Last instance gone -> shared disk removed from the server by default.
+        self.assertFalse(virtiofs.network_state_dir(self.base, nid).exists())
+        self.assertFalse(virtiofs.shared_dir(self.base, nid).exists())
+
+    def test_teardown_preserves_disk_when_flag_false(self):
+        svc = _service([_virtiofs_network(anchor=ABCD)])
+        _args, state, _mounts = virtiofs.attach_virtiofs_backends(
+            svc, base_dir=self.base, socket_dir=self.sock, virtiofsd_binary="virtiofsd",
+            spawn_fn=self._spawn, pid_alive_fn=lambda _pid: False,
+        )
+        nid = state[0]["network_id_hex"]
+        killed = []
+        virtiofs.teardown_virtiofs_for_vm(
+            "vm1", state, {},  # last user
+            base_dir=self.base,
+            delete_disk_on_last=False,
+            kill_fn=lambda pid: killed.append(pid),
+        )
+        self.assertEqual(killed, [4321])  # daemon still stopped
+        # ...but the shared disk (data + anchor) is kept for future reuse.
+        self.assertTrue(virtiofs.shared_dir(self.base, nid).is_dir())
+        self.assertTrue((virtiofs.shared_dir(self.base, nid) / virtiofs.ANCHOR_FILENAME).is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

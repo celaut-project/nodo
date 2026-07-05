@@ -81,6 +81,10 @@ virtualizers:
     # virtiofsd confinement for the exported directory: none|chroot|namespace.
     # Default chroot (deny-by-default, no cross-network access).
     VIRTIOFS_SANDBOX: "chroot"
+    # When the last instance of a shared-disk network is torn down, delete that
+    # network's virtiofs shared disk from the server. Default true. Set to false
+    # to keep the disk so a future instance of the same network reuses its data.
+    VIRTIOFS_DELETE_DISK_ON_LAST_INSTANCE: true
     SECURITY:
       # Enforce rootfs destination confinement for all filesystem paths.
       PATH_CONFINEMENT: true

@@ -123,6 +123,11 @@ def kill(vmachine_id: str) -> bool:
                 virtiofs_mounts,
                 list_runtime_states(),
                 base_dir=str(Path(CACHE) / "cloud_hypervisor" / "virtiofs"),
+                delete_disk_on_last=bool(
+                    env_manager.get(
+                        "virtualizers.ch.VIRTIOFS_DELETE_DISK_ON_LAST_INSTANCE", True
+                    )
+                ),
                 logger_fn=log.LOGGER,
             )
         except Exception as e:
