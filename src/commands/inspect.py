@@ -71,9 +71,9 @@ def inspect(service: str):
 
     print_rule("🔌 Service Interface")
     try:
-        if service_obj.api.environment_variables:  # Corrected typo
+        if service_obj.container.environment_variables:
             print("Env Vars:")
-            for var, df in service_obj.api.environment_variables.items():
+            for var, df in service_obj.container.environment_variables.items():
                 print(f"  - {var}: tags={df.tags}, prose='{df.prose}'")
     except Exception as e:
         print(f"Error reading environment variables: {e}")

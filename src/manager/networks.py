@@ -1,9 +1,14 @@
 import socket, os, json
-from typing import List
+from typing import Dict, List, Optional
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
 from src.utils.utils import read_service_from_disk
+from src.manager.network_env import (
+    PeerEnvLookup,
+    peer_env_matches,
+    filter_peers_by_environment,
+)
 
 env_manager = ConfigManager()
 sc = SQLConnection()
@@ -51,7 +56,11 @@ def resolve_ergo_network() -> List[celaut.Instance.Uri]:
     except:
         return []
 
-def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
+def resolve_network(
+    network: celaut.Service.Network,
+    requester_env_values: Optional[Dict[str, bytes]] = None,
+    peer_env_lookup: Optional[PeerEnvLookup] = None,
+) -> List[celaut.Instance]:
     for tag in network.tags:
         if "ergo" in tag:
             uris = resolve_ergo_network()
@@ -83,7 +92,12 @@ def resolve_network(network: celaut.Service.Network) -> List[celaut.Instance]:
         )]
     )
 
-    return [instance]
+    return filter_peers_by_environment(
+        network=network,
+        peers=[instance],
+        requester_env_values=requester_env_values,
+        peer_env_lookup=peer_env_lookup,
+    )
 
 def match_networks(a: celaut.Service.Network, b: celaut.Service.Network) -> bool:
     # TODO Could be more powerfull

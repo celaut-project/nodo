@@ -362,13 +362,15 @@ class ZipContainerPacker:
         )
     
     def parseApi(self):
-        
-        # Envs
+
+        # Environment variables now belong to the execution environment, so they
+        # are declared on Service.Container (not Service.Api). The `envs` list is
+        # still read from the top-level service.json for backwards compatibility.
         if self.json.get('envs'):
             for env in self.json.get('envs'):
                 try:
                     with open(self.path + env + ".field", "rb") as env_desc:
-                        self.service.api.environment_variables[env].ParseFromString(env_desc.read())
+                        self.service.container.environment_variables[env].ParseFromString(env_desc.read())
                 except FileNotFoundError:
                     pass
 
