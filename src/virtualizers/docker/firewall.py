@@ -228,3 +228,21 @@ def list_rules(container_id: str) -> List[NetworkRule]:
     except Exception as e:
         logger(f"Failed to list rules: {e}")
         return []
+
+def allow_all_egress(container_id: str) -> bool:
+    """Allow ALL outbound traffic from a container (network tag '*')."""
+    try:
+        container_ip = __get_container_ip(container_id)
+        success, message = __execute_iptables([
+            '-I', 'FORWARD',
+            '-s', container_ip,
+            '-j', 'ACCEPT',
+        ])
+        if success:
+            logger(f"Allowed ALL egress for container {container_id} [network tag '*']")
+        else:
+            logger(f"Failed to allow all egress for container {container_id}: {message}")
+        return success
+    except Exception as e:
+        logger(f"Failed to allow all egress: {e}")
+        return False
