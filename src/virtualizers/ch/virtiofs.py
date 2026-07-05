@@ -131,6 +131,54 @@ def daemon_state_path(base_dir: str, network_id_hex: str) -> Path:
     return network_state_dir(base_dir, network_id_hex) / "daemon.json"
 
 
+def shared_dir_usage_bytes(base_dir: str, network_id_hex: str) -> int:
+    """
+    Measured disk usage (bytes) of a network's shared directory — the ``du`` of
+    the shared disk. This is the number attributed to the network's *origin*
+    service and billed against its declared ``Sysresources.disk_space``.
+
+    Missing directory (never created / already torn down) counts as zero.
+    """
+    root = shared_dir(base_dir, network_id_hex)
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            file_path = Path(dirpath) / name
+            try:
+                total += file_path.stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def attributed_shared_disk_usage_bytes(
+    network_ids,
+    *,
+    base_dir: str,
+    declared_disk_space: Optional[int] = None,
+) -> int:
+    """
+    Measured usage (bytes) of the given networks' shared directories, clamped to
+    the origin service's declared ``disk_space``.
+
+    Josemi's rule: a shared disk's size lives *within* the disk the origin
+    service already declares in ``Sysresources.disk_space`` and is billed from
+    there — there is no separate size/quota field on the ``Network`` proto. The
+    cap and the billing source are the same existing number. Metering is
+    measured (``du``), not reserved: empty shared disks cost nothing; ones that
+    exceed the declaration are charged exactly the declaration.
+
+    ``declared_disk_space`` of ``None`` or ``0`` means "no declared cap" and the
+    raw measured usage is returned.
+    """
+    total = 0
+    for nid in network_ids:
+        total += shared_dir_usage_bytes(base_dir, nid)
+    if declared_disk_space is not None and int(declared_disk_space) > 0:
+        total = min(total, int(declared_disk_space))
+    return total
+
+
 def virtiofs_socket_path(socket_dir: str, network_id_hex: str) -> Path:
     """
     virtiofsd control socket. Kept in the (short) CH API socket dir to stay
@@ -235,6 +283,7 @@ def ensure_network_backend(
     sandbox: str = "chroot",
     spawn_fn: Callable[[List[str], Path], int] = _default_spawn,
     pid_alive_fn: Callable[[int], bool] = _default_pid_alive,
+    on_first_create: Optional[Callable[[str], None]] = None,
     logger_fn: Callable[[str], None] = lambda _m: None,
 ) -> Dict[str, object]:
     """
@@ -243,16 +292,29 @@ def ensure_network_backend(
 
     Idempotent: if a daemon for this network is already alive with its socket
     present, it is reused (co-located instances share one daemon + directory).
+
+    ``on_first_create`` — if given — is invoked with the network id (hex) exactly
+    once, the first time the shared directory is created on this host (i.e. this
+    instance is the *origin* of the network). It is NOT called for later
+    instances that merely join an already-created shared disk, so the origin can
+    be persisted idempotently by the caller.
     """
     nid = mount.network_id_hex
     export_dir = shared_dir(base_dir, nid)
     socket_path = virtiofs_socket_path(socket_dir, nid)
     state_path = daemon_state_path(base_dir, nid)
 
+    # "First create" == the shared directory did not exist before this call.
+    # A preserved disk (delete_disk_on_last=False) re-joined by a later instance
+    # already exists, so its original origin is kept.
+    first_create = not export_dir.exists()
     export_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(network_state_dir(base_dir, nid), 0o700)
     os.chmod(export_dir, 0o700)
     Path(socket_dir).mkdir(parents=True, exist_ok=True)
+
+    if first_create and on_first_create is not None:
+        on_first_create(nid)
 
     # Anchor placement: establish membership by writing the ABCD blob once.
     if mount.anchor:
@@ -318,6 +380,7 @@ def attach_virtiofs_backends(
     sandbox: str = "chroot",
     spawn_fn: Callable[[List[str], Path], int] = _default_spawn,
     pid_alive_fn: Callable[[int], bool] = _default_pid_alive,
+    on_first_create: Optional[Callable[[str], None]] = None,
     logger_fn: Callable[[str], None] = lambda _m: None,
 ):
     """
@@ -345,6 +408,7 @@ def attach_virtiofs_backends(
             sandbox=sandbox,
             spawn_fn=spawn_fn,
             pid_alive_fn=pid_alive_fn,
+            on_first_create=on_first_create,
             logger_fn=logger_fn,
         )
         fs_device_args.extend(
@@ -362,6 +426,7 @@ def teardown_virtiofs_for_vm(
     base_dir: str,
     delete_disk_on_last: bool = True,
     kill_fn: Callable[[int], None] = lambda pid: os.kill(pid, signal.SIGTERM),
+    on_disk_deleted: Optional[Callable[[str], None]] = None,
     logger_fn: Callable[[str], None] = lambda _m: None,
 ) -> None:
     """
@@ -419,8 +484,13 @@ def teardown_virtiofs_for_vm(
             try:
                 shutil.rmtree(disk_dir, ignore_errors=False)
                 logger_fn(f"[CH][virtiofs] network={nid} shared disk removed ({disk_dir}).")
+                # The disk is gone: forget its origin mapping so a future
+                # re-creation records a fresh origin service.
+                if on_disk_deleted is not None:
+                    on_disk_deleted(nid)
             except FileNotFoundError:
-                pass
+                if on_disk_deleted is not None:
+                    on_disk_deleted(nid)
             except OSError as e:
                 logger_fn(f"[CH][virtiofs] network={nid} error removing shared disk {disk_dir}: {e}")
         else:

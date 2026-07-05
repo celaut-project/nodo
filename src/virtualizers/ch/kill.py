@@ -118,6 +118,19 @@ def kill(vmachine_id: str) -> bool:
         # VM still uses it. list_runtime_states() still includes this VM, but the
         # teardown skips it by vmachine_id when counting other users.
         try:
+            def _forget_network_origin(network_id_hex: str) -> None:
+                # Shared disk removed (last instance gone): drop its origin
+                # mapping so a future re-creation records a fresh origin.
+                try:
+                    from src.database.sql_connection import SQLConnection
+
+                    SQLConnection().delete_network_origin(network_id_hex=network_id_hex)
+                except Exception as e:  # noqa: BLE001 - best-effort cleanup
+                    log.LOGGER(
+                        f"[CH][{vmachine_id}] virtiofs: failed forgetting origin for "
+                        f"network={network_id_hex}: {e}"
+                    )
+
             ch_virtiofs.teardown_virtiofs_for_vm(
                 vmachine_id,
                 virtiofs_mounts,
@@ -128,6 +141,7 @@ def kill(vmachine_id: str) -> bool:
                         "virtualizers.ch.VIRTIOFS_DELETE_DISK_ON_LAST_INSTANCE", True
                     )
                 ),
+                on_disk_deleted=_forget_network_origin,
                 logger_fn=log.LOGGER,
             )
         except Exception as e:

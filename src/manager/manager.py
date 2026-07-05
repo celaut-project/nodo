@@ -517,6 +517,7 @@ def provision_vmachine(
 
 def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     sys_req = sc.get_sys_req(id=id)
+    _log_attributed_shared_disk_usage(instance_id=id, declared_disk_space=sys_req["disk_space"])
     return celaut_pb2.ModifyServiceSystemResourcesOutput(
         sysreq=celaut_pb2.Sysresources(
             mem_limit=sys_req["mem_limit"],
@@ -526,6 +527,38 @@ def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
             gas_amount=sc.get_container_gas(id=id)
         )
     )
+
+
+def _log_attributed_shared_disk_usage(instance_id: str, declared_disk_space) -> None:
+    """
+    Count the shared-disk (virtiofs) usage this instance originated against its
+    already-declared ``disk_space`` and log the attribution.
+
+    The shared disk's measured ``du`` is billed from the origin service's
+    existing ``Sysresources.disk_space`` (no separate proto field), clamped to
+    that declaration as the hard ceiling. Best-effort: never breaks reporting.
+    """
+    try:
+        from src.manager.virtiofs_accounting import origin_instance_shared_disk_usage_bytes
+        from pathlib import Path
+
+        cache = env_manager.get("CACHE")
+        if not cache:
+            return
+        base_dir = str(Path(cache) / "cloud_hypervisor" / "virtiofs")
+        used = origin_instance_shared_disk_usage_bytes(
+            instance_id,
+            base_dir=base_dir,
+            sc=sc,
+            declared_disk_space=declared_disk_space,
+        )
+        if used > 0:
+            log.LOGGER(
+                f"Instance {instance_id}: shared-disk usage {used} bytes attributed "
+                f"to declared disk_space {declared_disk_space} (virtiofs origin)."
+            )
+    except Exception as e:  # noqa: BLE001 - accounting must not break reporting
+        log.LOGGER(f"Instance {instance_id}: shared-disk accounting skipped: {e}")
 
 
 def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.

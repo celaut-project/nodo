@@ -1006,12 +1006,31 @@ def execute(
         # command, and hand the guest a mount plan. No-op when the service
         # declares no virtiofs network.
         virtiofs_base_dir = str(Path(CACHE) / "cloud_hypervisor" / "virtiofs")
+
+        def _record_network_origin(network_id_hex: str) -> None:
+            # This VM is the first to create the shared disk on this host: it is
+            # the network's origin. Persist it idempotently (first creator wins);
+            # the shared disk's du is later billed against this service's declared
+            # disk_space (see src/manager/virtiofs_accounting.py).
+            try:
+                sc.record_network_origin(
+                    network_id_hex=network_id_hex,
+                    service_id=service_id,
+                    instance_id=vmachine_id,
+                )
+            except Exception as e:  # noqa: BLE001 - accounting must not break launch
+                log.LOGGER(
+                    f"[CH][{vmachine_id}] virtiofs: failed recording origin for "
+                    f"network={network_id_hex}: {e}"
+                )
+
         fs_device_args, virtiofs_mounts_state, virtiofs_mounts = ch_virtiofs.attach_virtiofs_backends(
             service,
             base_dir=virtiofs_base_dir,
             socket_dir=CH_API_SOCKET_DIR,
             virtiofsd_binary=VIRTIOFSD_PATH,
             sandbox=VIRTIOFS_SANDBOX,
+            on_first_create=_record_network_origin,
             logger_fn=log.LOGGER,
         )
         if virtiofs_mounts:
@@ -1241,6 +1260,7 @@ def execute(
                     virtiofs_mounts_state,
                     list_runtime_states(),
                     base_dir=str(Path(CACHE) / "cloud_hypervisor" / "virtiofs"),
+                    on_disk_deleted=lambda nid: sc.delete_network_origin(network_id_hex=nid),
                     logger_fn=log.LOGGER,
                 )
             except Exception as vfs_e:

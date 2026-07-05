@@ -460,6 +460,83 @@ class SQLConnection(metaclass=Singleton):
             return row['service_id']
         raise Exception(f'No service found for container ID {id}')
 
+    # Virtiofs shared-disk network origin methods
+    #
+    # A virtiofs shared-disk "network" is created lazily by the first instance
+    # that needs it. That first service is the network's *origin*: the shared
+    # disk's measured usage is billed against the origin service's already
+    # declared Sysresources.disk_space. We persist the mapping so the origin is
+    # not merely "whoever happened to call ensure_network_backend first" but a
+    # durable record across restarts.
+
+    def record_network_origin(
+        self,
+        network_id_hex: str,
+        service_id: str,
+        instance_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Record the originating service of a shared-disk network.
+
+        Idempotent: only the first creator is stored. A later instance joining
+        the same network never overwrites the origin (``INSERT OR IGNORE`` on the
+        ``network_id_hex`` primary key).
+
+        Returns:
+            bool: True if this call became the recorded origin, False if an
+            origin was already present for the network.
+        """
+        cursor = self._execute('''
+            INSERT OR IGNORE INTO network_origins (network_id_hex, service_id, instance_id)
+            VALUES (?, ?, ?)
+        ''', (network_id_hex, service_id, instance_id))
+        recorded = cursor.rowcount == 1
+        if recorded:
+            log.LOGGER(
+                f"Recorded virtiofs network origin {network_id_hex} -> "
+                f"service={service_id} instance={instance_id}"
+            )
+        return recorded
+
+    def get_network_origin(self, network_id_hex: str) -> Optional[dict]:
+        """
+        Retrieves the origin service of a shared-disk network.
+
+        Returns:
+            Optional[dict]: ``{"service_id": ..., "instance_id": ...}`` or None.
+        """
+        result = self._execute('''
+            SELECT service_id, instance_id FROM network_origins WHERE network_id_hex = ?
+        ''', (network_id_hex,))
+        row = result.fetchone()
+        if row is None:
+            return None
+        return {"service_id": row["service_id"], "instance_id": row["instance_id"]}
+
+    def get_origin_networks(self, instance_id: str) -> List[str]:
+        """
+        Fetches the ids of the shared-disk networks originated by an instance.
+
+        Returns:
+            List[str]: network content ids (hex) whose origin is ``instance_id``.
+        """
+        result = self._execute('''
+            SELECT network_id_hex FROM network_origins WHERE instance_id = ?
+        ''', (instance_id,))
+        return [row["network_id_hex"] for row in result.fetchall()]
+
+    def delete_network_origin(self, network_id_hex: str) -> None:
+        """
+        Removes a shared-disk network's origin mapping.
+
+        Called when the shared disk itself is removed from the host (the last
+        instance of the network went away), so a future re-creation records a
+        fresh origin.
+        """
+        self._execute('''
+            DELETE FROM network_origins WHERE network_id_hex = ?
+        ''', (network_id_hex,))
+
     def get_internal_virtualizer(self, id: str) -> Optional[str]:
         """
         Retrieves the virtualizer for a given container ID.

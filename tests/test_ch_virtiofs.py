@@ -226,6 +226,120 @@ class OrchestrationTests(unittest.TestCase):
         self.assertFalse(virtiofs.network_state_dir(self.base, nid).exists())
         self.assertFalse(virtiofs.shared_dir(self.base, nid).exists())
 
+    def test_on_first_create_fires_once_on_create_not_on_join(self):
+        # Origin recording hook: fires exactly once when the shared disk is first
+        # created, and NOT when a later instance joins the already-created disk.
+        svc = _service([_virtiofs_network(anchor=ABCD)])
+        created = []
+        # First attach creates the disk -> callback fires.
+        virtiofs.attach_virtiofs_backends(
+            svc, base_dir=self.base, socket_dir=self.sock, virtiofsd_binary="virtiofsd",
+            spawn_fn=self._spawn, pid_alive_fn=lambda _pid: False,
+            on_first_create=created.append,
+        )
+        nid = virtiofs.virtiofs_mounts_for_service(svc)[0].network_id_hex
+        self.assertEqual(created, [nid])
+        # Make the daemon look alive + socket present so the second attach joins.
+        virtiofs.virtiofs_socket_path(self.sock, nid).parent.mkdir(parents=True, exist_ok=True)
+        virtiofs.virtiofs_socket_path(self.sock, nid).write_bytes(b"")
+        # Second attach: disk already exists -> origin NOT overwritten (no fire).
+        virtiofs.attach_virtiofs_backends(
+            svc, base_dir=self.base, socket_dir=self.sock, virtiofsd_binary="virtiofsd",
+            spawn_fn=self._spawn, pid_alive_fn=lambda _pid: True,
+            on_first_create=created.append,
+        )
+        self.assertEqual(created, [nid])  # still only one origin record
+
+    def test_shared_dir_usage_measures_du(self):
+        svc = _service([_virtiofs_network(anchor=ABCD)])
+        _args, state, _mounts = virtiofs.attach_virtiofs_backends(
+            svc, base_dir=self.base, socket_dir=self.sock, virtiofsd_binary="virtiofsd",
+            spawn_fn=self._spawn, pid_alive_fn=lambda _pid: False,
+        )
+        nid = state[0]["network_id_hex"]
+        # Empty shared dir (only the anchor was written) -> anchor bytes counted.
+        anchor_len = len(ABCD)
+        self.assertEqual(virtiofs.shared_dir_usage_bytes(self.base, nid), anchor_len)
+        # Write a payload file into the shared dir and re-measure.
+        (virtiofs.shared_dir(self.base, nid) / "payload.bin").write_bytes(b"x" * 1000)
+        self.assertEqual(virtiofs.shared_dir_usage_bytes(self.base, nid), anchor_len + 1000)
+
+    def test_shared_dir_usage_missing_dir_is_zero(self):
+        self.assertEqual(virtiofs.shared_dir_usage_bytes(self.base, "deadbeef"), 0)
+
+    def test_attributed_usage_sums_networks(self):
+        (virtiofs.shared_dir(self.base, "aa")).mkdir(parents=True, exist_ok=True)
+        (virtiofs.shared_dir(self.base, "aa") / "f").write_bytes(b"x" * 100)
+        (virtiofs.shared_dir(self.base, "bb")).mkdir(parents=True, exist_ok=True)
+        (virtiofs.shared_dir(self.base, "bb") / "f").write_bytes(b"x" * 250)
+        self.assertEqual(
+            virtiofs.attributed_shared_disk_usage_bytes(
+                ["aa", "bb"], base_dir=self.base, declared_disk_space=None
+            ),
+            350,
+        )
+
+    def test_attributed_usage_capped_by_declared(self):
+        (virtiofs.shared_dir(self.base, "aa")).mkdir(parents=True, exist_ok=True)
+        (virtiofs.shared_dir(self.base, "aa") / "f").write_bytes(b"x" * 1000)
+        # Measured 1000 but declared cap 400 -> billed 400 (hard ceiling).
+        self.assertEqual(
+            virtiofs.attributed_shared_disk_usage_bytes(
+                ["aa"], base_dir=self.base, declared_disk_space=400
+            ),
+            400,
+        )
+        # Under the cap -> measured returned.
+        self.assertEqual(
+            virtiofs.attributed_shared_disk_usage_bytes(
+                ["aa"], base_dir=self.base, declared_disk_space=5000
+            ),
+            1000,
+        )
+
+    def test_attributed_usage_zero_declared_means_no_cap(self):
+        (virtiofs.shared_dir(self.base, "aa")).mkdir(parents=True, exist_ok=True)
+        (virtiofs.shared_dir(self.base, "aa") / "f").write_bytes(b"x" * 300)
+        self.assertEqual(
+            virtiofs.attributed_shared_disk_usage_bytes(
+                ["aa"], base_dir=self.base, declared_disk_space=0
+            ),
+            300,
+        )
+
+    def test_on_disk_deleted_fires_on_last_teardown(self):
+        svc = _service([_virtiofs_network(anchor=ABCD)])
+        _args, state, _mounts = virtiofs.attach_virtiofs_backends(
+            svc, base_dir=self.base, socket_dir=self.sock, virtiofsd_binary="virtiofsd",
+            spawn_fn=self._spawn, pid_alive_fn=lambda _pid: False,
+        )
+        nid = state[0]["network_id_hex"]
+        forgotten = []
+        virtiofs.teardown_virtiofs_for_vm(
+            "vm1", state, {},  # last user -> disk deleted
+            base_dir=self.base,
+            kill_fn=lambda _pid: None,
+            on_disk_deleted=forgotten.append,
+        )
+        self.assertEqual(forgotten, [nid])
+
+    def test_on_disk_deleted_not_fired_when_other_vm_uses_network(self):
+        svc = _service([_virtiofs_network(anchor=ABCD)])
+        _args, state, _mounts = virtiofs.attach_virtiofs_backends(
+            svc, base_dir=self.base, socket_dir=self.sock, virtiofsd_binary="virtiofsd",
+            spawn_fn=self._spawn, pid_alive_fn=lambda _pid: False,
+        )
+        nid = state[0]["network_id_hex"]
+        other = {"vm2": {"virtiofs": [{"network_id_hex": nid}]}}
+        forgotten = []
+        virtiofs.teardown_virtiofs_for_vm(
+            "vm1", state, other,  # still in use -> disk kept, origin kept
+            base_dir=self.base,
+            kill_fn=lambda _pid: None,
+            on_disk_deleted=forgotten.append,
+        )
+        self.assertEqual(forgotten, [])
+
     def test_teardown_preserves_disk_when_flag_false(self):
         svc = _service([_virtiofs_network(anchor=ABCD)])
         _args, state, _mounts = virtiofs.attach_virtiofs_backends(

@@ -152,6 +152,19 @@ def create_tables(cursor):
                 cost_per_kwh REAL,
                 last_updated DATETIME
             )
+        ''',
+        # Origin of each virtiofs shared-disk network: the first service that
+        # caused the shared directory to be created on this host. The shared
+        # disk's measured usage is billed against this origin service's already
+        # declared Sysresources.disk_space (see src/manager/virtiofs_accounting.py).
+        # First creator wins; later instances joining the network never overwrite it.
+        "network_origins": '''
+            CREATE TABLE IF NOT EXISTS network_origins (
+                network_id_hex TEXT PRIMARY KEY,
+                service_id TEXT,
+                instance_id TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
         '''
     }
 
