@@ -50,6 +50,9 @@ virtualizers:
     CACHE_DIR: "${main.CACHE}/ch"
     # Keep this path short to avoid Unix socket SUN_LEN limits.
     API_SOCKET_DIR: "/tmp/nodo-ch"
+    # virtiofsd daemon for shared filesystems (parent -> child inheritance).
+    # Only invoked for services that declare shared/guest directories.
+    VIRTIOFSD_BINARY: "virtiofsd"
     NETWORK_MODE: "tap_bridge"
     NETWORK_BRIDGE_NAME: "br-ch"
     NETWORK_SUBNET: "192.168.200.0/24"

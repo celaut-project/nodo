@@ -11,7 +11,12 @@ from src.virtualizers.ch.cgroups import remove_vm_cgroup
 from src.virtualizers.ch.process import pid_matches_vmachine
 from src.virtualizers.ch.runtime_state import (
     delete_runtime_state,
+    list_runtime_states,
     load_runtime_state,
+)
+from src.virtualizers.ch.virtiofs import (
+    shared_fs_base_dir,
+    teardown_virtiofs_for_vm,
 )
 
 env_manager = ConfigManager()
@@ -123,6 +128,27 @@ def kill(vmachine_id: str) -> bool:
             log.LOGGER(f"[CH][{vmachine_id}] event=cleanup runtime_dir_removed={runtime_dir}")
     except Exception as e:
         log.LOGGER(f"[CH][{vmachine_id}] failed removing runtime directory: {e}")
+
+    # Release shared-filesystem backends. A virtiofsd daemon is stopped only when
+    # this was the last VM using its share on the host; the exported directory is
+    # removed only for shares this VM itself exported (owned_share_ids), so a
+    # departing child never deletes its parent's data.
+    virtiofs_mounts = state.get("virtiofs") or []
+    if virtiofs_mounts and CACHE:
+        try:
+            other_states = {
+                vid: s for vid, s in list_runtime_states().items() if vid != vmachine_id
+            }
+            teardown_virtiofs_for_vm(
+                vmachine_id=vmachine_id,
+                mounts_state=virtiofs_mounts,
+                runtime_states=other_states,
+                base_dir=str(shared_fs_base_dir(CACHE)),
+                owned_share_ids=state.get("exported_shares") or [],
+                logger_fn=log.LOGGER,
+            )
+        except Exception as e:
+            log.LOGGER(f"[CH][{vmachine_id}] virtiofs teardown error: {e}")
 
     delete_runtime_state(vmachine_id)
     log.LOGGER(f"[CH][{vmachine_id}] event=cleanup runtime_state_removed")

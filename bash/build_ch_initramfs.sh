@@ -145,7 +145,10 @@ install_virtio_modules() {
 
     : > "$module_list"
 
-    for required_module in virtio_blk virtio_net; do
+    # virtiofs (+ its fuse dependency, pulled in by --show-depends) is needed for
+    # parent -> child shared filesystems. Harmless when unused: it is only loaded,
+    # never auto-mounted.
+    for required_module in virtio_blk virtio_net virtiofs; do
         deps="$(modprobe --set-version "$kernel_release" --show-depends "$required_module" 2>/dev/null || true)"
         if [ -z "$deps" ]; then
             if is_builtin_module "$kernel_release" "$required_module"; then
@@ -391,6 +394,43 @@ case "$ENTRYPOINT" in
     /*) ;;
     *) fatal "entrypoint must be absolute, got '$ENTRYPOINT'" ;;
 esac
+
+# Shared filesystems (parent -> child inheritance). If the host injected a
+# virtio-fs mount plan, mount each shared directory before switch_root. The plan
+# is a JSON list of {"tag","path","ro"} objects; parse it with busybox tools
+# (no jq in the initramfs). Absent plan => ordinary service, nothing to do.
+if [ -f /newroot/.__nodo_virtiofs ]; then
+    log "virtiofs: applying shared-filesystem mount plan"
+    # Flatten each JSON object onto its own line (one {tag,path,ro} per line), then
+    # iterate via redirect — NOT a pipe — so the loop runs in this shell and a
+    # `fatal` actually halts init. Parsed with sed (no jq in the initramfs).
+    tr '}' '\n' < /newroot/.__nodo_virtiofs > /tmp/.__nodo_virtiofs.lines
+    while IFS= read -r obj; do
+        case "$obj" in
+            *'"tag"'*)
+                vfs_tag=$(printf '%s' "$obj" | sed -n 's/.*"tag"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+                vfs_path=$(printf '%s' "$obj" | sed -n 's/.*"path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+                vfs_ro=$(printf '%s' "$obj" | sed -n 's/.*"ro"[[:space:]]*:[[:space:]]*\([a-z]*\).*/\1/p')
+                [ -n "$vfs_tag" ] || continue
+                case "$vfs_path" in
+                    /*) ;;
+                    *) fatal "virtiofs: guest path must be absolute, got '$vfs_path'" ;;
+                esac
+                mkdir -p "/newroot$vfs_path" || fatal "virtiofs: cannot create mountpoint $vfs_path"
+                if [ "$vfs_ro" = "true" ]; then
+                    mount -t virtiofs -o ro "$vfs_tag" "/newroot$vfs_path" \
+                        || fatal "virtiofs: cannot mount $vfs_tag (ro) at $vfs_path"
+                    log "virtiofs: mounted $vfs_tag -> $vfs_path (ro)"
+                else
+                    mount -t virtiofs "$vfs_tag" "/newroot$vfs_path" \
+                        || fatal "virtiofs: cannot mount $vfs_tag at $vfs_path"
+                    log "virtiofs: mounted $vfs_tag -> $vfs_path (rw)"
+                fi
+                ;;
+        esac
+    done < /tmp/.__nodo_virtiofs.lines
+    rm -f /tmp/.__nodo_virtiofs.lines
+fi
 
 [ -x "/newroot$ENTRYPOINT" ] || fatal "entrypoint is not executable: $ENTRYPOINT"
 
