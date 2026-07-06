@@ -382,6 +382,17 @@ mount --move /sys /newroot/sys || fatal "cannot move /sys to new root"
 mount --move /dev /newroot/dev || fatal "cannot move /dev to new root"
 mount -t tmpfs -o mode=755,nosuid,nodev tmpfs /newroot/run || fatal "cannot mount /run"
 
+# Mount the unified cgroup-v2 hierarchy. The guest has no init system (the service
+# entrypoint runs as PID 1 straight out of switch_root), so nothing else mounts it.
+# Container-runtime services (e.g. a service that boots its own dockerd) need it:
+# without a cgroup mount, rootful dockerd defaults to legacy cgroup-v1, finds no
+# controllers, and aborts with "Devices cgroup isn't mounted" -> PID 1 exits ->
+# kernel panic. On v2 device control is eBPF, so no per-controller mounts are
+# needed. Non-fatal: services that don't use cgroups are unaffected if it's absent.
+mkdir -p /newroot/sys/fs/cgroup
+mount -t cgroup2 none /newroot/sys/fs/cgroup \
+    || log "warning: could not mount cgroup2 at /sys/fs/cgroup (container-runtime services may fail)"
+
 [ -f /newroot/__config__ ] || fatal "missing /__config__ in service rootfs"
 [ -f /newroot/.__nodo_entrypoint ] || fatal "missing /.__nodo_entrypoint metadata file"
 
