@@ -4,9 +4,9 @@ This guide covers both automatic and fully manual uninstall.
 
 It is aligned with the current runtime model:
 
-- Python/JRE/yq/Docker can be local to `MAIN_DIR`.
+- Python/JRE/yq can be local to `MAIN_DIR`.
 - `nodo.service` exports `JAVA_HOME` and `PATH` from configured local paths.
-- QEMU/binfmt are not part of the install profile.
+- No local Docker (services run under Cloud Hypervisor); QEMU/binfmt are not part of the install profile.
 
 ## 1) Automatic uninstall (`uninstall.sh`)
 
@@ -21,8 +21,7 @@ sudo ./uninstall.sh
 What it does (best effort):
 
 - Stops/disables `nodo.service`.
-- Tries to clean node-managed containers.
-- Stops isolated Docker daemon under `/nodo/docker`.
+- Tries to clean node-managed service instances (Cloud Hypervisor microVMs).
 - Removes `/etc/systemd/system/nodo.service`, `/usr/local/bin/nodo`, and `/nodo`.
 
 ## 2) Manual uninstall (recommended for custom `MAIN_DIR`)
@@ -66,9 +65,6 @@ read_cfg_path_or_default() {
   expand_main_dir "$raw"
 }
 
-DOCKER_BIN_TARGET="$(read_cfg_path_or_default '.dependencies.docker.BIN' '${main.MAIN_DIR}/bin/docker')"
-DOCKERD_BIN_TARGET="$(read_cfg_path_or_default '.dependencies.docker.DAEMON_BIN' '${main.MAIN_DIR}/bin/dockerd')"
-DOCKER_SOCKET_PATH="$(read_cfg_path_or_default '.virtualizers.docker.DOCKER_SOCKET' '${main.MAIN_DIR}/docker/docker.sock')"
 WRAPPER_SCRIPT="/usr/local/bin/nodo"
 SERVICE_FILE="/etc/systemd/system/nodo.service"
 ```
@@ -80,49 +76,7 @@ sudo systemctl stop nodo.service 2>/dev/null || true
 sudo systemctl disable nodo.service 2>/dev/null || true
 ```
 
-### 2.4 Optional: remove containers from Nodo isolated daemon
-
-If isolated Docker is still reachable, remove containers from that daemon only:
-
-```bash
-if [ -x "$DOCKER_BIN_TARGET" ] && [ -S "$DOCKER_SOCKET_PATH" ]; then
-  IDS="$($DOCKER_BIN_TARGET -H "unix://$DOCKER_SOCKET_PATH" ps -aq 2>/dev/null || true)"
-  if [ -n "$IDS" ]; then
-    $DOCKER_BIN_TARGET -H "unix://$DOCKER_SOCKET_PATH" rm -f $IDS || true
-  fi
-fi
-```
-
-### 2.5 Stop isolated dockerd processes
-
-```bash
-if [ -f "$TARGET_DIR/docker/docker.pid" ]; then
-  PID="$(cat "$TARGET_DIR/docker/docker.pid")"
-  sudo kill "$PID" 2>/dev/null || true
-  sleep 2
-  sudo kill -9 "$PID" 2>/dev/null || true
-fi
-
-PIDS="$(pgrep -f "$TARGET_DIR/.*/dockerd" || true)"
-if [ -n "$PIDS" ]; then
-  sudo kill $PIDS 2>/dev/null || true
-  sleep 2
-  sudo kill -9 $PIDS 2>/dev/null || true
-fi
-```
-
-### 2.6 Unmount leftover Docker netns mounts (if any)
-
-```bash
-NETNS_DIR="$TARGET_DIR/docker/exec/netns"
-if [ -d "$NETNS_DIR" ] && command -v findmnt >/dev/null 2>&1; then
-  while read -r mp; do
-    [ -n "$mp" ] && sudo umount -l "$mp" 2>/dev/null || true
-  done < <(findmnt -R -n -o TARGET "$NETNS_DIR" 2>/dev/null | sort -r)
-fi
-```
-
-### 2.7 Remove service file and wrapper
+### 2.4 Remove service file and wrapper
 
 ```bash
 sudo rm -f "$SERVICE_FILE"
@@ -130,7 +84,7 @@ sudo systemctl daemon-reload
 sudo rm -f "$WRAPPER_SCRIPT"
 ```
 
-### 2.8 Remove installation directory
+### 2.5 Remove installation directory
 
 ```bash
 sudo rm -rf "$TARGET_DIR"
@@ -142,8 +96,7 @@ Removed (if inside `TARGET_DIR`):
 
 - Local Python runtime and venv.
 - Local Java runtime.
-- Local yq/Docker binaries.
-- Isolated Docker data/sockets.
+- Local yq binary.
 - Cloud Hypervisor assets copied under `TARGET_DIR`.
 
 Not removed automatically:
