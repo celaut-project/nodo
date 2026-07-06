@@ -104,9 +104,7 @@ def _normalize_virtualizer(name: Optional[str]) -> str:
         raise ValueError("Virtualizer value is empty.")
     if v in {"ch", "cloud_hypervisor", "cloud-hypervisor"}:
         return "ch"
-    if v == "docker":
-        return "docker"
-    raise ValueError(f"Unknown virtualizer '{name}'. Supported: ch, docker.")
+    raise ValueError(f"Unknown virtualizer '{name}'. Supported: ch.")
 
 
 def _resolve_virtualizer(vmachine_id: str) -> str:
@@ -238,16 +236,6 @@ def allow_connection(
             source_ip=source_ip,
         )
 
-    if virtualizer == "docker":
-        from src.virtualizers.docker.firewall import allow_connection as docker_allow_connection
-
-        return docker_allow_connection(
-            container_id=vmachine_id,
-            ip=ip,
-            port=port,
-            protocol=protocol,
-        )
-
     raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
 
 
@@ -271,16 +259,6 @@ def allow_connection_to_instance(
             source_ip=source_ip,
         )
 
-    if virtualizer == "docker":
-        from src.virtualizers.docker.firewall import (
-            allow_connection_to_instance as docker_allow_connection_to_instance,
-        )
-
-        return docker_allow_connection_to_instance(
-            container_id=vmachine_id,
-            instance=instance,
-        )
-
     raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
 
 
@@ -293,11 +271,6 @@ def block_all(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
         from src.virtualizers.ch.firewall import block_all as ch_block_all
 
         return ch_block_all(vmachine_id=vmachine_id, source_ip=source_ip)
-
-    if virtualizer == "docker":
-        from src.virtualizers.docker.firewall import block_all as docker_block_all
-
-        return docker_block_all(container_id=vmachine_id)
 
     raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
 
@@ -314,16 +287,6 @@ def remove_rule(
 
         return ch_remove_rule(
             vmachine_id=vmachine_id,
-            ip=ip,
-            port=port,
-            protocol=protocol,
-        )
-
-    if virtualizer == "docker":
-        from src.virtualizers.docker.firewall import remove_rule as docker_remove_rule
-
-        return docker_remove_rule(
-            container_id=vmachine_id,
             ip=ip,
             port=port,
             protocol=protocol,

@@ -30,9 +30,6 @@ RUNTIME_DIR="$TARGET_DIR/runtime"
 PYTHON_RUNTIME_ROOT_DEFAULT="$RUNTIME_DIR/python"
 PYTHON_RUNTIME_ROOT="$PYTHON_RUNTIME_ROOT_DEFAULT"
 JAVA_RUNTIME_ROOT_DEFAULT="$RUNTIME_DIR/java"
-DOCKER_BIN_TARGET="${TARGET_DIR}/bin/docker"
-DOCKERD_BIN_TARGET="${TARGET_DIR}/bin/dockerd"
-BUILDX_BIN_TARGET="${TARGET_DIR}/libexec/docker/cli-plugins/docker-buildx"
 
 fail() {
     echo "Error: $1"
@@ -71,9 +68,6 @@ apply_configured_dependency_paths() {
     fi
 
     PYTHON_RUNTIME_ROOT="$(read_config_path_or_default '.dependencies.python.RUNTIME_ROOT' "$PYTHON_RUNTIME_ROOT_DEFAULT")"
-    DOCKER_BIN_TARGET="$(read_config_path_or_default '.dependencies.docker.BIN' "$DOCKER_BIN_TARGET")"
-    DOCKERD_BIN_TARGET="$(read_config_path_or_default '.dependencies.docker.DAEMON_BIN' "$DOCKERD_BIN_TARGET")"
-    BUILDX_BIN_TARGET="$(read_config_path_or_default '.dependencies.docker.BUILDX_BIN' "$BUILDX_BIN_TARGET")"
 }
 
 download_file() {
@@ -387,48 +381,8 @@ fi
 "$TARGET_DIR/venv/bin/python" -m pip install --upgrade pip > /dev/null
 "$TARGET_DIR/venv/bin/python" -m pip install -r "$REQ_FILE" > /dev/null
 
-echo "Installing Docker (safe install)..."
-
-BIN_DIR="$(dirname "$DOCKER_BIN_TARGET")"
-PLUGIN_DIR="$(dirname "$BUILDX_BIN_TARGET")"
-mkdir -p "$BIN_DIR" "$PLUGIN_DIR"
-
-pkill -f "$DOCKERD_BIN_TARGET" 2>/dev/null || true
-
-install_tmp() {
-    local src="$1"
-    local dst="$2"
-    local tmp="${dst}.new.$$"
-    cp "$src" "$tmp"
-    chmod +x "$tmp"
-    mv -f "$tmp" "$dst"
-}
-
-ARCH=$(uname -m)
-DOCKER_ARCH="x86_64"
-BUILDX_ARCH="amd64"
-
-[ "$ARCH" = "aarch64" ] && DOCKER_ARCH="aarch64" && BUILDX_ARCH="arm64"
-
-curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-24.0.9.tgz" -o /tmp/docker.tgz
-tar -xzf /tmp/docker.tgz -C /tmp/
-
-install_tmp "/tmp/docker/docker" "$DOCKER_BIN_TARGET"
-install_tmp "/tmp/docker/dockerd" "$DOCKERD_BIN_TARGET"
-install_tmp "/tmp/docker/docker-init" "$BIN_DIR/docker-init"
-install_tmp "/tmp/docker/ctr" "$BIN_DIR/ctr"
-install_tmp "/tmp/docker/runc" "$BIN_DIR/runc"
-install_tmp "/tmp/docker/containerd" "$BIN_DIR/containerd"
-install_tmp "/tmp/docker/containerd-shim-runc-v2" "$BIN_DIR/containerd-shim-runc-v2"
-install_tmp "/tmp/docker/docker-proxy" "$BIN_DIR/docker-proxy"
-
-rm -rf /tmp/docker /tmp/docker.tgz
-chmod +x "$BIN_DIR"/*
-
-echo "Installing buildx..."
-curl -fsSL "https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0.12.1.linux-${BUILDX_ARCH}" \
-  -o "$BUILDX_BIN_TARGET"
-chmod +x "$BUILDX_BIN_TARGET"
+# No Docker install: nodo runs services under Cloud Hypervisor and delegates
+# packing to the external packer-service. Docker is never installed on this host.
 
 echo "Running migrations with local Python runtime..."
 "$TARGET_DIR/venv/bin/python" "$TARGET_DIR/nodo.py" migrate > /dev/null

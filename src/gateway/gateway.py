@@ -1,7 +1,6 @@
 from bee_rpc import client as bee
 
 from protos import celaut_pb2_grpc, celaut_pb2
-from src.packers.zip_with_dockerfile import pack_zip
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
@@ -142,16 +141,10 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 message_iterator=get_sysresources(id=token)
         )
 
-    def Pack(self, request_iterator, context, **kwargs):
-        log.LOGGER('Go to pack a proyect.')
-        _d: bee.Dir = next(bee.parse_from_buffer(
-            request_iterator=request_iterator,
-            indices={0: bytes},
-            partitions_message_mode={0: False}
-        ), None)
-        if _d.type != bytes:
-            raise Exception("Incorrect input on Pack grpc method. Should be bytes")
-        yield from pack_zip(zip=_d.dir)
+    # NOTE: the gRPC `Pack` handler was removed together with nodo's local
+    # Docker packer. Packing now happens in the external packer-service microVM
+    # (see src/commands/packer/zip_with_dockerfile/pack.py), so the gateway no
+    # longer builds services and no longer depends on Docker.
 
     def GetService(self, request_iterator, context, **kwargs):
         yield from GetServiceIterable(request_iterator, context)
