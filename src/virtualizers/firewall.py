@@ -275,6 +275,21 @@ def block_all(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
     raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
 
 
+def allow_all_egress(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
+    virtualizer = _resolve_virtualizer(vmachine_id)
+    if virtualizer == "ch":
+        from src.virtualizers.ch.firewall import allow_all_egress as ch_allow_all_egress
+
+        return ch_allow_all_egress(vmachine_id=vmachine_id, source_ip=source_ip)
+
+    if virtualizer == "docker":
+        from src.virtualizers.docker.firewall import allow_all_egress as docker_allow_all_egress
+
+        return docker_allow_all_egress(container_id=vmachine_id)
+
+    raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
+
+
 def remove_rule(
     vmachine_id: str,
     ip: str,

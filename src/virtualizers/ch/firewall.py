@@ -224,3 +224,27 @@ def remove_rule(
     except Exception as e:
         logger(f"[CH][FW] Failed to remove rule for {vmachine_id}: {e}")
         return False
+
+def allow_all_egress(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
+    """Allow ALL outbound traffic from the VM (used for network tag '*').
+
+    Inserted at the head of FORWARD so it short-circuits the block_all DROP rule.
+    Return traffic is covered by the global ESTABLISHED/RELATED accept rule.
+    """
+    try:
+        vm_ip = _resolve_vmachine_ip(vmachine_id=vmachine_id, source_ip=source_ip)
+        success, message = _execute_iptables([
+            "-I", "FORWARD",
+            "-s", vm_ip,
+            "-m", "comment",
+            "--comment", f"nodo;allow_all_egress;vm={vmachine_id}",
+            "-j", "ACCEPT",
+        ])
+        if success:
+            logger(f"[CH][FW] Allowed ALL egress for {vmachine_id} ({vm_ip}) [network tag '*']")
+        else:
+            logger(f"[CH][FW] Failed to allow all egress for {vmachine_id} ({vm_ip}): {message}")
+        return success
+    except Exception as e:
+        logger(f"[CH][FW] Failed to allow all egress for {vmachine_id}: {e}")
+        return False
