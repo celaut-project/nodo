@@ -473,10 +473,19 @@ if command -v lsinitramfs >/dev/null 2>&1; then
     printf '%s\n' "$listing" | grep -qx 'bin/busybox' || fail "generated initramfs misses /bin/busybox"
     printf '%s\n' "$listing" | grep -qx 'etc/nodo-ch-initramfs.marker' || fail "generated initramfs misses marker"
     if printf '%s\n' "$listing" | grep -qx 'etc/nodo-virtio-modules.list'; then
-        printf '%s\n' "$listing" | grep -Eq '(^|/)virtio_blk\.ko$' \
-            || fail "generated initramfs has module list but misses virtio_blk.ko"
-        printf '%s\n' "$listing" | grep -Eq '(^|/)virtio_net\.ko$' \
-            || fail "generated initramfs has module list but misses virtio_net.ko"
+        # Validate that every module actually recorded in the list is packed into
+        # the initramfs. Do NOT hard-require both virtio_blk and virtio_net: a guest
+        # kernel may have one built in (=y, no .ko emitted) and the other as a
+        # loadable module (=m). install_virtio_modules only records the loadable
+        # ones and skips built-ins, so the list is the source of truth. Hard-coding
+        # both names false-failed the build when a virtio_blk=y / virtio_net=m guest
+        # kernel emitted only virtio_net.ko into the list.
+        while IFS= read -r module_path; do
+            [ -n "$module_path" ] || continue
+            module_rel="${module_path#/}"
+            printf '%s\n' "$listing" | grep -qx "$module_rel" \
+                || fail "generated initramfs is missing listed module: $module_rel"
+        done < "$ROOT/etc/nodo-virtio-modules.list"
     fi
 fi
 
