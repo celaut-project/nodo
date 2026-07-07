@@ -44,6 +44,13 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
+GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
+METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+REGISTRY = env_manager.get("REGISTRY")
+# Optional: when set, `nodo pack` uploads registry-hash dependencies to this
+# remote packer service before packing, so the packer can resolve them (the
+# packer's own registry is otherwise empty). Empty -> local packing only.
+PACKER_SERVICE_URL = env_manager.get("PACKER_SERVICE_URL") or ""
 # Connect timeout is short; there is NO read timeout because a real build can
 # take many minutes and the server holds the connection open until it finishes.
 _CONNECT_TIMEOUT = 30
@@ -222,11 +229,31 @@ def pack(directory: str) -> Optional[str]:
             print(_msg)
             raise Exception(_msg)
 
-        if service_id_header and _id != service_id_header:
-            print(
-                "WARNING: imported service id does not match the packer's "
-                f"X-Service-Id header (imported {_id}, header {service_id_header})."
-            )
+def pack(directory: str) -> str:
+    _id = None
+    is_remote, directory = prepare_directory(directory)  # TODO Better approach, generator: return only path and finally remove if remote.
+
+    # When packing against a remote packer service, its registry is empty, so
+    # any registry-hash dependency this project declares must be pushed there
+    # first. Resolve each dependency against THIS nodo's registry (raising a
+    # clear error if one is missing) and upload the registry-hash ones.
+    if PACKER_SERVICE_URL:
+        from src.commands.packer.zip_with_dockerfile.packer_service_client import (
+            resolve_and_upload_dependencies,
+        )
+        print(f"Resolving dependencies against packer service {PACKER_SERVICE_URL} ...")
+        summary = resolve_and_upload_dependencies(
+            project_directory=directory,
+            packer_service_url=PACKER_SERVICE_URL,
+        )
+        if summary["uploaded"]:
+            print(f"Uploaded dependencies: {', '.join(summary['uploaded'])}")
+        if summary["already_present"]:
+            print(f"Dependencies already on packer: {', '.join(summary['already_present'])}")
+
+    service_zip_dir: str = generate_service_zip(
+        project_directory=directory
+    )
 
     except requests.exceptions.ConnectionError as e:
         print(
