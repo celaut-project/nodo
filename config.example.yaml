@@ -182,6 +182,31 @@ hashing:
   # If true, run integrity check/migration automatically when starting `nodo serve`.
   CHECK_INTEGRITY_ON_SERVE: false
 
+# Core services are Celaut services the node treats as part of its OWN workflow,
+# referenced by service id (content hash) — never by URL. They let the node bootstrap
+# capabilities it doesn't ship with: e.g. resolving and auto-downloading a service that
+# `nodo execute` is asked to run but doesn't have locally.
+#
+# This is an array of {name, id} entries. `name` is the well-known role the node looks up
+# (currently: "source-application" and "packer"); `id` is the published service hash for that role.
+#
+# Trust model: the auto-download fallback in `nodo execute` will only resolve+run a missing
+# service if it is reachable through one of these *configured* core services. An empty list
+# or a "<SET_ME>" placeholder disables the fallback (the node fails closed with the existing
+# "Service not allowed." behaviour) — it never invents an id or an arbitrary download source.
+core_services:
+  # source-application: a directory/registry that maps a service id -> its available sources
+  # (manifest URLs), so the node can fetch a service it doesn't have. The published id is not
+  # wired yet; leave as "<SET_ME>" until it is available, then the execute auto-download path
+  # activates. The read endpoint is derived from publisher.SOURCE_APPLICATION_WEB_PAGE below.
+  - name: "source-application"
+    id: "<SET_ME>"
+  # packer: the packer-service core service used by `nodo pack` to build services in a
+  # sealed microVM. The published id is not wired yet; leave as "<SET_ME>" until it is
+  # available, then `nodo pack` can resolve a running packer instance by this id.
+  - name: "packer"
+    id: "<SET_ME>"
+
 publisher:
   PROVIDER: "github"
   REPOSITORY: "owner/repo"
