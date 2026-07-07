@@ -6,7 +6,6 @@ from src.utils.config import ConfigManager
 from src.utils.utils import read_service_from_disk
 from src.manager.network_env import (
     PeerEnvLookup,
-    peer_env_matches,
     filter_peers_by_environment,
 )
 
@@ -61,6 +60,10 @@ def resolve_network(
     requester_env_values: Optional[Dict[str, bytes]] = None,
     peer_env_lookup: Optional[PeerEnvLookup] = None,
 ) -> List[celaut.Instance]:
+    # Wildcard "*" (open-internet egress) and any unresolved tag resolve to no
+    # concrete peer instances; initialise uris so an unmatched loop cannot raise
+    # UnboundLocalError (it previously did for tag "*").
+    uris: List[celaut.Instance.Uri] = []
     for tag in network.tags:
         if "ergo" in tag:
             uris = resolve_ergo_network()
@@ -73,6 +76,11 @@ def resolve_network(
         uris = resolve_domain(tag)
         if uris:
             break
+
+    if not uris:
+        # No concrete peer URIs (e.g. wildcard "*"): the tag is honoured at the
+        # firewall layer (allow-all egress); there is no peer instance to advertise.
+        return []
 
     client_protocol_stack = network.protocol_stack
     i_slot = 1  # Default slot id (because internal port usage is irrelevant here)

@@ -9,12 +9,8 @@ Group=sudo
 WorkingDirectory={{MAIN_DIR}}
 Environment=JAVA_HOME={{JAVA_HOME}}
 Environment=PATH={{JAVA_HOME}}/bin:{{PYTHON_RUNTIME_BIN_DIR}}:{{MAIN_DIR}}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# Start isolated Docker daemon before nodo
-ExecStartPre=/bin/bash {{MAIN_DIR}}/bash/start_docker_daemon.sh {{MAIN_DIR}}
-# Main nodo process
+# Main nodo process (no local Docker daemon — services run under Cloud Hypervisor)
 ExecStart=/bin/bash -c 'source {{MAIN_DIR}}/venv/bin/activate && exec {{PYTHON_VENV_BIN}} {{MAIN_DIR}}/nodo.py serve'
-# Stop isolated Docker daemon after nodo stops
-ExecStopPost=/bin/bash {{MAIN_DIR}}/bash/stop_docker_daemon.sh {{MAIN_DIR}}
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
