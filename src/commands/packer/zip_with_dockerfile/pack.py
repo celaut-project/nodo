@@ -230,30 +230,31 @@ def pack(directory: str) -> Optional[str]:
             raise Exception(_msg)
 
 def pack(directory: str) -> str:
-    _id = None
-    is_remote, directory = prepare_directory(directory)  # TODO Better approach, generator: return only path and finally remove if remote.
+    try:
+        _id = None
+        is_remote, directory = prepare_directory(directory)  # TODO Better approach, generator: return only path and finally remove if remote.
 
-    # When packing against a remote packer service, its registry is empty, so
-    # any registry-hash dependency this project declares must be pushed there
-    # first. Resolve each dependency against THIS nodo's registry (raising a
-    # clear error if one is missing) and upload the registry-hash ones.
-    if PACKER_SERVICE_URL:
-        from src.commands.packer.zip_with_dockerfile.packer_service_client import (
-            resolve_and_upload_dependencies,
-        )
-        print(f"Resolving dependencies against packer service {PACKER_SERVICE_URL} ...")
-        summary = resolve_and_upload_dependencies(
-            project_directory=directory,
-            packer_service_url=PACKER_SERVICE_URL,
-        )
-        if summary["uploaded"]:
-            print(f"Uploaded dependencies: {', '.join(summary['uploaded'])}")
-        if summary["already_present"]:
-            print(f"Dependencies already on packer: {', '.join(summary['already_present'])}")
+        # When packing against a remote packer service, its registry is empty, so
+        # any registry-hash dependency this project declares must be pushed there
+        # first. Resolve each dependency against THIS nodo's registry (raising a
+        # clear error if one is missing) and upload the registry-hash ones.
+        if PACKER_SERVICE_URL:
+            from src.commands.packer.zip_with_dockerfile.packer_service_client import (
+                resolve_and_upload_dependencies,
+            )
+            print(f"Resolving dependencies against packer service {PACKER_SERVICE_URL} ...")
+            summary = resolve_and_upload_dependencies(
+                project_directory=directory,
+                packer_service_url=PACKER_SERVICE_URL,
+            )
+            if summary["uploaded"]:
+                print(f"Uploaded dependencies: {', '.join(summary['uploaded'])}")
+            if summary["already_present"]:
+                print(f"Dependencies already on packer: {', '.join(summary['already_present'])}")
 
-    service_zip_dir: str = generate_service_zip(
-        project_directory=directory
-    )
+        service_zip_dir: str = generate_service_zip(
+            project_directory=directory
+        )
 
     except requests.exceptions.ConnectionError as e:
         print(
