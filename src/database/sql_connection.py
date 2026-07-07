@@ -291,6 +291,7 @@ class SQLConnection(metaclass=Singleton):
         service_id: str,
         virtualizer: Optional[str] = None,
         disk_space: Optional[int] = None,
+        envs: Optional[str] = None,
     ):
         """
         Adds an internal container to the database.
@@ -305,15 +306,36 @@ class SQLConnection(metaclass=Singleton):
             service_id (str): Service id
             virtualizer (Optional[str]): Virtualizer backend name
             disk_space (Optional[int]): Disk resource limit for the instance
+            envs (Optional[str]): JSON object of the environment variables the
+                instance was launched with (e.g. signer mode/seed for a
+                source-application), so the node can later tell how it was configured.
         """
         gas = str(gas)
         if virtualizer is None:
             virtualizer = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "ch")
         self._execute('''
-            INSERT INTO local_instances (id, name, ip, father_id, gas, mem_limit, disk_space, serialized_instance, service_id, virtualizer)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (container_id, name, container_ip, father_id, gas, 0, disk_space, serialized_instance, service_id, virtualizer))
+            INSERT INTO local_instances (id, name, ip, father_id, gas, mem_limit, disk_space, serialized_instance, service_id, virtualizer, envs)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (container_id, name, container_ip, father_id, gas, 0, disk_space, serialized_instance, service_id, virtualizer, envs))
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
+
+    def get_local_instance_envs(self, id: str) -> Optional[str]:
+        """
+        Retrieves the stored launch environment variables (raw JSON text) for a
+        local instance, or ``None`` when the instance is unknown or was recorded
+        without envs.
+
+        Args:
+            id (str): The id of the internal container.
+
+        Returns:
+            Optional[str]: The JSON-encoded env map, or ``None``.
+        """
+        cursor = self._execute('''
+            SELECT envs FROM local_instances WHERE id = ?
+        ''', (id,))
+        result = cursor.fetchone()
+        return result[0] if result and result[0] is not None else None
 
     def update_sys_req(
         self,
