@@ -233,6 +233,34 @@ publisher:
   REPOSITORY: "owner/repo"
   BRANCH: "main"
   SOURCE_APPLICATION_WEB_PAGE: "https://reputation-systems.github.io/source-application?tab=add"
+  # How a freshly-published source gets registered, resolved across four levels:
+  #   1. AUTO_PUBLISH_TX true + SOURCE_PROFILE_BOX_ID set + a configured "source-application"
+  #      core service -> the FILE_SOURCE opinion is published directly via the instance's
+  #      REST API (POST /api/sources {mainBoxId, fileHash, sourceEntry}). The node
+  #      AUTO-LAUNCHES the source-application in seed mode (see below) if one isn't already
+  #      running, so it signs + submits the tx itself. No click.
+  #   2. running instance but auto-submit off/unavailable, SOURCE_APPLICATION_WEB_PAGE set
+  #      -> prints a prefilled click-to-add link on the web app (the instance serves only
+  #         /api + /mcp JSON, never the prefill form).
+  #   3. no running instance but SOURCE_APPLICATION_WEB_PAGE set (above)
+  #      -> prints the same prefilled click-to-add link (pre-existing behaviour).
+  #   4. nothing usable -> a manual-registration message (file hash + content hash + manifest URL).
+  # The instance is the "source-application" entry under core_services (resolved by id).
+  #
+  # AUTO_PUBLISH_TX does NOT send the wallet seed over HTTP. Instead the node launches the
+  # on-node source-application instance in seed mode, injecting the wallet into its env
+  # (SOURCE_SIGNER_MODE=seed, SOURCE_MNEMONIC=<ledgers.ergo.WALLET_MNEMONIC>,
+  # SOURCE_NODE_URI=<ledgers.ergo.NODE_URL>). Requires ledgers.ergo.WALLET_MNEMONIC to be
+  # set. NOTE: if a source-application instance is ALREADY running (e.g. in unsigned mode),
+  # its env is used as-is and the node will not relaunch it; it then returns an unsigned tx
+  # and the publisher falls back to a link. Keep AUTO_PUBLISH_TX false unless you want this
+  # node to sign source transactions with its wallet.
+  AUTO_PUBLISH_TX: false
+  # The node's reputation PROFILE box id (its on-chain author identity). Required for
+  # AUTO_PUBLISH_TX: every FILE_SOURCE opinion is split from this box. Mint a profile once
+  # (source-application web app, or POST /api/profile on a seed-mode instance, then look up
+  # the resulting box), and paste its 64-hex box id here. Leave empty to disable level 1.
+  SOURCE_PROFILE_BOX_ID: ""
   # Formats can be file extensions (tags) or ergo box ids that define the format uniquely.
   CONTENT_FORMAT: ".grpcbb"
   RAW_FORMAT: ".celaut"
