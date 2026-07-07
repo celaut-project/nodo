@@ -1,177 +1,276 @@
-import os, sys, time, threading, shutil
-from typing import Optional
-import grpc
-from bee_rpc import client as grpcbb
+"""
+`nodo pack` — packer-service HTTP client.
 
-from protos import celaut_pb2, pack_pb2, gateway_bee, celaut_pb2_grpc
+nodo no longer builds services locally with Docker. Packing is delegated to a
+**packer service** (https://github.com/agenticaihome/celaut-packer-service): a
+Celaut microVM that runs Docker/buildx *inside* a sealed VM and exposes an HTTP
+`/pack` endpoint. This keeps Docker entirely out of the nodo host.
+
+Flow:
+  1. prepare_directory  — resolve the project (local path or git URL).   [Docker-free, client-side]
+  2. generate_service_zip — build the `.service.zip` archive.            [Docker-free, client-side]
+  3. POST the zip to  <PACKER_SERVICE_URL>/pack  → returns the packed
+     `.celaut.bee` body + `X-Service-Id` header.                         [build happens in the packer VM]
+  4. import_bee        — import the `.bee` into this node's REGISTRY /
+     METADATA_REGISTRY (reuses nodo's existing import logic).
+
+Configuring the packer (resolution order):
+  1. service id   PACKER_SERVICE_ID  (env var or config packer.PACKER_SERVICE_ID)
+     — the published content hash of the packer-service. nodo looks up a
+     *running* instance of that service on this node (the one you started with
+     `nodo execute <packer>`) and packs against its `ip:port`.
+  2. url override  PACKER_SERVICE_URL (env var or config packer.PACKER_SERVICE_URL)
+     — only needed to point at an out-of-band packer (one running elsewhere,
+     not as a local instance). Used when no service id is set, or when no
+     running instance of the configured id can be found.
+If neither yields an endpoint, `nodo pack` fails with an actionable message
+instead of trying to use a local Docker that no longer exists.
+"""
+import os
+import sys
+import sqlite3
+import tempfile
+from typing import Optional
+
+import requests
+
 from src.commands.packer.zip_with_dockerfile.prepare_directory import prepare_directory
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import generate_service_zip
-from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.utils.config import ConfigManager
-from src.utils.hashing import get_configured_hash_spec, hash_stream
+
+# `import_bee` pulls in the bee_rpc runtime (only needed when actually importing a
+# packed .bee). Imported lazily inside pack() so endpoint resolution / config
+# helpers don't require the full runtime stack.
 
 env_manager = ConfigManager()
 
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 REGISTRY = env_manager.get("REGISTRY")
-
-def __spinner(event):
-    """Spinner function to show progress while the main task runs."""
-    spinner = ['|', '/', '-', '\\']
-    messages = [
-        "Processing... This might take a while.",
-        "Processing... Please wait, the node is working.",
-        "Processing... Almost there, please hold on.",
-        "Processing... Still working, hang tight."
-    ]
-    idx = 0
-    msg_idx = 0
-    start_time = time.time()
-
-    while not event.is_set():
-        # Show spinner animation
-        sys.stdout.write(f'\r{messages[msg_idx]} {spinner[idx]}')
-        sys.stdout.flush()
-        idx = (idx + 1) % len(spinner)
-
-        # Update message every minute
-        if time.time() - start_time > 60:
-            msg_idx = (msg_idx + 1) % len(messages)
-            start_time = time.time()
-
-        time.sleep(0.1)  # Adjust speed of spinner
-
-    sys.stdout.flush()
+# Optional: when set, `nodo pack` uploads registry-hash dependencies to this
+# remote packer service before packing, so the packer can resolve them (the
+# packer's own registry is otherwise empty). Empty -> local packing only.
+PACKER_SERVICE_URL = env_manager.get("PACKER_SERVICE_URL") or ""
+# Connect timeout is short; there is NO read timeout because a real build can
+# take many minutes and the server holds the connection open until it finishes.
+_CONNECT_TIMEOUT = 30
 
 
+def _resolve_packer_id() -> Optional[str]:
+    """Resolve the packer-service id (content hash): env var first, then config."""
+    service_id = os.environ.get("PACKER_SERVICE_ID") or env_manager.get("packer.PACKER_SERVICE_ID")
+    if isinstance(service_id, str):
+        service_id = service_id.strip()
+    return service_id or None
 
-def __pack(zip, node: str):
-    channel = grpc.insecure_channel(node)
+
+def _resolve_packer_url() -> Optional[str]:
+    """Resolve the packer-service base URL override: env var first, then config."""
+    url = os.environ.get("PACKER_SERVICE_URL") or env_manager.get("packer.PACKER_SERVICE_URL")
+    if isinstance(url, str):
+        url = url.strip()
+    return url.rstrip("/") if url else None
+
+
+def _resolve_packer_endpoint_by_id(service_id: str) -> Optional[str]:
+    """Find a running local instance of `service_id` and return its `http://ip:port`.
+
+    Looks up `local_instances` in the node's sqlite DATABASE_FILE, parses each
+    matching row's serialized `celaut.Instance` protobuf, and returns the first
+    `http://ip:port` it can build from `uri_slot[*].uri[*]`. Fully defensive: any
+    problem (no DB, no table, no rows, parse error, no uri) returns None.
+    """
+    if not service_id:
+        return None
+
+    # Imported lazily/inside the guard so a missing protobuf module can't crash
+    # the whole resolution path.
     try:
-        yield from grpcbb.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(channel).Pack,
-            input=grpcbb.Dir(dir=zip, _type=bytes),
-            indices_serializer={0: bytes},
-            indices_parser=gateway_bee.PackOutput_indices,
-            partitions_message_mode_parser={1: True, 2: True, 3: False}
+        from protos import celaut_pb2 as celaut
+    except Exception:
+        return None
+
+    conn = None
+    try:
+        database_file = env_manager.get("DATABASE_FILE")
+        if not database_file:
+            return None
+        conn = sqlite3.connect(database_file)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT serialized_instance FROM local_instances WHERE service_id = ?",
+            (service_id,),
         )
+        rows = cursor.fetchall()
+    except Exception:
+        return None
     finally:
-        channel.close()
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    for row in rows:
+        serialized = row[0] if row else None
+        if not serialized:
+            continue
+        try:
+            inst = celaut.Instance()
+            inst.ParseFromString(serialized)
+            for _slot in inst.uri_slot:
+                for _uri in _slot.uri:
+                    ip = str(_uri.ip).strip()
+                    port = _uri.port
+                    if ip and port:
+                        return f"http://{ip}:{port}"
+        except Exception:
+            continue
+
+    return None
 
 
-def __on_peer(peer: str, service_zip_dir: str) -> str:
-    _id: Optional[str] = None
-    print(f'Starting packing your project on {peer}...')
-    
-    # Create an event to control the spinner thread
-    stop_event = threading.Event()
-    spinner_thread = threading.Thread(target=__spinner, args=(stop_event,))
-    spinner_thread.start()
-    
-    try:
-        for b in __pack(
-                zip=service_zip_dir,
-                node=peer
-        ):
-            if type(b) is pack_pb2.PackOutputServiceId:
-                if not _id:
-                    _id = b.id.hex()
-            elif type(b) == celaut_pb2.Metadata and _id:
-                # Metadata integrity validation.
-                metadata_integrity_validation = [hash.type for hash in b.hashtag.hash]
-                if len(metadata_integrity_validation) != len(set(metadata_integrity_validation)):
-                    _msg = "Metadata integrity validation exception on pack command.\n"
-                    for hash in list(b.hashtag.hash):
-                        _msg += f"-  {hash.type.hex()}: {hash.value.hex()}\n"
-                    print(_msg)
-                    raise Exception(_msg)
-
-                with open(f"{METADATA_REGISTRY}{_id}", "wb") as f:
-                    f.write(b.SerializeToString())
-            elif type(b) == grpcbb.Dir and b.type == pack_pb2.Service and _id:
-                # b is ServiceWithMeta grpc-bb cache directory.
-                os.system(f"mv {b.dir} {REGISTRY}{_id}")
-            elif type(b) == pack_pb2.PackOutputError:
-                print(f"\nError in the compilation process: \n{b.message}")
-                return
-            else:
-                raise Exception('\nError with the packer output:' + str(b))
-
-    except Exception as e:
-        raise e
-
-    finally:
-        # Stop the spinner when the process completes
-        stop_event.set()
-        spinner_thread.join()
-
-    print('Compilation complete.')
-    print('Service ID -> ', _id)
-    print('\nValidating the content...')
-    hash_spec = get_configured_hash_spec(env_manager)
-    validated_hash_hex = ""
-
-    try:
-        validated_hash_hex = hash_stream(
-            grpcbb.read_multiblock_directory(f"{REGISTRY}{_id}/"),
-            hash_spec
-        ).hex()
-
-        if validated_hash_hex == _id:
-            print("Service id validated correctly.")
-        else:
-            print(
-                "Service id mismatch after validation. "
-                f"(validated result: {validated_hash_hex})"
-            )
-            
-        min_block_size = env_manager.get("MIN_BUFFER_BLOCK_SIZE")
-        if min_block_size < 10 **6:
-            print(f"\n\n ALERT!! It has been detected that a buffer size that is too small (actual is {min_block_size}) may cause errors when generating the compressed version of the service, even without affecting its identifier and with correct validation of it. \n https://github.com/bee-rpc-protocol/bee-rpc/issues/7#issuecomment-2814172903")
-            
-    except Exception as e:
-        print(f"Maybe it doesn't have blocks? validation will occurr into an error due to https://github.com/celaut-project/nodo/issues/38 \n Actually throws an exception: {str(e)}.")
-    
-    return _id
+def _no_packer_configured_message() -> str:
+    return (
+        "\nNo packer service is configured.\n\n"
+        "nodo does not build services locally anymore — packing is done by a\n"
+        "packer-service microVM (it runs Docker/buildx inside a sealed VM, so you\n"
+        "never install Docker on this host).\n\n"
+        "Configure the packer by its published service id, then `nodo execute` it\n"
+        "so a running instance exists, and re-run `nodo pack`:\n"
+        "  • config.yaml:\n"
+        "        packer:\n"
+        "          PACKER_SERVICE_ID: \"<packer-service published id>\"\n"
+        "    (or env var:  export PACKER_SERVICE_ID=<packer-service published id>)\n"
+        "  • then:  nodo execute <packer-service published id>\n\n"
+        "nodo resolves a running instance of that id (its `ip:port`) and packs\n"
+        "against it. To point at an out-of-band packer instead, set the override\n"
+        "URL:  export PACKER_SERVICE_URL=http://<ip>:8080  (or packer.PACKER_SERVICE_URL).\n"
+    )
 
 
 def __remove_path(path):
+    import shutil
     if os.path.exists(path):
         (os.remove if os.path.isfile(path) else shutil.rmtree)(path)
         print(f"Removed: '{path}'")
 
 
+def _resolve_packer_endpoint() -> Optional[str]:
+    """Resolve the packer endpoint: by service id (running instance) first, then URL override."""
+    service_id = _resolve_packer_id()
+    if service_id:
+        endpoint = _resolve_packer_endpoint_by_id(service_id)
+        if endpoint:
+            return endpoint
+        print(
+            f"No running instance of packer service id {service_id} was found; "
+            "falling back to PACKER_SERVICE_URL if set."
+        )
+    return _resolve_packer_url()
+
+
+def pack(directory: str) -> Optional[str]:
+    packer_url = _resolve_packer_endpoint()
+    if not packer_url:
+        print(_no_packer_configured_message())
+        return None
+
+    _id: Optional[str] = None
+    is_remote, directory = prepare_directory(directory)
+
+    service_zip_dir: str = generate_service_zip(project_directory=directory)
+
+    bee_path: Optional[str] = None
+    try:
+        pack_endpoint = f"{packer_url}/pack"
+        print(f"Sending your project to the packer service at {pack_endpoint} ...")
+        print("Building inside the packer microVM — this might take a while.")
+
+        with open(service_zip_dir, "rb") as zip_file:
+            response = requests.post(
+                pack_endpoint,
+                data=zip_file,
+                headers={"Content-Type": "application/zip"},
+                timeout=(_CONNECT_TIMEOUT, None),
+            )
+
+        if response.status_code != 200:
+            print(
+                f"\nPacker service returned an error (HTTP {response.status_code}):\n"
+                f"{response.text}"
+            )
+            return None
+
+        service_id_header = response.headers.get("X-Service-Id")
+        if not response.content:
+            print("\nPacker service returned an empty body; no service was produced.")
+            return None
+
+        # Persist the returned `.celaut.bee` and import it through nodo's own
+        # import path (validates the hash and saves to REGISTRY/METADATA_REGISTRY).
+        fd, bee_path = tempfile.mkstemp(
+            suffix=".celaut.bee",
+            prefix=f"{service_id_header or 'service'}_",
+        )
+        with os.fdopen(fd, "wb") as f:
+            f.write(response.content)
+
+        print("Compilation complete.")
+        if service_id_header:
+            print("Service ID -> ", service_id_header)
+        print("\nImporting the packed service into the local registry...")
+
+        from src.commands.import_bee import import_bee
+        _id = import_bee(path=bee_path)
+
+        if not _id:
+            _msg = f"Failed to import the packed service for {directory}."
+            print(_msg)
+            raise Exception(_msg)
+
 def pack(directory: str) -> str:
     _id = None
     is_remote, directory = prepare_directory(directory)  # TODO Better approach, generator: return only path and finally remove if remote.
-    
+
+    # When packing against a remote packer service, its registry is empty, so
+    # any registry-hash dependency this project declares must be pushed there
+    # first. Resolve each dependency against THIS nodo's registry (raising a
+    # clear error if one is missing) and upload the registry-hash ones.
+    if PACKER_SERVICE_URL:
+        from src.commands.packer.zip_with_dockerfile.packer_service_client import (
+            resolve_and_upload_dependencies,
+        )
+        print(f"Resolving dependencies against packer service {PACKER_SERVICE_URL} ...")
+        summary = resolve_and_upload_dependencies(
+            project_directory=directory,
+            packer_service_url=PACKER_SERVICE_URL,
+        )
+        if summary["uploaded"]:
+            print(f"Uploaded dependencies: {', '.join(summary['uploaded'])}")
+        if summary["already_present"]:
+            print(f"Dependencies already on packer: {', '.join(summary['already_present'])}")
+
     service_zip_dir: str = generate_service_zip(
         project_directory=directory
     )
 
-    try:
-        ip, port = None, None
-        if False:  # TODO; control exceptions and try others; and environment variable PACK_LOCAL_FIRST
-            for peer_id in list(get_peer_ids()):
-                for _ip, _port in get_peer_directions(peer_id=peer_id):
-                    ip, port = _ip, _port
-        if not ip or not port:
-            ip, port = 'localhost', GATEWAY_PORT
-        _id = __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
-        
-        if not _id: 
-            _msg = f"Any id for {directory}"
-            print(_msg) 
-            raise Exception(_msg)
-    
+    except requests.exceptions.ConnectionError as e:
+        print(
+            f"\nCould not reach the packer service at {packer_url}: {e}\n"
+            "Check packer.PACKER_SERVICE_ID (and that its instance is running via "
+            "`nodo execute`) or the PACKER_SERVICE_URL override, and that the "
+            "packer-service instance is running and reachable."
+        )
+        return None
     except Exception as e:
-        print(f"Excepton packing {directory}: {e}")
-        
+        print(f"Exception packing {directory}: {e}")
+        return None
+
     finally:
-        # __remove_path(service_zip_dir)
-        
-        if is_remote: 
+        if bee_path and os.path.exists(bee_path):
+            os.remove(bee_path)
+        if is_remote:
             __remove_path(directory)
 
     return _id

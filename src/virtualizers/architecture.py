@@ -1,6 +1,6 @@
 from typing import Optional, Set
 from protos import celaut_pb2
-from src.utils.runtime import SUPPORTED_ARCHITECTURES
+from src.utils.architectures import SUPPORTED_ARCHITECTURES
 from src.utils.config import ConfigManager
 
 # Load environment configuration

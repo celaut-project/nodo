@@ -50,27 +50,18 @@ class VirtualizerFirewallDispatchTests(unittest.TestCase):
             source_ip=None,
         )
 
-    def test_allow_connection_dispatches_to_docker(self):
+    def test_allow_connection_rejects_removed_docker_virtualizer(self):
+        # The Docker virtualizer was removed; a stored "docker" value must raise.
         with patch.object(vm_firewall.sc, "get_internal_virtualizer", return_value="docker"), patch.object(
             vm_firewall, "ensure_forward_related_established_rule", return_value=True
-        ), patch(
-            "src.virtualizers.docker.firewall.allow_connection",
-            return_value=True,
-        ) as docker_allow:
-            result = vm_firewall.allow_connection(
-                vmachine_id="container-123",
-                ip="10.0.0.5",
-                port=8080,
-                protocol=vm_firewall.TransportProtocol.TCP,
-            )
-
-        self.assertTrue(result)
-        docker_allow.assert_called_once_with(
-            container_id="container-123",
-            ip="10.0.0.5",
-            port=8080,
-            protocol=vm_firewall.TransportProtocol.TCP,
-        )
+        ):
+            with self.assertRaisesRegex(ValueError, "Unknown virtualizer"):
+                vm_firewall.allow_connection(
+                    vmachine_id="container-123",
+                    ip="10.0.0.5",
+                    port=8080,
+                    protocol=vm_firewall.TransportProtocol.TCP,
+                )
 
     def test_allow_connection_to_instance_dispatches_to_cloud_hypervisor_with_source_ip(self):
         with patch.object(
@@ -94,24 +85,16 @@ class VirtualizerFirewallDispatchTests(unittest.TestCase):
             source_ip="192.168.200.5",
         )
 
-    def test_allow_connection_to_instance_dispatches_to_docker_without_source_ip(self):
+    def test_allow_connection_to_instance_rejects_removed_docker_virtualizer(self):
         with patch.object(vm_firewall.sc, "get_internal_virtualizer", return_value="docker"), patch.object(
             vm_firewall, "ensure_forward_related_established_rule", return_value=True
-        ), patch(
-            "src.virtualizers.docker.firewall.allow_connection_to_instance",
-            return_value=True,
-        ) as docker_allow:
-            result = vm_firewall.allow_connection_to_instance(
-                vmachine_id="container-123",
-                instance=celaut.Instance(),
-                source_ip="172.17.0.2",
-            )
-
-        self.assertTrue(result)
-        docker_allow.assert_called_once_with(
-            container_id="container-123",
-            instance=unittest.mock.ANY,
-        )
+        ):
+            with self.assertRaisesRegex(ValueError, "Unknown virtualizer"):
+                vm_firewall.allow_connection_to_instance(
+                    vmachine_id="container-123",
+                    instance=celaut.Instance(),
+                    source_ip="172.17.0.2",
+                )
 
     def test_remove_rule_dispatches_to_cloud_hypervisor(self):
         with patch.object(
