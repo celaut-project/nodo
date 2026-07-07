@@ -206,6 +206,27 @@ core_services:
   # available, then `nodo pack` can resolve a running packer instance by this id.
   - name: "packer"
     id: "<SET_ME>"
+  # low-demand-fallback: an opportunistic best-effort service the node runs ONLY when it
+  # has spare capacity (see the `low_demand:` block below) and no real workloads. It is
+  # always preempted by real/paid `execute` requests. The published id is not wired yet;
+  # leave as "<SET_ME>" until it is available. See docs/design/low-demand-fallback.md.
+  - name: "low-demand-fallback"
+    id: "<SET_ME>"
+
+# Opportunistic low-demand fallback scheduler (WIP — see docs/design/low-demand-fallback.md).
+# When ENABLED and the node is under ALL per-resource thresholds AND not serving real
+# workloads, it opportunistically runs the "low-demand-fallback" core service; a real
+# execute request or crossing any threshold preempts (stops) it. Thresholds are the
+# "environment-variable" levels below which the fallback is allowed to run.
+# The scheduler is driven from the manager loop (src/manager/maintain.py) and is a no-op
+# unless ENABLED is true; preemption always STOPS the fallback (there is no pause primitive).
+low_demand:
+  ENABLED: false                  # master switch; opportunistic fallback is OFF by default.
+  POLL_INTERVAL: 30               # seconds between idle checks (independent of MANAGER_ITERATION_TIME).
+  CPU_MAX_PERCENT: 40             # run the fallback only when system CPU usage is <= this percent.
+  MEM_MAX_PERCENT: 60             # run the fallback only when system memory usage is <= this percent.
+  LOW_DEMAND_CONSECUTIVE_POLLS: 3 # consecutive below-threshold, idle polls required before starting (hysteresis).
+  # Future per-resource thresholds (e.g. GPU_MAX_PERCENT, DISK_MAX_PERCENT) go here.
 
 publisher:
   PROVIDER: "github"

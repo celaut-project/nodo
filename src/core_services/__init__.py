@@ -18,6 +18,10 @@ UNSET_PLACEHOLDER = "<SET_ME>"
 
 # Well-known core service roles (the ``name`` field of each entry).
 SOURCE_APPLICATION = "source-application"
+# Opportunistic best-effort tenant the node runs only when it has spare capacity
+# and no real workloads; always preempted by real/paid execute requests. See
+# :mod:`src.core_services.low_demand` and ``docs/design/low-demand-fallback.md``.
+LOW_DEMAND_FALLBACK = "low-demand-fallback"
 
 _env_manager = ConfigManager()
 
