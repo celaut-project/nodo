@@ -84,15 +84,10 @@ message Service {
             map<string, GasAmount> gas_amount_per_call = 4;
         }
 
-        // Environment variables moved to Service.Container (field 7): they
-        // describe the execution environment, not the communication interface.
-        reserved 1;
-        reserved "environment_variables";
-
-        repeated Slot slot = 2;
+        repeated Slot slot = 1;
 
         // Accepted payment contracts with conversion to gas.
-        repeated GasPrice payment_contracts = 3;
+        repeated GasPrice payment_contracts = 2;
         
         /*
          The cost of the service is measured in "gas":
