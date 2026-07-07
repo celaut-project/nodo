@@ -484,7 +484,8 @@ def provision_vmachine(
         initial_gas_amount: Optional[int],
         serialized_instance: str,
         virtualizer: Optional[str] = None,
-        system_requirements_range: celaut_pb2.ModifyServiceSystemResourcesInput = None
+        system_requirements_range: celaut_pb2.ModifyServiceSystemResourcesInput = None,
+        envs: Optional[str] = None,
 ):
     disk_space = None
     if system_requirements_range and system_requirements_range.max_sysreq:
@@ -506,6 +507,7 @@ def provision_vmachine(
         service_id=service_id,
         virtualizer=virtualizer,
         disk_space=disk_space,
+        envs=envs,
     )
 
     if not hotplug(

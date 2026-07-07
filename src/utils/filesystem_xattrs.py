@@ -81,7 +81,7 @@ def metadata_from_lstat(stat_result: os.stat_result) -> FilesystemNodeMetadata:
         mode=mode,
         uid=int(stat_result.st_uid),
         gid=int(stat_result.st_gid),
-        mtime_ns=int(stat_result.st_mtime_ns),
+        mtime_ns=(0 if stat.S_ISLNK(mode) else int(stat_result.st_mtime_ns)),  # tarfile re-stamps symlink mtimes to wall-clock on each extract; regular-file mtimes are restored from the tar and stay deterministic
         device_major=device_major,
         device_minor=device_minor,
         device_is_block=device_is_block,

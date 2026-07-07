@@ -18,6 +18,7 @@ from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
 from src.utils.tools.duplicate_grabber import DuplicateGrabber
 from src.virtualizers.interface import maintain as vm_maintain
+from src.core_services.low_demand import scheduler_tick
 
 env_manager = ConfigManager()
 
@@ -116,7 +117,7 @@ def check_wanted_service(wanted: str):
 def maintain_vmachines(debug_mode: bool=False):
     def remove_and_penalize_vmachine(vmachine_id: str):
         _reputation_interface().update_vmachine_reputation(vmachine_id=vmachine_id, amount=-100)
-        log.LOGGER(f"Prunning container {vmachine_id} from the registry because the docker container does not exist.")
+        log.LOGGER(f"Prunning instance {vmachine_id} from the registry because the virtual machine does not exist.")
         try:
             stop_instance(token=vmachine_id)
         except Exception as e:
@@ -284,7 +285,15 @@ def manager_thread():
         maintain_clients(debug_mode=DEBUG_MODE())
         peer_deposits(debug_mode=DEBUG_MODE())
         DuplicateGrabber().manager()
-        
+
+        # Opportunistic low-demand fallback scheduler (OFF unless low_demand.ENABLED).
+        # Self-gates to low_demand.POLL_INTERVAL and never raises; see
+        # src/core_services/low_demand.py and docs/design/low-demand-fallback.md.
+        try:
+            scheduler_tick()
+        except Exception:
+            pass
+
         sleep(MANAGER_ITERATION_TIME)
         if DEBUG_MODE():
             log.LOGGER(f"Long interval count: {short_interval_count}/{SHORT_INTERVAL_COUNT}.")

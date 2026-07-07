@@ -17,28 +17,11 @@ dependencies:
     RUNTIME_ROOT: "${main.MAIN_DIR}/runtime/python"
   yq:
     BIN: "${main.MAIN_DIR}/bin/yq"
-  docker:
-    BIN: "${main.MAIN_DIR}/bin/docker"
-    DAEMON_BIN: "${main.MAIN_DIR}/bin/dockerd"
-    BUILDX_BIN: "${main.MAIN_DIR}/libexec/docker/cli-plugins/docker-buildx"
 
 virtualizers:
+  # Cloud Hypervisor is the only virtualizer. The Docker virtualizer was removed
+  # so the node no longer needs a local Docker install.
   DEFAULT_VIRTUALIZER: ch
-  docker:
-    DOCKER_CLIENT_TIMEOUT: 480
-    DOCKER_MAX_CONNECTIONS: 1000
-    CONCURRENT_CONTAINER_CREATIONS: 10
-    REMOVE_CONTAINERS: true
-    # Isolated Docker configuration - uses a separate daemon from user's Docker
-    DOCKER_SOCKET: "${main.MAIN_DIR}/docker/docker.sock"
-    DOCKER_DATA_ROOT: "${main.MAIN_DIR}/docker/data"
-    DOCKER_CONFIG_DIR: "${main.MAIN_DIR}/docker/config"
-    DOCKER_NETWORK: "docker0"
-    # Security options applied to service containers.
-    SECURITY_APPARMOR_UNCONFINED: false
-    SECURITY_SELINUX_DISABLE_LABEL: false
-    SECURITY_NO_SECCOMP: false  # This option disables seccomp security profiles, use with caution.
-    SECURITY_PRIVILEGED: false  # This option gives the container full access to the host, use with caution.
   ch:
     BINARY_PATH: ""
     KERNEL_PATHS:
@@ -105,8 +88,22 @@ builder:
   TRUST_METADATA_ARCHITECTURE: false
 
 packer:
-  SAVE_ALL: false
-  PACKER_MEMORY_SIZE_FACTOR: 2.0
+  # nodo no longer builds services locally. `nodo pack` sends the project to a
+  # packer-service microVM (it runs Docker/buildx inside a sealed VM, so Docker
+  # is never installed on this host) and imports the returned `.celaut.bee`.
+  #
+  # PRIMARY: reference the packer by its published content hash (service id).
+  # nodo resolves a *running* instance of that service on this node — the one
+  # you started with `nodo execute <packer-service id>` — and packs against its
+  # ip:port. The PACKER_SERVICE_ID environment variable overrides this value.
+  PACKER_SERVICE_ID: ""
+  # OPTIONAL override: the ip:port base URL of a packer-service running
+  # out-of-band (somewhere other than as a local instance of the id above).
+  # Used only when PACKER_SERVICE_ID is empty, or when no running instance of
+  # that id can be found. The PACKER_SERVICE_URL environment variable overrides
+  # this value. Leave both empty to disable `nodo pack`.
+  PACKER_SERVICE_URL: ""
+  # Architectures `nodo pack` will accept / announce.
   ARM_PACKER_SUPPORT: true
   X86_PACKER_SUPPORT: true
   # Optional URL of a remote celaut-packer-service. When set, `nodo pack` uploads
@@ -195,11 +192,85 @@ hashing:
   # If true, run integrity check/migration automatically when starting `nodo serve`.
   CHECK_INTEGRITY_ON_SERVE: false
 
+# Core services are Celaut services the node treats as part of its OWN workflow,
+# referenced by service id (content hash) — never by URL. They let the node bootstrap
+# capabilities it doesn't ship with: e.g. resolving and auto-downloading a service that
+# `nodo execute` is asked to run but doesn't have locally.
+#
+# This is an array of {name, id} entries. `name` is the well-known role the node looks up
+# (currently: "source-application" and "packer"); `id` is the published service hash for that role.
+#
+# Trust model: the auto-download fallback in `nodo execute` will only resolve+run a missing
+# service if it is reachable through one of these *configured* core services. An empty list
+# or a "<SET_ME>" placeholder disables the fallback (the node fails closed with the existing
+# "Service not allowed." behaviour) — it never invents an id or an arbitrary download source.
+core_services:
+  # source-application: a directory/registry that maps a service id -> its available sources
+  # (manifest URLs), so the node can fetch a service it doesn't have. The published id is not
+  # wired yet; leave as "<SET_ME>" until it is available, then the execute auto-download path
+  # activates. The read endpoint is derived from publisher.SOURCE_APPLICATION_WEB_PAGE below.
+  - name: "source-application"
+    id: "<SET_ME>"
+  # packer: the packer-service core service used by `nodo pack` to build services in a
+  # sealed microVM. The published id is not wired yet; leave as "<SET_ME>" until it is
+  # available, then `nodo pack` can resolve a running packer instance by this id.
+  - name: "packer"
+    id: "<SET_ME>"
+  # low-demand-fallback: an opportunistic best-effort service the node runs ONLY when it
+  # has spare capacity (see the `low_demand:` block below) and no real workloads. It is
+  # always preempted by real/paid `execute` requests. The published id is not wired yet;
+  # leave as "<SET_ME>" until it is available. See docs/design/low-demand-fallback.md.
+  - name: "low-demand-fallback"
+    id: "<SET_ME>"
+
+# Opportunistic low-demand fallback scheduler (WIP — see docs/design/low-demand-fallback.md).
+# When ENABLED and the node is under ALL per-resource thresholds AND not serving real
+# workloads, it opportunistically runs the "low-demand-fallback" core service; a real
+# execute request or crossing any threshold preempts (stops) it. Thresholds are the
+# "environment-variable" levels below which the fallback is allowed to run.
+# The scheduler is driven from the manager loop (src/manager/maintain.py) and is a no-op
+# unless ENABLED is true; preemption always STOPS the fallback (there is no pause primitive).
+low_demand:
+  ENABLED: false                  # master switch; opportunistic fallback is OFF by default.
+  POLL_INTERVAL: 30               # seconds between idle checks (independent of MANAGER_ITERATION_TIME).
+  CPU_MAX_PERCENT: 40             # run the fallback only when system CPU usage is <= this percent.
+  MEM_MAX_PERCENT: 60             # run the fallback only when system memory usage is <= this percent.
+  LOW_DEMAND_CONSECUTIVE_POLLS: 3 # consecutive below-threshold, idle polls required before starting (hysteresis).
+  # Future per-resource thresholds (e.g. GPU_MAX_PERCENT, DISK_MAX_PERCENT) go here.
+
 publisher:
   PROVIDER: "github"
   REPOSITORY: "owner/repo"
   BRANCH: "main"
   SOURCE_APPLICATION_WEB_PAGE: "https://reputation-systems.github.io/source-application?tab=add"
+  # How a freshly-published source gets registered, resolved across four levels:
+  #   1. AUTO_PUBLISH_TX true + SOURCE_PROFILE_BOX_ID set + a configured "source-application"
+  #      core service -> the FILE_SOURCE opinion is published directly via the instance's
+  #      REST API (POST /api/sources {mainBoxId, fileHash, sourceEntry}). The node
+  #      AUTO-LAUNCHES the source-application in seed mode (see below) if one isn't already
+  #      running, so it signs + submits the tx itself. No click.
+  #   2. running instance but auto-submit off/unavailable, SOURCE_APPLICATION_WEB_PAGE set
+  #      -> prints a prefilled click-to-add link on the web app (the instance serves only
+  #         /api + /mcp JSON, never the prefill form).
+  #   3. no running instance but SOURCE_APPLICATION_WEB_PAGE set (above)
+  #      -> prints the same prefilled click-to-add link (pre-existing behaviour).
+  #   4. nothing usable -> a manual-registration message (file hash + content hash + manifest URL).
+  # The instance is the "source-application" entry under core_services (resolved by id).
+  #
+  # AUTO_PUBLISH_TX does NOT send the wallet seed over HTTP. Instead the node launches the
+  # on-node source-application instance in seed mode, injecting the wallet into its env
+  # (SOURCE_SIGNER_MODE=seed, SOURCE_MNEMONIC=<ledgers.ergo.WALLET_MNEMONIC>,
+  # SOURCE_NODE_URI=<ledgers.ergo.NODE_URL>). Requires ledgers.ergo.WALLET_MNEMONIC to be
+  # set. NOTE: if a source-application instance is ALREADY running (e.g. in unsigned mode),
+  # its env is used as-is and the node will not relaunch it; it then returns an unsigned tx
+  # and the publisher falls back to a link. Keep AUTO_PUBLISH_TX false unless you want this
+  # node to sign source transactions with its wallet.
+  AUTO_PUBLISH_TX: false
+  # The node's reputation PROFILE box id (its on-chain author identity). Required for
+  # AUTO_PUBLISH_TX: every FILE_SOURCE opinion is split from this box. Mint a profile once
+  # (source-application web app, or POST /api/profile on a seed-mode instance, then look up
+  # the resulting box), and paste its 64-hex box id here. Leave empty to disable level 1.
+  SOURCE_PROFILE_BOX_ID: ""
   # Formats can be file extensions (tags) or ergo box ids that define the format uniquely.
   CONTENT_FORMAT: ".grpcbb"
   RAW_FORMAT: ".celaut"
