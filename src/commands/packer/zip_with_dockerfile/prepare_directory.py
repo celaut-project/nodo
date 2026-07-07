@@ -22,8 +22,22 @@ def __dockerfile_copy_from(directory: str):
             for line in lines:
                 if line.strip().startswith("COPY "):
                     parts = line.split()
-                    if len(parts) > 1 and parts[1].startswith("."):
-                        parts[1] = "service" + parts[1][1:]
+                    # A COPY may have several context sources before the final
+                    # destination: `COPY src1 src2 ... dest`. The build context is
+                    # the .service/ dir (project files live under service/), so
+                    # EVERY context source that starts with "." must be re-prefixed
+                    # — not just the first one. `--from=<stage>` sources reference a
+                    # build stage rather than the context, so leave those untouched.
+                    flags = [p for p in parts[1:] if p.startswith("--")]
+                    if len(parts) >= 3 and not any(
+                        f.startswith("--from") for f in flags
+                    ):
+                        start = 1
+                        while start < len(parts) and parts[start].startswith("--"):
+                            start += 1
+                        for j in range(start, len(parts) - 1):  # sources, not dest
+                            if parts[j].startswith("."):
+                                parts[j] = "service" + parts[j][1:]
                         line = " ".join(parts) + "\n"
                 file.write(line)
 
