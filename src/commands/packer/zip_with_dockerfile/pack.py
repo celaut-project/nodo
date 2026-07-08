@@ -8,21 +8,26 @@ Celaut microVM that runs Docker/buildx *inside* a sealed VM and exposes an HTTP
 
 Flow:
   1. prepare_directory  — resolve the project (local path or git URL).   [Docker-free, client-side]
-  2. generate_service_zip — build the `.service.zip` archive.            [Docker-free, client-side]
-  3. POST the zip to  <PACKER_SERVICE_URL>/pack  → returns the packed
+  2. resolve_and_upload_dependencies — push registry-hash dependencies to
+     the packer (its own registry starts empty).                        [client-side]
+  3. generate_service_zip — build the `.service.zip` archive.            [Docker-free, client-side]
+  4. POST the zip to  <PACKER_SERVICE_URL>/pack  → returns the packed
      `.celaut.bee` body + `X-Service-Id` header.                         [build happens in the packer VM]
-  4. import_bee        — import the `.bee` into this node's REGISTRY /
+  5. import_bee        — import the `.bee` into this node's REGISTRY /
      METADATA_REGISTRY (reuses nodo's existing import logic).
 
 Configuring the packer (resolution order):
-  1. service id   PACKER_SERVICE_ID  (env var or config packer.PACKER_SERVICE_ID)
-     — the published content hash of the packer-service. nodo looks up a
-     *running* instance of that service on this node (the one you started with
-     `nodo execute <packer>`) and packs against its `ip:port`.
+  1. service id   PACKER_SERVICE_ID  (env var, config `packer.PACKER_SERVICE_ID`,
+     or a `{name: "packer", id: ...}` entry in the top-level `core_services` list)
+     — the published content hash of the packer-service. nodo treats the packer as
+     a **core service**: if no instance is already running, it downloads (via the
+     source-application) and launches it on demand through the core-services runtime
+     (:func:`src.core_services.runtime.ensure_core_service_running`), then packs
+     against the live instance's `ip:port`.
   2. url override  PACKER_SERVICE_URL (env var or config packer.PACKER_SERVICE_URL)
-     — only needed to point at an out-of-band packer (one running elsewhere,
-     not as a local instance). Used when no service id is set, or when no
-     running instance of the configured id can be found.
+     — only needed to point at an out-of-band packer (one running elsewhere, not as
+     a local instance). Used as a last resort when no service id is set, or when a
+     configured id can neither be found running nor be launched.
 If neither yields an endpoint, `nodo pack` fails with an actionable message
 instead of trying to use a local Docker that no longer exists.
 """
@@ -47,9 +52,9 @@ env_manager = ConfigManager()
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 REGISTRY = env_manager.get("REGISTRY")
-# Optional: when set, `nodo pack` uploads registry-hash dependencies to this
-# remote packer service before packing, so the packer can resolve them (the
-# packer's own registry is otherwise empty). Empty -> local packing only.
+# Optional out-of-band packer override (an already-running packer reachable at a
+# fixed URL). Empty -> resolve the packer by service id via the core-services
+# runtime instead.
 PACKER_SERVICE_URL = env_manager.get("PACKER_SERVICE_URL") or ""
 # Connect timeout is short; there is NO read timeout because a real build can
 # take many minutes and the server holds the connection open until it finishes.
@@ -57,10 +62,24 @@ _CONNECT_TIMEOUT = 30
 
 
 def _resolve_packer_id() -> Optional[str]:
-    """Resolve the packer-service id (content hash): env var first, then config."""
+    """Resolve the packer-service id (content hash).
+
+    Resolution order: ``PACKER_SERVICE_ID`` env var → config ``packer.PACKER_SERVICE_ID``
+    → a ``{name: "packer", id: ...}`` entry in the unified top-level ``core_services``
+    list. The last one keeps the packer consistent with every other core service the
+    node bootstraps (source-application, low-demand-fallback, ...).
+    """
     service_id = os.environ.get("PACKER_SERVICE_ID") or env_manager.get("packer.PACKER_SERVICE_ID")
     if isinstance(service_id, str):
         service_id = service_id.strip()
+    if not service_id:
+        # Fall back to the unified core_services list (never fabricates an id:
+        # returns None for a missing/placeholder entry).
+        try:
+            from src.core_services import PACKER, get_core_service_id
+            service_id = get_core_service_id(PACKER)
+        except Exception:
+            service_id = None
     return service_id or None
 
 
@@ -130,22 +149,45 @@ def _resolve_packer_endpoint_by_id(service_id: str) -> Optional[str]:
     return None
 
 
+def _ensure_packer_running(service_id: str) -> Optional[str]:
+    """Download+launch the packer service by id and return its live endpoint.
+
+    Delegates to the core-services runtime, which mirrors how every other core
+    service is bootstrapped: return an already-running instance, else acquire the
+    service via the source-application, else launch it through the existing
+    ``nodo execute`` path — then resolve its ``http://ip:port``. Fully defensive:
+    any failure (no runtime deps, no gateway, launch error) degrades to ``None`` so
+    the caller can fall back to the URL override.
+    """
+    if not service_id:
+        return None
+    try:
+        from src.core_services.runtime import ensure_core_service_running
+        return ensure_core_service_running(service_id)
+    except Exception:
+        return None
+
+
 def _no_packer_configured_message() -> str:
     return (
         "\nNo packer service is configured.\n\n"
         "nodo does not build services locally anymore — packing is done by a\n"
         "packer-service microVM (it runs Docker/buildx inside a sealed VM, so you\n"
         "never install Docker on this host).\n\n"
-        "Configure the packer by its published service id, then `nodo execute` it\n"
-        "so a running instance exists, and re-run `nodo pack`:\n"
-        "  • config.yaml:\n"
+        "Configure the packer by its published service id and re-run `nodo pack`;\n"
+        "nodo will download and launch a packer instance on demand and pack\n"
+        "against it:\n"
+        "  • config.yaml (either location works):\n"
         "        packer:\n"
         "          PACKER_SERVICE_ID: \"<packer-service published id>\"\n"
-        "    (or env var:  export PACKER_SERVICE_ID=<packer-service published id>)\n"
-        "  • then:  nodo execute <packer-service published id>\n\n"
-        "nodo resolves a running instance of that id (its `ip:port`) and packs\n"
-        "against it. To point at an out-of-band packer instead, set the override\n"
-        "URL:  export PACKER_SERVICE_URL=http://<ip>:8080  (or packer.PACKER_SERVICE_URL).\n"
+        "    or, alongside the other core services:\n"
+        "        core_services:\n"
+        "          - name: \"packer\"\n"
+        "            id: \"<packer-service published id>\"\n"
+        "    (or env var:  export PACKER_SERVICE_ID=<packer-service published id>)\n\n"
+        "To point at an out-of-band packer instead (one already running elsewhere),\n"
+        "set the override URL:  export PACKER_SERVICE_URL=http://<ip>:8080  (or\n"
+        "packer.PACKER_SERVICE_URL).\n"
     )
 
 
@@ -157,14 +199,32 @@ def __remove_path(path):
 
 
 def _resolve_packer_endpoint() -> Optional[str]:
-    """Resolve the packer endpoint: by service id (running instance) first, then URL override."""
+    """Resolve the packer endpoint.
+
+    Order:
+      1. If a packer service id is configured, prefer an instance that is already
+         running (fast path, no launch).
+      2. Otherwise treat the packer as a core service and download+launch it on
+         demand through the core-services runtime, then use the live instance.
+      3. Only if neither yields an endpoint, fall back to the PACKER_SERVICE_URL
+         override (an out-of-band packer).
+    """
     service_id = _resolve_packer_id()
     if service_id:
         endpoint = _resolve_packer_endpoint_by_id(service_id)
         if endpoint:
             return endpoint
+        # No running instance — execute the packer service (download + launch) and
+        # pack against it, instead of silently falling back to a URL.
         print(
-            f"No running instance of packer service id {service_id} was found; "
+            f"No running instance of packer service id {service_id} found; "
+            "downloading/launching it via the core-services runtime..."
+        )
+        endpoint = _ensure_packer_running(service_id)
+        if endpoint:
+            return endpoint
+        print(
+            f"Could not start packer service id {service_id}; "
             "falling back to PACKER_SERVICE_URL if set."
         )
     return _resolve_packer_url()
@@ -177,12 +237,30 @@ def pack(directory: str) -> Optional[str]:
         return None
 
     _id: Optional[str] = None
+    # TODO Better approach, generator: return only path and finally remove if remote.
     is_remote, directory = prepare_directory(directory)
-
-    service_zip_dir: str = generate_service_zip(project_directory=directory)
 
     bee_path: Optional[str] = None
     try:
+        # The packer service builds inside its own sealed VM, so its registry is
+        # empty. Any registry-hash dependency this project declares must be pushed
+        # there first. Resolve each dependency against THIS nodo's registry (raising
+        # a clear error if one is missing) and upload the registry-hash ones.
+        from src.commands.packer.zip_with_dockerfile.packer_service_client import (
+            resolve_and_upload_dependencies,
+        )
+        print(f"Resolving dependencies against packer service {packer_url} ...")
+        summary = resolve_and_upload_dependencies(
+            project_directory=directory,
+            packer_service_url=packer_url,
+        )
+        if summary["uploaded"]:
+            print(f"Uploaded dependencies: {', '.join(summary['uploaded'])}")
+        if summary["already_present"]:
+            print(f"Dependencies already on packer: {', '.join(summary['already_present'])}")
+
+        service_zip_dir: str = generate_service_zip(project_directory=directory)
+
         pack_endpoint = f"{packer_url}/pack"
         print(f"Sending your project to the packer service at {pack_endpoint} ...")
         print("Building inside the packer microVM — this might take a while.")
@@ -228,33 +306,6 @@ def pack(directory: str) -> Optional[str]:
             _msg = f"Failed to import the packed service for {directory}."
             print(_msg)
             raise Exception(_msg)
-
-def pack(directory: str) -> str:
-    try:
-        _id = None
-        is_remote, directory = prepare_directory(directory)  # TODO Better approach, generator: return only path and finally remove if remote.
-
-        # When packing against a remote packer service, its registry is empty, so
-        # any registry-hash dependency this project declares must be pushed there
-        # first. Resolve each dependency against THIS nodo's registry (raising a
-        # clear error if one is missing) and upload the registry-hash ones.
-        if PACKER_SERVICE_URL:
-            from src.commands.packer.zip_with_dockerfile.packer_service_client import (
-                resolve_and_upload_dependencies,
-            )
-            print(f"Resolving dependencies against packer service {PACKER_SERVICE_URL} ...")
-            summary = resolve_and_upload_dependencies(
-                project_directory=directory,
-                packer_service_url=PACKER_SERVICE_URL,
-            )
-            if summary["uploaded"]:
-                print(f"Uploaded dependencies: {', '.join(summary['uploaded'])}")
-            if summary["already_present"]:
-                print(f"Dependencies already on packer: {', '.join(summary['already_present'])}")
-
-        service_zip_dir: str = generate_service_zip(
-            project_directory=directory
-        )
 
     except requests.exceptions.ConnectionError as e:
         print(
