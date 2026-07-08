@@ -18,6 +18,10 @@ UNSET_PLACEHOLDER = "<SET_ME>"
 
 # Well-known core service roles (the ``name`` field of each entry).
 SOURCE_APPLICATION = "source-application"
+# The packer service (``nodo pack`` delegates the Docker build to it). Configured
+# by id like any other core service so the node can download+launch it on demand
+# via :func:`src.core_services.runtime.ensure_core_service_running`.
+PACKER = "packer"
 # Opportunistic best-effort tenant the node runs only when it has spare capacity
 # and no real workloads; always preempted by real/paid execute requests. See
 # :mod:`src.core_services.low_demand` and ``docs/design/low-demand-fallback.md``.

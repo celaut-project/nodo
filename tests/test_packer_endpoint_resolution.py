@@ -95,10 +95,24 @@ class PackResolutionOrderTests(unittest.TestCase):
         by_id.assert_called_once_with("packerid123")
         by_url.assert_not_called()
 
-    def test_id_set_but_no_instance_falls_back_to_url_override(self):
+    def test_id_set_no_instance_launches_packer_via_core_services(self):
+        # No running instance, but the core-services runtime downloads+launches the
+        # packer and yields a live endpoint — that endpoint is used and the URL
+        # override is NOT consulted.
+        with patch.object(pack_mod, "_resolve_packer_id", return_value="packerid123"), \
+             patch.object(pack_mod, "_resolve_packer_endpoint_by_id", return_value=None), \
+             patch.object(pack_mod, "_ensure_packer_running", return_value="http://10.0.0.9:8080") as ensure, \
+             patch.object(pack_mod, "_resolve_packer_url", return_value="http://override:8080") as by_url:
+            endpoint = pack_mod._resolve_packer_endpoint()
+        self.assertEqual(endpoint, "http://10.0.0.9:8080")
+        ensure.assert_called_once_with("packerid123")
+        by_url.assert_not_called()
+
+    def test_id_set_no_instance_and_launch_fails_falls_back_to_url_override(self):
         out = io.StringIO()
         with patch.object(pack_mod, "_resolve_packer_id", return_value="packerid123"), \
              patch.object(pack_mod, "_resolve_packer_endpoint_by_id", return_value=None), \
+             patch.object(pack_mod, "_ensure_packer_running", return_value=None), \
              patch.object(pack_mod, "_resolve_packer_url", return_value="http://override:8080"):
             with redirect_stdout(out):
                 endpoint = pack_mod._resolve_packer_endpoint()
@@ -112,6 +126,20 @@ class PackResolutionOrderTests(unittest.TestCase):
             endpoint = pack_mod._resolve_packer_endpoint()
         self.assertEqual(endpoint, "http://override:8080")
         by_id.assert_not_called()
+
+    def test_id_resolves_from_core_services_list(self):
+        # With no env var and no packer.PACKER_SERVICE_ID, the id is taken from a
+        # {name: "packer", id: ...} entry in the unified core_services list.
+        def fake_get(key, default=None):
+            if key == "packer.PACKER_SERVICE_ID":
+                return None
+            if key == "core_services":
+                return [{"name": "packer", "id": "coreid789"}]
+            return default
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(pack_mod.env_manager, "get", side_effect=fake_get), \
+             patch("src.core_services._env_manager.get", side_effect=fake_get):
+            self.assertEqual(pack_mod._resolve_packer_id(), "coreid789")
 
     def test_neither_set_returns_none_and_pack_prints_guidance(self):
         out = io.StringIO()
