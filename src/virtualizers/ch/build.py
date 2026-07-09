@@ -645,7 +645,14 @@ def _write_item(
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", category=RuntimeWarning)
                     _blk.ParseFromString(branch.file)
-                _is_block_pointer = bool(get_hash_from_block(block=_blk, internal_block=True))
+                # Match copy_block_if_exists' own resolution: the block pointers this
+                # pipeline produces carry a single hash of type Enviroment.hash_type
+                # (internal_block=False), not the empty type (internal_block=True). Check
+                # both so the guard actually fires for hash-typed pointers.
+                _is_block_pointer = bool(
+                    get_hash_from_block(block=_blk, internal_block=True)
+                    or get_hash_from_block(block=_blk, internal_block=False)
+                )
             except DecodeError:
                 _is_block_pointer = False
             if _is_block_pointer:
