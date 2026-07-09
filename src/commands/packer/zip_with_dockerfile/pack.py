@@ -59,6 +59,15 @@ PACKER_SERVICE_URL = env_manager.get("PACKER_SERVICE_URL") or ""
 # Connect timeout is short; there is NO read timeout because a real build can
 # take many minutes and the server holds the connection open until it finishes.
 _CONNECT_TIMEOUT = 30
+# A freshly-launched packer resolves an endpoint the moment its VM network is up,
+# but the in-VM dockerd/buildx and the packer's own HTTP server take longer to
+# start serving. POSTing before that races startup and fails (connection
+# refused/reset -> "Dependency packing error"). Poll GET /health until the packer
+# answers 200 before sending anything. Only costs time on a cold launch; an
+# already-running packer answers immediately. Override the ceiling with
+# PACKER_HEALTH_TIMEOUT (seconds).
+_HEALTH_TIMEOUT = int(env_manager.get("PACKER_HEALTH_TIMEOUT") or 300)
+_HEALTH_POLL_INTERVAL = 3
 
 
 def _resolve_packer_id() -> Optional[str]:
@@ -168,6 +177,39 @@ def _ensure_packer_running(service_id: str) -> Optional[str]:
         return None
 
 
+def _wait_for_packer_health(packer_url: str, timeout: int = _HEALTH_TIMEOUT) -> bool:
+    """Block until the packer answers ``GET /health`` with 200.
+
+    Returns True as soon as the packer is serving, False if ``timeout`` seconds
+    elapse without a healthy response. Never raises — connection errors while the
+    packer VM is still booting are expected and simply retried.
+    """
+    import time
+
+    health_endpoint = f"{packer_url}/health"
+    deadline = time.monotonic() + max(0, timeout)
+    announced = False
+    while True:
+        try:
+            resp = requests.get(health_endpoint, timeout=(5, 10))
+            if resp.status_code == 200:
+                if announced:
+                    print("Packer service is up.")
+                return True
+        except requests.exceptions.RequestException:
+            pass  # not serving yet — keep polling until the deadline
+        if time.monotonic() >= deadline:
+            return False
+        if not announced:
+            print(
+                f"Waiting for the packer service to start serving at {health_endpoint} "
+                f"(up to {timeout}s; Docker/buildx inside the packer VM can take a "
+                "minute or two on a cold launch)..."
+            )
+            announced = True
+        time.sleep(_HEALTH_POLL_INTERVAL)
+
+
 def _no_packer_configured_message() -> str:
     return (
         "\nNo packer service is configured.\n\n"
@@ -239,6 +281,22 @@ def pack(directory: str) -> Optional[str]:
     _id: Optional[str] = None
     # TODO Better approach, generator: return only path and finally remove if remote.
     is_remote, directory = prepare_directory(directory)
+
+    # If nodo just launched the packer, its endpoint resolves before the in-VM
+    # HTTP server is serving. Wait for /health before the first request (the
+    # dependency upload below is the first packer contact) so we don't race
+    # startup. prepare_directory() above already gave the VM some warmup time.
+    if not _wait_for_packer_health(packer_url):
+        print(
+            f"\nThe packer service at {packer_url} did not become healthy within "
+            f"{_HEALTH_TIMEOUT}s.\n"
+            "It may still be starting (Docker/buildx inside the packer VM can take a\n"
+            "minute or two on a cold launch). Re-run `nodo pack`, or raise the wait\n"
+            "with PACKER_HEALTH_TIMEOUT (seconds)."
+        )
+        if is_remote:
+            __remove_path(directory)
+        return None
 
     bee_path: Optional[str] = None
     try:
