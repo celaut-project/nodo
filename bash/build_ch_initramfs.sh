@@ -148,7 +148,10 @@ install_virtio_modules() {
     # virtiofs (+ its fuse dependency, pulled in by --show-depends) is needed for
     # parent -> child shared filesystems. Harmless when unused: it is only loaded,
     # never auto-mounted.
-    for required_module in virtio_blk virtio_net virtiofs; do
+    # overlay is needed so a service that boots its own Docker daemon inside the
+    # guest can use the overlay2 storage driver. Without it dockerd falls back to
+    # vfs (full-copy layers), which makes an image build take ~150s instead of ~8s.
+    for required_module in virtio_blk virtio_net virtiofs overlay; do
         deps="$(modprobe --set-version "$kernel_release" --show-depends "$required_module" 2>/dev/null || true)"
         if [ -z "$deps" ]; then
             if is_builtin_module "$kernel_release" "$required_module"; then
