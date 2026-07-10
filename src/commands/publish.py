@@ -1,7 +1,5 @@
-from typing import Optional
-
-from src.publisher import publish_service
-from src.publisher.publisher import PublisherError
+from src.commands.publisher import publish_service
+from src.commands.publisher.publisher import PublisherError
 
 
 def publish_command(
