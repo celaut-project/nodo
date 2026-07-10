@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Any, Optional, List, Set, Tuple
 import tempfile
 
-from bee_rpc.client import copy_block_if_exists
+import warnings
+from google.protobuf.message import DecodeError
+from bee_rpc import buffer_pb2
+from bee_rpc.client import copy_block_if_exists, get_hash_from_block
 
 from protos import celaut_pb2
 from src.utils.config import ConfigManager
@@ -627,6 +630,38 @@ def _write_item(
             return
 
         if not copy_block_if_exists(buffer=branch.file, directory=str(target_path)):
+            # copy_block_if_exists returns False in two very different cases:
+            #   (1) branch.file is genuine inline content (small files)   -> writing it is correct
+            #   (2) branch.file is a block *pointer* (large files) whose block copy failed
+            #       (missing / partial / unsupported multiblock block in the local registry)
+            # Case (2) MUST NOT fall through to the inline write: branch.file is then only the
+            # 36-byte Buffer.Block pointer, and writing it as the file silently corrupts large
+            # binaries (dockerd -> "line 2: D: command not found"; libpython -> "invalid ELF
+            # header"). Distinguish them with the same detection copy_block_if_exists uses, and
+            # fail closed on a real block instead of writing garbage.
+            _is_block_pointer = False
+            try:
+                _blk = buffer_pb2.Buffer.Block()
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", category=RuntimeWarning)
+                    _blk.ParseFromString(branch.file)
+                # Match copy_block_if_exists' own resolution: the block pointers this
+                # pipeline produces carry a single hash of type Enviroment.hash_type
+                # (internal_block=False), not the empty type (internal_block=True). Check
+                # both so the guard actually fires for hash-typed pointers.
+                _is_block_pointer = bool(
+                    get_hash_from_block(block=_blk, internal_block=True)
+                    or get_hash_from_block(block=_blk, internal_block=False)
+                )
+            except DecodeError:
+                _is_block_pointer = False
+            if _is_block_pointer:
+                raise RuntimeError(
+                    f"Block reconstruction failed for '{rel_path}': a block pointer is present "
+                    "but its block could not be copied from the local registry (missing, "
+                    "partial, or unsupported multiblock block). Refusing to write the 36-byte "
+                    "pointer as file content, which would silently corrupt this file."
+                )
             with open(target_path, "wb") as f:
                 f.write(branch.file)
         if metadata is not None:
