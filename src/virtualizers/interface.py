@@ -25,24 +25,6 @@ packing is delegated to the external packer-service.
 env_manager = ConfigManager()
 sc = SQLConnection()
 
-def _normalize_virtualizer(name: Optional[str]) -> str:
-    """Only Cloud Hypervisor ('ch') is supported. Any other value — including
-    the removed 'docker' backend — is rejected with an actionable message."""
-    if not isinstance(name, str):
-        raise ValueError(f"Invalid virtualizer value: {name!r}")
-    v = name.strip().lower()
-    if not v:
-        raise ValueError("Virtualizer value is empty.")
-    if v == "ch":
-        return "ch"
-    if v == "docker":
-        raise ValueError(
-            "The Docker virtualizer was removed. nodo runs services only with "
-            "Cloud Hypervisor ('ch'). Set virtualizers.DEFAULT_VIRTUALIZER: ch "
-            "in your config.yaml."
-        )
-    raise ValueError(f"Unknown or unsupported virtualizer '{name}'. Supported: ch.")
-
 def get_configured_virtualizer() -> str:
     return "ch"
 
