@@ -21,10 +21,10 @@ from typing import List
 from urllib.parse import quote
 
 from src.core_services import SOURCE_APPLICATION, get_core_service_id
-from src.publisher.publisher import (
+from src.core_services.runtime import ensure_core_service_running
+from src.commands.publisher.publisher import (
     PublisherError,
     _fetch_bytes,
-    _resolve_source_application_endpoint,
     download_from_manifest_url,
 )
 from src.utils.config import ConfigManager
@@ -75,7 +75,7 @@ def _parse_sources(payload: bytes) -> List[str]:
     return []
 
 
-def lookup_sources(service_id: str) -> List[str]:
+def lookup_sources(service_id: str, core_id: str) -> List[str]:
     """Query the source-application for the manifest URLs of ``service_id``.
 
     Returns a list of manifest URLs (possibly empty). This is the single integration
@@ -87,9 +87,10 @@ def lookup_sources(service_id: str) -> List[str]:
     a *running* on-node instance — not the web page. All HTTP I/O reuses the publisher's
     retrying fetch helper rather than introducing a new HTTP client.
     """
-    endpoint = _resolve_source_application_endpoint()
+    endpoint = ensure_core_service_running(core_id)
     if not endpoint:
         # No running instance to answer /api reads (the static web app cannot).
+        print(f"ℹ️  No running instance of Source Application service to answer /api reads.")
         return []
     url = f"{endpoint.rstrip('/')}/api/sources?hash={quote(service_id, safe='')}"
     try:
@@ -117,7 +118,7 @@ def acquire_service(service_id: str) -> bool:
 
     print(f"🔎 Looking up '{service_id}' via the source-application core service...")
     try:
-        sources = lookup_sources(service_id)
+        sources = lookup_sources(service_id, core_id=source_application_id)
     except Exception as exc:  # defensive: a lookup failure must not break execute
         print(f"⚠️  source-application lookup failed: {exc}")
         return False
