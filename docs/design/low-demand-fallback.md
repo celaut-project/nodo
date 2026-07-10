@@ -95,7 +95,7 @@ is concrete rather than hand-wavy.
 
 - `src/core_services/runtime.py` —
   `ensure_core_service_running(service_id, *, launch=True)`
-  resolves an already-running instance (`find_running_endpoint`), else
+  resolves an already-running instance (`_find_running_endpoint`), else
   best-effort downloads via the source-application, else launches via the
   canonical `nodo execute` path (`src/commands/execute.py:116`). Fully
   defensive, never raises. **The fallback launches through exactly this.**
@@ -108,10 +108,10 @@ is concrete rather than hand-wavy.
 - Gateway exposes it: `Gateway.StopService` at `src/gateway/gateway.py:31` calls
   `stop_instance(token=token)`.
 
-  To stop the fallback we need its **token/instance id**. `find_running_endpoint`
-  (runtime.py) currently returns only the endpoint; to preempt we also need the
+  To stop the fallback we need its **token/instance id**. `_find_running_endpoint`
+  (runtime.py) returns only the endpoint; to preempt we also need the
   instance token so we can call `stop_instance`. **(open question 2 — we propose
-  adding a small `find_running_instance(service_id) -> (token, endpoint)` helper,
+  adding a small `find_running_instance(service_id) -> token` helper,
   or having the scheduler track the token it launched.)**
 
 ### 2.5 The preemption trigger (a real request arriving)
@@ -223,8 +223,8 @@ The three design questions below were put to maintainer Josemi and are now
    Celaut today. When a real `execute` request arrives, or resources exceed a
    threshold, the low-demand instance is **stopped immediately** via
    `stop_instance()` (`manager.py:531`) — never paused/suspended. To get the
-   instance's stop token we added `find_running_instance(service_id) -> (token,
-   endpoint)` to `runtime.py`, and the scheduler also remembers the token it
+   instance's stop token we added `find_running_instance(service_id) -> token`
+   to `runtime.py`, and the scheduler also remembers the token it
    launched. Implemented in `_stop_running_fallback()`.
 
 3. **Request detection — FINAL: POLLED, not reactive.** Pending/running real
@@ -261,8 +261,8 @@ The three design questions below were put to maintainer Josemi and are now
   fallback's own instance), `should_run_fallback()`, `run_fallback_once()`, and the
   stateful `scheduler_tick()` (hysteresis + always-stop preemption + `POLL_INTERVAL`
   cadence). Heavily documented, never raises.
-- `src/core_services/runtime.py` — `find_running_instance(service_id) -> (token,
-  endpoint)` so preemption can `stop_instance()` the fallback.
+- `src/core_services/runtime.py` — `find_running_instance(service_id) -> token`
+  so preemption can `stop_instance()` the fallback.
 - `src/manager/maintain.py` — a single guarded `scheduler_tick()` call wired into
   the existing `manager_thread` loop (no new thread; no-op unless `ENABLED`).
 - `tests/test_low_demand.py` — unit tests with mocked resource readings, a mocked

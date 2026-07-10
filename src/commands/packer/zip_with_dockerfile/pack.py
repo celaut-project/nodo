@@ -149,7 +149,7 @@ def _resolve_packer_endpoint() -> Optional[str]:
         if endpoint:
             return endpoint
         
-    if PACKER_SERVICE_URL.strip():
+    if PACKER_SERVICE_URL and PACKER_SERVICE_URL.strip():
         print(
             f"Could not start packer service id {service_id}; "
             "falling back to PACKER_SERVICE_URL if set."
