@@ -127,7 +127,26 @@ def inspect(service: str):
               "- The user may connect to it through the ports exposed by its interface.\n"
               "- It can only initiate connections to its own dependencies (child services it may deploy).\n"
               "- All of its dependencies will follow the same restrictions.\n")
+        
     for network in service_obj.network:
-        print(f"Tags: {', '.join([tag for tag in network.tags])}")
+        
+        tags = list(network.tags)
+
+        print(f"Tags: {', '.join(tags)}")
         print(f"Prose: {network.prose}\n")
         print("\n")
+        # '*' means unrestricted outbound Internet access
+        if "*" in tags:
+            print("⚠️⚠️⚠️  IMPORTANT SECURITY WARNING  ⚠️⚠️⚠️")
+            print()
+            print("This service has unrestricted outbound Internet access.")
+            print()
+            print("It can freely connect to any server or website on the Internet.")
+            print()
+            print("If the service is malicious or becomes compromised, it may transmit")
+            print("information outside your infrastructure without network restrictions.")
+            print()
+            print("Only use services with this permission if you trust its source")
+            print("and understand why unrestricted Internet access is necessary.")
+
+        print()
