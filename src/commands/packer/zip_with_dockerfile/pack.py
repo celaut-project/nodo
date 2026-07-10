@@ -2,7 +2,7 @@
 `nodo pack` — packer-service HTTP client.
 
 nodo no longer builds services locally with Docker. Packing is delegated to a
-**packer service** (https://github.com/agenticaihome/celaut-packer-service): a
+**packer service** (eg: https://github.com/celaut-basics/packer-service): a
 Celaut microVM that runs Docker/buildx *inside* a sealed VM and exposes an HTTP
 `/pack` endpoint. This keeps Docker entirely out of the nodo host.
 
@@ -21,9 +21,8 @@ Configuring the packer (resolution order):
      or a `{name: "packer", id: ...}` entry in the top-level `core_services` list)
      — the published content hash of the packer-service. nodo treats the packer as
      a **core service**: if no instance is already running, it downloads (via the
-     source-application) and launches it on demand through the core-services runtime
-     (:func:`src.core_services.runtime.ensure_core_service_running`), then packs
-     against the live instance's `ip:port`.
+     source-application) and launches it on demand through the core-services runtime, 
+     then packs against the live instance's `ip:port`.
   2. url override  PACKER_SERVICE_URL (env var or config packer.PACKER_SERVICE_URL)
      — only needed to point at an out-of-band packer (one running elsewhere, not as
      a local instance). Used as a last resort when no service id is set, or when a
@@ -32,7 +31,6 @@ If neither yields an endpoint, `nodo pack` fails with an actionable message
 instead of trying to use a local Docker that no longer exists.
 """
 import os
-import sys
 import sqlite3
 import tempfile
 from typing import Optional
@@ -41,6 +39,7 @@ import requests
 
 from src.commands.packer.zip_with_dockerfile.prepare_directory import prepare_directory
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import generate_service_zip
+from src.core_services.runtime import ensure_core_service_running
 from src.utils.config import ConfigManager
 
 # `import_bee` pulls in the bee_rpc runtime (only needed when actually importing a
@@ -52,10 +51,11 @@ env_manager = ConfigManager()
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 REGISTRY = env_manager.get("REGISTRY")
+PACKER_SERVICE_ID = env_manager.get("packer.PACKER_SERVICE_ID")
 # Optional out-of-band packer override (an already-running packer reachable at a
 # fixed URL). Empty -> resolve the packer by service id via the core-services
 # runtime instead.
-PACKER_SERVICE_URL = env_manager.get("PACKER_SERVICE_URL") or ""
+PACKER_SERVICE_URL = env_manager.get("PACKER_SERVICE_URL")
 # Connect timeout is short; there is NO read timeout because a real build can
 # take many minutes and the server holds the connection open until it finishes.
 _CONNECT_TIMEOUT = 30
@@ -78,7 +78,7 @@ def _resolve_packer_id() -> Optional[str]:
     list. The last one keeps the packer consistent with every other core service the
     node bootstraps (source-application, low-demand-fallback, ...).
     """
-    service_id = os.environ.get("PACKER_SERVICE_ID") or env_manager.get("packer.PACKER_SERVICE_ID")
+    service_id = PACKER_SERVICE_ID
     if isinstance(service_id, str):
         service_id = service_id.strip()
     if not service_id:
@@ -90,91 +90,6 @@ def _resolve_packer_id() -> Optional[str]:
         except Exception:
             service_id = None
     return service_id or None
-
-
-def _resolve_packer_url() -> Optional[str]:
-    """Resolve the packer-service base URL override: env var first, then config."""
-    url = os.environ.get("PACKER_SERVICE_URL") or env_manager.get("packer.PACKER_SERVICE_URL")
-    if isinstance(url, str):
-        url = url.strip()
-    return url.rstrip("/") if url else None
-
-
-def _resolve_packer_endpoint_by_id(service_id: str) -> Optional[str]:
-    """Find a running local instance of `service_id` and return its `http://ip:port`.
-
-    Looks up `local_instances` in the node's sqlite DATABASE_FILE, parses each
-    matching row's serialized `celaut.Instance` protobuf, and returns the first
-    `http://ip:port` it can build from `uri_slot[*].uri[*]`. Fully defensive: any
-    problem (no DB, no table, no rows, parse error, no uri) returns None.
-    """
-    if not service_id:
-        return None
-
-    # Imported lazily/inside the guard so a missing protobuf module can't crash
-    # the whole resolution path.
-    try:
-        from protos import celaut_pb2 as celaut
-    except Exception:
-        return None
-
-    conn = None
-    try:
-        database_file = env_manager.get("DATABASE_FILE")
-        if not database_file:
-            return None
-        conn = sqlite3.connect(database_file)
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT serialized_instance FROM local_instances WHERE service_id = ?",
-            (service_id,),
-        )
-        rows = cursor.fetchall()
-    except Exception:
-        return None
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-    for row in rows:
-        serialized = row[0] if row else None
-        if not serialized:
-            continue
-        try:
-            inst = celaut.Instance()
-            inst.ParseFromString(serialized)
-            for _slot in inst.uri_slot:
-                for _uri in _slot.uri:
-                    ip = str(_uri.ip).strip()
-                    port = _uri.port
-                    if ip and port:
-                        return f"http://{ip}:{port}"
-        except Exception:
-            continue
-
-    return None
-
-
-def _ensure_packer_running(service_id: str) -> Optional[str]:
-    """Download+launch the packer service by id and return its live endpoint.
-
-    Delegates to the core-services runtime, which mirrors how every other core
-    service is bootstrapped: return an already-running instance, else acquire the
-    service via the source-application, else launch it through the existing
-    ``nodo execute`` path — then resolve its ``http://ip:port``. Fully defensive:
-    any failure (no runtime deps, no gateway, launch error) degrades to ``None`` so
-    the caller can fall back to the URL override.
-    """
-    if not service_id:
-        return None
-    try:
-        from src.core_services.runtime import ensure_core_service_running
-        return ensure_core_service_running(service_id)
-    except Exception:
-        return None
 
 
 def _wait_for_packer_health(packer_url: str, timeout: int = _HEALTH_TIMEOUT) -> bool:
@@ -210,29 +125,6 @@ def _wait_for_packer_health(packer_url: str, timeout: int = _HEALTH_TIMEOUT) -> 
         time.sleep(_HEALTH_POLL_INTERVAL)
 
 
-def _no_packer_configured_message() -> str:
-    return (
-        "\nNo packer service is configured.\n\n"
-        "nodo does not build services locally anymore — packing is done by a\n"
-        "packer-service microVM (it runs Docker/buildx inside a sealed VM, so you\n"
-        "never install Docker on this host).\n\n"
-        "Configure the packer by its published service id and re-run `nodo pack`;\n"
-        "nodo will download and launch a packer instance on demand and pack\n"
-        "against it:\n"
-        "  • config.yaml (either location works):\n"
-        "        packer:\n"
-        "          PACKER_SERVICE_ID: \"<packer-service published id>\"\n"
-        "    or, alongside the other core services:\n"
-        "        core_services:\n"
-        "          - name: \"packer\"\n"
-        "            id: \"<packer-service published id>\"\n"
-        "    (or env var:  export PACKER_SERVICE_ID=<packer-service published id>)\n\n"
-        "To point at an out-of-band packer instead (one already running elsewhere),\n"
-        "set the override URL:  export PACKER_SERVICE_URL=http://<ip>:8080  (or\n"
-        "packer.PACKER_SERVICE_URL).\n"
-    )
-
-
 def __remove_path(path):
     import shutil
     if os.path.exists(path):
@@ -253,29 +145,44 @@ def _resolve_packer_endpoint() -> Optional[str]:
     """
     service_id = _resolve_packer_id()
     if service_id:
-        endpoint = _resolve_packer_endpoint_by_id(service_id)
+        endpoint = ensure_core_service_running(service_id)
         if endpoint:
             return endpoint
-        # No running instance — execute the packer service (download + launch) and
-        # pack against it, instead of silently falling back to a URL.
-        print(
-            f"No running instance of packer service id {service_id} found; "
-            "downloading/launching it via the core-services runtime..."
-        )
-        endpoint = _ensure_packer_running(service_id)
-        if endpoint:
-            return endpoint
+        
+    if PACKER_SERVICE_URL.strip():
         print(
             f"Could not start packer service id {service_id}; "
             "falling back to PACKER_SERVICE_URL if set."
         )
-    return _resolve_packer_url()
+        return PACKER_SERVICE_URL
+    
+    return None
 
 
 def pack(directory: str) -> Optional[str]:
     packer_url = _resolve_packer_endpoint()
     if not packer_url:
-        print(_no_packer_configured_message())
+        _msg = (
+            "\nNo packer service is configured.\n\n"
+            "nodo does not build services locally anymore — packing is done by a\n"
+            "packer-service microVM (it runs Docker/buildx inside a sealed VM, so you\n"
+            "never install Docker on this host).\n\n"
+            "Configure the packer by its published service id and re-run `nodo pack`;\n"
+            "nodo will download and launch a packer instance on demand and pack\n"
+            "against it:\n"
+            "  • config.yaml (either location works):\n"
+            "        packer:\n"
+            "          PACKER_SERVICE_ID: \"<packer-service published id>\"\n"
+            "    or, alongside the other core services:\n"
+            "        core_services:\n"
+            "          - name: \"packer\"\n"
+            "            id: \"<packer-service published id>\"\n"
+            "    (or env var:  export PACKER_SERVICE_ID=<packer-service published id>)\n\n"
+            "To point at an out-of-band packer instead (one already running elsewhere),\n"
+            "set the override URL:  export PACKER_SERVICE_URL=http://<ip>:8080  (or\n"
+            "packer.PACKER_SERVICE_URL).\n"
+        )
+        print(_msg)
         return None
 
     _id: Optional[str] = None

@@ -330,8 +330,8 @@ def _record_running_token(service_id: str) -> None:
         from src.core_services.runtime import find_running_instance
 
         info = find_running_instance(service_id)
-        if info and info[0]:
-            _state.running_token = info[0]
+        if info:
+            _state.running_token = info
     except Exception:
         pass
 
