@@ -3,6 +3,8 @@ import sys
 import threading
 import time
 from typing import Any, Generator
+import contextlib
+import io
 
 import grpc
 
@@ -118,108 +120,116 @@ def execute(
     external: bool = False,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
+    silent: bool = False
 ):
-    resolved = resolve_service_hash(service)
-    if not resolved:
-        # The service isn't in the local registry. Before refusing, try to acquire it
-        # through the 'source-application' core service: it maps the requested service id
-        # to its published sources and downloads it via the existing download/import path.
-        # This only succeeds when a trusted source-application is configured in
-        # 'core_services'; otherwise it's a no-op and we fall through to the error below.
-        if acquire_service(service):
-            resolved = resolve_service_hash(service)
+    sink = open(os.devnull, "w") if silent else None
 
-    if not resolved:
-        print("❌ Service not allowed.")
-        return
-
-    service = resolved
-
-    channel = None
-    stop_event = threading.Event()
-    animation_thread = threading.Thread(
-        target=rocket_animation,
-        args=(stop_event,),
-        daemon=True,
-    )
     try:
-        channel = grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
-        g_stub = celaut_pb2_grpc.GatewayStub(channel)
+        resolved = resolve_service_hash(service)
+        if not resolved:
+            # The service isn't in the local registry. Before refusing, try to acquire it
+            # through the 'source-application' core service: it maps the requested service id
+            # to its published sources and downloads it via the existing download/import path.
+            # This only succeeds when a trusted source-application is configured in
+            # 'core_services'; otherwise it's a no-op and we fall through to the error below.
+            if acquire_service(service):
+                resolved = resolve_service_hash(service)
 
-        inspect_service(service)
-        animation_thread.start()
+        if not resolved:
+            print("❌ Service not allowed.")
+            return
 
-        response = next(client_grpc(
-            method=g_stub.StartService,
-            input=generator(
-                _hash=service,
-                initial_gas_amount=10**16,
-                mem_limit=10**9,
-                external=external,
-                envs=envs,
-                instance_name=instance_name,
-            ),
-            indices_parser=celaut_pb2.ServiceInstance,
-            partitions_message_mode_parser=True,
-            indices_serializer=gateway_bee.StartService_input_indices
-        ))
-        stop_event.set()
-        animation_thread.join()
-        print("🚀 Service launched successfully!\n")
+        service = resolved
 
-    except grpc.RpcError as e:
-        stop_event.set()
-        if animation_thread.is_alive():
+        channel = None
+        stop_event = threading.Event()
+        animation_thread = threading.Thread(
+            target=rocket_animation,
+            args=(stop_event,),
+            daemon=True,
+        )
+        try:
+            channel = grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
+            g_stub = celaut_pb2_grpc.GatewayStub(channel)
+
+            inspect_service(service)
+            animation_thread.start()
+
+            response = next(client_grpc(
+                method=g_stub.StartService,
+                input=generator(
+                    _hash=service,
+                    initial_gas_amount=10**16,
+                    mem_limit=10**9,
+                    external=external,
+                    envs=envs,
+                    instance_name=instance_name,
+                ),
+                indices_parser=celaut_pb2.ServiceInstance,
+                partitions_message_mode_parser=True,
+                indices_serializer=gateway_bee.StartService_input_indices
+            ))
+            stop_event.set()
             animation_thread.join()
+            print("🚀 Service launched successfully!\n")
 
-        status_code = e.code()
-        details = e.details()
+        except grpc.RpcError as e:
+            stop_event.set()
+            if animation_thread.is_alive():
+                animation_thread.join()
 
-        FRIENDLY_ERRORS = {
-            grpc.StatusCode.NOT_FOUND: "Service not found.",
-            grpc.StatusCode.UNAVAILABLE: "Gateway is unavailable.",
-            grpc.StatusCode.PERMISSION_DENIED: "Permission denied.",
-            grpc.StatusCode.DEADLINE_EXCEEDED: "Request timed out."
-        }
+            status_code = e.code()
+            details = e.details()
 
-        print("❌ Failed to launch service.")
-        message = FRIENDLY_ERRORS.get(status_code, "Unknown error occurred.")
-        print(f"Reason: {message}")
+            FRIENDLY_ERRORS = {
+                grpc.StatusCode.NOT_FOUND: "Service not found.",
+                grpc.StatusCode.UNAVAILABLE: "Gateway is unavailable.",
+                grpc.StatusCode.PERMISSION_DENIED: "Permission denied.",
+                grpc.StatusCode.DEADLINE_EXCEEDED: "Request timed out."
+            }
 
-        if details:
-            print(f"Details: {details}")
+            print("❌ Failed to launch service.")
+            message = FRIENDLY_ERRORS.get(status_code, "Unknown error occurred.")
+            print(f"Reason: {message}")
 
-        return
+            if details:
+                print(f"Details: {details}")
 
-    except Exception as e:
-        stop_event.set()
-        if animation_thread.is_alive():
-            animation_thread.join()
-        print("❌ Unexpected error while launching service.")
-        print(f"Details: {str(e)}")
-        return
+            return
+
+        except Exception as e:
+            stop_event.set()
+            if animation_thread.is_alive():
+                animation_thread.join()
+            print("❌ Unexpected error while launching service.")
+            print(f"Details: {str(e)}")
+            return
+        finally:
+            if channel is not None:
+                channel.close()
+
+        endpoints: list[str] = []
+        for slot in response.instance.api.slot:
+            protocol_tags = {
+                tag.lower()
+                for protocol in slot.protocol_stack
+                for tag in protocol.tags
+            }
+            transport_tags = {tag.lower() for tag in slot.transport.tags}
+            if "http" in protocol_tags or "http" in transport_tags:
+                for _exp in response.instance.uri_slot:
+                    if _exp.internal_port == slot.port:
+                        for _uri in _exp.uri:
+                            endpoints.append(f"http://{_uri.ip}:{_uri.port}")
+                        break
+
+        if endpoints:
+            print("🌐 Endpoints available:\n")
+            for endpoint in endpoints:
+                print(f"  • {endpoint}")
+        else:
+            print("No endpoints available")
+
     finally:
-        if channel is not None:
-            channel.close()
-
-    endpoints: list[str] = []
-    for slot in response.instance.api.slot:
-        protocol_tags = {
-            tag.lower()
-            for protocol in slot.protocol_stack
-            for tag in protocol.tags
-        }
-        transport_tags = {tag.lower() for tag in slot.transport.tags}
-        if "http" in protocol_tags or "http" in transport_tags:
-            for _exp in response.instance.uri_slot:
-                if _exp.internal_port == slot.port:
-                    for _uri in _exp.uri:
-                        endpoints.append(f"http://{_uri.ip}:{_uri.port}")
-                    break
-
-    if endpoints:
-        print("🌐 Endpoints available:\n")
-        for endpoint in endpoints:
-            print(f"  • {endpoint}")
-    else:
-        print("No endpoints available")
+        if sink:
+            sink.close()
