@@ -33,7 +33,7 @@ from src.utils.config import ConfigManager
 _env_manager = ConfigManager()
 
 
-def find_running_endpoint(service_id: str) -> Optional[str]:
+def _find_running_endpoint(service_id: str) -> Optional[str]:
     """Return the first ``http://<ip>:<port>`` of a running instance of ``service_id``.
 
     Queries the ``local_instances`` table for rows matching ``service_id``, parses each
@@ -83,13 +83,8 @@ def find_running_endpoint(service_id: str) -> Optional[str]:
     return None
 
 
-def find_running_instance(service_id: str) -> Optional[Tuple[str, Optional[str]]]:
-    """Return ``(instance_token, endpoint)`` for a running instance of ``service_id``.
-
-    Symmetric to :func:`find_running_endpoint` but also returns the instance's
-    ``id`` (its stop token, as accepted by :func:`src.manager.manager.stop_instance`)
-    so a caller can *preempt* the instance, not just talk to it. ``endpoint`` may be
-    ``None`` if the instance is running but has no resolvable uri yet.
+def find_running_instance(service_id: str) -> Optional[str]:
+    """Return ``instance_token`` for a running instance of ``service_id``.
 
     Returns ``None`` when no instance of ``service_id`` is running or its row can't be
     read. Fully defensive: a missing database/table, an unparseable serialized
@@ -118,24 +113,7 @@ def find_running_instance(service_id: str) -> Optional[Tuple[str, Optional[str]]
         token = str(row[0]) if row and row[0] else None
         if not token:
             continue
-        endpoint = None
-        serialized_instance = row[1] if len(row) > 1 else None
-        if serialized_instance:
-            try:
-                instance = celaut.Instance()
-                instance.ParseFromString(serialized_instance)
-                for _exp in instance.uri_slot:
-                    for _uri in _exp.uri:
-                        ip = str(_uri.ip or "").strip()
-                        port = _uri.port
-                        if ip and port:
-                            endpoint = f"http://{ip}:{port}"
-                            break
-                    if endpoint:
-                        break
-            except Exception:
-                endpoint = None
-        return token, endpoint
+        return token
 
     return None
 
@@ -171,7 +149,7 @@ def ensure_core_service_running(
     availability) without triggering a launch.
     """
     # (a) Already running?
-    endpoint = find_running_endpoint(service_id)
+    endpoint = _find_running_endpoint(service_id)
     if endpoint:
         return endpoint
 
@@ -199,4 +177,4 @@ def ensure_core_service_running(
             pass
 
     # Re-check for a now-running instance after acquire/launch.
-    return find_running_endpoint(service_id)
+    return _find_running_endpoint(service_id)

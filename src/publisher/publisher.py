@@ -538,27 +538,6 @@ def _build_source_application_prefilled_url(
 SOURCE_APPLICATION_PUBLISH_ROUTE = "api/sources"
 
 
-def _resolve_source_application_endpoint() -> Optional[str]:
-    """Return the endpoint of a *running* source-application core-service instance.
-
-    Requires a configured (non-placeholder) ``source-application`` id under
-    ``core_services`` AND a currently-running instance of it; returns ``None``
-    otherwise. Detection only — it never downloads or launches the service, so a
-    publish never triggers heavy side effects. Fully defensive: never raises.
-    """
-    try:
-        from src.core_services import SOURCE_APPLICATION, get_core_service_id
-        from src.core_services.runtime import find_running_endpoint
-
-        source_application_id = get_core_service_id(SOURCE_APPLICATION)
-        if not source_application_id:
-            return None
-        return find_running_endpoint(source_application_id)
-    except Exception:
-        # Missing core_services infra / db / parse error — treat as "no instance".
-        return None
-
-
 def _build_source_signer_envs() -> Optional[Dict[str, str]]:
     """Seed-signer environment for an auto-launched source-application instance.
 

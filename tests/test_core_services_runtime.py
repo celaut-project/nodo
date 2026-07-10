@@ -71,33 +71,33 @@ class FindRunningEndpointTests(unittest.TestCase):
         cfg, conn = _patch_db(rows=rows)
         with cfg, conn:
             self.assertEqual(
-                runtime.find_running_endpoint("svc"), "http://10.0.0.5:9000"
+                runtime._find_running_endpoint("svc"), "http://10.0.0.5:9000"
             )
 
     def test_returns_none_when_no_rows(self):
         cfg, conn = _patch_db(rows=[])
         with cfg, conn:
-            self.assertIsNone(runtime.find_running_endpoint("svc"))
+            self.assertIsNone(runtime._find_running_endpoint("svc"))
 
     def test_missing_table_returns_none(self):
         # Simulate `no such table: local_instances`.
         cfg, conn = _patch_db(raise_on_execute=Exception("no such table: local_instances"))
         with cfg, conn:
-            self.assertIsNone(runtime.find_running_endpoint("svc"))
+            self.assertIsNone(runtime._find_running_endpoint("svc"))
 
     def test_unparseable_blob_returns_none(self):
         cfg, conn = _patch_db(rows=[(b"\xff\xff not a protobuf",)])
         with cfg, conn:
-            self.assertIsNone(runtime.find_running_endpoint("svc"))
+            self.assertIsNone(runtime._find_running_endpoint("svc"))
 
     def test_missing_database_file_returns_none(self):
         with patch.object(runtime._env_manager, "get", return_value=None):
-            self.assertIsNone(runtime.find_running_endpoint("svc"))
+            self.assertIsNone(runtime._find_running_endpoint("svc"))
 
     def test_connect_failure_returns_none(self):
         cfg, conn = _patch_db(raise_on_connect=sqlite3_error())
         with cfg, conn:
-            self.assertIsNone(runtime.find_running_endpoint("svc"))
+            self.assertIsNone(runtime._find_running_endpoint("svc"))
 
 
 def sqlite3_error():
