@@ -11,6 +11,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from unittest import mock
 from unittest.mock import patch
 
 IMPORT_ERROR = None
@@ -158,6 +159,103 @@ class PackResolutionOrderTests(unittest.TestCase):
         guidance = out.getvalue()
         self.assertIn("PACKER_SERVICE_ID", guidance)
         self.assertIn("PACKER_SERVICE_URL", guidance)
+
+
+class _Clock:
+    """A deterministic stand-in for ``time.monotonic``.
+
+    Returns each queued timestamp in order; once the queue is exhausted it keeps
+    returning the last value, so a loop that keeps polling can never hang the test
+    (the final value is chosen to be past the deadline).
+    """
+
+    def __init__(self, times):
+        self._times = list(times)
+        self._last = self._times[-1] if self._times else 0.0
+
+    def __call__(self):
+        if self._times:
+            self._last = self._times.pop(0)
+        return self._last
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class WaitForPackerHealthTests(unittest.TestCase):
+    """`_wait_for_packer_health` polls GET /health until 200 or the deadline.
+
+    `time.sleep`/`time.monotonic` are patched so these run instantly, and
+    `requests.get` is mocked so no real network I/O happens.
+    """
+
+    def _ok(self):
+        resp = mock.Mock()
+        resp.status_code = 200
+        return resp
+
+    def test_warm_path_returns_true_immediately_no_sleep(self):
+        # An already-serving packer answers 200 on the first GET: True, zero sleeps,
+        # and no "waiting..." noise printed (the cold-launch cost is not paid).
+        out = io.StringIO()
+        clock = _Clock([0.0])  # only the deadline base is read before the 200
+        with patch.object(pack_mod.requests, "get", return_value=self._ok()) as get, \
+             patch("time.sleep") as sleep, \
+             patch("time.monotonic", new=clock):
+            with redirect_stdout(out):
+                healthy = pack_mod._wait_for_packer_health("http://packer:8080", timeout=300)
+        self.assertTrue(healthy)
+        get.assert_called_once_with("http://packer:8080/health", timeout=(5, 10))
+        sleep.assert_not_called()
+        self.assertEqual(out.getvalue(), "")
+
+    def test_cold_path_retries_connection_errors_then_succeeds(self):
+        # Packer VM still booting: a couple of connection failures, then 200 -> True.
+        exc = pack_mod.requests.exceptions
+        get_results = [
+            exc.ConnectionError("connection refused"),
+            exc.Timeout("read timed out"),
+            self._ok(),
+        ]
+        # deadline base + one monotonic read per loop iteration (all under deadline).
+        clock = _Clock([0.0, 1.0, 2.0, 3.0])
+        with patch.object(pack_mod.requests, "get", side_effect=get_results) as get, \
+             patch("time.sleep") as sleep, \
+             patch("time.monotonic", new=clock):
+            with redirect_stdout(io.StringIO()):
+                healthy = pack_mod._wait_for_packer_health("http://packer:8080", timeout=300)
+        self.assertTrue(healthy)
+        self.assertEqual(get.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)  # slept between the two failed polls
+
+    def test_never_healthy_returns_false_at_deadline(self):
+        # Packer never serves: every GET fails; once monotonic passes the deadline
+        # the loop gives up and returns False rather than blocking forever.
+        exc = pack_mod.requests.exceptions
+        # base=0, deadline=10; reads 3.0, 6.0 (retry), then 11.0 (>= deadline -> stop).
+        clock = _Clock([0.0, 3.0, 6.0, 11.0])
+        with patch.object(pack_mod.requests, "get",
+                          side_effect=exc.ConnectionError("refused")) as get, \
+             patch("time.sleep") as sleep, \
+             patch("time.monotonic", new=clock):
+            with redirect_stdout(io.StringIO()):
+                healthy = pack_mod._wait_for_packer_health("http://packer:8080", timeout=10)
+        self.assertFalse(healthy)
+        self.assertEqual(get.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_non_200_response_is_retried_like_a_failure(self):
+        # A serving-but-not-ready packer (e.g. 503) is retried, not treated as healthy.
+        not_ready = mock.Mock()
+        not_ready.status_code = 503
+        clock = _Clock([0.0, 1.0, 2.0])
+        with patch.object(pack_mod.requests, "get",
+                          side_effect=[not_ready, self._ok()]) as get, \
+             patch("time.sleep") as sleep, \
+             patch("time.monotonic", new=clock):
+            with redirect_stdout(io.StringIO()):
+                healthy = pack_mod._wait_for_packer_health("http://packer:8080", timeout=300)
+        self.assertTrue(healthy)
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(sleep.call_count, 1)
 
 
 if __name__ == "__main__":
