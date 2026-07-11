@@ -31,7 +31,6 @@ If neither yields an endpoint, `nodo pack` fails with an actionable message
 instead of trying to use a local Docker that no longer exists.
 """
 import os
-import sqlite3
 import tempfile
 from typing import Optional
 
@@ -39,6 +38,7 @@ import requests
 
 from src.commands.packer.zip_with_dockerfile.prepare_directory import prepare_directory
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import generate_service_zip
+from src.core_services import PACKER, get_core_service_id
 from src.core_services.runtime import ensure_core_service_running
 from src.utils.config import ConfigManager
 
@@ -51,7 +51,6 @@ env_manager = ConfigManager()
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 REGISTRY = env_manager.get("REGISTRY")
-PACKER_SERVICE_ID = env_manager.get("packer.PACKER_SERVICE_ID")
 # Optional out-of-band packer override (an already-running packer reachable at a
 # fixed URL). Empty -> resolve the packer by service id via the core-services
 # runtime instead.
@@ -78,17 +77,7 @@ def _resolve_packer_id() -> Optional[str]:
     list. The last one keeps the packer consistent with every other core service the
     node bootstraps (source-application, low-demand-fallback, ...).
     """
-    service_id = PACKER_SERVICE_ID
-    if isinstance(service_id, str):
-        service_id = service_id.strip()
-    if not service_id:
-        # Fall back to the unified core_services list (never fabricates an id:
-        # returns None for a missing/placeholder entry).
-        try:
-            from src.core_services import PACKER, get_core_service_id
-            service_id = get_core_service_id(PACKER)
-        except Exception:
-            service_id = None
+    service_id = get_core_service_id(PACKER)
     return service_id or None
 
 
