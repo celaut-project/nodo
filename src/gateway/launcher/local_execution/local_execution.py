@@ -233,11 +233,14 @@ def local_execution(
         )
 
     free_port_ranges = env_manager.get("network.FREE_PORTS_RANGE", [])
-    assigment_ports: Optional[Dict[int, int]] = (
-        {port: get_free_port(free_port_ranges=free_port_ranges) for port in supported_slot_ports}
-        if expose_outside
-        else {port: port for port in supported_slot_ports}
-    )
+    assigment_ports = {
+        port: (
+            get_free_port(free_port_ranges=free_port_ranges)
+            if expose_outside
+            else port
+        )
+        for port in supported_slot_ports
+    }
     log.LOGGER(
         f"Execution network mode: by_local={not expose_outside}, "
         f"assigment_ports={assigment_ports}"
@@ -263,30 +266,32 @@ def local_execution(
     try:
         if expose_outside and not force_external_exposure:
             resolved_network = utils.get_network_name(direction=father_ip)
+
         log.LOGGER(f"Preparing published URI slots: resolved_network={resolved_network} and father IP={father_ip if father_ip else 'N/A'}")
+
+        # get the host ip to be published for this instance. If the instance doesn't require to be exposed, publish the vmachine_ip, otherwise publish the local IP of this node.:
+        if not expose_outside:
+            _ip = vmachine_ip
+        elif force_external_exposure:
+            _ip = _get_external_advertised_host_ip(father_ip=father_ip)
+        else:
+            _ip = utils.get_local_ip_from_network(
+                network=resolved_network,
+                allow_link_local=False,
+            )
 
         for internal, external in assigment_ports.items():
             uri_slot = celaut.Instance.Uri_Slot()
             uri_slot.internal_port = internal
 
-            # get the host ip to be published for this instance. If the instance doesn't require to be exposed, publish the vmachine_ip, otherwise publish the local IP of this node.:
-            _ip: str = (
-                _get_external_advertised_host_ip(father_ip=father_ip)
-                if force_external_exposure and expose_outside
-                else utils.get_local_ip_from_network(network=resolved_network, allow_link_local=False)
-                if expose_outside
-                else vmachine_ip
-            )
-            _port: int = external
-
             uri_slot.uri.append(
                 celaut.Instance.Uri(
                     ip=_ip,
-                    port=_port
+                    port=external
                 )
             )
             log.LOGGER(
-                f"Published URI mapping: internal_port={internal}, advertised={_ip}:{_port}, "
+                f"Published URI mapping: internal_port={internal}, advertised={_ip}:{external}, "
                 f"vmachine_ip={vmachine_ip}, by_local={not expose_outside}"
             )
             uri_slots.append(uri_slot)
