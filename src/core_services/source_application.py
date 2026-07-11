@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 from src.core_services import SOURCE_APPLICATION, get_core_service_id
 from src.core_services.runtime import ensure_core_service_running
-from src.publisher.publisher import (
+from src.commands.publisher.publisher import (
     PublisherError,
     _fetch_bytes,
     download_from_manifest_url,
@@ -87,6 +87,7 @@ def __lookup_sources(service_id: str) -> List[str]:
     endpoint = ensure_core_service_running(service_id)
     if not endpoint:
         # No running instance to answer /api reads (the static web app cannot).
+        print(f"ℹ️  No running instance of Source Application service to answer /api reads.")
         return []
     url = f"{endpoint.rstrip('/')}/api/sources?hash={quote(service_id, safe='')}"
     try:

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 IMPORT_ERROR = None
 try:
-    from src.publisher import publisher
+    from src.commands.publisher import publisher
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     publisher = None  # type: ignore[assignment]

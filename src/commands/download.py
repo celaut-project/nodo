@@ -1,7 +1,7 @@
 from typing import Optional
 
-from src.publisher import download_from_manifest_url
-from src.publisher.publisher import PublisherError
+from src.commands.publisher import download_from_manifest_url
+from src.commands.publisher.publisher import PublisherError
 
 
 def download_command(url: str, output_dir: Optional[str] = None):
