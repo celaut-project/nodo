@@ -5,7 +5,7 @@ import ipaddress
 from typing import Generator, Optional
 
 import netifaces as ni
-from bee_rpc.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME
+from bee_rpc.block_driver import WITHOUT_BLOCK_POINTERS_FILE_NAME as WITHOUT_BLOCKS_FILE_NAME  # <-- Esto es engañoso, porque el nombre del archivo es "without_block_pointers" y no "without_blocks".  Pero realmente el archivo es el objeto con punteros en lugar de bloques directamente.
 from bee_rpc.client import Dir
 
 from protos import celaut_pb2 as celaut
@@ -55,7 +55,7 @@ def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
         return None
 
     if os.path.isdir(filename):
-        filename = filename + '/' + WITHOUT_BLOCK_POINTERS_FILE_NAME
+        filename = filename + '/' + WITHOUT_BLOCKS_FILE_NAME
     try:
         mem_size = 2 * os.path.getsize(filename)
         log.LOGGER(f"Wait to unlock memory {mem_size}")
