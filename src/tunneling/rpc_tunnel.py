@@ -12,7 +12,7 @@ def service_tunnel(iterator) -> Generator[bytes, None, None]:
     slot_id: Optional[str] = None
 
     # Extract token_id and slot_id from the iterator
-    for c in iterator:
+    for c in iterator:  # could use next instead
         if type(c) == TokenMessage:
             token_id = c.token
             slot_id = c.slot
@@ -45,8 +45,9 @@ def service_tunnel(iterator) -> Generator[bytes, None, None]:
         return None  # Invalid port number
 
     try:
+        # Should work for udp and virtrio too
         logger(f"Attempting connection to {container_ip}:{port}")
-        with socket.create_connection((container_ip, port)) as conn:
+        with socket.create_connection((container_ip, port)) as conn:  # TCP?
             logger(f"Connection established to {container_ip}:{port}")
             conn.setblocking(False)  # Use non-blocking mode for bidirectional communication
 
