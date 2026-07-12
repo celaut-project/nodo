@@ -1,0 +1,2 @@
+- packer-service se ha descargado como archivo, no tiene bloques, pero si que posee archivos Block(), por lo que o se almaceno en storage de forma incorrecta o se construyo de forma incorrecta.
+- Por tanto, no es un problema del build.
