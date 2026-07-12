@@ -641,6 +641,7 @@ def _write_item(
             # fail closed on a real block instead of writing garbage.
             _is_block_pointer = False
             block_id = None
+            _blk = None
             try:
                 _blk = buffer_pb2.Buffer.Block()
                 with warnings.catch_warnings():
@@ -650,23 +651,45 @@ def _write_item(
                 # pipeline produces carry a single hash of type Enviroment.hash_type
                 # (internal_block=False), not the empty type (internal_block=True). Check
                 # both so the guard actually fires for hash-typed pointers.
-                block_id = str(
+                block_id = (
                     get_hash_from_block(block=_blk, internal_block=True)
                     or get_hash_from_block(block=_blk, internal_block=False)
                 )
-                _is_block_pointer = bool(block_id)
+                
+                _is_block_pointer = block_id is not None
             except DecodeError:
                 _is_block_pointer = False
 
             if _is_block_pointer:  #  Si llega aqui, copy_block_if_exists tuvo que retornar el último False.
+
+                # Vuelve a obtener ambos hashes para el mensaje de error, para que sea más fácil de depurar.
+                internal = get_hash_from_block(_blk, internal_block=True)
+                external = get_hash_from_block(_blk, internal_block=False)
+
                 raise RuntimeError(
-                    f"Block reconstruction failed for '{rel_path}': a block pointer is present "
-                    "but its block could not be copied from the local registry (missing, "
-                    "partial, or unsupported multiblock block). Refusing to write the 36-byte "
-                    f"pointer as file content, which would silently corrupt this file. \n Block ID: {block_id}"
+                    f"""
+                Block reconstruction failed.
+
+                block_id={block_id!r}
+                type(block_id)={type(block_id)}
+                _is_block_pointer={_is_block_pointer}
+
+                internal={internal!r} ({type(internal)})
+                external={external!r} ({type(external)})
+                block_id={block_id!r}
+                
+                Parsed block:
+                {_blk}
+
+                Raw bytes:
+                {branch.file!r}
+                """
                 )
+            
+            # At this point, is not a block pointer, so we can write the inline content to the file.
             with open(target_path, "wb") as f:
                 f.write(branch.file)
+        
         if metadata is not None:
             _apply_regular_metadata(path=target_path, metadata=metadata, rel_path=rel_path)
         else:
