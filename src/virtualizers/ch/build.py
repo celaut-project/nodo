@@ -640,6 +640,7 @@ def _write_item(
             # header"). Distinguish them with the same detection copy_block_if_exists uses, and
             # fail closed on a real block instead of writing garbage.
             _is_block_pointer = False
+            block_id = None
             try:
                 _blk = buffer_pb2.Buffer.Block()
                 with warnings.catch_warnings():
@@ -649,18 +650,20 @@ def _write_item(
                 # pipeline produces carry a single hash of type Enviroment.hash_type
                 # (internal_block=False), not the empty type (internal_block=True). Check
                 # both so the guard actually fires for hash-typed pointers.
-                _is_block_pointer = bool(
+                block_id = str(
                     get_hash_from_block(block=_blk, internal_block=True)
                     or get_hash_from_block(block=_blk, internal_block=False)
                 )
+                _is_block_pointer = bool(block_id)
             except DecodeError:
                 _is_block_pointer = False
-            if _is_block_pointer:
+
+            if _is_block_pointer:  #  Si llega aqui, copy_block_if_exists tuvo que retornar el último False.
                 raise RuntimeError(
                     f"Block reconstruction failed for '{rel_path}': a block pointer is present "
                     "but its block could not be copied from the local registry (missing, "
                     "partial, or unsupported multiblock block). Refusing to write the 36-byte "
-                    "pointer as file content, which would silently corrupt this file."
+                    "pointer as file content, which would silently corrupt this file. \n Block ID: {block_id}"
                 )
             with open(target_path, "wb") as f:
                 f.write(branch.file)
