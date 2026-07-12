@@ -663,7 +663,7 @@ def _write_item(
                     f"Block reconstruction failed for '{rel_path}': a block pointer is present "
                     "but its block could not be copied from the local registry (missing, "
                     "partial, or unsupported multiblock block). Refusing to write the 36-byte "
-                    "pointer as file content, which would silently corrupt this file. \n Block ID: {block_id}"
+                    f"pointer as file content, which would silently corrupt this file. \n Block ID: {block_id}"
                 )
             with open(target_path, "wb") as f:
                 f.write(branch.file)
