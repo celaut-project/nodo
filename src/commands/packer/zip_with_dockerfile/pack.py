@@ -17,9 +17,10 @@ Flow:
      METADATA_REGISTRY (reuses nodo's existing import logic).
 
 Configuring the packer (resolution order):
-  1. service id   PACKER_SERVICE_ID  (env var, config `packer.PACKER_SERVICE_ID`,
-     or a `{name: "packer", id: ...}` entry in the top-level `core_services` list)
-     — the published content hash of the packer-service. nodo treats the packer as
+  1. service id   the `{name: "packer", id: ...}` entry in the top-level
+     `core_services` list (single source of truth), optionally overridden by the
+     `PACKER_SERVICE_ID` env var — the published content hash of the
+     packer-service. nodo treats the packer as
      a **core service**: if no instance is already running, it downloads (via the
      source-application) and launches it on demand through the core-services runtime, 
      then packs against the live instance's `ip:port`.
@@ -55,6 +56,11 @@ REGISTRY = env_manager.get("REGISTRY")
 # fixed URL). Empty -> resolve the packer by service id via the core-services
 # runtime instead.
 PACKER_SERVICE_URL = env_manager.get("PACKER_SERVICE_URL")
+# Optional env-var override of the packer service id. The single source of truth
+# for the packer id is the `{name: "packer", id: ...}` entry in the top-level
+# `core_services` list (see config.example.yaml); this env var only overrides it
+# for ad-hoc/CI runs without editing config.
+PACKER_SERVICE_ID = os.environ.get("PACKER_SERVICE_ID")
 # Connect timeout is short; there is NO read timeout because a real build can
 # take many minutes and the server holds the connection open until it finishes.
 _CONNECT_TIMEOUT = 30
@@ -72,13 +78,15 @@ _HEALTH_POLL_INTERVAL = 3
 def _resolve_packer_id() -> Optional[str]:
     """Resolve the packer-service id (content hash).
 
-    Resolution order: ``PACKER_SERVICE_ID`` env var → config ``packer.PACKER_SERVICE_ID``
-    → a ``{name: "packer", id: ...}`` entry in the unified top-level ``core_services``
-    list. The last one keeps the packer consistent with every other core service the
-    node bootstraps (source-application, low-demand-fallback, ...).
+    Single source of truth: the ``{name: "packer", id: ...}`` entry in the unified
+    top-level ``core_services`` list, keeping the packer consistent with every other
+    core service the node bootstraps (source-application, low-demand-fallback, ...).
+    The ``PACKER_SERVICE_ID`` environment variable overrides it for ad-hoc runs
+    without editing config.
     """
-    service_id = get_core_service_id(PACKER)
-    return service_id or None
+    if PACKER_SERVICE_ID and PACKER_SERVICE_ID.strip():
+        return PACKER_SERVICE_ID.strip()
+    return get_core_service_id(PACKER) or None
 
 
 def _wait_for_packer_health(packer_url: str, timeout: int = _HEALTH_TIMEOUT) -> bool:
@@ -159,10 +167,7 @@ def pack(directory: str) -> Optional[str]:
             "Configure the packer by its published service id and re-run `nodo pack`;\n"
             "nodo will download and launch a packer instance on demand and pack\n"
             "against it:\n"
-            "  • config.yaml (either location works):\n"
-            "        packer:\n"
-            "          PACKER_SERVICE_ID: \"<packer-service published id>\"\n"
-            "    or, alongside the other core services:\n"
+            "  • config.yaml, alongside the other core services:\n"
             "        core_services:\n"
             "          - name: \"packer\"\n"
             "            id: \"<packer-service published id>\"\n"
@@ -264,8 +269,9 @@ def pack(directory: str) -> Optional[str]:
     except requests.exceptions.ConnectionError as e:
         print(
             f"\nCould not reach the packer service at {packer_url}: {e}\n"
-            "Check packer.PACKER_SERVICE_ID (and that its instance is running via "
-            "`nodo execute`) or the PACKER_SERVICE_URL override, and that the "
+            "Check the packer id in core_services (or the PACKER_SERVICE_ID env "
+            "override, and that its instance is running via `nodo execute`) or the "
+            "PACKER_SERVICE_URL override, and that the "
             "packer-service instance is running and reachable."
         )
         return None

@@ -6,8 +6,9 @@
 > `.celaut.bee`. You still author a `Dockerfile`/`service.json` exactly as
 > described below — the `docker buildx` mechanics in *Service Preparation
 > Process* now run inside that microVM, not on your host. Reference the packer
-> by its published service id with `PACKER_SERVICE_ID` (or
-> `packer.PACKER_SERVICE_ID` in `config.yaml`) and `nodo execute` it so a running
+> by its published service id under `core_services` in `config.yaml` — the single
+> source of truth (`core_services: [{ name: "packer", id: "<id>" }]`), or override
+> with the `PACKER_SERVICE_ID` env var — and `nodo execute` it so a running
 > instance exists — nodo resolves that instance's `ip:port` automatically. Use
 > `PACKER_SERVICE_URL` (or `packer.PACKER_SERVICE_URL`) only to override with an
 > out-of-band packer.

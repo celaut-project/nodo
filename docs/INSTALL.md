@@ -222,9 +222,10 @@ mkdir -p "$PY_VENV_DIR"
 
 nodo no longer installs Docker. Services run under Cloud Hypervisor, and
 packing is delegated to a **packer-service** (it runs Docker/buildx
-inside its own sealed microVM). To pack, set `packer.PACKER_SERVICE_ID` in
-`config.yaml` (or the `PACKER_SERVICE_ID` env var) to the packer-service's
-published service id and `nodo execute` it so a running instance exists; nodo
+inside its own sealed microVM). To pack, set the packer-service's published
+service id under `core_services` in `config.yaml` — the single source of truth:
+`core_services: [{ name: "packer", id: "<id>" }]` (or override with the
+`PACKER_SERVICE_ID` env var) — and `nodo execute` it so a running instance exists; nodo
 resolves that instance's `ip:port` automatically. To point at an out-of-band
 packer instead, set `packer.PACKER_SERVICE_URL` (or the `PACKER_SERVICE_URL`
 env var) to its `ip:8080` as an override.
