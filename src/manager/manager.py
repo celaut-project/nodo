@@ -510,12 +510,15 @@ def provision_vmachine(
         envs=envs,
     )
 
+    return
+
+    # TODO Is this necessary? Memory usage and cpu usage were not specified at execute.py execute() ?
     if not hotplug(
             vmachine_id=vmachine_id,
             system_requeriments_range=system_requirements_range
     ):
         log.LOGGER(f'Exception during modify params of {vmachine_id}.')
-        raise Exception(f'Exception during modify params of {vmachine_id}.')
+        raise Exception("The system is currently busy. Please try again in a few moments.")  # TODO Could be grete receive how many resources are available and how many are requested.
 
 def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     sys_req = sc.get_sys_req(id=id)
