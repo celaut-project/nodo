@@ -155,7 +155,7 @@ def __build_proof_box(
                     org_appkit.ErgoValue.of(jpype.JString(type_nft_id).getBytes("utf-8")),         # R4: typeNftTokenId
                     org_appkit.ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),    # R5: uniqueObjectData
                     org_appkit.ErgoValue.of(jpype.JBoolean(False)),                                  # R6: isLocked
-                    org_appkit.ErgoValue.of(owner_hash),                                             # R7: blake2b256(propositionBytes)
+                    org_appkit.ErgoValue.of(jpype.JArray(jpype.JByte)(owner_hash)),                  # R7: blake2b256(propositionBytes)
                     org_appkit.ErgoValue.of(jpype.JBoolean(int(token_amount) >= 0)),                # R8: positive/negative
                     org_appkit.ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                 # R9: content
                 ]) \
