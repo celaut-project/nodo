@@ -67,11 +67,9 @@ class PackResolutionOrderTests(unittest.TestCase):
         ensure.assert_not_called()
 
     def test_id_resolves_from_core_services_list(self):
-        # With no env var and no packer.PACKER_SERVICE_ID, the id is taken from a
-        # {name: "packer", id: ...} entry in the unified core_services list.
+        # With no PACKER_SERVICE_ID env override, the id is taken from the single
+        # source of truth: the {name: "packer", id: ...} entry in core_services.
         def fake_get(key, default=None):
-            if key == "packer.PACKER_SERVICE_ID":
-                return None
             if key == "core_services":
                 return [{"name": "packer", "id": "coreid789"}]
             return default

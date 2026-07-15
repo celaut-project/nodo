@@ -14,9 +14,11 @@ class ConfigDependencyPathsTests(unittest.TestCase):
         self.assertIn("yq:", content)
         self.assertIn("BIN:", content)
         # Docker dependency paths were removed (no local Docker); packing is
-        # delegated to the packer-service, referenced by service id
-        # (PACKER_SERVICE_URL kept as an override).
-        self.assertIn("PACKER_SERVICE_ID:", content)
+        # delegated to the packer-service. Its service id lives in ONE place — the
+        # `core_services` "packer" entry — so the packer section no longer carries a
+        # duplicate PACKER_SERVICE_ID key (see issue #135); only the out-of-band
+        # PACKER_SERVICE_URL override remains in the packer section.
+        self.assertNotIn("PACKER_SERVICE_ID:", content)
         self.assertIn("PACKER_SERVICE_URL:", content)
 
 
