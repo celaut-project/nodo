@@ -392,5 +392,246 @@ class CaptureAvailabilityTests(unittest.TestCase):
             observe.interface_exists = original_exists
 
 
+class HumanBytes1dpTests(unittest.TestCase):
+    def test_one_decimal_scaling(self):
+        self.assertEqual(observe.human_bytes_1dp(None), "N/A")
+        self.assertEqual(observe.human_bytes_1dp(512), "512 B")
+        self.assertEqual(observe.human_bytes_1dp(int(1.5 * 1024)), "1.5 KB")
+        self.assertEqual(observe.human_bytes_1dp(int(38.4 * 1024)), "38.4 KB")
+        self.assertEqual(observe.human_bytes_1dp(int(2.3 * 1024 ** 2)), "2.3 MB")
+
+
+class FlowTableTests(unittest.TestCase):
+    """The live per-flow aggregation: counters update, nothing is suppressed."""
+
+    def _event(self, direction="OUT", peer_ip="34.117.5.5"):
+        return {
+            "direction": direction,
+            "transport": "tcp",
+            "protocol": "TCP",
+            "src_ip": "10.0.0.2",
+            "src_port": 54000,
+            "dst_ip": peer_ip,
+            "dst_port": 443,
+            "peer_ip": peer_ip,
+        }
+
+    def _peer(self, host="34.117.5.5"):
+        return {"kind": "external", "host": host}
+
+    def test_repeated_packets_accumulate_and_do_not_suppress(self):
+        table = observe.FlowTable()
+        ev = self._event()
+        key = observe.flow_key(ev)
+        for i in range(3):
+            row = table.update(
+                key, direction="OUT", protocol="TCP", peer=self._peer(),
+                tag=None, frame_len=100, timestamp=1000.0 + i, source="pcap")
+        # Three packets on one flow → one row, counters summed, NOT shown once.
+        rows = table.active_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(row["packets"], 3)
+        self.assertEqual(row["bytes"], 300)
+        self.assertEqual(row["first_seen"], 1000.0)
+        self.assertEqual(row["last_seen"], 1002.0)
+
+    def test_distinct_flows_are_separate_rows(self):
+        table = observe.FlowTable()
+        a = self._event(peer_ip="34.117.5.5")
+        b = self._event(peer_ip="8.8.8.8")
+        table.update(observe.flow_key(a), direction="OUT", protocol="TCP",
+                     peer=self._peer("34.117.5.5"), tag=None, frame_len=60,
+                     timestamp=5.0, source="pcap")
+        table.update(observe.flow_key(b), direction="OUT", protocol="TCP",
+                     peer=self._peer("8.8.8.8"), tag=None, frame_len=60,
+                     timestamp=6.0, source="pcap")
+        self.assertEqual(len(table.active_rows()), 2)
+
+    def test_active_rows_sorted_newest_first_and_capped(self):
+        table = observe.FlowTable(max_rows=2)
+        for i in range(3):
+            ev = self._event(peer_ip=f"9.9.9.{i}")
+            table.update(observe.flow_key(ev), direction="OUT", protocol="TCP",
+                         peer=self._peer(f"9.9.9.{i}"), tag=None, frame_len=10,
+                         timestamp=float(i), source="pcap")
+        rows = table.active_rows()
+        self.assertEqual(len(rows), 2)                 # capped to max_rows
+        self.assertGreater(rows[0]["last_seen"], rows[1]["last_seen"])  # newest first
+
+    def test_conntrack_source_leaves_bytes_zero(self):
+        table = observe.FlowTable()
+        ev = self._event()
+        table.update(observe.flow_key(ev), direction="OUT", protocol="TCP",
+                     peer=self._peer(), tag=None, frame_len=None,
+                     timestamp=1.0, source="conntrack")
+        row = table.active_rows()[0]
+        self.assertEqual(row["packets"], 1)
+        self.assertEqual(row["bytes"], 0)              # no per-flow bytes in conntrack
+
+
+class FormatFlowLineTests(unittest.TestCase):
+    def _row(self, **over):
+        base = {
+            "direction": "OUT",
+            "protocol": "TCP",
+            "peer": {"kind": "instance", "id": "c92ae2ffdeadbeef",
+                     "relationship": "parent"},
+            "tag": "gateway",
+            "packets": 142,
+            "bytes": int(38.4 * 1024),
+            "first_seen": 1_700_000_000.0,
+            "last_seen": 1_700_000_000.0,
+            "source": "pcap",
+        }
+        base.update(over)
+        return base
+
+    def test_instance_row_has_counts_and_bytes(self):
+        line = observe.format_flow_line(self._row())
+        self.assertIn("OUT", line)
+        self.assertIn("→", line)
+        self.assertIn("instance c92ae2ff", line)
+        self.assertIn("[gateway]", line)
+        self.assertIn("(parent)", line)
+        self.assertIn("TCP", line)
+        self.assertIn("142 pkts", line)
+        self.assertIn("38.4 KB", line)
+
+    def test_inbound_uses_left_arrow(self):
+        line = observe.format_flow_line(self._row(direction="IN"))
+        self.assertIn("←", line)
+
+    def test_conntrack_row_shows_conntrack_instead_of_bytes(self):
+        line = observe.format_flow_line(
+            self._row(source="conntrack", bytes=0,
+                      peer={"kind": "external", "host": "34.117.5.5"}))
+        self.assertIn("conntrack", line)
+        self.assertIn("34.117.5.5", line)
+
+    def test_long_peer_is_truncated_to_one_line(self):
+        long_host = "verylonghostname." * 5
+        line = observe.format_flow_line(
+            self._row(peer={"kind": "external", "host": long_host}))
+        self.assertIn("…", line)
+        # peer column stays bounded (truncation applied).
+        self.assertLess(len(line), 120)
+
+
+class LinkTypeDetectionTests(unittest.TestCase):
+    def test_ether_type_selects_ethernet(self):
+        original = observe.read_interface_arptype
+        try:
+            observe.read_interface_arptype = lambda name: observe.ARPHRD_ETHER
+            lt, is_eth = observe.detect_link_type("tapabc")
+            self.assertEqual(lt, observe.LINKTYPE_ETHERNET)
+            self.assertTrue(is_eth)
+        finally:
+            observe.read_interface_arptype = original
+
+    def test_arphrd_none_selects_raw(self):
+        original = observe.read_interface_arptype
+        try:
+            observe.read_interface_arptype = lambda name: observe.ARPHRD_NONE
+            lt, is_eth = observe.detect_link_type("tun0")
+            self.assertEqual(lt, observe.LINKTYPE_RAW)
+            self.assertFalse(is_eth)
+        finally:
+            observe.read_interface_arptype = original
+
+    def test_unknown_type_defaults_to_ethernet(self):
+        original = observe.read_interface_arptype
+        try:
+            observe.read_interface_arptype = lambda name: None
+            lt, is_eth = observe.detect_link_type("weird0")
+            self.assertEqual(lt, observe.LINKTYPE_ETHERNET)
+            self.assertTrue(is_eth)
+        finally:
+            observe.read_interface_arptype = original
+
+    def test_first_frame_sniff_when_sysfs_unavailable(self):
+        original = observe.read_interface_arptype
+        try:
+            observe.read_interface_arptype = lambda name: None
+            # A raw IPv4 packet (version nibble 4) → RAW.
+            raw_ip = bytes([0x45]) + b"\x00" * 30
+            lt, is_eth = observe.detect_link_type("x", first_frame=raw_ip)
+            self.assertEqual(lt, observe.LINKTYPE_RAW)
+            self.assertFalse(is_eth)
+            # An ethernet frame with an IPv4 ethertype → ETHERNET.
+            eth = _build_frame("10.0.0.2", "8.8.8.8", proto=17, sport=1, dport=53)
+            lt2, is_eth2 = observe.detect_link_type("x", first_frame=eth)
+            self.assertEqual(lt2, observe.LINKTYPE_ETHERNET)
+            self.assertTrue(is_eth2)
+        finally:
+            observe.read_interface_arptype = original
+
+
+class RawIpParsingTests(unittest.TestCase):
+    """LINKTYPE_RAW path: frames are IP packets with no ethernet header."""
+
+    VM_IP = "10.0.0.2"
+
+    def _raw_ip(self, src, dst, proto, sport=0, dport=0):
+        eth_framed = _build_frame(src, dst, proto, sport, dport)
+        return eth_framed[14:]  # strip the ethernet header → raw IP
+
+    def test_raw_ip_outbound_parsed_without_ethernet_header(self):
+        raw = self._raw_ip("10.0.0.2", "34.117.5.5", proto=6, sport=1, dport=443)
+        ev = observe.parse_ethernet_frame(raw, vm_ip=self.VM_IP, is_ethernet=False)
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev["direction"], "OUT")
+        self.assertEqual(ev["peer_ip"], "34.117.5.5")
+        self.assertEqual(ev["transport"], "tcp")
+
+    def test_ethernet_frame_fed_as_raw_would_misparse(self):
+        # Sanity: an ethernet frame parsed as raw IP does NOT yield a valid event
+        # (the leading MAC bytes aren't a valid IPv4 header) — proving the flag matters.
+        eth = _build_frame("10.0.0.2", "34.117.5.5", proto=6, sport=1, dport=443)
+        self.assertIsNone(
+            observe.parse_ethernet_frame(eth, vm_ip=self.VM_IP, is_ethernet=False))
+
+    def test_ethernet_mode_still_default(self):
+        eth = _build_frame("10.0.0.2", "34.117.5.5", proto=6, sport=1, dport=443)
+        ev = observe.parse_ethernet_frame(eth, vm_ip=self.VM_IP)  # default is_ethernet=True
+        self.assertEqual(ev["direction"], "OUT")
+
+
+class ScmTimestampParseTests(unittest.TestCase):
+    def _cmsg(self, tv_sec, tv_nsec, level=None, ctype=None):
+        level = observe.socket.SOL_SOCKET if level is None else level
+        ctype = observe.SCM_TIMESTAMPNS if ctype is None else ctype
+        data = struct.pack(observe._TIMESPEC_FMT, tv_sec, tv_nsec)
+        return (level, ctype, data)
+
+    def test_parses_timespec_to_float_seconds(self):
+        ancdata = [self._cmsg(1_700_000_000, 500_000_000)]
+        ts = observe.parse_scm_timestampns(ancdata)
+        self.assertAlmostEqual(ts, 1_700_000_000.5, places=6)
+
+    def test_returns_none_without_timestamp_cmsg(self):
+        # A control message of a different type → no usable timestamp.
+        other = [(observe.socket.SOL_SOCKET, 0xABCD,
+                  struct.pack(observe._TIMESPEC_FMT, 1, 0))]
+        self.assertIsNone(observe.parse_scm_timestampns(other))
+        self.assertIsNone(observe.parse_scm_timestampns([]))
+
+    def test_ignores_truncated_cmsg_data(self):
+        short = [(observe.socket.SOL_SOCKET, observe.SCM_TIMESTAMPNS, b"\x00\x00")]
+        self.assertIsNone(observe.parse_scm_timestampns(short))
+
+
+class CaptureUnavailableNoteTests(unittest.TestCase):
+    def test_writes_reason_into_save_dir(self):
+        with TemporaryDirectory() as d:
+            reason = "AF_PACKET unavailable (non-Linux host); no pcap will be written"
+            path = observe.write_capture_unavailable_note(d, reason)
+            self.assertEqual(os.path.basename(path), observe.CAPTURE_UNAVAILABLE_FILENAME)
+            with open(path, "r", encoding="utf-8") as f:
+                body = f.read()
+            self.assertIn(reason, body)
+            self.assertIn("No packet capture", body)
+            self.assertIn("CAP_NET_RAW", body)
+
+
 if __name__ == "__main__":
     unittest.main()
