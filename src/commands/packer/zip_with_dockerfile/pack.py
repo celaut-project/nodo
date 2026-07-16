@@ -18,13 +18,15 @@ Flow:
 
 Configuring the packer (resolution order):
   1. service id   the `{name: "packer", id: ...}` entry in the top-level
-     `core_services` list (single source of truth), optionally overridden by the
-     `PACKER_SERVICE_ID` env var — the published content hash of the
-     packer-service. nodo treats the packer as
-     a **core service**: if no instance is already running, it downloads (via the
-     source-application) and launches it on demand through the core-services runtime, 
-     then packs against the live instance's `ip:port`.
-  2. url override  PACKER_SERVICE_URL (env var or config packer.PACKER_SERVICE_URL)
+     `core_services` list — the single source of truth for the packer id (there is
+     no env var and no `packer.*` id key). It is the published content hash of the
+     packer-service. nodo treats the packer as a **core service**: if no instance is
+     already running, it downloads and launches it on demand through the
+     core-services runtime, then packs against the live instance's `ip:port`.
+     Download source: when `packer.PACKER_SOURCE_URL` is set, nodo fetches the
+     packer directly from that manifest URL; when it is empty, nodo resolves the
+     sources via the source-application core service.
+  2. url override  PACKER_SERVICE_URL (config packer.PACKER_SERVICE_URL)
      — only needed to point at an out-of-band packer (one running elsewhere, not as
      a local instance). Used as a last resort when no service id is set, or when a
      configured id can neither be found running nor be launched.
@@ -56,11 +58,12 @@ REGISTRY = env_manager.get("REGISTRY")
 # fixed URL). Empty -> resolve the packer by service id via the core-services
 # runtime instead.
 PACKER_SERVICE_URL = env_manager.get("PACKER_SERVICE_URL")
-# Optional env-var override of the packer service id. The single source of truth
-# for the packer id is the `{name: "packer", id: ...}` entry in the top-level
-# `core_services` list (see config.example.yaml); this env var only overrides it
-# for ad-hoc/CI runs without editing config.
-PACKER_SERVICE_ID = os.environ.get("PACKER_SERVICE_ID")
+# Optional direct source for downloading the packer service. When set, it is a
+# manifest URL nodo fetches the packer from directly (bypassing the
+# source-application lookup) before launching it as a core service. When empty,
+# nodo resolves the packer's sources via the source-application core service. See
+# `packer.PACKER_SOURCE_URL` in config.example.yaml.
+PACKER_SOURCE_URL = env_manager.get("PACKER_SOURCE_URL")
 # Connect timeout is short; there is NO read timeout because a real build can
 # take many minutes and the server holds the connection open until it finishes.
 _CONNECT_TIMEOUT = 30
@@ -81,11 +84,9 @@ def _resolve_packer_id() -> Optional[str]:
     Single source of truth: the ``{name: "packer", id: ...}`` entry in the unified
     top-level ``core_services`` list, keeping the packer consistent with every other
     core service the node bootstraps (source-application, low-demand-fallback, ...).
-    The ``PACKER_SERVICE_ID`` environment variable overrides it for ad-hoc runs
-    without editing config.
+    There is no environment-variable or ``packer.*`` override — the id lives only in
+    ``core_services``.
     """
-    if PACKER_SERVICE_ID and PACKER_SERVICE_ID.strip():
-        return PACKER_SERVICE_ID.strip()
     return get_core_service_id(PACKER) or None
 
 
@@ -136,13 +137,16 @@ def _resolve_packer_endpoint() -> Optional[str]:
       1. If a packer service id is configured, prefer an instance that is already
          running (fast path, no launch).
       2. Otherwise treat the packer as a core service and download+launch it on
-         demand through the core-services runtime, then use the live instance.
+         demand through the core-services runtime, then use the live instance. The
+         download source is PACKER_SOURCE_URL when set (fetched directly), otherwise
+         the source-application core service.
       3. Only if neither yields an endpoint, fall back to the PACKER_SERVICE_URL
          override (an out-of-band packer).
     """
     service_id = _resolve_packer_id()
     if service_id:
-        endpoint = ensure_core_service_running(service_id)
+        source_url = PACKER_SOURCE_URL.strip() if PACKER_SOURCE_URL else None
+        endpoint = ensure_core_service_running(service_id, source_url=source_url)
         if endpoint:
             return endpoint
         
@@ -167,14 +171,13 @@ def pack(directory: str) -> Optional[str]:
             "Configure the packer by its published service id and re-run `nodo pack`;\n"
             "nodo will download and launch a packer instance on demand and pack\n"
             "against it:\n"
-            "  • config.yaml, alongside the other core services:\n"
+            "  • config.yaml, alongside the other core services (the single source\n"
+            "    of truth for the packer id):\n"
             "        core_services:\n"
             "          - name: \"packer\"\n"
-            "            id: \"<packer-service published id>\"\n"
-            "    (or env var:  export PACKER_SERVICE_ID=<packer-service published id>)\n\n"
+            "            id: \"<packer-service published id>\"\n\n"
             "To point at an out-of-band packer instead (one already running elsewhere),\n"
-            "set the override URL:  export PACKER_SERVICE_URL=http://<ip>:8080  (or\n"
-            "packer.PACKER_SERVICE_URL).\n"
+            "set the override URL in config.yaml:  packer.PACKER_SERVICE_URL: \"http://<ip>:8080\".\n"
         )
         print(_msg)
         return None
@@ -269,9 +272,8 @@ def pack(directory: str) -> Optional[str]:
     except requests.exceptions.ConnectionError as e:
         print(
             f"\nCould not reach the packer service at {packer_url}: {e}\n"
-            "Check the packer id in core_services (or the PACKER_SERVICE_ID env "
-            "override, and that its instance is running via `nodo execute`) or the "
-            "PACKER_SERVICE_URL override, and that the "
+            "Check the packer id in core_services (and that its instance is running "
+            "via `nodo execute`) or the PACKER_SERVICE_URL override, and that the "
             "packer-service instance is running and reachable."
         )
         return None

@@ -88,10 +88,11 @@ These are the most commonly used commands for daily tasks:
   imports the returned `.celaut.bee`. Configure the packer by its published
   service id first, then `nodo execute` it so a running instance exists:  
   set the packer id under `core_services` in `config.yaml` — the single source of
-  truth: `core_services: [{ name: "packer", id: "<packer-service id>" }]`  (or
-  override with `export PACKER_SERVICE_ID=<packer-service id>`)  
-  nodo resolves the running instance's `ip:port` automatically. To override with
-  an out-of-band packer instead: `export PACKER_SERVICE_URL=http://<ip>:8080`  (or `packer.PACKER_SERVICE_URL`)  
+  truth: `core_services: [{ name: "packer", id: "<packer-service id>" }]`  
+  nodo resolves the running instance's `ip:port` automatically. When nodo needs to
+  download the packer it uses `packer.PACKER_SOURCE_URL` if set, otherwise the
+  source-application core service. To override with an out-of-band packer instead,
+  set `packer.PACKER_SERVICE_URL: http://<ip>:8080` in `config.yaml`  
   **Example:**  
   `nodo pack /path/to/project`
   > Check [detailed documentation](../src/commands/packer/zip_with_dockerfile/README.md)
@@ -306,9 +307,10 @@ command above):
 ```bash
 # set the packer id under core_services in config.yaml (single source of truth):
 #   core_services: [{ name: "packer", id: "<packer-service id>" }]
-export PACKER_SERVICE_ID=<packer-service id>   # optional env override of the core_services id
+# download source (optional): packer.PACKER_SOURCE_URL: "<manifest url>"
+#   when empty, nodo resolves the packer via the source-application core service.
 nodo execute <packer-service id>               # start a running instance nodo resolves by id
-# override only: export PACKER_SERVICE_URL=http://<ip>:8080  (packer.PACKER_SERVICE_URL)
+# override only: packer.PACKER_SERVICE_URL: http://<ip>:8080  in config.yaml
 nodo pack /path/to/project
 ```
 
