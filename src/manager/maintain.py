@@ -16,7 +16,6 @@ from src.utils.cost_functions.general_cost_functions import compute_maintenance_
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
-from src.utils.tools.duplicate_grabber import DuplicateGrabber
 from src.virtualizers.interface import maintain as vm_maintain
 from src.core_services.low_demand import scheduler_tick
 
@@ -284,7 +283,6 @@ def manager_thread():
         maintain_vmachines(debug_mode=DEBUG_MODE())
         maintain_clients(debug_mode=DEBUG_MODE())
         peer_deposits(debug_mode=DEBUG_MODE())
-        DuplicateGrabber().manager()
 
         # Opportunistic low-demand fallback scheduler (OFF unless low_demand.ENABLED).
         # Self-gates to low_demand.POLL_INTERVAL and never raises; see
