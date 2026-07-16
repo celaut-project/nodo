@@ -95,25 +95,27 @@ packer:
   # packer-service microVM (it runs Docker/buildx inside a sealed VM, so Docker
   # is never installed on this host) and imports the returned `.celaut.bee`.
   #
-  # PRIMARY: reference the packer by its published content hash (service id).
-  # nodo resolves a *running* instance of that service on this node — the one
-  # you started with `nodo execute <packer-service id>` — and packs against its
-  # ip:port. The PACKER_SERVICE_ID environment variable overrides this value.
-  PACKER_SERVICE_ID: ""
+  # PRIMARY: the packer is referenced by its published content hash (service id).
+  # That id lives in exactly ONE place — the `{name: "packer", id: ...}` entry in
+  # the top-level `core_services` list below (the single source of truth; it is not
+  # configurable here and has no env var). nodo resolves a *running* instance of
+  # that service on this node — the one it launches on demand or that you started
+  # with `nodo execute <packer-service id>` — and packs against its ip:port.
+  #
+  # PACKER_SOURCE_URL: manifest URL nodo downloads the packer service from directly
+  # when it needs to acquire it (used *before* the source-application lookup). Leave
+  # empty to instead resolve the packer's sources via the source-application core
+  # service (the `source-application` entry in `core_services`).
+  PACKER_SOURCE_URL: ""
+  #
   # OPTIONAL override: the ip:port base URL of a packer-service running
   # out-of-band (somewhere other than as a local instance of the id above).
-  # Used only when PACKER_SERVICE_ID is empty, or when no running instance of
-  # that id can be found. The PACKER_SERVICE_URL environment variable overrides
-  # this value. Leave both empty to disable `nodo pack`.
+  # Used only when no packer id is set, or when no running instance of that id
+  # can be found. Leave empty to resolve the packer by its core_services id instead.
   PACKER_SERVICE_URL: ""
   # Architectures `nodo pack` will accept / announce.
   ARM_PACKER_SUPPORT: true
   X86_PACKER_SUPPORT: true
-  # Optional URL of a remote celaut-packer-service. When set, `nodo pack` uploads
-  # any registry-hash dependencies to that service's /registry/<id> endpoint
-  # before packing (the packer's own registry is otherwise empty). Leave empty
-  # for local packing via the gateway.
-  PACKER_SERVICE_URL: ""
   docker:
     # Network used for docker buildx builds. "host" helps ensure DNS is reachable.
     BUILDX_NETWORK: "host"

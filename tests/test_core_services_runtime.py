@@ -107,22 +107,29 @@ def sqlite3_error():
 
 
 @contextmanager
-def _stub_deps(acquire, launch):
-    """Inject stub modules so runtime.py's lazy imports of source_application/execute
-    resolve to our mocks without dragging in the real (bee_rpc-dependent) modules."""
+def _stub_deps(acquire, launch, download=None):
+    """Inject stub modules so runtime.py's lazy imports of
+    source_application/execute/publisher resolve to our mocks without dragging in
+    the real (bee_rpc-dependent) modules."""
     sa_mod = types.ModuleType("src.core_services.source_application")
     sa_mod.acquire_service = acquire
     exec_mod = types.ModuleType("src.commands.execute")
     exec_mod.execute = launch
+    pub_mod = types.ModuleType("src.commands.publisher.publisher")
+    pub_mod.download_from_manifest_url = download if download is not None else MagicMock(return_value={})
 
     originals = {
         "src.core_services.source_application": sys.modules.get(
             "src.core_services.source_application"
         ),
         "src.commands.execute": sys.modules.get("src.commands.execute"),
+        "src.commands.publisher.publisher": sys.modules.get(
+            "src.commands.publisher.publisher"
+        ),
     }
     sys.modules["src.core_services.source_application"] = sa_mod
     sys.modules["src.commands.execute"] = exec_mod
+    sys.modules["src.commands.publisher.publisher"] = pub_mod
     try:
         yield
     finally:
@@ -199,6 +206,57 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
 
         self.assertEqual(result, "http://10.0.0.9:7000")
         launch.assert_called_once_with("svc", envs=None)
+
+    def test_source_url_downloads_directly_and_skips_source_application(self):
+        # A direct source_url takes precedence: the service is fetched straight from
+        # that manifest URL and the source-application acquire path is NOT consulted.
+        acquire = MagicMock(return_value=True)
+        launch = MagicMock()
+        download = MagicMock(return_value={"service_id": "svc"})
+        with patch.object(
+            runtime, "_find_running_endpoint",
+            side_effect=[None, "http://10.0.0.9:7000"],
+        ), _stub_deps(acquire, launch, download=download):
+            result = runtime.ensure_core_service_running(
+                "svc", source_url="https://src/manifest"
+            )
+
+        self.assertEqual(result, "http://10.0.0.9:7000")
+        download.assert_called_once_with("https://src/manifest")
+        acquire.assert_not_called()
+        launch.assert_called_once_with("svc", envs=None)
+
+    def test_empty_source_url_uses_source_application(self):
+        # An empty/whitespace source_url is treated as unset: fall back to the
+        # source-application acquire path (the direct download is not attempted).
+        acquire = MagicMock(return_value=True)
+        launch = MagicMock()
+        download = MagicMock()
+        with patch.object(
+            runtime, "_find_running_endpoint", return_value=None,
+        ), _stub_deps(acquire, launch, download=download):
+            result = runtime.ensure_core_service_running("svc", source_url="   ")
+
+        self.assertIsNone(result)
+        download.assert_not_called()
+        acquire.assert_called_once_with("svc")
+
+    def test_source_url_download_failure_is_swallowed(self):
+        # A failing direct download must not break the ensure path (fail-closed):
+        # it degrades to None rather than raising.
+        acquire = MagicMock(return_value=False)
+        launch = MagicMock()
+        download = MagicMock(side_effect=RuntimeError("bad source"))
+        with patch.object(
+            runtime, "_find_running_endpoint", return_value=None,
+        ), _stub_deps(acquire, launch, download=download):
+            result = runtime.ensure_core_service_running(
+                "svc", source_url="https://src/manifest", launch=False
+            )
+
+        self.assertIsNone(result)
+        download.assert_called_once_with("https://src/manifest")
+        acquire.assert_not_called()
 
 
 if __name__ == "__main__":
