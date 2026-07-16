@@ -61,6 +61,21 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo kill abcdef1234567890`
 
+- **observe `<instance id> [--save <path>]`**  
+  Attaches to a running instance and continuously displays live resource
+  metrics (CPU and memory, current + session peak) together with a best-effort
+  stream of network activity involving the observed microVM. Instance IDs may
+  be abbreviated to a unique prefix. Press `Ctrl-C` to exit.  
+  By default nothing is stored. Pass `--save <path>` to also record events to a
+  file while they display in real time — `.jsonl` paths get one JSON object per
+  event, any other suffix gets the human-readable event log.  
+  Network capture reads the host `conntrack` table (Linux node, run as root);
+  when it is unavailable the resource metrics still display and a labelled
+  notice explains why.  
+  **Examples:**  
+  `nodo observe 8a7fd2`  
+  `nodo observe 8a7fd2 --save trace.jsonl`
+
 - **increase_gas `<instance id> <gas amount>`**  
   Increases the allocated gas for a service instance.  
   **Example:**  

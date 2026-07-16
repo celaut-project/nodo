@@ -184,6 +184,7 @@ if __name__ == '__main__':
                     "\n- inspect <service id> | <service tag>"
                     "\n- remove <service id> | <service tag>"
                     "\n- kill <instance id>"
+                    "\n- observe <instance id> [--save <path>]"
                     "\n- increase_gas <instance id> <gas to add>"
                     "\n- decrease_gas <instance id> <gas to retire>"
                     "\n- services"
@@ -430,6 +431,27 @@ if __name__ == '__main__':
             case "kill":
                 from src.commands.kill import kill
                 kill(instance=sys.argv[2])
+
+            case "observe":
+                from src.commands.observe import observe
+                import sys
+
+                args = sys.argv[2:]
+                save_path = None
+                if "--save" in args:
+                    try:
+                        save_index = args.index("--save")
+                        save_path = resolve_user_path(args[save_index + 1])
+                        args = args[:save_index] + args[save_index + 2:]
+                    except IndexError:
+                        print("Error: --save requires a path", flush=True)
+                        sys.exit(1)
+
+                if len(args) != 1:
+                    print("Usage: nodo observe <instance id> [--save <path>]", flush=True)
+                    sys.exit(1)
+
+                observe(instance_id=args[0], save_path=save_path)
                 
             case "increase_gas":
                 from src.commands.modify_gas import modify_gas
