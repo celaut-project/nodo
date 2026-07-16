@@ -26,10 +26,26 @@ extra catalogue lookup is needed. Transport protocol, ports, TCP flags and
 direction are derived from the real IP/TCP/UDP headers — there is no
 port→app-name guessing.
 
+The on-screen network section is a **live per-flow table** (``FlowTable``): each
+flow (direction+transport+addrs+ports) is one row that accumulates packet and
+byte counters and a last-seen timestamp, so a chatty connection visibly ticks up
+next to the CPU/memory numbers instead of printing once and looking frozen. The
+display re-renders on network bursts (throttled) as well as on the 1 s metrics
+tick, and CPU/memory + the network table always appear in the *same* frame. The
+``.pcap`` still records **every** frame verbatim; the aggregation is display-only.
+
+Packet timestamps come from the kernel (``SO_TIMESTAMPNS`` / ``SCM_TIMESTAMPNS``
+ancillary data on ``recvmsg``) for accurate inter-packet timing in the pcap,
+falling back to ``time.time()`` when the ancillary stamp is unavailable. The pcap
+link-type is auto-detected from the interface (``/sys/class/net/<if>/type``):
+ARPHRD_ETHER → ``LINKTYPE_ETHERNET``, a tun/ARPHRD_NONE device → ``LINKTYPE_RAW``.
+
 If AF_PACKET is unavailable (non-root, non-Linux, or the tap can't be found)
 the command degrades to the legacy ``conntrack`` table scan for the on-screen
 feed and clearly labels the degraded mode. It never fabricates events, and in
-degraded mode no ``.pcap`` is written.
+degraded mode no ``.pcap`` is written — when ``--save`` is set a
+``capture_unavailable.txt`` note is written into the save dir explaining why, so
+the artifact folder is self-explanatory.
 """
 
 import json
@@ -51,19 +67,37 @@ METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 
 CONNTRACK_PATH = "/proc/net/nf_conntrack"
 REFRESH_INTERVAL_S = 1.0
+# Min wall-time between renders triggered by network bursts, so a chatty flow
+# doesn't flicker the screen faster than the eye can read. Metrics still sample
+# on their own REFRESH_INTERVAL_S cadence.
+MIN_RENDER_INTERVAL_S = 0.2
 MAX_EVENTS_DISPLAYED = 15
 
 # libpcap framing constants.
 PCAP_MAGIC = 0xA1B2C3D4
 PCAP_VERSION_MAJOR = 2
 PCAP_VERSION_MINOR = 4
-LINKTYPE_ETHERNET = 1          # tap devices created in "tap" mode carry L2 frames.
+LINKTYPE_ETHERNET = 1          # ARPHRD_ETHER tap: L2 ethernet frames.
+LINKTYPE_RAW = 101             # tun/ARPHRD_NONE: raw IP, no ethernet header.
 DEFAULT_SNAPLEN = 65535        # capture whole frames (jumbo-safe, Wireshark default).
 ETH_P_ALL = 0x0003             # AF_PACKET protocol: every frame, both directions.
+
+# Linux ARPHRD_* interface hardware types (from /sys/class/net/<if>/type).
+ARPHRD_ETHER = 1
+ARPHRD_NONE = 0xFFFE           # 65534 — tun / point-to-point raw-IP devices.
+
+# Kernel receive-timestamp options. getattr fallbacks keep the module importable
+# on platforms whose ``socket`` lacks the constants (e.g. macOS dev boxes); the
+# values are only ever used on the Linux AF_PACKET path.
+SO_TIMESTAMPNS = getattr(socket, "SO_TIMESTAMPNS", 35)
+SCM_TIMESTAMPNS = getattr(socket, "SCM_TIMESTAMPNS", SO_TIMESTAMPNS)
+# struct timespec { long tv_sec; long tv_nsec; } in native size/alignment.
+_TIMESPEC_FMT = "@ll"
 
 # Save-directory file names (documented convention — see PR / USAGE).
 METRICS_FILENAME = "metrics.jsonl"
 CAPTURE_FILENAME = "capture.pcap"
+CAPTURE_UNAVAILABLE_FILENAME = "capture_unavailable.txt"
 
 # IP protocol byte → transport label (RFC 790). Derived from the IP header, not
 # from a port→app map.
@@ -85,6 +119,20 @@ def bytes_to_human(n: Optional[int]) -> str:
     for threshold, unit in ((1024 ** 3, "GB"), (1024 ** 2, "MB"), (1024, "KB")):
         if n >= threshold:
             return f"{n / threshold:.0f} {unit}"
+    return f"{int(n)} B"
+
+
+def human_bytes_1dp(n: Optional[int]) -> str:
+    """Like :func:`bytes_to_human` but with one decimal (``38.4 KB``).
+
+    Used for the live per-flow byte totals where a single decimal makes the
+    tick-up between renders visible.
+    """
+    if n is None:
+        return "N/A"
+    for threshold, unit in ((1024 ** 3, "GB"), (1024 ** 2, "MB"), (1024, "KB")):
+        if n >= threshold:
+            return f"{n / threshold:.1f} {unit}"
     return f"{int(n)} B"
 
 
@@ -166,6 +214,58 @@ def interface_exists(ifname: str) -> bool:
     return bool(ifname) and os.path.isdir(os.path.join("/sys/class/net", ifname))
 
 
+def read_interface_arptype(ifname: str) -> Optional[int]:
+    """Read the ARPHRD hardware type from ``/sys/class/net/<ifname>/type``.
+
+    Returns the integer type (1 = ARPHRD_ETHER, 65534 = ARPHRD_NONE/tun) or
+    ``None`` when it can't be read (non-Linux, missing iface).
+    """
+    try:
+        with open(os.path.join("/sys/class/net", ifname, "type"),
+                  "r", encoding="utf-8") as f:
+            return int(f.read().strip())
+    except Exception:
+        return None
+
+
+def frame_looks_ethernet(frame: bytes) -> bool:
+    """Heuristic: does ``frame`` start with an ethernet header vs a raw IP packet?
+
+    Used as a fallback when the sysfs ARPHRD type is unavailable. A raw IPv4/IPv6
+    packet begins with a version nibble of 4 or 6; a real ethernet frame's first
+    byte is a MAC octet and bytes 12-13 hold a known ethertype.
+    """
+    if len(frame) >= 14:
+        ethertype = int.from_bytes(frame[12:14], "big")
+        if ethertype in (0x0800, 0x0806, 0x86DD):  # IPv4, ARP, IPv6
+            return True
+    if frame and (frame[0] >> 4) in (4, 6):
+        return False
+    return True  # default to ethernet (cloud-hypervisor uses a tap/L2 device).
+
+
+def detect_link_type(ifname: str,
+                     first_frame: Optional[bytes] = None) -> Tuple[int, bool]:
+    """Pick the pcap link-type for ``ifname``: ``(linktype, is_ethernet)``.
+
+    Primary signal is the sysfs ARPHRD type; ``ARPHRD_NONE`` (tun) means the
+    device delivers raw IP → ``LINKTYPE_RAW`` and no 14-byte ethernet header to
+    strip. If sysfs is unreadable but a sniffed ``first_frame`` is supplied, fall
+    back to :func:`frame_looks_ethernet`. Default (and cloud-hypervisor's tap)
+    stays Ethernet — but no longer blindly.
+    """
+    arptype = read_interface_arptype(ifname)
+    if arptype == ARPHRD_ETHER:
+        return LINKTYPE_ETHERNET, True
+    if arptype == ARPHRD_NONE:
+        return LINKTYPE_RAW, False
+    if arptype is None and first_frame is not None:
+        if frame_looks_ethernet(first_frame):
+            return LINKTYPE_ETHERNET, True
+        return LINKTYPE_RAW, False
+    return LINKTYPE_ETHERNET, True
+
+
 # --------------------------------------------------------------------------- #
 # pcap framing (stdlib struct — no library, openable in Wireshark).
 # --------------------------------------------------------------------------- #
@@ -203,6 +303,21 @@ def pcap_record(frame: bytes, timestamp: float,
     return pcap_packet_header(ts_sec, ts_usec, len(incl), orig_len) + incl
 
 
+def parse_scm_timestampns(ancdata: List[Tuple[int, int, bytes]]) -> Optional[float]:
+    """Extract the kernel receive time (float seconds) from ``recvmsg`` ancillary.
+
+    Looks for a ``SOL_SOCKET``/``SCM_TIMESTAMPNS`` control message carrying a
+    ``struct timespec`` (tv_sec, tv_nsec). Returns ``None`` when no usable
+    timestamp cmsg is present so callers can fall back to ``time.time()``.
+    """
+    size = struct.calcsize(_TIMESPEC_FMT)
+    for level, ctype, cdata in ancdata:
+        if level == socket.SOL_SOCKET and ctype == SCM_TIMESTAMPNS and len(cdata) >= size:
+            tv_sec, tv_nsec = struct.unpack(_TIMESPEC_FMT, cdata[:size])
+            return tv_sec + tv_nsec / 1_000_000_000.0
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Ethernet / IPv4 / TCP-UDP header parsing (protocol + direction, no port map).
 # --------------------------------------------------------------------------- #
@@ -222,8 +337,15 @@ def tcp_flags_str(flags: Optional[int]) -> Optional[str]:
     return ",".join(active) if active else None
 
 
-def parse_ethernet_frame(frame: bytes, vm_ip: str) -> Optional[Dict[str, Any]]:
-    """Parse a raw ethernet frame into a connection event relative to ``vm_ip``.
+def parse_ethernet_frame(frame: bytes, vm_ip: str,
+                         is_ethernet: bool = True) -> Optional[Dict[str, Any]]:
+    """Parse a captured frame into a connection event relative to ``vm_ip``.
+
+    ``is_ethernet`` selects the link layer:
+
+    * ``True``  (LINKTYPE_ETHERNET / tap) — strip the 14-byte ethernet header
+      and require an IPv4 ethertype.
+    * ``False`` (LINKTYPE_RAW / tun)      — the frame *is* the IP packet.
 
     Only IPv4 TCP/UDP/ICMP frames that involve ``vm_ip`` are surfaced for the
     live feed (every frame is still written to the pcap verbatim). Direction is
@@ -235,6 +357,8 @@ def parse_ethernet_frame(frame: bytes, vm_ip: str) -> Optional[Dict[str, Any]]:
     Transport comes from the IP protocol byte; ports/flags from the L4 header.
     Returns ``None`` for non-IPv4, non-VM, or malformed frames.
     """
+    if not is_ethernet:  # raw IP: no ethernet header to skip.
+        return _parse_ipv4(frame, vm_ip)
     if len(frame) < 14:
         return None
     ethertype = int.from_bytes(frame[12:14], "big")
@@ -441,6 +565,102 @@ def serialize_event(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# Live per-flow aggregation (what the network panel shows — the pcap keeps
+# every frame; this is display-only state).
+# --------------------------------------------------------------------------- #
+_PEER_COL_WIDTH = 40   # truncate long peer strings so rows stay one line.
+
+
+class FlowTable:
+    """Ordered table of active flows, one row per :func:`flow_key`.
+
+    Each packet *updates* its flow's counters (packet count, byte total,
+    last-seen) instead of being suppressed after the first sighting, so a busy
+    connection visibly ticks up on screen. Rows are surfaced newest-activity
+    first (sorted by last-seen descending) and capped to ``max_rows``.
+    """
+
+    def __init__(self, max_rows: int = MAX_EVENTS_DISPLAYED) -> None:
+        self.max_rows = max_rows
+        self._flows: "Dict[Tuple[Any, ...], Dict[str, Any]]" = {}
+
+    def get(self, key: Tuple[Any, ...]) -> Optional[Dict[str, Any]]:
+        return self._flows.get(key)
+
+    def update(self, key: Tuple[Any, ...], *, direction: str,
+               protocol: Optional[str], peer: Dict[str, Any], tag: Optional[str],
+               frame_len: Optional[int], timestamp: float,
+               source: str) -> Dict[str, Any]:
+        """Create or update the row for ``key`` and return it.
+
+        ``frame_len`` is the captured frame length (added to the byte total) for
+        the AF_PACKET path, or ``None`` for the conntrack fallback where per-flow
+        byte counts aren't available. ``source`` is ``"pcap"`` or ``"conntrack"``.
+        """
+        row = self._flows.get(key)
+        if row is None:
+            row = {
+                "direction": direction,
+                "protocol": protocol,
+                "peer": peer,
+                "tag": tag,
+                "packets": 0,
+                "bytes": 0,
+                "first_seen": timestamp,
+                "last_seen": timestamp,
+                "source": source,
+            }
+            self._flows[key] = row
+        row["packets"] += 1
+        if frame_len is not None:
+            row["bytes"] += frame_len
+        row["last_seen"] = timestamp
+        return row
+
+    def active_rows(self) -> List[Dict[str, Any]]:
+        """Most-recently-active flows first, capped to ``max_rows``."""
+        rows = sorted(self._flows.values(),
+                      key=lambda r: r["last_seen"], reverse=True)
+        return rows[:self.max_rows]
+
+
+def format_flow_line(row: Dict[str, Any]) -> str:
+    """Render one :class:`FlowTable` row as a live-feed line.
+
+    ``12:31:07  OUT → instance c92ae2ff [gateway] (parent)      TCP    142 pkts   38.4 KB``
+
+    Newest activity is shown at the top of the panel. In conntrack fallback mode
+    per-flow byte counts aren't available, so the size column reads ``conntrack``.
+    """
+    ts = time.strftime("%H:%M:%S", time.localtime(row["last_seen"]))
+    direction = row.get("direction", "?")
+    arrow = "→" if direction == "OUT" else "←"
+
+    peer = row.get("peer", {})
+    if peer.get("kind") == "instance":
+        piece = f"instance {short_id(peer.get('id'))}"
+        if row.get("tag"):
+            piece += f" [{row['tag']}]"
+        relationship = peer.get("relationship")
+        if relationship:
+            piece += f" ({relationship})"
+    else:
+        piece = str(peer.get("host", "?"))
+    if len(piece) > _PEER_COL_WIDTH:
+        piece = piece[:_PEER_COL_WIDTH - 1] + "…"
+
+    protocol = row.get("protocol") or "?"
+    packets = row.get("packets", 0)
+    if row.get("source") == "conntrack":
+        size = "conntrack"
+    else:
+        size = human_bytes_1dp(row.get("bytes", 0))
+
+    return (f"{ts}  {direction:<3} {arrow} {piece:<{_PEER_COL_WIDTH}} "
+            f"{protocol:<5} {packets:>5} pkts  {size:>9}")
+
+
+# --------------------------------------------------------------------------- #
 # Save directory + writers (jsonl metrics + pcap capture).
 # --------------------------------------------------------------------------- #
 def _sanitize_component(name: str) -> str:
@@ -468,6 +688,24 @@ def build_save_dir(base_path: str, instance_name: Optional[str],
     else:
         dirname = instance_id
     return os.path.join(base_path, dirname)
+
+
+def write_capture_unavailable_note(save_dir: str, reason: str) -> str:
+    """Write ``capture_unavailable.txt`` explaining why no pcap was produced.
+
+    Keeps a ``--save`` artifact folder self-explanatory when capture degraded to
+    conntrack (no CAP_NET_RAW / non-Linux / tap missing / bind failed). Returns
+    the path written.
+    """
+    path = os.path.join(save_dir, CAPTURE_UNAVAILABLE_FILENAME)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("No packet capture (.pcap) was produced for this session.\n\n")
+        f.write(f"Reason: {reason}\n\n")
+        f.write("The metrics.jsonl file still contains the CPU/memory samples. "
+                "To capture packets, re-run `nodo observe` on the Linux/KVM host "
+                "with CAP_NET_RAW (e.g. via sudo) so the AF_PACKET tap capture "
+                "can bind.\n")
+    return path
 
 
 def metrics_record(metrics: "SessionMetrics", alive: bool,
@@ -677,6 +915,12 @@ def open_packet_socket(tap_ifname: str, snaplen: int = DEFAULT_SNAPLEN):
         s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
     except OSError:
         pass
+    try:
+        # Ask the kernel to attach a nanosecond receive timestamp to each packet
+        # (read via recvmsg ancillary data) for accurate inter-packet pcap timing.
+        s.setsockopt(socket.SOL_SOCKET, SO_TIMESTAMPNS, 1)
+    except OSError:
+        pass
     s.bind((tap_ifname, 0))
     s.setblocking(False)
     return s
@@ -756,15 +1000,18 @@ def _render(
         pcap_note = CAPTURE_FILENAME if capture_mode == "pcap" else \
             f"{CAPTURE_FILENAME} — not written (degraded: conntrack mode)"
         lines.append(f"    └─ {pcap_note}")
-    lines.append("─" * 46)
-    lines.append(f"network: {capture_mode}")
-    lines.append("")
+    lines.append("─" * 72)
+    source = "AF_PACKET live capture" if capture_mode == "pcap" else "conntrack (degraded)"
+    lines.append(f"Network — live flows [{source}]   (newest first, updates live)")
     if net_notice:
-        lines.append(f"(network) {net_notice}")
+        lines.append(f"  ⚠ {net_notice}")
     if events:
-        lines.extend(events[-MAX_EVENTS_DISPLAYED:])
+        # Column guide for the aggregated per-flow rows.
+        lines.append(f"  {'time':<8}  {'dir':<3}   "
+                     f"{'peer':<40} {'proto':<5} {'packets':>10}  {'bytes':>9}")
+        lines.extend(f"  {line}" for line in events[:MAX_EVENTS_DISPLAYED])
     elif not net_notice:
-        lines.append("(waiting for network activity…)")
+        lines.append("  (waiting for network activity…)")
     print("\n".join(lines), flush=True)
 
 
@@ -811,10 +1058,16 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
     tap_ifname, degraded_reason = resolve_capture_source(full_id, vm_ip)
     pcap_sock = None
     capture_mode = "conntrack"
+    # Link-type + whether frames carry an ethernet header (auto-detected below).
+    link_type = LINKTYPE_ETHERNET
+    is_ethernet = True
     if tap_ifname:
         try:
             pcap_sock = open_packet_socket(tap_ifname)
             capture_mode = "pcap"
+            # Auto-detect tap (L2/ethernet) vs tun (L3/raw-IP) so the pcap header
+            # and header-stripping match what the device actually delivers.
+            link_type, is_ethernet = detect_link_type(tap_ifname)
         except OSError as exc:
             degraded_reason = (
                 f"AF_PACKET bind to '{tap_ifname}' failed ({exc}); "
@@ -831,12 +1084,17 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
         os.makedirs(save_dir, exist_ok=True)
         metrics_writer_cm = MetricsWriter(os.path.join(save_dir, METRICS_FILENAME))
         if capture_mode == "pcap":
-            pcap_writer_cm = PcapWriter(os.path.join(save_dir, CAPTURE_FILENAME))
+            pcap_writer_cm = PcapWriter(
+                os.path.join(save_dir, CAPTURE_FILENAME), network=link_type)
+        else:
+            # Degraded: leave a note so the artifact folder explains the missing pcap.
+            write_capture_unavailable_note(
+                save_dir,
+                degraded_reason or "packet capture unavailable on this host")
 
     instance_index = build_instance_index()
     metrics = SessionMetrics()
-    seen_flows: set = set()
-    display_events: List[str] = []
+    flow_table = FlowTable(max_rows=MAX_EVENTS_DISPLAYED)
 
     prev_usage = first_sample.get("cpu_usage_usec")
     prev_wall = time.monotonic_ns()
@@ -849,25 +1107,48 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
 
     previous_handler = signal.signal(signal.SIGINT, _handle_sigint)
 
-    def _emit(raw: Dict[str, Any], net_writer) -> None:
-        """Classify + display (once per flow) a parsed connection event."""
+    def _record_flow(raw: Dict[str, Any], frame_len: Optional[int],
+                     ts_float: float, source: str) -> None:
+        """Aggregate a parsed connection event into the live flow table.
+
+        Never suppresses: repeated packets on the same flow bump its packet/byte
+        counters and last-seen. Peer classification (and the per-peer tag lookup,
+        which touches disk) happens only when a flow is first seen, then reused.
+        """
         key = flow_key(raw)
-        if key in seen_flows:
-            return
-        seen_flows.add(key)
-        peer = classify_peer(raw["peer_ip"], full_id, father_id, instance_index)
-        peer_tag = (
-            resolve_tag(peer.get("service_id", ""))
-            if peer.get("kind") == "instance"
-            else None
+        existing = flow_table.get(key)
+        if existing is not None:
+            peer, peer_tag = existing["peer"], existing["tag"]
+        else:
+            peer = classify_peer(raw["peer_ip"], full_id, father_id, instance_index)
+            peer_tag = (
+                resolve_tag(peer.get("service_id", ""))
+                if peer.get("kind") == "instance"
+                else None
+            )
+        flow_table.update(
+            key,
+            direction=raw["direction"],
+            protocol=raw.get("protocol"),
+            peer=peer,
+            tag=peer_tag,
+            frame_len=frame_len,
+            timestamp=ts_float,
+            source=source,
         )
-        event = {
-            **raw,
-            "time": datetime.now().strftime("%H:%M:%S"),
-            "peer": peer,
-            "tag": peer_tag,
-        }
-        display_events.append(format_event_line(event, tag=peer_tag))
+
+    # Ancillary buffer big enough for one SCM_TIMESTAMPNS timespec cmsg.
+    try:
+        ancbufsize = socket.CMSG_SPACE(struct.calcsize(_TIMESPEC_FMT))
+    except (AttributeError, OSError):
+        ancbufsize = 0
+
+    last_render = {"t": 0.0}
+
+    def _do_render(notice: Optional[str]) -> None:
+        flow_lines = [format_flow_line(r) for r in flow_table.active_rows()]
+        _render(header, metrics, flow_lines, save_dir, notice, capture_mode)
+        last_render["t"] = time.monotonic()
 
     try:
         metrics_writer = metrics_writer_cm.__enter__() if metrics_writer_cm else None
@@ -882,19 +1163,37 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
             if pcap_sock is not None:
                 ready, _, _ = select.select([pcap_sock], [], [], timeout)
                 if ready:
+                    drained = 0
                     while True:
                         try:
-                            frame = pcap_sock.recv(DEFAULT_SNAPLEN)
+                            if ancbufsize:
+                                data, ancdata, _, _ = pcap_sock.recvmsg(
+                                    DEFAULT_SNAPLEN, ancbufsize)
+                            else:
+                                data, ancdata = pcap_sock.recv(DEFAULT_SNAPLEN), []
                         except BlockingIOError:
                             break
                         except OSError:
                             break
-                        ts = time.time()
+                        if not data:
+                            break
+                        # Kernel receive timestamp for accurate inter-packet
+                        # timing, falling back to wall-clock when unavailable.
+                        ts = parse_scm_timestampns(ancdata)
+                        if ts is None:
+                            ts = time.time()
                         if pcap_writer:
-                            pcap_writer.write_frame(frame, ts)
-                        parsed = parse_ethernet_frame(frame, vm_ip)
+                            pcap_writer.write_frame(data, ts)
+                        parsed = parse_ethernet_frame(data, vm_ip,
+                                                      is_ethernet=is_ethernet)
                         if parsed:
-                            _emit(parsed, None)
+                            _record_flow(parsed, len(data), ts, "pcap")
+                        drained += 1
+                    # Re-render on network bursts too (throttled) so a chatty flow
+                    # ticks up between the 1 s metrics samples — always redrawing
+                    # CPU/mem + the network table in the same frame.
+                    if drained and (time.monotonic() - last_render["t"]) >= MIN_RENDER_INTERVAL_S:
+                        _do_render(degraded_reason)
             else:
                 if timeout > 0:
                     time.sleep(timeout)
@@ -907,8 +1206,7 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
             # --- sample resource metrics -------------------------------------
             sample = _sample_resources(full_id)
             if not sample.get("alive"):
-                _render(header, metrics, display_events, save_dir,
-                        "instance stopped — ending observation", capture_mode)
+                _do_render("instance stopped — ending observation")
                 break
 
             cur_wall = time.monotonic_ns()
@@ -922,17 +1220,18 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
             if metrics_writer:
                 metrics_writer.write(metrics_record(metrics, alive=True))
 
-            # In conntrack fallback mode, scan the table each tick.
+            # In conntrack fallback mode, scan the table each tick. Feeds the same
+            # live flow table (byte counts unavailable there → shown as "conntrack").
             net_notice = degraded_reason
             if pcap_sock is None:
                 raw_events, conntrack_notice = read_conntrack_events(vm_ip)
+                scan_ts = time.time()
                 for raw in raw_events:
-                    _emit(raw, None)
+                    _record_flow(raw, None, scan_ts, "conntrack")
                 if conntrack_notice:
                     net_notice = conntrack_notice
 
-            _render(header, metrics, display_events, save_dir,
-                    net_notice, capture_mode)
+            _do_render(net_notice)
     finally:
         if pcap_writer_cm:
             pcap_writer_cm.__exit__(None, None, None)

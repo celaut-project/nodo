@@ -63,19 +63,40 @@ These are the most commonly used commands for daily tasks:
 
 - **observe `<instance id> [--save <path>]`**  
   Attaches to a running instance and continuously displays live resource
-  metrics (CPU and memory, current + session peak) together with a live stream
-  of the microVM's network activity. Instance IDs may be abbreviated to a
-  unique prefix. Press `Ctrl-C` to exit.  
+  metrics (CPU and memory, current + session peak) **together with a live
+  per-flow view of the microVM's network activity in the same frame**. Instance
+  IDs may be abbreviated to a unique prefix. Press `Ctrl-C` to exit.  
+
+  **Live network panel.** The network section is a live table of active flows,
+  newest activity first. Each flow (direction + transport + addresses/ports) is
+  one row that **accumulates** as packets arrive — packet count, byte total and
+  a last-seen timestamp all tick up in place, so a chatty connection stays
+  visibly alive next to the CPU/memory numbers instead of printing once and
+  looking frozen. A row looks like:
+
+  ```
+  17:15:41  OUT → instance c92ae2ff [gateway] (parent)     TCP     142 pkts    38.4 KB
+  ```
+
+  The panel re-renders on network bursts (throttled to avoid flicker) as well as
+  on the ~1 s metrics tick; CPU/memory and the flow table are always drawn in the
+  same frame. This on-screen table is an **aggregation for readability** — the
+  `.pcap` still records **every** frame verbatim, and `metrics.jsonl` remains
+  metrics-only.
 
   **Network capture.** On the Linux/KVM host with `CAP_NET_RAW` (run as root),
   observe binds an `AF_PACKET` raw socket to the instance's *tap* interface and
-  captures **every** ethernet frame in both directions — the Wireshark
-  equivalent of the VM's whole NIC. Transport protocol (TCP/UDP/ICMP), ports,
-  TCP flags and direction are read straight from the real IP/TCP/UDP headers;
-  there is no port→app-name guessing. If `AF_PACKET` is unavailable (non-root,
+  captures **every** frame in both directions — the Wireshark equivalent of the
+  VM's whole NIC. Transport protocol (TCP/UDP/ICMP), ports, TCP flags and
+  direction are read straight from the real IP/TCP/UDP headers; there is no
+  port→app-name guessing. Packet timestamps are taken from the **kernel**
+  (`SO_TIMESTAMPNS`), so the pcap has accurate inter-packet timing. The pcap
+  link-type is **auto-detected** from the interface: a normal L2 tap
+  (`ARPHRD_ETHER`) records as `LINKTYPE_ETHERNET`, a raw-IP tun device
+  (`ARPHRD_NONE`) as `LINKTYPE_RAW`. If `AF_PACKET` is unavailable (non-root,
   non-Linux, or the tap can't be found) it degrades to the legacy `conntrack`
-  table scan for the on-screen feed, labels the degraded mode, and writes no
-  `.pcap`.  
+  table scan for the on-screen feed (byte counts show `conntrack`), labels the
+  degraded mode, and writes no `.pcap`.  
 
   **Saving (`--save <path>`).** By default nothing is stored. When `--save` is
   passed, `<path>` is treated as a **directory**: observe creates
@@ -84,10 +105,12 @@ These are the most commonly used commands for daily tasks:
   - `metrics.jsonl` — one JSON object per second with the CPU + memory sample
     shown in the live panel (`cpu_percent`, `cpu_peak_percent`, `mem_bytes`,
     `mem_peak_bytes`).
-  - `capture.pcap` — the raw captured frames in standard libpcap format
-    (`LINKTYPE_ETHERNET`, 65535 snaplen), openable directly in Wireshark /
-    `tcpdump -r`. Only written when real packet capture is active (not in the
-    conntrack fallback).
+  - `capture.pcap` — **every** captured frame in standard libpcap format
+    (auto-detected link-type, 65535 snaplen), openable directly in Wireshark /
+    `tcpdump -r`. Written only when real packet capture is active.
+  - `capture_unavailable.txt` — written **instead** of the pcap when capture
+    degraded to conntrack, stating why no pcap was produced (e.g. missing
+    `CAP_NET_RAW` / non-Linux host), so the artifact folder is self-explanatory.
 
   **Examples:**  
   `nodo observe 8a7fd2`  
