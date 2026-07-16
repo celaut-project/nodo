@@ -28,13 +28,26 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 class PackResolutionOrderTests(unittest.TestCase):
     def test_id_set_and_core_service_running_uses_that_endpoint(self):
         # A configured id resolves/launches via the core-services runtime; that
-        # endpoint wins and the URL override is NOT consulted.
+        # endpoint wins and the URL override is NOT consulted. With no
+        # PACKER_SOURCE_URL, source_url is passed through as None.
         with patch.object(pack_mod, "_resolve_packer_id", return_value="packerid123"), \
              patch.object(pack_mod, "ensure_core_service_running", return_value="http://10.0.0.9:8080") as ensure, \
+             patch.object(pack_mod, "PACKER_SOURCE_URL", ""), \
              patch.object(pack_mod, "PACKER_SERVICE_URL", "http://override:8080"):
             endpoint = pack_mod._resolve_packer_endpoint()
         self.assertEqual(endpoint, "http://10.0.0.9:8080")
-        ensure.assert_called_once_with("packerid123")
+        ensure.assert_called_once_with("packerid123", source_url=None)
+
+    def test_packer_source_url_is_passed_to_runtime(self):
+        # When PACKER_SOURCE_URL is set, it is threaded into the core-services
+        # runtime as the direct download source for the packer service (trimmed).
+        with patch.object(pack_mod, "_resolve_packer_id", return_value="packerid123"), \
+             patch.object(pack_mod, "ensure_core_service_running", return_value="http://10.0.0.9:8080") as ensure, \
+             patch.object(pack_mod, "PACKER_SOURCE_URL", "  https://src/manifest  "), \
+             patch.object(pack_mod, "PACKER_SERVICE_URL", None):
+            endpoint = pack_mod._resolve_packer_endpoint()
+        self.assertEqual(endpoint, "http://10.0.0.9:8080")
+        ensure.assert_called_once_with("packerid123", source_url="https://src/manifest")
 
     def test_id_set_launch_fails_falls_back_to_url_override(self):
         # id configured but the runtime can neither find nor launch an instance →
@@ -67,16 +80,14 @@ class PackResolutionOrderTests(unittest.TestCase):
         ensure.assert_not_called()
 
     def test_id_resolves_from_core_services_list(self):
-        # With no env var and no packer.PACKER_SERVICE_ID, the id is taken from a
-        # {name: "packer", id: ...} entry in the unified core_services list.
+        # The id comes solely from the single source of truth: the
+        # {name: "packer", id: ...} entry in core_services. There is no env var or
+        # `packer.*` override anymore (issue #135).
         def fake_get(key, default=None):
-            if key == "packer.PACKER_SERVICE_ID":
-                return None
             if key == "core_services":
                 return [{"name": "packer", "id": "coreid789"}]
             return default
-        with patch.dict(os.environ, {}, clear=True), \
-             patch.object(pack_mod, "PACKER_SERVICE_ID", None), \
+        with patch.dict(os.environ, {"PACKER_SERVICE_ID": "envid-should-be-ignored"}), \
              patch.object(pack_mod.env_manager, "get", side_effect=fake_get), \
              patch("src.core_services._env_manager.get", side_effect=fake_get):
             self.assertEqual(pack_mod._resolve_packer_id(), "coreid789")
@@ -96,8 +107,11 @@ class PackResolutionOrderTests(unittest.TestCase):
             req.post.assert_not_called()
         self.assertIsNone(result)
         guidance = out.getvalue()
-        self.assertIn("PACKER_SERVICE_ID", guidance)
+        # The guidance points at core_services (single source of truth) and the
+        # PACKER_SERVICE_URL override — and no longer mentions a PACKER_SERVICE_ID.
+        self.assertIn("core_services", guidance)
         self.assertIn("PACKER_SERVICE_URL", guidance)
+        self.assertNotIn("PACKER_SERVICE_ID", guidance)
 
 
 class _Clock:
