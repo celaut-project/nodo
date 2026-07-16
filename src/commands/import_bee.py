@@ -83,8 +83,12 @@ def import_bee(path: str) -> Optional[str]:
         })
         
         # Extract the metadata directory and parse the metadata
-        metadata_dir = next(it).dir
-        service_dir = next(it).dir
+        try:
+            metadata_dir = next(it).dir
+            service_dir = next(it).dir
+        except StopIteration:
+            print("Error: The service file contains no blocks (empty service).")
+            return None
         metadata = celaut_pb2.Metadata()
         metadata.ParseFromString(open(metadata_dir, "rb").read())
         
