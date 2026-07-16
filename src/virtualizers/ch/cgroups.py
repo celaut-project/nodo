@@ -85,7 +85,7 @@ def ensure_vm_cgroup(vmachine_id: str, pid: int) -> Path:
 
     procs_file = vm_cgroup / "cgroup.procs"
     with open(procs_file, "w", encoding="utf-8") as f:
-        f.write(f"{pid}\n")
+        f.write(f"{pid}\n")  # Writing to cgroup.procs instructs the kernel to move this process into the cgroup. 
 
     return vm_cgroup
 
