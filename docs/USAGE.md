@@ -63,18 +63,37 @@ These are the most commonly used commands for daily tasks:
 
 - **observe `<instance id> [--save <path>]`**  
   Attaches to a running instance and continuously displays live resource
-  metrics (CPU and memory, current + session peak) together with a best-effort
-  stream of network activity involving the observed microVM. Instance IDs may
-  be abbreviated to a unique prefix. Press `Ctrl-C` to exit.  
-  By default nothing is stored. Pass `--save <path>` to also record events to a
-  file while they display in real time — `.jsonl` paths get one JSON object per
-  event, any other suffix gets the human-readable event log.  
-  Network capture reads the host `conntrack` table (Linux node, run as root);
-  when it is unavailable the resource metrics still display and a labelled
-  notice explains why.  
+  metrics (CPU and memory, current + session peak) together with a live stream
+  of the microVM's network activity. Instance IDs may be abbreviated to a
+  unique prefix. Press `Ctrl-C` to exit.  
+
+  **Network capture.** On the Linux/KVM host with `CAP_NET_RAW` (run as root),
+  observe binds an `AF_PACKET` raw socket to the instance's *tap* interface and
+  captures **every** ethernet frame in both directions — the Wireshark
+  equivalent of the VM's whole NIC. Transport protocol (TCP/UDP/ICMP), ports,
+  TCP flags and direction are read straight from the real IP/TCP/UDP headers;
+  there is no port→app-name guessing. If `AF_PACKET` is unavailable (non-root,
+  non-Linux, or the tap can't be found) it degrades to the legacy `conntrack`
+  table scan for the on-screen feed, labels the degraded mode, and writes no
+  `.pcap`.  
+
+  **Saving (`--save <path>`).** By default nothing is stored. When `--save` is
+  passed, `<path>` is treated as a **directory**: observe creates
+  `<path>/<tag>_<instance_id>/` (or `<path>/<instance_id>/` when the service
+  has no tag) and writes, live while the display runs:
+  - `metrics.jsonl` — one JSON object per second with the CPU + memory sample
+    shown in the live panel (`cpu_percent`, `cpu_peak_percent`, `mem_bytes`,
+    `mem_peak_bytes`).
+  - `capture.pcap` — the raw captured frames in standard libpcap format
+    (`LINKTYPE_ETHERNET`, 65535 snaplen), openable directly in Wireshark /
+    `tcpdump -r`. Only written when real packet capture is active (not in the
+    conntrack fallback).
+
   **Examples:**  
   `nodo observe 8a7fd2`  
-  `nodo observe 8a7fd2 --save trace.jsonl`
+  `nodo observe 8a7fd2 --save ./captures`  
+  → `./captures/gateway_8a7fd2.../{metrics.jsonl,capture.pcap}`, then
+  `wireshark ./captures/gateway_8a7fd2.../capture.pcap`
 
 - **increase_gas `<instance id> <gas amount>`**  
   Increases the allocated gas for a service instance.  
