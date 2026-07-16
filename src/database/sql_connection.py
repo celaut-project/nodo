@@ -289,9 +289,9 @@ class SQLConnection(metaclass=Singleton):
         gas: int,
         serialized_instance: str,
         service_id: str,
-        virtualizer: Optional[str] = None,
-        disk_space: Optional[int] = None,
-        envs: Optional[str] = None,
+        virtualizer: str,
+        disk_space: int,
+        envs: str,
     ):
         """
         Adds an internal container to the database.
@@ -310,13 +310,10 @@ class SQLConnection(metaclass=Singleton):
                 instance was launched with (e.g. signer mode/seed for a
                 source-application), so the node can later tell how it was configured.
         """
-        gas = str(gas)
-        if virtualizer is None:
-            virtualizer = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "ch")
         self._execute('''
             INSERT INTO local_instances (id, name, ip, father_id, gas, mem_limit, disk_space, serialized_instance, service_id, virtualizer, envs)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (container_id, name, container_ip, father_id, gas, 0, disk_space, serialized_instance, service_id, virtualizer, envs))
+        ''', (container_id, name, container_ip, father_id, str(gas), 0, disk_space, serialized_instance, service_id, virtualizer, envs))
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
     def get_local_instance_envs(self, id: str) -> Optional[str]:

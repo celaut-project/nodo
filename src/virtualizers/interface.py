@@ -4,7 +4,6 @@ from src.virtualizers.ch.execute import execute as ch_execute
 from src.virtualizers.ch.hotplug import hotplug as ch_hotplug
 from src.virtualizers.ch.kill import kill as ch_kill
 from src.virtualizers.ch.maintain import maintain as ch_maintain
-from src.virtualizers.ch.remove import remove as remove_ch
 from src.virtualizers.firewall import TransportProtocol, remove_rule as vm_remove_rule
 from typing import Optional, Callable, Dict, Tuple
 from src.virtualizers.architecture import check_supported_architecture, UnsupportedArchitectureException
@@ -91,10 +90,6 @@ def execute(
         initial_system_resources=initial_system_resources,
         father_id=father_id,
     )
-
-def remove(vmachine_id: str) -> bool:
-    """Remove a service."""
-    return remove_ch(vmachine_id=vmachine_id)
 
 def remove_firewall_rule(
         vmachine_id: str,

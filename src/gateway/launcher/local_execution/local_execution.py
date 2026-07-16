@@ -10,7 +10,6 @@ from src.virtualizers.interface import build, execute, get_configured_virtualize
 from src.manager.manager import (
     default_initial_cost,
     is_external_execute_client,
-    provision_vmachine,
     reserve_instance_name,
 )
 from src.utils import utils, logger as log
@@ -25,7 +24,7 @@ sc = SQLConnection()
 env_manager = ConfigManager()
 
 
-def _serialize_envs(config: Optional[celaut.Configuration]) -> Optional[str]:
+def _serialize_envs(config: Optional[celaut.Configuration]) -> str:
     """Serialize a Configuration's ``environment_variables`` map to JSON text.
 
     The instance is launched with these envs (see ``execute()``), so persisting them
@@ -40,7 +39,7 @@ def _serialize_envs(config: Optional[celaut.Configuration]) -> Optional[str]:
         key: value.decode("utf-8", errors="replace")
         for key, value in config.environment_variables.items()
     }
-    return json.dumps(envs, sort_keys=True) if envs else None
+    return json.dumps(envs, sort_keys=True) if envs else ""
 
 
 _INTERFACE_PREFIX_PRIORITY = (
@@ -250,6 +249,8 @@ def local_execution(
         f"Invoking virtualizer execute: virtualizer={configured_virtualizer}, "
         f"service_id={service_id}, father_id={father_id}"
     )
+
+    # Execute virtualizer process.
     vmachine_id, vmachine_ip = execute(
         assigment_ports=assigment_ports, 
         by_local=not expose_outside, 
@@ -261,6 +262,7 @@ def local_execution(
     )
     log.LOGGER(f"Virtualizer execute returned: vmachine_id={vmachine_id}, vmachine_ip={vmachine_ip}")
 
+    # Resolve slots
     uri_slots: List[celaut.Instance.Uri_Slot] = []
     resolved_network = ""
     try:
@@ -306,21 +308,31 @@ def local_execution(
             uri_slot=uri_slots
         )
 
-    provision_vmachine(
-        service_id=service_id,
-        father_id=father_id,
-        vmachine_id=vmachine_id,
-        instance_name=instance_name,
-        vmachine_ip=vmachine_ip,
-        initial_gas_amount=initial_gas_amount,
-        serialized_instance=instance.SerializeToString(),
-        virtualizer=configured_virtualizer,
-        system_requirements_range=celaut_pb2.ModifyServiceSystemResourcesInput(
+    # Store the instance in the database, including the disk space from the system requirements range.
+    system_requirements_range=celaut_pb2.ModifyServiceSystemResourcesInput(
                 min_sysreq=initial_system_resources,
                 max_sysreq=initial_system_resources
-            ),
+            )
+    disk_space = None
+    if system_requirements_range and system_requirements_range.max_sysreq:
+        sysreq = system_requirements_range.max_sysreq
+        if sysreq.HasField("disk_space"):
+            disk_space = int(sysreq.disk_space)
+    if not disk_space:
+        raise Exception("Disk space is not specified in the system requirements range.")
+
+    sc.add_local_instance(
+        father_id=father_id,
+        container_id=vmachine_id,
+        name=instance_name,
+        container_ip=vmachine_ip,
+        gas=initial_gas_amount,
+        serialized_instance=instance.SerializeToString(),
+        service_id=service_id,
+        virtualizer=configured_virtualizer,
+        disk_space=disk_space,
         envs=_serialize_envs(config),
-        )
+    )
     log.LOGGER(
         f"Instance provisioned in DB: vmachine_id={vmachine_id}, virtualizer={configured_virtualizer}, "
         f"uri_slots={len(uri_slots)}"

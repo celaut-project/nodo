@@ -174,12 +174,16 @@ def generate_gateway_config_dev(path: str, envs: Dict[str, str]):
     client_id = next(get_dev_clients(gas_amount=gas_amount))
 
     sc.add_local_instance(
+        name="rundev::" + path,
         father_id=client_id,
         container_id="rundev::" + path + "::" + str(os.getpid()),
         container_ip=get_local_ip(),  # localhost
         gas=gas_amount,
         serialized_instance="",
         service_id="rundev::" + path,
+        virtualizer="ch",
+        disk_space=0, # TODO
+        envs=""
     )
     
     print(f"\nDevelopment environment setup finished for the service at: '{path}'")

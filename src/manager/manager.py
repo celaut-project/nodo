@@ -475,51 +475,6 @@ def default_initial_cost(
         sc.get_gas_amount_by_father_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
     ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INITIAL_GAS_AMOUNT)
 
-def provision_vmachine(
-        service_id: str,
-        father_id: str,
-        vmachine_id: str,
-        instance_name: str,
-        vmachine_ip: str,
-        initial_gas_amount: Optional[int],
-        serialized_instance: str,
-        virtualizer: Optional[str] = None,
-        system_requirements_range: celaut_pb2.ModifyServiceSystemResourcesInput = None,
-        envs: Optional[str] = None,
-):
-    disk_space = None
-    if system_requirements_range and system_requirements_range.max_sysreq:
-        sysreq = system_requirements_range.max_sysreq
-        if sysreq.HasField("disk_space"):
-            disk_space = int(sysreq.disk_space)
-
-    log.LOGGER(f'Add service for {father_id}')
-    initial_gas_amount = initial_gas_amount if initial_gas_amount \
-        else default_initial_cost(father_id=father_id)
-        
-    sc.add_local_instance(
-        father_id=father_id,
-        container_id=vmachine_id,
-        name=instance_name,
-        container_ip=vmachine_ip,
-        gas=initial_gas_amount,
-        serialized_instance=serialized_instance,
-        service_id=service_id,
-        virtualizer=virtualizer,
-        disk_space=disk_space,
-        envs=envs,
-    )
-
-    return
-
-    # TODO Is this necessary? Memory usage and cpu usage were not specified at execute.py execute() ?
-    if not hotplug(
-            vmachine_id=vmachine_id,
-            system_requeriments_range=system_requirements_range
-    ):
-        log.LOGGER(f'Exception during modify params of {vmachine_id}.')
-        raise Exception("The system is currently busy. Please try again in a few moments.")  # TODO Could be grete receive how many resources are available and how many are requested.
-
 def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     sys_req = sc.get_sys_req(id=id)
     return celaut_pb2.ModifyServiceSystemResourcesOutput(
