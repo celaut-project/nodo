@@ -40,18 +40,6 @@ CONNTRACK_PATH = "/proc/net/nf_conntrack"
 REFRESH_INTERVAL_S = 1.0
 MAX_EVENTS_DISPLAYED = 15
 
-# Well-known ports → application protocol label (best-effort only).
-_WELL_KNOWN_PORTS = {
-    80: "HTTP",
-    443: "HTTPS",
-    53: "DNS",
-    22: "SSH",
-    5432: "PostgreSQL",
-    3306: "MySQL",
-    6379: "Redis",
-    9053: "Ergo",
-}
-
 
 # --------------------------------------------------------------------------- #
 # Pure helpers (stdlib only — unit-testable without the nodo runtime).
@@ -122,13 +110,6 @@ class SessionMetrics:
         return "N/A" if value is None else f"{value:.0f}%"
 
 
-def app_protocol(transport: str, dst_port: Optional[int]) -> str:
-    """Best-effort application protocol from the transport + destination port."""
-    if dst_port in _WELL_KNOWN_PORTS:
-        return _WELL_KNOWN_PORTS[dst_port]
-    return (transport or "").upper() or "?"
-
-
 def parse_conntrack_line(line: str, vm_ip: str) -> Optional[Dict[str, Any]]:
     """Parse a ``/proc/net/nf_conntrack`` line into a connection event.
 
@@ -179,7 +160,7 @@ def parse_conntrack_line(line: str, vm_ip: str) -> Optional[Dict[str, Any]]:
     return {
         "direction": direction,
         "transport": transport,
-        "protocol": app_protocol(transport, dst_port),
+        "protocol": "N/A",
         "src_ip": src_ip,
         "dst_ip": dst_ip,
         "src_port": _port(orig.get("sport")),
