@@ -119,14 +119,21 @@ def find_running_instance(service_id: str) -> Optional[str]:
 
 
 def ensure_core_service_running(
-    service_id: str, *, launch: bool = True, envs: Optional[Dict[str, str]] = None
+    service_id: str,
+    *,
+    launch: bool = True,
+    envs: Optional[Dict[str, str]] = None,
+    source_url: Optional[str] = None,
 ) -> Optional[str]:
     """Ensure a core service is running and return its endpoint, or ``None``.
 
     Resolution order:
         (a) If an instance of ``service_id`` is already running, return its endpoint.
-        (b) Otherwise, best-effort *download* the service into the local registry via
-            the source-application (:func:`acquire_service`) so it can be launched.
+        (b) Otherwise, best-effort *download* the service into the local registry so it
+            can be launched. When ``source_url`` is provided, the service is fetched
+            directly from that manifest URL (bypassing the source-application lookup);
+            otherwise it is resolved via the source-application
+            (:func:`acquire_service`).
         (c) Otherwise (when ``launch`` is ``True``), best-effort *launch* the service
             by id by reusing the existing ``nodo execute`` path
             (:func:`src.commands.execute.execute`), injecting ``envs`` into the new
@@ -154,11 +161,19 @@ def ensure_core_service_running(
         return endpoint
 
     # (b) Not running — make sure it's at least present locally (best-effort download).
-    #     acquire_service is itself fail-closed and returns False when it can't acquire.
+    #     A direct ``source_url`` takes precedence: fetch the service straight from that
+    #     manifest URL, bypassing the source-application lookup. When it is empty, resolve
+    #     the sources via the source-application (:func:`acquire_service`). Both paths are
+    #     fail-closed: a download failure must not break the ensure path.
     try:
-        from src.core_services.source_application import acquire_service
+        if source_url and source_url.strip():
+            from src.commands.publisher.publisher import download_from_manifest_url
 
-        acquire_service(service_id)
+            download_from_manifest_url(source_url.strip())
+        else:
+            from src.core_services.source_application import acquire_service
+
+            acquire_service(service_id)
     except Exception:
         # Defensive: a download failure must not break the ensure path.
         pass
