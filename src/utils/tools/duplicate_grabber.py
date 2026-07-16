@@ -79,3 +79,15 @@ class DuplicateGrabber(metaclass=Singleton):
             self.sessions[session].value = next(generator)
             self.sessions[session].set()
             return self.sessions[session].value, True
+
+# NOTE: DuplicateGrabber is currently a dead-code singleton.
+# The `next()` method (which prevents duplicate downloads by hashing)
+# is never called anywhere in the codebase. Only `manager()` runs
+# in the maintain loop, but since sessions are never created, it's a no-op.
+#
+# The class is intentionally kept for potential future use:
+# - Download operations that could benefit from duplicate prevention
+# - Service fetching that may trigger redundant network calls
+#
+# TODO(#66): Either wire up `next()` in download/fetch paths, or
+# remove the class entirely if duplicate prevention is not needed.
