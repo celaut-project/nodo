@@ -22,6 +22,10 @@ def _event_to_proto(event: Dict[str, Any]) -> celaut_pb2.ObserveEvent:
         proto.session.tag = event.get("tag") or ""
         proto.session.capture_mode = event.get("capture_mode", "")
         proto.session.degraded_reason = event.get("degraded_reason") or ""
+        if event.get("link_type") is not None:
+            proto.session.link_type = event["link_type"]
+        if event.get("snaplen") is not None:
+            proto.session.snaplen = event["snaplen"]
 
     elif kind == "metrics":
         m = proto.metrics
@@ -34,6 +38,18 @@ def _event_to_proto(event: Dict[str, Any]) -> celaut_pb2.ObserveEvent:
             m.mem_bytes = event["mem_bytes"]
         if event.get("mem_peak_bytes") is not None:
             m.mem_peak_bytes = event["mem_peak_bytes"]
+        if event.get("disk_read_bytes") is not None:
+            m.disk_read_bytes = event["disk_read_bytes"]
+        if event.get("disk_write_bytes") is not None:
+            m.disk_write_bytes = event["disk_write_bytes"]
+        if event.get("net_rx_bytes") is not None:
+            m.net_rx_bytes = event["net_rx_bytes"]
+        if event.get("net_tx_bytes") is not None:
+            m.net_tx_bytes = event["net_tx_bytes"]
+        if event.get("net_rx_packets") is not None:
+            m.net_rx_packets = event["net_rx_packets"]
+        if event.get("net_tx_packets") is not None:
+            m.net_tx_packets = event["net_tx_packets"]
 
     elif kind == "packet":
         record = event.get("record", {})
@@ -46,6 +62,10 @@ def _event_to_proto(event: Dict[str, Any]) -> celaut_pb2.ObserveEvent:
         p.dst = record.get("dst") or ""
         if event.get("frame_len") is not None:
             p.frame_len = event["frame_len"]
+        if event.get("frame") is not None:
+            p.raw_frame = event["frame"]
+            if event.get("frame_ts") is not None:
+                p.frame_timestamp = event["frame_ts"]
         p.peer_kind = record.get("peer_kind") or ""
         p.peer_instance_id = record.get("peer_instance_id") or ""
         p.peer_tag = record.get("peer_tag") or ""

@@ -186,6 +186,13 @@ class SessionMetrics:
         self.cpu_peak: Optional[float] = None
         self.mem_current: Optional[int] = None
         self.mem_peak: Optional[int] = None
+        # Latest cumulative I/O counters (disk block-IO + tap net), or None.
+        self.disk_read_bytes: Optional[int] = None
+        self.disk_write_bytes: Optional[int] = None
+        self.net_rx_bytes: Optional[int] = None
+        self.net_tx_bytes: Optional[int] = None
+        self.net_rx_packets: Optional[int] = None
+        self.net_tx_packets: Optional[int] = None
 
     def update_cpu(self, percent: Optional[float]) -> None:
         if percent is None:
@@ -200,6 +207,15 @@ class SessionMetrics:
         self.mem_current = mem_bytes
         if self.mem_peak is None or mem_bytes > self.mem_peak:
             self.mem_peak = mem_bytes
+
+    def update_io(self, sample: Dict[str, Any]) -> None:
+        """Store the latest cumulative disk/net counters (None-safe)."""
+        for attr in ("disk_read_bytes", "disk_write_bytes",
+                     "net_rx_bytes", "net_tx_bytes",
+                     "net_rx_packets", "net_tx_packets"):
+            value = sample.get(attr)
+            if value is not None:
+                setattr(self, attr, value)
 
     def cpu_str(self, value: Optional[float]) -> str:
         return "N/A" if value is None else f"{value:.0f}%"
@@ -734,6 +750,12 @@ def metrics_record(metrics: "SessionMetrics", alive: bool,
                              else round(metrics.cpu_peak, 1)),
         "mem_bytes": metrics.mem_current,
         "mem_peak_bytes": metrics.mem_peak,
+        "disk_read_bytes": metrics.disk_read_bytes,
+        "disk_write_bytes": metrics.disk_write_bytes,
+        "net_rx_bytes": metrics.net_rx_bytes,
+        "net_tx_bytes": metrics.net_tx_bytes,
+        "net_rx_packets": metrics.net_rx_packets,
+        "net_tx_packets": metrics.net_tx_packets,
     }
 
 
@@ -907,6 +929,12 @@ def _sample_resources(instance_id: str) -> Dict[str, Any]:
         "alive": bool(snapshot.get("alive")),
         "mem_bytes": mem_bytes,
         "cpu_usage_usec": _read_cgroup_cpu_usage_usec(snapshot.get("cgroup_path")),
+        "disk_read_bytes": snapshot.get("disk_read_bytes"),
+        "disk_write_bytes": snapshot.get("disk_write_bytes"),
+        "net_rx_bytes": snapshot.get("net_rx_bytes"),
+        "net_tx_bytes": snapshot.get("net_tx_bytes"),
+        "net_rx_packets": snapshot.get("net_rx_packets"),
+        "net_tx_packets": snapshot.get("net_tx_packets"),
     }
 
 
@@ -1167,6 +1195,7 @@ def observe_event_stream(
     prev_usage = first_sample.get("cpu_usage_usec")
     prev_wall = time.monotonic_ns()
     metrics.update_memory(first_sample.get("mem_bytes"))
+    metrics.update_io(first_sample)
 
     # Ancillary buffer big enough for one SCM_TIMESTAMPNS timespec cmsg.
     try:
@@ -1188,6 +1217,7 @@ def observe_event_stream(
         "degraded_reason": degraded_reason,
         "tap_ifname": tap_ifname,
         "link_type": link_type,
+        "snaplen": DEFAULT_SNAPLEN,
         "is_ethernet": is_ethernet,
     }
 
@@ -1247,6 +1277,7 @@ def observe_event_stream(
             )
             prev_usage, prev_wall = cur_usage, cur_wall
             metrics.update_memory(sample.get("mem_bytes"))
+            metrics.update_io(sample)
 
             # In conntrack fallback mode, scan the table each tick and emit its
             # flows before the metrics sample so a consumer renders both in the

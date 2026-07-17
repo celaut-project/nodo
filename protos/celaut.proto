@@ -367,6 +367,8 @@ message ObserveEvent {
         string tag = 2;
         string capture_mode = 3;     // "pcap" (AF_PACKET tap) | "conntrack" (fallback).
         string degraded_reason = 4;  // empty when full AF_PACKET capture is live.
+        int32 link_type = 5;         // libpcap LINKTYPE for the global header (1=ethernet, 101=raw IP).
+        uint32 snaplen = 6;          // capture snap length for the pcap global header.
     }
 
     // One CPU+memory sample (the fields of observe.metrics_record).
@@ -376,6 +378,17 @@ message ObserveEvent {
         optional double cpu_peak_percent = 3;
         optional uint64 mem_bytes = 4;
         optional uint64 mem_peak_bytes = 5;
+        // Cumulative block-IO bytes for this instance: cgroup io.stat when
+        // the io controller is delegated to the leaf, else the hypervisor
+        // process's /proc/<pid>/io read_bytes/write_bytes.
+        optional uint64 disk_read_bytes = 6;
+        optional uint64 disk_write_bytes = 7;
+        // Cumulative tap-interface counters. rx = frames the host received from
+        // the VM (VM egress); tx = frames sent to the VM (VM ingress).
+        optional uint64 net_rx_bytes = 8;
+        optional uint64 net_tx_bytes = 9;
+        optional uint64 net_rx_packets = 10;
+        optional uint64 net_tx_packets = 11;
     }
 
     // One parsed connection event (the fields of observe.serialize_event).
@@ -393,6 +406,11 @@ message ObserveEvent {
         string peer_relationship = 11;  // parent | child | peer.
         string peer_host = 12;          // set when peer_kind == "external".
         string source = 13;             // "pcap" | "conntrack".
+        // Verbatim captured frame + kernel receive time, so an include_packets
+        // client can rebuild a byte-exact .pcap remotely. Only set in pcap mode
+        // when include_packets is true (unset for conntrack / metrics-only).
+        bytes raw_frame = 14;
+        optional double frame_timestamp = 15;
     }
 
     // Degraded-mode / lifecycle message (never fabricated data).
