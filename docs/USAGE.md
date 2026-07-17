@@ -118,6 +118,34 @@ These are the most commonly used commands for daily tasks:
   → `./captures/gateway_8a7fd2.../{metrics.jsonl,capture.pcap}`, then
   `wireshark ./captures/gateway_8a7fd2.../capture.pcap`
 
+  **Observe over the gateway (`Gateway.Observe` bee_rpc):** the same live data is
+  exposed as a streaming RPC so peers/agents can subscribe remotely instead of
+  attaching a terminal. It shares the exact capture core the `observe` command
+  uses (`observe_event_stream`) — no duplicated logic.
+  - **Input:** one `ObserveRequest { instance_id, include_packets }`. The
+    `instance_id` addresses the instance the same way `GetMetrics` does
+    (`TokenMessage.token` semantics — id or unique id-prefix). Set
+    `include_packets = true` to also receive raw per-packet records; leave it
+    `false` (default) for the lighter metrics-only stream.
+  - **Output:** a live stream of `ObserveEvent`. Each event names its payload via
+    `kind`:
+    - `session` — sent first: `capture_mode` (`pcap` | `conntrack`) and
+      `degraded_reason` so the client knows whether full AF_PACKET capture is
+      active.
+    - `metrics` — one CPU + memory snapshot per second, mirroring the
+      `metrics.jsonl` fields (`cpu_percent`, `cpu_peak_percent`, `mem_bytes`,
+      `mem_peak_bytes`).
+    - `packet` — one parsed connection event (direction, transport, ports, TCP
+      flags, classified peer). Emitted per frame in `pcap` mode, per conntrack
+      row in the fallback.
+    - `notice` — degraded-mode / lifecycle messages (e.g. *instance stopped*),
+      never fabricated data.
+  - The stream ends cleanly when the instance stops or the client cancels (the
+    AF_PACKET socket is released on cancellation). Instance-not-found /
+    not-running is reported as a trailing degraded `notice`.
+  - Full AF_PACKET capture needs a Linux host with `CAP_NET_RAW`; elsewhere the
+    RPC degrades to the conntrack fallback exactly like the CLI.
+
 - **increase_gas `<instance id> <gas amount>`**  
   Increases the allocated gas for a service instance.  
   **Example:**  

@@ -57,7 +57,7 @@ import struct
 import sqlite3
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from src.utils.config import ConfigManager
 
@@ -107,6 +107,19 @@ IP_PROTO = {
     17: "udp",
     58: "icmpv6",
 }
+
+
+class ObserveInstanceError(Exception):
+    """Raised when an instance can't be observed (not found / not running).
+
+    Carries a human-facing ``message`` so both front-ends report the same
+    reason: the CLI prints it, the ``Gateway.Observe`` RPC surfaces it as a
+    trailing ``notice`` event.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
 
 
 # --------------------------------------------------------------------------- #
@@ -1015,24 +1028,56 @@ def _render(
     print("\n".join(lines), flush=True)
 
 
-def observe(instance_id: str, save_path: Optional[str] = None) -> None:
-    """Entry point for ``nodo observe <instance_id> [--save <path>]``."""
-    try:
-        instance = resolve_instance(instance_id)
-    except ValueError as exc:
-        print(str(exc), flush=True)
-        return
-    except sqlite3.Error as exc:
-        print(f"Error reading instance catalogue: {exc}", flush=True)
-        return
+# --------------------------------------------------------------------------- #
+# Shared live-observability core (consumed by both the CLI and Gateway.Observe).
+# --------------------------------------------------------------------------- #
+def observe_event_stream(
+    instance_id: str,
+    *,
+    include_packets: bool = True,
+    should_stop: Optional[Callable[[], bool]] = None,
+) -> Iterator[Dict[str, Any]]:
+    """Yield a running instance's live observability events, no side-effects.
 
+    This is the single source of the AF_PACKET / metrics-sampling logic. Both
+    the ``nodo observe`` CLI (which renders a TUI and writes the pcap +
+    ``metrics.jsonl`` artifacts on top of these events) and the
+    ``Gateway.Observe`` RPC (which serialises them to ``ObserveEvent`` protos)
+    consume it — neither duplicates the capture loop.
+
+    It resolves ``instance_id`` to a running local instance, binds an AF_PACKET
+    raw socket to its tap (or falls back to the conntrack table scan), and yields
+    event dicts until the instance stops, the capture socket dies, or
+    ``should_stop()`` returns ``True``. It performs **no** rendering and **no**
+    file writes.
+
+    Each yielded dict carries a ``"kind"`` discriminator and a ``"time"`` field
+    (``HH:MM:SS``, matching ``metrics.jsonl``):
+
+    * ``session`` — emitted once, first. Reports how capture resolved
+      (``capture_mode``, ``degraded_reason``, ``link_type``…) so a consumer can
+      set up a pcap writer with the right header before data flows.
+    * ``metrics`` — one CPU+memory sample per ``REFRESH_INTERVAL_S`` (exactly the
+      fields of :func:`metrics_record`).
+    * ``packet``  — one parsed connection event per captured frame (pcap mode) or
+      conntrack row (fallback). Carries ``record`` (the flattened
+      :func:`serialize_event` form, for the wire), ``raw`` (the parsed dict with
+      classified ``peer``/``tag``, for per-flow aggregation) and, in pcap mode
+      when ``include_packets`` is set, the verbatim ``frame`` bytes + kernel
+      ``frame_ts`` so a consumer can write a pcap. When ``include_packets`` is
+      ``False`` the heavy ``frame`` bytes are dropped (metrics stay the baseline
+      "data"; raw packets are opt-in).
+    * ``notice``  — degraded-mode / lifecycle messages (never fabricated data).
+
+    :raises ObserveInstanceError: instance not found, unreachable, or not running.
+    :raises ValueError: ambiguous instance-id prefix (from :func:`resolve_instance`).
+    """
+    instance = resolve_instance(instance_id)  # may raise ValueError / sqlite3.Error
     if instance is None:
-        print(
+        raise ObserveInstanceError(
             f"No local instance found matching '{instance_id}'. "
-            "Use 'nodo instances' to list running instances.",
-            flush=True,
+            "Use 'nodo instances' to list running instances."
         )
-        return
 
     full_id = instance["id"]
     father_id = instance.get("father_id") or ""
@@ -1044,15 +1089,14 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
     try:
         first_sample = _sample_resources(full_id)
     except Exception as exc:
-        print(f"Unable to attach to instance {short_id(full_id)}: {exc}", flush=True)
-        return
-    if not first_sample.get("alive"):
-        print(
-            f"Instance {short_id(full_id)} is not running (no live process). "
-            "Nothing to observe.",
-            flush=True,
+        raise ObserveInstanceError(
+            f"Unable to attach to instance {short_id(full_id)}: {exc}"
         )
-        return
+    if not first_sample.get("alive"):
+        raise ObserveInstanceError(
+            f"Instance {short_id(full_id)} is not running (no live process). "
+            "Nothing to observe."
+        )
 
     # Decide capture source (AF_PACKET on the tap, else conntrack fallback).
     tap_ifname, degraded_reason = resolve_capture_source(full_id, vm_ip)
@@ -1065,8 +1109,6 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
         try:
             pcap_sock = open_packet_socket(tap_ifname)
             capture_mode = "pcap"
-            # Auto-detect tap (L2/ethernet) vs tun (L3/raw-IP) so the pcap header
-            # and header-stripping match what the device actually delivers.
             link_type, is_ethernet = detect_link_type(tap_ifname)
         except OSError as exc:
             degraded_reason = (
@@ -1075,67 +1117,56 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
             )
             pcap_sock = None
 
-    # Set up the save directory + writers.
-    save_dir: Optional[str] = None
-    metrics_writer_cm: Optional[MetricsWriter] = None
-    pcap_writer_cm: Optional[PcapWriter] = None
-    if save_path:
-        save_dir = build_save_dir(save_path, tag, full_id)
-        os.makedirs(save_dir, exist_ok=True)
-        metrics_writer_cm = MetricsWriter(os.path.join(save_dir, METRICS_FILENAME))
-        if capture_mode == "pcap":
-            pcap_writer_cm = PcapWriter(
-                os.path.join(save_dir, CAPTURE_FILENAME), network=link_type)
-        else:
-            # Degraded: leave a note so the artifact folder explains the missing pcap.
-            write_capture_unavailable_note(
-                save_dir,
-                degraded_reason or "packet capture unavailable on this host")
-
     instance_index = build_instance_index()
     metrics = SessionMetrics()
-    flow_table = FlowTable(max_rows=MAX_EVENTS_DISPLAYED)
+    # Classify each peer IP once (peer/tag lookup touches disk); reuse thereafter.
+    peer_cache: Dict[str, Tuple[Dict[str, Any], Optional[str]]] = {}
+
+    def _classify(raw: Dict[str, Any]) -> Dict[str, Any]:
+        peer_ip = raw.get("peer_ip", "")
+        cached = peer_cache.get(peer_ip)
+        if cached is None:
+            peer = classify_peer(peer_ip, full_id, father_id, instance_index)
+            peer_tag = (
+                resolve_tag(peer.get("service_id", ""))
+                if peer.get("kind") == "instance" else None
+            )
+            cached = (peer, peer_tag)
+            peer_cache[peer_ip] = cached
+        peer, peer_tag = cached
+        enriched = dict(raw)
+        enriched["peer"] = peer
+        enriched["tag"] = peer_tag
+        return enriched
+
+    def _packet_event(raw: Dict[str, Any], frame: Optional[bytes],
+                      frame_len: Optional[int], ts_float: float,
+                      source: str) -> Dict[str, Any]:
+        enriched = _classify(raw)
+        ts_label = datetime.fromtimestamp(ts_float).strftime("%H:%M:%S")
+        enriched["time"] = ts_label
+        return {
+            "kind": "packet",
+            "time": ts_label,
+            "raw": enriched,                     # parsed dict (+peer/tag) for aggregation.
+            "record": serialize_event(enriched),  # flattened form for the wire.
+            "frame_len": frame_len,
+            "frame_ts": ts_float,
+            "source": source,
+            "frame": frame if include_packets else None,
+        }
+
+    def _notice(message: str, degraded: bool) -> Dict[str, Any]:
+        return {
+            "kind": "notice",
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "message": message,
+            "degraded": degraded,
+        }
 
     prev_usage = first_sample.get("cpu_usage_usec")
     prev_wall = time.monotonic_ns()
     metrics.update_memory(first_sample.get("mem_bytes"))
-
-    stop = {"flag": False}
-
-    def _handle_sigint(signum, frame):  # noqa: ANN001
-        stop["flag"] = True
-
-    previous_handler = signal.signal(signal.SIGINT, _handle_sigint)
-
-    def _record_flow(raw: Dict[str, Any], frame_len: Optional[int],
-                     ts_float: float, source: str) -> None:
-        """Aggregate a parsed connection event into the live flow table.
-
-        Never suppresses: repeated packets on the same flow bump its packet/byte
-        counters and last-seen. Peer classification (and the per-peer tag lookup,
-        which touches disk) happens only when a flow is first seen, then reused.
-        """
-        key = flow_key(raw)
-        existing = flow_table.get(key)
-        if existing is not None:
-            peer, peer_tag = existing["peer"], existing["tag"]
-        else:
-            peer = classify_peer(raw["peer_ip"], full_id, father_id, instance_index)
-            peer_tag = (
-                resolve_tag(peer.get("service_id", ""))
-                if peer.get("kind") == "instance"
-                else None
-            )
-        flow_table.update(
-            key,
-            direction=raw["direction"],
-            protocol=raw.get("protocol"),
-            peer=peer,
-            tag=peer_tag,
-            frame_len=frame_len,
-            timestamp=ts_float,
-            source=source,
-        )
 
     # Ancillary buffer big enough for one SCM_TIMESTAMPNS timespec cmsg.
     try:
@@ -1143,19 +1174,26 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
     except (AttributeError, OSError):
         ancbufsize = 0
 
-    last_render = {"t": 0.0}
-
-    def _do_render(notice: Optional[str]) -> None:
-        flow_lines = [format_flow_line(r) for r in flow_table.active_rows()]
-        _render(header, metrics, flow_lines, save_dir, notice, capture_mode)
-        last_render["t"] = time.monotonic()
+    # Session event first, so a consumer can set up its pcap writer/save-dir
+    # (needs capture_mode + link_type) before any data event arrives.
+    yield {
+        "kind": "session",
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "instance_id": full_id,
+        "father_id": father_id,
+        "vm_ip": vm_ip,
+        "tag": tag,
+        "header": header,
+        "capture_mode": capture_mode,
+        "degraded_reason": degraded_reason,
+        "tap_ifname": tap_ifname,
+        "link_type": link_type,
+        "is_ethernet": is_ethernet,
+    }
 
     try:
-        metrics_writer = metrics_writer_cm.__enter__() if metrics_writer_cm else None
-        pcap_writer = pcap_writer_cm.__enter__() if pcap_writer_cm else None
-
         next_sample = time.monotonic()
-        while not stop["flag"]:
+        while should_stop is None or not should_stop():
             now = time.monotonic()
             timeout = max(0.0, next_sample - now)
 
@@ -1163,7 +1201,6 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
             if pcap_sock is not None:
                 ready, _, _ = select.select([pcap_sock], [], [], timeout)
                 if ready:
-                    drained = 0
                     while True:
                         try:
                             if ancbufsize:
@@ -1182,18 +1219,12 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
                         ts = parse_scm_timestampns(ancdata)
                         if ts is None:
                             ts = time.time()
-                        if pcap_writer:
-                            pcap_writer.write_frame(data, ts)
                         parsed = parse_ethernet_frame(data, vm_ip,
                                                       is_ethernet=is_ethernet)
                         if parsed:
-                            _record_flow(parsed, len(data), ts, "pcap")
-                        drained += 1
-                    # Re-render on network bursts too (throttled) so a chatty flow
-                    # ticks up between the 1 s metrics samples — always redrawing
-                    # CPU/mem + the network table in the same frame.
-                    if drained and (time.monotonic() - last_render["t"]) >= MIN_RENDER_INTERVAL_S:
-                        _do_render(degraded_reason)
+                            yield _packet_event(parsed, data, len(data), ts, "pcap")
+                        if should_stop is not None and should_stop():
+                            break
             else:
                 if timeout > 0:
                     time.sleep(timeout)
@@ -1206,7 +1237,7 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
             # --- sample resource metrics -------------------------------------
             sample = _sample_resources(full_id)
             if not sample.get("alive"):
-                _do_render("instance stopped — ending observation")
+                yield _notice("instance stopped — ending observation", degraded=False)
                 break
 
             cur_wall = time.monotonic_ns()
@@ -1217,31 +1248,132 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
             prev_usage, prev_wall = cur_usage, cur_wall
             metrics.update_memory(sample.get("mem_bytes"))
 
-            if metrics_writer:
-                metrics_writer.write(metrics_record(metrics, alive=True))
-
-            # In conntrack fallback mode, scan the table each tick. Feeds the same
-            # live flow table (byte counts unavailable there → shown as "conntrack").
-            net_notice = degraded_reason
+            # In conntrack fallback mode, scan the table each tick and emit its
+            # flows before the metrics sample so a consumer renders both in the
+            # same frame (byte counts are unavailable there → frame_len None).
             if pcap_sock is None:
                 raw_events, conntrack_notice = read_conntrack_events(vm_ip)
                 scan_ts = time.time()
                 for raw in raw_events:
-                    _record_flow(raw, None, scan_ts, "conntrack")
+                    yield _packet_event(raw, None, None, scan_ts, "conntrack")
                 if conntrack_notice:
-                    net_notice = conntrack_notice
+                    yield _notice(conntrack_notice, degraded=True)
 
-            _do_render(net_notice)
+            yield {"kind": "metrics", **metrics_record(metrics, alive=True)}
     finally:
-        if pcap_writer_cm:
-            pcap_writer_cm.__exit__(None, None, None)
-        if metrics_writer_cm:
-            metrics_writer_cm.__exit__(None, None, None)
         if pcap_sock is not None:
             try:
                 pcap_sock.close()
             except OSError:
                 pass
+
+
+def observe(instance_id: str, save_path: Optional[str] = None) -> None:
+    """Entry point for ``nodo observe <instance_id> [--save <path>]``.
+
+    Thin front-end over :func:`observe_event_stream`: it renders the live TUI and
+    (optionally) writes the pcap + ``metrics.jsonl`` artifacts, while the
+    AF_PACKET / metrics capture itself lives entirely in the shared generator.
+    """
+    stop = {"flag": False}
+
+    def _handle_sigint(signum, frame):  # noqa: ANN001
+        stop["flag"] = True
+
+    previous_handler = signal.signal(signal.SIGINT, _handle_sigint)
+
+    save_dir: Optional[str] = None
+    metrics_writer_cm: Optional[MetricsWriter] = None
+    pcap_writer_cm: Optional[PcapWriter] = None
+    metrics_writer: Optional[MetricsWriter] = None
+    pcap_writer: Optional[PcapWriter] = None
+
+    metrics = SessionMetrics()
+    flow_table = FlowTable(max_rows=MAX_EVENTS_DISPLAYED)
+    last_render = {"t": 0.0}
+    header = instance_id
+    capture_mode = "conntrack"
+    base_notice: Optional[str] = None
+    full_id = instance_id
+
+    def _do_render(notice: Optional[str]) -> None:
+        flow_lines = [format_flow_line(r) for r in flow_table.active_rows()]
+        _render(header, metrics, flow_lines, save_dir, notice, capture_mode)
+        last_render["t"] = time.monotonic()
+
+    try:
+        for event in observe_event_stream(
+            instance_id,
+            include_packets=bool(save_path),
+            should_stop=lambda: stop["flag"],
+        ):
+            kind = event["kind"]
+            if kind == "session":
+                header = event["header"]
+                capture_mode = event["capture_mode"]
+                base_notice = event.get("degraded_reason")
+                full_id = event["instance_id"]
+                if save_path:
+                    save_dir = build_save_dir(save_path, event.get("tag"), full_id)
+                    os.makedirs(save_dir, exist_ok=True)
+                    metrics_writer_cm = MetricsWriter(
+                        os.path.join(save_dir, METRICS_FILENAME))
+                    metrics_writer = metrics_writer_cm.__enter__()
+                    if capture_mode == "pcap":
+                        pcap_writer_cm = PcapWriter(
+                            os.path.join(save_dir, CAPTURE_FILENAME),
+                            network=event["link_type"])
+                        pcap_writer = pcap_writer_cm.__enter__()
+                    else:
+                        # Degraded: note why the pcap is missing (self-explanatory folder).
+                        write_capture_unavailable_note(
+                            save_dir,
+                            base_notice or "packet capture unavailable on this host")
+            elif kind == "metrics":
+                metrics.cpu_current = event["cpu_percent"]
+                metrics.cpu_peak = event["cpu_peak_percent"]
+                metrics.mem_current = event["mem_bytes"]
+                metrics.mem_peak = event["mem_peak_bytes"]
+                if metrics_writer:
+                    metrics_writer.write(metrics_record(metrics, alive=event["alive"]))
+                _do_render(base_notice)
+            elif kind == "packet":
+                raw = event["raw"]
+                if pcap_writer is not None and event.get("frame") is not None:
+                    pcap_writer.write_frame(event["frame"], event["frame_ts"])
+                flow_table.update(
+                    flow_key(raw),
+                    direction=raw["direction"],
+                    protocol=raw.get("protocol"),
+                    peer=raw["peer"],
+                    tag=raw.get("tag"),
+                    frame_len=event.get("frame_len"),
+                    timestamp=event["frame_ts"],
+                    source=event["source"],
+                )
+                # Re-render on network bursts too (throttled) so a chatty flow
+                # ticks up between the 1 s metrics samples.
+                if (time.monotonic() - last_render["t"]) >= MIN_RENDER_INTERVAL_S:
+                    _do_render(base_notice)
+            elif kind == "notice":
+                if event.get("message") == "instance stopped — ending observation":
+                    _do_render(event["message"])
+                else:
+                    base_notice = event["message"]
+    except ValueError as exc:
+        print(str(exc), flush=True)
+        return
+    except sqlite3.Error as exc:
+        print(f"Error reading instance catalogue: {exc}", flush=True)
+        return
+    except ObserveInstanceError as exc:
+        print(exc.message, flush=True)
+        return
+    finally:
+        if pcap_writer_cm:
+            pcap_writer_cm.__exit__(None, None, None)
+        if metrics_writer_cm:
+            metrics_writer_cm.__exit__(None, None, None)
         signal.signal(signal.SIGINT, previous_handler)
 
     print(f"\nObservation of {short_id(full_id)} ended.", flush=True)
