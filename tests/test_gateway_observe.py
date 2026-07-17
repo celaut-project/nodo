@@ -37,9 +37,17 @@ def _drive_conntrack_stream(should_stop, *, include_packets=False,
         }]
     usage = itertools.count(1_000_000, 1_000_000)
     mem = itertools.count(4096, 1024)
+    disk_r = itertools.count(10_000, 500)
+    disk_w = itertools.count(20_000, 700)
+    net = itertools.count(100, 10)
 
     def _sample(_id):
-        return {"alive": True, "mem_bytes": next(mem), "cpu_usage_usec": next(usage)}
+        return {
+            "alive": True, "mem_bytes": next(mem), "cpu_usage_usec": next(usage),
+            "disk_read_bytes": next(disk_r), "disk_write_bytes": next(disk_w),
+            "net_rx_bytes": next(net), "net_tx_bytes": next(net),
+            "net_rx_packets": next(net), "net_tx_packets": next(net),
+        }
 
     with mock.patch.object(observe, "REFRESH_INTERVAL_S", 0.0), \
             mock.patch.object(observe, "resolve_instance",
@@ -93,6 +101,26 @@ class ObserveEventStreamTests(unittest.TestCase):
         self.assertTrue(metrics["alive"])
         self.assertIn("mem_bytes", metrics)
         self.assertIn("cpu_peak_percent", metrics)
+
+    def test_metrics_event_includes_disk_and_net_io(self):
+        events = _drive_conntrack_stream(self._stop_after(2))
+        metrics = next(e for e in events if e["kind"] == "metrics")
+        # Josemi's ask: disk usage + network I/O (bytes AND packets, in/out).
+        for field in ("disk_read_bytes", "disk_write_bytes",
+                      "net_rx_bytes", "net_tx_bytes",
+                      "net_rx_packets", "net_tx_packets"):
+            self.assertIn(field, metrics)
+            self.assertIsNotNone(metrics[field])
+        self.assertGreaterEqual(metrics["disk_read_bytes"], 10_000)
+        self.assertGreaterEqual(metrics["disk_write_bytes"], 20_000)
+
+    def test_session_event_exposes_link_type_and_snaplen(self):
+        # A remote client needs these to write the pcap global header.
+        events = _drive_conntrack_stream(self._stop_after(1))
+        session = events[0]
+        self.assertIn("snaplen", session)
+        self.assertEqual(session["snaplen"], observe.DEFAULT_SNAPLEN)
+        self.assertIn("link_type", session)
 
     def test_include_packets_false_drops_raw_frame_bytes(self):
         events = _drive_conntrack_stream(self._stop_after(1), include_packets=False)
@@ -180,6 +208,61 @@ class EventToProtoTests(unittest.TestCase):
         self.assertEqual(proto.packet.peer_kind, "instance")
         self.assertEqual(proto.packet.peer_relationship, "child")
         self.assertEqual(proto.packet.source, "pcap")
+
+    def test_metrics_conversion_maps_disk_and_net_io(self):
+        proto = OI._event_to_proto({
+            "kind": "metrics", "time": "12:00:01", "alive": True,
+            "disk_read_bytes": 111, "disk_write_bytes": 222,
+            "net_rx_bytes": 333, "net_tx_bytes": 444,
+            "net_rx_packets": 5, "net_tx_packets": 6,
+        })
+        m = proto.metrics
+        self.assertEqual(m.disk_read_bytes, 111)
+        self.assertEqual(m.disk_write_bytes, 222)
+        self.assertEqual(m.net_rx_bytes, 333)
+        self.assertEqual(m.net_tx_bytes, 444)
+        self.assertEqual(m.net_rx_packets, 5)
+        self.assertEqual(m.net_tx_packets, 6)
+
+    def test_metrics_io_fields_unset_when_absent(self):
+        proto = OI._event_to_proto({
+            "kind": "metrics", "time": "12:00:01", "alive": True,
+        })
+        for f in ("disk_read_bytes", "disk_write_bytes", "net_rx_bytes",
+                  "net_tx_bytes", "net_rx_packets", "net_tx_packets"):
+            self.assertFalse(proto.metrics.HasField(f))
+
+    def test_session_conversion_maps_link_type_and_snaplen(self):
+        proto = OI._event_to_proto({
+            "kind": "session", "time": "12:00:00", "instance_id": "inst-1",
+            "capture_mode": "pcap", "link_type": 1, "snaplen": 65535,
+        })
+        self.assertEqual(proto.session.link_type, 1)
+        self.assertEqual(proto.session.snaplen, 65535)
+
+    def test_packet_conversion_maps_raw_frame_and_timestamp(self):
+        frame = bytes(range(64))
+        proto = OI._event_to_proto({
+            "kind": "packet", "time": "12:00:01", "frame_len": 64,
+            "source": "pcap", "frame": frame, "frame_ts": 1717000000.5,
+            "record": {"direction": "OUT", "transport": "tcp", "protocol": "TCP",
+                       "src": "10.0.0.5:5000", "dst": "1.2.3.4:443",
+                       "peer_kind": "external", "peer_host": "1.2.3.4"},
+        })
+        self.assertEqual(proto.packet.raw_frame, frame)
+        self.assertAlmostEqual(proto.packet.frame_timestamp, 1717000000.5, places=3)
+
+    def test_packet_raw_frame_unset_when_not_included(self):
+        # include_packets=False path: observe_event_stream sets frame=None.
+        proto = OI._event_to_proto({
+            "kind": "packet", "time": "12:00:01", "frame_len": None,
+            "source": "conntrack", "frame": None,
+            "record": {"direction": "OUT", "transport": "tcp", "protocol": "TCP",
+                       "src": "10.0.0.5:5000", "dst": "1.2.3.4:443",
+                       "peer_kind": "external", "peer_host": "1.2.3.4"},
+        })
+        self.assertEqual(proto.packet.raw_frame, b"")
+        self.assertFalse(proto.packet.HasField("frame_timestamp"))
 
     def test_notice_conversion(self):
         proto = OI._event_to_proto({
@@ -274,6 +357,68 @@ class ObserveIterableTests(unittest.TestCase):
         cancelled = OI.ObserveIterable(iter([]), _FakeContext(active=False))
         self.assertFalse(active._should_stop())
         self.assertTrue(cancelled._should_stop())
+
+
+class PcapReconstructionTests(unittest.TestCase):
+    """A client with include_packets=true must be able to rebuild a valid pcap
+    using only the proto stream: Session(link_type, snaplen) for the global
+    header, and each Packet(raw_frame, frame_timestamp) for a record. This
+    reconstructs one with plain struct (no server helpers) and validates it."""
+
+    def _reconstruct_pcap(self, session_proto, packet_protos):
+        import struct
+        out = struct.pack("<IHHiIII", 0xa1b2c3d4, 2, 4, 0, 0,
+                          session_proto.session.snaplen or 65535,
+                          session_proto.session.link_type)
+        for pk in packet_protos:
+            frame = pk.packet.raw_frame
+            ts = pk.packet.frame_timestamp
+            ts_sec = int(ts)
+            ts_usec = int(round((ts - ts_sec) * 1_000_000))
+            out += struct.pack("<IIII", ts_sec, ts_usec, len(frame), len(frame))
+            out += frame
+        return out
+
+    def test_stream_rebuilds_byte_exact_pcap(self):
+        frame_a = bytes(range(60))
+        frame_b = bytes(range(60, 128))
+        session = OI._event_to_proto({
+            "kind": "session", "time": "12:00:00", "instance_id": "i",
+            "capture_mode": "pcap", "link_type": 1, "snaplen": 65535,
+        })
+        packets = [
+            OI._event_to_proto({"kind": "packet", "time": "12:00:01",
+                                 "frame_len": len(frame_a), "source": "pcap",
+                                 "frame": frame_a, "frame_ts": 1717000000.25,
+                                 "record": {"direction": "OUT", "src": "a", "dst": "b",
+                                            "peer_kind": "external"}}),
+            OI._event_to_proto({"kind": "packet", "time": "12:00:02",
+                                 "frame_len": len(frame_b), "source": "pcap",
+                                 "frame": frame_b, "frame_ts": 1717000001.5,
+                                 "record": {"direction": "IN", "src": "b", "dst": "a",
+                                            "peer_kind": "external"}}),
+        ]
+        pcap = self._reconstruct_pcap(session, packets)
+
+        # Validate: magic + version + link type in the global header.
+        import struct
+        magic, vmaj, vmin, _tz, _sig, snaplen, network = struct.unpack(
+            "<IHHiIII", pcap[:24])
+        self.assertEqual(magic, 0xa1b2c3d4)
+        self.assertEqual((vmaj, vmin), (2, 4))
+        self.assertEqual(network, 1)
+        self.assertEqual(snaplen, 65535)
+
+        # Walk both records and confirm the frame bytes survive byte-exact.
+        off = 24
+        recovered = []
+        while off < len(pcap):
+            ts_sec, ts_usec, incl, orig = struct.unpack("<IIII", pcap[off:off + 16])
+            off += 16
+            recovered.append(pcap[off:off + incl])
+            self.assertEqual(incl, orig)
+            off += incl
+        self.assertEqual(recovered, [frame_a, frame_b])
 
 
 if __name__ == "__main__":
