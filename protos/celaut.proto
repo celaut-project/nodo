@@ -347,6 +347,86 @@ message ModifyGasDepositOutput {
     string message = 2;
 }
 
+// Observe: live instance observability stream (see src/commands/observe.py).
+// Input: which instance to observe (id/token, as GetMetrics addresses it).
+message ObserveRequest {
+    string instance_id = 1;    // instance id / token (TokenMessage.token semantics).
+    bool include_packets = 2;  // opt-in per-packet records; metrics snapshots are the baseline.
+}
+
+// One live observability event. ``kind`` names the populated payload so a
+// consumer can switch without inspecting the oneof. Fields mirror what
+// observe.py writes to metrics.jsonl (metrics) and serialize_event (packet).
+message ObserveEvent {
+    string time = 1;  // HH:MM:SS, matching metrics.jsonl timestamps.
+    string kind = 2;  // "session" | "metrics" | "packet" | "notice".
+
+    // Emitted once, first: how capture was resolved for this instance.
+    message Session {
+        string instance_id = 1;
+        string tag = 2;
+        string capture_mode = 3;     // "pcap" (AF_PACKET tap) | "conntrack" (fallback).
+        string degraded_reason = 4;  // empty when full AF_PACKET capture is live.
+        int32 link_type = 5;         // libpcap LINKTYPE for the global header (1=ethernet, 101=raw IP).
+        uint32 snaplen = 6;          // capture snap length for the pcap global header.
+    }
+
+    // One CPU+memory sample (the fields of observe.metrics_record).
+    message Metrics {
+        bool alive = 1;
+        optional double cpu_percent = 2;
+        optional double cpu_peak_percent = 3;
+        optional uint64 mem_bytes = 4;
+        optional uint64 mem_peak_bytes = 5;
+        // Cumulative block-IO bytes for this instance: cgroup io.stat when
+        // the io controller is delegated to the leaf, else the hypervisor
+        // process's /proc/<pid>/io read_bytes/write_bytes.
+        optional uint64 disk_read_bytes = 6;
+        optional uint64 disk_write_bytes = 7;
+        // Cumulative tap-interface counters. rx = frames the host received from
+        // the VM (VM egress); tx = frames sent to the VM (VM ingress).
+        optional uint64 net_rx_bytes = 8;
+        optional uint64 net_tx_bytes = 9;
+        optional uint64 net_rx_packets = 10;
+        optional uint64 net_tx_packets = 11;
+    }
+
+    // One parsed connection event (the fields of observe.serialize_event).
+    message Packet {
+        string direction = 1;           // "IN" | "OUT" (derived from the IP header).
+        string transport = 2;           // tcp | udp | icmp ...
+        string protocol = 3;            // display label (transport upper-cased).
+        string tcp_flags = 4;
+        string src = 5;                 // ip:port
+        string dst = 6;                 // ip:port
+        optional uint32 frame_len = 7;  // captured bytes (pcap path only).
+        string peer_kind = 8;           // "instance" | "external".
+        string peer_instance_id = 9;    // set when peer_kind == "instance".
+        string peer_tag = 10;
+        string peer_relationship = 11;  // parent | child | peer.
+        string peer_host = 12;          // set when peer_kind == "external".
+        string source = 13;             // "pcap" | "conntrack".
+        // Verbatim captured frame + kernel receive time, so an include_packets
+        // client can rebuild a byte-exact .pcap remotely. Only set in pcap mode
+        // when include_packets is true (unset for conntrack / metrics-only).
+        bytes raw_frame = 14;
+        optional double frame_timestamp = 15;
+    }
+
+    // Degraded-mode / lifecycle message (never fabricated data).
+    message Notice {
+        string message = 1;
+        bool degraded = 2;
+    }
+
+    oneof payload {
+        Session session = 10;
+        Metrics metrics = 11;
+        Packet packet = 12;
+        Notice notice = 13;
+    }
+}
+
 // -----------------------
 // GATEWAY SERVICE DEFINITION
 // -----------------------
@@ -368,4 +448,5 @@ service Gateway {
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash -> Service
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage | bytes -> bytes
+    rpc Observe(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ObserveRequest(instance_id/token) -> stream ObserveEvent
 }

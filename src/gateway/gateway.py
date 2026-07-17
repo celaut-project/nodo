@@ -3,6 +3,7 @@ from bee_rpc import client as bee
 from protos import celaut_pb2_grpc, celaut_pb2
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
+from src.gateway.iterables.observe_iterable import ObserveIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_address
 from src.tunneling.rpc_tunnel import service_tunnel
@@ -190,6 +191,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 ),
                 indices=celaut_pb2.Metrics,
         )
+
+    def Observe(self, request_iterator, context, **kwargs):
+        yield from ObserveIterable(request_iterator, context)
 
     def SignPublicKey(self, request_iterator, context, **kwargs):
         try:
