@@ -155,6 +155,28 @@ def short_id(instance_id: Optional[str], length: int = 8) -> str:
     return str(instance_id)[:length]
 
 
+def format_gas(gas: Any) -> str:
+    """Render an instance's gas balance the way ``nodo instances`` does.
+
+    Gas is stored in the catalogue as a numeric string (celaut ``GasAmount``).
+    We reuse the node's smart-scientific formatter (:func:`ssformat`) when it is
+    importable and degrade gracefully otherwise, so this stays unit-testable
+    without the nodo runtime.
+    """
+    if gas is None or gas == "":
+        return "N/A"
+    try:
+        gas_int = int(gas)
+    except (ValueError, TypeError):
+        return "Invalid Gas Data"
+    try:
+        from src.utils.logger import ssformat
+
+        return ssformat(gas_int)
+    except Exception:
+        return str(gas_int)
+
+
 def compute_cpu_percent(
     prev_usage_usec: Optional[int],
     cur_usage_usec: Optional[int],
@@ -829,15 +851,15 @@ def _local_instances_table_exists(conn: sqlite3.Connection) -> bool:
 def resolve_instance(instance_id: str) -> Optional[Dict[str, Any]]:
     """Find a local instance by exact id or unique id-prefix.
 
-    Returns the row (id, ip, father_id, service_id, virtualizer) or ``None``.
-    Raises ``ValueError`` when a prefix is ambiguous.
+    Returns the row (id, ip, father_id, service_id, virtualizer, name, gas) or
+    ``None``. Raises ``ValueError`` when a prefix is ambiguous.
     """
     conn = _connect()
     try:
         if not _local_instances_table_exists(conn):
             return None
         cur = conn.execute(
-            "SELECT id, ip, father_id, service_id, virtualizer, name "
+            "SELECT id, ip, father_id, service_id, virtualizer, name, gas "
             "FROM local_instances WHERE id = ?",
             (instance_id,),
         )
@@ -868,6 +890,27 @@ def build_instance_index() -> Dict[str, Dict[str, str]]:
     finally:
         conn.close()
     return index
+
+
+def read_instance_gas(instance_id: str) -> Optional[str]:
+    """Best-effort read of an instance's current gas balance from the catalogue.
+
+    Returns the raw numeric-string value (or ``None`` when unknown) so the live
+    panel can reflect gas being spent while the instance runs. Never raises.
+    """
+    conn = _connect()
+    try:
+        if not _local_instances_table_exists(conn):
+            return None
+        cur = conn.execute(
+            "SELECT gas FROM local_instances WHERE id = ?", (instance_id,)
+        )
+        row = cur.fetchone()
+        return row["gas"] if row is not None else None
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
 
 
 def _resolve_service_tag(service_id: str) -> Optional[str]:
@@ -1007,6 +1050,7 @@ def _clear_screen() -> None:
 def _render(
     header: str,
     metrics: SessionMetrics,
+    gas: str,
     events: List[str],
     save_dir: Optional[str],
     net_notice: Optional[str],
@@ -1021,6 +1065,9 @@ def _render(
     lines.append("Memory")
     lines.append(f" Current: {bytes_to_human(metrics.mem_current)}")
     lines.append(f" Peak:    {bytes_to_human(metrics.mem_peak)}")
+    lines.append("")
+    lines.append("Gas")
+    lines.append(f" Balance: {gas}")
     lines.append("")
     if save_dir:
         lines.append(f"\033[31m●\033[0m Recording to {save_dir}/")
@@ -1100,6 +1147,7 @@ def observe_event_stream(
     service_id = instance.get("service_id") or ""
     service_tag = _resolve_service_tag(service_id=service_id) or ""
     instance_name = instance.get("name")
+    gas_display = format_gas(instance.get("gas"))
 
     short_id = f"{full_id[:3]}..." if len(full_id) > 3 else full_id
     header = f"{instance_name} · {short_id}" if instance_name else short_id
@@ -1212,6 +1260,7 @@ def observe_event_stream(
         "father_id": father_id,
         "vm_ip": vm_ip,
         "tag": service_tag,
+        "gas_display": gas_display,
         "header": header,
         "capture_mode": capture_mode,
         "degraded_reason": degraded_reason,
@@ -1290,7 +1339,12 @@ def observe_event_stream(
                 if conntrack_notice:
                     yield _notice(conntrack_notice, degraded=True)
 
-            yield {"kind": "metrics", **metrics_record(metrics, alive=True)}
+            # Re-read gas each tick so the panel reflects it being spent live.
+            yield {
+                "kind": "metrics",
+                "gas_display": format_gas(read_instance_gas(full_id)),
+                **metrics_record(metrics, alive=True),
+            }
     finally:
         if pcap_sock is not None:
             try:
@@ -1326,10 +1380,12 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
     capture_mode = "conntrack"
     base_notice: Optional[str] = None
     full_id = instance_id
+    last_gas = {"v": "N/A"}
 
     def _do_render(notice: Optional[str]) -> None:
         flow_lines = [format_flow_line(r) for r in flow_table.active_rows()]
-        _render(header, metrics, flow_lines, save_dir, notice, capture_mode)
+        _render(header, metrics, last_gas["v"], flow_lines, save_dir, notice,
+                capture_mode)
         last_render["t"] = time.monotonic()
 
     try:
@@ -1344,6 +1400,7 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
                 capture_mode = event["capture_mode"]
                 base_notice = event.get("degraded_reason")
                 full_id = event["instance_id"]
+                last_gas["v"] = event.get("gas_display", last_gas["v"])
                 if save_path:
                     save_dir = build_save_dir(save_path, event.get("tag"), full_id)
                     os.makedirs(save_dir, exist_ok=True)
@@ -1365,6 +1422,7 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
                 metrics.cpu_peak = event["cpu_peak_percent"]
                 metrics.mem_current = event["mem_bytes"]
                 metrics.mem_peak = event["mem_peak_bytes"]
+                last_gas["v"] = event.get("gas_display", last_gas["v"])
                 if metrics_writer:
                     metrics_writer.write(metrics_record(metrics, alive=event["alive"]))
                 _do_render(base_notice)
