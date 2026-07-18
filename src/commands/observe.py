@@ -1260,6 +1260,7 @@ def observe_event_stream(
         "father_id": father_id,
         "vm_ip": vm_ip,
         "tag": service_tag,
+        "gas": instance.get("gas"),
         "gas_display": gas_display,
         "header": header,
         "capture_mode": capture_mode,
@@ -1340,9 +1341,11 @@ def observe_event_stream(
                     yield _notice(conntrack_notice, degraded=True)
 
             # Re-read gas each tick so the panel reflects it being spent live.
+            gas_raw = read_instance_gas(full_id)
             yield {
                 "kind": "metrics",
-                "gas_display": format_gas(read_instance_gas(full_id)),
+                "gas": gas_raw,
+                "gas_display": format_gas(gas_raw),
                 **metrics_record(metrics, alive=True),
             }
     finally:

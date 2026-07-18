@@ -26,6 +26,7 @@ def _event_to_proto(event: Dict[str, Any]) -> celaut_pb2.ObserveEvent:
             proto.session.link_type = event["link_type"]
         if event.get("snaplen") is not None:
             proto.session.snaplen = event["snaplen"]
+        proto.session.gas = event.get("gas") or ""
 
     elif kind == "metrics":
         m = proto.metrics
@@ -50,6 +51,8 @@ def _event_to_proto(event: Dict[str, Any]) -> celaut_pb2.ObserveEvent:
             m.net_rx_packets = event["net_rx_packets"]
         if event.get("net_tx_packets") is not None:
             m.net_tx_packets = event["net_tx_packets"]
+        if event.get("gas") is not None:
+            m.gas = event["gas"]
 
     elif kind == "packet":
         record = event.get("record", {})
