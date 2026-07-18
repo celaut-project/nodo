@@ -58,7 +58,7 @@ def _get_type_nft_boxes(node_url: str, type_nft_ids: List[str]) -> list:
 
     data_inputs = []
     for token_id in unique_ids:
-        url = f"{node_url}/api/v1/boxes/byTokenId/{token_id}"
+        url = f"{node_url}/blockchain/box/byTokenId/{token_id}"
         response = requests.get(url, timeout=15)
         if response.status_code != 200:
             raise ValueError(f"Could not fetch Type NFT {token_id}: HTTP {response.status_code}")

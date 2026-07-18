@@ -79,30 +79,6 @@ def __get_sender_addr(mnemonic: str):
     sender_address = ergo.getSenderAddress(index=0, wallet_mnemonic=_m[1], wallet_password=_m[2])
     return sender_address
 
-def __get_input_boxes(amount: int) -> List[dict]:
-    ergo = __init_ergo()
-    explorer_api = ergo.get_api_url()
-    sender_address = __get_sender_addr(WALLET_MNEMONIC())
-
-    url = f"{explorer_api}/api/v1/boxes/unspent/unconfirmed/byAddress/{sender_address}"
-    response = requests.get(url)
-
-    if response.status_code != 200:
-        LOGGER(f"Error fetching UTXOs: {response.status_code} - {response.text}")
-        return False
-
-    # Parse the response from the API
-    utxos = response.json()
-    inputs = []
-    for box_dict in utxos:
-        if "additionalRegisters" in box_dict and "R4" in box_dict["additionalRegisters"]:
-            r4_value = box_dict["additionalRegisters"]["R4"]["renderedValue"]
-            decoded_r4 = bytes.fromhex(r4_value).decode("utf-8")
-            if decoded_r4 in []: # ... in deposit tokens (from db).
-                continue
-        inputs.append(box_dict)  # TODO Should convert dict -> InputBox.
-    return inputs
-
 def __balance_total(address) -> Optional[dict]:
     # Initialize ErgoAppKit and fetch unspent UTXOs for the contract address
     ergo = __init_ergo()
