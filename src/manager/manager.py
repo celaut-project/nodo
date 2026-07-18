@@ -57,12 +57,8 @@ sc = SQLConnection()
 _INSTANCE_NAME_RANDOM = secrets.SystemRandom()
 
 
-def resolve_local_instance_reference(reference: str) -> Optional[str]:
-    return sc.resolve_local_instance_reference(reference=reference)
-
-
 def resolve_instance_token(reference: str, *, allow_uri_fallback: bool = False) -> Optional[str]:
-    resolved = resolve_local_instance_reference(reference=reference)
+    resolved = sc.resolve_local_instance_reference(reference=reference)
     if resolved:
         return resolved
     if allow_uri_fallback:

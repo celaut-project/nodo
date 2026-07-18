@@ -1,5 +1,6 @@
 import sys, os, subprocess
 from bee_rpc.utils import modify_env
+from src.manager.manager import resolve_instance_token
 from src.utils import logger as log
 import src.manager.resources as iobd
 from src.utils.config import ConfigManager
@@ -451,7 +452,14 @@ if __name__ == '__main__':
                     print("Usage: nodo observe <instance id> [--save <path>]", flush=True)
                     sys.exit(1)
 
-                observe(instance_id=args[0], save_path=save_path)
+                instance = args[0]
+                instance_id = resolve_instance_token(reference=instance, allow_uri_fallback=True)
+
+                if not instance_id:
+                    print(f"Error: Could not resolve instance reference '{instance}' to a valid instance ID.", flush=True)
+                    sys.exit(1)
+
+                observe(instance_id=instance_id, save_path=save_path)
                 
             case "increase_gas":
                 from src.commands.modify_gas import modify_gas

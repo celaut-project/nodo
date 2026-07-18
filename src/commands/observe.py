@@ -837,24 +837,11 @@ def resolve_instance(instance_id: str) -> Optional[Dict[str, Any]]:
         if not _local_instances_table_exists(conn):
             return None
         cur = conn.execute(
-            "SELECT id, ip, father_id, service_id, virtualizer "
+            "SELECT id, ip, father_id, service_id, virtualizer, name "
             "FROM local_instances WHERE id = ?",
             (instance_id,),
         )
         row = cur.fetchone()
-        if row is None:
-            cur = conn.execute(
-                "SELECT id, ip, father_id, service_id, virtualizer "
-                "FROM local_instances WHERE id LIKE ?",
-                (instance_id + "%",),
-            )
-            matches = cur.fetchall()
-            if len(matches) > 1:
-                raise ValueError(
-                    f"Ambiguous instance id '{instance_id}' matches "
-                    f"{len(matches)} instances; provide more characters."
-                )
-            row = matches[0] if matches else None
         return dict(row) if row is not None else None
     finally:
         conn.close()
@@ -883,7 +870,7 @@ def build_instance_index() -> Dict[str, Dict[str, str]]:
     return index
 
 
-def resolve_tag(service_id: str) -> Optional[str]:
+def _resolve_service_tag(service_id: str) -> Optional[str]:
     """Resolve a service id to its first metadata tag (best-effort)."""
     if not service_id:
         return None
@@ -1110,19 +1097,30 @@ def observe_event_stream(
     full_id = instance["id"]
     father_id = instance.get("father_id") or ""
     vm_ip = instance.get("ip") or ""
-    tag = resolve_tag(instance.get("service_id") or "")
-    header = f"{full_id}" + (f" [{tag}]" if tag else "")
+    service_id = instance.get("service_id") or ""
+    service_tag = _resolve_service_tag(service_id=service_id) or ""
+    instance_name = instance.get("name")
+
+    short_id = f"{full_id[:3]}..." if len(full_id) > 3 else full_id
+    header = f"{instance_name} · {short_id}" if instance_name else short_id
+    header += f"\nInstance ID: {full_id}"
+
+    if service_tag:
+        header += f"\nService: {service_tag} · {service_id}"
+
+    if father_id:
+        header += f"\nParent ID: {father_id}"
 
     # Validate it is actually running before attaching.
     try:
         first_sample = _sample_resources(full_id)
     except Exception as exc:
         raise ObserveInstanceError(
-            f"Unable to attach to instance {short_id(full_id)}: {exc}"
+            f"Unable to attach to instance {short_id}: {exc}"
         )
     if not first_sample.get("alive"):
         raise ObserveInstanceError(
-            f"Instance {short_id(full_id)} is not running (no live process). "
+            f"Instance {short_id} is not running (no live process). "
             "Nothing to observe."
         )
 
@@ -1155,10 +1153,12 @@ def observe_event_stream(
         cached = peer_cache.get(peer_ip)
         if cached is None:
             peer = classify_peer(peer_ip, full_id, father_id, instance_index)
+            peer_service_id = peer.get('service_id', '')
+            short_peer_service_id = peer_service_id[:3] if len(peer_service_id) > 3 else peer_service_id
             peer_tag = (
-                resolve_tag(peer.get("service_id", ""))
-                if peer.get("kind") == "instance" else None
-            )
+                (_resolve_service_tag(peer_service_id) or "") + (" · " if short_peer_service_id else "")
+                if peer.get("kind") == "instance" else ""
+            ) + short_peer_service_id
             cached = (peer, peer_tag)
             peer_cache[peer_ip] = cached
         peer, peer_tag = cached
@@ -1211,7 +1211,7 @@ def observe_event_stream(
         "instance_id": full_id,
         "father_id": father_id,
         "vm_ip": vm_ip,
-        "tag": tag,
+        "tag": service_tag,
         "header": header,
         "capture_mode": capture_mode,
         "degraded_reason": degraded_reason,
