@@ -1,6 +1,6 @@
 import hashlib
 from binascii import hexlify
-from typing import List, Optional, Tuple
+from typing import Iterator, List
 import requests
 
 from src.utils.config import ConfigManager
@@ -104,40 +104,42 @@ def owner_script_hash_hex(address) -> str:
     return hashlib.blake2b(proposition_bytes, digest_size=32).hexdigest()
 
 
-def compile_contract_template(ergo, script: str) -> Tuple[str, str]:
-    """
-    Compile an ErgoScript contract and return (mainnet P2S address, ergoTree template hash).
-    The template hash is what the Explorer's box-search endpoint filters on.
-    """
+def get_contract_address(ergo, script: str) -> str:
+    """Compile an ErgoScript contract and return its mainnet P2S address."""
     jpype = require_java_module("jpype", feature="Ergo reputation")
     org_appkit = jpype.JPackage("org").ergoplatform.appkit
     ergo_tree = ergo._ctx.compileContract(org_appkit.ConstantsBuilder.empty(), script).getErgoTree()
-
-    template = ergo_tree.template()
-    template_array = template.toArray() if hasattr(template, "toArray") else template
-    template_bytes = bytes((byte + 256) % 256 for byte in template_array)
-    template_hash = hashlib.blake2b(template_bytes, digest_size=32).hexdigest()
-
-    address = str(org_appkit.Address.fromErgoTree(ergo_tree, org_appkit.NetworkType.MAINNET).toString())
-    return address, template_hash
+    return str(org_appkit.Address.fromErgoTree(ergo_tree, org_appkit.NetworkType.MAINNET).toString())
 
 
-def search_unspent_boxes(ergo, template_hash: str, registers: Optional[dict] = None, limit: int = 20) -> List[dict]:
+def iter_unspent_boxes_by_address(ergo, address: str, page_size: int = 50, max_boxes: int = 2000) -> Iterator[dict]:
     """
-    Look up unspent boxes for a contract (by ErgoTree template hash) and, crucially, filter
-    by register values *server-side* via the Explorer `POST /api/v1/boxes/unspent/search`
-    endpoint — so only the matching boxes are returned instead of every box at the address.
+    Yield unspent boxes at a single contract address via the Explorer
+    `GET /api/v1/boxes/unspent/byAddress/{address}`, paginated (same access pattern as
+    payment_system.payment_process_validator).
+
+    This is scoped to one contract, not the whole chain; callers filter client-side and
+    should break as soon as they find what they need so the common case fetches one page.
     """
     api_url = str(ergo.get_api_url()).rstrip("/")
-    body: dict = {"ergoTreeTemplateHash": template_hash}
-    if registers:
-        body["registers"] = registers
+    offset = 0
+    fetched = 0
+    while fetched < max_boxes:
+        url = f"{api_url}/api/v1/boxes/unspent/byAddress/{address}?limit={page_size}&offset={offset}"
+        response = requests.get(url, timeout=30)
+        if response.status_code != 200:
+            raise ValueError(f"Box lookup failed: HTTP {response.status_code} - {response.text[:200]}")
 
-    url = f"{api_url}/api/v1/boxes/unspent/search?limit={limit}&offset=0"
-    response = requests.post(url, json=body, timeout=30)
-    if response.status_code != 200:
-        raise ValueError(f"Box search failed: HTTP {response.status_code} - {response.text[:200]}")
+        items = response.json().get("items", [])
+        if not items:
+            break
+        for box in items:
+            yield box
+            fetched += 1
+        if len(items) < page_size:
+            break
+        offset += page_size
 
-    payload = response.json()
-    return payload.get("items", []) if isinstance(payload, dict) else (payload or [])
+    if fetched >= max_boxes:
+        LOGGER(f"Reached the {max_boxes}-box cap while scanning {address} for a reputation proof.")
 
