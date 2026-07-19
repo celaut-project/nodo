@@ -901,6 +901,17 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
         if imported_service_id:
             print(f"Service imported successfully: {imported_service_id}", flush=True)
 
+        else:
+            answer = input(
+                f"Service import failed. Delete the exported file '{output_path}'? [Y/n]: "
+            ).strip().lower()
+
+            if answer in ("", "y", "yes"):
+                os.remove(output_path)
+                print("Exported file deleted.")
+            else:
+                print(f"Exported file kept at: {output_path}")
+
     if not settings["keep_artifacts"] and output_path.exists():
         output_path.unlink()
         print(f"Removed downloaded artifact: {output_path}", flush=True)
