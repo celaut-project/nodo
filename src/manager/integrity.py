@@ -3,9 +3,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from bee_rpc.client import read_multiblock_directory
-
 from protos import celaut_pb2
+from src.utils.service_content import read_service_content
 from src.commands.__by_tag import get_id
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_stream
@@ -46,18 +45,8 @@ class IntegrityReport:
         }
 
 
-def _iter_service_content(service_path: Path):
-    if service_path.is_file():
-        with service_path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                yield chunk
-    else:
-        for chunk in read_multiblock_directory(directory=str(service_path)):
-            yield chunk
-
-
 def _compute_service_hash(service_path: Path, hash_spec) -> str:
-    return hash_stream(_iter_service_content(service_path), hash_spec).hex()
+    return hash_stream(read_service_content(service_path), hash_spec).hex()
 
 
 def _read_metadata(metadata_path: Path) -> Optional[celaut_pb2.Metadata]:
