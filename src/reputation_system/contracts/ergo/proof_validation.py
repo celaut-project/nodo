@@ -6,11 +6,20 @@ from typing import List, Optional
 from protos import celaut_pb2 as celaut
 
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign
-from src.reputation_system.contracts.ergo.utils import get_public_key
+from src.reputation_system.contracts.ergo.utils import (
+    get_contract_address,
+    get_public_key,
+    iter_unspent_boxes_by_address,
+    owner_script_hash_hex,
+)
 from src.reputation_system.envs import CONTRACT, ergo_ledger
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
-from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
+from src.utils.java_dependency import (
+    JavaDependencyMissing,
+    ensure_ergpy_jvm,
+    require_java_module,
+)
 from src.utils.logger import LOGGER as logger
 
 
@@ -208,3 +217,110 @@ def validate_reputation_proof_ownership() -> bool:
     except Exception as e:
         logger(f"Error validating reputation proof ownership: {e}")
         return False
+
+
+def find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
+    """
+    Look up an on-chain reputation proof owned by the given wallet.
+
+    Scans the unspent boxes of the reputation contract (a single address, paginated) and
+    returns the proof (token) id of the first box whose R7 equals the wallet's owner hash
+    — breaking as soon as it matches. Returns None when the wallet owns no proof.
+    """
+    node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
+    if not node_url:
+        raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
+
+    ensure_ergpy_jvm(feature="Ergo reputation")
+    appkit = require_java_module("ergpy.appkit", feature="Ergo reputation")
+    ergo = appkit.ErgoAppKit(node_url=node_url)
+
+    owner_hash = owner_script_hash_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
+    contract_address = get_contract_address(ergo, CONTRACT)
+
+    for box in iter_unspent_boxes_by_address(ergo, contract_address):
+        # R7 stores blake2b256(propositionBytes) of the box owner (Coll[Byte], "0e20" + hash).
+        if _extract_r7_hash_hex(str(_extract_register_value(box, "R7") or "")) != owner_hash:
+            continue
+
+        assets = box.get("assets") or []
+        if assets and assets[0].get("tokenId"):
+            return assets[0]["tokenId"]
+
+    return None
+
+
+def sync_reputation_proof_ownership() -> bool:
+    """
+    Reconcile the locally configured reputation proof with the wallet mnemonic and report
+    every step to the user. Wraps the (unmodified) validate_reputation_proof_ownership:
+
+    1. Validate the currently configured proof.
+    2. If it is invalid and a proof id is configured, remove it from the config.
+    3. If a wallet mnemonic is configured, look up an on-chain reputation proof owned by
+       that wallet and, if one exists, store its id in the config.
+    4. Print every step for the user.
+
+    Returns True when the node ends up in a coherent state (valid proof, or no proof and
+    none discoverable); False when an on-chain lookup failed.
+    """
+    config = ConfigManager()
+    mnemonic_phrase = config.get("ledgers.ergo.WALLET_MNEMONIC") or config.get("WALLET_MNEMONIC")
+    proof_id = config.get("reputation.REPUTATION_PROOF_ID") or config.get("REPUTATION_PROOF_ID")
+
+    # 1. Validate current state via the shared function (kept untouched).
+    is_valid = validate_reputation_proof_ownership()
+
+    # 2. Drop a configured proof that does not belong to this wallet.
+    if proof_id:
+        if is_valid:
+            print(f"Reputation proof {proof_id} is valid for the configured wallet.", flush=True)
+        else:
+            _msg = (
+                f"Reputation proof {proof_id} is not owned by the configured wallet; "
+                "removing it from the node configuration."
+            )
+            print(_msg, flush=True)
+            logger(_msg)
+            config.set("reputation.REPUTATION_PROOF_ID", "")
+            proof_id = None
+    else:
+        print("No reputation proof id is currently configured.", flush=True)
+
+    # 3. With a wallet but no (valid) proof id, try to discover one on-chain.
+    if not mnemonic_phrase:
+        print(
+            "No wallet mnemonic is configured; skipping the on-chain reputation proof lookup.",
+            flush=True,
+        )
+        return is_valid
+
+    if proof_id:
+        # Already have a valid, configured proof — nothing to discover.
+        return True
+
+    try:
+        discovered_proof_id = find_reputation_proof_id_for_owner(mnemonic_phrase)
+    except JavaDependencyMissing:
+        raise
+    except Exception as e:
+        _msg = f"Could not look up a reputation proof for the configured wallet: {e}"
+        print(_msg, flush=True)
+        logger(_msg)
+        return False
+
+    if discovered_proof_id:
+        config.set("reputation.REPUTATION_PROOF_ID", discovered_proof_id)
+        _msg = (
+            f"Found reputation proof {discovered_proof_id} owned by the configured wallet; "
+            "saved it to the node configuration."
+        )
+        print(_msg, flush=True)
+        logger(_msg)
+    else:
+        print(
+            "No reputation proof associated with the configured wallet was found on-chain.",
+            flush=True,
+        )
+
+    return True

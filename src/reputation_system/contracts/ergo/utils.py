@@ -1,5 +1,6 @@
+import hashlib
 from binascii import hexlify
-from typing import List
+from typing import Iterator, List
 import requests
 
 from src.utils.config import ConfigManager
@@ -88,4 +89,57 @@ def get_boxes_by_token_ids(ergo, node_url: str, token_ids: List[str]) -> list:
     except Exception as e:
         LOGGER(f"BlockchainContext.getBoxesById failed: {e}")
         raise RuntimeError(f"Failed to fetch boxes by ID via BlockchainContext: {e}")
+
+
+def owner_script_hash_hex(address) -> str:
+    """
+    blake2b256(propositionBytes) of an address' ErgoTree, as hex. This is the value a
+    Reputation Box stores in R7 to identify its owner. Single source of truth reused by
+    the reputation transaction builder and the proof-ownership lookup.
+    """
+    jpype = require_java_module("jpype", feature="Ergo reputation")
+    ergo_tree = address.getErgoAddress().script()
+    serializer = jpype.JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
+    proposition_bytes = bytes((byte + 256) % 256 for byte in serializer.serializeErgoTree(ergo_tree))
+    return hashlib.blake2b(proposition_bytes, digest_size=32).hexdigest()
+
+
+def get_contract_address(ergo, script: str) -> str:
+    """Compile an ErgoScript contract and return its mainnet P2S address."""
+    jpype = require_java_module("jpype", feature="Ergo reputation")
+    org_appkit = jpype.JPackage("org").ergoplatform.appkit
+    ergo_tree = ergo._ctx.compileContract(org_appkit.ConstantsBuilder.empty(), script).getErgoTree()
+    return str(org_appkit.Address.fromErgoTree(ergo_tree, org_appkit.NetworkType.MAINNET).toString())
+
+
+def iter_unspent_boxes_by_address(ergo, address: str, page_size: int = 50, max_boxes: int = 2000) -> Iterator[dict]:
+    """
+    Yield unspent boxes at a single contract address via the Explorer
+    `GET /api/v1/boxes/unspent/byAddress/{address}`, paginated (same access pattern as
+    payment_system.payment_process_validator).
+
+    This is scoped to one contract, not the whole chain; callers filter client-side and
+    should break as soon as they find what they need so the common case fetches one page.
+    """
+    api_url = str(ergo.get_api_url()).rstrip("/")
+    offset = 0
+    fetched = 0
+    while fetched < max_boxes:
+        url = f"{api_url}/api/v1/boxes/unspent/byAddress/{address}?limit={page_size}&offset={offset}"
+        response = requests.get(url, timeout=30)
+        if response.status_code != 200:
+            raise ValueError(f"Box lookup failed: HTTP {response.status_code} - {response.text[:200]}")
+
+        items = response.json().get("items", [])
+        if not items:
+            break
+        for box in items:
+            yield box
+            fetched += 1
+        if len(items) < page_size:
+            break
+        offset += page_size
+
+    if fetched >= max_boxes:
+        LOGGER(f"Reached the {max_boxes}-box cap while scanning {address} for a reputation proof.")
 
