@@ -7,10 +7,10 @@ from protos import celaut_pb2 as celaut
 
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign
 from src.reputation_system.contracts.ergo.utils import (
-    compile_contract_template,
+    get_contract_address,
     get_public_key,
+    iter_unspent_boxes_by_address,
     owner_script_hash_hex,
-    search_unspent_boxes,
 )
 from src.reputation_system.envs import CONTRACT, ergo_ledger
 from src.utils.config import ConfigManager
@@ -222,9 +222,9 @@ def find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     """
     Look up an on-chain reputation proof owned by the given wallet.
 
-    Queries the reputation contract's unspent boxes filtered *server-side* by R7 (the owner
-    hash), so only the wallet's own proof boxes are returned — never the whole set of
-    reputation boxes on the chain. Returns the associated proof (token) id, or None.
+    Scans the unspent boxes of the reputation contract (a single address, paginated) and
+    returns the proof (token) id of the first box whose R7 equals the wallet's owner hash
+    — breaking as soon as it matches. Returns None when the wallet owns no proof.
     """
     node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
     if not node_url:
@@ -235,11 +235,13 @@ def find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     ergo = appkit.ErgoAppKit(node_url=node_url)
 
     owner_hash = owner_script_hash_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
-    _, template_hash = compile_contract_template(ergo, CONTRACT)
+    contract_address = get_contract_address(ergo, CONTRACT)
 
-    # R7 holds the owner hash as a serialized Coll[Byte] of 32 bytes: "0e20" + 32-byte hash.
-    boxes = search_unspent_boxes(ergo, template_hash, registers={"R7": f"0e20{owner_hash}"})
-    for box in boxes:
+    for box in iter_unspent_boxes_by_address(ergo, contract_address):
+        # R7 stores blake2b256(propositionBytes) of the box owner (Coll[Byte], "0e20" + hash).
+        if _extract_r7_hash_hex(str(_extract_register_value(box, "R7") or "")) != owner_hash:
+            continue
+
         assets = box.get("assets") or []
         if assets and assets[0].get("tokenId"):
             return assets[0]["tokenId"]
