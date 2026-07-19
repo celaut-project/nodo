@@ -286,13 +286,6 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     output_boxes = ergo.buildOutBox(receiver_wallet_addresses=[sender_address.toString()], amount_list=[value_in_ergs])
     outputs.extend(output_boxes)
 
-    # ONLY FOR VERIFICATION.
-    ctx = ergo._ctx
-    methods = [m.getName() for m in ctx.getClass().getMethods()]
-    box_methods = [m for m in methods if "Box" in m or "box" in m]
-    LOGGER(f"BlockchainContext box methods: {box_methods}")
-    # END OF ONLY FOR VERIFICATION.
-
     # Resolve and attach DPG type boxes as dataInputs.
     type_nft_box_ids = _get_type_nft_box_ids(
         node_url=node_url,
