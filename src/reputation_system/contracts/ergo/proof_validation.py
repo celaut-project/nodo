@@ -6,6 +6,7 @@ import requests
 from protos import celaut_pb2 as celaut
 
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign
+from src.reputation_system.contracts.ergo.utils import get_public_key
 from src.reputation_system.envs import CONTRACT, ergo_ledger
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
@@ -49,6 +50,7 @@ def _extract_register_value(box: dict, register: str) -> Optional[str]:
 
 
 def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
+    # TODO Hacer igual a _get_type_nft_box_ids y _get_boxes_by_id_from_context de transaction.py
     node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
     if not node_url:
         raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
@@ -91,14 +93,17 @@ def _validate_box_structure(box: dict) -> bool:
 
     return True
 
-
+"""
+    Valida si el Perfil de Reputación es soportado por el nodo y si existe en la red. 
+    Utilizado para validar Perfil de un par antes de almacenarlo.
+"""
 def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> bool:
     _ = peer_id  # retained to keep public signature stable.
 
     compatibility = (
         contract_ledger.ledger.formal == ergo_ledger.formal
         and get_script(contract_ledger) == CONTRACT.encode("utf-8")
-    )
+    )  # TODO Could check at Reputation System to consider tag-prose-formal equivalences.
 
     if not compatibility:
         logger(
@@ -130,11 +135,18 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
     return True
 
 
+"""
+    Firma un mensaje con WALLET_MNEMONIC para demostrarle a un tercero autenticidad.
+"""
 def sign_message(public_key, message) -> str | None:
     mnemonic_phrase = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC") or ConfigManager().get("WALLET_MNEMONIC")
     if not mnemonic_phrase:
         logger("Missing wallet mnemonic configuration")
         return None
+    
+    address = get_public_key(mnemonic_phrase=mnemonic_phrase)
+    if address.toString() is not public_key:
+        logger(f"Public_key {public_key} not mine.")
 
     # Keep API compatibility: sign request if caller-provided public key is non-empty.
     if not public_key:
@@ -146,6 +158,9 @@ def sign_message(public_key, message) -> str | None:
     return signed_msg
 
 
+"""
+    Verifica que el Perfil de Reputación y la cartera almacenados en la configuración están relacionados (el perfil pertenece a esa cartera).
+"""
 def validate_reputation_proof_ownership() -> bool:
     mnemonic_phrase = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC") or ConfigManager().get("WALLET_MNEMONIC")
     proof_id = ConfigManager().get("reputation.REPUTATION_PROOF_ID") or ConfigManager().get("REPUTATION_PROOF_ID")
@@ -158,12 +173,10 @@ def validate_reputation_proof_ownership() -> bool:
         return False
 
     try:
-        from src.reputation_system.contracts.ergo.utils import get_public_key
-
+        # Obtiene expected_owner_hash de WALLET_MNEMONIC
         address = get_public_key(mnemonic_phrase=mnemonic_phrase)
         ergo_tree = address.getErgoAddress().script()
         jpype = require_java_module("jpype", feature="Ergo reputation")
-
         serializer = jpype.JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
         proposition_bytes = bytes((byte + 256) % 256 for byte in serializer.serializeErgoTree(ergo_tree))
         expected_owner_hash = hashlib.blake2b(proposition_bytes, digest_size=32).hexdigest()
@@ -173,12 +186,21 @@ def validate_reputation_proof_ownership() -> bool:
             logger(f"No boxes found for proof id {proof_id}")
             return False
 
+        # Context: R7 of a Reputation Box is R7 	Coll[Byte] 	blake2b256(propositionBytes) of the owner script. 
+        # (https://github.com/reputation-systems/reputation-system#22-reputation-token-contract-reputation-box)
         box_hashes = {
             _extract_r7_hash_hex(str(_extract_register_value(box, "R7") or ""))
             for box in boxes
         }
 
-        valid = box_hashes == {expected_owner_hash}
+        # Comprobamos si el blake2b256(propositionBytes) de WALLET_MNEMONIC es igual al almacenado en R7 del reputation profile
+        # 
+        # ¡Si alguno de todos los boxes de ese perfil difiere, se considera invalido! 
+        # Esta política podría cambiar:
+        # 1. Si expected owner hash se encuentra en cualquier R7, se considera valido.
+        # 2. Únicamente se mira la caja donde R5 === profile token id.
+        # 
+        valid: bool = box_hashes == {expected_owner_hash}
         if not valid:
             logger(
                 f"Validation failed: expected owner hash {expected_owner_hash}, "
