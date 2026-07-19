@@ -369,6 +369,7 @@ message ObserveEvent {
         string degraded_reason = 4;  // empty when full AF_PACKET capture is live.
         int32 link_type = 5;         // libpcap LINKTYPE for the global header (1=ethernet, 101=raw IP).
         uint32 snaplen = 6;          // capture snap length for the pcap global header.
+        string gas = 7;              // instance gas balance at attach (celaut GasAmount numeric string); "" when unknown.
     }
 
     // One CPU+memory sample (the fields of observe.metrics_record).
@@ -389,6 +390,9 @@ message ObserveEvent {
         optional uint64 net_tx_bytes = 9;
         optional uint64 net_rx_packets = 10;
         optional uint64 net_tx_packets = 11;
+        // Instance gas balance at this sample (celaut GasAmount numeric string),
+        // re-read each tick so a consumer sees it spent live. "" when unknown.
+        string gas = 12;
     }
 
     // One parsed connection event (the fields of observe.serialize_event).
