@@ -367,6 +367,16 @@ These are intended for development or advanced maintenance environments:
   **Example:**  
   `nodo submit_reputation`
 
+- **sync_reputation_proof**  
+  Reconciles the locally configured reputation proof with the wallet mnemonic and reports
+  every step. It (1) validates the currently configured proof, (2) removes it from the
+  config if it is not owned by the configured wallet, (3) if a mnemonic is configured,
+  looks up an on-chain reputation proof owned by that wallet and stores its id in the
+  config when one exists. This runs automatically after `nodo config`, so a freshly set
+  mnemonic immediately picks up its associated reputation proof (if any).  
+  **Example:**  
+  `nodo sync_reputation_proof`
+
 - **refresh_ergo_nodes**  
   Refreshes the Ergo nodes list and selects one as a provider.  
   **Example:**  
