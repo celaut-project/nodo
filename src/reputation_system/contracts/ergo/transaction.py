@@ -80,6 +80,28 @@ def _explorer_box_to_input_box(box_payload: dict):
     output_info_cls = org.ergoplatform.explorer.client.model.OutputInfo
     input_box_impl_cls = org.ergoplatform.appkit.impl.InputBoxImpl
     gson = org.ergoplatform.restapi.client.JSON.createGson().create()
+    
+    # FIX: Ensure additionalRegisters is properly formatted
+    # The explorer API may return registers as strings or in a different format
+    # than what OutputInfo expects. We need to normalize it.
+    if "additionalRegisters" in box_payload:
+        registers = box_payload["additionalRegisters"]
+        if isinstance(registers, str):
+            # If it's a string, try to parse it or set to empty object
+            box_payload["additionalRegisters"] = {}
+        elif isinstance(registers, dict):
+            # Explorer format has nested objects with "serializedValue", etc.
+            # OutputInfo might expect just the hex values or a different structure
+            # Try extracting just the serialized values, or normalize to expected format
+            normalized = {}
+            for key, value in registers.items():
+                if isinstance(value, dict):
+                    # Keep only if the structure matches, or extract serializedValue
+                    normalized[key] = value.get("serializedValue", value)
+                else:
+                    normalized[key] = value
+            box_payload["additionalRegisters"] = normalized
+    
     output_info = gson.fromJson(json.dumps(box_payload), output_info_cls)
     return input_box_impl_cls(output_info)
 
