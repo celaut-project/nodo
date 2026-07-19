@@ -48,59 +48,6 @@ def _owner_script_hash(sender_address) -> bytes:
     return hashlib.blake2b(proposition_bytes, digest_size=32).digest()
 
 
-def _get_type_nft_box_ids(node_url: str, type_nft_ids: List[str]) -> List[str]:
-    """
-    Fetch type NFT box IDs from the Explorer API.
-    We only need the boxId here — no JSON deserialization of box contents.
-    """
-    if not node_url:
-        raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
-
-    unique_ids = {token_id for token_id in type_nft_ids if token_id}
-    if not unique_ids:
-        raise ValueError("No type NFT IDs were provided to resolve dataInputs")
-
-    box_ids = []
-    for token_id in unique_ids:
-        url = f"{node_url}/blockchain/box/byTokenId/{token_id}"
-        response = requests.get(url, timeout=15)
-        if response.status_code != 200:
-            raise ValueError(f"Could not fetch Type NFT {token_id}: HTTP {response.status_code}")
-
-        payload = response.json()
-        items = payload.get("items") if isinstance(payload, dict) else None
-        if not items:
-            raise ValueError(f"Type NFT {token_id} was not found in explorer response")
-
-        for item in items:
-            box_ids.append(item["boxId"])
-
-    return box_ids
-
-
-def _get_boxes_by_id_from_context(ergo, box_ids: List[str]):
-    """
-    Fetch boxes by ID using AppKit's BlockchainContext.
-    AppKit v5.x exposes: List<InputBox> getBoxesById(String... boxIds)
-    """
-    if not box_ids:
-        return []
-
-    jpype = require_java_module("jpype", feature="Ergo reputation")
-    ctx = ergo._ctx
-
-    # AppKit's getBoxesById takes a Java varargs String...
-    # In JPype we pass a JArray(JString) for reliability.
-    try:
-        jarray_cls = jpype.JArray(jpype.JString)
-        java_box_ids = jarray_cls(box_ids)
-        boxes = ctx.getBoxesById(java_box_ids)
-        return list(boxes)
-    except Exception as e:
-        LOGGER(f"BlockchainContext.getBoxesById failed: {e}")
-        raise RuntimeError(f"Failed to fetch boxes by ID via BlockchainContext: {e}")
-
-
 def _attach_data_inputs(tx_builder, data_inputs) -> None:
     for method_name in ("withDataInputs", "addDataInputs"):
         method = getattr(tx_builder, method_name, None)
@@ -186,7 +133,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     jpype = require_java_module("jpype", feature="Ergo reputation")
     org_appkit = jpype.JPackage("org").ergoplatform.appkit
     from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
-    from src.reputation_system.contracts.ergo.utils import get_public_key
+    from src.reputation_system.contracts.ergo.utils import get_public_key, get_boxes_by_token_ids
 
     ergo = appkit.ErgoAppKit(node_url=node_url)
     fee = DEFAULT_FEE
@@ -287,11 +234,11 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     outputs.extend(output_boxes)
 
     # Resolve and attach DPG type boxes as dataInputs.
-    type_nft_box_ids = _get_type_nft_box_ids(
+    java_data_inputs = get_boxes_by_token_ids(
+        ergo=ergo,
         node_url=node_url,
-        type_nft_ids=[CELAUT_NODE_TYPE_NFT_ID],
+        token_ids=[CELAUT_NODE_TYPE_NFT_ID],
     )
-    java_data_inputs = _get_boxes_by_id_from_context(ergo, type_nft_box_ids)
     unsigned_tx = _build_unsigned_transaction(
         ergo=ergo,
         input_boxes=java_input_boxes,
