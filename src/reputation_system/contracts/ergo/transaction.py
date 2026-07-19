@@ -48,7 +48,11 @@ def _owner_script_hash(sender_address) -> bytes:
     return hashlib.blake2b(proposition_bytes, digest_size=32).digest()
 
 
-def _get_type_nft_boxes(node_url: str, type_nft_ids: List[str]) -> list:
+def _get_type_nft_box_ids(node_url: str, type_nft_ids: List[str]) -> List[str]:
+    """
+    Fetch type NFT box IDs from the Explorer API.
+    We only need the boxId here — no JSON deserialization of box contents.
+    """
     if not node_url:
         raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
 
@@ -56,7 +60,7 @@ def _get_type_nft_boxes(node_url: str, type_nft_ids: List[str]) -> list:
     if not unique_ids:
         raise ValueError("No type NFT IDs were provided to resolve dataInputs")
 
-    data_inputs = []
+    box_ids = []
     for token_id in unique_ids:
         url = f"{node_url}/blockchain/box/byTokenId/{token_id}"
         response = requests.get(url, timeout=15)
@@ -68,42 +72,33 @@ def _get_type_nft_boxes(node_url: str, type_nft_ids: List[str]) -> list:
         if not items:
             raise ValueError(f"Type NFT {token_id} was not found in explorer response")
 
-        data_inputs.append(items[0])
+        for item in items:
+            box_ids.append(item["boxId"])
 
-    return data_inputs
+    return box_ids
 
 
-def _explorer_box_to_input_box(box_payload: dict):
+def _get_boxes_by_id_from_context(ergo, box_ids: List[str]):
+    """
+    Fetch boxes by ID using AppKit's BlockchainContext.
+    AppKit v5.x exposes: List<InputBox> getBoxesById(String... boxIds)
+    """
+    if not box_ids:
+        return []
+
     jpype = require_java_module("jpype", feature="Ergo reputation")
-    org = jpype.JPackage("org")
+    ctx = ergo._ctx
 
-    output_info_cls = org.ergoplatform.explorer.client.model.OutputInfo
-    input_box_impl_cls = org.ergoplatform.appkit.impl.InputBoxImpl
-    gson = org.ergoplatform.restapi.client.JSON.createGson().create()
-    
-    # FIX: Ensure additionalRegisters is properly formatted
-    # The explorer API may return registers as strings or in a different format
-    # than what OutputInfo expects. We need to normalize it.
-    if "additionalRegisters" in box_payload:
-        registers = box_payload["additionalRegisters"]
-        if isinstance(registers, str):
-            # If it's a string, try to parse it or set to empty object
-            box_payload["additionalRegisters"] = {}
-        elif isinstance(registers, dict):
-            # Explorer format has nested objects with "serializedValue", etc.
-            # OutputInfo might expect just the hex values or a different structure
-            # Try extracting just the serialized values, or normalize to expected format
-            normalized = {}
-            for key, value in registers.items():
-                if isinstance(value, dict):
-                    # Keep only if the structure matches, or extract serializedValue
-                    normalized[key] = value.get("serializedValue", value)
-                else:
-                    normalized[key] = value
-            box_payload["additionalRegisters"] = normalized
-    
-    output_info = gson.fromJson(json.dumps(box_payload), output_info_cls)
-    return input_box_impl_cls(output_info)
+    # AppKit's getBoxesById takes a Java varargs String...
+    # In JPype we pass a JArray(JString) for reliability.
+    try:
+        jarray_cls = jpype.JArray(jpype.JString)
+        java_box_ids = jarray_cls(box_ids)
+        boxes = ctx.getBoxesById(java_box_ids)
+        return list(boxes)
+    except Exception as e:
+        LOGGER(f"BlockchainContext.getBoxesById failed: {e}")
+        raise RuntimeError(f"Failed to fetch boxes by ID via BlockchainContext: {e}")
 
 
 def _attach_data_inputs(tx_builder, data_inputs) -> None:
@@ -291,12 +286,19 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     output_boxes = ergo.buildOutBox(receiver_wallet_addresses=[sender_address.toString()], amount_list=[value_in_ergs])
     outputs.extend(output_boxes)
 
+    # ONLY FOR VERIFICATION.
+    ctx = ergo._ctx
+    methods = [m.getName() for m in ctx.getClass().getMethods()]
+    box_methods = [m for m in methods if "Box" in m or "box" in m]
+    LOGGER(f"BlockchainContext box methods: {box_methods}")
+    # END OF ONLY FOR VERIFICATION.
+
     # Resolve and attach DPG type boxes as dataInputs.
-    data_input_payloads = _get_type_nft_boxes(
+    type_nft_box_ids = _get_type_nft_box_ids(
         node_url=node_url,
         type_nft_ids=[CELAUT_NODE_TYPE_NFT_ID],
     )
-    java_data_inputs = [_explorer_box_to_input_box(box_payload) for box_payload in data_input_payloads]
+    java_data_inputs = _get_boxes_by_id_from_context(ergo, type_nft_box_ids)
     unsigned_tx = _build_unsigned_transaction(
         ergo=ergo,
         input_boxes=java_input_boxes,
