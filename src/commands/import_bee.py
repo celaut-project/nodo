@@ -2,10 +2,11 @@ import os
 import shutil
 from typing import Optional
 from protos import celaut_pb2
-from bee_rpc.client import read_from_file, read_multiblock_directory
+from bee_rpc.client import read_from_file
 
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_stream
+from src.utils.service_content import read_service_content
 
 env_manager = ConfigManager()
 
@@ -14,16 +15,7 @@ METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 VALIDATE_ON_IMPORT = env_manager.get("VALIDATE_ON_IMPORT")
 
 
-def read_service_content(service_path):
-    if os.path.isfile(service_path):
-        with open(service_path, "rb") as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                yield chunk
-    else:
-        for i in read_multiblock_directory(directory=service_path):
-            yield i
-
-
+# It's on utils.service_content too, but here we have other params...
 def _compute_service_hash(service_path: str, hash_spec) -> str:
     return hash_stream(read_service_content(service_path=service_path), hash_spec).hex()
 
