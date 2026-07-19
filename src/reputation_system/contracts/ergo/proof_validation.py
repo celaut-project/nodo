@@ -1,8 +1,8 @@
 import hashlib
+import json
 import re
 from typing import List, Optional
 
-import requests
 from protos import celaut_pb2 as celaut
 
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign
@@ -10,7 +10,7 @@ from src.reputation_system.contracts.ergo.utils import get_public_key
 from src.reputation_system.envs import CONTRACT, ergo_ledger
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
-from src.utils.java_dependency import require_java_module
+from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 from src.utils.logger import LOGGER as logger
 
 
@@ -50,21 +50,18 @@ def _extract_register_value(box: dict, register: str) -> Optional[str]:
 
 
 def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
-    # TODO Hacer igual a _get_type_nft_box_ids y _get_boxes_by_id_from_context de transaction.py
+    from src.reputation_system.contracts.ergo.utils import get_boxes_by_token_ids
+
     node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
     if not node_url:
         raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
 
-    url = f"{node_url}/blockchain/box/unspent/byTokenId/{token_id}"
-    response = requests.get(url, params={"offset": 0, "limit": 100}, timeout=15)
-    if response.status_code != 200:
-        raise ValueError(f"Failed to fetch token boxes: HTTP {response.status_code}")
+    ensure_ergpy_jvm(feature="Ergo reputation")
+    appkit = require_java_module("ergpy.appkit", feature="Ergo reputation")
+    ergo = appkit.ErgoAppKit(node_url=node_url)
 
-    data = response.json()
-    if not isinstance(data, list):
-        raise ValueError("Unexpected response structure for unspent boxes")
-
-    return data
+    java_boxes = get_boxes_by_token_ids(ergo, node_url, [token_id])
+    return [json.loads(str(box.toJson(True))) for box in java_boxes]
 
 
 def _validate_box_structure(box: dict) -> bool:
