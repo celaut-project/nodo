@@ -3,12 +3,15 @@ import json
 import re
 from typing import List, Optional
 
-import requests
-
 from protos import celaut_pb2 as celaut
 
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign
-from src.reputation_system.contracts.ergo.utils import get_public_key
+from src.reputation_system.contracts.ergo.utils import (
+    compile_contract_template,
+    get_public_key,
+    owner_script_hash_hex,
+    search_unspent_boxes,
+)
 from src.reputation_system.envs import CONTRACT, ergo_ledger
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
@@ -215,100 +218,28 @@ def validate_reputation_proof_ownership() -> bool:
         return False
 
 
-def _owner_hash_hex(mnemonic_phrase: str) -> str:
+def find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     """
-    blake2b256(propositionBytes) of the wallet's owner script — the value a Reputation
-    Box stores in R7. Mirrors the expected-owner computation in
-    validate_reputation_proof_ownership (kept separate so that shared function, also used
-    by transaction.py, stays untouched).
+    Look up an on-chain reputation proof owned by the given wallet.
+
+    Queries the reputation contract's unspent boxes filtered *server-side* by R7 (the owner
+    hash), so only the wallet's own proof boxes are returned — never the whole set of
+    reputation boxes on the chain. Returns the associated proof (token) id, or None.
     """
-    address = get_public_key(mnemonic_phrase=mnemonic_phrase)
-    ergo_tree = address.getErgoAddress().script()
-    jpype = require_java_module("jpype", feature="Ergo reputation")
-    serializer = jpype.JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
-    proposition_bytes = bytes((byte + 256) % 256 for byte in serializer.serializeErgoTree(ergo_tree))
-    return hashlib.blake2b(proposition_bytes, digest_size=32).hexdigest()
-
-
-def _reputation_contract_address() -> str:
-    """Compile the reputation CONTRACT and return its mainnet P2S address string."""
     node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
     if not node_url:
         raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
 
     ensure_ergpy_jvm(feature="Ergo reputation")
     appkit = require_java_module("ergpy.appkit", feature="Ergo reputation")
-    jpype = require_java_module("jpype", feature="Ergo reputation")
-    org_appkit = jpype.JPackage("org").ergoplatform.appkit
-
     ergo = appkit.ErgoAppKit(node_url=node_url)
-    compiled_contract = ergo._ctx.compileContract(org_appkit.ConstantsBuilder.empty(), CONTRACT)
-    ergo_tree = compiled_contract.getErgoTree()
-    script_address = org_appkit.Address.fromErgoTree(ergo_tree, org_appkit.NetworkType.MAINNET)
-    return str(script_address.toString())
 
+    owner_hash = owner_script_hash_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
+    _, template_hash = compile_contract_template(ergo, CONTRACT)
 
-def _iter_unspent_boxes_by_address(address: str, page_limit: int = 100, max_boxes: int = 5000):
-    """
-    Yield unspent boxes sitting at an address using the Ergo node REST API, paginated.
-    Endpoint: POST /blockchain/box/unspent/byAddress (body: the address string).
-    The node returns a bare JSON array; older/explorer-style payloads wrap it in {"items": [...]}.
-    """
-    node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
-    if not node_url:
-        raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
-
-    offset = 0
-    fetched = 0
-    while fetched < max_boxes:
-        url = f"{node_url}/blockchain/box/unspent/byAddress?offset={offset}&limit={page_limit}"
-        response = requests.post(
-            url,
-            data=address,
-            headers={"Content-Type": "text/plain"},
-            timeout=30,
-        )
-        if response.status_code != 200:
-            raise ValueError(
-                f"Could not fetch unspent boxes for address {address}: HTTP {response.status_code}"
-            )
-
-        payload = response.json()
-        items = payload.get("items", []) if isinstance(payload, dict) else payload
-        if not items:
-            break
-
-        for box in items:
-            yield box
-            fetched += 1
-
-        if len(items) < page_limit:
-            break
-        offset += page_limit
-
-    if fetched >= max_boxes:
-        logger(
-            f"Reached the {max_boxes}-box scan cap while looking up reputation proofs at {address}; "
-            "an associated proof may exist beyond the scanned window."
-        )
-
-
-def find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
-    """
-    Look up an on-chain reputation proof owned by the given wallet.
-
-    Scans the unspent boxes of the reputation contract, matches the box whose R7 equals the
-    wallet's blake2b256(propositionBytes) owner hash, and returns the associated proof
-    (token) id. Returns None when no proof is found for the wallet.
-    """
-    owner_hash = _owner_hash_hex(mnemonic_phrase)
-    address = _reputation_contract_address()
-
-    for box in _iter_unspent_boxes_by_address(address):
-        r7_hash = _extract_r7_hash_hex(str(_extract_register_value(box, "R7") or ""))
-        if r7_hash != owner_hash:
-            continue
-
+    # R7 holds the owner hash as a serialized Coll[Byte] of 32 bytes: "0e20" + 32-byte hash.
+    boxes = search_unspent_boxes(ergo, template_hash, registers={"R7": f"0e20{owner_hash}"})
+    for box in boxes:
         assets = box.get("assets") or []
         if assets and assets[0].get("tokenId"):
             return assets[0]["tokenId"]
