@@ -217,7 +217,7 @@ if __name__ == '__main__':
                     "\n- test <test name>"
                     "\n- ggconf <repository path>"
                     "\n- submit_reputation"
-                    "\n- validate_reputation_proof_ownership"
+                    "\n- sync_reputation_proof"
                     "\n- refresh_ergo_nodes"
                     "\n- prune_containers"
                     "\n- refresh_clients"
@@ -521,17 +521,13 @@ if __name__ == '__main__':
                 else:
                     print("Failed to submit reputation proof.", flush=True)
 
-            case 'validate_reputation_proof_ownership':
+            case 'sync_reputation_proof':
                 try:
-                    from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
-                    is_valid = validate_reputation_proof_ownership()
+                    from src.reputation_system.contracts.ergo.proof_validation import sync_reputation_proof_ownership
+                    sync_reputation_proof_ownership()
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)
                     os._exit(1)
-                if is_valid:
-                    print("Reputation proof ownership is valid.", flush=True)
-                else:
-                    print("Reputation proof ownership is invalid. Please check your environment variables.", flush=True)
                 
             case 'refresh_ergo_nodes':
                 from src.manager.ergo import get_refresh_peers
@@ -559,17 +555,15 @@ if __name__ == '__main__':
 
             case 'config':
                 os.system("/bin/bash bash/reconfig.sh")
-                if env_manager.get("REPUTATION_PROOF_ID"):
-                    try:
-                        from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
+                # After (re)configuring — e.g. a new wallet mnemonic — reconcile the
+                # reputation proof: drop it if it no longer belongs to the wallet, and
+                # discover/store the wallet's on-chain proof if one exists.
+                try:
+                    from src.reputation_system.contracts.ergo.proof_validation import sync_reputation_proof_ownership
 
-                        if not validate_reputation_proof_ownership():
-                            _msg = "The reputation proof is not associated with the provided main address. It will be removed from the node environment registry."
-                            log.LOGGER(_msg)
-                            print(_msg)
-                            env_manager.set("REPUTATION_PROOF_ID", "")
-                    except JavaDependencyMissing as e:
-                        print_java_dependency_error(e)
+                    sync_reputation_proof_ownership()
+                except JavaDependencyMissing as e:
+                    print_java_dependency_error(e)
 
             case 'envs':
                 os.system(f"yq . {MAIN_DIR}/config.yaml")
