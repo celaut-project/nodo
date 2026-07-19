@@ -633,5 +633,90 @@ class CaptureUnavailableNoteTests(unittest.TestCase):
             self.assertIn("CAP_NET_RAW", body)
 
 
+class FormatGasTests(unittest.TestCase):
+    def test_missing_or_empty_is_na(self):
+        self.assertEqual(observe.format_gas(None), "N/A")
+        self.assertEqual(observe.format_gas(""), "N/A")
+
+    def test_non_numeric_is_flagged(self):
+        self.assertEqual(observe.format_gas("not-a-number"), "Invalid Gas Data")
+
+    def test_numeric_matches_node_formatter(self):
+        # Gas is rendered exactly like `nodo instances` (ssformat), whether the
+        # catalogue hands us an int or the numeric string it actually stores.
+        from src.utils.logger import ssformat
+
+        self.assertEqual(observe.format_gas(1000), ssformat(1000))
+        self.assertEqual(observe.format_gas("1000"), ssformat(1000))
+
+
+class InstanceGasCatalogueTests(unittest.TestCase):
+    """resolve_instance / read_instance_gas against a real sqlite catalogue."""
+
+    def setUp(self):
+        import sqlite3
+
+        self._tmp = NamedTemporaryFile(suffix=".sqlite", delete=False)
+        self._tmp.close()
+        self._orig_db = observe.DATABASE_FILE
+        observe.DATABASE_FILE = self._tmp.name
+        conn = sqlite3.connect(self._tmp.name)
+        conn.execute(
+            "CREATE TABLE local_instances ("
+            "id TEXT, ip TEXT, father_id TEXT, service_id TEXT, "
+            "virtualizer TEXT, name TEXT, gas TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO local_instances VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("abc123", "10.0.0.2", "dad", "svc", "ch", "inst", "5000"),
+        )
+        conn.commit()
+        conn.close()
+
+    def tearDown(self):
+        observe.DATABASE_FILE = self._orig_db
+        os.unlink(self._tmp.name)
+
+    def test_resolve_instance_includes_gas(self):
+        row = observe.resolve_instance("abc123")
+        self.assertIsNotNone(row)
+        self.assertEqual(row["gas"], "5000")
+
+    def test_read_instance_gas_reflects_updates(self):
+        import sqlite3
+
+        self.assertEqual(observe.read_instance_gas("abc123"), "5000")
+        conn = sqlite3.connect(self._tmp.name)
+        conn.execute("UPDATE local_instances SET gas = ? WHERE id = ?",
+                     ("4200", "abc123"))
+        conn.commit()
+        conn.close()
+        self.assertEqual(observe.read_instance_gas("abc123"), "4200")
+
+    def test_read_instance_gas_unknown_id_is_none(self):
+        self.assertIsNone(observe.read_instance_gas("nope"))
+
+
+class RenderGasPanelTests(unittest.TestCase):
+    def test_render_shows_gas_balance(self):
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            observe._render(
+                header="inst",
+                metrics=observe.SessionMetrics(),
+                gas="1.20e+3",
+                events=[],
+                save_dir=None,
+                net_notice=None,
+                capture_mode="conntrack",
+            )
+        out = buf.getvalue()
+        self.assertIn("Gas", out)
+        self.assertIn("Balance: 1.20e+3", out)
+
+
 if __name__ == "__main__":
     unittest.main()
