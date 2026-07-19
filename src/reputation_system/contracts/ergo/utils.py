@@ -3,12 +3,12 @@ from binascii import hexlify
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 
-def get_public_key(mnemonic_phrase: str) -> str:
+def get_public_key(mnemonic_phrase: str) -> object:
     """
     Obtains the public key in hexadecimal format from the mnemonic phrase.
 
     :param mnemonic_phrase: BIP-39 mnemonic phrase.
-    :return: Public key in hexadecimal format.
+    :return: Public key in org.ergoplatform.appkit.Address | tip: use address.toString() to obtain the hexadecimal string.
     """
     ergpy = require_java_module("ergpy.appkit", feature="Ergo reputation")
     ergo = ergpy.ErgoAppKit(node_url=ConfigManager().get("ledgers.ergo.NODE_URL"))
