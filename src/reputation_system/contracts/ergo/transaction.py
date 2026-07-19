@@ -41,11 +41,9 @@ def _java_bytes_to_python_bytes(java_bytes) -> bytes:
 
 
 def _owner_script_hash(sender_address) -> bytes:
-    jpype = require_java_module("jpype", feature="Ergo reputation")
-    ergo_tree = sender_address.getErgoAddress().script()
-    serializer = jpype.JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
-    proposition_bytes = _java_bytes_to_python_bytes(serializer.serializeErgoTree(ergo_tree))
-    return hashlib.blake2b(proposition_bytes, digest_size=32).digest()
+    from src.reputation_system.contracts.ergo.utils import owner_script_hash_hex
+
+    return bytes.fromhex(owner_script_hash_hex(sender_address))
 
 
 def _attach_data_inputs(tx_builder, data_inputs) -> None:
