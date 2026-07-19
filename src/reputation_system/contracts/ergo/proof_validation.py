@@ -163,7 +163,8 @@ def validate_reputation_proof_ownership() -> bool:
     proof_id = ConfigManager().get("reputation.REPUTATION_PROOF_ID") or ConfigManager().get("REPUTATION_PROOF_ID")
 
     if not proof_id:
-        return True
+        logger('Missing reputation proof id on configuration, run submit reputation.')
+        return False
 
     if not mnemonic_phrase:
         logger("Missing mnemonic while validating reputation proof ownership")
