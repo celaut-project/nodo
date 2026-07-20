@@ -33,8 +33,11 @@ env_manager = ConfigManager()
 
 CACHE = env_manager.get("CACHE")
 BLOCKDIR = env_manager.get("BLOCKDIR")
-PACKER_MEMORY_SIZE_FACTOR = env_manager.get("PACKER_MEMORY_SIZE_FACTOR")
-SAVE_ALL = env_manager.get("SAVE_ALL")
+# Defaults keep the local packer working on configs that predate these keys
+# (e.g. nodes upgraded from a Docker-free build) — packer.local is opt-in and its
+# config section may not exist yet.
+PACKER_MEMORY_SIZE_FACTOR = env_manager.get("PACKER_MEMORY_SIZE_FACTOR", 2.0) or 2.0
+SAVE_ALL = env_manager.get("SAVE_ALL", False)
 MIN_BUFFER_BLOCK_SIZE = env_manager.get("MIN_BUFFER_BLOCK_SIZE")
 BUILDX_NETWORK = env_manager.get("packer.docker.BUILDX_NETWORK", "host")
 BUILDX_BUILDER = env_manager.get("packer.docker.BUILDX_BUILDER", "nodo-hostnet")
