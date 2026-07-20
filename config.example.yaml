@@ -17,6 +17,16 @@ dependencies:
     RUNTIME_ROOT: "${main.MAIN_DIR}/runtime/python"
   yq:
     BIN: "${main.MAIN_DIR}/bin/yq"
+  # Docker is an OPTIONAL, node-local dependency used only by the local packer
+  # (packer.local: true). It is NOT installed at node-install time; nodo runs
+  # bash/install_docker.sh on demand (like install_java.sh) and drives an
+  # ISOLATED daemon under MAIN_DIR — never the host's Docker. These paths are the
+  # portable defaults; override only to relocate the isolated toolchain.
+  docker:
+    BIN: "${main.MAIN_DIR}/bin/docker"
+    DAEMON_BIN: "${main.MAIN_DIR}/bin/dockerd"
+    BUILDX_BIN: "${main.MAIN_DIR}/libexec/docker/cli-plugins/docker-buildx"
+    DOCKER_SOCKET: "${main.MAIN_DIR}/docker/docker.sock"
 
 virtualizers:
   # Cloud Hypervisor is the only virtualizer. The Docker virtualizer was removed
@@ -91,9 +101,21 @@ builder:
   TRUST_METADATA_ARCHITECTURE: false
 
 packer:
-  # nodo no longer builds services locally. `nodo pack` sends the project to a
-  # packer-service microVM (it runs Docker/buildx inside a sealed VM, so Docker
-  # is never installed on this host) and imports the returned `.celaut.bee`.
+  # local: choose the packer backend (default false).
+  #   false -> `nodo pack` delegates to a packer-service (behaviour documented
+  #            below): resolve the packer by its core_services id, falling back to
+  #            the PACKER_SERVICE_URL override. Docker is NEVER installed here.
+  #   true  -> `nodo pack` builds the service LOCALLY with nodo's own isolated
+  #            Docker toolchain. Docker is provisioned on demand via
+  #            bash/install_docker.sh (isolated to the node, independent of any
+  #            host Docker); nodo starts its isolated Docker daemon right before a
+  #            pack and stops it right after, and only one `nodo pack` runs at a
+  #            time. See dependencies.docker.* and packer.docker.* below.
+  local: false
+  # nodo no longer builds services locally *by default*. `nodo pack` sends the
+  # project to a packer-service microVM (it runs Docker/buildx inside a sealed VM,
+  # so Docker is never installed on this host) and imports the returned
+  # `.celaut.bee`. (Set packer.local: true to build locally instead.)
   #
   # PRIMARY: the packer is referenced by its published content hash (service id).
   # That id lives in exactly ONE place — the `{name: "packer", id: ...}` entry in
@@ -116,6 +138,11 @@ packer:
   # Architectures `nodo pack` will accept / announce.
   ARM_PACKER_SUPPORT: true
   X86_PACKER_SUPPORT: true
+  # Local-packer tuning (only used when packer.local: true).
+  # Factor of the exported filesystem size to lock as RAM during a local build.
+  PACKER_MEMORY_SIZE_FACTOR: 2.0
+  # Reserved: persist every packed artifact to the registry. Kept for parity.
+  SAVE_ALL: false
   docker:
     # Network used for docker buildx builds. "host" helps ensure DNS is reachable.
     BUILDX_NETWORK: "host"
