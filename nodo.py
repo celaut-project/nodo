@@ -223,7 +223,7 @@ if __name__ == '__main__':
                     "\n- refresh_clients"
                     "\n- tx_history"
                     "\n- increase_peer_deposit <peer id> <gas to add>"
-                    "\n- docker <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
+                    "\n- local_docker_packer <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
                     "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
                     "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
                     "\n\n",
@@ -663,7 +663,7 @@ if __name__ == '__main__':
                 from src.commands.increase_peer_deposit import increase_peer_deposit
                 increase_peer_deposit(peer_id=sys.argv[2], gas=int(sys.argv[3]))
 
-            case "docker":
+            case "local_docker_packer":
                 # Run docker commands in nodo's isolated Docker context (the
                 # optional local packer's toolchain). Import lazily so this never
                 # loads on CH-only nodes that don't have Docker installed.
