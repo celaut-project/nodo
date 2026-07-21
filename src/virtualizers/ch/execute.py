@@ -417,7 +417,13 @@ def _resolve_initial_resources(resources: celaut.Sysresources) -> Tuple[int, int
                 vcpus = max(1, int(math.ceil(cpu_quota / cpu_period)))
 
             if resources.HasField("mem_limit") and resources.mem_limit > 0:
-                mem_b = max(MIN_MEM_MIB, int(resources.mem_limit))
+                # mem_b is in bytes; MIN_MEM_MIB is a MiB floor, so convert it to
+                # bytes before comparing. Without the conversion the floor is a
+                # no-op (128 < any real byte count) and a service declaring e.g.
+                # mem_limit=50MB boots with ~48 MiB of guest RAM — too little for
+                # the kernel+initramfs to reach console, so the guest never brings
+                # up eth0 and launch fails with "Guest network did not become ready".
+                mem_b = max(MIN_MEM_MIB * 1024 * 1024, int(resources.mem_limit))
     except Exception:
         pass
 
