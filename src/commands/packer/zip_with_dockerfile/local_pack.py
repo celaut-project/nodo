@@ -1,16 +1,20 @@
 """`nodo pack` — optional LOCAL (Docker) packer.
 
 Enabled by ``packer.local: true`` in config.yaml (default False). This restores
-nodo's original local build path — generate the service zip, hand it to the
-gateway's ``Pack`` RPC, which builds it with nodo's isolated Docker toolchain and
-streams back the service id, metadata and service directory — but wraps it in the
-policy Josemi asked for:
+nodo's original local build path — generate the service zip and build it with
+nodo's isolated Docker toolchain by calling ``pack_zip()`` directly, in process,
+streaming back the service id, metadata and service directory — but wraps it in
+the policy Josemi asked for:
 
   * Docker is provisioned on demand (``install_docker.sh``) the first time it's
     needed, isolated to the node (never the host Docker).
   * nodo's isolated Docker daemon is started right before the build and stopped
     right after it.
   * a command-level lock prevents two ``nodo pack`` runs at once.
+
+Packing is fully local now: ``nodo pack`` calls ``pack_zip()`` in process instead
+of going through the gateway's (now removed) ``Pack`` RPC — there is no gRPC
+round-trip to the local gateway anymore.
 
 When ``packer.local`` is False the node uses the packer-service client in
 ``pack.py`` instead; this module is never imported in that case.
@@ -36,14 +40,23 @@ from src.commands.packer.zip_with_dockerfile.generate_service_zip import generat
 
 env_manager = ConfigManager()
 
-GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 REGISTRY = env_manager.get("REGISTRY")
 
 
 # --------------------------------------------------------------------------- #
 # Command-level concurrency lock: only one local `nodo pack` at a time.
+#
+# A service that declares dependencies packs those dependencies first
+# (generate_service_zip -> __export_registry -> pack -> pack_local). Those nested
+# packs are part of the SAME `nodo pack` operation, so they must reuse the
+# top-level pack's lock and its already-running isolated Docker daemon rather than
+# trying (and failing) to re-acquire the single-holder command lock. `_pack_depth`
+# tracks this reentrancy: only the outermost call owns the lock and the daemon.
 # --------------------------------------------------------------------------- #
+_pack_depth = 0
+
+
 def _pack_lock_path() -> str:
     cache = env_manager.get("CACHE") or "/tmp"
     os.makedirs(cache, exist_ok=True)
@@ -71,7 +84,7 @@ def _release_pack_lock(lock_file) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Restored gRPC client to the local gateway's Pack handler.
+# In-process local packer.
 # --------------------------------------------------------------------------- #
 def __spinner(event):
     """Spinner to show progress while the build runs."""
@@ -98,38 +111,32 @@ def __spinner(event):
     sys.stdout.flush()
 
 
-def __pack(zip, node: str):
-    import grpc
+def _pack_and_register(service_zip_dir: str) -> Optional[str]:
+    """Build the prepared service zip in process and register the result.
+
+    Calls ``pack_zip()`` directly and parses its PackOutput buffer stream locally
+    (the same messages the gateway ``Pack`` RPC used to stream back), then writes
+    the metadata and service directory into the node's registries. Returns the
+    validated service id, or None on a packer error.
+    """
     from bee_rpc import client as grpcbb
-    from protos import gateway_bee, celaut_pb2_grpc
-
-    channel = grpc.insecure_channel(node)
-    try:
-        yield from grpcbb.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(channel).Pack,
-            input=grpcbb.Dir(dir=zip, _type=bytes),
-            indices_serializer={0: bytes},
-            indices_parser=gateway_bee.PackOutput_indices,
-            partitions_message_mode_parser={1: True, 2: True, 3: False}
-        )
-    finally:
-        channel.close()
-
-
-def __on_peer(peer: str, service_zip_dir: str) -> Optional[str]:
-    from bee_rpc import client as grpcbb
-    from protos import celaut_pb2, pack_pb2
+    from protos import celaut_pb2, pack_pb2, gateway_bee
+    from src.packers.zip_with_dockerfile import pack_zip
     from src.utils.hashing import get_configured_hash_spec, hash_stream
 
     _id: Optional[str] = None
-    print(f'Starting packing your project on {peer}...')
+    print('Starting packing your project...')
 
     stop_event = threading.Event()
     spinner_thread = threading.Thread(target=__spinner, args=(stop_event,))
     spinner_thread.start()
 
     try:
-        for b in __pack(zip=service_zip_dir, node=peer):
+        for b in grpcbb.parse_from_buffer(
+            request_iterator=pack_zip(zip=service_zip_dir),
+            indices=gateway_bee.PackOutput_indices,
+            partitions_message_mode={1: True, 2: True, 3: False}
+        ):
             if type(b) is pack_pb2.PackOutputServiceId:
                 if not _id:
                     _id = b.id.hex()
@@ -200,31 +207,47 @@ def __remove_path(path):
 
 
 def pack_local(directory: str) -> Optional[str]:
-    """Build a project locally with nodo's isolated Docker toolchain."""
-    # Guard against concurrent packs before doing any work.
-    lock_file = _acquire_pack_lock()
-    if lock_file is None:
-        print(
-            "\nAnother `nodo pack` is already running. Only one local pack can run "
-            "at a time (nodo's isolated Docker daemon is shared). Wait for it to "
-            "finish and try again."
-        )
-        return None
+    """Build a project locally with nodo's isolated Docker toolchain.
 
+    Nested dependency packs (triggered from generate_service_zip while packing a
+    service that declares yet-unpacked dependencies) are part of the same pack
+    operation: they reuse the top-level pack's command lock and running Docker
+    daemon instead of re-acquiring the single-holder lock (which would fail and
+    cancel the dependency).
+    """
+    global _pack_depth
+    nested = _pack_depth > 0
+
+    # Only the top-level pack owns the command lock; nested dependency packs run
+    # inside that same guarded context.
+    lock_file = None
+    if not nested:
+        lock_file = _acquire_pack_lock()
+        if lock_file is None:
+            print(
+                "\nAnother `nodo pack` is already running. Only one local pack can run "
+                "at a time (nodo's isolated Docker daemon is shared). Wait for it to "
+                "finish and try again."
+            )
+            return None
+
+    _pack_depth += 1
     daemon_started = False
     _id: Optional[str] = None
     is_remote = False
     try:
-        # Provision the isolated Docker toolchain on demand, then start its daemon.
-        ensure_docker_installed()
-        start_docker_daemon()
-        daemon_started = True
+        if not nested:
+            # Provision the isolated Docker toolchain on demand, then start its
+            # daemon. It is started before generate_service_zip so nested
+            # dependency packs build against the already-running daemon.
+            ensure_docker_installed()
+            start_docker_daemon()
+            daemon_started = True
 
         is_remote, directory = prepare_directory(directory)
         service_zip_dir: str = generate_service_zip(project_directory=directory)
 
-        ip, port = 'localhost', GATEWAY_PORT
-        _id = __on_peer(peer=f"{ip}:{port}", service_zip_dir=service_zip_dir)
+        _id = _pack_and_register(service_zip_dir)
 
         if not _id:
             print(f"Packing produced no service id for {directory}.")
@@ -233,11 +256,13 @@ def pack_local(directory: str) -> Optional[str]:
         print(f"Exception packing {directory}: {e}")
         log.LOGGER(f"Local pack exception for {directory}: {e}")
     finally:
+        _pack_depth -= 1
         if daemon_started:
-            # Stop nodo's isolated Docker daemon once the pack completes.
+            # Stop nodo's isolated Docker daemon once the whole pack completes.
             stop_docker_daemon()
         if is_remote:
             __remove_path(directory)
-        _release_pack_lock(lock_file)
+        if lock_file is not None:
+            _release_pack_lock(lock_file)
 
     return _id
