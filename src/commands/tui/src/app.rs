@@ -139,7 +139,7 @@ fn get_peers() -> Result<Vec<Peer>> {
             Ok(Peer {
                 id,
                 uri: format!("{}:{}", ip, port),
-                gas_format,
+                gas,
                 rpi, // Assign the optional reputation_proof_id
             })
         })?
