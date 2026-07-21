@@ -18,6 +18,7 @@ from src.commands.__by_tag import get_id
 from src.commands.import_bee import import_bee
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_file
+from src.utils.service_content import compute_id
 
 API_BASE_URL = "https://api.github.com"
 RETRYABLE_HTTP_STATUS_CODES = {401, 409, 422, 429, 500, 502, 503, 504}
@@ -386,10 +387,29 @@ def _export_service_to_bee(service_ref: str) -> Tuple[str, Path]:
             },
         )
 
-        fd, artifact_path = tempfile.mkstemp(prefix=f"{service_id}_", suffix=".celaut.bee")
+        fd, artifact_path = tempfile.mkstemp(
+            prefix=f"{service_id}_",
+            suffix=".celaut.bee",
+        )
         os.close(fd)
+
         final_path = Path(artifact_path)
         Path(output_file).replace(final_path)
+
+    # Verify exported artifact integrity.
+    try:
+        computed_service_id = compute_id(service_id)
+
+        if computed_service_id != service_id:
+            final_path.unlink(missing_ok=True)
+            raise PublisherError(
+                "Integrity verification failed after export: "
+                f"expected {service_id}, got {computed_service_id}."
+            )
+
+    except Exception:
+        final_path.unlink(missing_ok=True)
+        raise
 
     return service_id, final_path
 
@@ -900,6 +920,17 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
         imported_service_id = import_bee(str(output_path))
         if imported_service_id:
             print(f"Service imported successfully: {imported_service_id}", flush=True)
+
+        else:
+            answer = input(
+                f"Service import failed. Delete the exported file '{output_path}'? [Y/n]: "
+            ).strip().lower()
+
+            if answer in ("", "y", "yes"):
+                os.remove(output_path)
+                print("Exported file deleted.")
+            else:
+                print(f"Exported file kept at: {output_path}")
 
     if not settings["keep_artifacts"] and output_path.exists():
         output_path.unlink()

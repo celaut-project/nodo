@@ -41,47 +41,9 @@ def _java_bytes_to_python_bytes(java_bytes) -> bytes:
 
 
 def _owner_script_hash(sender_address) -> bytes:
-    jpype = require_java_module("jpype", feature="Ergo reputation")
-    ergo_tree = sender_address.getErgoAddress().script()
-    serializer = jpype.JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
-    proposition_bytes = _java_bytes_to_python_bytes(serializer.serializeErgoTree(ergo_tree))
-    return hashlib.blake2b(proposition_bytes, digest_size=32).digest()
+    from src.reputation_system.contracts.ergo.utils import owner_script_hash_hex
 
-
-def _get_type_nft_boxes(node_url: str, type_nft_ids: List[str]) -> list:
-    if not node_url:
-        raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
-
-    unique_ids = {token_id for token_id in type_nft_ids if token_id}
-    if not unique_ids:
-        raise ValueError("No type NFT IDs were provided to resolve dataInputs")
-
-    data_inputs = []
-    for token_id in unique_ids:
-        url = f"{node_url}/api/v1/boxes/byTokenId/{token_id}"
-        response = requests.get(url, timeout=15)
-        if response.status_code != 200:
-            raise ValueError(f"Could not fetch Type NFT {token_id}: HTTP {response.status_code}")
-
-        payload = response.json()
-        items = payload.get("items") if isinstance(payload, dict) else None
-        if not items:
-            raise ValueError(f"Type NFT {token_id} was not found in explorer response")
-
-        data_inputs.append(items[0])
-
-    return data_inputs
-
-
-def _explorer_box_to_input_box(box_payload: dict):
-    jpype = require_java_module("jpype", feature="Ergo reputation")
-    org = jpype.JPackage("org")
-
-    output_info_cls = org.ergoplatform.explorer.client.model.OutputInfo
-    input_box_impl_cls = org.ergoplatform.appkit.impl.InputBoxImpl
-    gson = org.ergoplatform.restapi.client.JSON.createGson().create()
-    output_info = gson.fromJson(json.dumps(box_payload), output_info_cls)
-    return input_box_impl_cls(output_info)
+    return bytes.fromhex(owner_script_hash_hex(sender_address))
 
 
 def _attach_data_inputs(tx_builder, data_inputs) -> None:
@@ -169,7 +131,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     jpype = require_java_module("jpype", feature="Ergo reputation")
     org_appkit = jpype.JPackage("org").ergoplatform.appkit
     from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
-    from src.reputation_system.contracts.ergo.utils import get_public_key
+    from src.reputation_system.contracts.ergo.utils import get_public_key, get_boxes_by_token_ids
 
     ergo = appkit.ErgoAppKit(node_url=node_url)
     fee = DEFAULT_FEE
@@ -270,11 +232,11 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     outputs.extend(output_boxes)
 
     # Resolve and attach DPG type boxes as dataInputs.
-    data_input_payloads = _get_type_nft_boxes(
+    java_data_inputs = get_boxes_by_token_ids(
+        ergo=ergo,
         node_url=node_url,
-        type_nft_ids=[CELAUT_NODE_TYPE_NFT_ID],
+        token_ids=[CELAUT_NODE_TYPE_NFT_ID],
     )
-    java_data_inputs = [_explorer_box_to_input_box(box_payload) for box_payload in data_input_payloads]
     unsigned_tx = _build_unsigned_transaction(
         ergo=ergo,
         input_boxes=java_input_boxes,
