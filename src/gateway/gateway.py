@@ -142,22 +142,6 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 message_iterator=get_sysresources(id=token)
         )
 
-    def Pack(self, request_iterator, context, **kwargs):
-        # The local Docker packer is OPTIONAL (`packer.local: true`). Import it
-        # lazily so CH-only nodes never load the Docker worker (or its isolated
-        # docker_env) just to start the gateway. When `packer.local` is False,
-        # packing goes through the packer-service client instead of this handler.
-        log.LOGGER('Go to pack a proyect.')
-        from src.packers.zip_with_dockerfile import pack_zip
-        _d: bee.Dir = next(bee.parse_from_buffer(
-            request_iterator=request_iterator,
-            indices={0: bytes},
-            partitions_message_mode={0: False}
-        ), None)
-        if _d.type != bytes:
-            raise Exception("Incorrect input on Pack grpc method. Should be bytes")
-        yield from pack_zip(zip=_d.dir)
-
     def GetService(self, request_iterator, context, **kwargs):
         yield from GetServiceIterable(request_iterator, context)
 
