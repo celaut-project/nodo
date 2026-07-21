@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+# Keep apt non-interactive: systemd/systemd-sysv (installed below for the WSL
+# runtime) otherwise prompt to confirm replacing the init system.
+export DEBIAN_FRONTEND=noninteractive
+
 if [ -z "${1:-}" ]; then
   echo "Error: TARGET_DIR is not provided."
   exit 1
@@ -336,6 +340,12 @@ install_build_dependencies() {
         gzip
         initramfs-tools-core
         iputils-ping
+        # WSL runtime deps: iproute2 provides `ip` (nodo networking); systemd +
+        # systemd-sysv provide `systemctl` so `nodo daemon` and the nodo.service
+        # unit work once the imported distro boots systemd (see /etc/wsl.conf below).
+        iproute2
+        systemd
+        systemd-sysv
         ca-certificates
         curl
         gnupg
@@ -386,5 +396,46 @@ fi
 
 echo "Running migrations with local Python runtime..."
 "$TARGET_DIR/venv/bin/python" "$TARGET_DIR/nodo.py" migrate > /dev/null
+
+configure_systemd_service() {
+    # The release rootfs is imported and run directly (the end user does not
+    # re-run install.sh), so the systemd unit and WSL systemd-boot config must be
+    # baked in here — otherwise `nodo daemon ...` fails with `systemctl: not
+    # found` on a fresh import. Render the same unit install.sh does.
+    local unit_src="$TARGET_DIR/bash/nodo.service.template"
+    local unit_dst="/etc/systemd/system/nodo.service"
+    [ -f "$unit_src" ] || fail "nodo.service.template not found at $unit_src"
+
+    echo "Rendering systemd unit ${unit_dst}..."
+    sed \
+        -e "s|{{MAIN_DIR}}|${TARGET_DIR}|g" \
+        -e "s|{{JAVA_HOME}}|${JAVA_RUNTIME_ROOT_DEFAULT}/current|g" \
+        -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|${PYTHON_RUNTIME_ROOT}/current/bin|g" \
+        -e "s|{{PYTHON_VENV_BIN}}|python|g" \
+        "$unit_src" > "$unit_dst"
+    chmod 644 "$unit_dst"
+    if grep -q '{{[A-Z_][A-Z_]*}}' "$unit_dst"; then
+        fail "Unresolved placeholders remain in ${unit_dst}."
+    fi
+
+    # Enable the unit. systemd is not PID1 in this build container, so
+    # `systemctl enable` is unavailable — create the wants symlink by hand.
+    mkdir -p /etc/systemd/system/multi-user.target.wants
+    ln -sf "$unit_dst" /etc/systemd/system/multi-user.target.wants/nodo.service
+
+    # Boot systemd as PID1 under WSL (so `systemctl` works) and default the distro
+    # to root — nodo needs root for Cloud Hypervisor networking/microVMs.
+    echo "Writing /etc/wsl.conf (systemd boot + default root user)..."
+    cat > /etc/wsl.conf <<'WSLCONF'
+[boot]
+systemd=true
+
+[user]
+default=root
+WSLCONF
+}
+
+echo "Configuring systemd service and WSL boot..."
+configure_systemd_service
 
 echo "All steps completed."
