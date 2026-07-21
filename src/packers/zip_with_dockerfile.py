@@ -322,6 +322,22 @@ class ZipContainerPacker:
         r.at_most.mem_limit = most_mem_limit
         r.at_most.disk_space = most_disk_space
 
+        # Possible descendant workloads. Each scenario is one independent
+        # worst-case concurrent execution the service may trigger through its
+        # descendants (not cumulative, no ordering). Spec-only: nodo does not
+        # interpret/validate these here — that is future scheduler work (#163).
+        for scenario in self.json.get("possible_workloads", []):
+            pw = self.service.container.possible_workloads.add()
+            for wl in scenario.get("workloads", []):
+                w = pw.workloads.add()
+                w.count = int(wl.get("count", 1))
+                wl_res = wl.get("resources", {})
+                w.resources.blkio_weight = int(wl_res.get("blkio_weight", 0))
+                w.resources.cpu_period = int(wl_res.get("cpu_period", 0))
+                w.resources.cpu_quota = int(wl_res.get("cpu_quota", 0))
+                w.resources.mem_limit = int(wl_res.get("mem_limit", 0))
+                w.resources.disk_space = int(wl_res.get("disk_space", 0))
+
 
         # Entrypoint
         init = self.json.get("init", {})

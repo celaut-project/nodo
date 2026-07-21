@@ -514,6 +514,41 @@ The `service.json` file defines **runtime metadata** for the service: its archit
 
 ---
 
+#### `possible_workloads`
+- **Type:** `array` of objects
+- **Required:** No
+- **Description:** Declares the **worst-case descendant workloads** the service may request during its lifetime (a service can spawn child services locally or on other peers). It exists for scheduling admission decisions — *can the network satisfy any execution this service could trigger?* Unlike `resources` (this instance's own needs), `possible_workloads` describe its **descendants**. Serialized to `container.possible_workloads`.
+- Each array entry is **one independent concurrent execution scenario**. Scenarios are **not cumulative** and imply **no temporal ordering**; a scheduler only needs to check whether each scenario, in isolation, could be satisfied.
+- Each scenario has a `workloads` array; each item groups identical concurrent descendants:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `count` | int | `1` | Number of concurrent descendant instances in this group |
+| `resources` | object (`Sysresources`) | `{}` | Resources each of those descendants may require (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds; `0` = no limit) |
+
+> **Spec-only:** the field is declared and serialized, but nodo's scheduler does **not** yet interpret or enforce it. Scheduler interpretation is future work (celaut-project/nodo#163).
+
+**Example — two independent scenarios (`2×5 GB + 1×40 GB`, or `4×16 GB`):**
+```json
+{
+    "possible_workloads": [
+        {
+            "workloads": [
+                { "count": 2, "resources": { "mem_limit": 5000000000 } },
+                { "count": 1, "resources": { "mem_limit": 40000000000 } }
+            ]
+        },
+        {
+            "workloads": [
+                { "count": 4, "resources": { "mem_limit": 16000000000 } }
+            ]
+        }
+    ]
+}
+```
+
+---
+
 #### `init`
 - **Type:** `object`
 - **Required:** No
