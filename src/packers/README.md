@@ -34,6 +34,19 @@
       "disk_space": 4000000000
     }
   },
+  "possible_workloads": [
+    {
+      "workloads": [
+        { "count": 2, "resources": { "mem_limit": 5000000000 } },
+        { "count": 1, "resources": { "mem_limit": 40000000000 } }
+      ]
+    },
+    {
+      "workloads": [
+        { "count": 4, "resources": { "mem_limit": 16000000000 } }
+      ]
+    }
+  ],
   "network": [
     {
       "tags": ["example.com"],
@@ -56,6 +69,17 @@
 - `api[].protocol` is serialized to `api.slot[].protocol_stack[*].tags` (application protocol stack over transport).
 - `api[].gas_amount_per_call` is serialized to `api.slot[].gas_amount_per_call`.
 - `resources.start_time_ms` no longer exists.
+- `possible_workloads[]` declares the **worst-case descendant workloads** the service
+  may request during its lifetime, for scheduling admission decisions. It is serialized
+  to `container.possible_workloads`. Each entry is **one independent concurrent execution
+  scenario** — scenarios are *not* cumulative and imply *no* temporal ordering; a scheduler
+  only checks whether each scenario, in isolation, could be satisfied. Each scenario's
+  `workloads[]` item is `count` (number of concurrent descendant instances) × `resources`
+  (a `Sysresources`: `mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`;
+  bytes / microseconds; an omitted field defaults to `0` = no limit). Unlike `resources`
+  (this instance's own needs), these describe its descendants. Spec-only for now: the field
+  is declared and serialized, but nodo's scheduler does not yet interpret or enforce it
+  (see celaut-project/nodo#163).
 
 ## Filesystem Metadata Xattrs Contract
 
