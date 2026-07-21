@@ -160,7 +160,30 @@ def _resolve_packer_endpoint() -> Optional[str]:
     return None
 
 
+def _local_packer_enabled() -> bool:
+    """True when config selects nodo's optional local (Docker) packer.
+
+    ``packer.local`` defaults to False: the node keeps the packer-service
+    behaviour (resolve the packer by its ``core_services`` id, falling back to the
+    ``PACKER_SERVICE_URL`` override). When True, `nodo pack` builds the service
+    locally with nodo's isolated Docker toolchain instead.
+    """
+    return bool(env_manager.get("packer.local", False))
+
+
 def pack(directory: str) -> Optional[str]:
+    """Pack a project into a Celaut service.
+
+    Dispatches to the local Docker packer when ``packer.local: true``, otherwise
+    to the packer-service HTTP client (the default).
+    """
+    if _local_packer_enabled():
+        from src.commands.packer.zip_with_dockerfile.local_pack import pack_local
+        return pack_local(directory)
+    return _pack_via_service(directory)
+
+
+def _pack_via_service(directory: str) -> Optional[str]:
     packer_url = _resolve_packer_endpoint()
     if not packer_url:
         _msg = (

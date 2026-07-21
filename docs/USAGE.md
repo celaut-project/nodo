@@ -167,10 +167,13 @@ These are the most commonly used commands for daily tasks:
   `nodo connect 192.168.1.10:4040`
 
 - **pack `<project directory>`**  
-  Packages a project into a service. nodo does **not** build locally — it sends
-  the project to an external **packer-service** (a microVM that runs
-  Docker/buildx in a sealed VM, so Docker is never installed on your host) and
-  imports the returned `.celaut.bee`. Configure the packer by its published
+  Packages a project into a service. There are two backends, selected by
+  `packer.local` in `config.yaml`:
+
+  **Default (`packer.local: false`) — packer-service:** nodo does **not** build
+  locally. It sends the project to an external **packer-service** (a microVM that
+  runs Docker/buildx in a sealed VM, so Docker is never installed on your host)
+  and imports the returned `.celaut.bee`. Configure the packer by its published
   service id first, then `nodo execute` it so a running instance exists:  
   set the packer id under `core_services` in `config.yaml` — the single source of
   truth: `core_services: [{ name: "packer", id: "<packer-service id>" }]`  
@@ -178,6 +181,16 @@ These are the most commonly used commands for daily tasks:
   download the packer it uses `packer.PACKER_SOURCE_URL` if set, otherwise the
   source-application core service. To override with an out-of-band packer instead,
   set `packer.PACKER_SERVICE_URL: http://<ip>:8080` in `config.yaml`  
+
+  **Optional (`packer.local: true`) — local Docker packer:** nodo builds the
+  service on this host with its **own isolated Docker toolchain**. Docker is
+  **not** installed at node-install time — the first local pack provisions it on
+  demand via `bash/install_docker.sh` (isolated to the node, independent of any
+  Docker already on the host, mirroring `install_java.sh`). nodo starts its
+  isolated Docker daemon right before the build and stops it right after, and
+  only one `nodo pack` may run at a time. Tune it with `packer.docker.*` and
+  `dependencies.docker.*` in `config.yaml`.  
+
   **Example:**  
   `nodo pack /path/to/project`
   > Check [detailed documentation](../src/commands/packer/zip_with_dockerfile/README.md)
