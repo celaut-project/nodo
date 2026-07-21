@@ -20,3 +20,5 @@ prost-types = "0.11"
 
 [build-dependencies]
 prost-build = "0.11"
+# Vendored protoc so the build doesn't require a system-installed protobuf compiler.
+protoc-bin-vendored = "3"
