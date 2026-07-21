@@ -447,7 +447,6 @@ service Gateway {
     rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Payment -> Empty
     rpc SignPublicKey(stream buffer.Buffer) returns (stream buffer.Buffer) {} // SignRequest -> SignResponse
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput -> ModifyServiceSystemResourcesOutput
-    rpc Pack(stream buffer.Buffer) returns (stream buffer.Buffer) {} // bytes -> PackOutputServiceId | Service | Metadata | PackOutputError
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash & Service -> EstimatedCost
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash -> Service
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
