@@ -671,11 +671,11 @@ $Verbose = $VerboseMode.IsPresent
 $DistroName = "Nodo"
 $KernelDir = "C:\wsl-kernel"
 $KernelPath = Join-Path $KernelDir "bzImage"
-$KernelUrl = "https://github.com/celaut-project/nodo/releases/download/v1/bzImage"
+$KernelUrl = "https://github.com/celaut-project/nodo/releases/download/v2/bzImage"
 $NodoBaseDir = "C:\WSL\Nodo"
 $NodoImageDir = "C:\WSL\Images"
 $NodoRootfsPath = Join-Path $NodoImageDir "debian-nodo.tar"
-$NodoRootfsUrl = "https://github.com/celaut-project/nodo/releases/download/v1/debian.tar"
+$NodoRootfsUrl = "https://github.com/celaut-project/nodo/releases/download/v2/debian.tar"
 
 function Get-RegisteredDistros {
     $output = wsl --list --quiet *>&1
@@ -938,8 +938,8 @@ echo -e "${GREEN}[OK] Hostname configured as 'Nodo'${NC}"
 
 echo -e "\n${CYAN}[STEP 5.3] Downloading internal kernel...${NC}"
 mkdir -p /boot
-curl -sSL https://github.com/celaut-project/nodo/releases/download/v1/vmlinuz -o /boot/vmlinuz
-curl -sSL https://github.com/celaut-project/nodo/releases/download/v1/initramfs -o /boot/initramfs
+curl -sSL https://github.com/celaut-project/nodo/releases/download/v2/vmlinuz -o /boot/vmlinuz
+curl -sSL https://github.com/celaut-project/nodo/releases/download/v2/initramfs -o /boot/initramfs
 echo -e "${GREEN}[OK] vmlinuz and initramfs installed${NC}"
 
 echo -e "\n${CYAN}[STEP 5.4] Installing Nodo system...${NC}"

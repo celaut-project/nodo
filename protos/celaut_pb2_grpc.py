@@ -68,11 +68,6 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
-        self.Pack = channel.stream_stream(
-                '/celaut.Gateway/Pack',
-                request_serializer=buffer__pb2.Buffer.SerializeToString,
-                response_deserializer=buffer__pb2.Buffer.FromString,
-                )
         self.GetServiceEstimatedCost = channel.stream_stream(
                 '/celaut.Gateway/GetServiceEstimatedCost',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
@@ -90,6 +85,11 @@ class GatewayStub(object):
                 )
         self.ServiceTunnel = channel.stream_stream(
                 '/celaut.Gateway/ServiceTunnel',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
+        self.Observe = channel.stream_stream(
+                '/celaut.Gateway/Observe',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
@@ -162,12 +162,6 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def Pack(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def GetServiceEstimatedCost(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -187,6 +181,12 @@ class GatewayServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def ServiceTunnel(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Observe(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -245,11 +245,6 @@ def add_GatewayServicer_to_server(servicer, server):
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
-            'Pack': grpc.stream_stream_rpc_method_handler(
-                    servicer.Pack,
-                    request_deserializer=buffer__pb2.Buffer.FromString,
-                    response_serializer=buffer__pb2.Buffer.SerializeToString,
-            ),
             'GetServiceEstimatedCost': grpc.stream_stream_rpc_method_handler(
                     servicer.GetServiceEstimatedCost,
                     request_deserializer=buffer__pb2.Buffer.FromString,
@@ -267,6 +262,11 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'ServiceTunnel': grpc.stream_stream_rpc_method_handler(
                     servicer.ServiceTunnel,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
+            'Observe': grpc.stream_stream_rpc_method_handler(
+                    servicer.Observe,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
@@ -455,23 +455,6 @@ class Gateway(object):
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
-    def Pack(request_iterator,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/Pack',
-            buffer__pb2.Buffer.SerializeToString,
-            buffer__pb2.Buffer.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
-
-    @staticmethod
     def GetServiceEstimatedCost(request_iterator,
             target,
             options=(),
@@ -534,6 +517,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/ServiceTunnel',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def Observe(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/Observe',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

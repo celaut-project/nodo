@@ -61,6 +61,91 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo kill abcdef1234567890`
 
+- **observe `<instance id> [--save <path>]`**  
+  Attaches to a running instance and continuously displays live resource
+  metrics (CPU and memory, current + session peak) **together with a live
+  per-flow view of the microVM's network activity in the same frame**. Instance
+  IDs may be abbreviated to a unique prefix. Press `Ctrl-C` to exit.  
+
+  **Live network panel.** The network section is a live table of active flows,
+  newest activity first. Each flow (direction + transport + addresses/ports) is
+  one row that **accumulates** as packets arrive — packet count, byte total and
+  a last-seen timestamp all tick up in place, so a chatty connection stays
+  visibly alive next to the CPU/memory numbers instead of printing once and
+  looking frozen. A row looks like:
+
+  ```
+  17:15:41  OUT → instance c92ae2ff [gateway] (parent)     TCP     142 pkts    38.4 KB
+  ```
+
+  The panel re-renders on network bursts (throttled to avoid flicker) as well as
+  on the ~1 s metrics tick; CPU/memory and the flow table are always drawn in the
+  same frame. This on-screen table is an **aggregation for readability** — the
+  `.pcap` still records **every** frame verbatim, and `metrics.jsonl` remains
+  metrics-only.
+
+  **Network capture.** On the Linux/KVM host with `CAP_NET_RAW` (run as root),
+  observe binds an `AF_PACKET` raw socket to the instance's *tap* interface and
+  captures **every** frame in both directions — the Wireshark equivalent of the
+  VM's whole NIC. Transport protocol (TCP/UDP/ICMP), ports, TCP flags and
+  direction are read straight from the real IP/TCP/UDP headers; there is no
+  port→app-name guessing. Packet timestamps are taken from the **kernel**
+  (`SO_TIMESTAMPNS`), so the pcap has accurate inter-packet timing. The pcap
+  link-type is **auto-detected** from the interface: a normal L2 tap
+  (`ARPHRD_ETHER`) records as `LINKTYPE_ETHERNET`, a raw-IP tun device
+  (`ARPHRD_NONE`) as `LINKTYPE_RAW`. If `AF_PACKET` is unavailable (non-root,
+  non-Linux, or the tap can't be found) it degrades to the legacy `conntrack`
+  table scan for the on-screen feed (byte counts show `conntrack`), labels the
+  degraded mode, and writes no `.pcap`.  
+
+  **Saving (`--save <path>`).** By default nothing is stored. When `--save` is
+  passed, `<path>` is treated as a **directory**: observe creates
+  `<path>/<tag>_<instance_id>/` (or `<path>/<instance_id>/` when the service
+  has no tag) and writes, live while the display runs:
+  - `metrics.jsonl` — one JSON object per second with the CPU + memory sample
+    shown in the live panel (`cpu_percent`, `cpu_peak_percent`, `mem_bytes`,
+    `mem_peak_bytes`).
+  - `capture.pcap` — **every** captured frame in standard libpcap format
+    (auto-detected link-type, 65535 snaplen), openable directly in Wireshark /
+    `tcpdump -r`. Written only when real packet capture is active.
+  - `capture_unavailable.txt` — written **instead** of the pcap when capture
+    degraded to conntrack, stating why no pcap was produced (e.g. missing
+    `CAP_NET_RAW` / non-Linux host), so the artifact folder is self-explanatory.
+
+  **Examples:**  
+  `nodo observe 8a7fd2`  
+  `nodo observe 8a7fd2 --save ./captures`  
+  → `./captures/gateway_8a7fd2.../{metrics.jsonl,capture.pcap}`, then
+  `wireshark ./captures/gateway_8a7fd2.../capture.pcap`
+
+  **Observe over the gateway (`Gateway.Observe` bee_rpc):** the same live data is
+  exposed as a streaming RPC so peers/agents can subscribe remotely instead of
+  attaching a terminal. It shares the exact capture core the `observe` command
+  uses (`observe_event_stream`) — no duplicated logic.
+  - **Input:** one `ObserveRequest { instance_id, include_packets }`. The
+    `instance_id` addresses the instance the same way `GetMetrics` does
+    (`TokenMessage.token` semantics — id or unique id-prefix). Set
+    `include_packets = true` to also receive raw per-packet records; leave it
+    `false` (default) for the lighter metrics-only stream.
+  - **Output:** a live stream of `ObserveEvent`. Each event names its payload via
+    `kind`:
+    - `session` — sent first: `capture_mode` (`pcap` | `conntrack`) and
+      `degraded_reason` so the client knows whether full AF_PACKET capture is
+      active.
+    - `metrics` — one CPU + memory snapshot per second, mirroring the
+      `metrics.jsonl` fields (`cpu_percent`, `cpu_peak_percent`, `mem_bytes`,
+      `mem_peak_bytes`).
+    - `packet` — one parsed connection event (direction, transport, ports, TCP
+      flags, classified peer). Emitted per frame in `pcap` mode, per conntrack
+      row in the fallback.
+    - `notice` — degraded-mode / lifecycle messages (e.g. *instance stopped*),
+      never fabricated data.
+  - The stream ends cleanly when the instance stops or the client cancels (the
+    AF_PACKET socket is released on cancellation). Instance-not-found /
+    not-running is reported as a trailing degraded `notice`.
+  - Full AF_PACKET capture needs a Linux host with `CAP_NET_RAW`; elsewhere the
+    RPC degrades to the conntrack fallback exactly like the CLI.
+
 - **increase_gas `<instance id> <gas amount>`**  
   Increases the allocated gas for a service instance.  
   **Example:**  
@@ -82,10 +167,13 @@ These are the most commonly used commands for daily tasks:
   `nodo connect 192.168.1.10:4040`
 
 - **pack `<project directory>`**  
-  Packages a project into a service. nodo does **not** build locally — it sends
-  the project to an external **packer-service** (a microVM that runs
-  Docker/buildx in a sealed VM, so Docker is never installed on your host) and
-  imports the returned `.celaut.bee`. Configure the packer by its published
+  Packages a project into a service. There are two backends, selected by
+  `packer.local` in `config.yaml`:
+
+  **Default (`packer.local: false`) — packer-service:** nodo does **not** build
+  locally. It sends the project to an external **packer-service** (a microVM that
+  runs Docker/buildx in a sealed VM, so Docker is never installed on your host)
+  and imports the returned `.celaut.bee`. Configure the packer by its published
   service id first, then `nodo execute` it so a running instance exists:  
   set the packer id under `core_services` in `config.yaml` — the single source of
   truth: `core_services: [{ name: "packer", id: "<packer-service id>" }]`  
@@ -93,6 +181,16 @@ These are the most commonly used commands for daily tasks:
   download the packer it uses `packer.PACKER_SOURCE_URL` if set, otherwise the
   source-application core service. To override with an out-of-band packer instead,
   set `packer.PACKER_SERVICE_URL: http://<ip>:8080` in `config.yaml`  
+
+  **Optional (`packer.local: true`) — local Docker packer:** nodo builds the
+  service on this host with its **own isolated Docker toolchain**. Docker is
+  **not** installed at node-install time — the first local pack provisions it on
+  demand via `bash/install_docker.sh` (isolated to the node, independent of any
+  Docker already on the host, mirroring `install_java.sh`). nodo starts its
+  isolated Docker daemon right before the build and stops it right after, and
+  only one `nodo pack` may run at a time. Tune it with `packer.docker.*` and
+  `dependencies.docker.*` in `config.yaml`.  
+
   **Example:**  
   `nodo pack /path/to/project`
   > Check [detailed documentation](../src/commands/packer/zip_with_dockerfile/README.md)
@@ -281,6 +379,16 @@ These are intended for development or advanced maintenance environments:
   Forces the submission of reputation information.  
   **Example:**  
   `nodo submit_reputation`
+
+- **sync_reputation_proof**  
+  Reconciles the locally configured reputation proof with the wallet mnemonic and reports
+  every step. It (1) validates the currently configured proof, (2) removes it from the
+  config if it is not owned by the configured wallet, (3) if a mnemonic is configured,
+  looks up an on-chain reputation proof owned by that wallet and stores its id in the
+  config when one exists. This runs automatically after `nodo config`, so a freshly set
+  mnemonic immediately picks up its associated reputation proof (if any).  
+  **Example:**  
+  `nodo sync_reputation_proof`
 
 - **refresh_ergo_nodes**  
   Refreshes the Ergo nodes list and selects one as a provider.  

@@ -73,11 +73,21 @@ def ensure_vm_cgroup(vmachine_id: str, pid: int) -> Path:
     if not isinstance(pid, int) or pid <= 0:
         raise RuntimeError(f"Invalid PID for vmachine {vmachine_id}: {pid}")
 
-    parent = _cgroup_root() / "nodo-ch"
-    parent.mkdir(parents=True, exist_ok=True)
-
-    available = _read_available_controllers(_cgroup_root())
+    root = _cgroup_root()
+    available = _read_available_controllers(root)
     wanted = {"memory", "cpu"}.intersection(available)
+
+    # cgroup v2 delegation is top-down: a controller is only listed in a child's
+    # cgroup.controllers (and thus enable-able in its cgroup.subtree_control) if
+    # the PARENT already delegates it via cgroup.subtree_control. systemd usually
+    # delegates cpu/memory at the root, but on nodes where it doesn't, enabling
+    # them straight on nodo-ch fails with ENOENT ("Unable to enable cgroup subtree
+    # controllers ['cpu', 'memory'] in .../nodo-ch"). Delegate on the root first so
+    # nodo-ch inherits the controllers, then delegate on nodo-ch for the VM child.
+    _enable_subtree_controllers(root, wanted)
+
+    parent = root / "nodo-ch"
+    parent.mkdir(parents=True, exist_ok=True)
     _enable_subtree_controllers(parent, wanted)
 
     vm_cgroup = _vm_cgroup_dir(vmachine_id)
@@ -85,7 +95,7 @@ def ensure_vm_cgroup(vmachine_id: str, pid: int) -> Path:
 
     procs_file = vm_cgroup / "cgroup.procs"
     with open(procs_file, "w", encoding="utf-8") as f:
-        f.write(f"{pid}\n")
+        f.write(f"{pid}\n")  # Writing to cgroup.procs instructs the kernel to move this process into the cgroup. 
 
     return vm_cgroup
 

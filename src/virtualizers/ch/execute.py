@@ -22,6 +22,7 @@ from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_bytes
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
+from src.virtualizers.ch.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
 from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
 from src.virtualizers.ch.virtiofs import (
     attach_virtiofs_backends,
@@ -396,21 +397,37 @@ def _delete_tap(tap_name: str) -> None:
     _run(["ip", "link", "del", tap_name], check=False)
 
 
-def _resolve_initial_resources(resources: celaut.Sysresources) -> Tuple[int, int]:
+def _resolve_initial_resources(resources: celaut.Sysresources) -> Tuple[int, int, int, int]:
     vcpus = DEFAULT_VCPUS
-    mem_mib = DEFAULT_MEM_MIB
+    mem_b = DEFAULT_MEM_MIB * (1024 * 1024)  # Convert MiB to bytes
+
+    # Default values: 1 vCPU
+    cpu_period = 100000
+    cpu_quota = 100000
 
     try:
-        if resources and resources.HasField("cpu_quota") and resources.HasField("cpu_period"):
-            if resources.cpu_period > 0 and resources.cpu_quota > 0:
-                vcpus = max(1, int(math.ceil(resources.cpu_quota / resources.cpu_period)))
+        if resources:
+            if resources.HasField("cpu_period") and resources.cpu_period > 0:
+                cpu_period = resources.cpu_period
 
-        if resources and resources.HasField("mem_limit") and resources.mem_limit > 0:
-            mem_mib = max(MIN_MEM_MIB, int(math.ceil(resources.mem_limit / (1024 * 1024))))
+            if resources.HasField("cpu_quota") and resources.cpu_quota > 0:
+                cpu_quota = resources.cpu_quota
+
+            if cpu_period > 0 and cpu_quota > 0:
+                vcpus = max(1, int(math.ceil(cpu_quota / cpu_period)))
+
+            if resources.HasField("mem_limit") and resources.mem_limit > 0:
+                # mem_b is in bytes; MIN_MEM_MIB is a MiB floor, so convert it to
+                # bytes before comparing. Without the conversion the floor is a
+                # no-op (128 < any real byte count) and a service declaring e.g.
+                # mem_limit=50MB boots with ~48 MiB of guest RAM — too little for
+                # the kernel+initramfs to reach console, so the guest never brings
+                # up eth0 and launch fails with "Guest network did not become ready".
+                mem_b = max(MIN_MEM_MIB * 1024 * 1024, int(resources.mem_limit))
     except Exception:
         pass
 
-    return vcpus, mem_mib
+    return vcpus, mem_b, cpu_quota, cpu_period
 
 
 def _build_network_resolution(
@@ -1075,7 +1092,8 @@ def execute(
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
 
-        vcpus, mem_mib = _resolve_initial_resources(initial_system_resources)
+        vcpus, mem_b, cpu_quota, cpu_period = _resolve_initial_resources(initial_system_resources)
+        mem_mib = math.ceil(mem_b / (1024 * 1024))
         netmask = str(network.netmask)
         kernel_cmdline = _kernel_cmdline(vm_ip=vm_ip, netmask=netmask)
         log.LOGGER(
@@ -1143,6 +1161,12 @@ def execute(
             )
         log.LOGGER(f"[CH][{vmachine_id}] process health check passed after 1s")
 
+        # Set cgroup limits
+        vm_cgroup: Path = ensure_vm_cgroup(vmachine_id=vmachine_id, pid=process.pid)
+        apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=mem_b)
+        apply_cpu_limit(vm_cgroup=vm_cgroup, cpu_quota=cpu_quota, cpu_period=cpu_period)
+
+        # Network
         network_timeout_s = _guest_network_ready_timeout_seconds()
         log.LOGGER(
             f"[CH][{vmachine_id}] waiting guest network readiness: vm_ip={vm_ip}, timeout={network_timeout_s}s"
@@ -1225,7 +1249,7 @@ def execute(
                     {"domain": domain, "ip": ip}
                     for domain, ip in domain_records
                 ],
-                "cgroup_path": "",
+                "cgroup_path": vm_cgroup.as_posix(),
                 "virtiofs": virtiofs_mounts,
                 "exported_shares": exported_share_ids,
                 "bridge": NETWORK_BRIDGE_NAME,

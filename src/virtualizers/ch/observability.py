@@ -124,6 +124,104 @@ def _cgroup_memory_snapshot(
     }
 
 
+def _cgroup_io_snapshot(cgroup_path: Optional[Path]) -> Dict[str, Optional[int]]:
+    """Cumulative block-IO from cgroup v2 ``io.stat`` (summed over devices).
+
+    Each line is ``MAJ:MIN key=val key=val ...`` with ``rbytes``/``wbytes``
+    (bytes read/written to backing storage). Returns ``None`` totals when the
+    file is absent (io controller not enabled) so callers keep unset-on-the-wire.
+    """
+    if not cgroup_path:
+        return {"disk_read_bytes": None, "disk_write_bytes": None}
+    read_total = 0
+    write_total = 0
+    saw_any = False
+    try:
+        with open(cgroup_path / "io.stat", "r", encoding="utf-8") as f:
+            for line in f:
+                for field in line.split()[1:]:
+                    if "=" not in field:
+                        continue
+                    key, _, value = field.partition("=")
+                    try:
+                        num = int(value)
+                    except ValueError:
+                        continue
+                    if key == "rbytes":
+                        read_total += num
+                        saw_any = True
+                    elif key == "wbytes":
+                        write_total += num
+                        saw_any = True
+    except Exception:
+        return {"disk_read_bytes": None, "disk_write_bytes": None}
+    if not saw_any:
+        return {"disk_read_bytes": None, "disk_write_bytes": None}
+    return {"disk_read_bytes": read_total, "disk_write_bytes": write_total}
+
+
+def _process_io_snapshot(pid: int) -> Dict[str, Optional[int]]:
+    """Per-VM disk I/O from the hypervisor process's ``/proc/<pid>/io``.
+
+    Fallback for disk usage when the cgroup ``io`` controller is not delegated
+    to the instance's leaf cgroup (the common case: the leaf only carries
+    ``cpu``/``memory``, so ``io.stat`` lives only on the parent and would mix
+    instances). ``read_bytes``/``write_bytes`` are the bytes actually fetched
+    from / sent to the storage layer by this VM's process.
+    """
+    if pid <= 0:
+        return {"disk_read_bytes": None, "disk_write_bytes": None}
+    try:
+        io = psutil.Process(pid).io_counters()
+        return {"disk_read_bytes": int(io.read_bytes),
+                "disk_write_bytes": int(io.write_bytes)}
+    except Exception:
+        return {"disk_read_bytes": None, "disk_write_bytes": None}
+
+
+def _tap_ifname(vmachine_id: str) -> Optional[str]:
+    """Host tap interface name for ``vmachine_id``.
+
+    Mirrors ``execute.py::_create_tap`` / ``observe.tap_ifname_for_instance``:
+    ``tap`` + first 10 hex chars of ``sha1(instance_id)``. Re-derived (not
+    stored) so this stays read-only and never diverges from the runtime value.
+    """
+    import hashlib
+
+    safe_id = str(vmachine_id or "").strip()
+    if not safe_id:
+        return None
+    return "tap" + hashlib.sha1(safe_id.encode("utf-8")).hexdigest()[:10]
+
+
+def _read_net_counter(ifname: str, name: str) -> Optional[int]:
+    try:
+        with open(f"/sys/class/net/{ifname}/statistics/{name}",
+                  "r", encoding="utf-8") as f:
+            return int(f.read().strip())
+    except Exception:
+        return None
+
+
+def _tap_net_snapshot(vmachine_id: str) -> Dict[str, Optional[int]]:
+    """Cumulative tap-interface byte/packet counters.
+
+    Read from ``/sys/class/net/<tap>/statistics``. Orientation is the host tap's:
+    ``rx`` = frames the host received from the VM (VM egress); ``tx`` = frames the
+    host sent to the VM (VM ingress). ``None`` when the tap is absent.
+    """
+    ifname = _tap_ifname(vmachine_id)
+    if not ifname:
+        return {"net_rx_bytes": None, "net_tx_bytes": None,
+                "net_rx_packets": None, "net_tx_packets": None}
+    return {
+        "net_rx_bytes": _read_net_counter(ifname, "rx_bytes"),
+        "net_tx_bytes": _read_net_counter(ifname, "tx_bytes"),
+        "net_rx_packets": _read_net_counter(ifname, "rx_packets"),
+        "net_tx_packets": _read_net_counter(ifname, "tx_packets"),
+    }
+
+
 def get_vm_runtime_snapshot(
     vmachine_id: str,
     state: Optional[Dict[str, Any]] = None,
@@ -132,6 +230,16 @@ def get_vm_runtime_snapshot(
     pid = int(runtime_state.get("pid") or 0)
     proc = _process_snapshot(pid, vmachine_id=vmachine_id)
     cgroup_memory = _cgroup_memory_snapshot(vmachine_id=vmachine_id, runtime_state=runtime_state)
+    cgroup_io = _cgroup_io_snapshot(
+        _guess_cgroup_path(vmachine_id=vmachine_id, runtime_state=runtime_state))
+    proc_io = _process_io_snapshot(pid)
+    disk_read_bytes = (cgroup_io["disk_read_bytes"]
+                       if cgroup_io["disk_read_bytes"] is not None
+                       else proc_io["disk_read_bytes"])
+    disk_write_bytes = (cgroup_io["disk_write_bytes"]
+                        if cgroup_io["disk_write_bytes"] is not None
+                        else proc_io["disk_write_bytes"])
+    net_io = _tap_net_snapshot(vmachine_id=vmachine_id)
 
     uptime_s = proc["uptime_s"]
     if uptime_s is None:
@@ -147,5 +255,11 @@ def get_vm_runtime_snapshot(
         "cgroup_memory_max_raw": cgroup_memory["memory_max_raw"],
         "cgroup_memory_max_bytes": cgroup_memory["memory_max_bytes"],
         "cgroup_memory_current_bytes": cgroup_memory["memory_current_bytes"],
+        "disk_read_bytes": disk_read_bytes,
+        "disk_write_bytes": disk_write_bytes,
+        "net_rx_bytes": net_io["net_rx_bytes"],
+        "net_tx_bytes": net_io["net_tx_bytes"],
+        "net_rx_packets": net_io["net_rx_packets"],
+        "net_tx_packets": net_io["net_tx_packets"],
         "log_paths": _resolve_log_paths(runtime_state),
     }

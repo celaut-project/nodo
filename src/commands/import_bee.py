@@ -2,10 +2,11 @@ import os
 import shutil
 from typing import Optional
 from protos import celaut_pb2
-from bee_rpc.client import read_from_file, read_multiblock_directory
+from bee_rpc.client import read_from_file
 
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_stream
+from src.utils.service_content import read_service_content
 
 env_manager = ConfigManager()
 
@@ -14,16 +15,7 @@ METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 VALIDATE_ON_IMPORT = env_manager.get("VALIDATE_ON_IMPORT")
 
 
-def read_service_content(service_path):
-    if os.path.isfile(service_path):
-        with open(service_path, "rb") as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                yield chunk
-    else:
-        for i in read_multiblock_directory(directory=service_path):
-            yield i
-
-
+# It's on utils.service_content too, but here we have other params...
 def _compute_service_hash(service_path: str, hash_spec) -> str:
     return hash_stream(read_service_content(service_path=service_path), hash_spec).hex()
 
@@ -52,7 +44,7 @@ def _remove_path(path: str):
         os.remove(path)
 
 
-def import_bee(path: str) -> Optional[str]:
+def import_bee(path: str, integrity_hash: Optional[str] = None) -> Optional[str]:
     # Get the current directory (where the "nodo" command is executed from)
     current_directory = os.getcwd()
     
@@ -97,30 +89,25 @@ def import_bee(path: str) -> Optional[str]:
                 service_saved = os.path.exists(os.path.join(REGISTRY, service_hash))
                 break
 
-        calculated_hash = _compute_service_hash(service_path=service_dir, hash_spec=hash_spec)
-                
-        if not service_hash:
-            print(
-                f"There is no configured hash ({hash_spec.name}) in metadata; "
-                "it will be computed from service content."
-            )
-            service_hash = calculated_hash
-        
-        elif VALIDATE_ON_IMPORT:
-            if service_hash != calculated_hash:
-                print(
-                    f"Hash {hash_spec.name} exists in metadata, but it is not correct for service content."
-                )
-                if input("Do you want to overwrite it? y/n") not in ["y", "Y", "yes", "YES"]:
-                    return
-                service_hash = calculated_hash
+        if VALIDATE_ON_IMPORT:
+            calculated_hash = _compute_service_hash(service_path=service_dir, hash_spec=hash_spec)
 
-        _upsert_metadata_hash(
-            metadata=metadata,
-            hash_id=hash_spec.id_bytes,
-            hash_hex=service_hash,
-        )
+            if service_hash != calculated_hash:
+                _upsert_metadata_hash(
+                    metadata=metadata,
+                    hash_id=hash_spec.id_bytes,
+                    hash_hex=calculated_hash,
+                )
+                service_hash = calculated_hash
         
+        if integrity_hash:
+            if integrity_hash != service_hash:
+                print(
+                    f"Integrity hash mismatch. "
+                    f"Expected: {service_hash}, received: {integrity_hash}. "
+                    f"Ensure that the integrity hash uses the {hash_spec.name} algorithm."
+                )
+                return
         
         # Move metadata to the metadata registry
         metadata_destination = os.path.join(METADATA_REGISTRY, service_hash)
@@ -140,3 +127,4 @@ def import_bee(path: str) -> Optional[str]:
     
     except Exception as e:
         print(f"Error importing service: {e}")
+        return

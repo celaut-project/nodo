@@ -2,7 +2,6 @@ import os
 import shutil
 from src.commands.__by_tag import get_id
 from src.utils.config import ConfigManager
-from src.virtualizers.interface import remove as remove_vm
 
 env_manager = ConfigManager()
 
@@ -17,8 +16,6 @@ def remove(service: str):
     if os.geteuid() != 0:
         print("This script requires superuser privileges. Please run with sudo.")
         return
-
-    remove_vm(service)
 
     registry_path = os.path.join(REGISTRY, service)
     if os.path.isfile(registry_path):

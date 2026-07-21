@@ -1,5 +1,6 @@
 import sys, os, subprocess
 from bee_rpc.utils import modify_env
+from src.manager.manager import resolve_instance_token
 from src.utils import logger as log
 import src.manager.resources as iobd
 from src.utils.config import ConfigManager
@@ -184,6 +185,7 @@ if __name__ == '__main__':
                     "\n- inspect <service id> | <service tag>"
                     "\n- remove <service id> | <service tag>"
                     "\n- kill <instance id>"
+                    "\n- observe <instance id> [--save <path>]"
                     "\n- increase_gas <instance id> <gas to add>"
                     "\n- decrease_gas <instance id> <gas to retire>"
                     "\n- services"
@@ -215,12 +217,13 @@ if __name__ == '__main__':
                     "\n- test <test name>"
                     "\n- ggconf <repository path>"
                     "\n- submit_reputation"
-                    "\n- validate_reputation_proof_ownership"
+                    "\n- sync_reputation_proof"
                     "\n- refresh_ergo_nodes"
                     "\n- prune_containers"
                     "\n- refresh_clients"
                     "\n- tx_history"
                     "\n- increase_peer_deposit <peer id> <gas to add>"
+                    "\n- local_docker_packer <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
                     "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
                     "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
                     "\n\n",
@@ -430,6 +433,34 @@ if __name__ == '__main__':
             case "kill":
                 from src.commands.kill import kill
                 kill(instance=sys.argv[2])
+
+            case "observe":
+                from src.commands.observe import observe
+                import sys
+
+                args = sys.argv[2:]
+                save_path = None
+                if "--save" in args:
+                    try:
+                        save_index = args.index("--save")
+                        save_path = resolve_user_path(args[save_index + 1])
+                        args = args[:save_index] + args[save_index + 2:]
+                    except IndexError:
+                        print("Error: --save requires a path", flush=True)
+                        sys.exit(1)
+
+                if len(args) != 1:
+                    print("Usage: nodo observe <instance id> [--save <path>]", flush=True)
+                    sys.exit(1)
+
+                instance = args[0]
+                instance_id = resolve_instance_token(reference=instance, allow_uri_fallback=True)
+
+                if not instance_id:
+                    print(f"Error: Could not resolve instance reference '{instance}' to a valid instance ID.", flush=True)
+                    sys.exit(1)
+
+                observe(instance_id=instance_id, save_path=save_path)
                 
             case "increase_gas":
                 from src.commands.modify_gas import modify_gas
@@ -491,17 +522,13 @@ if __name__ == '__main__':
                 else:
                     print("Failed to submit reputation proof.", flush=True)
 
-            case 'validate_reputation_proof_ownership':
+            case 'sync_reputation_proof':
                 try:
-                    from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
-                    is_valid = validate_reputation_proof_ownership()
+                    from src.reputation_system.contracts.ergo.proof_validation import sync_reputation_proof_ownership
+                    sync_reputation_proof_ownership()
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)
                     os._exit(1)
-                if is_valid:
-                    print("Reputation proof ownership is valid.", flush=True)
-                else:
-                    print("Reputation proof ownership is invalid. Please check your environment variables.", flush=True)
                 
             case 'refresh_ergo_nodes':
                 from src.manager.ergo import get_refresh_peers
@@ -529,17 +556,15 @@ if __name__ == '__main__':
 
             case 'config':
                 os.system("/bin/bash bash/reconfig.sh")
-                if env_manager.get("REPUTATION_PROOF_ID"):
-                    try:
-                        from src.reputation_system.contracts.ergo.proof_validation import validate_reputation_proof_ownership
+                # After (re)configuring — e.g. a new wallet mnemonic — reconcile the
+                # reputation proof: drop it if it no longer belongs to the wallet, and
+                # discover/store the wallet's on-chain proof if one exists.
+                try:
+                    from src.reputation_system.contracts.ergo.proof_validation import sync_reputation_proof_ownership
 
-                        if not validate_reputation_proof_ownership():
-                            _msg = "The reputation proof is not associated with the provided main address. It will be removed from the node environment registry."
-                            log.LOGGER(_msg)
-                            print(_msg)
-                            env_manager.set("REPUTATION_PROOF_ID", "")
-                    except JavaDependencyMissing as e:
-                        print_java_dependency_error(e)
+                    sync_reputation_proof_ownership()
+                except JavaDependencyMissing as e:
+                    print_java_dependency_error(e)
 
             case 'envs':
                 os.system(f"yq . {MAIN_DIR}/config.yaml")
@@ -637,6 +662,29 @@ if __name__ == '__main__':
             case "increase_peer_deposit":
                 from src.commands.increase_peer_deposit import increase_peer_deposit
                 increase_peer_deposit(peer_id=sys.argv[2], gas=int(sys.argv[3]))
+
+            case "local_docker_packer":
+                # Run docker commands in nodo's isolated Docker context (the
+                # optional local packer's toolchain). Import lazily so this never
+                # loads on CH-only nodes that don't have Docker installed.
+                if os.geteuid() != 0:
+                    print("This script requires superuser privileges. Please run with sudo.")
+                    exit()
+
+                from src.utils.docker_env import DOCKER_COMMAND, DOCKER_ENV
+                docker_args = sys.argv[2:] if len(sys.argv) > 2 else []
+                if not docker_args:
+                    print("Usage: nodo docker <docker command>", flush=True)
+                    print("Example: nodo docker ps", flush=True)
+                    print("Example: nodo docker images", flush=True)
+                    print("\nThis uses nodo's isolated Docker daemon.", flush=True)
+                else:
+                    result = subprocess.run(
+                        DOCKER_COMMAND + docker_args,
+                        env=DOCKER_ENV,
+                    )
+                    if result.returncode != 0:
+                        sys.exit(result.returncode)
 
             case "daemon":
                 from src.commands.daemon import daemon_command
