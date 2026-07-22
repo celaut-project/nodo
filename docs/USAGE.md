@@ -450,16 +450,20 @@ If `hashing.CHECK_INTEGRITY_ON_SERVE` is set to `true`, Nodo runs an automatic i
 
 ## Terminal User Interface (TUI)
 
-The TUI provides a graphical terminal-based interface for managing nodes and services. Key features:
+Run `nodo tui` to open the operations console. Its pages cover node/host statistics, current
+instance resource usage and reservations, local services, peers and clients, complete
+`config.yaml` editing, logs, storage, and Ergo wallet balances. The old tunnels page was
+removed because nodo does not use it.
 
-- **Navigation:**  
-  - Left/Right Arrows: Switch sections.  
-  - Up/Down Arrows: Move between items.
+- Left/Right switches pages; Up/Down selects rows.
+- `r` refreshes, `Tab` switches peer/client focus, and `c` connects a peer.
+- On Services, `e` executes the selected service.
+- On Config, `e` edits any selected YAML value, `/` filters values, and `x` clears the filter.
+  Secrets are masked, comments are preserved, and each write creates `config.yaml.tui.bak`.
+- `q`, Escape, or Ctrl+C exits.
 
-- **Quick Commands:**  
-  - `o` / `p`: Rotate views in a section.  
-  - `m`: Toggle block view layout.  
-  - `c`: Connect to a peer.
+See [the TUI reference](../src/commands/tui/README.md) for page details, refresh behavior, and
+the typed configuration editor contract.
 
 ---
 
