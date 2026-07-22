@@ -134,8 +134,19 @@ def _read_tag(metadata_path: str) -> Optional[str]:
 
 
 def service_candidates(registry: Optional[str], metadata: Optional[str]) -> List[str]:
-    """Service content ids plus their tags."""
+    """Service content ids plus their (de-duplicated) tags.
+
+    Ids are unique, but a tag is frequently shared by many services, so the list
+    is de-duplicated to avoid the same tag appearing dozens of times.
+    """
     candidates: List[str] = []
+    seen: Dict[str, None] = {}
+
+    def add(value: Optional[str]) -> None:
+        if value and value not in seen:
+            seen[value] = None
+            candidates.append(value)
+
     if not registry:
         return candidates
     try:
@@ -143,11 +154,11 @@ def service_candidates(registry: Optional[str], metadata: Optional[str]) -> List
     except OSError:
         return candidates
     for service_id in ids:
-        candidates.append(service_id)
+        add(service_id)
         if metadata:
             tag = _read_tag(os.path.join(metadata, service_id))
             if tag and tag != service_id:
-                candidates.append(tag)
+                add(tag)
     return candidates
 
 

@@ -101,6 +101,25 @@ class ServiceCandidateTests(unittest.TestCase):
             self.assertIn("webserver", result)  # tag surfaced
             self.assertIn("svc-bbb", result)  # untagged service still completes
 
+    @unittest.skipIf(IMPORT_ERROR is not None, f"Missing protobuf: {IMPORT_ERROR}")
+    def test_shared_tags_are_deduplicated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = os.path.join(tmp, "registry")
+            metadata = os.path.join(tmp, "metadata")
+            os.makedirs(registry)
+            os.makedirs(metadata)
+            # Three distinct services that all carry the same tag.
+            for service_id in ("svc-1", "svc-2", "svc-3"):
+                open(os.path.join(registry, service_id), "wb").close()
+                md = celaut.Metadata()
+                md.hashtag.tag.append("packer")
+                with open(os.path.join(metadata, service_id), "wb") as handle:
+                    handle.write(md.SerializeToString())
+            result = completion.service_candidates(registry, metadata)
+            self.assertEqual(result.count("packer"), 1)  # tag listed once
+            for service_id in ("svc-1", "svc-2", "svc-3"):
+                self.assertIn(service_id, result)  # every id still present
+
 
 class ScriptGenerationTests(unittest.TestCase):
     def test_bash_script_bakes_paths_and_commands(self):
