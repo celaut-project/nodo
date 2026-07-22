@@ -37,8 +37,27 @@
   "possible_environment_workload": [
     {
       "workloads": [
-        { "count": 2, "resources": { "mem_limit": 5000000000 } },
-        { "count": 1, "resources": { "mem_limit": 40000000000 } }
+        {
+          "count": 2,
+          "resources": { "mem_limit": 5000000000 },
+          "dependency": {
+            "hash": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]
+          }
+        },
+        {
+          "count": 1,
+          "resources": { "mem_limit": 40000000000 },
+          "dependency": {
+            "service": {
+              "container": {
+                "resources": {
+                  "at_init": { "mem_limit": 40000000000 },
+                  "at_most": { "mem_limit": 48000000000 }
+                }
+              }
+            }
+          }
+        }
       ]
     },
     {
@@ -80,6 +99,15 @@
   (this instance's own needs), these describe its descendants. Spec-only for now: the field
   is declared and serialized, but nodo's scheduler does not yet interpret or enforce it
   (see celaut-project/nodo#163).
+- `workloads[].dependency` is optional (or may be `null`). It can identify the descendant
+  with `hash`, embed a full or partial protobuf-shaped `service`, and independently declare
+  whether the embedded service is complete (`is_completed`) or whether the complete artifact
+  already exists in the parent filesystem (`on_filesystem`). Hash values use hexadecimal;
+  hash type defaults to `sha3_256` and can be selected explicitly with
+  `{ "type": "sha3_256", "value": "<hex>" }`.
+- A nested `dependency.service` uses the protobuf `Service` JSON shape. In particular,
+  resources belong at `service.container.resources`, while descendant workload declarations
+  remain at `service.possible_environment_workload`.
 
 ## Filesystem Metadata Xattrs Contract
 

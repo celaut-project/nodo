@@ -422,6 +422,21 @@ The `service.json` file defines **runtime metadata** for the service: its archit
             "tags": ["ipv4", "public"],
             "prose": "Public IPv4 network access"
         }
+    ],
+    "possible_environment_workload": [
+        {
+            "workloads": [
+                {
+                    "count": 2,
+                    "resources": { "mem_limit": 536870912 },
+                    "dependency": {
+                        "hash": [
+                            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                        ]
+                    }
+                }
+            ]
+        }
     ]
 }
 ```
@@ -525,6 +540,115 @@ The `service.json` file defines **runtime metadata** for the service: its archit
 |-------|------|---------|-------------|
 | `count` | int | `1` | Number of concurrent descendant instances in this group |
 | `resources` | object (`Sysresources`) | `{}` | Resources each of those descendants may require (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds; `0` = no limit) |
+| `dependency` | object or `null` | omitted | Optional identity, embedded specification, and availability information for the descendant service |
+
+##### `workloads[].dependency`
+
+Every dependency field is optional, but a non-null dependency object must contain at least
+one `hash` or an embedded `service`:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `hash` | array | `[]` | Known content hashes. A string is a SHA3-256 digest in hexadecimal. Object form is `{ "type": "sha3_256", "value": "<hex>" }`; `type` also accepts another configured hash name or hash-id hex. |
+| `service` | object | omitted | Full or partial embedded `celaut.Service`, using protobuf JSON structure. For example, resources are under `container.resources`. |
+| `is_completed` | bool | `false` | `true` asserts that the embedded `service` is complete and can be checked against the declared hashes. Requires `service`. |
+| `on_filesystem` | bool | `false` | `true` declares that the complete dependency artifact is already stored in this service's filesystem (for example as a `.celaut.bee`). This does not copy it automatically; use the existing `pack_config.json` dependency flow to place the artifact in the filesystem. |
+
+`dependency: null` and an omitted `dependency` both leave the protobuf message absent.
+The booleans are independent: a service may be embedded, stored on the filesystem, both, or
+neither. The packer serializes these declarations; scheduler/runtime enforcement remains
+future work.
+
+**Hash-only dependency — resolve by content identity:**
+
+```json
+{
+    "count": 1,
+    "resources": { "mem_limit": 536870912 },
+    "dependency": {
+        "hash": [
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        ]
+    }
+}
+```
+
+**Filesystem-backed dependency:**
+
+```json
+{
+    "count": 1,
+    "resources": { "mem_limit": 536870912 },
+    "dependency": {
+        "hash": [
+            { "type": "sha3_256", "value": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+        ],
+        "on_filesystem": true
+    }
+}
+```
+
+**Partial service projection — scheduler-relevant fields only:**
+
+```json
+{
+    "count": 1,
+    "resources": { "mem_limit": 536870912 },
+    "dependency": {
+        "hash": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
+        "service": {
+            "container": {
+                "resources": {
+                    "at_init": { "mem_limit": 536870912 },
+                    "at_most": { "mem_limit": 1073741824 }
+                }
+            },
+            "possible_environment_workload": [
+                {
+                    "workloads": [
+                        {
+                            "count": 2,
+                            "resources": { "mem_limit": 268435456 },
+                            "dependency": null
+                        }
+                    ]
+                }
+            ]
+        },
+        "is_completed": false
+    }
+}
+```
+
+**Complete service embedded in the parent specification:**
+
+```json
+{
+    "count": 1,
+    "resources": { "mem_limit": 536870912 },
+    "dependency": {
+        "hash": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
+        "service": {
+            "prose": "Complete dependency specification",
+            "container": {
+                "architecture": { "tags": ["linux/amd64"] },
+                "filesystem": "<base64 protobuf bytes>",
+                "init": { "entry_path": ["service", "start"] },
+                "resources": {
+                    "at_init": { "mem_limit": 536870912 },
+                    "at_most": { "mem_limit": 1073741824 }
+                }
+            }
+        },
+        "is_completed": true,
+        "on_filesystem": false
+    }
+}
+```
+
+The special `dependency.hash` values are hexadecimal for operator convenience. Other
+protobuf `bytes` fields inside `dependency.service` (such as `container.filesystem`) use
+standard protobuf JSON base64 encoding.
 
 > **Spec-only:** the field is declared and serialized, but nodo's scheduler does **not** yet interpret or enforce it. Scheduler interpretation is future work (celaut-project/nodo#163).
 
@@ -534,8 +658,27 @@ The `service.json` file defines **runtime metadata** for the service: its archit
     "possible_environment_workload": [
         {
             "workloads": [
-                { "count": 2, "resources": { "mem_limit": 5000000000 } },
-                { "count": 1, "resources": { "mem_limit": 40000000000 } }
+                {
+                    "count": 2,
+                    "resources": { "mem_limit": 5000000000 },
+                    "dependency": {
+                        "hash": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]
+                    }
+                },
+                {
+                    "count": 1,
+                    "resources": { "mem_limit": 40000000000 },
+                    "dependency": {
+                        "service": {
+                            "container": {
+                                "resources": {
+                                    "at_init": { "mem_limit": 40000000000 },
+                                    "at_most": { "mem_limit": 48000000000 }
+                                }
+                            }
+                        }
+                    }
+                }
             ]
         },
         {

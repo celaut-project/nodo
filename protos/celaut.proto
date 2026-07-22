@@ -119,7 +119,7 @@ message Service {
                 // True when the complete dependency is stored in this
                 // service's filesystem (for example, as a celaut.bee passed
                 // later to the node's Execute method).
-                bool is_stored = 4;
+                bool on_filesystem = 4;
             }
 
             // Number of concurrent descendant instances that require `resources`.
