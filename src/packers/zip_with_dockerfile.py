@@ -11,6 +11,7 @@ from bee_rpc.utils import modify_env
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
+from src.packers.service_json import populate_possible_environment_workloads
 from src.utils.hashing import SHA3_256_ID, get_configured_hash_spec, hash_stream
 from src.utils.arch_guard import ensure_native_arch
 # PACKER_SUPPORTED_ARCHITECTURES lives in the Docker-free architectures module.
@@ -321,6 +322,15 @@ class ZipContainerPacker:
         r.at_most.cpu_quota = most_cpu_quota
         r.at_most.mem_limit = most_mem_limit
         r.at_most.disk_space = most_disk_space
+
+        # Possible descendant workloads. Each scenario is one independent
+        # worst-case concurrent execution the service may trigger through its
+        # descendants (not cumulative, no ordering). Spec-only: nodo does not
+        # interpret/validate these here — that is future scheduler work (#163).
+        populate_possible_environment_workloads(
+            self.service,
+            self.json.get("possible_environment_workload", []),
+        )
 
 
         # Entrypoint
