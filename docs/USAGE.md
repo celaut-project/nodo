@@ -467,6 +467,39 @@ the typed configuration editor contract.
 
 ---
 
+## Shell Completion
+
+Nodo ships `<Tab>` completion for **bash** and **zsh**. It completes command names and, for the
+commands that take one, the identifier of the relevant object:
+
+- **Service id or tag** — `execute`, `estimate`, `inspect`, `remove`, `publish`, `tag`,
+  `export`, `integrity`
+- **Instance id or name** — `kill`, `observe`, `increase_gas`, `decrease_gas`
+- **Peer id** — `disconnect`, `increase_peer_deposit`
+- **Subcommands** — `daemon start|status|stop|restart`
+
+The installer sets this up automatically. To (re)install it yourself:
+
+```bash
+nodo completion install          # per-user, or system-wide when run as root
+nodo completion install --user   # force the per-user location
+nodo completion install --system # force the system-wide location
+```
+
+You can also print a script to place wherever you like:
+
+```bash
+nodo completion bash > /etc/bash_completion.d/nodo
+nodo completion zsh  > /usr/local/share/zsh/site-functions/_nodo
+```
+
+Open a new shell to pick it up. Bash needs the `bash-completion` package installed; zsh needs the
+install directory on your `fpath`. Completion never edits your shell rc files. The dynamic
+candidate list comes from `nodo completion list <commands|services|instances|peers|refs>`, which is
+deliberately lightweight so it stays fast on every keypress.
+
+---
+
 ## Getting Help
 
 To view a summary of all available commands, simply run:
