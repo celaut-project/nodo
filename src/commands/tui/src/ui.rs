@@ -1,484 +1,678 @@
-use crate::app::{App, CPU_TIMES, LOG_FILE, RAM_TIMES};
-#[allow(clippy::wildcard_imports)]
+use crate::app::{format_bytes, percent, shorten, App, InputMode, Page, HISTORY_POINTS};
 use ratatui::{prelude::*, widgets::*};
-use std::cmp;
-use std::fs::File;
-use std::io::{self, BufRead};
-use vec_to_array::vec_to_array;
 
-/// Renders the user interface widgets.
+const ACCENT: Color = Color::Cyan;
+const MUTED: Color = Color::DarkGray;
+const GOOD: Color = Color::Green;
+const WARN: Color = Color::Yellow;
+
 pub fn render(app: &mut App, frame: &mut Frame) {
-    let view_constraints =
-        get_view_constraints(app.mode_view_index.state_id.as_deref().unwrap_or(""));
-    let mut constraints = vec![Constraint::Fill(1)];
-    constraints.extend(view_constraints.iter());
-    constraints.push(Constraint::Length(1));
+    let layout = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(8),
+        Constraint::Length(2),
+    ])
+    .split(frame.size());
 
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(frame.size());
-
-    let mut n = 0;
-    draw_tabs(frame, app, layout[n]);
-
-    for (i, constraint) in view_constraints.iter().enumerate() {
-        n += 1;
-        let current_index = (i + app.block_view_index.state.selected().unwrap_or(0))
-            % app.block_view_index.items.len();
-        match app.block_view_index.items[current_index].0.as_str() {
-            "ram-usage" => draw_ram_usage(frame, app, layout[n]),
-            "cpu-usage" => draw_cpu_usage(frame, app, layout[n]),
-            "tui-logs" => draw_tui_logs(frame, app, layout[n]),
-            "logs" => draw_logs(frame, app, layout[n]),
-            _ => {}
-        }
+    draw_tabs(frame, app, layout[0]);
+    match app.page() {
+        Page::Overview => draw_overview(frame, app, layout[1]),
+        Page::Instances => draw_instances(frame, app, layout[1]),
+        Page::Services => draw_services(frame, app, layout[1]),
+        Page::Network => draw_network(frame, app, layout[1]),
+        Page::Config => draw_config(frame, app, layout[1]),
+        Page::Logs => draw_logs(frame, app, layout[1]),
     }
+    draw_footer(frame, app, layout[2]);
 
-    let controls_text = get_controls_text(&app);
-    let controls_paragraph = Paragraph::new(controls_text)
-        .style(Style::default().fg(Color::White).bg(Color::Black))
-        .alignment(Alignment::Center);
-
-    frame.render_widget(controls_paragraph, layout[n + 1]);
-
-    if app.connect_popup {
-        let popup = Paragraph::new(app.connect_text.to_string())
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow))
-                    .title("Connect new peer")
-                    .title_style(
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                    .style(Style::default().bg(Color::Black).fg(Color::White)),
-            )
-            .alignment(Alignment::Left)
-            .wrap(Wrap { trim: true });
-
-        let min_percent_x: u16 = cmp::min((frame.size().width as f64) as u16, 10);
-        let content_width_ratio = cmp::max(app.connect_text.len() as u16, min_percent_x);
-        let area = centered_rect(content_width_ratio, 5, frame.size());
-        frame.render_widget(popup, area);
+    if app.input_mode != InputMode::Normal {
+        draw_input_popup(frame, app);
     }
 }
 
-fn get_view_constraints(mode: &str) -> Vec<Constraint> {
-    match mode {
-        "" => vec![],
-        "10" => vec![Constraint::Percentage(25)],
-        "10-10" => vec![Constraint::Percentage(25), Constraint::Percentage(25)],
-        "10-10-10" => vec![
-            Constraint::Percentage(25),
-            Constraint::Percentage(25),
-            Constraint::Percentage(25),
+fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
+    let titles = Page::ALL
+        .iter()
+        .map(|page| Line::from(page.title()))
+        .collect::<Vec<_>>();
+    let status_color = if app.node_info.service_status == "running" {
+        GOOD
+    } else {
+        WARN
+    };
+    let title = Line::from(vec![
+        Span::styled(
+            " NODO ",
+            Style::default().fg(Color::Black).bg(ACCENT).bold(),
+        ),
+        Span::raw("  operations console  "),
+        Span::styled(
+            if app.node_info.service_status.is_empty() {
+                "unknown"
+            } else {
+                &app.node_info.service_status
+            },
+            Style::default().fg(status_color),
+        ),
+    ]);
+    let tabs = Tabs::new(titles)
+        .block(Block::bordered().title(title))
+        .select(app.tabs.index)
+        .style(Style::default().fg(MUTED))
+        .highlight_style(Style::default().fg(ACCENT).bold())
+        .divider(" │ ");
+    frame.render_widget(tabs, area);
+}
+
+fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
+    let rows = Layout::vertical([
+        Constraint::Length(7),
+        Constraint::Length(7),
+        Constraint::Min(6),
+    ])
+    .split(area);
+    let top = Layout::horizontal([
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+    ])
+    .split(rows[0]);
+
+    draw_card(
+        frame,
+        top[0],
+        "NODE",
+        vec![
+            metric_line(
+                "Status",
+                nonempty(&app.node_info.service_status, "checking…"),
+            ),
+            metric_line("Address", nonempty(&app.node_info.address, "—")),
+            metric_line("Version", shorten(&app.node_info.version, 18)),
         ],
-        "20-10" => vec![Constraint::Percentage(50), Constraint::Percentage(25)],
-        "30" => vec![Constraint::Percentage(75)],
-        _ => vec![],
-    }
+        ACCENT,
+    );
+    draw_card(
+        frame,
+        top[1],
+        "WORKLOAD",
+        vec![
+            metric_line("Instances", app.instances.items.len().to_string()),
+            metric_line(
+                "Memory now",
+                format_bytes(app.stats.instance_memory_current),
+            ),
+            metric_line(
+                "Reserved",
+                format!(
+                    "{} RAM / {} disk",
+                    format_bytes(app.stats.instance_memory_reserved),
+                    format_bytes(app.stats.instance_disk_reserved)
+                ),
+            ),
+        ],
+        Color::LightBlue,
+    );
+    draw_card(
+        frame,
+        top[2],
+        "STORAGE",
+        vec![
+            metric_line(
+                "Host disk",
+                format!(
+                    "{} / {} ({}%)",
+                    format_bytes(app.stats.disk_used),
+                    format_bytes(app.stats.disk_total),
+                    percent(app.stats.disk_used, app.stats.disk_total)
+                ),
+            ),
+            metric_line("Nodo data", format_bytes(app.stats.storage_bytes)),
+            metric_line("Services", app.services.items.len().to_string()),
+        ],
+        Color::LightMagenta,
+    );
+    draw_card(
+        frame,
+        top[3],
+        "NETWORK",
+        vec![
+            metric_line("Peers", app.peers.items.len().to_string()),
+            metric_line("Clients", app.clients.items.len().to_string()),
+            metric_line(
+                "Proof",
+                shorten(nonempty(&app.node_info.reputation_proof, "—"), 18),
+            ),
+        ],
+        Color::LightGreen,
+    );
+
+    let middle =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[1]);
+    draw_ergo(frame, app, middle[0]);
+    draw_health(frame, app, middle[1]);
+
+    let charts =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[2]);
+    draw_sparkline(
+        frame,
+        charts[0],
+        "CPU HISTORY",
+        app.cpu_history.iter().copied().collect(),
+        app.stats.cpu_percent,
+        Color::Yellow,
+    );
+    draw_sparkline(
+        frame,
+        charts[1],
+        "MEMORY HISTORY",
+        app.ram_history.iter().copied().collect(),
+        percent(app.stats.memory_used, app.stats.memory_total),
+        ACCENT,
+    );
 }
 
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Percentage((100 - percent_y) / 2),
-                Constraint::Percentage(percent_y),
-                Constraint::Percentage((100 - percent_y) / 2),
-            ]
-            .as_ref(),
-        )
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(
-            [
-                Constraint::Percentage((100 - percent_x) / 2),
-                Constraint::Percentage(percent_x),
-                Constraint::Percentage((100 - percent_x) / 2),
-            ]
-            .as_ref(),
-        )
-        .split(popup_layout[1])[1]
+fn draw_card<'a>(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'a>>, color: Color) {
+    let block = Block::bordered()
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::default().fg(color).bold(),
+        ))
+        .border_style(Style::default().fg(MUTED));
+    frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
-fn get_controls_text(app: &App) -> String {
-    let is_row_selected = match app.tabs.index {
-        0 => app.peers.state_id.is_some(),
-        1 => app.clients.state_id.is_some(),
-        2 => app.instances.state_id.is_some(),
-        3 => app.services.state_id.is_some(),
-        4 => app.envs.state_id.is_some(),
-        5 => app.tunnels.state_id.is_some(),
-        _ => false,
+fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{label:<12}"), Style::default().fg(MUTED)),
+        Span::styled(value.into(), Style::default().fg(Color::White).bold()),
+    ])
+}
+
+fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
+    let sender = nonempty(&app.node_info.sender_address, "not configured");
+    let receiver = nonempty(&app.node_info.receiver_address, "not configured");
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("Total  ", Style::default().fg(MUTED)),
+            Span::styled(
+                format_balance(app.node_info.total_balance),
+                Style::default().fg(Color::LightGreen).bold(),
+            ),
+        ]),
+        Line::from(format!(
+            "Send   {}  {}",
+            shorten(sender, 28),
+            format_balance(app.node_info.sender_balance)
+        )),
+        Line::from(format!(
+            "Recv   {}  {}",
+            shorten(receiver, 28),
+            format_balance(app.node_info.receiver_balance)
+        )),
+        Line::from(Span::styled(
+            nonempty(&app.node_info.error, "Balances refresh every 60 seconds"),
+            Style::default().fg(if app.node_info.error.is_empty() {
+                MUTED
+            } else {
+                WARN
+            }),
+        )),
+    ];
+    draw_card(frame, area, "ERGO WALLET", lines, Color::LightGreen);
+}
+
+fn draw_health(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::bordered()
+        .title(Span::styled(
+            " HOST CAPACITY ",
+            Style::default().fg(Color::Yellow).bold(),
+        ))
+        .border_style(Style::default().fg(MUTED));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let rows = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Length(2),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+    draw_gauge(frame, rows[0], "CPU", app.stats.cpu_percent, Color::Yellow);
+    draw_gauge(
+        frame,
+        rows[1],
+        "RAM",
+        percent(app.stats.memory_used, app.stats.memory_total),
+        ACCENT,
+    );
+    frame.render_widget(
+        Paragraph::new(format!(
+            "{} used of {}",
+            format_bytes(app.stats.memory_used),
+            format_bytes(app.stats.memory_total)
+        ))
+        .style(Style::default().fg(MUTED)),
+        rows[2],
+    );
+}
+
+fn draw_gauge(frame: &mut Frame, area: Rect, label: &str, value: u64, color: Color) {
+    let gauge = Gauge::default()
+        .block(Block::default().title(label))
+        .gauge_style(Style::default().fg(color).bg(Color::Black))
+        .percent(value.min(100) as u16)
+        .label(format!("{value}%"));
+    frame.render_widget(gauge, area);
+}
+
+fn draw_sparkline(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    data: Vec<u64>,
+    current: u64,
+    color: Color,
+) {
+    let title = format!(" {title} • {current}% • last {} samples ", HISTORY_POINTS);
+    frame.render_widget(
+        Sparkline::default()
+            .block(
+                Block::bordered()
+                    .title(Span::styled(title, Style::default().fg(color).bold()))
+                    .border_style(Style::default().fg(MUTED)),
+            )
+            .data(&data)
+            .max(100)
+            .style(Style::default().fg(color)),
+        area,
+    );
+}
+
+fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
+    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(6)]).split(area);
+    let rows = app.instances.items.iter().map(|instance| {
+        Row::new(vec![
+            instance.name.clone(),
+            shorten(&instance.id, 18),
+            instance.service.clone(),
+            instance.ip.clone(),
+            instance.virtualizer.clone(),
+            instance
+                .memory_current
+                .map(format_bytes)
+                .unwrap_or_else(|| "—".to_string()),
+            format_bytes(instance.memory_limit),
+            format_bytes(instance.disk_limit),
+            instance.gas.clone(),
+        ])
+    });
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(16),
+            Constraint::Length(19),
+            Constraint::Length(18),
+            Constraint::Length(15),
+            Constraint::Length(5),
+            Constraint::Length(11),
+            Constraint::Length(11),
+            Constraint::Length(11),
+            Constraint::Min(12),
+        ],
+    )
+    .header(header_row(vec![
+        "Name", "Instance", "Service", "IP", "VM", "RAM now", "RAM max", "Disk max", "Gas",
+    ]))
+    .block(section_block(
+        format!(" INSTANCES • {} running ", app.instances.items.len()),
+        Color::LightBlue,
+    ))
+    .highlight_style(selected_style())
+    .highlight_symbol("▸ ");
+    frame.render_stateful_widget(table, layout[0], &mut app.instances.state);
+
+    let detail = if let Some(instance) = app.instances.selected() {
+        vec![
+            metric_line("Instance", instance.id.clone()),
+            metric_line("Service", instance.service.clone()),
+            metric_line("Endpoint", nonempty(&instance.ip, "—")),
+            metric_line("Gas", instance.gas.clone()),
+        ]
+    } else {
+        vec![Line::from(Span::styled(
+            "Select an instance to inspect its complete identity and allocation.",
+            Style::default().fg(MUTED),
+        ))]
+    };
+    draw_card(
+        frame,
+        layout[1],
+        "SELECTED INSTANCE",
+        detail,
+        Color::LightBlue,
+    );
+}
+
+fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
+    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(5)]).split(area);
+    let rows = app.services.items.iter().map(|service| {
+        Row::new(vec![
+            service.tag.clone(),
+            service.id.clone(),
+            format_bytes(service.size_bytes),
+        ])
+    });
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(28),
+            Constraint::Min(42),
+            Constraint::Length(14),
+        ],
+    )
+    .header(header_row(vec!["Tag", "Content ID", "Stored size"]))
+    .block(section_block(
+        format!(" SERVICES • {} available ", app.services.items.len()),
+        Color::LightMagenta,
+    ))
+    .highlight_style(selected_style())
+    .highlight_symbol("▸ ");
+    frame.render_stateful_widget(table, layout[0], &mut app.services.state);
+
+    let detail = app
+        .services
+        .selected()
+        .map(|service| {
+            format!(
+                "{}\n{} • {}",
+                service.id,
+                nonempty(&service.tag, "untagged"),
+                format_bytes(service.size_bytes)
+            )
+        })
+        .unwrap_or_else(|| "Select a service, then press e to execute it.".to_string());
+    frame.render_widget(
+        Paragraph::new(detail)
+            .block(section_block(" SELECTED SERVICE ", Color::LightMagenta))
+            .style(Style::default().fg(Color::White)),
+        layout[1],
+    );
+}
+
+fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
+    let split =
+        Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)]).split(area);
+    let peer_color = if app.network_focus == 0 {
+        ACCENT
+    } else {
+        MUTED
+    };
+    let client_color = if app.network_focus == 1 {
+        ACCENT
+    } else {
+        MUTED
     };
 
-    let mut control_text = String::new();
+    let peers = app.peers.items.iter().map(|peer| {
+        Row::new(vec![
+            peer.id.clone(),
+            peer.uris.clone(),
+            peer.gas.clone(),
+            peer.reputation.clone(),
+        ])
+    });
+    let peer_table = Table::new(
+        peers,
+        [
+            Constraint::Length(30),
+            Constraint::Length(28),
+            Constraint::Length(18),
+            Constraint::Min(24),
+        ],
+    )
+    .header(header_row(vec![
+        "Peer ID",
+        "Endpoints",
+        "Gas",
+        "Reputation proof",
+    ]))
+    .block(section_block(
+        format!(" PEERS • {} connected ", app.peers.items.len()),
+        peer_color,
+    ))
+    .highlight_style(selected_style())
+    .highlight_symbol("▸ ");
+    frame.render_stateful_widget(peer_table, split[0], &mut app.peers.state);
 
-    control_text.push_str("  Left/Right for menu  |  Up/Down for table rows");
-    control_text.push_str("  |  Press SHIFT and Left/Right to rotate the block views sections");
-    control_text.push_str("  |  Press SHIFT and Up/Down to change the block view layout");
+    let clients = app.clients.items.iter().map(|client| {
+        Row::new(vec![
+            client.id.clone(),
+            client.gas.clone(),
+            client.last_usage.clone(),
+        ])
+    });
+    let client_table = Table::new(
+        clients,
+        [
+            Constraint::Min(45),
+            Constraint::Length(24),
+            Constraint::Length(20),
+        ],
+    )
+    .header(header_row(vec!["Client ID", "Gas", "Last usage"]))
+    .block(section_block(
+        format!(
+            " CLIENTS • {} known • Tab changes focus ",
+            app.clients.items.len()
+        ),
+        client_color,
+    ))
+    .highlight_style(selected_style())
+    .highlight_symbol("▸ ");
+    frame.render_stateful_widget(client_table, split[1], &mut app.clients.state);
+}
 
-    if is_row_selected {
-        match app.tabs.index {
-            0 => control_text.push_str("  |  Press 'd' to delete the peer."),
-            1 => control_text.push_str("  |  Press 'd' to delete the client."),
-            2 => control_text.push_str("  |  Press 'd' to delete the instance."),
-            3 => control_text.push_str(
-                "  |  Press 'e' to execute an instance.  |  Press 'd' to delete the service.",
-            ),
-            4 => control_text.push_str("  |  Press 'e' to edit."),
-            5 => control_text.push_str(" | Press 'd' to close the tunnel."),
-            _ => (),
-        }
+fn draw_config(frame: &mut Frame, app: &mut App, area: Rect) {
+    let filter = if app.config_filter.is_empty() {
+        "all values".to_string()
+    } else {
+        format!("filter: {}", app.config_filter)
+    };
+    let rows = app.config.items.iter().map(|entry| {
+        Row::new(vec![
+            entry.path.clone(),
+            entry.display_value(),
+            entry.value_type.clone(),
+        ])
+    });
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Percentage(44),
+            Constraint::Percentage(46),
+            Constraint::Length(10),
+        ],
+    )
+    .header(header_row(vec!["Configuration path", "Value", "Type"]))
+    .block(section_block(
+        format!(
+            " CONFIGURATION • {} of {} values • {} ",
+            app.config.items.len(),
+            app.config_all.len(),
+            filter
+        ),
+        Color::Yellow,
+    ))
+    .highlight_style(selected_style())
+    .highlight_symbol("▸ ");
+    frame.render_stateful_widget(table, area, &mut app.config.state);
+}
+
+fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
+    let split =
+        Layout::horizontal([Constraint::Percentage(68), Constraint::Percentage(32)]).split(area);
+    let node_text = visible_tail(&app.node_logs, split[0].height.saturating_sub(2) as usize);
+    frame.render_widget(
+        Paragraph::new(node_text)
+            .block(section_block(" NODE LOG • app.log ", Color::White))
+            .style(Style::default().fg(Color::Gray))
+            .wrap(Wrap { trim: false }),
+        split[0],
+    );
+    let action_text = visible_tail(&app.app_logs, split[1].height.saturating_sub(2) as usize);
+    frame.render_widget(
+        Paragraph::new(action_text)
+            .block(section_block(" TUI ACTIONS ", ACCENT))
+            .style(Style::default().fg(Color::Gray))
+            .wrap(Wrap { trim: false }),
+        split[1],
+    );
+}
+
+fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
+    let controls = match app.page() {
+        Page::Overview => "←/→ page  •  r refresh  •  q quit",
+        Page::Instances => "↑/↓ select  •  ←/→ page  •  r refresh  •  q quit",
+        Page::Services => "↑/↓ select  •  e execute  •  ←/→ page  •  q quit",
+        Page::Network => "↑/↓ select  •  Tab peers/clients  •  c connect  •  q quit",
+        Page::Config => "↑/↓ select  •  e edit  •  / filter  •  x clear filter  •  q quit",
+        Page::Logs => "←/→ page  •  r refresh  •  q quit",
+    };
+    let lines = vec![
+        Line::from(Span::styled(&app.status, Style::default().fg(WARN))),
+        Line::from(Span::styled(controls, Style::default().fg(MUTED))),
+    ];
+    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
+}
+
+fn draw_input_popup(frame: &mut Frame, app: &App) {
+    let area = centered_rect(72, 7, frame.size());
+    frame.render_widget(Clear, area);
+    let secret_hint = if app.edit_config_secret {
+        " • existing secret hidden; blank keeps it, type \"\" to clear"
+    } else {
+        ""
+    };
+    let display = if app.edit_config_secret {
+        "•".repeat(app.input.chars().count())
+    } else {
+        app.input.clone()
+    };
+    let content = vec![
+        Line::from(display),
+        Line::from(Span::styled(
+            format!("Enter saves • Esc cancels • Ctrl+U clears{secret_hint}"),
+            Style::default().fg(MUTED),
+        )),
+    ];
+    let popup = Paragraph::new(content)
+        .block(
+            Block::bordered()
+                .title(Span::styled(
+                    format!(" {} ", app.input_title),
+                    Style::default().fg(ACCENT).bold(),
+                ))
+                .border_style(Style::default().fg(ACCENT)),
+        )
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+    frame.render_widget(popup, area);
+}
+
+fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
+    let vertical = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Length(height.min(area.height)),
+        Constraint::Fill(1),
+    ])
+    .split(area);
+    Layout::horizontal([
+        Constraint::Percentage((100 - percent_x) / 2),
+        Constraint::Percentage(percent_x),
+        Constraint::Percentage((100 - percent_x) / 2),
+    ])
+    .split(vertical[1])[1]
+}
+
+fn header_row(labels: Vec<&str>) -> Row<'static> {
+    Row::new(
+        labels
+            .into_iter()
+            .map(|label| Cell::from(label.to_string()))
+            .collect::<Vec<_>>(),
+    )
+    .style(Style::default().fg(ACCENT).bold())
+    .bottom_margin(1)
+}
+
+fn section_block(title: impl Into<String>, color: Color) -> Block<'static> {
+    Block::bordered()
+        .title(Span::styled(
+            title.into(),
+            Style::default().fg(color).bold(),
+        ))
+        .border_style(Style::default().fg(color))
+}
+
+fn selected_style() -> Style {
+    Style::default().fg(Color::Black).bg(ACCENT).bold()
+}
+
+fn format_balance(balance: Option<f64>) -> String {
+    balance
+        .map(|amount| format!("{amount:.6} ERG"))
+        .unwrap_or_else(|| "—".to_string())
+}
+
+fn nonempty<'a>(value: &'a str, fallback: &'a str) -> &'a str {
+    if value.trim().is_empty() {
+        fallback
+    } else {
+        value
     }
+}
 
-    match app.tabs.index {
-        0 => {
-            if app.connect_popup {
-                control_text.push_str("  |  Press 'esc' to close");
-            } else {
-                control_text.push_str("  |  Press 'c' to connect to a new peer");
+fn visible_tail(lines: &[String], count: usize) -> String {
+    let start = lines.len().saturating_sub(count);
+    lines[start..].join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn every_page_renders_at_common_terminal_sizes() {
+        for (width, height) in [(80, 24), (140, 40)] {
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let mut app = App::new();
+            for index in 0..Page::ALL.len() {
+                app.tabs.index = index;
+                terminal.draw(|frame| render(&mut app, frame)).unwrap();
             }
         }
-        _ => (),
     }
 
-    control_text
-}
-
-fn draw_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(vec![Constraint::Length(3), Constraint::Fill(1)])
-        .split(area);
-
-    let tabs = app
-        .tabs
-        .titles
-        .iter()
-        .map(|t| text::Line::from(Span::styled(*t, Style::default().fg(Color::Green))))
-        .collect::<Tabs>()
-        .block(Block::default().borders(Borders::ALL).title(app.title))
-        .highlight_style(Style::default().fg(Color::Yellow))
-        .select(app.tabs.index);
-
-    frame.render_widget(tabs, layout[0]);
-    match app.tabs.index {
-        0 => draw_peer_list(frame, app, layout[1]),
-        1 => draw_client_list(frame, app, layout[1]),
-        2 => draw_instance_list(frame, app, layout[1]),
-        3 => draw_service_list(frame, app, layout[1]),
-        4 => draw_env_list(frame, app, layout[1]),
-        5 => draw_tunnel_list(frame, app, layout[1]),
-        _ => {}
-    };
-}
-
-fn draw_peer_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    frame.render_stateful_widget(
-        Table::new(
-            app.peers
-                .items
-                .iter()
-                .map(|peer| Row::new(vec![
-                    peer.id.clone(), 
-                    peer.uri.clone(), 
-                    peer.gas.clone(), 
-                    peer.rpi.clone().unwrap_or_else(|| "N/A".to_string()),
-                ]))
-                .collect::<Vec<Row>>(),
-            [
-                Constraint::Length(30),
-                Constraint::Length(20),
-                Constraint::Length(20),
-                Constraint::Length(30)
-            ],
-        )
-        .header(Row::new(vec![
-            Cell::from("Id"),
-            Cell::from("Main URI"),
-            Cell::from("Gas on it"),
-            Cell::from("Reputation proof")
-        ]))
-        .block(
-            Block::bordered()
-                .title("PEERS")
-                .title_alignment(Alignment::Left)
-                .border_type(BorderType::Thick),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ")
-        .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
-        area,
-        &mut app.peers.state,
-    );
-}
-
-fn draw_client_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    frame.render_stateful_widget(
-        Table::new(
-            app.clients
-                .items
-                .iter()
-                .map(|client| Row::new(vec![client.id.clone(), client.gas.clone()]))
-                .collect::<Vec<Row>>(),
-            [Constraint::Length(70), Constraint::Length(30)],
-        )
-        .header(Row::new(vec![Cell::from("Client Id"), Cell::from("Gas")]))
-        .block(
-            Block::bordered()
-                .title("CLIENTS")
-                .title_alignment(Alignment::Left)
-                .border_type(BorderType::Thick),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ")
-        .style(Style::default().fg(Color::LightGreen).bg(Color::Black)),
-        area,
-        &mut app.clients.state,
-    );
-}
-
-fn draw_instance_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    frame.render_stateful_widget(
-        Table::new(
-            app.instances
-                .items
-                .iter()
-                .map(|instance| Row::new(vec![instance.id.clone(), instance.ip.clone(), instance.gas.clone()]))
-                .collect::<Vec<Row>>(),
-            [Constraint::Length(40), Constraint::Length(40), Constraint::Length(20)],
-        )
-        .header(Row::new(vec![Cell::from("Instance Id"), Cell::from("Internal Ip"), Cell::from("Gas")]))
-        .block(
-            Block::bordered()
-                .title("INSTANCES")
-                .title_alignment(Alignment::Left)
-                .border_type(BorderType::Thick),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ")
-        .style(Style::default().fg(Color::LightBlue).bg(Color::Black)),
-        area,
-        &mut app.instances.state,
-    );
-}
-
-fn draw_service_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    frame.render_stateful_widget(
-        Table::new(
-            app.services
-                .items
-                .iter()
-                .map(|peer| Row::new(vec![peer.id.clone(), peer.tag.clone()]))
-                .collect::<Vec<Row>>(),
-            [Constraint::Length(80), Constraint::Length(20)],
-        )
-        .header(Row::new(vec![Cell::from("Id"), Cell::from("Tag")]))
-        .block(
-            Block::bordered()
-                .title("SERVICES")
-                .title_alignment(Alignment::Left)
-                .border_type(BorderType::Thick),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ")
-        .style(Style::default().fg(Color::LightMagenta).bg(Color::Black)),
-        area,
-        &mut app.services.state,
-    );
-}
-
-fn draw_env_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    frame.render_stateful_widget(
-        Table::new(
-            app.envs
-                .items
-                .iter()
-                .map(|env| Row::new(vec![env.id.clone(), env.value.clone(), env.info.clone()]))
-                .collect::<Vec<Row>>(),
-            [
-                Constraint::Length(50),
-                Constraint::Length(70),
-                Constraint::Length(70),
-            ],
-        )
-        .header(Row::new(vec![
-            Cell::from("Id"),
-            Cell::from("Value"),
-            Cell::from("Info"),
-        ]))
-        .block(
-            Block::bordered()
-                .title("ENVS")
-                .title_alignment(Alignment::Left)
-                .border_type(BorderType::Thick),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ")
-        .style(Style::default().fg(Color::White).bg(Color::Black)),
-        area,
-        &mut app.envs.state,
-    );
-}
-
-fn draw_tunnel_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    frame.render_stateful_widget(
-        Table::new(
-            app.tunnels
-                .items
-                .iter()
-                .map(|tunnel| {
-                    Row::new(vec![
-                        tunnel.id.clone(),
-                        tunnel.uri.clone(),
-                        tunnel.service.clone(),
-                        (if tunnel.live { "Live" } else { "Dead" }).to_string(),
-                    ])
-                })
-                .collect::<Vec<Row>>(),
-            [
-                Constraint::Length(50),
-                Constraint::Length(50),
-                Constraint::Length(70),
-                Constraint::Length(20),
-            ],
-        )
-        .header(Row::new(vec![
-            Cell::from("Id"),
-            Cell::from("Uri"),
-            Cell::from("Service"),
-            Cell::from("Alive"),
-        ]))
-        .block(
-            Block::bordered()
-                .title("TUNNELS")
-                .title_alignment(Alignment::Left)
-                .border_type(BorderType::Thick),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ")
-        .style(Style::default().fg(Color::White).bg(Color::Black)),
-        area,
-        &mut app.tunnels.state,
-    );
-}
-
-fn read_last_lines(filename: &str, line_count: usize) -> io::Result<Vec<String>> {
-    let file = File::open(filename)?;
-    let reader = io::BufReader::new(file);
-
-    let lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
-
-    let lines_to_show = if lines.len() > line_count {
-        lines.into_iter().rev().take(line_count).rev().collect()
-    } else {
-        lines
-    };
-
-    Ok(lines_to_show)
-}
-
-fn draw_logs(frame: &mut Frame, _app: &mut App, area: Rect) {
-    let log_lines = area.height as usize;
-    let logs_text = match read_last_lines(LOG_FILE, log_lines) {
-        Ok(lines) => lines.join("\n"),
-        Err(_) => "Unable to read log file.".to_string(),
-    };
-
-    let logs_paragraph = Paragraph::new(logs_text)
-        .block(
-            Block::bordered()
-                .title("Logs")
-                .title_alignment(Alignment::Left)
-                .border_type(BorderType::Thick),
-        )
-        .style(Style::default().fg(Color::White).bg(Color::Black));
-
-    frame.render_widget(logs_paragraph, area);
-}
-
-fn draw_tui_logs(frame: &mut Frame, app: &mut App, area: Rect) {
-    let log_lines = area.height as usize;
-    let logs_text: String = app
-        .logs
-        .iter()
-        .rev()
-        .take(log_lines)
-        .rev()
-        .cloned()
-        .collect::<Vec<String>>()
-        .join("\n");
-    let logs_paragraph = Paragraph::new(logs_text)
-        .block(
-            Block::bordered()
-                .title("Tui logs")
-                .title_alignment(Alignment::Left)
-                .border_type(BorderType::Thick),
-        )
-        .style(Style::default().fg(Color::White).bg(Color::Black));
-
-    frame.render_widget(logs_paragraph, area);
-}
-
-fn draw_ram_usage(frame: &mut Frame, app: &mut App, area: Rect) {
-    let ram_usage_arr: [u64; RAM_TIMES] = {
-        if app.ram_usage.len() > RAM_TIMES {
-            let ram_usage_vector =
-                app.ram_usage.clone()[(app.ram_usage.len() - RAM_TIMES)..].to_vec();
-            let ram_usage_arr: [u64; RAM_TIMES] = vec_to_array!(ram_usage_vector, u64, RAM_TIMES);
-            ram_usage_arr
-        } else {
-            [0; RAM_TIMES]
-        }
-    };
-    frame.render_widget(
-        Sparkline::default()
-            .data(&ram_usage_arr)
-            .max(100)
-            .direction(RenderDirection::LeftToRight)
-            .style(Style::default().light_yellow().on_white())
-            .block(
-                Block::bordered()
-                    .title("Ram usage")
-                    .title_alignment(Alignment::Left)
-                    .border_type(BorderType::Thick),
-            )
-            .style(Style::default().fg(Color::Cyan).bg(Color::Black)),
-        area,
-    );
-}
-
-fn draw_cpu_usage(frame: &mut Frame, app: &mut App, area: Rect) {
-    let cpu_usage_arr: [u64; CPU_TIMES] = {
-        if app.cpu_usage.len() > CPU_TIMES {
-            let cpu_usage_vector =
-                app.cpu_usage.clone()[(app.cpu_usage.len() - CPU_TIMES)..].to_vec();
-            let cpu_usage_arr: [u64; CPU_TIMES] = vec_to_array!(cpu_usage_vector, u64, CPU_TIMES);
-            cpu_usage_arr
-        } else {
-            [0; CPU_TIMES]
-        }
-    };
-    frame.render_widget(
-        Sparkline::default()
-            .block(
-                Block::bordered()
-                    .title("CPU usage")
-                    .title_alignment(Alignment::Left)
-                    .border_type(BorderType::Thick),
-            )
-            .data(&cpu_usage_arr)
-            .max(100)
-            .direction(RenderDirection::LeftToRight)
-            .style(Style::default().fg(Color::Yellow).bg(Color::Black)),
-        area,
-    );
+    #[test]
+    fn secret_editor_never_renders_plaintext() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.input_mode = InputMode::EditConfig;
+        app.edit_config_secret = true;
+        app.input_title = "Edit wallet mnemonic".to_string();
+        app.input = "these words must stay hidden".to_string();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(!screen.contains("these words"));
+        assert!(screen.contains("••••"));
+    }
 }
