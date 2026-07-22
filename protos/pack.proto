@@ -31,6 +31,7 @@ message Service {
     Container container = 2;
     celaut.Service.Api api = 3;
     repeated celaut.Service.Network network = 4;
+    repeated celaut.Service.PossibleEnvironmentWorkload possible_environment_workload = 5;
 }
 
 message PackOutputServiceId {
