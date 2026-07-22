@@ -34,6 +34,38 @@
       "disk_space": 4000000000
     }
   },
+  "possible_environment_workload": [
+    {
+      "workloads": [
+        {
+          "count": 2,
+          "resources": { "mem_limit": 5000000000 },
+          "dependency": {
+            "hash": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]
+          }
+        },
+        {
+          "count": 1,
+          "resources": { "mem_limit": 40000000000 },
+          "dependency": {
+            "service": {
+              "container": {
+                "resources": {
+                  "at_init": { "mem_limit": 40000000000 },
+                  "at_most": { "mem_limit": 48000000000 }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "workloads": [
+        { "count": 4, "resources": { "mem_limit": 16000000000 } }
+      ]
+    }
+  ],
   "network": [
     {
       "tags": ["example.com"],
@@ -56,6 +88,26 @@
 - `api[].protocol` is serialized to `api.slot[].protocol_stack[*].tags` (application protocol stack over transport).
 - `api[].gas_amount_per_call` is serialized to `api.slot[].gas_amount_per_call`.
 - `resources.start_time_ms` no longer exists.
+- `possible_environment_workload[]` declares the **worst-case descendant workloads** the service
+  may request during its lifetime, for scheduling admission decisions. It is serialized
+  directly to `Service.possible_environment_workload`, outside `Service.Container`. Each entry is **one independent concurrent execution
+  scenario** — scenarios are *not* cumulative and imply *no* temporal ordering; a scheduler
+  only checks whether each scenario, in isolation, could be satisfied. Each scenario's
+  `workloads[]` item is `count` (number of concurrent descendant instances) × `resources`
+  (a `Sysresources`: `mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`;
+  bytes / microseconds; an omitted field defaults to `0` = no limit). Unlike `resources`
+  (this instance's own needs), these describe its descendants. Spec-only for now: the field
+  is declared and serialized, but nodo's scheduler does not yet interpret or enforce it
+  (see celaut-project/nodo#163).
+- `workloads[].dependency` is optional (or may be `null`). It can identify the descendant
+  with `hash`, embed a full or partial protobuf-shaped `service`, and independently declare
+  whether the embedded service is complete (`is_completed`) or whether the complete artifact
+  already exists in the parent filesystem (`on_filesystem`). Hash values use hexadecimal;
+  hash type defaults to `sha3_256` and can be selected explicitly with
+  `{ "type": "sha3_256", "value": "<hex>" }`.
+- A nested `dependency.service` uses the protobuf `Service` JSON shape. In particular,
+  resources belong at `service.container.resources`, while descendant workload declarations
+  remain at `service.possible_environment_workload`.
 
 ## Filesystem Metadata Xattrs Contract
 
