@@ -106,10 +106,30 @@ message Service {
     message PossibleEnvironmentWorkload {
         // One group of identical concurrent descendant workloads.
         message Workload {
+            // Identifies the service responsible for this workload. The
+            // message may be omitted when the workload is resource-only.
+            message Dependency {
+                // Known content hashes for the dependency service.
+                repeated Metadata.HashTag.Hash hash = 1;
+                // Full or partial dependency specification.
+                Service service = 2;
+                // True when `service` is complete, so its hashes can be
+                // calculated and verified against `hash`.
+                bool is_completed = 3;
+                // True when the complete dependency is stored in this
+                // service's filesystem (for example, as a celaut.bee passed
+                // later to the node's Execute method).
+                bool is_stored = 4;
+            }
+
             // Number of concurrent descendant instances that require `resources`.
             uint32 count = 1;
             // Resources each of those descendant instances may require.
             Sysresources resources = 2;
+            // Dependency identity/specification, if this workload is tied to
+            // a particular service. Message presence distinguishes an omitted
+            // dependency from an explicitly populated one.
+            Dependency dependency = 3;
         }
         repeated Workload workloads = 1;
     }
