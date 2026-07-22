@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 import celaut_pb2 as celaut__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\npack.proto\x12\x04pack\x1a\x0c\x63\x65laut.proto\"\xe5\x06\n\x07Service\x12\r\n\x05prose\x18\x01 \x01(\t\x12*\n\tcontainer\x18\x02 \x01(\x0b\x32\x17.pack.Service.Container\x12 \n\x03\x61pi\x18\x03 \x01(\x0b\x32\x13.celaut.Service.Api\x12(\n\x07network\x18\x04 \x03(\x0b\x32\x17.celaut.Service.Network\x1a\xd2\x05\n\tContainer\x12<\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32&.celaut.Service.Container.Architecture\x12\x38\n\nfilesystem\x18\x02 \x01(\x0b\x32$.celaut.Service.Container.Filesystem\x12*\n\x04init\x18\x03 \x01(\x0b\x32\x1c.pack.Service.Container.Init\x12;\n\tresources\x18\x04 \x01(\x0b\x32#.celaut.Service.Container.ResourcesH\x00\x88\x01\x01\x12G\n\x12\x63onfig_declaration\x18\x05 \x01(\x0b\x32+.celaut.Service.Container.ConfigDeclaration\x12\x39\n\x13node_protocol_stack\x18\x06 \x03(\x0b\x32\x1c.celaut.Service.Api.Protocol\x1a\x83\x01\n\x04Init\x12\x12\n\nentry_path\x18\x01 \x03(\t\x12\x38\n\x06xattrs\x18\x02 \x03(\x0b\x32(.pack.Service.Container.Init.XattrsEntry\x1a-\n\x0bXattrsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\x1a\xcb\x01\n\nFilesystem\x12=\n\x06\x62ranch\x18\x01 \x03(\x0b\x32-.pack.Service.Container.Filesystem.ItemBranch\x1a~\n\nItemBranch\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0e\n\x04\x66ile\x18\x02 \x01(\x0cH\x00\x12\x0e\n\x04link\x18\x03 \x01(\tH\x00\x12:\n\nfilesystem\x18\x04 \x01(\x0b\x32$.celaut.Service.Container.FilesystemH\x00\x42\x06\n\x04itemB\x0c\n\n_resources\"!\n\x13PackOutputServiceId\x12\n\n\x02id\x18\x01 \x01(\x0c\"\"\n\x0fPackOutputError\x12\x0f\n\x07message\x18\x01 \x01(\tb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\npack.proto\x12\x04pack\x1a\x0c\x63\x65laut.proto\"\xb9\x07\n\x07Service\x12\r\n\x05prose\x18\x01 \x01(\t\x12*\n\tcontainer\x18\x02 \x01(\x0b\x32\x17.pack.Service.Container\x12 \n\x03\x61pi\x18\x03 \x01(\x0b\x32\x13.celaut.Service.Api\x12(\n\x07network\x18\x04 \x03(\x0b\x32\x17.celaut.Service.Network\x12R\n\x1dpossible_environment_workload\x18\x05 \x03(\x0b\x32+.celaut.Service.PossibleEnvironmentWorkload\x1a\xd2\x05\n\tContainer\x12<\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32&.celaut.Service.Container.Architecture\x12\x38\n\nfilesystem\x18\x02 \x01(\x0b\x32$.celaut.Service.Container.Filesystem\x12*\n\x04init\x18\x03 \x01(\x0b\x32\x1c.pack.Service.Container.Init\x12;\n\tresources\x18\x04 \x01(\x0b\x32#.celaut.Service.Container.ResourcesH\x00\x88\x01\x01\x12G\n\x12\x63onfig_declaration\x18\x05 \x01(\x0b\x32+.celaut.Service.Container.ConfigDeclaration\x12\x39\n\x13node_protocol_stack\x18\x06 \x03(\x0b\x32\x1c.celaut.Service.Api.Protocol\x1a\x83\x01\n\x04Init\x12\x12\n\nentry_path\x18\x01 \x03(\t\x12\x38\n\x06xattrs\x18\x02 \x03(\x0b\x32(.pack.Service.Container.Init.XattrsEntry\x1a-\n\x0bXattrsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\x1a\xcb\x01\n\nFilesystem\x12=\n\x06\x62ranch\x18\x01 \x03(\x0b\x32-.pack.Service.Container.Filesystem.ItemBranch\x1a~\n\nItemBranch\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0e\n\x04\x66ile\x18\x02 \x01(\x0cH\x00\x12\x0e\n\x04link\x18\x03 \x01(\tH\x00\x12:\n\nfilesystem\x18\x04 \x01(\x0b\x32$.celaut.Service.Container.FilesystemH\x00\x42\x06\n\x04itemB\x0c\n\n_resources\"!\n\x13PackOutputServiceId\x12\n\n\x02id\x18\x01 \x01(\x0c\"\"\n\x0fPackOutputError\x12\x0f\n\x07message\x18\x01 \x01(\tb\x06proto3')
 
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, globals())
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'pack_pb2', globals())
@@ -24,19 +24,19 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _SERVICE_CONTAINER_INIT_XATTRSENTRY._options = None
   _SERVICE_CONTAINER_INIT_XATTRSENTRY._serialized_options = b'8\001'
   _SERVICE._serialized_start=35
-  _SERVICE._serialized_end=904
-  _SERVICE_CONTAINER._serialized_start=182
-  _SERVICE_CONTAINER._serialized_end=904
-  _SERVICE_CONTAINER_INIT._serialized_start=553
-  _SERVICE_CONTAINER_INIT._serialized_end=684
-  _SERVICE_CONTAINER_INIT_XATTRSENTRY._serialized_start=639
-  _SERVICE_CONTAINER_INIT_XATTRSENTRY._serialized_end=684
-  _SERVICE_CONTAINER_FILESYSTEM._serialized_start=687
-  _SERVICE_CONTAINER_FILESYSTEM._serialized_end=890
-  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH._serialized_start=764
-  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH._serialized_end=890
-  _PACKOUTPUTSERVICEID._serialized_start=906
-  _PACKOUTPUTSERVICEID._serialized_end=939
-  _PACKOUTPUTERROR._serialized_start=941
-  _PACKOUTPUTERROR._serialized_end=975
+  _SERVICE._serialized_end=988
+  _SERVICE_CONTAINER._serialized_start=266
+  _SERVICE_CONTAINER._serialized_end=988
+  _SERVICE_CONTAINER_INIT._serialized_start=637
+  _SERVICE_CONTAINER_INIT._serialized_end=768
+  _SERVICE_CONTAINER_INIT_XATTRSENTRY._serialized_start=723
+  _SERVICE_CONTAINER_INIT_XATTRSENTRY._serialized_end=768
+  _SERVICE_CONTAINER_FILESYSTEM._serialized_start=771
+  _SERVICE_CONTAINER_FILESYSTEM._serialized_end=974
+  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH._serialized_start=848
+  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH._serialized_end=974
+  _PACKOUTPUTSERVICEID._serialized_start=990
+  _PACKOUTPUTSERVICEID._serialized_end=1023
+  _PACKOUTPUTERROR._serialized_start=1025
+  _PACKOUTPUTERROR._serialized_end=1059
 # @@protoc_insertion_point(module_scope)

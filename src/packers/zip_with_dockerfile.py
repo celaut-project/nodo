@@ -326,8 +326,8 @@ class ZipContainerPacker:
         # worst-case concurrent execution the service may trigger through its
         # descendants (not cumulative, no ordering). Spec-only: nodo does not
         # interpret/validate these here — that is future scheduler work (#163).
-        for scenario in self.json.get("possible_workloads", []):
-            pw = self.service.container.possible_workloads.add()
+        for scenario in self.json.get("possible_environment_workload", []):
+            pw = self.service.possible_environment_workload.add()
             for wl in scenario.get("workloads", []):
                 w = pw.workloads.add()
                 w.count = int(wl.get("count", 1))

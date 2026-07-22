@@ -97,6 +97,23 @@ message Service {
         */
     }
 
+    // A single possible concurrent execution scenario for the descendant
+    // services this service may spawn during its lifetime. Scenarios are
+    // independent: they are NOT cumulative and imply no temporal ordering.
+    // The scheduler only needs to determine whether each scenario, in
+    // isolation, could be satisfied by the network. Unlike `resources`
+    // (which describe this instance itself), these describe its descendants.
+    message PossibleEnvironmentWorkload {
+        // One group of identical concurrent descendant workloads.
+        message Workload {
+            // Number of concurrent descendant instances that require `resources`.
+            uint32 count = 1;
+            // Resources each of those descendant instances may require.
+            Sysresources resources = 2;
+        }
+        repeated Workload workloads = 1;
+    }
+
     message Container {
         
         message Architecture {
@@ -144,23 +161,6 @@ message Service {
             Sysresources at_most = 2;
         }
 
-        // A single possible concurrent execution scenario for the descendant
-        // services this service may spawn during its lifetime. Scenarios are
-        // independent: they are NOT cumulative and imply no temporal ordering.
-        // The scheduler only needs to determine whether each scenario, in
-        // isolation, could be satisfied by the network. Unlike `resources`
-        // (which describe this instance itself), these describe its descendants.
-        message PossibleWorkload {
-            // One group of identical concurrent descendant workloads.
-            message Workload {
-                // Number of concurrent descendant instances that require `resources`.
-                uint32 count = 1;
-                // Resources each of those descendant instances may require.
-                Sysresources resources = 2;
-            }
-            repeated Workload workloads = 1;
-        }
-
         // CPU architecture and environment description.
         Architecture architecture = 1;
         
@@ -183,12 +183,6 @@ message Service {
         // runs the code, not to the communication interface.)
         map<string, DataFormat> environment_variables = 7;
 
-        // Worst-case descendant workload scenarios this service may request.
-        // Declared for scheduling admission decisions ("can this network satisfy
-        // any execution this service could trigger?"). Spec-only: nodo's
-        // scheduler interpretation/validation is intentionally NOT part of this
-        // change (see celaut-project/nodo#163).
-        repeated PossibleWorkload possible_workloads = 8;
     }
 
     // A Network is a *logical communication domain* between service
@@ -228,6 +222,12 @@ message Service {
     
     // Network definitions.
     repeated Network network = 4;
+
+    // Worst-case descendant workload scenarios this service may request.
+    // This belongs to the service-level execution environment rather than to
+    // its container representation. Spec-only: nodo's scheduler interpretation
+    // and validation are intentionally NOT part of this change (#163).
+    repeated PossibleEnvironmentWorkload possible_environment_workload = 5;
 }
 
 message Instance {

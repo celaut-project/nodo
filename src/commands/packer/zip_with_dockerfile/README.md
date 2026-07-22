@@ -514,10 +514,10 @@ The `service.json` file defines **runtime metadata** for the service: its archit
 
 ---
 
-#### `possible_workloads`
+#### `possible_environment_workload`
 - **Type:** `array` of objects
 - **Required:** No
-- **Description:** Declares the **worst-case descendant workloads** the service may request during its lifetime (a service can spawn child services locally or on other peers). It exists for scheduling admission decisions — *can the network satisfy any execution this service could trigger?* Unlike `resources` (this instance's own needs), `possible_workloads` describe its **descendants**. Serialized to `container.possible_workloads`.
+- **Description:** Declares the **worst-case descendant workloads** the service may request during its lifetime (a service can spawn child services locally or on other peers). It exists for scheduling admission decisions — *can the network satisfy any execution this service could trigger?* Unlike `resources` (this instance's own needs), `possible_environment_workload` describes its **descendants**. Serialized directly to `Service.possible_environment_workload`, outside `Service.Container`.
 - Each array entry is **one independent concurrent execution scenario**. Scenarios are **not cumulative** and imply **no temporal ordering**; a scheduler only needs to check whether each scenario, in isolation, could be satisfied.
 - Each scenario has a `workloads` array; each item groups identical concurrent descendants:
 
@@ -531,7 +531,7 @@ The `service.json` file defines **runtime metadata** for the service: its archit
 **Example — two independent scenarios (`2×5 GB + 1×40 GB`, or `4×16 GB`):**
 ```json
 {
-    "possible_workloads": [
+    "possible_environment_workload": [
         {
             "workloads": [
                 { "count": 2, "resources": { "mem_limit": 5000000000 } },

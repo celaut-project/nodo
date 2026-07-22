@@ -34,7 +34,7 @@
       "disk_space": 4000000000
     }
   },
-  "possible_workloads": [
+  "possible_environment_workload": [
     {
       "workloads": [
         { "count": 2, "resources": { "mem_limit": 5000000000 } },
@@ -69,9 +69,9 @@
 - `api[].protocol` is serialized to `api.slot[].protocol_stack[*].tags` (application protocol stack over transport).
 - `api[].gas_amount_per_call` is serialized to `api.slot[].gas_amount_per_call`.
 - `resources.start_time_ms` no longer exists.
-- `possible_workloads[]` declares the **worst-case descendant workloads** the service
+- `possible_environment_workload[]` declares the **worst-case descendant workloads** the service
   may request during its lifetime, for scheduling admission decisions. It is serialized
-  to `container.possible_workloads`. Each entry is **one independent concurrent execution
+  directly to `Service.possible_environment_workload`, outside `Service.Container`. Each entry is **one independent concurrent execution
   scenario** — scenarios are *not* cumulative and imply *no* temporal ordering; a scheduler
   only checks whether each scenario, in isolation, could be satisfied. Each scenario's
   `workloads[]` item is `count` (number of concurrent descendant instances) × `resources`
