@@ -15,7 +15,7 @@ _sym_db = _symbol_database.Default()
 import buffer_pb2 as buffer__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0c\x63\x65laut.proto\x12\x06\x63\x65laut\x1a\x0c\x62uffer.proto\"9\n\nDataFormat\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12\r\n\x05prose\x18\x02 \x01(\t\x12\x0e\n\x06\x66ormal\x18\x03 \x01(\x0c\"\xc7\x01\n\x08\x43ontract\x12\'\n\x06ledger\x18\x01 \x01(\x0b\x32\x17.celaut.Contract.Ledger\x12,\n\x06xattrs\x18\x02 \x03(\x0b\x32\x1c.celaut.Contract.XattrsEntry\x1a\x35\n\x06Ledger\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12\r\n\x05prose\x18\x02 \x01(\t\x12\x0e\n\x06\x66ormal\x18\x03 \x01(\x0c\x1a-\n\x0bXattrsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\"\x16\n\tGasAmount\x12\t\n\x01n\x18\x01 \x01(\t\"U\n\x08GasPrice\x12\"\n\x08\x63ontract\x18\x01 \x01(\x0b\x32\x10.celaut.Contract\x12%\n\ngas_amount\x18\x02 \x01(\x0b\x32\x11.celaut.GasAmount\"\x93\x03\n\x08Metadata\x12.\n\x07hashtag\x18\x01 \x01(\x0b\x32\x18.celaut.Metadata.HashTagH\x00\x88\x01\x01\x12\'\n\x06\x66ormat\x18\x02 \x01(\x0b\x32\x12.celaut.DataFormatH\x01\x88\x01\x01\x12+\n\x11reputation_proofs\x18\x03 \x03(\x0b\x32\x10.celaut.Contract\x1a\xe9\x01\n\x07HashTag\x12+\n\x04hash\x18\x01 \x03(\x0b\x32\x1d.celaut.Metadata.HashTag.Hash\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12:\n\x0c\x61ttr_hashtag\x18\x03 \x03(\x0b\x32$.celaut.Metadata.HashTag.AttrHashTag\x1a#\n\x04Hash\x12\x0c\n\x04type\x18\x01 \x01(\x0c\x12\r\n\x05value\x18\x02 \x01(\x0c\x1a\x43\n\x0b\x41ttrHashTag\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12\'\n\x05value\x18\x02 \x03(\x0b\x32\x18.celaut.Metadata.HashTagB\n\n\x08_hashtagB\t\n\x07_format\"\xc3\x11\n\x07Service\x12\r\n\x05prose\x18\x01 \x01(\t\x12,\n\tcontainer\x18\x02 \x01(\x0b\x32\x19.celaut.Service.Container\x12 \n\x03\x61pi\x18\x03 \x01(\x0b\x32\x13.celaut.Service.Api\x12(\n\x07network\x18\x04 \x03(\x0b\x32\x17.celaut.Service.Network\x1a\xaa\x03\n\x03\x41pi\x12&\n\x04slot\x18\x01 \x03(\x0b\x32\x18.celaut.Service.Api.Slot\x12+\n\x11payment_contracts\x18\x02 \x03(\x0b\x32\x10.celaut.GasPrice\x1a\x37\n\x08Protocol\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12\r\n\x05prose\x18\x02 \x01(\t\x12\x0e\n\x06\x66ormal\x18\x03 \x01(\x0c\x1a\x94\x02\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12/\n\ttransport\x18\x02 \x01(\x0b\x32\x1c.celaut.Service.Api.Protocol\x12\x34\n\x0eprotocol_stack\x18\x03 \x03(\x0b\x32\x1c.celaut.Service.Api.Protocol\x12K\n\x13gas_amount_per_call\x18\x04 \x03(\x0b\x32..celaut.Service.Api.Slot.GasAmountPerCallEntry\x1aJ\n\x15GasAmountPerCallEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12 \n\x05value\x18\x02 \x01(\x0b\x32\x11.celaut.GasAmount:\x02\x38\x01\x1a\xf4\x0b\n\tContainer\x12<\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32&.celaut.Service.Container.Architecture\x12\x12\n\nfilesystem\x18\x02 \x01(\x0c\x12,\n\x04init\x18\x03 \x01(\x0b\x32\x1e.celaut.Service.Container.Init\x12;\n\tresources\x18\x04 \x01(\x0b\x32#.celaut.Service.Container.ResourcesH\x00\x88\x01\x01\x12G\n\x12\x63onfig_declaration\x18\x05 \x01(\x0b\x32+.celaut.Service.Container.ConfigDeclaration\x12\x39\n\x13node_protocol_stack\x18\x06 \x03(\x0b\x32\x1c.celaut.Service.Api.Protocol\x12R\n\x15\x65nvironment_variables\x18\x07 \x03(\x0b\x32\x33.celaut.Service.Container.EnvironmentVariablesEntry\x12\x46\n\x12possible_workloads\x18\x08 \x03(\x0b\x32*.celaut.Service.Container.PossibleWorkload\x1a;\n\x0c\x41rchitecture\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12\r\n\x05prose\x18\x02 \x01(\t\x12\x0e\n\x06\x66ormal\x18\x03 \x01(\x0c\x1a\xa2\x03\n\nFilesystem\x12?\n\x06\x62ranch\x18\x01 \x03(\x0b\x32/.celaut.Service.Container.Filesystem.ItemBranch\x1a\xd2\x02\n\nItemBranch\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0e\n\x04\x66ile\x18\x02 \x01(\x0cH\x00\x12\x44\n\x04link\x18\x03 \x01(\x0b\x32\x34.celaut.Service.Container.Filesystem.ItemBranch.LinkH\x00\x12:\n\nfilesystem\x18\x04 \x01(\x0b\x32$.celaut.Service.Container.FilesystemH\x00\x12K\n\x06xattrs\x18\x05 \x03(\x0b\x32;.celaut.Service.Container.Filesystem.ItemBranch.XattrsEntry\x1a \n\x04Link\x12\x0b\n\x03src\x18\x01 \x01(\t\x12\x0b\n\x03\x64st\x18\x02 \x01(\t\x1a-\n\x0bXattrsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\x42\x06\n\x04item\x1a\x85\x01\n\x04Init\x12\x12\n\nentry_path\x18\x01 \x03(\t\x12:\n\x06xattrs\x18\x02 \x03(\x0b\x32*.celaut.Service.Container.Init.XattrsEntry\x1a-\n\x0bXattrsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\x1a\x45\n\x11\x43onfigDeclaration\x12\x0c\n\x04path\x18\x01 \x03(\t\x12\"\n\x06\x66ormat\x18\x02 \x01(\x0b\x32\x12.celaut.DataFormat\x1aY\n\tResources\x12%\n\x07\x61t_init\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12%\n\x07\x61t_most\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources\x1a\x9e\x01\n\x10PossibleWorkload\x12\x46\n\tworkloads\x18\x01 \x03(\x0b\x32\x33.celaut.Service.Container.PossibleWorkload.Workload\x1a\x42\n\x08Workload\x12\r\n\x05\x63ount\x18\x01 \x01(\r\x12\'\n\tresources\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources\x1aO\n\x19\x45nvironmentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.celaut.DataFormat:\x02\x38\x01\x42\x0c\n\n_resources\x1a\x8a\x01\n\x07Network\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12\r\n\x05prose\x18\x02 \x01(\t\x12\x0e\n\x06\x66ormal\x18\x03 \x01(\x0c\x12\x34\n\x0eprotocol_stack\x18\x04 \x03(\x0b\x32\x1c.celaut.Service.Api.Protocol\x12\x1c\n\x14\x65nvironment_variable\x18\x05 \x01(\t\"\xc0\x01\n\x08Instance\x12 \n\x03\x61pi\x18\x01 \x01(\x0b\x32\x13.celaut.Service.Api\x12+\n\x08uri_slot\x18\x02 \x03(\x0b\x32\x19.celaut.Instance.Uri_Slot\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x44\n\x08Uri_Slot\x12\x15\n\rinternal_port\x18\x01 \x01(\x05\x12!\n\x03uri\x18\x02 \x03(\x0b\x32\x14.celaut.Instance.Uri\"\xfa\x01\n\rConfiguration\x12N\n\x15\x65nvironment_variables\x18\x01 \x03(\x0b\x32/.celaut.Configuration.EnvironmentVariablesEntry\x12\x11\n\tspec_slot\x18\x02 \x03(\x05\x12\x32\n\x12initial_gas_amount\x18\x03 \x01(\x0b\x32\x11.celaut.GasAmountH\x00\x88\x01\x01\x1a;\n\x19\x45nvironmentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\x42\x15\n\x13_initial_gas_amount\"\xa7\x02\n\x11\x43onfigurationFile\x12!\n\x07gateway\x18\x01 \x01(\x0b\x32\x10.celaut.Instance\x12%\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x15.celaut.Configuration\x12G\n\x12network_resolution\x18\x03 \x03(\x0b\x32+.celaut.ConfigurationFile.NetworkResolution\x12\x32\n\x14initial_sysresources\x18\x04 \x01(\x0b\x32\x14.celaut.Sysresources\x1aK\n\x11NetworkResolution\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12(\n\x0epeer_instances\x18\x02 \x03(\x0b\x32\x10.celaut.Instance\"\xd6\x01\n\x0cSysresources\x12\x19\n\x0c\x62lkio_weight\x18\x01 \x01(\x04H\x00\x88\x01\x01\x12\x17\n\ncpu_period\x18\x02 \x01(\x04H\x01\x88\x01\x01\x12\x16\n\tcpu_quota\x18\x03 \x01(\x04H\x02\x88\x01\x01\x12\x16\n\tmem_limit\x18\x04 \x01(\x04H\x03\x88\x01\x01\x12\x17\n\ndisk_space\x18\x05 \x01(\x04H\x04\x88\x01\x01\x42\x0f\n\r_blkio_weightB\r\n\x0b_cpu_periodB\x0c\n\n_cpu_quotaB\x0c\n\n_mem_limitB\r\n\x0b_disk_space\"9\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\x12\x11\n\x04slot\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x07\n\x05_slot\"\xc7\x01\n\rEstimatedCost\x12\x1f\n\x04\x63ost\x18\x01 \x01(\x0b\x32\x11.celaut.GasAmount\x12\x30\n\x15init_maintenance_cost\x18\x02 \x01(\x0b\x32\x11.celaut.GasAmount\x12/\n\x14max_maintenance_cost\x18\x03 \x01(\x0b\x32\x11.celaut.GasAmount\x12 \n\x18maintenance_seconds_loop\x18\x04 \x01(\x05\x12\x10\n\x08variance\x18\x05 \x01(\x02\"+\n\x06Refund\x12!\n\x06\x61mount\x18\x01 \x01(\x0b\x32\x11.celaut.GasAmount\"2\n\x0bSignRequest\x12\x12\n\npublic_key\x18\x01 \x01(\t\x12\x0f\n\x07to_sign\x18\x02 \x01(\t\"\x1e\n\x0cSignResponse\x12\x0e\n\x06signed\x18\x01 \x01(\t\"k\n\x07Payment\x12\x15\n\rdeposit_token\x18\x01 \x01(\t\x12\"\n\x08\x63ontract\x18\x02 \x01(\x0b\x32\x10.celaut.Contract\x12%\n\ngas_amount\x18\x03 \x01(\x0b\x32\x11.celaut.GasAmount\"0\n\x07Metrics\x12%\n\ngas_amount\x18\x01 \x01(\x0b\x32\x11.celaut.GasAmount\"D\n\x0fServiceInstance\x12\r\n\x05token\x18\x01 \x01(\t\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\"W\n\x04Peer\x12+\n\x11reputation_proofs\x18\x01 \x03(\x0b\x32\x10.celaut.Contract\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\"\x1b\n\x06\x43lient\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\x1f\n\x0eRecursionGuard\x12\r\n\x05token\x18\x01 \x01(\t\"j\n\"ModifyServiceSystemResourcesOutput\x12$\n\x06sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12\x1e\n\x03gas\x18\x02 \x01(\x0b\x32\x11.celaut.GasAmount\"w\n!ModifyServiceSystemResourcesInput\x12(\n\nmin_sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12(\n\nmax_sysreq\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources\"Y\n\x15ModifyGasDepositInput\x12)\n\x0egas_difference\x18\x01 \x01(\x0b\x32\x11.celaut.GasAmount\x12\x15\n\rservice_token\x18\x02 \x01(\t\":\n\x16ModifyGasDepositOutput\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\">\n\x0eObserveRequest\x12\x13\n\x0binstance_id\x18\x01 \x01(\t\x12\x17\n\x0finclude_packets\x18\x02 \x01(\x08\"\x82\n\n\x0cObserveEvent\x12\x0c\n\x04time\x18\x01 \x01(\t\x12\x0c\n\x04kind\x18\x02 \x01(\t\x12/\n\x07session\x18\n \x01(\x0b\x32\x1c.celaut.ObserveEvent.SessionH\x00\x12/\n\x07metrics\x18\x0b \x01(\x0b\x32\x1c.celaut.ObserveEvent.MetricsH\x00\x12-\n\x06packet\x18\x0c \x01(\x0b\x32\x1b.celaut.ObserveEvent.PacketH\x00\x12-\n\x06notice\x18\r \x01(\x0b\x32\x1b.celaut.ObserveEvent.NoticeH\x00\x1a\x8b\x01\n\x07Session\x12\x13\n\x0binstance_id\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x01(\t\x12\x14\n\x0c\x63\x61pture_mode\x18\x03 \x01(\t\x12\x17\n\x0f\x64\x65graded_reason\x18\x04 \x01(\t\x12\x11\n\tlink_type\x18\x05 \x01(\x05\x12\x0f\n\x07snaplen\x18\x06 \x01(\r\x12\x0b\n\x03gas\x18\x07 \x01(\t\x1a\xf7\x03\n\x07Metrics\x12\r\n\x05\x61live\x18\x01 \x01(\x08\x12\x18\n\x0b\x63pu_percent\x18\x02 \x01(\x01H\x00\x88\x01\x01\x12\x1d\n\x10\x63pu_peak_percent\x18\x03 \x01(\x01H\x01\x88\x01\x01\x12\x16\n\tmem_bytes\x18\x04 \x01(\x04H\x02\x88\x01\x01\x12\x1b\n\x0emem_peak_bytes\x18\x05 \x01(\x04H\x03\x88\x01\x01\x12\x1c\n\x0f\x64isk_read_bytes\x18\x06 \x01(\x04H\x04\x88\x01\x01\x12\x1d\n\x10\x64isk_write_bytes\x18\x07 \x01(\x04H\x05\x88\x01\x01\x12\x19\n\x0cnet_rx_bytes\x18\x08 \x01(\x04H\x06\x88\x01\x01\x12\x19\n\x0cnet_tx_bytes\x18\t \x01(\x04H\x07\x88\x01\x01\x12\x1b\n\x0enet_rx_packets\x18\n \x01(\x04H\x08\x88\x01\x01\x12\x1b\n\x0enet_tx_packets\x18\x0b \x01(\x04H\t\x88\x01\x01\x12\x0b\n\x03gas\x18\x0c \x01(\tB\x0e\n\x0c_cpu_percentB\x13\n\x11_cpu_peak_percentB\x0c\n\n_mem_bytesB\x11\n\x0f_mem_peak_bytesB\x12\n\x10_disk_read_bytesB\x13\n\x11_disk_write_bytesB\x0f\n\r_net_rx_bytesB\x0f\n\r_net_tx_bytesB\x11\n\x0f_net_rx_packetsB\x11\n\x0f_net_tx_packets\x1a\xd5\x02\n\x06Packet\x12\x11\n\tdirection\x18\x01 \x01(\t\x12\x11\n\ttransport\x18\x02 \x01(\t\x12\x10\n\x08protocol\x18\x03 \x01(\t\x12\x11\n\ttcp_flags\x18\x04 \x01(\t\x12\x0b\n\x03src\x18\x05 \x01(\t\x12\x0b\n\x03\x64st\x18\x06 \x01(\t\x12\x16\n\tframe_len\x18\x07 \x01(\rH\x00\x88\x01\x01\x12\x11\n\tpeer_kind\x18\x08 \x01(\t\x12\x18\n\x10peer_instance_id\x18\t \x01(\t\x12\x10\n\x08peer_tag\x18\n \x01(\t\x12\x19\n\x11peer_relationship\x18\x0b \x01(\t\x12\x11\n\tpeer_host\x18\x0c \x01(\t\x12\x0e\n\x06source\x18\r \x01(\t\x12\x11\n\traw_frame\x18\x0e \x01(\x0c\x12\x1c\n\x0f\x66rame_timestamp\x18\x0f \x01(\x01H\x01\x88\x01\x01\x42\x0c\n\n_frame_lenB\x12\n\x10_frame_timestamp\x1a+\n\x06Notice\x12\x0f\n\x07message\x18\x01 \x01(\t\x12\x10\n\x08\x64\x65graded\x18\x02 \x01(\x08\x42\t\n\x07payload2\xfd\x06\n\x07Gateway\x12\x34\n\x0cStartService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bStopService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x38\n\x10ModifyGasDeposit\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bGetPeerInfo\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x35\n\rIntroducePeer\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x36\n\x0eGenerateClient\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12<\n\x14GenerateDepositToken\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07Payable\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x35\n\rSignPublicKey\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x44\n\x1cModifyServiceSystemResources\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12,\n\x04Pack\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12?\n\x17GetServiceEstimatedCost\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x32\n\nGetService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x32\n\nGetMetrics\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x35\n\rServiceTunnel\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07Observe\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0c\x63\x65laut.proto\x12\x06\x63\x65laut\x1a\x0c\x62uffer.proto\"9\n\nDataFormat\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12\r\n\x05prose\x18\x02 \x01(\t\x12\x0e\n\x06\x66ormal\x18\x03 \x01(\x0c\"\xc7\x01\n\x08\x43ontract\x12\'\n\x06ledger\x18\x01 \x01(\x0b\x32\x17.celaut.Contract.Ledger\x12,\n\x06xattrs\x18\x02 \x03(\x0b\x32\x1c.celaut.Contract.XattrsEntry\x1a\x35\n\x06Ledger\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12\r\n\x05prose\x18\x02 \x01(\t\x12\x0e\n\x06\x66ormal\x18\x03 \x01(\x0c\x1a-\n\x0bXattrsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\"\x16\n\tGasAmount\x12\t\n\x01n\x18\x01 \x01(\t\"U\n\x08GasPrice\x12\"\n\x08\x63ontract\x18\x01 \x01(\x0b\x32\x10.celaut.Contract\x12%\n\ngas_amount\x18\x02 \x01(\x0b\x32\x11.celaut.GasAmount\"\x93\x03\n\x08Metadata\x12.\n\x07hashtag\x18\x01 \x01(\x0b\x32\x18.celaut.Metadata.HashTagH\x00\x88\x01\x01\x12\'\n\x06\x66ormat\x18\x02 \x01(\x0b\x32\x12.celaut.DataFormatH\x01\x88\x01\x01\x12+\n\x11reputation_proofs\x18\x03 \x03(\x0b\x32\x10.celaut.Contract\x1a\xe9\x01\n\x07HashTag\x12+\n\x04hash\x18\x01 \x03(\x0b\x32\x1d.celaut.Metadata.HashTag.Hash\x12\x0b\n\x03tag\x18\x02 \x03(\t\x12:\n\x0c\x61ttr_hashtag\x18\x03 \x03(\x0b\x32$.celaut.Metadata.HashTag.AttrHashTag\x1a#\n\x04Hash\x12\x0c\n\x04type\x18\x01 \x01(\x0c\x12\r\n\x05value\x18\x02 \x01(\x0c\x1a\x43\n\x0b\x41ttrHashTag\x12\x0b\n\x03key\x18\x01 \x01(\x05\x12\'\n\x05value\x18\x02 \x03(\x0b\x32\x18.celaut.Metadata.HashTagB\n\n\x08_hashtagB\t\n\x07_format\"\xdb\x11\n\x07Service\x12\r\n\x05prose\x18\x01 \x01(\t\x12,\n\tcontainer\x18\x02 \x01(\x0b\x32\x19.celaut.Service.Container\x12 \n\x03\x61pi\x18\x03 \x01(\x0b\x32\x13.celaut.Service.Api\x12(\n\x07network\x18\x04 \x03(\x0b\x32\x17.celaut.Service.Network\x12R\n\x1dpossible_environment_workload\x18\x05 \x03(\x0b\x32+.celaut.Service.PossibleEnvironmentWorkload\x1a\xaa\x03\n\x03\x41pi\x12&\n\x04slot\x18\x01 \x03(\x0b\x32\x18.celaut.Service.Api.Slot\x12+\n\x11payment_contracts\x18\x02 \x03(\x0b\x32\x10.celaut.GasPrice\x1a\x37\n\x08Protocol\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12\r\n\x05prose\x18\x02 \x01(\t\x12\x0e\n\x06\x66ormal\x18\x03 \x01(\x0c\x1a\x94\x02\n\x04Slot\x12\x0c\n\x04port\x18\x01 \x01(\x05\x12/\n\ttransport\x18\x02 \x01(\x0b\x32\x1c.celaut.Service.Api.Protocol\x12\x34\n\x0eprotocol_stack\x18\x03 \x03(\x0b\x32\x1c.celaut.Service.Api.Protocol\x12K\n\x13gas_amount_per_call\x18\x04 \x03(\x0b\x32..celaut.Service.Api.Slot.GasAmountPerCallEntry\x1aJ\n\x15GasAmountPerCallEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12 \n\x05value\x18\x02 \x01(\x0b\x32\x11.celaut.GasAmount:\x02\x38\x01\x1a\xaa\x01\n\x1bPossibleEnvironmentWorkload\x12G\n\tworkloads\x18\x01 \x03(\x0b\x32\x34.celaut.Service.PossibleEnvironmentWorkload.Workload\x1a\x42\n\x08Workload\x12\r\n\x05\x63ount\x18\x01 \x01(\r\x12\'\n\tresources\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources\x1a\x8b\n\n\tContainer\x12<\n\x0c\x61rchitecture\x18\x01 \x01(\x0b\x32&.celaut.Service.Container.Architecture\x12\x12\n\nfilesystem\x18\x02 \x01(\x0c\x12,\n\x04init\x18\x03 \x01(\x0b\x32\x1e.celaut.Service.Container.Init\x12;\n\tresources\x18\x04 \x01(\x0b\x32#.celaut.Service.Container.ResourcesH\x00\x88\x01\x01\x12G\n\x12\x63onfig_declaration\x18\x05 \x01(\x0b\x32+.celaut.Service.Container.ConfigDeclaration\x12\x39\n\x13node_protocol_stack\x18\x06 \x03(\x0b\x32\x1c.celaut.Service.Api.Protocol\x12R\n\x15\x65nvironment_variables\x18\x07 \x03(\x0b\x32\x33.celaut.Service.Container.EnvironmentVariablesEntry\x1a;\n\x0c\x41rchitecture\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12\r\n\x05prose\x18\x02 \x01(\t\x12\x0e\n\x06\x66ormal\x18\x03 \x01(\x0c\x1a\xa2\x03\n\nFilesystem\x12?\n\x06\x62ranch\x18\x01 \x03(\x0b\x32/.celaut.Service.Container.Filesystem.ItemBranch\x1a\xd2\x02\n\nItemBranch\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0e\n\x04\x66ile\x18\x02 \x01(\x0cH\x00\x12\x44\n\x04link\x18\x03 \x01(\x0b\x32\x34.celaut.Service.Container.Filesystem.ItemBranch.LinkH\x00\x12:\n\nfilesystem\x18\x04 \x01(\x0b\x32$.celaut.Service.Container.FilesystemH\x00\x12K\n\x06xattrs\x18\x05 \x03(\x0b\x32;.celaut.Service.Container.Filesystem.ItemBranch.XattrsEntry\x1a \n\x04Link\x12\x0b\n\x03src\x18\x01 \x01(\t\x12\x0b\n\x03\x64st\x18\x02 \x01(\t\x1a-\n\x0bXattrsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\x42\x06\n\x04item\x1a\x85\x01\n\x04Init\x12\x12\n\nentry_path\x18\x01 \x03(\t\x12:\n\x06xattrs\x18\x02 \x03(\x0b\x32*.celaut.Service.Container.Init.XattrsEntry\x1a-\n\x0bXattrsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\x1a\x45\n\x11\x43onfigDeclaration\x12\x0c\n\x04path\x18\x01 \x03(\t\x12\"\n\x06\x66ormat\x18\x02 \x01(\x0b\x32\x12.celaut.DataFormat\x1aY\n\tResources\x12%\n\x07\x61t_init\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12%\n\x07\x61t_most\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources\x1aO\n\x19\x45nvironmentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12!\n\x05value\x18\x02 \x01(\x0b\x32\x12.celaut.DataFormat:\x02\x38\x01\x42\x0c\n\n_resources\x1a\x8a\x01\n\x07Network\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12\r\n\x05prose\x18\x02 \x01(\t\x12\x0e\n\x06\x66ormal\x18\x03 \x01(\x0c\x12\x34\n\x0eprotocol_stack\x18\x04 \x03(\x0b\x32\x1c.celaut.Service.Api.Protocol\x12\x1c\n\x14\x65nvironment_variable\x18\x05 \x01(\t\"\xc0\x01\n\x08Instance\x12 \n\x03\x61pi\x18\x01 \x01(\x0b\x32\x13.celaut.Service.Api\x12+\n\x08uri_slot\x18\x02 \x03(\x0b\x32\x19.celaut.Instance.Uri_Slot\x1a\x1f\n\x03Uri\x12\n\n\x02ip\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\x05\x1a\x44\n\x08Uri_Slot\x12\x15\n\rinternal_port\x18\x01 \x01(\x05\x12!\n\x03uri\x18\x02 \x03(\x0b\x32\x14.celaut.Instance.Uri\"\xfa\x01\n\rConfiguration\x12N\n\x15\x65nvironment_variables\x18\x01 \x03(\x0b\x32/.celaut.Configuration.EnvironmentVariablesEntry\x12\x11\n\tspec_slot\x18\x02 \x03(\x05\x12\x32\n\x12initial_gas_amount\x18\x03 \x01(\x0b\x32\x11.celaut.GasAmountH\x00\x88\x01\x01\x1a;\n\x19\x45nvironmentVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\x42\x15\n\x13_initial_gas_amount\"\xa7\x02\n\x11\x43onfigurationFile\x12!\n\x07gateway\x18\x01 \x01(\x0b\x32\x10.celaut.Instance\x12%\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x15.celaut.Configuration\x12G\n\x12network_resolution\x18\x03 \x03(\x0b\x32+.celaut.ConfigurationFile.NetworkResolution\x12\x32\n\x14initial_sysresources\x18\x04 \x01(\x0b\x32\x14.celaut.Sysresources\x1aK\n\x11NetworkResolution\x12\x0c\n\x04tags\x18\x01 \x03(\t\x12(\n\x0epeer_instances\x18\x02 \x03(\x0b\x32\x10.celaut.Instance\"\xd6\x01\n\x0cSysresources\x12\x19\n\x0c\x62lkio_weight\x18\x01 \x01(\x04H\x00\x88\x01\x01\x12\x17\n\ncpu_period\x18\x02 \x01(\x04H\x01\x88\x01\x01\x12\x16\n\tcpu_quota\x18\x03 \x01(\x04H\x02\x88\x01\x01\x12\x16\n\tmem_limit\x18\x04 \x01(\x04H\x03\x88\x01\x01\x12\x17\n\ndisk_space\x18\x05 \x01(\x04H\x04\x88\x01\x01\x42\x0f\n\r_blkio_weightB\r\n\x0b_cpu_periodB\x0c\n\n_cpu_quotaB\x0c\n\n_mem_limitB\r\n\x0b_disk_space\"9\n\x0cTokenMessage\x12\r\n\x05token\x18\x01 \x01(\t\x12\x11\n\x04slot\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x07\n\x05_slot\"\xc7\x01\n\rEstimatedCost\x12\x1f\n\x04\x63ost\x18\x01 \x01(\x0b\x32\x11.celaut.GasAmount\x12\x30\n\x15init_maintenance_cost\x18\x02 \x01(\x0b\x32\x11.celaut.GasAmount\x12/\n\x14max_maintenance_cost\x18\x03 \x01(\x0b\x32\x11.celaut.GasAmount\x12 \n\x18maintenance_seconds_loop\x18\x04 \x01(\x05\x12\x10\n\x08variance\x18\x05 \x01(\x02\"+\n\x06Refund\x12!\n\x06\x61mount\x18\x01 \x01(\x0b\x32\x11.celaut.GasAmount\"2\n\x0bSignRequest\x12\x12\n\npublic_key\x18\x01 \x01(\t\x12\x0f\n\x07to_sign\x18\x02 \x01(\t\"\x1e\n\x0cSignResponse\x12\x0e\n\x06signed\x18\x01 \x01(\t\"k\n\x07Payment\x12\x15\n\rdeposit_token\x18\x01 \x01(\t\x12\"\n\x08\x63ontract\x18\x02 \x01(\x0b\x32\x10.celaut.Contract\x12%\n\ngas_amount\x18\x03 \x01(\x0b\x32\x11.celaut.GasAmount\"0\n\x07Metrics\x12%\n\ngas_amount\x18\x01 \x01(\x0b\x32\x11.celaut.GasAmount\"D\n\x0fServiceInstance\x12\r\n\x05token\x18\x01 \x01(\t\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\"W\n\x04Peer\x12+\n\x11reputation_proofs\x18\x01 \x03(\x0b\x32\x10.celaut.Contract\x12\"\n\x08instance\x18\x02 \x01(\x0b\x32\x10.celaut.Instance\"\x1b\n\x06\x43lient\x12\x11\n\tclient_id\x18\x01 \x01(\t\"\x1f\n\x0eRecursionGuard\x12\r\n\x05token\x18\x01 \x01(\t\"j\n\"ModifyServiceSystemResourcesOutput\x12$\n\x06sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12\x1e\n\x03gas\x18\x02 \x01(\x0b\x32\x11.celaut.GasAmount\"w\n!ModifyServiceSystemResourcesInput\x12(\n\nmin_sysreq\x18\x01 \x01(\x0b\x32\x14.celaut.Sysresources\x12(\n\nmax_sysreq\x18\x02 \x01(\x0b\x32\x14.celaut.Sysresources\"Y\n\x15ModifyGasDepositInput\x12)\n\x0egas_difference\x18\x01 \x01(\x0b\x32\x11.celaut.GasAmount\x12\x15\n\rservice_token\x18\x02 \x01(\t\":\n\x16ModifyGasDepositOutput\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\">\n\x0eObserveRequest\x12\x13\n\x0binstance_id\x18\x01 \x01(\t\x12\x17\n\x0finclude_packets\x18\x02 \x01(\x08\"\x82\n\n\x0cObserveEvent\x12\x0c\n\x04time\x18\x01 \x01(\t\x12\x0c\n\x04kind\x18\x02 \x01(\t\x12/\n\x07session\x18\n \x01(\x0b\x32\x1c.celaut.ObserveEvent.SessionH\x00\x12/\n\x07metrics\x18\x0b \x01(\x0b\x32\x1c.celaut.ObserveEvent.MetricsH\x00\x12-\n\x06packet\x18\x0c \x01(\x0b\x32\x1b.celaut.ObserveEvent.PacketH\x00\x12-\n\x06notice\x18\r \x01(\x0b\x32\x1b.celaut.ObserveEvent.NoticeH\x00\x1a\x8b\x01\n\x07Session\x12\x13\n\x0binstance_id\x18\x01 \x01(\t\x12\x0b\n\x03tag\x18\x02 \x01(\t\x12\x14\n\x0c\x63\x61pture_mode\x18\x03 \x01(\t\x12\x17\n\x0f\x64\x65graded_reason\x18\x04 \x01(\t\x12\x11\n\tlink_type\x18\x05 \x01(\x05\x12\x0f\n\x07snaplen\x18\x06 \x01(\r\x12\x0b\n\x03gas\x18\x07 \x01(\t\x1a\xf7\x03\n\x07Metrics\x12\r\n\x05\x61live\x18\x01 \x01(\x08\x12\x18\n\x0b\x63pu_percent\x18\x02 \x01(\x01H\x00\x88\x01\x01\x12\x1d\n\x10\x63pu_peak_percent\x18\x03 \x01(\x01H\x01\x88\x01\x01\x12\x16\n\tmem_bytes\x18\x04 \x01(\x04H\x02\x88\x01\x01\x12\x1b\n\x0emem_peak_bytes\x18\x05 \x01(\x04H\x03\x88\x01\x01\x12\x1c\n\x0f\x64isk_read_bytes\x18\x06 \x01(\x04H\x04\x88\x01\x01\x12\x1d\n\x10\x64isk_write_bytes\x18\x07 \x01(\x04H\x05\x88\x01\x01\x12\x19\n\x0cnet_rx_bytes\x18\x08 \x01(\x04H\x06\x88\x01\x01\x12\x19\n\x0cnet_tx_bytes\x18\t \x01(\x04H\x07\x88\x01\x01\x12\x1b\n\x0enet_rx_packets\x18\n \x01(\x04H\x08\x88\x01\x01\x12\x1b\n\x0enet_tx_packets\x18\x0b \x01(\x04H\t\x88\x01\x01\x12\x0b\n\x03gas\x18\x0c \x01(\tB\x0e\n\x0c_cpu_percentB\x13\n\x11_cpu_peak_percentB\x0c\n\n_mem_bytesB\x11\n\x0f_mem_peak_bytesB\x12\n\x10_disk_read_bytesB\x13\n\x11_disk_write_bytesB\x0f\n\r_net_rx_bytesB\x0f\n\r_net_tx_bytesB\x11\n\x0f_net_rx_packetsB\x11\n\x0f_net_tx_packets\x1a\xd5\x02\n\x06Packet\x12\x11\n\tdirection\x18\x01 \x01(\t\x12\x11\n\ttransport\x18\x02 \x01(\t\x12\x10\n\x08protocol\x18\x03 \x01(\t\x12\x11\n\ttcp_flags\x18\x04 \x01(\t\x12\x0b\n\x03src\x18\x05 \x01(\t\x12\x0b\n\x03\x64st\x18\x06 \x01(\t\x12\x16\n\tframe_len\x18\x07 \x01(\rH\x00\x88\x01\x01\x12\x11\n\tpeer_kind\x18\x08 \x01(\t\x12\x18\n\x10peer_instance_id\x18\t \x01(\t\x12\x10\n\x08peer_tag\x18\n \x01(\t\x12\x19\n\x11peer_relationship\x18\x0b \x01(\t\x12\x11\n\tpeer_host\x18\x0c \x01(\t\x12\x0e\n\x06source\x18\r \x01(\t\x12\x11\n\traw_frame\x18\x0e \x01(\x0c\x12\x1c\n\x0f\x66rame_timestamp\x18\x0f \x01(\x01H\x01\x88\x01\x01\x42\x0c\n\n_frame_lenB\x12\n\x10_frame_timestamp\x1a+\n\x06Notice\x12\x0f\n\x07message\x18\x01 \x01(\t\x12\x10\n\x08\x64\x65graded\x18\x02 \x01(\x08\x42\t\n\x07payload2\xfd\x06\n\x07Gateway\x12\x34\n\x0cStartService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bStopService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x38\n\x10ModifyGasDeposit\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x33\n\x0bGetPeerInfo\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x35\n\rIntroducePeer\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x36\n\x0eGenerateClient\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12<\n\x14GenerateDepositToken\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07Payable\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x35\n\rSignPublicKey\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x44\n\x1cModifyServiceSystemResources\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12,\n\x04Pack\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12?\n\x17GetServiceEstimatedCost\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x32\n\nGetService\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x32\n\nGetMetrics\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12\x35\n\rServiceTunnel\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x12/\n\x07Observe\x12\x0e.buffer.Buffer\x1a\x0e.buffer.Buffer\"\x00(\x01\x30\x01\x62\x06proto3')
 
 
 
@@ -34,6 +34,8 @@ _SERVICE_API = _SERVICE.nested_types_by_name['Api']
 _SERVICE_API_PROTOCOL = _SERVICE_API.nested_types_by_name['Protocol']
 _SERVICE_API_SLOT = _SERVICE_API.nested_types_by_name['Slot']
 _SERVICE_API_SLOT_GASAMOUNTPERCALLENTRY = _SERVICE_API_SLOT.nested_types_by_name['GasAmountPerCallEntry']
+_SERVICE_POSSIBLEENVIRONMENTWORKLOAD = _SERVICE.nested_types_by_name['PossibleEnvironmentWorkload']
+_SERVICE_POSSIBLEENVIRONMENTWORKLOAD_WORKLOAD = _SERVICE_POSSIBLEENVIRONMENTWORKLOAD.nested_types_by_name['Workload']
 _SERVICE_CONTAINER = _SERVICE.nested_types_by_name['Container']
 _SERVICE_CONTAINER_ARCHITECTURE = _SERVICE_CONTAINER.nested_types_by_name['Architecture']
 _SERVICE_CONTAINER_FILESYSTEM = _SERVICE_CONTAINER.nested_types_by_name['Filesystem']
@@ -44,8 +46,6 @@ _SERVICE_CONTAINER_INIT = _SERVICE_CONTAINER.nested_types_by_name['Init']
 _SERVICE_CONTAINER_INIT_XATTRSENTRY = _SERVICE_CONTAINER_INIT.nested_types_by_name['XattrsEntry']
 _SERVICE_CONTAINER_CONFIGDECLARATION = _SERVICE_CONTAINER.nested_types_by_name['ConfigDeclaration']
 _SERVICE_CONTAINER_RESOURCES = _SERVICE_CONTAINER.nested_types_by_name['Resources']
-_SERVICE_CONTAINER_POSSIBLEWORKLOAD = _SERVICE_CONTAINER.nested_types_by_name['PossibleWorkload']
-_SERVICE_CONTAINER_POSSIBLEWORKLOAD_WORKLOAD = _SERVICE_CONTAINER_POSSIBLEWORKLOAD.nested_types_by_name['Workload']
 _SERVICE_CONTAINER_ENVIRONMENTVARIABLESENTRY = _SERVICE_CONTAINER.nested_types_by_name['EnvironmentVariablesEntry']
 _SERVICE_NETWORK = _SERVICE.nested_types_by_name['Network']
 _INSTANCE = DESCRIPTOR.message_types_by_name['Instance']
@@ -182,6 +182,20 @@ Service = _reflection.GeneratedProtocolMessageType('Service', (_message.Message,
     })
   ,
 
+  'PossibleEnvironmentWorkload' : _reflection.GeneratedProtocolMessageType('PossibleEnvironmentWorkload', (_message.Message,), {
+
+    'Workload' : _reflection.GeneratedProtocolMessageType('Workload', (_message.Message,), {
+      'DESCRIPTOR' : _SERVICE_POSSIBLEENVIRONMENTWORKLOAD_WORKLOAD,
+      '__module__' : 'celaut_pb2'
+      # @@protoc_insertion_point(class_scope:celaut.Service.PossibleEnvironmentWorkload.Workload)
+      })
+    ,
+    'DESCRIPTOR' : _SERVICE_POSSIBLEENVIRONMENTWORKLOAD,
+    '__module__' : 'celaut_pb2'
+    # @@protoc_insertion_point(class_scope:celaut.Service.PossibleEnvironmentWorkload)
+    })
+  ,
+
   'Container' : _reflection.GeneratedProtocolMessageType('Container', (_message.Message,), {
 
     'Architecture' : _reflection.GeneratedProtocolMessageType('Architecture', (_message.Message,), {
@@ -247,20 +261,6 @@ Service = _reflection.GeneratedProtocolMessageType('Service', (_message.Message,
       })
     ,
 
-    'PossibleWorkload' : _reflection.GeneratedProtocolMessageType('PossibleWorkload', (_message.Message,), {
-
-      'Workload' : _reflection.GeneratedProtocolMessageType('Workload', (_message.Message,), {
-        'DESCRIPTOR' : _SERVICE_CONTAINER_POSSIBLEWORKLOAD_WORKLOAD,
-        '__module__' : 'celaut_pb2'
-        # @@protoc_insertion_point(class_scope:celaut.Service.Container.PossibleWorkload.Workload)
-        })
-      ,
-      'DESCRIPTOR' : _SERVICE_CONTAINER_POSSIBLEWORKLOAD,
-      '__module__' : 'celaut_pb2'
-      # @@protoc_insertion_point(class_scope:celaut.Service.Container.PossibleWorkload)
-      })
-    ,
-
     'EnvironmentVariablesEntry' : _reflection.GeneratedProtocolMessageType('EnvironmentVariablesEntry', (_message.Message,), {
       'DESCRIPTOR' : _SERVICE_CONTAINER_ENVIRONMENTVARIABLESENTRY,
       '__module__' : 'celaut_pb2'
@@ -288,6 +288,8 @@ _sym_db.RegisterMessage(Service.Api)
 _sym_db.RegisterMessage(Service.Api.Protocol)
 _sym_db.RegisterMessage(Service.Api.Slot)
 _sym_db.RegisterMessage(Service.Api.Slot.GasAmountPerCallEntry)
+_sym_db.RegisterMessage(Service.PossibleEnvironmentWorkload)
+_sym_db.RegisterMessage(Service.PossibleEnvironmentWorkload.Workload)
 _sym_db.RegisterMessage(Service.Container)
 _sym_db.RegisterMessage(Service.Container.Architecture)
 _sym_db.RegisterMessage(Service.Container.Filesystem)
@@ -298,8 +300,6 @@ _sym_db.RegisterMessage(Service.Container.Init)
 _sym_db.RegisterMessage(Service.Container.Init.XattrsEntry)
 _sym_db.RegisterMessage(Service.Container.ConfigDeclaration)
 _sym_db.RegisterMessage(Service.Container.Resources)
-_sym_db.RegisterMessage(Service.Container.PossibleWorkload)
-_sym_db.RegisterMessage(Service.Container.PossibleWorkload.Workload)
 _sym_db.RegisterMessage(Service.Container.EnvironmentVariablesEntry)
 _sym_db.RegisterMessage(Service.Network)
 
@@ -551,101 +551,101 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _METADATA_HASHTAG_ATTRHASHTAG._serialized_start=724
   _METADATA_HASHTAG_ATTRHASHTAG._serialized_end=791
   _SERVICE._serialized_start=817
-  _SERVICE._serialized_end=3060
-  _SERVICE_API._serialized_start=966
-  _SERVICE_API._serialized_end=1392
-  _SERVICE_API_PROTOCOL._serialized_start=1058
-  _SERVICE_API_PROTOCOL._serialized_end=1113
-  _SERVICE_API_SLOT._serialized_start=1116
-  _SERVICE_API_SLOT._serialized_end=1392
-  _SERVICE_API_SLOT_GASAMOUNTPERCALLENTRY._serialized_start=1318
-  _SERVICE_API_SLOT_GASAMOUNTPERCALLENTRY._serialized_end=1392
-  _SERVICE_CONTAINER._serialized_start=1395
-  _SERVICE_CONTAINER._serialized_end=2919
-  _SERVICE_CONTAINER_ARCHITECTURE._serialized_start=1885
-  _SERVICE_CONTAINER_ARCHITECTURE._serialized_end=1944
-  _SERVICE_CONTAINER_FILESYSTEM._serialized_start=1947
-  _SERVICE_CONTAINER_FILESYSTEM._serialized_end=2365
-  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH._serialized_start=2027
-  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH._serialized_end=2365
-  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH_LINK._serialized_start=2278
-  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH_LINK._serialized_end=2310
+  _SERVICE._serialized_end=3084
+  _SERVICE_API._serialized_start=1050
+  _SERVICE_API._serialized_end=1476
+  _SERVICE_API_PROTOCOL._serialized_start=1142
+  _SERVICE_API_PROTOCOL._serialized_end=1197
+  _SERVICE_API_SLOT._serialized_start=1200
+  _SERVICE_API_SLOT._serialized_end=1476
+  _SERVICE_API_SLOT_GASAMOUNTPERCALLENTRY._serialized_start=1402
+  _SERVICE_API_SLOT_GASAMOUNTPERCALLENTRY._serialized_end=1476
+  _SERVICE_POSSIBLEENVIRONMENTWORKLOAD._serialized_start=1479
+  _SERVICE_POSSIBLEENVIRONMENTWORKLOAD._serialized_end=1649
+  _SERVICE_POSSIBLEENVIRONMENTWORKLOAD_WORKLOAD._serialized_start=1583
+  _SERVICE_POSSIBLEENVIRONMENTWORKLOAD_WORKLOAD._serialized_end=1649
+  _SERVICE_CONTAINER._serialized_start=1652
+  _SERVICE_CONTAINER._serialized_end=2943
+  _SERVICE_CONTAINER_ARCHITECTURE._serialized_start=2070
+  _SERVICE_CONTAINER_ARCHITECTURE._serialized_end=2129
+  _SERVICE_CONTAINER_FILESYSTEM._serialized_start=2132
+  _SERVICE_CONTAINER_FILESYSTEM._serialized_end=2550
+  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH._serialized_start=2212
+  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH._serialized_end=2550
+  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH_LINK._serialized_start=2463
+  _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH_LINK._serialized_end=2495
   _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH_XATTRSENTRY._serialized_start=252
   _SERVICE_CONTAINER_FILESYSTEM_ITEMBRANCH_XATTRSENTRY._serialized_end=297
-  _SERVICE_CONTAINER_INIT._serialized_start=2368
-  _SERVICE_CONTAINER_INIT._serialized_end=2501
+  _SERVICE_CONTAINER_INIT._serialized_start=2553
+  _SERVICE_CONTAINER_INIT._serialized_end=2686
   _SERVICE_CONTAINER_INIT_XATTRSENTRY._serialized_start=252
   _SERVICE_CONTAINER_INIT_XATTRSENTRY._serialized_end=297
-  _SERVICE_CONTAINER_CONFIGDECLARATION._serialized_start=2503
-  _SERVICE_CONTAINER_CONFIGDECLARATION._serialized_end=2572
-  _SERVICE_CONTAINER_RESOURCES._serialized_start=2574
-  _SERVICE_CONTAINER_RESOURCES._serialized_end=2663
-  _SERVICE_CONTAINER_POSSIBLEWORKLOAD._serialized_start=2666
-  _SERVICE_CONTAINER_POSSIBLEWORKLOAD._serialized_end=2824
-  _SERVICE_CONTAINER_POSSIBLEWORKLOAD_WORKLOAD._serialized_start=2758
-  _SERVICE_CONTAINER_POSSIBLEWORKLOAD_WORKLOAD._serialized_end=2824
-  _SERVICE_CONTAINER_ENVIRONMENTVARIABLESENTRY._serialized_start=2826
-  _SERVICE_CONTAINER_ENVIRONMENTVARIABLESENTRY._serialized_end=2905
-  _SERVICE_NETWORK._serialized_start=2922
-  _SERVICE_NETWORK._serialized_end=3060
-  _INSTANCE._serialized_start=3063
-  _INSTANCE._serialized_end=3255
-  _INSTANCE_URI._serialized_start=3154
-  _INSTANCE_URI._serialized_end=3185
-  _INSTANCE_URI_SLOT._serialized_start=3187
-  _INSTANCE_URI_SLOT._serialized_end=3255
-  _CONFIGURATION._serialized_start=3258
-  _CONFIGURATION._serialized_end=3508
-  _CONFIGURATION_ENVIRONMENTVARIABLESENTRY._serialized_start=3426
-  _CONFIGURATION_ENVIRONMENTVARIABLESENTRY._serialized_end=3485
-  _CONFIGURATIONFILE._serialized_start=3511
-  _CONFIGURATIONFILE._serialized_end=3806
-  _CONFIGURATIONFILE_NETWORKRESOLUTION._serialized_start=3731
-  _CONFIGURATIONFILE_NETWORKRESOLUTION._serialized_end=3806
-  _SYSRESOURCES._serialized_start=3809
-  _SYSRESOURCES._serialized_end=4023
-  _TOKENMESSAGE._serialized_start=4025
-  _TOKENMESSAGE._serialized_end=4082
-  _ESTIMATEDCOST._serialized_start=4085
-  _ESTIMATEDCOST._serialized_end=4284
-  _REFUND._serialized_start=4286
-  _REFUND._serialized_end=4329
-  _SIGNREQUEST._serialized_start=4331
-  _SIGNREQUEST._serialized_end=4381
-  _SIGNRESPONSE._serialized_start=4383
-  _SIGNRESPONSE._serialized_end=4413
-  _PAYMENT._serialized_start=4415
-  _PAYMENT._serialized_end=4522
-  _METRICS._serialized_start=4524
-  _METRICS._serialized_end=4572
-  _SERVICEINSTANCE._serialized_start=4574
-  _SERVICEINSTANCE._serialized_end=4642
-  _PEER._serialized_start=4644
-  _PEER._serialized_end=4731
-  _CLIENT._serialized_start=4733
-  _CLIENT._serialized_end=4760
-  _RECURSIONGUARD._serialized_start=4762
-  _RECURSIONGUARD._serialized_end=4793
-  _MODIFYSERVICESYSTEMRESOURCESOUTPUT._serialized_start=4795
-  _MODIFYSERVICESYSTEMRESOURCESOUTPUT._serialized_end=4901
-  _MODIFYSERVICESYSTEMRESOURCESINPUT._serialized_start=4903
-  _MODIFYSERVICESYSTEMRESOURCESINPUT._serialized_end=5022
-  _MODIFYGASDEPOSITINPUT._serialized_start=5024
-  _MODIFYGASDEPOSITINPUT._serialized_end=5113
-  _MODIFYGASDEPOSITOUTPUT._serialized_start=5115
-  _MODIFYGASDEPOSITOUTPUT._serialized_end=5173
-  _OBSERVEREQUEST._serialized_start=5175
-  _OBSERVEREQUEST._serialized_end=5237
-  _OBSERVEEVENT._serialized_start=5240
-  _OBSERVEEVENT._serialized_end=6522
-  _OBSERVEEVENT_SESSION._serialized_start=5477
-  _OBSERVEEVENT_SESSION._serialized_end=5616
-  _OBSERVEEVENT_METRICS._serialized_start=5619
-  _OBSERVEEVENT_METRICS._serialized_end=6122
-  _OBSERVEEVENT_PACKET._serialized_start=6125
-  _OBSERVEEVENT_PACKET._serialized_end=6466
-  _OBSERVEEVENT_NOTICE._serialized_start=6468
-  _OBSERVEEVENT_NOTICE._serialized_end=6511
-  _GATEWAY._serialized_start=6525
-  _GATEWAY._serialized_end=7418
+  _SERVICE_CONTAINER_CONFIGDECLARATION._serialized_start=2688
+  _SERVICE_CONTAINER_CONFIGDECLARATION._serialized_end=2757
+  _SERVICE_CONTAINER_RESOURCES._serialized_start=2759
+  _SERVICE_CONTAINER_RESOURCES._serialized_end=2848
+  _SERVICE_CONTAINER_ENVIRONMENTVARIABLESENTRY._serialized_start=2850
+  _SERVICE_CONTAINER_ENVIRONMENTVARIABLESENTRY._serialized_end=2929
+  _SERVICE_NETWORK._serialized_start=2946
+  _SERVICE_NETWORK._serialized_end=3084
+  _INSTANCE._serialized_start=3087
+  _INSTANCE._serialized_end=3279
+  _INSTANCE_URI._serialized_start=3178
+  _INSTANCE_URI._serialized_end=3209
+  _INSTANCE_URI_SLOT._serialized_start=3211
+  _INSTANCE_URI_SLOT._serialized_end=3279
+  _CONFIGURATION._serialized_start=3282
+  _CONFIGURATION._serialized_end=3532
+  _CONFIGURATION_ENVIRONMENTVARIABLESENTRY._serialized_start=3450
+  _CONFIGURATION_ENVIRONMENTVARIABLESENTRY._serialized_end=3509
+  _CONFIGURATIONFILE._serialized_start=3535
+  _CONFIGURATIONFILE._serialized_end=3830
+  _CONFIGURATIONFILE_NETWORKRESOLUTION._serialized_start=3755
+  _CONFIGURATIONFILE_NETWORKRESOLUTION._serialized_end=3830
+  _SYSRESOURCES._serialized_start=3833
+  _SYSRESOURCES._serialized_end=4047
+  _TOKENMESSAGE._serialized_start=4049
+  _TOKENMESSAGE._serialized_end=4106
+  _ESTIMATEDCOST._serialized_start=4109
+  _ESTIMATEDCOST._serialized_end=4308
+  _REFUND._serialized_start=4310
+  _REFUND._serialized_end=4353
+  _SIGNREQUEST._serialized_start=4355
+  _SIGNREQUEST._serialized_end=4405
+  _SIGNRESPONSE._serialized_start=4407
+  _SIGNRESPONSE._serialized_end=4437
+  _PAYMENT._serialized_start=4439
+  _PAYMENT._serialized_end=4546
+  _METRICS._serialized_start=4548
+  _METRICS._serialized_end=4596
+  _SERVICEINSTANCE._serialized_start=4598
+  _SERVICEINSTANCE._serialized_end=4666
+  _PEER._serialized_start=4668
+  _PEER._serialized_end=4755
+  _CLIENT._serialized_start=4757
+  _CLIENT._serialized_end=4784
+  _RECURSIONGUARD._serialized_start=4786
+  _RECURSIONGUARD._serialized_end=4817
+  _MODIFYSERVICESYSTEMRESOURCESOUTPUT._serialized_start=4819
+  _MODIFYSERVICESYSTEMRESOURCESOUTPUT._serialized_end=4925
+  _MODIFYSERVICESYSTEMRESOURCESINPUT._serialized_start=4927
+  _MODIFYSERVICESYSTEMRESOURCESINPUT._serialized_end=5046
+  _MODIFYGASDEPOSITINPUT._serialized_start=5048
+  _MODIFYGASDEPOSITINPUT._serialized_end=5137
+  _MODIFYGASDEPOSITOUTPUT._serialized_start=5139
+  _MODIFYGASDEPOSITOUTPUT._serialized_end=5197
+  _OBSERVEREQUEST._serialized_start=5199
+  _OBSERVEREQUEST._serialized_end=5261
+  _OBSERVEEVENT._serialized_start=5264
+  _OBSERVEEVENT._serialized_end=6546
+  _OBSERVEEVENT_SESSION._serialized_start=5501
+  _OBSERVEEVENT_SESSION._serialized_end=5640
+  _OBSERVEEVENT_METRICS._serialized_start=5643
+  _OBSERVEEVENT_METRICS._serialized_end=6146
+  _OBSERVEEVENT_PACKET._serialized_start=6149
+  _OBSERVEEVENT_PACKET._serialized_end=6490
+  _OBSERVEEVENT_NOTICE._serialized_start=6492
+  _OBSERVEEVENT_NOTICE._serialized_end=6535
+  _GATEWAY._serialized_start=6549
+  _GATEWAY._serialized_end=7442
 # @@protoc_insertion_point(module_scope)
