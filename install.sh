@@ -376,6 +376,18 @@ EOF
 
 create_wrapper_script
 
+install_shell_completion() {
+  # Install bash/zsh tab-completion for commands and service/instance/peer ids.
+  # Invoke the helper directly (not via the nodo wrapper) so this never triggers
+  # nodo's heavy import graph or the KYA prompt during install.
+  printf "Installing shell completion...\n"
+  NODO_COMPLETION_DIR="$TARGET_DIR" NODO_COMPLETION_PY="$PYTHON_VENV_BIN_PATH" \
+    "$PYTHON_VENV_BIN_PATH" "$TARGET_DIR/src/commands/completion.py" install --system \
+    || printf "Shell completion install skipped (non-fatal).\n"
+}
+
+install_shell_completion
+
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
 
 if systemctl list-unit-files --type=service | grep -Fq "nodo.service"; then
