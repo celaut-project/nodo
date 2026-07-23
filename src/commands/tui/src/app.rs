@@ -1,50 +1,80 @@
-use ratatui::widgets::{TableState};
-use regex::Regex;
-use rusqlite::{Connection, Result};
-use std::io::{self, BufRead, Read};
-use std::process::Stdio;
-use std::{error, fs, vec};
-use sysinfo::System;
-use tokio::process::Command;
-use tokio::io::AsyncBufReadExt;
 use prost::Message;
-use std::fs::{File};
+use ratatui::widgets::TableState;
+use regex::Regex;
+use rusqlite::{Connection, Result as SqlResult};
+use serde_yaml::Value;
+use std::collections::{HashMap, VecDeque};
+use std::error;
+use std::fs::{self, File};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::{Duration, Instant};
+use sysinfo::{Disks, System};
+use tokio::process::Command;
+use tokio::task::JoinHandle;
 
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
 
-const DATABASE_FILE: &str = "../../../storage/database.sqlite";
-pub const LOG_FILE: &str = "../../../storage/app.log";
-pub const ENV_FILE: &str = "../../../.env";
-const SERVICES_ROOT: &str = "../../../storage/__registry__";
-const METADATA_ROOT: &str = "../../../storage/__metadata__";
-pub const RAM_TIMES: usize = 500;
-pub const CPU_TIMES: usize = 500;
+pub const HISTORY_POINTS: usize = 120;
+const DATA_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+const WALLET_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 pub mod protos {
     include!(concat!("protos", "/celaut.rs"));
 }
 
-trait Identifiable {
+pub trait Identifiable {
     fn id(&self) -> &str;
 }
 
-#[derive(Debug, Clone)]
-pub struct IdentifiableString(pub String);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Page {
+    Overview,
+    Instances,
+    Services,
+    Network,
+    Config,
+    Logs,
+}
 
-impl Identifiable for IdentifiableString {
-    fn id(&self) -> &str {
-        &self.0
+impl Page {
+    pub const ALL: [Page; 6] = [
+        Page::Overview,
+        Page::Instances,
+        Page::Services,
+        Page::Network,
+        Page::Config,
+        Page::Logs,
+    ];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Page::Overview => "OVERVIEW",
+            Page::Instances => "INSTANCES",
+            Page::Services => "SERVICES",
+            Page::Network => "NETWORK",
+            Page::Config => "CONFIG",
+            Page::Logs => "LOGS",
+        }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputMode {
+    Normal,
+    Connect,
+    EditConfig,
+    FilterConfig,
+}
+
+#[derive(Debug, Clone)]
 pub struct Peer {
     pub id: String,
-    pub uri: String,
+    pub uris: String,
     pub gas: String,
-    pub rpi: Option<String>  // Reputation proof id
+    pub reputation: String,
 }
 
 impl Identifiable for Peer {
@@ -53,22 +83,11 @@ impl Identifiable for Peer {
     }
 }
 
-#[derive(Debug)]
-pub struct Service {
-    pub id: String,
-    pub tag: String
-}
-
-impl Identifiable for Service {
-    fn id(&self) -> &str {
-        &self.id
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Client {
     pub id: String,
-    pub gas: String
+    pub gas: String,
+    pub last_usage: String,
 }
 
 impl Identifiable for Client {
@@ -77,295 +96,200 @@ impl Identifiable for Client {
     }
 }
 
-#[derive(Debug)]
-pub struct Container {
+#[derive(Debug, Clone)]
+pub struct Service {
+    pub id: String,
+    pub tag: String,
+    pub size_bytes: u64,
+}
+
+impl Identifiable for Service {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Instance {
     pub id: String,
     pub name: String,
     pub ip: String,
-    pub gas: String
-}
-
-impl Identifiable for Container {
-    fn id(&self) -> &str {
-        &self.id
-    }
-}
-
-#[derive(Debug)]
-pub struct Env {
-    pub id: String,
-    pub value: String,
-    pub info: String,
-    pub group: String,
-}
-
-impl Identifiable for Env {
-    fn id(&self) -> &str {
-        &self.id
-    }
-}
-
-#[derive(Debug)]
-pub struct Tunnel {
-    pub id: String,
-    pub uri: String,
     pub service: String,
-    pub live: bool,
+    pub gas: String,
+    pub virtualizer: String,
+    pub memory_current: Option<u64>,
+    pub memory_limit: u64,
+    pub disk_limit: u64,
 }
 
-impl Identifiable for Tunnel {
+impl Identifiable for Instance {
     fn id(&self) -> &str {
         &self.id
     }
 }
 
-fn get_peers() -> Result<Vec<Peer>> {
-    Ok(Connection::open(DATABASE_FILE)?
-        .prepare(
-            "SELECT p.id, u.ip, u.port, p.gas, p.reputation_proof_id
-                FROM peer p
-                JOIN slot s ON p.id = s.peer_id
-                JOIN uri u ON s.id = u.slot_id",
-        )?
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            let ip: String = row.get(1)?;
-            let port: u16 = row.get(2)?;
-            let gas_str: String = row.get(3)?;
-            let rpi: Option<String> = row.get(4)?;
-
-            let gas = format!("{:e}", gas_str.parse::<f64>().unwrap());
-
-            Ok(Peer {
-                id,
-                uri: format!("{}:{}", ip, port),
-                gas,
-                rpi, // Assign the optional reputation_proof_id
-            })
-        })?
-        .collect::<Result<Vec<Peer>>>()?)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigPathSegment {
+    Key(String),
+    Index(usize),
 }
 
-fn get_clients() -> Result<Vec<Client>> {
-    Ok(Connection::open(DATABASE_FILE)?
-        .prepare("SELECT id, gas FROM clients")?
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            let gas_str: String = row.get(1)?;
-
-            let gas = format!("{:e}", gas_str.parse::<f64>().unwrap());
-
-            Ok(Client {
-                id,
-                gas,
-            })
-        })?
-        .collect::<Result<Vec<Client>>>()?)
+#[derive(Debug, Clone)]
+pub struct ConfigEntry {
+    pub path: String,
+    pub path_segments: Vec<ConfigPathSegment>,
+    pub value: String,
+    pub edit_value: String,
+    pub value_type: String,
+    pub secret: bool,
 }
 
-fn get_instances() -> Result<Vec<Container>> {
-    let conn = Connection::open(DATABASE_FILE)?;
-
-    let internal_instances = conn
-        .prepare("SELECT id, name, ip, gas FROM local_instances")?
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let ip: String = row.get(2)?;
-            let gas_str: String = row.get(3)?;
-
-            let gas = format!("{:e}", gas_str.parse::<f64>().unwrap());
-
-            Ok(Container {
-                id, name, ip, gas 
-            })
-        })?
-        .collect::<Result<Vec<Container>>>()?;
-
-    /*let external_instances = conn
-        .prepare("SELECT token FROM delegated_instances")?
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            Ok(Container {
-                id,
-                name: String::new(),
-                ip: String::new(),
-                gas: String::new(),
-            })
-        })?
-        .collect::<Result<Vec<Container>>>()?;
-    */
-
-    let mut instances = Vec::new();
-    instances.extend(internal_instances);
-    // instances.extend(external_instances);
-
-    Ok(instances)
-}
-
-fn get_services() -> Result<Vec<Service>, io::Error> {
-    // Read all entries in the SERVICES_ROOT directory
-    let entries = fs::read_dir(Path::new(SERVICES_ROOT))?;
-    let mut services = Vec::new();
-
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.file_name();
-    
-        // Convert the file name to a string
-        let service_id = path.to_string_lossy().into_owned();
-    
-        // Construct the metadata file path
-        let metadata_path = PathBuf::from(METADATA_ROOT).join(&service_id);
-    
-        let mut tag = String::from("any");
-    
-        // Check if the metadata file exists
-        if metadata_path.exists() {
-            // Wrap the metadata processing in a Result handling block
-            tag = match (|| -> Result<String, Box<dyn std::error::Error>> {
-                // Open the metadata file
-                let mut file = File::open(&metadata_path)?;
-                let mut buf = Vec::new();
-    
-                // Read the metadata file into the buffer
-                file.read_to_end(&mut buf)?;
-    
-                // Decode the protobuf message from the buffer
-                let metadata: protos::Metadata = protos::Metadata::decode(&*buf)?;
-    
-                let result_tag = if let Some(hashtag) = metadata.hashtag {
-                    if !hashtag.tag.is_empty() {
-                        hashtag.tag.first().cloned()
-                    } else {
-                        Some(String::from("No tags found in hashtag"))
-                    }
-                } else {
-                    Some(String::from("No hashtag found in metadata"))
-                };
-    
-                Ok(result_tag.unwrap_or_else(|| String::from("No tag available")))
-            })() {
-                Ok(t) => t,
-                Err(e) => format!("{}", e)
-            };
-        }
-    
-        // Push the service into the vector
-        services.push(Service { id: service_id, tag: tag });
+impl Identifiable for ConfigEntry {
+    fn id(&self) -> &str {
+        &self.path
     }
-
-    Ok(services)
 }
 
-fn get_envs() -> Result<Vec<Env>, io::Error> {
-    let path = Path::new(ENV_FILE);
-    let file = fs::File::open(&path)?;
-    let reader = io::BufReader::new(file);
-
-    let lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
-    let mut envs = Vec::new();
-    let mut current_group = String::new();
-
-    let mut iter = lines.iter().peekable();
-    while let Some(line) = iter.next() {
-        let line = line.trim();
-
-        if line.starts_with("# ----") {
-            if let Some(group_line) = iter.next() {
-                if group_line.trim().starts_with("# ") {
-                    current_group = group_line.trim_start_matches("# ").to_string();
-                }
-            }
-            continue;
-        }
-
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        if let Some((key, value_with_comment)) = line.split_once('=') {
-            let (value, info) = if let Some((val, comment)) = value_with_comment.split_once('#') {
-                (val.trim().to_string(), comment.trim().to_string())
-            } else {
-                (value_with_comment.trim().to_string(), String::new())
-            };
-
-            envs.push(Env {
-                id: key.trim().to_string(),
-                value: value.trim().to_string(),
-                info: info,
-                group: current_group.clone(),
-            });
+impl ConfigEntry {
+    pub fn display_value(&self) -> String {
+        if self.secret && !self.value.is_empty() && self.value != "null" {
+            "•••••••• (set)".to_string()
+        } else {
+            self.value.clone()
         }
     }
-
-    Ok(envs)
 }
 
-fn get_tunnels() -> Result<Vec<Tunnel>> {
-    Ok(Connection::open(DATABASE_FILE)?
-        .prepare("SELECT id, uri, service, live FROM tunnels")?
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            let uri: String = row.get(1)?;
-            let service: String = row.get(2)?;
-            let live: bool = row.get(3)?;
-            Ok(Tunnel {
-                id,
-                uri,
-                service,
-                live,
-            })
-        })?
-        .collect::<Result<Vec<Tunnel>>>()?)
+#[derive(Debug, Clone, Default)]
+pub struct NodeInfo {
+    pub service_status: String,
+    pub version: String,
+    pub address: String,
+    pub reputation_proof: String,
+    pub sender_address: String,
+    pub sender_balance: Option<f64>,
+    pub receiver_address: String,
+    pub receiver_balance: Option<f64>,
+    pub total_balance: Option<f64>,
+    pub error: String,
 }
 
-
-fn get_ram_usage(sys: &mut System) -> u64 {
-    // First we update all information of our system struct.
-    sys.refresh_memory();
-
-    // Get total and used memory
-    let total_memory = sys.total_memory();
-    let used_memory = sys.used_memory();
-
-    // Calculate the RAM usage in percentage
-    let ram_usage_percentage = (used_memory as f64 / total_memory as f64) * 100.0;
-    ram_usage_percentage as u64
+#[derive(Debug, Clone, Default)]
+pub struct DashboardStats {
+    pub cpu_percent: u64,
+    pub memory_used: u64,
+    pub memory_total: u64,
+    pub disk_used: u64,
+    pub disk_total: u64,
+    pub storage_bytes: u64,
+    pub instance_memory_current: u64,
+    pub instance_memory_reserved: u64,
+    pub instance_disk_reserved: u64,
 }
 
-fn get_cpu_usage(sys: &mut System) -> u64 {
-    // Refresh CPU information
-    sys.refresh_cpu();
+#[derive(Debug, Clone)]
+pub struct Paths {
+    pub root: PathBuf,
+    pub config: PathBuf,
+    pub database: PathBuf,
+    pub storage: PathBuf,
+    pub registry: PathBuf,
+    pub metadata: PathBuf,
+    pub log: PathBuf,
+    pub cgroups: PathBuf,
+    pub yq: PathBuf,
+}
 
-    // Retrieve CPU usage as a percentage for all CPUs combined
-    let cpu_usage_percentage = sys.global_cpu_info().cpu_usage();
+impl Paths {
+    pub fn discover() -> Self {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."));
+        let config = root.join("config.yaml");
+        let document = read_yaml(&config).ok();
 
-    cpu_usage_percentage as u64
+        let main_dir = yaml_string(document.as_ref(), &["main", "MAIN_DIR"])
+            .map(PathBuf::from)
+            .unwrap_or_else(|| root.clone());
+        let storage = yaml_string(document.as_ref(), &["main", "STORAGE"])
+            .map(|value| resolve_config_path(&value, &main_dir, None))
+            .unwrap_or_else(|| root.join("storage"));
+
+        let resolve = |keys: &[&str], fallback: PathBuf| {
+            yaml_string(document.as_ref(), keys)
+                .map(|value| resolve_config_path(&value, &main_dir, Some(&storage)))
+                .unwrap_or(fallback)
+        };
+
+        Self {
+            root: root.clone(),
+            config,
+            database: resolve(&["main", "DATABASE_FILE"], storage.join("database.sqlite")),
+            registry: resolve(&["main", "REGISTRY"], storage.join("__registry__")),
+            metadata: resolve(&["main", "METADATA_REGISTRY"], storage.join("__metadata__")),
+            log: storage.join("app.log"),
+            cgroups: resolve(
+                &["virtualizers", "ch", "CGROUPS_BASE_DIR"],
+                PathBuf::from("/sys/fs/cgroup"),
+            ),
+            yq: resolve(&["dependencies", "yq", "BIN"], PathBuf::from("yq")),
+            storage,
+        }
+    }
+}
+
+fn read_yaml(path: &Path) -> Result<Value, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|error| format!("Unable to read {}: {error}", path.display()))?;
+    serde_yaml::from_str(&content)
+        .map_err(|error| format!("Unable to parse {}: {error}", path.display()))
+}
+
+fn yaml_string(document: Option<&Value>, keys: &[&str]) -> Option<String> {
+    let mut value = document?;
+    for key in keys {
+        value = value.get(*key)?;
+    }
+    value.as_str().map(ToString::to_string)
+}
+
+fn resolve_config_path(value: &str, main_dir: &Path, storage: Option<&Path>) -> PathBuf {
+    let main = main_dir.to_string_lossy();
+    let storage_text = storage
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let expanded = value
+        .replace("${main.MAIN_DIR}", &main)
+        .replace("${main.STORAGE}", &storage_text);
+    let path = PathBuf::from(expanded);
+    if path.is_absolute() {
+        path
+    } else {
+        main_dir.join(path)
+    }
 }
 
 #[derive(Debug)]
-pub struct TabsState<'a> {
-    pub titles: Vec<&'a str>,
+pub struct TabsState {
     pub index: usize,
 }
 
-impl<'a> TabsState<'a> {
-    pub fn new(titles: Vec<&'a str>) -> TabsState {
-        TabsState { titles, index: 0 }
+impl TabsState {
+    pub fn page(&self) -> Page {
+        Page::ALL[self.index]
     }
 
     pub fn next(&mut self) {
-        self.index = (self.index + 1) % self.titles.len();
+        self.index = (self.index + 1) % Page::ALL.len();
     }
 
     pub fn previous(&mut self) {
-        if self.index > 0 {
-            self.index -= 1;
+        self.index = if self.index == 0 {
+            Page::ALL.len() - 1
         } else {
-            self.index = self.titles.len() - 1;
-        }
+            self.index - 1
+        };
     }
 }
 
@@ -386,117 +310,138 @@ impl<T: Identifiable> StatefulList<T> {
     }
 
     pub fn refresh(&mut self, items: Vec<T>) {
+        let selected_id = self.state_id.clone();
         self.items = items;
-        // Reset the state if the list is empty
         if self.items.is_empty() {
             self.state.select(None);
             self.state_id = None;
+            return;
         }
+        if let Some(id) = selected_id {
+            if let Some(index) = self.items.iter().position(|item| item.id() == id) {
+                self.state.select(Some(index));
+                self.state_id = Some(id);
+                return;
+            }
+        }
+        self.state.select(None);
+        self.state_id = None;
+    }
+
+    pub fn selected(&self) -> Option<&T> {
+        self.state
+            .selected()
+            .and_then(|index| self.items.get(index))
     }
 
     pub fn next(&mut self) {
         if self.items.is_empty() {
-            self.state.select(None);
-            self.state_id = None;
             return;
         }
-
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i >= self.items.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
+        let index = match self.state.selected() {
+            Some(index) if index + 1 < self.items.len() => index + 1,
+            _ => 0,
         };
-        self.state.select(Some(i));
-        self.state_id = Some(self.items[i].id().to_string());
+        self.state.select(Some(index));
+        self.state_id = Some(self.items[index].id().to_string());
     }
 
     pub fn previous(&mut self) {
         if self.items.is_empty() {
-            self.state.select(None);
-            self.state_id = None;
             return;
         }
-
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.items.len() - 1
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
+        let index = match self.state.selected() {
+            Some(0) | None => self.items.len() - 1,
+            Some(index) => index - 1,
         };
-        self.state.select(Some(i));
-        self.state_id = Some(self.items[i].id().to_string());
+        self.state.select(Some(index));
+        self.state_id = Some(self.items[index].id().to_string());
     }
 }
 
-/// Application.
-#[derive(Debug)]
-pub struct App<'a> {
-    pub title: &'a str,
-    pub tabs: TabsState<'a>,
+pub struct App {
+    pub title: &'static str,
+    pub tabs: TabsState,
     pub running: bool,
-    pub logs: Vec<String>,
     pub peers: StatefulList<Peer>,
     pub clients: StatefulList<Client>,
-    pub instances: StatefulList<Container>,
+    pub instances: StatefulList<Instance>,
     pub services: StatefulList<Service>,
-    pub envs: StatefulList<Env>,
-    pub tunnels: StatefulList<Tunnel>,
-    pub ram_usage: Vec<u64>,
-    pub cpu_usage: Vec<u64>,
+    pub config: StatefulList<ConfigEntry>,
+    pub config_all: Vec<ConfigEntry>,
+    pub config_filter: String,
+    pub network_focus: usize,
+    pub app_logs: Vec<String>,
+    pub node_logs: Vec<String>,
+    pub cpu_history: VecDeque<u64>,
+    pub ram_history: VecDeque<u64>,
+    pub stats: DashboardStats,
+    pub node_info: NodeInfo,
+    pub paths: Paths,
+    pub input_mode: InputMode,
+    pub input: String,
+    pub input_title: String,
+    pub edit_config_path: Option<Vec<ConfigPathSegment>>,
+    pub edit_config_secret: bool,
+    pub status: String,
     pub sys: System,
-    pub mode_view_index: StatefulList<IdentifiableString>,
-    pub block_view_index: StatefulList<IdentifiableString>,
-    pub connect_popup: bool,
-    pub connect_text: String,
+    last_data_refresh: Instant,
+    last_storage_refresh: Instant,
+    last_wallet_refresh: Instant,
+    wallet_task: Option<JoinHandle<Result<NodeInfo, String>>>,
 }
 
-impl<'a> Default for App<'a> {
+impl Default for App {
     fn default() -> Self {
+        let paths = Paths::discover();
+        let config_all = get_config_entries(&paths.config).unwrap_or_default();
+        let now = Instant::now();
         Self {
-            title: "NODO TUI",
-            tabs: TabsState::new(vec!["PEERS", "CLIENTS", "INSTANCES", "SERVICES", "ENVS", "TUNNELS"]),
+            title: "NODO OPERATIONS",
+            tabs: TabsState { index: 0 },
             running: true,
-            logs: Vec::new(),
-            peers: StatefulList::with_items(get_peers().unwrap_or_default()),
-            clients: StatefulList::with_items(get_clients().unwrap_or_default()),
-            instances: StatefulList::with_items(get_instances().unwrap_or_default()),
-            services: StatefulList::with_items(get_services().unwrap_or_default()),
-            envs: StatefulList::with_items(get_envs().unwrap_or_default()),
-            tunnels: StatefulList::with_items(get_tunnels().unwrap_or_default()),
-            ram_usage: [0; RAM_TIMES].to_vec(),
-            cpu_usage: [0; CPU_TIMES].to_vec(),
+            peers: StatefulList::with_items(get_peers(&paths.database).unwrap_or_default()),
+            clients: StatefulList::with_items(get_clients(&paths.database).unwrap_or_default()),
+            instances: StatefulList::with_items(Vec::new()),
+            services: StatefulList::with_items(Vec::new()),
+            config: StatefulList::with_items(config_all.clone()),
+            config_all,
+            config_filter: String::new(),
+            network_focus: 0,
+            app_logs: vec!["TUI ready".to_string()],
+            node_logs: read_last_lines(&paths.log, 250).unwrap_or_default(),
+            cpu_history: VecDeque::from(vec![0; HISTORY_POINTS]),
+            ram_history: VecDeque::from(vec![0; HISTORY_POINTS]),
+            stats: DashboardStats::default(),
+            node_info: NodeInfo {
+                service_status: "checking…".to_string(),
+                ..NodeInfo::default()
+            },
+            paths,
+            input_mode: InputMode::Normal,
+            input: String::new(),
+            input_title: String::new(),
+            edit_config_path: None,
+            edit_config_secret: false,
+            status: "Press r to refresh • q to quit".to_string(),
             sys: System::new_all(),
-            mode_view_index: StatefulList::with_items(
-                vec!["", "10", "10-10", "10-10-10", "20-10", "30"]
-                    .into_iter()
-                    .map(|s| IdentifiableString(s.to_string()))
-                    .collect(),
-            ),
-            block_view_index: StatefulList::with_items(
-                vec!["ram-usage", "cpu-usage", "tui-logs", "logs"]
-                    .into_iter()
-                    .map(|s| IdentifiableString(s.to_string()))
-                    .collect(),
-            ),
-            connect_popup: false,
-            connect_text: "".to_string(),
+            last_data_refresh: now.checked_sub(DATA_REFRESH_INTERVAL).unwrap_or(now),
+            last_storage_refresh: now.checked_sub(Duration::from_secs(30)).unwrap_or(now),
+            last_wallet_refresh: now.checked_sub(WALLET_REFRESH_INTERVAL).unwrap_or(now),
+            wallet_task: None,
         }
     }
 }
 
-impl<'a> App<'a> {
-    /// Constructs a new instance of [`App`].
+impl App {
     pub fn new() -> Self {
-        Self::default()
+        let mut app = Self::default();
+        app.refresh_local(true);
+        app
+    }
+
+    pub fn page(&self) -> Page {
+        self.tabs.page()
     }
 
     pub fn on_right(&mut self) {
@@ -508,134 +453,812 @@ impl<'a> App<'a> {
     }
 
     pub fn on_up(&mut self) {
-        match self.tabs.index {
-            0 => self.peers.previous(),
-            1 => self.clients.previous(),
-            2 => self.instances.previous(),
-            3 => self.services.previous(),
-            4 => self.envs.previous(),
-            5 => self.tunnels.previous(),
+        match self.page() {
+            Page::Instances => self.instances.previous(),
+            Page::Services => self.services.previous(),
+            Page::Network if self.network_focus == 0 => self.peers.previous(),
+            Page::Network => self.clients.previous(),
+            Page::Config => self.config.previous(),
             _ => {}
         }
     }
 
     pub fn on_down(&mut self) {
-        match self.tabs.index {
-            0 => self.peers.next(),
-            1 => self.clients.next(),
-            2 => self.instances.next(),
-            3 => self.services.next(),
-            4 => self.envs.next(),
-            5 => self.tunnels.next(),
+        match self.page() {
+            Page::Instances => self.instances.next(),
+            Page::Services => self.services.next(),
+            Page::Network if self.network_focus == 0 => self.peers.next(),
+            Page::Network => self.clients.next(),
+            Page::Config => self.config.next(),
             _ => {}
         }
     }
 
-    pub fn next_block_view(&mut self) {
-        self.block_view_index.next();
+    pub fn toggle_focus(&mut self) {
+        if self.page() == Page::Network {
+            self.network_focus = (self.network_focus + 1) % 2;
+        }
     }
 
-    pub fn previous_block_view(&mut self) {
-        self.block_view_index.previous();
-    }
-
-    pub fn change_mode_view(&mut self) {
-        self.mode_view_index.next();
-    }
-
-    /// Handles the tick event of the terminal.
-    pub fn tick(&self) {}
-
-    /// Set running to false to quit the application.
     pub fn quit(&mut self) {
         self.running = false;
     }
 
-    pub fn open_popup(&mut self) {
-        self.connect_popup = true;
+    pub fn close_input(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.input.clear();
+        self.input_title.clear();
+        self.edit_config_path = None;
+        self.edit_config_secret = false;
     }
 
-    pub fn close_popup(&mut self) {
-        self.connect_popup = false;
+    pub fn open_connect(&mut self) {
+        self.input_mode = InputMode::Connect;
+        self.input.clear();
+        self.input_title = "Connect peer (host:port)".to_string();
     }
 
-    async fn execute_command(&mut self, args: Vec<String>) -> io::Result<()> {
-        const COMMAND: &str = "nodo";
-        let mut child = Command::new(COMMAND)
+    pub fn open_config_filter(&mut self) {
+        self.input_mode = InputMode::FilterConfig;
+        self.input = self.config_filter.clone();
+        self.input_title = "Filter configuration paths".to_string();
+    }
+
+    pub fn clear_config_filter(&mut self) {
+        self.config_filter.clear();
+        self.apply_config_filter();
+        self.status = "Configuration filter cleared".to_string();
+    }
+
+    pub fn open_config_editor(&mut self) {
+        let Some(entry) = self.config.selected().cloned() else {
+            self.status = "Select a configuration value first".to_string();
+            return;
+        };
+        self.input_mode = InputMode::EditConfig;
+        self.input_title = format!("Edit {} ({})", entry.path, entry.value_type);
+        self.input = if entry.secret {
+            String::new()
+        } else {
+            entry.edit_value.clone()
+        };
+        self.edit_config_path = Some(entry.path_segments);
+        self.edit_config_secret = entry.secret;
+    }
+
+    pub fn apply_config_filter(&mut self) {
+        let needle = self.config_filter.to_lowercase();
+        let filtered = self
+            .config_all
+            .iter()
+            .filter(|entry| {
+                needle.is_empty()
+                    || entry.path.to_lowercase().contains(&needle)
+                    || (!entry.secret && entry.value.to_lowercase().contains(&needle))
+            })
+            .cloned()
+            .collect();
+        self.config.refresh(filtered);
+    }
+
+    pub async fn submit_input(&mut self) {
+        match self.input_mode {
+            InputMode::Connect => self.connect().await,
+            InputMode::EditConfig => self.save_config_edit().await,
+            InputMode::FilterConfig => {
+                self.config_filter = self.input.trim().to_string();
+                self.apply_config_filter();
+                let count = self.config.items.len();
+                self.close_input();
+                self.status = format!("Configuration filter: {count} matching values");
+            }
+            InputMode::Normal => {}
+        }
+    }
+
+    async fn connect(&mut self) {
+        let target = self.input.trim().to_string();
+        let valid_shape = Regex::new(r"^(\[[0-9a-fA-F:]+\]|[^:\s]+):\d{1,5}$")
+            .expect("valid peer regex")
+            .is_match(&target);
+        let valid_port = target
+            .rsplit_once(':')
+            .and_then(|(_, port)| port.parse::<u16>().ok())
+            .map(|port| port > 0)
+            .unwrap_or(false);
+        let valid = valid_shape && valid_port;
+        if !valid {
+            self.status = "Peer must be host:port (IPv6 may use [address]:port)".to_string();
+            return;
+        }
+        self.close_input();
+        self.execute_command(vec!["connect".to_string(), target])
+            .await;
+        self.refresh_local(true);
+    }
+
+    async fn save_config_edit(&mut self) {
+        let Some(path) = self.edit_config_path.clone() else {
+            self.status = "No configuration path selected".to_string();
+            self.close_input();
+            return;
+        };
+        if self.edit_config_secret && self.input.is_empty() {
+            self.status = "Secret unchanged; type \"\" explicitly to clear it".to_string();
+            self.close_input();
+            return;
+        }
+        if let Err(error) = serde_yaml::from_str::<Value>(&self.input) {
+            self.status = format!("Invalid YAML value: {error}");
+            return;
+        }
+
+        let expression = format!("{} = env(NODO_TUI_VALUE)", yq_path_expression(&path));
+        let backup = self.paths.config.with_extension("yaml.tui.bak");
+        if let Err(error) = fs::copy(&self.paths.config, &backup) {
+            self.status = format!("Could not create config backup: {error}");
+            return;
+        }
+
+        let output = Command::new(&self.paths.yq)
+            .arg("e")
+            .arg("-i")
+            .arg(expression)
+            .arg(&self.paths.config)
+            .env("NODO_TUI_VALUE", &self.input)
+            .output()
+            .await;
+
+        match output {
+            Ok(output) if output.status.success() => {
+                self.paths = Paths::discover();
+                self.config_all = get_config_entries(&self.paths.config).unwrap_or_default();
+                self.apply_config_filter();
+                self.close_input();
+                self.status = format!(
+                    "Configuration saved • backup: {} • restart nodo to apply runtime changes",
+                    backup.display()
+                );
+            }
+            Ok(output) => {
+                let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                self.status = format!("yq could not update configuration: {message}");
+            }
+            Err(error) => {
+                self.status = format!("Could not run {}: {error}", self.paths.yq.display());
+            }
+        }
+    }
+
+    pub async fn execute_selected_service(&mut self) {
+        if self.page() != Page::Services {
+            return;
+        }
+        let Some(id) = self.services.state_id.clone() else {
+            self.status = "Select a service first".to_string();
+            return;
+        };
+        self.execute_command(vec!["execute".to_string(), id]).await;
+        self.refresh_local(true);
+    }
+
+    async fn execute_command(&mut self, args: Vec<String>) {
+        self.status = format!("Running nodo {}…", args.join(" "));
+        let output = Command::new("nodo")
             .args(&args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()?;
-
-        let stdout = child.stdout.take().expect("Failed to capture stdout");
-        let stderr = child.stderr.take().expect("Failed to capture stderr");
-
-        let mut stdout_reader = tokio::io::BufReader::new(stdout).lines();
-        let mut stderr_reader = tokio::io::BufReader::new(stderr).lines();
-
-        while let Some(line) = stdout_reader.next_line().await? {
-            self.logs.push(format!("STDOUT: {}", line));
-        }
-
-        while let Some(line) = stderr_reader.next_line().await? {
-            self.logs.push(format!("STDERR: {}", line));
-        }
-
-        let status = child.wait().await?;
-        self.logs.push(format!("Command exited with status: {}", status));
-
-        Ok(())
-    }
-
-    pub async fn connect(&mut self) {
-        if !self.connect_text.is_empty() {
-            let re = Regex::new(
-                    r"^.*:\d{1,5}$"
-                ).unwrap();
-            if re.is_match(&self.connect_text) {
-                let args = vec!["connect".to_string(), self.connect_text.clone()];
-                self.execute_command(args).await;
-                self.connect_text.clear();
-                self.close_popup();
-            } // TODO else show error msg during 3 seconds or any key press.
-        }
-    }
-
-    pub async fn press_d(&mut self) {
-        match self.tabs.index {
-            0 => {}
-            1 => {}
-            2 => {}
-            3 => {}
-            _ => {}
-        }
-    }
-
-    pub async fn press_e(&mut self) {
-        match self.tabs.index {
-            0 => {}
-            1 => {}
-            2 => {}
-            3 => {
-                if let Some(id) = &self.services.state_id {
-                    let _ = self.execute_command(vec!["execute".to_string(), id.to_string()]).await;
-                } 
-                else {
-                    self.logs.push("No service state ID available to execute.".to_string());
-                }
+            .output()
+            .await;
+        match output {
+            Ok(output) => {
+                self.app_logs.extend(
+                    String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .map(ToString::to_string),
+                );
+                self.app_logs.extend(
+                    String::from_utf8_lossy(&output.stderr)
+                        .lines()
+                        .map(|line| format!("ERROR: {line}")),
+                );
+                self.status = if output.status.success() {
+                    "Command completed".to_string()
+                } else {
+                    format!("Command exited with {}", output.status)
+                };
             }
-            _ => {}
+            Err(error) => self.status = format!("Unable to launch nodo command: {error}"),
         }
     }
 
-    pub async fn refresh(&mut self) {
-        self.peers.refresh(get_peers().unwrap_or_default());
-        self.clients.refresh(get_clients().unwrap_or_default());
-        self.instances.refresh(get_instances().unwrap_or_default());
-        self.services.refresh(get_services().unwrap_or_default());
-        self.envs.refresh(get_envs().unwrap_or_default());
-        self.tunnels.refresh(get_tunnels().unwrap_or_default());
-        self.ram_usage.push(get_ram_usage(&mut self.sys));
-        self.cpu_usage.push(get_cpu_usage(&mut self.sys));
+    pub async fn refresh(&mut self, force: bool) {
+        self.refresh_local(force);
+        self.poll_wallet_task().await;
+        if self.wallet_task.is_none()
+            && (force || self.last_wallet_refresh.elapsed() >= WALLET_REFRESH_INTERVAL)
+        {
+            self.last_wallet_refresh = Instant::now();
+            self.wallet_task = Some(tokio::spawn(fetch_node_info()));
+        }
+    }
+
+    fn refresh_local(&mut self, force: bool) {
+        if !force && self.last_data_refresh.elapsed() < DATA_REFRESH_INTERVAL {
+            return;
+        }
+        self.last_data_refresh = Instant::now();
+        self.paths = Paths::discover();
+
+        let services = get_services(&self.paths).unwrap_or_default();
+        let service_names = services
+            .iter()
+            .map(|service| (service.id.clone(), service.tag.clone()))
+            .collect::<HashMap<_, _>>();
+        self.services.refresh(services);
+        self.instances
+            .refresh(get_instances(&self.paths, &service_names).unwrap_or_default());
+        self.peers
+            .refresh(get_peers(&self.paths.database).unwrap_or_default());
+        self.clients
+            .refresh(get_clients(&self.paths.database).unwrap_or_default());
+        self.node_logs = read_last_lines(&self.paths.log, 250).unwrap_or_default();
+
+        self.sys.refresh_cpu();
+        self.sys.refresh_memory();
+        self.stats.cpu_percent = self.sys.global_cpu_info().cpu_usage().round() as u64;
+        self.stats.memory_used = self.sys.used_memory();
+        self.stats.memory_total = self.sys.total_memory();
+        (self.stats.disk_used, self.stats.disk_total) = disk_usage(&self.paths.storage);
+        if force || self.last_storage_refresh.elapsed() >= Duration::from_secs(30) {
+            self.stats.storage_bytes = path_size(&self.paths.storage).unwrap_or(0);
+            self.last_storage_refresh = Instant::now();
+        }
+        self.stats.instance_memory_current = self
+            .instances
+            .items
+            .iter()
+            .filter_map(|instance| instance.memory_current)
+            .sum();
+        self.stats.instance_memory_reserved = self
+            .instances
+            .items
+            .iter()
+            .map(|instance| instance.memory_limit)
+            .sum();
+        self.stats.instance_disk_reserved = self
+            .instances
+            .items
+            .iter()
+            .map(|instance| instance.disk_limit)
+            .sum();
+        push_history(&mut self.cpu_history, self.stats.cpu_percent);
+        let ram_percent = percent(self.stats.memory_used, self.stats.memory_total);
+        push_history(&mut self.ram_history, ram_percent);
+    }
+
+    async fn poll_wallet_task(&mut self) {
+        if !self
+            .wallet_task
+            .as_ref()
+            .map(|task| task.is_finished())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let task = self.wallet_task.take().unwrap();
+        match task.await {
+            Ok(Ok(info)) => self.node_info = info,
+            Ok(Err(error)) => self.node_info.error = error,
+            Err(error) => self.node_info.error = format!("Wallet refresh failed: {error}"),
+        }
+    }
+}
+
+async fn fetch_node_info() -> Result<NodeInfo, String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(20),
+        Command::new("nodo").arg("info").output(),
+    )
+    .await
+    .map_err(|_| "nodo info timed out after 20 seconds".to_string())?
+    .map_err(|error| format!("Unable to run nodo info: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(parse_node_info(&String::from_utf8_lossy(&output.stdout)))
+}
+
+pub fn parse_node_info(output: &str) -> NodeInfo {
+    let mut info = NodeInfo::default();
+    for line in output.lines().map(str::trim) {
+        if let Some(value) = line.strip_prefix("Nodo service is currently ") {
+            info.service_status = value.trim_end_matches('.').to_string();
+        } else if let Some(value) = line.strip_prefix("Nodo version: ") {
+            info.version = value.to_string();
+        } else if let Some(value) = line.strip_prefix("Nodo address: ") {
+            info.address = value.to_string();
+        } else if let Some(value) = line.strip_prefix("Reputation Proof ID: ") {
+            info.reputation_proof = value.to_string();
+        } else if let Some(value) = line.strip_prefix("Sending Wallet: ") {
+            let (address, balance) = parse_wallet_line(value, ", Amount:");
+            info.sender_address = address;
+            info.sender_balance = balance;
+        } else if let Some(value) = line.strip_prefix("Receiver Wallet: ") {
+            let (address, balance) = parse_wallet_line(value, ", Received:");
+            info.receiver_address = address;
+            info.receiver_balance = balance;
+        } else if let Some(value) = line.strip_prefix("Total: ") {
+            info.total_balance = parse_erg_amount(value);
+        }
+    }
+    info
+}
+
+fn parse_wallet_line(value: &str, separator: &str) -> (String, Option<f64>) {
+    match value.split_once(separator) {
+        Some((address, amount)) => (address.trim().to_string(), parse_erg_amount(amount)),
+        None => (value.to_string(), None),
+    }
+}
+
+fn parse_erg_amount(value: &str) -> Option<f64> {
+    value
+        .trim()
+        .trim_end_matches("ERGs")
+        .trim()
+        .parse::<f64>()
+        .ok()
+}
+
+fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
+    let connection = Connection::open(database)?;
+    let mut statement = connection.prepare(
+        "SELECT p.id,
+                COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
+                p.gas,
+                COALESCE(p.reputation_proof_id, '')
+         FROM peer p
+         LEFT JOIN slot s ON p.id = s.peer_id
+         LEFT JOIN uri u ON s.id = u.slot_id
+         GROUP BY p.id, p.gas, p.reputation_proof_id",
+    )?;
+    let peers = statement
+        .query_map([], |row| {
+            Ok(Peer {
+                id: row.get(0)?,
+                uris: row.get(1)?,
+                gas: format_gas(row.get::<_, String>(2)?),
+                reputation: row.get(3)?,
+            })
+        })?
+        .collect();
+    peers
+}
+
+fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
+    let connection = Connection::open(database)?;
+    let mut statement = connection.prepare("SELECT id, gas, last_usage FROM clients")?;
+    let clients = statement
+        .query_map([], |row| {
+            let last_usage = row
+                .get::<_, Option<f64>>(2)?
+                .map(|value| format!("{value:.0}"))
+                .unwrap_or_else(|| "—".to_string());
+            Ok(Client {
+                id: row.get(0)?,
+                gas: format_gas(row.get::<_, String>(1)?),
+                last_usage,
+            })
+        })?
+        .collect();
+    clients
+}
+
+fn get_instances(
+    paths: &Paths,
+    service_names: &HashMap<String, String>,
+) -> SqlResult<Vec<Instance>> {
+    let connection = Connection::open(&paths.database)?;
+    let mut statement = connection.prepare(
+        "SELECT id, name, ip, gas, service_id, mem_limit, disk_space, virtualizer
+         FROM local_instances",
+    )?;
+    let instances = statement
+        .query_map([], |row| {
+            let id: String = row.get(0)?;
+            let service_id: String = row.get::<_, Option<String>>(4)?.unwrap_or_default();
+            let service = service_names
+                .get(&service_id)
+                .cloned()
+                .unwrap_or_else(|| shorten(&service_id, 18));
+            let memory_current = read_u64(
+                &paths
+                    .cgroups
+                    .join("nodo-ch")
+                    .join(&id)
+                    .join("memory.current"),
+            );
+            Ok(Instance {
+                id,
+                name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                ip: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                gas: format_gas(row.get::<_, String>(3)?),
+                service,
+                memory_current,
+                memory_limit: row.get::<_, Option<u64>>(5)?.unwrap_or(0),
+                disk_limit: row.get::<_, Option<u64>>(6)?.unwrap_or(0),
+                virtualizer: row
+                    .get::<_, Option<String>>(7)?
+                    .unwrap_or_else(|| "ch".to_string()),
+            })
+        })?
+        .collect();
+    instances
+}
+
+fn get_services(paths: &Paths) -> Result<Vec<Service>, io::Error> {
+    let mut services = Vec::new();
+    let entries = match fs::read_dir(&paths.registry) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(services),
+        Err(error) => return Err(error),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let id = entry.file_name().to_string_lossy().into_owned();
+        let tag = read_service_tag(&paths.metadata.join(&id)).unwrap_or_else(|| "—".to_string());
+        let size_bytes = path_size(&entry.path()).unwrap_or(0);
+        services.push(Service {
+            id,
+            tag,
+            size_bytes,
+        });
+    }
+    services.sort_by(|left, right| left.tag.cmp(&right.tag).then(left.id.cmp(&right.id)));
+    Ok(services)
+}
+
+fn read_service_tag(path: &Path) -> Option<String> {
+    let mut bytes = Vec::new();
+    File::open(path).ok()?.read_to_end(&mut bytes).ok()?;
+    let metadata = protos::Metadata::decode(&*bytes).ok()?;
+    metadata.hashtag?.tag.first().cloned()
+}
+
+fn get_config_entries(path: &Path) -> Result<Vec<ConfigEntry>, String> {
+    let document = read_yaml(path)?;
+    let mut entries = Vec::new();
+    flatten_yaml(&document, &mut Vec::new(), &mut entries);
+    Ok(entries)
+}
+
+fn flatten_yaml(value: &Value, path: &mut Vec<ConfigPathSegment>, entries: &mut Vec<ConfigEntry>) {
+    match value {
+        Value::Mapping(mapping) if !mapping.is_empty() => {
+            for (key, child) in mapping {
+                let key = key
+                    .as_str()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| yaml_value(key));
+                path.push(ConfigPathSegment::Key(key));
+                flatten_yaml(child, path, entries);
+                path.pop();
+            }
+        }
+        Value::Sequence(sequence) if !sequence.is_empty() => {
+            for (index, child) in sequence.iter().enumerate() {
+                path.push(ConfigPathSegment::Index(index));
+                flatten_yaml(child, path, entries);
+                path.pop();
+            }
+        }
+        _ => {
+            let display_path = config_path_display(path);
+            entries.push(ConfigEntry {
+                secret: is_secret_path(&display_path),
+                path: display_path,
+                path_segments: path.clone(),
+                value: yaml_value(value),
+                edit_value: yaml_edit_value(value),
+                value_type: yaml_type(value).to_string(),
+            });
+        }
+    }
+}
+
+fn yaml_value(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => value.clone(),
+        Value::Sequence(value) if value.is_empty() => "[]".to_string(),
+        Value::Mapping(value) if value.is_empty() => "{}".to_string(),
+        _ => serde_yaml::to_string(value)
+            .unwrap_or_else(|_| "<unprintable>".to_string())
+            .trim()
+            .to_string(),
+    }
+}
+
+fn yaml_edit_value(value: &Value) -> String {
+    serde_yaml::to_string(value)
+        .unwrap_or_else(|_| yaml_value(value))
+        .trim()
+        .to_string()
+}
+
+fn yaml_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Sequence(_) => "list",
+        Value::Mapping(_) => "object",
+        Value::Tagged(_) => "tagged",
+    }
+}
+
+fn config_path_display(path: &[ConfigPathSegment]) -> String {
+    let mut output = String::new();
+    for segment in path {
+        match segment {
+            ConfigPathSegment::Key(key) => {
+                if !output.is_empty() {
+                    output.push('.');
+                }
+                output.push_str(key);
+            }
+            ConfigPathSegment::Index(index) => output.push_str(&format!("[{index}]")),
+        }
+    }
+    output
+}
+
+pub fn yq_path_expression(path: &[ConfigPathSegment]) -> String {
+    let mut output = ".".to_string();
+    for segment in path {
+        match segment {
+            ConfigPathSegment::Key(key) => {
+                let quoted = serde_json::to_string(key).expect("JSON string serialization");
+                output.push_str(&format!("[{quoted}]"));
+            }
+            ConfigPathSegment::Index(index) => output.push_str(&format!("[{index}]")),
+        }
+    }
+    output
+}
+
+fn is_secret_path(path: &str) -> bool {
+    let normalized = path.to_ascii_lowercase();
+    if ["mnemonic", "password", "secret", "private_key", "api_key"]
+        .iter()
+        .any(|marker| normalized.contains(marker))
+    {
+        return true;
+    }
+    let leaf = normalized
+        .rsplit(['.', ']'])
+        .find(|part| !part.is_empty() && !part.chars().all(|character| character.is_ascii_digit()))
+        .unwrap_or(&normalized)
+        .trim_start_matches('[');
+    leaf == "token" || leaf.ends_with("_token")
+}
+
+fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
+    const TAIL_BYTES: u64 = 256 * 1024;
+    let mut file = File::open(path)?;
+    let length = file.metadata()?.len();
+    let offset = length.saturating_sub(TAIL_BYTES);
+    file.seek(SeekFrom::Start(offset))?;
+    let mut content = Vec::new();
+    file.read_to_end(&mut content)?;
+    let content = String::from_utf8_lossy(&content);
+    let content = if offset > 0 {
+        content.split_once('\n').map(|(_, rest)| rest).unwrap_or("")
+    } else {
+        &content
+    };
+    let mut lines = VecDeque::with_capacity(count);
+    for line in content.lines() {
+        if lines.len() == count {
+            lines.pop_front();
+        }
+        lines.push_back(line.to_string());
+    }
+    Ok(lines.into_iter().collect())
+}
+
+fn path_size(path: &Path) -> io::Result<u64> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+    if !metadata.is_dir() {
+        return Ok(0);
+    }
+    let mut total = 0;
+    for entry in fs::read_dir(path)? {
+        total += path_size(&entry?.path()).unwrap_or(0);
+    }
+    Ok(total)
+}
+
+fn disk_usage(storage: &Path) -> (u64, u64) {
+    let disks = Disks::new_with_refreshed_list();
+    disks
+        .iter()
+        .filter(|disk| storage.starts_with(disk.mount_point()))
+        .max_by_key(|disk| disk.mount_point().as_os_str().len())
+        .map(|disk| {
+            let total = disk.total_space();
+            (total.saturating_sub(disk.available_space()), total)
+        })
+        .unwrap_or((0, 0))
+}
+
+fn read_u64(path: &Path) -> Option<u64> {
+    fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+fn format_gas(value: String) -> String {
+    value
+        .parse::<f64>()
+        .map(|number| format!("{number:.3e}"))
+        .unwrap_or(value)
+}
+
+fn push_history(history: &mut VecDeque<u64>, value: u64) {
+    if history.len() >= HISTORY_POINTS {
+        history.pop_front();
+    }
+    history.push_back(value);
+}
+
+pub fn percent(used: u64, total: u64) -> u64 {
+    if total == 0 {
+        0
+    } else {
+        ((used as f64 / total as f64) * 100.0).round() as u64
+    }
+}
+
+pub fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+pub fn shorten(value: &str, max: usize) -> String {
+    if value.chars().count() <= max {
+        return value.to_string();
+    }
+    if max < 5 {
+        return value.chars().take(max).collect();
+    }
+    let front = (max - 1) / 2;
+    let back = max - front - 1;
+    let start: String = value.chars().take(front).collect();
+    let end: String = value
+        .chars()
+        .rev()
+        .take(back)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    format!("{start}…{end}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_nodo_info_wallets() {
+        let output = "Nodo service is currently running.\n\
+Nodo version: abc123\n\
+Nodo address: 10.0.0.1:5000\n\
+Reputation Proof ID: proof-id\n\
+Sending Wallet: 9sender, Amount: 1.25 ERGs\n\
+Receiver Wallet: 9receiver, Received: 0.75 ERGs\n\
+Total: 2 ERGs\n";
+        let info = parse_node_info(output);
+        assert_eq!(info.service_status, "running");
+        assert_eq!(info.sender_address, "9sender");
+        assert_eq!(info.sender_balance, Some(1.25));
+        assert_eq!(info.receiver_balance, Some(0.75));
+        assert_eq!(info.total_balance, Some(2.0));
+    }
+
+    #[test]
+    fn flattens_all_yaml_leaf_values_and_masks_secrets() {
+        let value: Value = serde_yaml::from_str(
+            "network:\n  port: 5000\nledgers:\n  ergo:\n    WALLET_MNEMONIC: secret words\ncore_services:\n  - name: packer\n    id: abc\nempty: []\n",
+        )
+        .unwrap();
+        let mut entries = Vec::new();
+        flatten_yaml(&value, &mut Vec::new(), &mut entries);
+        let paths: Vec<_> = entries.iter().map(|entry| entry.path.as_str()).collect();
+        assert!(paths.contains(&"network.port"));
+        assert!(paths.contains(&"core_services[0].id"));
+        assert!(paths.contains(&"empty"));
+        let mnemonic = entries
+            .iter()
+            .find(|entry| entry.path.ends_with("WALLET_MNEMONIC"))
+            .unwrap();
+        assert!(mnemonic.secret);
+        assert_eq!(mnemonic.display_value(), "•••••••• (set)");
+    }
+
+    #[test]
+    fn editor_preserves_ambiguous_string_types() {
+        let value: Value = serde_yaml::from_str("value: 'true'\nempty: ''\n").unwrap();
+        let mut entries = Vec::new();
+        flatten_yaml(&value, &mut Vec::new(), &mut entries);
+        let string_bool = entries.iter().find(|entry| entry.path == "value").unwrap();
+        assert_eq!(string_bool.value_type, "string");
+        assert!(matches!(
+            serde_yaml::from_str::<Value>(&string_bool.edit_value).unwrap(),
+            Value::String(_)
+        ));
+    }
+
+    #[test]
+    fn only_actual_tokens_are_masked() {
+        assert!(is_secret_path("publisher.TOKEN"));
+        assert!(is_secret_path("publisher.FALLBACK_TOKEN"));
+        assert!(!is_secret_path("reputation.TOTAL_REPUTATION_TOKEN_AMOUNT"));
+        assert!(!is_secret_path("reputation.PLAIN_TEXT_TYPE_NFT_ID"));
+    }
+
+    #[test]
+    fn current_example_config_is_fully_navigable() {
+        let document: Value =
+            serde_yaml::from_str(include_str!("../../../../config.example.yaml")).unwrap();
+        let mut entries = Vec::new();
+        flatten_yaml(&document, &mut Vec::new(), &mut entries);
+        assert!(entries.len() > 100);
+        assert!(entries
+            .iter()
+            .any(|entry| entry.path == "virtualizers.ch.MIN_MEM_MIB"));
+        assert!(entries
+            .iter()
+            .any(|entry| entry.path == "core_services[1].id"));
+        assert!(
+            entries
+                .iter()
+                .find(|entry| entry.path == "ledgers.ergo.WALLET_MNEMONIC")
+                .unwrap()
+                .secret
+        );
+    }
+
+    #[test]
+    fn emits_safe_yq_paths() {
+        let path = vec![
+            ConfigPathSegment::Key("core_services".to_string()),
+            ConfigPathSegment::Index(1),
+            ConfigPathSegment::Key("id".to_string()),
+        ];
+        assert_eq!(yq_path_expression(&path), ".[\"core_services\"][1][\"id\"]");
+    }
+
+    #[test]
+    fn formats_sizes_and_percentages() {
+        assert_eq!(format_bytes(1_073_741_824), "1.0 GiB");
+        assert_eq!(percent(25, 100), 25);
+        assert_eq!(percent(1, 0), 0);
     }
 }
