@@ -12,6 +12,71 @@ from src.utils.network import get_free_port
 from src.utils.singleton import Singleton
 
 
+def to_yaml_safe(value: Any) -> Any:
+    """Normalize a value into plain YAML-serializable Python types.
+
+    Values that reach the config sometimes come from the Java bridge (jpype),
+    e.g. a ``java.lang.String`` returned by an Appkit ``.toString()`` call. Such
+    objects are ``str`` subclasses that PyYAML does not recognize, so ``yaml.dump``
+    would persist them as ``!!python/object:jpype._jstring.java.lang.String`` —
+    which then fails to load. Coercing every value to an exact builtin type here
+    keeps ``config.yaml`` clean regardless of where a value originated.
+    """
+    if value is None or type(value) in (bool, int, float, str):
+        return value
+    # Normalize subclasses (jpype JString/JInt/JDouble, Decimal, etc.).
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return float(value)
+    if isinstance(value, str):
+        return str(value)
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    if isinstance(value, dict):
+        return {to_yaml_safe(k): to_yaml_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [to_yaml_safe(item) for item in value]
+    # Any other foreign object (e.g. an unmapped Java type) becomes its string form.
+    return str(value)
+
+
+def _construct_foreign_as_string(loader: "yaml.Loader", tag_suffix: str, node: yaml.Node) -> Any:
+    """Recover a foreign ``!!python/object:*`` node as its underlying string.
+
+    Lets a config that was written with an embedded Java object (before the
+    coercion above existed) still load, so nodo can rewrite it cleanly.
+    """
+    try:
+        if isinstance(node, yaml.MappingNode):
+            mapping = loader.construct_mapping(node, deep=True)
+            for key in ("_jstr", "value", "data"):
+                if mapping.get(key) is not None:
+                    return str(mapping[key])
+            for candidate in mapping.values():
+                if candidate is not None:
+                    return str(candidate)
+            return ""
+        if isinstance(node, yaml.ScalarNode):
+            return str(loader.construct_scalar(node))
+        if isinstance(node, yaml.SequenceNode):
+            return [str(item) for item in loader.construct_sequence(node, deep=True)]
+    except Exception:
+        return ""
+    return ""
+
+
+class _TolerantLoader(yaml.SafeLoader):
+    """SafeLoader that degrades foreign python/object tags to strings."""
+
+
+_TolerantLoader.add_multi_constructor(
+    "tag:yaml.org,2002:python/object", _construct_foreign_as_string
+)
+
+
 class ConfigManager(metaclass=Singleton):
     """
     Manages application configuration using a YAML file.
@@ -98,7 +163,20 @@ class ConfigManager(metaclass=Singleton):
                 raise FileNotFoundError(f"Configuration file not found at: {self.config_path}")
 
             with open(self.config_path, "r") as f:
-                self._config = yaml.safe_load(f) or {}
+                raw = f.read()
+
+            recovered = False
+            try:
+                self._config = yaml.safe_load(raw) or {}
+            except yaml.YAMLError:
+                # A previous version may have persisted a foreign (Java) object.
+                # Recover it as plain strings, then force a clean rewrite below.
+                self._config = yaml.load(raw, Loader=_TolerantLoader) or {}
+                recovered = True
+                self.log(
+                    "config.yaml contained a non-native (Java) value; recovered it "
+                    "and rewriting the file cleanly."
+                )
 
             original_config = copy.deepcopy(self._config)
 
@@ -130,8 +208,8 @@ class ConfigManager(metaclass=Singleton):
             # Interpolate paths after dynamic values are processed.
             self._interpolate_paths(self._config)
 
-            # Save if dynamic processing made changes.
-            if config_changed:
+            # Save if dynamic processing made changes or we recovered a bad file.
+            if config_changed or recovered:
                 self.log("Dynamic values were processed, saving configuration...")
                 self._save_config_unlocked()
 
@@ -139,8 +217,11 @@ class ConfigManager(metaclass=Singleton):
 
     def _save_config_unlocked(self):
         """Internal save method without locking (assumes caller holds lock)."""
+        # Coerce to native types first, then use safe_dump so a foreign object can
+        # never again be persisted as a `!!python/object:...` tag.
+        safe_config = to_yaml_safe(self._config)
         with open(self.config_path, "w") as f:
-            yaml.dump(self._config, f, indent=2, default_flow_style=False)
+            yaml.safe_dump(safe_config, f, indent=2, default_flow_style=False)
 
         try:
             os.chmod(self.config_path, 0o666)  # To allow sudo nodo update and still be writable
@@ -182,7 +263,9 @@ class ConfigManager(metaclass=Singleton):
         """
         with self._lock:
             self.ensure_loaded()
-            self._set_nested(self._config, key.split("."), value)
+            # Normalize now so in-memory reads also get a native value, not a
+            # Java/foreign object that would later poison the YAML file.
+            self._set_nested(self._config, key.split("."), to_yaml_safe(value))
             self._save_config_unlocked()
 
     def _interpolate_paths(self, data: Any, context: Optional[Dict[str, Any]] = None):
