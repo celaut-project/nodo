@@ -200,6 +200,7 @@ if __name__ == '__main__':
                     "\n- config"
                     "\n- envs"
                     "\n- tui"
+                    "\n- completion <bash|zsh|install>  (shell tab-completion for commands and ids)"
                     "\n- info"
                     "\n- logs"
                     "\n- export <service> <path>"
@@ -694,6 +695,13 @@ if __name__ == '__main__':
             case "doctor":
                 from src.commands.doctor import doctor_command
                 doctor_command(main_dir=MAIN_DIR)
+
+            case "completion":
+                # Shell tab-completion for commands and service/instance/peer ids.
+                from src.commands.completion import main as completion_main
+                os.environ.setdefault("NODO_COMPLETION_DIR", MAIN_DIR)
+                os.environ.setdefault("NODO_COMPLETION_PY", sys.executable)
+                os._exit(completion_main(sys.argv[2:]))
 
             case other:
                 print('Unknown command.', flush=True)
