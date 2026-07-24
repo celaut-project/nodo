@@ -82,6 +82,27 @@ if [ -f "${DOCKER_PID_FILE}" ]; then
     fi
 fi
 
+# Authoritative guard: scan for an isolated dockerd already bound to our
+# data-root. The pidfile fast-path above can miss an orphan (stale/removed
+# pidfile), and launching a second daemon on the same data-root collides on
+# the boltdb lock ("metadata.db: timeout") and deletes the live socket.
+RUNNING_PIDS="$(isolated_dockerd_pids "${DOCKER_DATA_ROOT}" || true)"
+if [ -n "${RUNNING_PIDS}" ]; then
+    if "${DOCKER_BIN}" -H "unix://${DOCKER_SOCKET}" info > /dev/null 2>&1; then
+        # Idempotent: healthy daemon already serving this data-root.
+        echo "Nodo Docker daemon already running and responsive (PID(s): ${RUNNING_PIDS})."
+        exit 0
+    else
+        # Wedged: daemon alive but not answering. Do NOT delete the socket or
+        # launch a second daemon — that is exactly what causes the collision.
+        echo "Error: an isolated Docker daemon is already running on ${DOCKER_DATA_ROOT} (PID(s): ${RUNNING_PIDS}) but is not responding on ${DOCKER_SOCKET}."
+        echo "It is holding the data-root lock, so a new daemon cannot start (this causes the 'metadata.db: timeout' error)."
+        echo "Stop it first, then retry:"
+        echo "    sudo \"${SCRIPT_DIR}/stop_docker_daemon.sh\" \"${TARGET_DIR}\""
+        exit 1
+    fi
+fi
+
 # Remove old socket if it exists (from crashed daemon)
 rm -f "${DOCKER_SOCKET}"
 
