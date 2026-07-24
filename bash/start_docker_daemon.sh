@@ -98,6 +98,13 @@ if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"
 fi
 
+# Dump the tail of the daemon log so the real dockerd error is visible.
+dump_daemon_log() {
+    echo "----- Last lines of ${DOCKER_LOG_FILE} -----"
+    ${SUDO} tail -n 40 "${DOCKER_LOG_FILE}" 2>/dev/null || tail -n 40 "${DOCKER_LOG_FILE}" 2>/dev/null || true
+    echo "--------------------------------------------"
+}
+
 nohup ${SUDO} env PATH="${DOCKER_PATH}" "${DOCKERD_BIN}" \
     --config-file="${DOCKER_CONFIG_DIR}/daemon.json" \
     -H "unix://${DOCKER_SOCKET}" \
@@ -107,15 +114,38 @@ nohup ${SUDO} env PATH="${DOCKER_PATH}" "${DOCKERD_BIN}" \
     --userland-proxy=false \
     > "${DOCKER_LOG_FILE}" 2>&1 &
 
-# Wait for the socket to be created (max 30 seconds)
+# Remember the PID of the launched background process so we can detect an
+# early crash. Because dockerd is started via sudo, this is the PID of the
+# sudo wrapper; the pidfile (written by dockerd itself) is used as a
+# secondary liveness signal below.
+DAEMON_LAUNCH_PID=$!
+
+# Wait for the daemon to become responsive (max 30 seconds).
 echo "Waiting for Docker daemon to start..."
 for i in $(seq 1 30); do
+    # Primary early-exit: if the launched process is gone the daemon crashed
+    # during startup. Cross-check the pidfile in case sudo re-parented dockerd.
+    if ! kill -0 "${DAEMON_LAUNCH_PID}" 2>/dev/null; then
+        DAEMON_ALIVE=0
+        if [ -f "${DOCKER_PID_FILE}" ]; then
+            DOCKERD_PID="$(cat "${DOCKER_PID_FILE}" 2>/dev/null || true)"
+            if [ -n "${DOCKERD_PID}" ] && ${SUDO} kill -0 "${DOCKERD_PID}" 2>/dev/null; then
+                DAEMON_ALIVE=1
+            fi
+        fi
+        if [ "${DAEMON_ALIVE}" -eq 0 ]; then
+            echo "Error: Docker daemon process exited during startup."
+            dump_daemon_log
+            exit 1
+        fi
+    fi
+
     if [ -S "${DOCKER_SOCKET}" ]; then
         ${SUDO} chmod 666 "${DOCKER_SOCKET}" >/dev/null 2>&1 || true
-        echo "Nodo Docker daemon started successfully!"
-        
-        # Verify it works
+
+        # Only report success once the daemon actually answers.
         if "${DOCKER_BIN}" -H "unix://${DOCKER_SOCKET}" info > /dev/null 2>&1; then
+            echo "Nodo Docker daemon started successfully!"
             echo "Docker daemon is responsive."
             exit 0
         fi
@@ -123,6 +153,6 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-echo "Error: Docker daemon failed to start within 30 seconds."
-echo "Check the log file: ${DOCKER_LOG_FILE}"
+echo "Error: Docker daemon did not become responsive within 30 seconds."
+dump_daemon_log
 exit 1
