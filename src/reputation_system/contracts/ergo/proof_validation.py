@@ -167,9 +167,10 @@ def sign_message(public_key, message) -> str | None:
 """
     Verifica que el Perfil de Reputación y la cartera almacenados en la configuración están relacionados (el perfil pertenece a esa cartera).
 """
-def validate_reputation_proof_ownership() -> bool:
-    mnemonic_phrase = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC") or ConfigManager().get("WALLET_MNEMONIC")
-    proof_id = ConfigManager().get("reputation.REPUTATION_PROOF_ID") or ConfigManager().get("REPUTATION_PROOF_ID")
+def validate_reputation_proof_ownership(
+        mnemonic_phrase: str = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC"), 
+        proof_id: str = ConfigManager().get("reputation.REPUTATION_PROOF_ID")
+    ) -> bool:
 
     if not proof_id:
         logger('Missing reputation proof id on configuration, run submit reputation.')
@@ -269,58 +270,57 @@ def sync_reputation_proof_ownership() -> bool:
     proof_id = config.get("reputation.REPUTATION_PROOF_ID") or config.get("REPUTATION_PROOF_ID")
 
     # 1. Validate current state via the shared function (kept untouched).
-    is_valid = validate_reputation_proof_ownership()
+    is_valid = validate_reputation_proof_ownership(mnemonic_phrase=mnemonic_phrase, proof_id=proof_id)
 
     # 2. Drop a configured proof that does not belong to this wallet.
-    if proof_id:
-        if is_valid:
-            print(f"Reputation proof {proof_id} is valid for the configured wallet.", flush=True)
-        else:
-            _msg = (
-                f"Reputation proof {proof_id} is not owned by the configured wallet; "
-                "removing it from the node configuration."
-            )
-            print(_msg, flush=True)
-            logger(_msg)
-            config.set("reputation.REPUTATION_PROOF_ID", "")
-            proof_id = None
+    if is_valid:
+        print(f"Reputation proof {proof_id} is valid for the configured wallet.", flush=True)
     else:
-        print("No reputation proof id is currently configured.", flush=True)
+        _msg = (
+            f"Reputation proof {proof_id} is not owned by the configured wallet; "
+            "removing it from the node configuration."
+        )
+        print(_msg, flush=True)
+        logger(_msg)
+        config.set("reputation.REPUTATION_PROOF_ID", "")
+        proof_id=None
 
     # 3. With a wallet but no (valid) proof id, try to discover one on-chain.
-    if not mnemonic_phrase:
+    if not is_valid and not mnemonic_phrase:  # Can't only be valid in case it has mnemonic and proof_id.
         print(
             "No wallet mnemonic is configured; skipping the on-chain reputation proof lookup.",
             flush=True,
         )
-        return is_valid
+        return False
 
     if proof_id:
         # Already have a valid, configured proof — nothing to discover.
         return True
 
-    try:
-        discovered_proof_id = find_reputation_proof_id_for_owner(mnemonic_phrase)
-    except JavaDependencyMissing:
-        raise
-    except Exception as e:
-        _msg = f"Could not look up a reputation proof for the configured wallet: {e}"
-        print(_msg, flush=True)
-        logger(_msg)
-        return False
-
-    if discovered_proof_id:
-        config.set("reputation.REPUTATION_PROOF_ID", discovered_proof_id)
-        _msg = (
-            f"Found reputation proof {discovered_proof_id} owned by the configured wallet; "
-            "saved it to the node configuration."
-        )
-        print(_msg, flush=True)
-        logger(_msg)
     else:
-        print(
-            "No reputation proof associated with the configured wallet was found on-chain.",
-            flush=True,
-        )
+        # In case there is no proof_id
+        try:
+            discovered_proof_id = find_reputation_proof_id_for_owner(mnemonic_phrase)
+        except JavaDependencyMissing:
+            raise
+        except Exception as e:
+            _msg = f"Could not look up a reputation proof for the configured wallet: {e}"
+            print(_msg, flush=True)
+            logger(_msg)
+            return False
 
-    return True
+        if discovered_proof_id:
+            config.set("reputation.REPUTATION_PROOF_ID", discovered_proof_id)
+            _msg = (
+                f"Found reputation proof {discovered_proof_id} owned by the configured wallet; "
+                "saved it to the node configuration."
+            )
+            print(_msg, flush=True)
+            logger(_msg)
+        else:
+            print(
+                "No reputation proof associated with the configured wallet was found on-chain.",
+                flush=True,
+            )
+
+        return True
