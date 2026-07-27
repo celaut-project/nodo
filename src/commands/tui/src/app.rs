@@ -122,6 +122,17 @@ pub struct Instance {
     pub memory_current: Option<u64>,
     pub memory_limit: u64,
     pub disk_limit: u64,
+    /// "local" for locally-run instances, otherwise the owning peer id for
+    /// delegated/remote instances.
+    pub location: String,
+    /// Parent instance id (from `father_id`); empty when this is a root.
+    pub father_id: String,
+}
+
+impl Instance {
+    pub fn is_local(&self) -> bool {
+        self.location == "local"
+    }
 }
 
 impl Identifiable for Instance {
@@ -870,10 +881,10 @@ fn get_instances(
 ) -> SqlResult<Vec<Instance>> {
     let connection = Connection::open(&paths.database)?;
     let mut statement = connection.prepare(
-        "SELECT id, name, ip, gas, service_id, mem_limit, disk_space, virtualizer
+        "SELECT id, name, ip, gas, service_id, mem_limit, disk_space, virtualizer, father_id
          FROM local_instances",
     )?;
-    let instances = statement
+    let mut instances: Vec<Instance> = statement
         .query_map([], |row| {
             let id: String = row.get(0)?;
             let service_id: String = row.get::<_, Option<String>>(4)?.unwrap_or_default();
@@ -900,6 +911,55 @@ fn get_instances(
                 virtualizer: row
                     .get::<_, Option<String>>(7)?
                     .unwrap_or_else(|| "ch".to_string()),
+                location: "local".to_string(),
+                father_id: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+            })
+        })?
+        .collect::<SqlResult<Vec<_>>>()?;
+
+    // Delegated (remote) instances live on other peers. The table carries no
+    // gas / memory / disk columns, and remote gas needs an async gRPC call
+    // (see manager/metrics.py __get_metrics_external) that would block the UI.
+    // We therefore surface them here with placeholders ("—") and location set
+    // to the owning peer id, without any blocking network round-trip.
+    let remote = get_delegated_instances(&connection, service_names)?;
+    instances.extend(remote);
+    Ok(instances)
+}
+
+fn get_delegated_instances(
+    connection: &Connection,
+    service_names: &HashMap<String, String>,
+) -> SqlResult<Vec<Instance>> {
+    let mut statement = connection.prepare(
+        "SELECT id, peer_id, service_id, father_id FROM delegated_instances",
+    )?;
+    let instances = statement
+        .query_map([], |row| {
+            let id: String = row.get::<_, Option<String>>(0)?.unwrap_or_default();
+            let peer_id: String = row.get::<_, Option<String>>(1)?.unwrap_or_default();
+            let service_id: String = row.get::<_, Option<String>>(2)?.unwrap_or_default();
+            let service = service_names
+                .get(&service_id)
+                .cloned()
+                .unwrap_or_else(|| shorten(&service_id, 18));
+            let location = if peer_id.is_empty() {
+                "remote".to_string()
+            } else {
+                peer_id
+            };
+            Ok(Instance {
+                id,
+                name: String::new(),
+                ip: String::new(),
+                gas: "—".to_string(),
+                service,
+                memory_current: None,
+                memory_limit: 0,
+                disk_limit: 0,
+                virtualizer: "remote".to_string(),
+                location,
+                father_id: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
             })
         })?
         .collect();

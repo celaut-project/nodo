@@ -292,40 +292,60 @@ fn draw_sparkline(
 fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(6)]).split(area);
     let rows = app.instances.items.iter().map(|instance| {
+        let location = if instance.is_local() {
+            "local".to_string()
+        } else {
+            shorten(&instance.location, 14)
+        };
+        let location_style = if instance.is_local() {
+            Style::default().fg(GOOD)
+        } else {
+            Style::default().fg(WARN)
+        };
         Row::new(vec![
-            instance.name.clone(),
-            shorten(&instance.id, 18),
-            instance.service.clone(),
-            instance.ip.clone(),
-            instance.virtualizer.clone(),
-            instance
-                .memory_current
-                .map(format_bytes)
-                .unwrap_or_else(|| "—".to_string()),
-            format_bytes(instance.memory_limit),
-            format_bytes(instance.disk_limit),
-            instance.gas.clone(),
+            Cell::from(instance.name.clone()),
+            Cell::from(location).style(location_style),
+            Cell::from(shorten(&instance.id, 18)),
+            Cell::from(instance.service.clone()),
+            Cell::from(instance.ip.clone()),
+            Cell::from(instance.virtualizer.clone()),
+            Cell::from(
+                instance
+                    .memory_current
+                    .map(format_bytes)
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            Cell::from(format_bytes(instance.memory_limit)),
+            Cell::from(format_bytes(instance.disk_limit)),
+            Cell::from(instance.gas.clone()),
         ])
     });
+    let local_count = app.instances.items.iter().filter(|i| i.is_local()).count();
+    let remote_count = app.instances.items.len() - local_count;
     let table = Table::new(
         rows,
         [
             Constraint::Length(16),
+            Constraint::Length(14),
             Constraint::Length(19),
             Constraint::Length(18),
             Constraint::Length(15),
-            Constraint::Length(5),
-            Constraint::Length(11),
-            Constraint::Length(11),
-            Constraint::Length(11),
+            Constraint::Length(7),
+            Constraint::Length(9),
+            Constraint::Length(9),
+            Constraint::Length(9),
             Constraint::Min(12),
         ],
     )
     .header(header_row(vec![
-        "Name", "Instance", "Service", "IP", "VM", "RAM now", "RAM max", "Disk max", "Gas",
+        "Name", "Location", "Instance", "Service", "IP", "VM", "RAM now", "RAM max", "Disk max",
+        "Gas",
     ]))
     .block(section_block(
-        format!(" INSTANCES • {} running ", app.instances.items.len()),
+        format!(
+            " INSTANCES • {} local • {} remote ",
+            local_count, remote_count
+        ),
         Color::LightBlue,
     ))
     .highlight_style(selected_style())
@@ -335,6 +355,14 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     let detail = if let Some(instance) = app.instances.selected() {
         vec![
             metric_line("Instance", instance.id.clone()),
+            metric_line(
+                "Location",
+                if instance.is_local() {
+                    "local".to_string()
+                } else {
+                    format!("remote • peer {}", instance.location)
+                },
+            ),
             metric_line("Service", instance.service.clone()),
             metric_line("Endpoint", nonempty(&instance.ip, "—")),
             metric_line("Gas", instance.gas.clone()),
