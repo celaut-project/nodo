@@ -386,6 +386,7 @@ pub struct App {
     pub config_all: Vec<ConfigEntry>,
     pub config_filter: String,
     pub network_focus: usize,
+    pub instances_grouped: bool,
     pub app_logs: Vec<String>,
     pub node_logs: Vec<String>,
     pub cpu_history: VecDeque<u64>,
@@ -423,6 +424,7 @@ impl Default for App {
             config_all,
             config_filter: String::new(),
             network_focus: 0,
+            instances_grouped: false,
             app_logs: vec!["TUI ready".to_string()],
             node_logs: read_last_lines(&paths.log, 250).unwrap_or_default(),
             cpu_history: VecDeque::from(vec![0; HISTORY_POINTS]),
@@ -492,6 +494,19 @@ impl App {
     pub fn toggle_focus(&mut self) {
         if self.page() == Page::Network {
             self.network_focus = (self.network_focus + 1) % 2;
+        }
+    }
+
+    /// Toggle the Instances page between the flat table and the dependency
+    /// tree (grouped by father_id).
+    pub fn toggle_instances_grouped(&mut self) {
+        if self.page() == Page::Instances {
+            self.instances_grouped = !self.instances_grouped;
+            self.status = if self.instances_grouped {
+                "Instances: dependency tree (g toggles)".to_string()
+            } else {
+                "Instances: flat list (g toggles)".to_string()
+            };
         }
     }
 

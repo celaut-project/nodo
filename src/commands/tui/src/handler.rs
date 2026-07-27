@@ -28,6 +28,9 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (_, KeyCode::Down) => app.on_down(),
         (_, KeyCode::Tab) => app.toggle_focus(),
         (KeyModifiers::NONE, KeyCode::Char('r')) => app.refresh(true).await,
+        (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Instances => {
+            app.toggle_instances_grouped()
+        }
         (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Network => {
             app.open_connect()
         }

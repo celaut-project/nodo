@@ -1,5 +1,6 @@
-use crate::app::{format_bytes, percent, shorten, App, InputMode, Page, HISTORY_POINTS};
+use crate::app::{format_bytes, percent, shorten, App, Instance, InputMode, Page, HISTORY_POINTS};
 use ratatui::{prelude::*, widgets::*};
+use std::collections::{HashMap, HashSet};
 
 const ACCENT: Color = Color::Cyan;
 const MUTED: Color = Color::DarkGray;
@@ -290,6 +291,10 @@ fn draw_sparkline(
 }
 
 fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
+    if app.instances_grouped {
+        draw_instances_tree(frame, app, area);
+        return;
+    }
     let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(6)]).split(area);
     let rows = app.instances.items.iter().map(|instance| {
         let location = if instance.is_local() {
@@ -380,6 +385,109 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         detail,
         Color::LightBlue,
     );
+}
+
+/// Render instances as a dependency tree grouped by `father_id`, porting the
+/// Python `list_instances(groupable=True)` builder from commands/instances.py.
+fn draw_instances_tree(frame: &mut Frame, app: &App, area: Rect) {
+    let items = &app.instances.items;
+    let inst_map: HashMap<&str, &Instance> = items
+        .iter()
+        .filter(|instance| !instance.id.is_empty())
+        .map(|instance| (instance.id.as_str(), instance))
+        .collect();
+
+    // Group children under their parent; a father_id that is empty, "None", or
+    // not present locally makes the node a root (mirrors the Python logic).
+    let mut children: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut has_parent: HashSet<&str> = HashSet::new();
+    for instance in items.iter().filter(|instance| !instance.id.is_empty()) {
+        let father = instance.father_id.as_str();
+        if !father.is_empty() && father != "None" && inst_map.contains_key(father) {
+            children.entry(father).or_default().push(instance.id.as_str());
+            has_parent.insert(instance.id.as_str());
+        }
+    }
+    let roots: Vec<&str> = items
+        .iter()
+        .filter(|instance| !instance.id.is_empty())
+        .map(|instance| instance.id.as_str())
+        .filter(|id| !has_parent.contains(id))
+        .collect();
+
+    let mut lines: Vec<Line> = Vec::new();
+    let mut printed: HashSet<&str> = HashSet::new();
+    for root in &roots {
+        build_tree_lines(root, 0, &inst_map, &children, &mut printed, &mut lines);
+    }
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No instances to display.",
+            Style::default().fg(MUTED),
+        )));
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(section_block(
+                format!(
+                    " INSTANCE DEPENDENCY TREE • {} nodes • g toggles flat view ",
+                    inst_map.len()
+                ),
+                Color::LightBlue,
+            ))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn build_tree_lines<'a>(
+    node_id: &'a str,
+    depth: usize,
+    inst_map: &HashMap<&'a str, &'a Instance>,
+    children: &HashMap<&'a str, Vec<&'a str>>,
+    printed: &mut HashSet<&'a str>,
+    lines: &mut Vec<Line<'static>>,
+) {
+    if printed.contains(node_id) {
+        return;
+    }
+    printed.insert(node_id);
+    let Some(instance) = inst_map.get(node_id) else {
+        return;
+    };
+
+    let indent = "    ".repeat(depth);
+    let marker = if depth == 0 { "● " } else { "└─ " };
+    let label = if instance.name.is_empty() {
+        shorten(&instance.id, 20)
+    } else {
+        instance.name.clone()
+    };
+    let location = if instance.is_local() {
+        "local".to_string()
+    } else {
+        format!("peer {}", shorten(&instance.location, 12))
+    };
+    lines.push(Line::from(vec![
+        Span::raw(format!("{indent}{marker}")),
+        Span::styled(label, Style::default().fg(Color::White).bold()),
+        Span::styled(format!("  [{}]", instance.service), Style::default().fg(MUTED)),
+        Span::styled(
+            format!("  {location}"),
+            Style::default().fg(if instance.is_local() { GOOD } else { WARN }),
+        ),
+        Span::styled(
+            format!("  gas {}", instance.gas),
+            Style::default().fg(ACCENT),
+        ),
+    ]));
+
+    if let Some(kids) = children.get(node_id) {
+        for kid in kids {
+            build_tree_lines(kid, depth + 1, inst_map, children, printed, lines);
+        }
+    }
 }
 
 fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -567,7 +675,7 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let controls = match app.page() {
         Page::Overview => "←/→ page  •  r refresh  •  q quit",
-        Page::Instances => "↑/↓ select  •  ←/→ page  •  r refresh  •  q quit",
+        Page::Instances => "↑/↓ select  •  g tree/flat  •  ←/→ page  •  r refresh  •  q quit",
         Page::Services => "↑/↓ select  •  e execute  •  ←/→ page  •  q quit",
         Page::Network => "↑/↓ select  •  Tab peers/clients  •  +/- reputation  •  c connect  •  q quit",
         Page::Config => "↑/↓ select  •  e edit  •  / filter  •  x clear filter  •  q quit",
@@ -687,6 +795,24 @@ mod tests {
                 terminal.draw(|frame| render(&mut app, frame)).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn grouped_instance_tree_renders() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Instances).unwrap();
+        app.instances_grouped = true;
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("DEPENDENCY TREE"));
     }
 
     #[test]
