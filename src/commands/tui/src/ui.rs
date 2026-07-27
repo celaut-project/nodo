@@ -444,21 +444,23 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let peers = app.peers.items.iter().map(|peer| {
         Row::new(vec![
-            peer.id.clone(),
-            peer.uris.clone(),
-            peer.gas.clone(),
-            peer.client_gas.clone(),
-            peer.reputation.clone(),
+            Cell::from(peer.id.clone()),
+            Cell::from(peer.uris.clone()),
+            Cell::from(peer.gas.clone()),
+            Cell::from(peer.client_gas.clone()),
+            Cell::from(peer.reputation_score.clone()).style(Style::default().fg(GOOD).bold()),
+            Cell::from(peer.reputation.clone()),
         ])
     });
     let peer_table = Table::new(
         peers,
         [
             Constraint::Length(30),
-            Constraint::Length(26),
-            Constraint::Length(14),
-            Constraint::Length(14),
-            Constraint::Min(24),
+            Constraint::Length(24),
+            Constraint::Length(13),
+            Constraint::Length(13),
+            Constraint::Length(7),
+            Constraint::Min(20),
         ],
     )
     .header(header_row(vec![
@@ -466,6 +468,7 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
         "Endpoints",
         "Peer Gas",
         "Our Gas",
+        "Rep",
         "Reputation proof",
     ]))
     .block(section_block(
@@ -566,7 +569,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Page::Overview => "←/→ page  •  r refresh  •  q quit",
         Page::Instances => "↑/↓ select  •  ←/→ page  •  r refresh  •  q quit",
         Page::Services => "↑/↓ select  •  e execute  •  ←/→ page  •  q quit",
-        Page::Network => "↑/↓ select  •  Tab peers/clients  •  c connect  •  q quit",
+        Page::Network => "↑/↓ select  •  Tab peers/clients  •  +/- reputation  •  c connect  •  q quit",
         Page::Config => "↑/↓ select  •  e edit  •  / filter  •  x clear filter  •  q quit",
         Page::Logs => "←/→ page  •  r refresh  •  q quit",
     };

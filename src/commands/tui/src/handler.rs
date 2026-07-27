@@ -31,6 +31,12 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Network => {
             app.open_connect()
         }
+        (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Network => {
+            app.adjust_selected_peer_reputation(1)
+        }
+        (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Network => {
+            app.adjust_selected_peer_reputation(-1)
+        }
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Config => {
             app.open_config_editor()
         }

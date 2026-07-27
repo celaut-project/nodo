@@ -75,6 +75,8 @@ pub struct Peer {
     pub uris: String,
     pub gas: String,
     pub reputation: String,
+    /// Local reputation score (nodo-managed, independent of the on-chain proof).
+    pub reputation_score: String,
     /// Gas the registered client for this peer holds on us (our gas on the peer).
     pub client_gas: String,
 }
@@ -493,6 +495,29 @@ impl App {
         }
     }
 
+    /// Increase or decrease the selected peer's local reputation score.
+    pub fn adjust_selected_peer_reputation(&mut self, delta: i64) {
+        if self.page() != Page::Network || self.network_focus != 0 {
+            return;
+        }
+        let Some(peer) = self.peers.selected().cloned() else {
+            self.status = "Select a peer first (Tab focuses peers)".to_string();
+            return;
+        };
+        match adjust_peer_reputation(&self.paths.database, &peer.id, delta) {
+            Ok(()) => {
+                self.status = format!(
+                    "Reputation {:+} on peer {}",
+                    delta,
+                    shorten(&peer.id, 16)
+                );
+                self.peers
+                    .refresh(get_peers(&self.paths.database).unwrap_or_default());
+            }
+            Err(error) => self.status = format!("Reputation update failed: {error}"),
+        }
+    }
+
     pub fn quit(&mut self) {
         self.running = false;
     }
@@ -831,12 +856,13 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
                 p.gas,
                 COALESCE(p.reputation_proof_id, ''),
-                c.gas
+                c.gas,
+                p.reputation_score
          FROM peer p
          LEFT JOIN slot s ON p.id = s.peer_id
          LEFT JOIN uri u ON s.id = u.slot_id
          LEFT JOIN clients c ON p.client_id = c.id
-         GROUP BY p.id, p.gas, p.reputation_proof_id, c.gas",
+         GROUP BY p.id, p.gas, p.reputation_proof_id, c.gas, p.reputation_score",
     )?;
     let peers = statement
         .query_map([], |row| {
@@ -844,16 +870,40 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 .get::<_, Option<String>>(4)?
                 .map(format_gas)
                 .unwrap_or_else(|| "—".to_string());
+            let reputation_score = row
+                .get::<_, Option<i64>>(5)?
+                .map(|score| score.to_string())
+                .unwrap_or_else(|| "0".to_string());
             Ok(Peer {
                 id: row.get(0)?,
                 uris: row.get(1)?,
                 gas: format_gas(row.get::<_, String>(2)?),
                 reputation: row.get(3)?,
+                reputation_score,
                 client_gas,
             })
         })?
         .collect();
     peers
+}
+
+/// Adjust a peer's local reputation score by `delta`, mirroring
+/// `sql_connection.update_reputation_peer`: add `delta` to the score and
+/// increment the index. Works when `reputation_proof_id` is NULL (score-only),
+/// so no on-chain proof is required.
+fn adjust_peer_reputation(database: &Path, peer_id: &str, delta: i64) -> SqlResult<()> {
+    let connection = Connection::open(database)?;
+    let (score, index): (i64, i64) = connection.query_row(
+        "SELECT COALESCE(reputation_score, 0), COALESCE(reputation_index, 0)
+         FROM peer WHERE id = ?1",
+        [peer_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    connection.execute(
+        "UPDATE peer SET reputation_score = ?1, reputation_index = ?2 WHERE id = ?3",
+        rusqlite::params![score + delta, index + 1, peer_id],
+    )?;
+    Ok(())
 }
 
 fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
