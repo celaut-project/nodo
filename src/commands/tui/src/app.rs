@@ -75,6 +75,8 @@ pub struct Peer {
     pub uris: String,
     pub gas: String,
     pub reputation: String,
+    /// Gas the registered client for this peer holds on us (our gas on the peer).
+    pub client_gas: String,
 }
 
 impl Identifiable for Peer {
@@ -817,19 +819,26 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
         "SELECT p.id,
                 COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
                 p.gas,
-                COALESCE(p.reputation_proof_id, '')
+                COALESCE(p.reputation_proof_id, ''),
+                c.gas
          FROM peer p
          LEFT JOIN slot s ON p.id = s.peer_id
          LEFT JOIN uri u ON s.id = u.slot_id
-         GROUP BY p.id, p.gas, p.reputation_proof_id",
+         LEFT JOIN clients c ON p.client_id = c.id
+         GROUP BY p.id, p.gas, p.reputation_proof_id, c.gas",
     )?;
     let peers = statement
         .query_map([], |row| {
+            let client_gas = row
+                .get::<_, Option<String>>(4)?
+                .map(format_gas)
+                .unwrap_or_else(|| "—".to_string());
             Ok(Peer {
                 id: row.get(0)?,
                 uris: row.get(1)?,
                 gas: format_gas(row.get::<_, String>(2)?),
                 reputation: row.get(3)?,
+                client_gas,
             })
         })?
         .collect();

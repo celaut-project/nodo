@@ -419,6 +419,7 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
             peer.id.clone(),
             peer.uris.clone(),
             peer.gas.clone(),
+            peer.client_gas.clone(),
             peer.reputation.clone(),
         ])
     });
@@ -426,15 +427,17 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
         peers,
         [
             Constraint::Length(30),
-            Constraint::Length(28),
-            Constraint::Length(18),
+            Constraint::Length(26),
+            Constraint::Length(14),
+            Constraint::Length(14),
             Constraint::Min(24),
         ],
     )
     .header(header_row(vec![
         "Peer ID",
         "Endpoints",
-        "Gas",
+        "Peer Gas",
+        "Our Gas",
         "Reputation proof",
     ]))
     .block(section_block(
