@@ -705,3 +705,13 @@ if __name__ == '__main__':
 
             case other:
                 print('Unknown command.', flush=True)
+
+    # Hand the console back when a one-shot command finishes. The Ergo / reputation
+    # commands (sync_reputation_proof, submit_reputation, tx_history, config, …)
+    # start a JVM through jpype, whose non-daemon threads otherwise keep the
+    # interpreter alive and hang the shell after the command has already done its
+    # work. `serve` blocks in wait_for_termination() and never reaches here, and the
+    # codebase registers no atexit handlers, so flush the streams and exit hard.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
