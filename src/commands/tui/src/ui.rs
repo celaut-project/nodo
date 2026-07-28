@@ -1,5 +1,6 @@
-use crate::app::{format_bytes, percent, shorten, App, InputMode, Page, HISTORY_POINTS};
+use crate::app::{format_bytes, percent, shorten, App, Instance, InputMode, Page, HISTORY_POINTS};
 use ratatui::{prelude::*, widgets::*};
+use std::collections::{HashMap, HashSet};
 
 const ACCENT: Color = Color::Cyan;
 const MUTED: Color = Color::DarkGray;
@@ -290,42 +291,66 @@ fn draw_sparkline(
 }
 
 fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
+    if app.instances_grouped {
+        draw_instances_tree(frame, app, area);
+        return;
+    }
     let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(6)]).split(area);
     let rows = app.instances.items.iter().map(|instance| {
+        let location = if instance.is_local() {
+            "local".to_string()
+        } else {
+            shorten(&instance.location, 14)
+        };
+        let location_style = if instance.is_local() {
+            Style::default().fg(GOOD)
+        } else {
+            Style::default().fg(WARN)
+        };
         Row::new(vec![
-            instance.name.clone(),
-            shorten(&instance.id, 18),
-            instance.service.clone(),
-            instance.ip.clone(),
-            instance.virtualizer.clone(),
-            instance
-                .memory_current
-                .map(format_bytes)
-                .unwrap_or_else(|| "—".to_string()),
-            format_bytes(instance.memory_limit),
-            format_bytes(instance.disk_limit),
-            instance.gas.clone(),
+            Cell::from(instance.name.clone()),
+            Cell::from(location).style(location_style),
+            Cell::from(shorten(&instance.id, 18)),
+            Cell::from(instance.service.clone()),
+            Cell::from(instance.ip.clone()),
+            Cell::from(instance.virtualizer.clone()),
+            Cell::from(
+                instance
+                    .memory_current
+                    .map(format_bytes)
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            Cell::from(format_bytes(instance.memory_limit)),
+            Cell::from(format_bytes(instance.disk_limit)),
+            Cell::from(instance.gas.clone()),
         ])
     });
+    let local_count = app.instances.items.iter().filter(|i| i.is_local()).count();
+    let remote_count = app.instances.items.len() - local_count;
     let table = Table::new(
         rows,
         [
             Constraint::Length(16),
+            Constraint::Length(14),
             Constraint::Length(19),
             Constraint::Length(18),
             Constraint::Length(15),
-            Constraint::Length(5),
-            Constraint::Length(11),
-            Constraint::Length(11),
-            Constraint::Length(11),
+            Constraint::Length(7),
+            Constraint::Length(9),
+            Constraint::Length(9),
+            Constraint::Length(9),
             Constraint::Min(12),
         ],
     )
     .header(header_row(vec![
-        "Name", "Instance", "Service", "IP", "VM", "RAM now", "RAM max", "Disk max", "Gas",
+        "Name", "Location", "Instance", "Service", "IP", "VM", "RAM now", "RAM max", "Disk max",
+        "Gas",
     ]))
     .block(section_block(
-        format!(" INSTANCES • {} running ", app.instances.items.len()),
+        format!(
+            " INSTANCES • {} local • {} remote ",
+            local_count, remote_count
+        ),
         Color::LightBlue,
     ))
     .highlight_style(selected_style())
@@ -335,6 +360,14 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     let detail = if let Some(instance) = app.instances.selected() {
         vec![
             metric_line("Instance", instance.id.clone()),
+            metric_line(
+                "Location",
+                if instance.is_local() {
+                    "local".to_string()
+                } else {
+                    format!("remote • peer {}", instance.location)
+                },
+            ),
             metric_line("Service", instance.service.clone()),
             metric_line("Endpoint", nonempty(&instance.ip, "—")),
             metric_line("Gas", instance.gas.clone()),
@@ -352,6 +385,109 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         detail,
         Color::LightBlue,
     );
+}
+
+/// Render instances as a dependency tree grouped by `father_id`, porting the
+/// Python `list_instances(groupable=True)` builder from commands/instances.py.
+fn draw_instances_tree(frame: &mut Frame, app: &App, area: Rect) {
+    let items = &app.instances.items;
+    let inst_map: HashMap<&str, &Instance> = items
+        .iter()
+        .filter(|instance| !instance.id.is_empty())
+        .map(|instance| (instance.id.as_str(), instance))
+        .collect();
+
+    // Group children under their parent; a father_id that is empty, "None", or
+    // not present locally makes the node a root (mirrors the Python logic).
+    let mut children: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut has_parent: HashSet<&str> = HashSet::new();
+    for instance in items.iter().filter(|instance| !instance.id.is_empty()) {
+        let father = instance.father_id.as_str();
+        if !father.is_empty() && father != "None" && inst_map.contains_key(father) {
+            children.entry(father).or_default().push(instance.id.as_str());
+            has_parent.insert(instance.id.as_str());
+        }
+    }
+    let roots: Vec<&str> = items
+        .iter()
+        .filter(|instance| !instance.id.is_empty())
+        .map(|instance| instance.id.as_str())
+        .filter(|id| !has_parent.contains(id))
+        .collect();
+
+    let mut lines: Vec<Line> = Vec::new();
+    let mut printed: HashSet<&str> = HashSet::new();
+    for root in &roots {
+        build_tree_lines(root, 0, &inst_map, &children, &mut printed, &mut lines);
+    }
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No instances to display.",
+            Style::default().fg(MUTED),
+        )));
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(section_block(
+                format!(
+                    " INSTANCE DEPENDENCY TREE • {} nodes • g toggles flat view ",
+                    inst_map.len()
+                ),
+                Color::LightBlue,
+            ))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn build_tree_lines<'a>(
+    node_id: &'a str,
+    depth: usize,
+    inst_map: &HashMap<&'a str, &'a Instance>,
+    children: &HashMap<&'a str, Vec<&'a str>>,
+    printed: &mut HashSet<&'a str>,
+    lines: &mut Vec<Line<'static>>,
+) {
+    if printed.contains(node_id) {
+        return;
+    }
+    printed.insert(node_id);
+    let Some(instance) = inst_map.get(node_id) else {
+        return;
+    };
+
+    let indent = "    ".repeat(depth);
+    let marker = if depth == 0 { "● " } else { "└─ " };
+    let label = if instance.name.is_empty() {
+        shorten(&instance.id, 20)
+    } else {
+        instance.name.clone()
+    };
+    let location = if instance.is_local() {
+        "local".to_string()
+    } else {
+        format!("peer {}", shorten(&instance.location, 12))
+    };
+    lines.push(Line::from(vec![
+        Span::raw(format!("{indent}{marker}")),
+        Span::styled(label, Style::default().fg(Color::White).bold()),
+        Span::styled(format!("  [{}]", instance.service), Style::default().fg(MUTED)),
+        Span::styled(
+            format!("  {location}"),
+            Style::default().fg(if instance.is_local() { GOOD } else { WARN }),
+        ),
+        Span::styled(
+            format!("  gas {}", instance.gas),
+            Style::default().fg(ACCENT),
+        ),
+    ]));
+
+    if let Some(kids) = children.get(node_id) {
+        for kid in kids {
+            build_tree_lines(kid, depth + 1, inst_map, children, printed, lines);
+        }
+    }
 }
 
 fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -416,25 +552,31 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let peers = app.peers.items.iter().map(|peer| {
         Row::new(vec![
-            peer.id.clone(),
-            peer.uris.clone(),
-            peer.gas.clone(),
-            peer.reputation.clone(),
+            Cell::from(peer.id.clone()),
+            Cell::from(peer.uris.clone()),
+            Cell::from(peer.gas.clone()),
+            Cell::from(peer.client_gas.clone()),
+            Cell::from(peer.reputation_score.clone()).style(Style::default().fg(GOOD).bold()),
+            Cell::from(peer.reputation.clone()),
         ])
     });
     let peer_table = Table::new(
         peers,
         [
             Constraint::Length(30),
-            Constraint::Length(28),
-            Constraint::Length(18),
-            Constraint::Min(24),
+            Constraint::Length(24),
+            Constraint::Length(13),
+            Constraint::Length(13),
+            Constraint::Length(7),
+            Constraint::Min(20),
         ],
     )
     .header(header_row(vec![
         "Peer ID",
         "Endpoints",
-        "Gas",
+        "Peer Gas",
+        "Our Gas",
+        "Rep",
         "Reputation proof",
     ]))
     .block(section_block(
@@ -533,9 +675,9 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let controls = match app.page() {
         Page::Overview => "←/→ page  •  r refresh  •  q quit",
-        Page::Instances => "↑/↓ select  •  ←/→ page  •  r refresh  •  q quit",
+        Page::Instances => "↑/↓ select  •  g tree/flat  •  ←/→ page  •  r refresh  •  q quit",
         Page::Services => "↑/↓ select  •  e execute  •  ←/→ page  •  q quit",
-        Page::Network => "↑/↓ select  •  Tab peers/clients  •  c connect  •  q quit",
+        Page::Network => "↑/↓ select  •  Tab peers/clients  •  +/- reputation  •  c connect  •  q quit",
         Page::Config => "↑/↓ select  •  e edit  •  / filter  •  x clear filter  •  q quit",
         Page::Logs => "←/→ page  •  r refresh  •  q quit",
     };
@@ -653,6 +795,24 @@ mod tests {
                 terminal.draw(|frame| render(&mut app, frame)).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn grouped_instance_tree_renders() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Instances).unwrap();
+        app.instances_grouped = true;
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("DEPENDENCY TREE"));
     }
 
     #[test]

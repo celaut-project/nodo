@@ -75,6 +75,10 @@ pub struct Peer {
     pub uris: String,
     pub gas: String,
     pub reputation: String,
+    /// Local reputation score (nodo-managed, independent of the on-chain proof).
+    pub reputation_score: String,
+    /// Gas the registered client for this peer holds on us (our gas on the peer).
+    pub client_gas: String,
 }
 
 impl Identifiable for Peer {
@@ -120,6 +124,17 @@ pub struct Instance {
     pub memory_current: Option<u64>,
     pub memory_limit: u64,
     pub disk_limit: u64,
+    /// "local" for locally-run instances, otherwise the owning peer id for
+    /// delegated/remote instances.
+    pub location: String,
+    /// Parent instance id (from `father_id`); empty when this is a root.
+    pub father_id: String,
+}
+
+impl Instance {
+    pub fn is_local(&self) -> bool {
+        self.location == "local"
+    }
 }
 
 impl Identifiable for Instance {
@@ -371,6 +386,7 @@ pub struct App {
     pub config_all: Vec<ConfigEntry>,
     pub config_filter: String,
     pub network_focus: usize,
+    pub instances_grouped: bool,
     pub app_logs: Vec<String>,
     pub node_logs: Vec<String>,
     pub cpu_history: VecDeque<u64>,
@@ -408,6 +424,7 @@ impl Default for App {
             config_all,
             config_filter: String::new(),
             network_focus: 0,
+            instances_grouped: false,
             app_logs: vec!["TUI ready".to_string()],
             node_logs: read_last_lines(&paths.log, 250).unwrap_or_default(),
             cpu_history: VecDeque::from(vec![0; HISTORY_POINTS]),
@@ -477,6 +494,42 @@ impl App {
     pub fn toggle_focus(&mut self) {
         if self.page() == Page::Network {
             self.network_focus = (self.network_focus + 1) % 2;
+        }
+    }
+
+    /// Toggle the Instances page between the flat table and the dependency
+    /// tree (grouped by father_id).
+    pub fn toggle_instances_grouped(&mut self) {
+        if self.page() == Page::Instances {
+            self.instances_grouped = !self.instances_grouped;
+            self.status = if self.instances_grouped {
+                "Instances: dependency tree (g toggles)".to_string()
+            } else {
+                "Instances: flat list (g toggles)".to_string()
+            };
+        }
+    }
+
+    /// Increase or decrease the selected peer's local reputation score.
+    pub fn adjust_selected_peer_reputation(&mut self, delta: i64) {
+        if self.page() != Page::Network || self.network_focus != 0 {
+            return;
+        }
+        let Some(peer) = self.peers.selected().cloned() else {
+            self.status = "Select a peer first (Tab focuses peers)".to_string();
+            return;
+        };
+        match adjust_peer_reputation(&self.paths.database, &peer.id, delta) {
+            Ok(()) => {
+                self.status = format!(
+                    "Reputation {:+} on peer {}",
+                    delta,
+                    shorten(&peer.id, 16)
+                );
+                self.peers
+                    .refresh(get_peers(&self.paths.database).unwrap_or_default());
+            }
+            Err(error) => self.status = format!("Reputation update failed: {error}"),
         }
     }
 
@@ -817,23 +870,55 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
         "SELECT p.id,
                 COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
                 p.gas,
-                COALESCE(p.reputation_proof_id, '')
+                COALESCE(p.reputation_proof_id, ''),
+                c.gas,
+                p.reputation_score
          FROM peer p
          LEFT JOIN slot s ON p.id = s.peer_id
          LEFT JOIN uri u ON s.id = u.slot_id
-         GROUP BY p.id, p.gas, p.reputation_proof_id",
+         LEFT JOIN clients c ON p.client_id = c.id
+         GROUP BY p.id, p.gas, p.reputation_proof_id, c.gas, p.reputation_score",
     )?;
     let peers = statement
         .query_map([], |row| {
+            let client_gas = row
+                .get::<_, Option<String>>(4)?
+                .map(format_gas)
+                .unwrap_or_else(|| "—".to_string());
+            let reputation_score = row
+                .get::<_, Option<i64>>(5)?
+                .map(|score| score.to_string())
+                .unwrap_or_else(|| "0".to_string());
             Ok(Peer {
                 id: row.get(0)?,
                 uris: row.get(1)?,
                 gas: format_gas(row.get::<_, String>(2)?),
                 reputation: row.get(3)?,
+                reputation_score,
+                client_gas,
             })
         })?
         .collect();
     peers
+}
+
+/// Adjust a peer's local reputation score by `delta`, mirroring
+/// `sql_connection.update_reputation_peer`: add `delta` to the score and
+/// increment the index. Works when `reputation_proof_id` is NULL (score-only),
+/// so no on-chain proof is required.
+fn adjust_peer_reputation(database: &Path, peer_id: &str, delta: i64) -> SqlResult<()> {
+    let connection = Connection::open(database)?;
+    let (score, index): (i64, i64) = connection.query_row(
+        "SELECT COALESCE(reputation_score, 0), COALESCE(reputation_index, 0)
+         FROM peer WHERE id = ?1",
+        [peer_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    connection.execute(
+        "UPDATE peer SET reputation_score = ?1, reputation_index = ?2 WHERE id = ?3",
+        rusqlite::params![score + delta, index + 1, peer_id],
+    )?;
+    Ok(())
 }
 
 fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
@@ -861,10 +946,10 @@ fn get_instances(
 ) -> SqlResult<Vec<Instance>> {
     let connection = Connection::open(&paths.database)?;
     let mut statement = connection.prepare(
-        "SELECT id, name, ip, gas, service_id, mem_limit, disk_space, virtualizer
+        "SELECT id, name, ip, gas, service_id, mem_limit, disk_space, virtualizer, father_id
          FROM local_instances",
     )?;
-    let instances = statement
+    let mut instances: Vec<Instance> = statement
         .query_map([], |row| {
             let id: String = row.get(0)?;
             let service_id: String = row.get::<_, Option<String>>(4)?.unwrap_or_default();
@@ -891,6 +976,55 @@ fn get_instances(
                 virtualizer: row
                     .get::<_, Option<String>>(7)?
                     .unwrap_or_else(|| "ch".to_string()),
+                location: "local".to_string(),
+                father_id: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+            })
+        })?
+        .collect::<SqlResult<Vec<_>>>()?;
+
+    // Delegated (remote) instances live on other peers. The table carries no
+    // gas / memory / disk columns, and remote gas needs an async gRPC call
+    // (see manager/metrics.py __get_metrics_external) that would block the UI.
+    // We therefore surface them here with placeholders ("—") and location set
+    // to the owning peer id, without any blocking network round-trip.
+    let remote = get_delegated_instances(&connection, service_names)?;
+    instances.extend(remote);
+    Ok(instances)
+}
+
+fn get_delegated_instances(
+    connection: &Connection,
+    service_names: &HashMap<String, String>,
+) -> SqlResult<Vec<Instance>> {
+    let mut statement = connection.prepare(
+        "SELECT id, peer_id, service_id, father_id FROM delegated_instances",
+    )?;
+    let instances = statement
+        .query_map([], |row| {
+            let id: String = row.get::<_, Option<String>>(0)?.unwrap_or_default();
+            let peer_id: String = row.get::<_, Option<String>>(1)?.unwrap_or_default();
+            let service_id: String = row.get::<_, Option<String>>(2)?.unwrap_or_default();
+            let service = service_names
+                .get(&service_id)
+                .cloned()
+                .unwrap_or_else(|| shorten(&service_id, 18));
+            let location = if peer_id.is_empty() {
+                "remote".to_string()
+            } else {
+                peer_id
+            };
+            Ok(Instance {
+                id,
+                name: String::new(),
+                ip: String::new(),
+                gas: "—".to_string(),
+                service,
+                memory_current: None,
+                memory_limit: 0,
+                disk_limit: 0,
+                virtualizer: "remote".to_string(),
+                location,
+                father_id: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
             })
         })?
         .collect();
