@@ -3,8 +3,6 @@ from pathlib import Path
 from typing import Optional
 
 from protos import celaut_pb2
-from src.utils.config import ConfigManager
-
 
 LEDGER = "ergo"
 

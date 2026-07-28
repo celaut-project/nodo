@@ -220,7 +220,7 @@ def validate_reputation_proof_ownership(
         return False
 
 
-def find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
+def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     """
     Look up an on-chain reputation proof owned by the given wallet.
 
@@ -300,7 +300,7 @@ def sync_reputation_proof_ownership() -> bool:
     else:
         # In case there is no proof_id
         try:
-            discovered_proof_id = find_reputation_proof_id_for_owner(mnemonic_phrase)
+            discovered_proof_id = __find_reputation_proof_id_for_owner(mnemonic_phrase)
         except JavaDependencyMissing:
             raise
         except Exception as e:
