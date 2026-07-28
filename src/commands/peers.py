@@ -38,7 +38,7 @@ def list_peers():
         cursor.execute(
             '''
             SELECT
-                id, protocol_stack, client_id,
+                id, protocol_stack, remote_client_id,
                 gas, gas_last_update,
                 reputation_proof_id, reputation_score,
                 reputation_index, last_index_on_ledger
@@ -53,7 +53,7 @@ def list_peers():
 
         for peer in peers:
             (
-                peer_id, protocol_stack, client_id,
+                peer_id, protocol_stack, remote_client_id,
                 gas_str, gas_last_update,
                 reputation_proof_id, reputation_score,
                 reputation_index, last_index_on_ledger
@@ -78,7 +78,7 @@ def list_peers():
 
             # Section: Client & Gas
             print("[Client & Gas]")
-            print(f"  Client ID: {client_id}")
+            print(f"  Remote Client ID: {remote_client_id}")
             print(f"  Gas/ERG: {ssformat(gas_price)}")
             print(f"  Gas: {ssformat(gas)}")
             print(f"       {ssformat(gas_on_ergs)} nanoERG")
