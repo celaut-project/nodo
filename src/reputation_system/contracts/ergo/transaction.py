@@ -1,4 +1,3 @@
-import hashlib
 import json
 from typing import List, Optional, Tuple, TypedDict
 
@@ -40,10 +39,38 @@ def _java_bytes_to_python_bytes(java_bytes) -> bytes:
     return bytes((byte + 256) % 256 for byte in java_bytes)
 
 
-def _owner_script_hash(sender_address) -> bytes:
-    from src.reputation_system.contracts.ergo.utils import owner_script_hash_hex
+def _owner_proposition_bytes(sender_address) -> bytes:
+    from src.reputation_system.contracts.ergo.utils import owner_proposition_bytes
 
-    return bytes.fromhex(owner_script_hash_hex(sender_address))
+    return owner_proposition_bytes(sender_address)
+
+
+def _looks_like_hex(value: str) -> bool:
+    """True when ``value`` is an even-length string of hex digits (a token id / hash)."""
+    if not value or len(value) % 2 != 0:
+        return False
+    try:
+        bytes.fromhex(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _id_bytes(value: str) -> bytes:
+    """
+    Encode a register payload the way the whole reputation ecosystem expects: token
+    ids / hex pointers are stored as their *raw bytes* (never as UTF-8 text of the
+    hex string), and only genuine free-text pointers fall back to UTF-8. Mirrors the
+    web app's ``hexOrUtf8ToBytes``. An empty string encodes to an empty Coll[Byte].
+    """
+    if _looks_like_hex(value):
+        return bytes.fromhex(value)
+    return (value or "").encode("utf-8")
+
+
+def _java_bytes(jpype, data: bytes):
+    """Wrap Python ``bytes`` (0–255) as a Java signed ``byte[]`` for ErgoValue.of."""
+    return jpype.JArray(jpype.JByte)(data)
 
 
 def _attach_data_inputs(tx_builder, data_inputs) -> None:
@@ -103,7 +130,7 @@ def __build_proof_box(
     type_nft_id = assigned_object['type'] if assigned_object else PLAIN_TEXT_TYPE_NFT_ID
     object_to_assign = assigned_object['value'] if assigned_object else ""
 
-    owner_hash = _owner_script_hash(sender_address)
+    owner_proposition = _owner_proposition_bytes(sender_address)
     try:
         ergo_token_cls = org_appkit.ErgoToken
     except AttributeError:
@@ -114,11 +141,11 @@ def __build_proof_box(
                 .value(SAFE_MIN_BOX_VALUE) \
                 .tokens([ergo_token_cls(proof_id, jpype.JLong(abs(int(token_amount))))]) \
                 .registers([
-                    org_appkit.ErgoValue.of(jpype.JString(type_nft_id).getBytes("utf-8")),         # R4: typeNftTokenId
-                    org_appkit.ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),    # R5: uniqueObjectData
+                    org_appkit.ErgoValue.of(_java_bytes(jpype, _id_bytes(type_nft_id))),            # R4: typeNftTokenId (raw bytes)
+                    org_appkit.ErgoValue.of(_java_bytes(jpype, _id_bytes(object_to_assign))),       # R5: uniqueObjectData (raw bytes; self = own token id)
                     org_appkit.ErgoValue.of(jpype.JBoolean(False)),                                  # R6: isLocked
-                    org_appkit.ErgoValue.of(jpype.JArray(jpype.JByte)(owner_hash)),                  # R7: blake2b256(propositionBytes)
-                    org_appkit.ErgoValue.of(jpype.JBoolean(int(token_amount) >= 0)),                # R8: positive/negative
+                    org_appkit.ErgoValue.of(_java_bytes(jpype, owner_proposition)),                  # R7: raw propositionBytes of the owner
+                    org_appkit.ErgoValue.of(jpype.JBoolean(int(token_amount) >= 0)),                # R8: customFlag (sign of the amount)
                     org_appkit.ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                 # R9: content
                 ]) \
                 .contract(ergo._ctx.compileContract(org_appkit.ConstantsBuilder.empty(), CONTRACT)) \
