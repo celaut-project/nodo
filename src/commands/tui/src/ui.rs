@@ -26,8 +26,13 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     }
     draw_footer(frame, app, layout[2]);
 
-    if app.input_mode != InputMode::Normal {
-        draw_input_popup(frame, app);
+    match app.input_mode {
+        InputMode::Normal => {}
+        InputMode::Confirm => draw_confirm_popup(frame, app),
+        InputMode::Details => draw_details_popup(frame, app),
+        InputMode::Connect | InputMode::EditConfig | InputMode::FilterConfig => {
+            draw_input_popup(frame, app)
+        }
     }
 }
 
@@ -555,7 +560,6 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
             Cell::from(peer.id.clone()),
             Cell::from(peer.uris.clone()),
             Cell::from(peer.gas.clone()),
-            Cell::from(peer.client_gas.clone()),
             Cell::from(peer.reputation_score.clone()).style(Style::default().fg(GOOD).bold()),
             Cell::from(peer.reputation.clone()),
         ])
@@ -566,7 +570,6 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
             Constraint::Length(30),
             Constraint::Length(24),
             Constraint::Length(13),
-            Constraint::Length(13),
             Constraint::Length(7),
             Constraint::Min(20),
         ],
@@ -574,7 +577,6 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
     .header(header_row(vec![
         "Peer ID",
         "Endpoints",
-        "Peer Gas",
         "Our Gas",
         "Rep",
         "Reputation proof",
@@ -675,8 +677,10 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let controls = match app.page() {
         Page::Overview => "←/→ page  •  r refresh  •  q quit",
-        Page::Instances => "↑/↓ select  •  g tree/flat  •  ←/→ page  •  r refresh  •  q quit",
-        Page::Services => "↑/↓ select  •  e execute  •  ←/→ page  •  q quit",
+        Page::Instances => {
+            "↑/↓ select  •  g tree/flat  •  k kill  •  ←/→ page  •  r refresh  •  q quit"
+        }
+        Page::Services => "↑/↓ select  •  e execute  •  i details  •  d delete  •  ←/→ page  •  q quit",
         Page::Network => "↑/↓ select  •  Tab peers/clients  •  +/- reputation  •  c connect  •  q quit",
         Page::Config => "↑/↓ select  •  e edit  •  / filter  •  x clear filter  •  q quit",
         Page::Logs => "←/→ page  •  r refresh  •  q quit",
@@ -713,6 +717,57 @@ fn draw_input_popup(frame: &mut Frame, app: &App) {
             Block::bordered()
                 .title(Span::styled(
                     format!(" {} ", app.input_title),
+                    Style::default().fg(ACCENT).bold(),
+                ))
+                .border_style(Style::default().fg(ACCENT)),
+        )
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+    frame.render_widget(popup, area);
+}
+
+fn draw_confirm_popup(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 6, frame.size());
+    frame.render_widget(Clear, area);
+    let content = vec![
+        Line::from(Span::styled(
+            app.input_title.clone(),
+            Style::default().fg(Color::White).bold(),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "y confirms • n / Esc cancels",
+            Style::default().fg(MUTED),
+        )),
+    ];
+    let popup = Paragraph::new(content)
+        .alignment(Alignment::Center)
+        .block(
+            Block::bordered()
+                .title(Span::styled(" CONFIRM ", Style::default().fg(WARN).bold()))
+                .border_style(Style::default().fg(WARN)),
+        )
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+    frame.render_widget(popup, area);
+}
+
+fn draw_details_popup(frame: &mut Frame, app: &App) {
+    let area = centered_rect(80, frame.size().height.saturating_sub(4).max(8), frame.size());
+    frame.render_widget(Clear, area);
+    let (title, text, scroll) = match &app.details {
+        Some(details) => (
+            details.title.clone(),
+            details.lines.join("\n"),
+            details.scroll as u16,
+        ),
+        None => (String::new(), String::new(), 0),
+    };
+    let popup = Paragraph::new(text)
+        .scroll((scroll, 0))
+        .wrap(Wrap { trim: false })
+        .block(
+            Block::bordered()
+                .title(Span::styled(
+                    format!(" {title} • ↑/↓ scroll • Esc close "),
                     Style::default().fg(ACCENT).bold(),
                 ))
                 .border_style(Style::default().fg(ACCENT)),
@@ -813,6 +868,49 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(screen.contains("DEPENDENCY TREE"));
+    }
+
+    #[test]
+    fn confirm_popup_shows_prompt_and_choices() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.input_mode = InputMode::Confirm;
+        app.input_title = "Delete service demo? (y/N)".to_string();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("Delete service demo?"));
+        assert!(screen.contains("y confirms"));
+    }
+
+    #[test]
+    fn details_popup_renders_inspect_output() {
+        use crate::app::DetailsView;
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.input_mode = InputMode::Details;
+        app.details = Some(DetailsView {
+            title: "Service abcdef".to_string(),
+            lines: vec!["tag: demo".to_string(), "size: 42 bytes".to_string()],
+            scroll: 0,
+        });
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("Service abcdef"));
+        assert!(screen.contains("tag: demo"));
     }
 
     #[test]

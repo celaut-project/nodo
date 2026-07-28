@@ -838,7 +838,7 @@ class SQLConnection(metaclass=Singleton):
             List[dict]: A list of dictionaries containing peer details.
         """
         result = self._execute('''
-            SELECT id, token, client_id, gas FROM peer
+            SELECT id, token, remote_client_id, gas FROM peer
         ''')
 
         peers = []
@@ -1014,8 +1014,8 @@ class SQLConnection(metaclass=Singleton):
         if not self.peer_exists(peer_id=peer_id):
             try:
                 self._execute('''
-                    INSERT INTO peer (id, protocol_stack, client_id, gas)
-                    VALUES (?, ?, '', '0')  -- Initialize with empty client_id and 0 gas
+                    INSERT INTO peer (id, protocol_stack, remote_client_id, gas)
+                    VALUES (?, ?, '', '0')  -- Initialize with empty remote_client_id and 0 gas
                 ''', (peer_id, protocol_stack))
                 logger.LOGGER(f'Peer {peer_id} added')
                 return True
@@ -1334,7 +1334,7 @@ class SQLConnection(metaclass=Singleton):
 
         try:
             self._execute('''
-                UPDATE peer SET client_id = ? WHERE id = ?
+                UPDATE peer SET remote_client_id = ? WHERE id = ?
             ''', (client_id, peer_id))
             logger.LOGGER(f'Associated external client {client_id} with peer {peer_id}')
             return True
@@ -1402,10 +1402,10 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             result = self._execute('''
-                SELECT client_id FROM peer WHERE id = ?
+                SELECT remote_client_id FROM peer WHERE id = ?
             ''', (peer_id,))
             row = result.fetchone()
-            if row and row['client_id']:
+            if row and row['remote_client_id']:
                 return True
             return False
         except sqlite3.Error as e:
@@ -1424,11 +1424,11 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             result = self._execute('''
-                SELECT client_id FROM peer WHERE id = ?
+                SELECT remote_client_id FROM peer WHERE id = ?
             ''', (peer_id,))
             row = result.fetchone()
             if row:
-                return row['client_id']
+                return row['remote_client_id']
             return None
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to retrieve client for peer {peer_id}: {e}')
@@ -1443,7 +1443,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             self._execute('''
-                UPDATE peer SET client_id = NULL WHERE id = ?
+                UPDATE peer SET remote_client_id = NULL WHERE id = ?
             ''', (peer_id,))
             logger.LOGGER(f'Successfully deleted external client associated with peer {peer_id}')
         except sqlite3.Error as e:

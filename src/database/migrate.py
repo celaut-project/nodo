@@ -33,7 +33,7 @@ def create_tables(cursor):
             CREATE TABLE IF NOT EXISTS peer (
                 id TEXT PRIMARY KEY,
                 protocol_stack BLOB,
-                client_id TEXT,
+                remote_client_id TEXT,
                 gas TEXT,
                 gas_last_update DATETIME DEFAULT NULL,
                 reputation_proof_id TEXT,
