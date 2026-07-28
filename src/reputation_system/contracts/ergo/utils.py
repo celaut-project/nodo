@@ -1,4 +1,3 @@
-import hashlib
 from binascii import hexlify
 from typing import Iterator, List
 import requests
@@ -91,17 +90,27 @@ def get_boxes_by_token_ids(ergo, node_url: str, token_ids: List[str]) -> list:
         raise RuntimeError(f"Failed to fetch boxes by ID via BlockchainContext: {e}")
 
 
-def owner_script_hash_hex(address) -> str:
+def owner_proposition_bytes(address) -> bytes:
     """
-    blake2b256(propositionBytes) of an address' ErgoTree, as hex. This is the value a
-    Reputation Box stores in R7 to identify its owner. Single source of truth reused by
-    the reputation transaction builder and the proof-ownership lookup.
+    Raw ``propositionBytes`` (serialized ErgoTree) of an address' script.
+
+    This is the value a Reputation Box stores in R7 to identify its owner. The
+    reputation_proof.es contract authorises the admin/spend path with
+    ``INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }`` — so R7 must
+    hold the *raw* propositionBytes, NOT a hash, or the owner could never spend the
+    box (and the reputation-system web app, Game of Prompts, skills, forum, … all
+    read R7 as the raw propositionBytes too). Single source of truth reused by the
+    reputation transaction builder and the proof-ownership lookup.
     """
     jpype = require_java_module("jpype", feature="Ergo reputation")
     ergo_tree = address.getErgoAddress().script()
     serializer = jpype.JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
-    proposition_bytes = bytes((byte + 256) % 256 for byte in serializer.serializeErgoTree(ergo_tree))
-    return hashlib.blake2b(proposition_bytes, digest_size=32).hexdigest()
+    return bytes((byte + 256) % 256 for byte in serializer.serializeErgoTree(ergo_tree))
+
+
+def owner_proposition_bytes_hex(address) -> str:
+    """Hex of :func:`owner_proposition_bytes` — the R7 owner value as stored/compared."""
+    return owner_proposition_bytes(address).hex()
 
 
 def get_contract_address(ergo, script: str) -> str:
