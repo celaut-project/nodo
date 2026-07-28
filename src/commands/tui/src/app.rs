@@ -67,18 +67,58 @@ pub enum InputMode {
     Connect,
     EditConfig,
     FilterConfig,
+    /// Yes/no confirmation before a destructive action (delete service, kill instance).
+    Confirm,
+    /// Read-only, scrollable overlay (e.g. `nodo inspect` output).
+    Details,
+}
+
+/// A destructive action awaiting user confirmation.
+#[derive(Debug, Clone)]
+pub enum PendingAction {
+    DeleteService { id: String, label: String },
+    KillInstance { id: String, label: String },
+}
+
+/// What to do with a background command's output once it finishes.
+#[derive(Debug, Clone)]
+enum CommandKind {
+    /// Append output to the action log and report status.
+    Generic,
+    /// Render stdout in the Details overlay (carries the service id for the title).
+    Inspect(String),
+}
+
+/// Result of a background `nodo` invocation.
+#[derive(Debug)]
+struct CommandOutcome {
+    kind: CommandKind,
+    label: String,
+    stdout: String,
+    stderr: String,
+    success: bool,
+}
+
+/// Scrollable read-only overlay contents.
+#[derive(Debug, Clone)]
+pub struct DetailsView {
+    pub title: String,
+    pub lines: Vec<String>,
+    pub scroll: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct Peer {
     pub id: String,
     pub uris: String,
+    /// Our gas balance on this peer. Source of truth is the `gas` column on the
+    /// `peer` table itself — NOT the local `clients` table. `peer.remote_client_id`
+    /// identifies our client *inside the remote peer*, so it can never be joined
+    /// against our local `clients` table (see issue #178).
     pub gas: String,
     pub reputation: String,
     /// Local reputation score (nodo-managed, independent of the on-chain proof).
     pub reputation_score: String,
-    /// Gas the registered client for this peer holds on us (our gas on the peer).
-    pub client_gas: String,
 }
 
 impl Identifiable for Peer {
@@ -399,12 +439,18 @@ pub struct App {
     pub input_title: String,
     pub edit_config_path: Option<Vec<ConfigPathSegment>>,
     pub edit_config_secret: bool,
+    /// Destructive action awaiting a y/N confirmation.
+    pub pending_action: Option<PendingAction>,
+    /// Contents of the read-only Details overlay, when open.
+    pub details: Option<DetailsView>,
     pub status: String,
     pub sys: System,
     last_data_refresh: Instant,
     last_storage_refresh: Instant,
     last_wallet_refresh: Instant,
     wallet_task: Option<JoinHandle<Result<NodeInfo, String>>>,
+    /// In-flight background `nodo` command, if any (keeps the UI responsive).
+    command_task: Option<JoinHandle<CommandOutcome>>,
 }
 
 impl Default for App {
@@ -440,12 +486,15 @@ impl Default for App {
             input_title: String::new(),
             edit_config_path: None,
             edit_config_secret: false,
+            pending_action: None,
+            details: None,
             status: "Press r to refresh • q to quit".to_string(),
             sys: System::new_all(),
             last_data_refresh: now.checked_sub(DATA_REFRESH_INTERVAL).unwrap_or(now),
             last_storage_refresh: now.checked_sub(Duration::from_secs(30)).unwrap_or(now),
             last_wallet_refresh: now.checked_sub(WALLET_REFRESH_INTERVAL).unwrap_or(now),
             wallet_task: None,
+            command_task: None,
         }
     }
 }
@@ -543,6 +592,12 @@ impl App {
         self.input_title.clear();
         self.edit_config_path = None;
         self.edit_config_secret = false;
+        self.pending_action = None;
+    }
+
+    /// True while a background `nodo` command is still running.
+    pub fn command_running(&self) -> bool {
+        self.command_task.is_some()
     }
 
     pub fn open_connect(&mut self) {
@@ -596,7 +651,7 @@ impl App {
 
     pub async fn submit_input(&mut self) {
         match self.input_mode {
-            InputMode::Connect => self.connect().await,
+            InputMode::Connect => self.connect(),
             InputMode::EditConfig => self.save_config_edit().await,
             InputMode::FilterConfig => {
                 self.config_filter = self.input.trim().to_string();
@@ -605,11 +660,11 @@ impl App {
                 self.close_input();
                 self.status = format!("Configuration filter: {count} matching values");
             }
-            InputMode::Normal => {}
+            InputMode::Normal | InputMode::Confirm | InputMode::Details => {}
         }
     }
 
-    async fn connect(&mut self) {
+    fn connect(&mut self) {
         let target = self.input.trim().to_string();
         let valid_shape = Regex::new(r"^(\[[0-9a-fA-F:]+\]|[^:\s]+):\d{1,5}$")
             .expect("valid peer regex")
@@ -625,9 +680,11 @@ impl App {
             return;
         }
         self.close_input();
-        self.execute_command(vec!["connect".to_string(), target])
-            .await;
-        self.refresh_local(true);
+        self.spawn_command(
+            CommandKind::Generic,
+            "Connect peer".to_string(),
+            vec!["connect".to_string(), target],
+        );
     }
 
     async fn save_config_edit(&mut self) {
@@ -683,7 +740,7 @@ impl App {
         }
     }
 
-    pub async fn execute_selected_service(&mut self) {
+    pub fn execute_selected_service(&mut self) {
         if self.page() != Page::Services {
             return;
         }
@@ -691,42 +748,185 @@ impl App {
             self.status = "Select a service first".to_string();
             return;
         };
-        self.execute_command(vec!["execute".to_string(), id]).await;
-        self.refresh_local(true);
+        self.spawn_command(
+            CommandKind::Generic,
+            "Execute service".to_string(),
+            vec!["execute".to_string(), id],
+        );
     }
 
-    async fn execute_command(&mut self, args: Vec<String>) {
+    /// Open the read-only Details overlay for the selected service by running
+    /// `nodo inspect <id>` in the background.
+    pub fn open_service_details(&mut self) {
+        if self.page() != Page::Services {
+            return;
+        }
+        let Some(id) = self.services.state_id.clone() else {
+            self.status = "Select a service first".to_string();
+            return;
+        };
+        self.status = format!("Inspecting {}…", shorten(&id, 18));
+        self.spawn_command(
+            CommandKind::Inspect(id.clone()),
+            "Inspect service".to_string(),
+            vec!["inspect".to_string(), id],
+        );
+    }
+
+    /// Ask for confirmation before deleting the selected service.
+    pub fn open_delete_service_confirm(&mut self) {
+        if self.page() != Page::Services {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(service) = self.services.selected().cloned() else {
+            self.status = "Select a service first".to_string();
+            return;
+        };
+        let label = if service.tag.trim().is_empty() {
+            shorten(&service.id, 18)
+        } else {
+            service.tag.clone()
+        };
+        self.input_mode = InputMode::Confirm;
+        self.input_title = format!("Delete service {label}? (y/N)");
+        self.pending_action = Some(PendingAction::DeleteService {
+            id: service.id.clone(),
+            label,
+        });
+    }
+
+    /// Ask for confirmation before killing the selected instance.
+    pub fn open_kill_instance_confirm(&mut self) {
+        if self.page() != Page::Instances {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(instance) = self.instances.selected().cloned() else {
+            self.status = "Select an instance first".to_string();
+            return;
+        };
+        let label = if instance.name.trim().is_empty() {
+            shorten(&instance.id, 18)
+        } else {
+            instance.name.clone()
+        };
+        self.input_mode = InputMode::Confirm;
+        self.input_title = format!("Kill instance {label}? (y/N)");
+        self.pending_action = Some(PendingAction::KillInstance {
+            id: instance.id.clone(),
+            label,
+        });
+    }
+
+    /// Run the pending destructive action (called on `y` in a Confirm modal).
+    pub fn confirm_pending(&mut self) {
+        let Some(action) = self.pending_action.take() else {
+            self.close_input();
+            return;
+        };
+        let (label, args) = match action {
+            PendingAction::DeleteService { id, label } => (
+                format!("Delete service {label}"),
+                vec!["remove".to_string(), id],
+            ),
+            PendingAction::KillInstance { id, label } => {
+                (format!("Kill instance {label}"), vec!["kill".to_string(), id])
+            }
+        };
+        self.close_input();
+        self.spawn_command(CommandKind::Generic, label, args);
+    }
+
+    /// Scroll the Details overlay by `delta` lines (clamped).
+    pub fn scroll_details(&mut self, delta: isize) {
+        if let Some(details) = self.details.as_mut() {
+            let max = details.lines.len().saturating_sub(1) as isize;
+            details.scroll = (details.scroll as isize + delta).clamp(0, max) as usize;
+        }
+    }
+
+    /// Close the Details overlay and return to normal mode.
+    pub fn close_details(&mut self) {
+        self.details = None;
+        self.input_mode = InputMode::Normal;
+        self.status = "Press r to refresh • q to quit".to_string();
+    }
+
+    /// Spawn a `nodo` command in the background so the UI stays responsive.
+    /// Only one command runs at a time; new requests are rejected while busy.
+    fn spawn_command(&mut self, kind: CommandKind, label: String, args: Vec<String>) {
+        if self.command_task.is_some() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
         self.status = format!("Running nodo {}…", args.join(" "));
-        let output = Command::new("nodo")
-            .args(&args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await;
-        match output {
-            Ok(output) => {
-                self.app_logs.extend(
-                    String::from_utf8_lossy(&output.stdout)
-                        .lines()
-                        .map(ToString::to_string),
-                );
-                self.app_logs.extend(
-                    String::from_utf8_lossy(&output.stderr)
-                        .lines()
-                        .map(|line| format!("ERROR: {line}")),
-                );
-                self.status = if output.status.success() {
-                    "Command completed".to_string()
+        self.command_task = Some(tokio::spawn(run_command(kind, label, args)));
+    }
+
+    /// Collect a finished background command, route its output, and refresh.
+    async fn poll_command_task(&mut self) {
+        if !self
+            .command_task
+            .as_ref()
+            .map(|task| task.is_finished())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let task = self.command_task.take().unwrap();
+        let outcome = match task.await {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.status = format!("Command task failed: {error}");
+                return;
+            }
+        };
+
+        self.app_logs
+            .extend(outcome.stdout.lines().map(ToString::to_string));
+        self.app_logs
+            .extend(outcome.stderr.lines().map(|line| format!("ERROR: {line}")));
+
+        match outcome.kind {
+            CommandKind::Inspect(service_id) => {
+                if outcome.success {
+                    let mut lines: Vec<String> =
+                        outcome.stdout.lines().map(ToString::to_string).collect();
+                    if lines.is_empty() {
+                        lines.push("(no output)".to_string());
+                    }
+                    self.details = Some(DetailsView {
+                        title: format!("Service {}", shorten(&service_id, 24)),
+                        lines,
+                        scroll: 0,
+                    });
+                    self.input_mode = InputMode::Details;
+                    self.status = "Service details • ↑/↓ scroll • Esc close".to_string();
                 } else {
-                    format!("Command exited with {}", output.status)
+                    self.status = format!("nodo inspect failed: {}", first_line(&outcome.stderr));
+                }
+            }
+            CommandKind::Generic => {
+                self.status = if outcome.success {
+                    format!("{} completed", outcome.label)
+                } else {
+                    format!("{} failed: {}", outcome.label, first_line(&outcome.stderr))
                 };
             }
-            Err(error) => self.status = format!("Unable to launch nodo command: {error}"),
         }
+        self.refresh_local(true);
     }
 
     pub async fn refresh(&mut self, force: bool) {
         self.refresh_local(force);
+        self.poll_command_task().await;
         self.poll_wallet_task().await;
         if self.wallet_task.is_none()
             && (force || self.last_wallet_refresh.elapsed() >= WALLET_REFRESH_INTERVAL)
@@ -808,6 +1008,41 @@ impl App {
     }
 }
 
+/// Run `nodo <args>` to completion off the UI thread, capturing its output.
+async fn run_command(kind: CommandKind, label: String, args: Vec<String>) -> CommandOutcome {
+    match Command::new("nodo")
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+    {
+        Ok(output) => CommandOutcome {
+            kind,
+            label,
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            success: output.status.success(),
+        },
+        Err(error) => CommandOutcome {
+            kind,
+            label,
+            stdout: String::new(),
+            stderr: format!("Unable to launch nodo command: {error}"),
+            success: false,
+        },
+    }
+}
+
+/// First non-blank line of `text`, trimmed — used for one-line status messages.
+fn first_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+        .to_string()
+}
+
 async fn fetch_node_info() -> Result<NodeInfo, String> {
     let output = tokio::time::timeout(
         Duration::from_secs(20),
@@ -866,27 +1101,25 @@ fn parse_erg_amount(value: &str) -> Option<f64> {
 
 fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
     let connection = Connection::open(database)?;
+    // Our gas on a peer lives on the `peer` table's own `gas` column. The old
+    // `LEFT JOIN clients c ON p.client_id = c.id` was wrong: `peer.remote_client_id`
+    // is our client id *inside the remote peer*, never a key into our local
+    // `clients` table, so that join surfaced a bogus gas value (issue #178).
     let mut statement = connection.prepare(
         "SELECT p.id,
                 COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
                 p.gas,
                 COALESCE(p.reputation_proof_id, ''),
-                c.gas,
                 p.reputation_score
          FROM peer p
          LEFT JOIN slot s ON p.id = s.peer_id
          LEFT JOIN uri u ON s.id = u.slot_id
-         LEFT JOIN clients c ON p.client_id = c.id
-         GROUP BY p.id, p.gas, p.reputation_proof_id, c.gas, p.reputation_score",
+         GROUP BY p.id, p.gas, p.reputation_proof_id, p.reputation_score",
     )?;
     let peers = statement
         .query_map([], |row| {
-            let client_gas = row
-                .get::<_, Option<String>>(4)?
-                .map(format_gas)
-                .unwrap_or_else(|| "—".to_string());
             let reputation_score = row
-                .get::<_, Option<i64>>(5)?
+                .get::<_, Option<i64>>(4)?
                 .map(|score| score.to_string())
                 .unwrap_or_else(|| "0".to_string());
             Ok(Peer {
@@ -895,7 +1128,6 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 gas: format_gas(row.get::<_, String>(2)?),
                 reputation: row.get(3)?,
                 reputation_score,
-                client_gas,
             })
         })?
         .collect();
