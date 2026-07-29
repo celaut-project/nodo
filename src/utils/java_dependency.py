@@ -21,7 +21,7 @@ def _detect_main_dir() -> str:
 
 def get_java_install_command() -> str:
     main_dir = _detect_main_dir()
-    return f"/bin/bash {main_dir}/bash/install_java.sh {main_dir}"
+    return f"sudo /bin/bash {main_dir}/bash/install_java.sh {main_dir}"
 
 
 def build_java_dependency_message(feature: Optional[str] = None) -> str:
