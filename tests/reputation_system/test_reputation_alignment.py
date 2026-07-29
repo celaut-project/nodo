@@ -143,3 +143,38 @@ def test_find_reputation_proof_id_uses_defined_owner_helper():
     names = fn.__code__.co_names
     assert "owner_script_hash_hex" not in names
     assert "owner_proposition_bytes_hex" in names
+
+
+# Real on-chain values from Nate's node (wallet 9fcwct…) — used to pin discovery selection.
+_OWNER = "0008cd02910cc52aa89e392d2715fc556aea54d5d4d81ccca937a11481771d37395c39b7"
+_NODE_TYPE = "64060577c3393e0e3cf8938ec8e6a2002ded27ece17750aa5add7d5c3e1227ba"
+_PROFILE_TYPE = "1820fd428a0b92d61ce3f86cd98240fdeeee8a392900f0b19a2e017d66f79926"
+_NODE_PROOF = "34ad59463ca524f9a27dd9f549e6c81fda819e8772137ee800a0408b8214d1a4"
+_USER_PROFILE = "cd37aa0fa3d9e2b7af812b921fdb5e2b04e351afcd74aa71f0d80d2bf91f8e58"
+
+
+def _box(token, r4, r5, r7=_OWNER):
+    def coll(h):  # serialized Coll[Byte]: 0e + 1-byte VLQ length + payload (all < 128 bytes here)
+        return "0e" + format(len(h) // 2, "02x") + h
+    return {
+        "assets": [{"tokenId": token, "amount": 1}],
+        "additionalRegisters": {
+            "R4": {"serializedValue": coll(r4)},
+            "R5": {"serializedValue": coll(r5)},
+            "R7": {"serializedValue": coll(r7)},
+        },
+    }
+
+
+def test_discovery_adopts_only_the_nodes_own_proof():
+    pick = proof_validation._node_own_proof_token_id
+    # The node's own proof: R4 = node-type NFT, R5 self-points, R7 = owner -> adopted.
+    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _NODE_PROOF), _OWNER, _NODE_TYPE) == _NODE_PROOF
+    # A user PROFILE the same wallet owns (R4 = profile-type, self-pointing) -> rejected.
+    assert pick(_box(_USER_PROFILE, _PROFILE_TYPE, _USER_PROFILE), _OWNER, _NODE_TYPE) is None
+    # A reputation-edge box (R5 points to another object, not self) -> rejected.
+    assert pick(_box(_USER_PROFILE, _NODE_TYPE, "de" * 32), _OWNER, _NODE_TYPE) is None
+    # A proof owned by a different wallet (R7 mismatch) -> rejected.
+    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _NODE_PROOF, r7="00" * 36), _OWNER, _NODE_TYPE) is None
+    # With node type unconfigured, fall back to self-pointing only (still rejects edges).
+    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _NODE_PROOF), _OWNER, "") == _NODE_PROOF
