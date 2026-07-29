@@ -557,15 +557,6 @@ if __name__ == '__main__':
 
             case 'config':
                 os.system("/bin/bash bash/reconfig.sh")
-                # After (re)configuring — e.g. a new wallet mnemonic — reconcile the
-                # reputation proof: drop it if it no longer belongs to the wallet, and
-                # discover/store the wallet's on-chain proof if one exists.
-                try:
-                    from src.reputation_system.contracts.ergo.proof_validation import sync_reputation_proof_ownership
-
-                    sync_reputation_proof_ownership()
-                except JavaDependencyMissing as e:
-                    print_java_dependency_error(e)
 
             case 'envs':
                 os.system(f"yq . {MAIN_DIR}/config.yaml")
