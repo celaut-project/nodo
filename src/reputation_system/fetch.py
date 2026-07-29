@@ -8,12 +8,12 @@ from src.utils.contract_xattrs import set_script, set_token_id
 env_manager = ConfigManager()
 
 def local_proofs() -> Generator[celaut.Contract, None, None]:
-    from src.reputation_system.envs import CONTRACT, ergo_ledger
+    from src.reputation_system.envs import REPUTATION_PROOF_ERGO_TREE, ergo_ledger
 
     proof_id = env_manager.get('REPUTATION_PROOF_ID')
     if proof_id:
         contract = celaut.Contract(ledger=ergo_ledger)
-        set_script(contract, CONTRACT.encode("utf-8"))
+        set_script(contract, bytes.fromhex(REPUTATION_PROOF_ERGO_TREE))
         set_token_id(contract, proof_id)
         yield contract
     

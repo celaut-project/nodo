@@ -27,10 +27,27 @@ def _coll_byte(data: bytes) -> str:
     return "0e" + vlq.hex() + data.hex()
 
 
-def test_envs_contract_placeholder_is_resolved():
-    assert "`+DIGITAL_PUBLIC_GOOD_SCRIPT_HASH+`" not in envs.CONTRACT
+def test_reputation_contract_is_the_canonical_ecosystem_instance():
+    # nodo must mint/scan proofs on the exact ErgoTree-v1 contract that
+    # reputation-systems/reputation-system publishes. A different ErgoTree version,
+    # or a Digital-Public-Good hash derived from the .es source text instead of the
+    # compiled ErgoTree bytes, lands the box at a P2S address that system cannot read.
+    # These values are pinned and were verified against the on-chain contract holding
+    # every live proof (see the derivation notes in envs.py).
+    assert (
+        envs.DIGITAL_PUBLIC_GOOD_SCRIPT_HASH
+        == "ceea52651b6b206381ea28a2e59f775367cef567c0c2f089dc7e09356b64ef61"
+    )
     assert len(envs.DIGITAL_PUBLIC_GOOD_SCRIPT_HASH) == 64
-    int(envs.DIGITAL_PUBLIC_GOOD_SCRIPT_HASH, 16)
+    int(envs.DIGITAL_PUBLIC_GOOD_SCRIPT_HASH, 16)  # valid hex
+
+    assert envs.REPUTATION_PROOF_ADDRESS.startswith("6axptaZbz6n5h3MUjsWMf4pt")
+    assert len(envs.REPUTATION_PROOF_ADDRESS) == 1204
+
+    # The pinned ErgoTree is valid hex and an ErgoTree-v1 tree (header byte 0x19).
+    tree = envs.REPUTATION_PROOF_ERGO_TREE
+    assert tree.startswith("19")
+    assert bytes.fromhex(tree)  # no odd length / non-hex
 
 
 def test_id_bytes_encodes_hex_ids_as_raw_bytes():
