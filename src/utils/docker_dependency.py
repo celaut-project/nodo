@@ -1,7 +1,6 @@
 """On-demand management of nodo's optional, isolated Docker dependency.
 
-Docker is only needed by the local packer (``packer.local: true``). Mirroring
-``java_dependency`` / ``install_java.sh``, Docker is **not** installed as part of
+Docker is only needed by the local packer (``packer.local: true``). Docker is **not** installed as part of
 the node installation: ``bash/install_docker.sh`` provisions an isolated Docker
 toolchain (dockerd + docker client + buildx) under ``MAIN_DIR`` on demand, the
 first time a local pack needs it — regardless of any Docker already on the host.

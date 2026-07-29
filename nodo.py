@@ -557,15 +557,6 @@ if __name__ == '__main__':
 
             case 'config':
                 os.system("/bin/bash bash/reconfig.sh")
-                # After (re)configuring — e.g. a new wallet mnemonic — reconcile the
-                # reputation proof: drop it if it no longer belongs to the wallet, and
-                # discover/store the wallet's on-chain proof if one exists.
-                try:
-                    from src.reputation_system.contracts.ergo.proof_validation import sync_reputation_proof_ownership
-
-                    sync_reputation_proof_ownership()
-                except JavaDependencyMissing as e:
-                    print_java_dependency_error(e)
 
             case 'envs':
                 os.system(f"yq . {MAIN_DIR}/config.yaml")
@@ -705,3 +696,13 @@ if __name__ == '__main__':
 
             case other:
                 print('Unknown command.', flush=True)
+
+    # Hand the console back when a one-shot command finishes. The Ergo / reputation
+    # commands (sync_reputation_proof, submit_reputation, tx_history, config, …)
+    # start a JVM through jpype, whose non-daemon threads otherwise keep the
+    # interpreter alive and hang the shell after the command has already done its
+    # work. `serve` blocks in wait_for_termination() and never reaches here, and the
+    # codebase registers no atexit handlers, so flush the streams and exit hard.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
