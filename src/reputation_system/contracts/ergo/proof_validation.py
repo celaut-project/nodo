@@ -11,7 +11,11 @@ from src.reputation_system.contracts.ergo.utils import (
     iter_unspent_boxes_by_address,
     owner_script_hash_hex,
 )
-from src.reputation_system.envs import CONTRACT, REPUTATION_PROOF_ADDRESS, ergo_ledger
+from src.reputation_system.envs import (
+    REPUTATION_PROOF_ADDRESS,
+    REPUTATION_PROOF_ERGO_TREE,
+    ergo_ledger,
+)
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
 from src.utils.java_dependency import (
@@ -105,16 +109,17 @@ def _validate_box_structure(box: dict) -> bool:
 def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> bool:
     _ = peer_id  # retained to keep public signature stable.
 
+    expected_script = bytes.fromhex(REPUTATION_PROOF_ERGO_TREE)
     compatibility = (
         contract_ledger.ledger.formal == ergo_ledger.formal
-        and get_script(contract_ledger) == CONTRACT.encode("utf-8")
+        and get_script(contract_ledger) == expected_script
     )  # TODO Could check at Reputation System to consider tag-prose-formal equivalences.
 
     if not compatibility:
         logger(
             "Contract ledger not compatible: "
             f"ledger={contract_ledger.ledger.formal == ergo_ledger.formal} "
-            f"script={get_script(contract_ledger) == CONTRACT.encode('utf-8')}"
+            f"script={get_script(contract_ledger) == expected_script}"
         )
         return False
 
