@@ -5,12 +5,15 @@ from protos import celaut_pb2 as celaut
 
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign
 from src.reputation_system.contracts.ergo.utils import (
-    get_contract_address,
     get_public_key,
     iter_unspent_boxes_by_address,
     owner_proposition_bytes_hex,
 )
-from src.reputation_system.envs import CONTRACT, ergo_ledger
+from src.reputation_system.envs import (
+    REPUTATION_PROOF_ADDRESS,
+    REPUTATION_PROOF_ERGO_TREE,
+    ergo_ledger,
+)
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
 from src.utils.java_dependency import (
@@ -123,16 +126,17 @@ def _validate_box_structure(box: dict) -> bool:
 def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> bool:
     _ = peer_id  # retained to keep public signature stable.
 
+    expected_script = bytes.fromhex(REPUTATION_PROOF_ERGO_TREE)
     compatibility = (
         contract_ledger.ledger.formal == ergo_ledger.formal
-        and get_script(contract_ledger) == CONTRACT.encode("utf-8")
+        and get_script(contract_ledger) == expected_script
     )  # TODO Could check at Reputation System to consider tag-prose-formal equivalences.
 
     if not compatibility:
         logger(
             "Contract ledger not compatible: "
             f"ledger={contract_ledger.ledger.formal == ergo_ledger.formal} "
-            f"script={get_script(contract_ledger) == CONTRACT.encode('utf-8')}"
+            f"script={get_script(contract_ledger) == expected_script}"
         )
         return False
 
@@ -247,8 +251,10 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     appkit = require_java_module("ergpy.appkit", feature="Ergo reputation")
     ergo = appkit.ErgoAppKit(node_url=node_url)
 
-    owner_proposition = owner_proposition_bytes_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
-    contract_address = get_contract_address(ergo, CONTRACT)
+    owner_hash = owner_script_hash_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
+    # Scan the canonical ecosystem contract address (ErgoTree v1), where every real
+    # reputation proof lives — not a locally-recompiled v0 address.
+    contract_address = REPUTATION_PROOF_ADDRESS
 
     for box in iter_unspent_boxes_by_address(ergo, contract_address):
         # R7 stores the box owner's raw propositionBytes (Coll[Byte]).
