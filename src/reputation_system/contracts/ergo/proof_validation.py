@@ -95,6 +95,37 @@ def _boxes_off_canonical_contract(boxes: List[dict]) -> List[str]:
     ]
 
 
+def _node_own_proof_token_id(box: dict, owner_proposition: str, node_type_nft: str) -> Optional[str]:
+    """
+    If ``box`` is the node's OWN reputation proof owned by ``owner_proposition``, return its
+    token id; otherwise None.
+
+    nodo mints its proof with R7 = owner propositionBytes, R4 = the CELAUT node-type NFT,
+    and R5 self-pointing to the proof's own token id (see transaction.py). The wallet may
+    also own unrelated proofs — e.g. a user profile of a different type, or reputation-edge
+    boxes pointing at another object — which must NOT be adopted as the node's proof.
+    """
+    if _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or "")) != owner_proposition:
+        return None
+
+    assets = box.get("assets") or []
+    token_id = assets[0].get("tokenId") if assets else None
+    if not token_id:
+        return None
+
+    r4 = (_decode_coll_byte_hex(str(_extract_register_value(box, "R4") or "")) or "").lower()
+    r5 = (_decode_coll_byte_hex(str(_extract_register_value(box, "R5") or "")) or "").lower()
+
+    # R5 must self-point: an identity/node proof, not a reputation edge to another object.
+    if r5 != token_id.lower():
+        return None
+    # When configured, R4 must be the node-type NFT — never a user PROFILE_TYPE_NFT etc.
+    if node_type_nft and r4 != node_type_nft.lower():
+        return None
+
+    return token_id
+
+
 def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
     from src.reputation_system.contracts.ergo.utils import get_boxes_by_token_ids
 
@@ -282,18 +313,17 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     ergo = appkit.ErgoAppKit(node_url=node_url)
 
     owner_proposition = owner_proposition_bytes_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
+    # nodo's own proof carries R4 = the CELAUT node-type NFT; used to avoid adopting an
+    # unrelated proof (e.g. a user profile) that the same wallet happens to own.
+    node_type_nft = ConfigManager().get("reputation.CELAUT_NODE_TYPE_NFT_ID") or ""
     # Scan the canonical ecosystem contract address (ErgoTree v1), where every real
     # reputation proof lives — not a locally-recompiled v0 address.
     contract_address = REPUTATION_PROOF_ADDRESS
 
     for box in iter_unspent_boxes_by_address(ergo, contract_address):
-        # R7 stores the box owner's raw propositionBytes (Coll[Byte]).
-        if _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or "")) != owner_proposition:
-            continue
-
-        assets = box.get("assets") or []
-        if assets and assets[0].get("tokenId"):
-            return assets[0]["tokenId"]
+        token_id = _node_own_proof_token_id(box, owner_proposition, node_type_nft)
+        if token_id:
+            return token_id
 
     return None
 
