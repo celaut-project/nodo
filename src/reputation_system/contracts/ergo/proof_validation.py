@@ -78,6 +78,23 @@ def _extract_register_value(box: dict, register: str) -> Optional[str]:
     return None
 
 
+def _boxes_off_canonical_contract(boxes: List[dict]) -> List[str]:
+    """
+    Return the ErgoTrees of any boxes NOT sitting on the canonical reputation contract.
+
+    A proof the wallet "owns" (its R7 matches) but whose box lives on a different contract
+    instance — e.g. a locally-recompiled ErgoTree v0 — is invisible to
+    reputation-systems/reputation-system. Boxes without an ``ergoTree`` field are left to
+    the ownership check (not flagged here).
+    """
+    canonical = REPUTATION_PROOF_ERGO_TREE.lower()
+    return [
+        b["ergoTree"]
+        for b in boxes
+        if b.get("ergoTree") and b["ergoTree"].lower() != canonical
+    ]
+
+
 def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
     from src.reputation_system.contracts.ergo.utils import get_boxes_by_token_ids
 
@@ -211,6 +228,19 @@ def validate_reputation_proof_ownership(
             logger(f"No boxes found for proof id {proof_id}")
             return False
 
+        # Reject proofs that are not on the canonical ecosystem contract (ErgoTree v1).
+        # A proof the wallet "owns" (R7 matches) but that sits on a different contract
+        # instance — e.g. a locally-recompiled v0 ErgoTree — is invisible to
+        # reputation-systems/reputation-system, so it must NOT be treated as valid.
+        off_contract = _boxes_off_canonical_contract(boxes)
+        if off_contract:
+            logger(
+                f"Reputation proof {proof_id} is not on the canonical contract "
+                f"(expected ErgoTree {REPUTATION_PROOF_ERGO_TREE[:16]}…, "
+                f"found {[t[:16] + '…' for t in off_contract]}); rejecting."
+            )
+            return False
+
         # R7 of a Reputation Box holds the owner's raw propositionBytes (Coll[Byte]).
         # The reputation_proof.es contract authorises spends with
         # `INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }`, so R7 is
@@ -251,7 +281,7 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     appkit = require_java_module("ergpy.appkit", feature="Ergo reputation")
     ergo = appkit.ErgoAppKit(node_url=node_url)
 
-    owner_hash = owner_script_hash_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
+    owner_proposition = owner_proposition_bytes_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
     # Scan the canonical ecosystem contract address (ErgoTree v1), where every real
     # reputation proof lives — not a locally-recompiled v0 address.
     contract_address = REPUTATION_PROOF_ADDRESS
