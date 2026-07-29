@@ -7,12 +7,11 @@ from protos import celaut_pb2 as celaut
 
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign
 from src.reputation_system.contracts.ergo.utils import (
-    get_contract_address,
     get_public_key,
     iter_unspent_boxes_by_address,
     owner_script_hash_hex,
 )
-from src.reputation_system.envs import CONTRACT, ergo_ledger
+from src.reputation_system.envs import CONTRACT, REPUTATION_PROOF_ADDRESS, ergo_ledger
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
 from src.utils.java_dependency import (
@@ -237,7 +236,9 @@ def find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     ergo = appkit.ErgoAppKit(node_url=node_url)
 
     owner_hash = owner_script_hash_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
-    contract_address = get_contract_address(ergo, CONTRACT)
+    # Scan the canonical ecosystem contract address (ErgoTree v1), where every real
+    # reputation proof lives — not a locally-recompiled v0 address.
+    contract_address = REPUTATION_PROOF_ADDRESS
 
     for box in iter_unspent_boxes_by_address(ergo, contract_address):
         # R7 stores blake2b256(propositionBytes) of the box owner (Coll[Byte], "0e20" + hash).
