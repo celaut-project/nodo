@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple, TypedDict
 
 import requests
 
-from src.reputation_system.envs import CONTRACT, REPUTATION_PROOF_ADDRESS
+from src.reputation_system.envs import REPUTATION_PROOF_ADDRESS
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 from src.utils.logger import LOGGER
