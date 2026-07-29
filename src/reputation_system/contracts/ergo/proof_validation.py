@@ -1,6 +1,4 @@
-import hashlib
 import json
-import re
 from typing import List, Optional
 
 from protos import celaut_pb2 as celaut
@@ -10,7 +8,7 @@ from src.reputation_system.contracts.ergo.utils import (
     get_contract_address,
     get_public_key,
     iter_unspent_boxes_by_address,
-    owner_script_hash_hex,
+    owner_proposition_bytes_hex,
 )
 from src.reputation_system.envs import CONTRACT, ergo_ledger
 from src.utils.config import ConfigManager
@@ -23,23 +21,42 @@ from src.utils.java_dependency import (
 from src.utils.logger import LOGGER as logger
 
 
-_HEX_64_RE = re.compile(r"[0-9a-fA-F]{64}")
+def _decode_coll_byte_hex(register_value: str) -> Optional[str]:
+    """
+    Return the raw byte payload (hex) of a Coll[Byte] register.
 
-
-def _extract_r7_hash_hex(register_value: str) -> Optional[str]:
+    Handles the node's serialized form — ``0e`` (Coll[Byte] type tag) + VLQ length +
+    payload — and the explorer's already-rendered raw-hex form. No fixed-length
+    assumption: R7 holds the owner ``propositionBytes`` (~35 bytes for a P2PK), R4/R5
+    hold 32-byte token ids, etc.
+    """
     if not register_value:
         return None
 
     value = register_value.strip().lower()
-    # Serialized Coll[Byte] of 32 bytes normally starts with 0e20
-    if value.startswith("0e20") and len(value) >= 68:
-        candidate = value[4:68]
-        if _HEX_64_RE.fullmatch(candidate):
-            return candidate
+    if not value:
+        return None
 
-    # Fallback: find any 64-hex chunk.
-    match = _HEX_64_RE.search(value)
-    return match.group(0).lower() if match else None
+    if value.startswith("0e"):
+        # Serialized Coll[Byte]: 0e <VLQ length> <payload bytes>.
+        idx = 2
+        length = 0
+        shift = 0
+        try:
+            while idx + 1 < len(value):
+                byte = int(value[idx:idx + 2], 16)
+                idx += 2
+                length |= (byte & 0x7F) << shift
+                if not (byte & 0x80):
+                    break
+                shift += 7
+        except ValueError:
+            return None
+        payload = value[idx:idx + length * 2]
+        return payload or None
+
+    # Already the rendered raw-hex payload.
+    return value
 
 
 def _extract_register_value(box: dict, register: str) -> Optional[str]:
@@ -90,7 +107,7 @@ def _validate_box_structure(box: dict) -> bool:
         return False
     if r8 is None or str(r8).lower() not in {"true", "false", "0400", "0401"}:
         return False
-    if _extract_r7_hash_hex(str(r7) if r7 is not None else "") is None:
+    if _decode_coll_byte_hex(str(r7) if r7 is not None else "") is None:
         return False
 
     assets = box.get("assets", [])
@@ -181,38 +198,31 @@ def validate_reputation_proof_ownership(
         return False
 
     try:
-        # Obtiene expected_owner_hash de WALLET_MNEMONIC
+        # Obtiene expected_owner (raw propositionBytes) de WALLET_MNEMONIC.
         address = get_public_key(mnemonic_phrase=mnemonic_phrase)
-        ergo_tree = address.getErgoAddress().script()
-        jpype = require_java_module("jpype", feature="Ergo reputation")
-        serializer = jpype.JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
-        proposition_bytes = bytes((byte + 256) % 256 for byte in serializer.serializeErgoTree(ergo_tree))
-        expected_owner_hash = hashlib.blake2b(proposition_bytes, digest_size=32).hexdigest()
+        expected_owner = owner_proposition_bytes_hex(address)
 
         boxes = _get_unspent_boxes_by_token(proof_id)
         if not boxes:
             logger(f"No boxes found for proof id {proof_id}")
             return False
 
-        # Context: R7 of a Reputation Box is R7 	Coll[Byte] 	blake2b256(propositionBytes) of the owner script. 
-        # (https://github.com/reputation-systems/reputation-system#22-reputation-token-contract-reputation-box)
-        box_hashes = {
-            _extract_r7_hash_hex(str(_extract_register_value(box, "R7") or ""))
+        # R7 of a Reputation Box holds the owner's raw propositionBytes (Coll[Byte]).
+        # The reputation_proof.es contract authorises spends with
+        # `INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }`, so R7 is
+        # the raw ErgoTree of the owner — NOT blake2b256(propositionBytes).
+        box_owners = {
+            _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or ""))
             for box in boxes
         }
 
-        # Comprobamos si el blake2b256(propositionBytes) de WALLET_MNEMONIC es igual al almacenado en R7 del reputation profile
-        # 
-        # ¡Si alguno de todos los boxes de ese perfil difiere, se considera invalido! 
-        # Esta política podría cambiar:
-        # 1. Si expected owner hash se encuentra en cualquier R7, se considera valido.
-        # 2. Únicamente se mira la caja donde R5 === profile token id.
-        # 
-        valid: bool = box_hashes == {expected_owner_hash}
+        # ¡Si alguno de todos los boxes de ese perfil difiere, se considera invalido!
+        # Política: el R7 de cada caja del perfil debe ser el propositionBytes de la cartera.
+        valid: bool = box_owners == {expected_owner}
         if not valid:
             logger(
-                f"Validation failed: expected owner hash {expected_owner_hash}, "
-                f"found R7 hashes {sorted([h for h in box_hashes if h])}"
+                f"Validation failed: expected owner propositionBytes {expected_owner}, "
+                f"found R7 values {sorted([h for h in box_owners if h])}"
             )
         return valid
     except Exception as e:
@@ -225,8 +235,9 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     Look up an on-chain reputation proof owned by the given wallet.
 
     Scans the unspent boxes of the reputation contract (a single address, paginated) and
-    returns the proof (token) id of the first box whose R7 equals the wallet's owner hash
-    — breaking as soon as it matches. Returns None when the wallet owns no proof.
+    returns the proof (token) id of the first box whose R7 equals the wallet's owner
+    propositionBytes — breaking as soon as it matches. Returns None when the wallet owns
+    no proof.
     """
     node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
     if not node_url:
@@ -236,12 +247,12 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     appkit = require_java_module("ergpy.appkit", feature="Ergo reputation")
     ergo = appkit.ErgoAppKit(node_url=node_url)
 
-    owner_hash = owner_script_hash_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
+    owner_proposition = owner_proposition_bytes_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
     contract_address = get_contract_address(ergo, CONTRACT)
 
     for box in iter_unspent_boxes_by_address(ergo, contract_address):
-        # R7 stores blake2b256(propositionBytes) of the box owner (Coll[Byte], "0e20" + hash).
-        if _extract_r7_hash_hex(str(_extract_register_value(box, "R7") or "")) != owner_hash:
+        # R7 stores the box owner's raw propositionBytes (Coll[Byte]).
+        if _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or "")) != owner_proposition:
             continue
 
         assets = box.get("assets") or []
