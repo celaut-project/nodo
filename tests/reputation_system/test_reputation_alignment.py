@@ -119,3 +119,27 @@ def test_validate_box_structure_rejects_missing_r7():
         "assets": [{"tokenId": PROOF_ID, "amount": 1}],
     }
     assert not proof_validation._validate_box_structure(box)
+
+
+def test_off_canonical_contract_rejects_v0_and_accepts_v1():
+    # A proof box on the canonical ErgoTree-v1 contract is NOT flagged...
+    canonical = envs.REPUTATION_PROOF_ERGO_TREE
+    assert proof_validation._boxes_off_canonical_contract([{"ergoTree": canonical}]) == []
+    # ...but a box on a different (e.g. locally-recompiled ErgoTree-v0) contract IS flagged,
+    # so validate_reputation_proof_ownership rejects the wallet-owned-but-invisible proof.
+    v0_tree = "101c0400040004000400"  # header 0x10 => ErgoTree v0
+    assert proof_validation._boxes_off_canonical_contract([{"ergoTree": v0_tree}]) == [v0_tree]
+    # A box without an ergoTree is left to the ownership check, not flagged here.
+    assert proof_validation._boxes_off_canonical_contract([{}]) == []
+    # Case-insensitive match.
+    assert proof_validation._boxes_off_canonical_contract([{"ergoTree": canonical.upper()}]) == []
+
+
+def test_find_reputation_proof_id_uses_defined_owner_helper():
+    # Regression: the discovery function once referenced an undefined `owner_script_hash_hex`
+    # (dropped in a rename), crashing sync with NameError. It must reference the helper that
+    # actually exists in utils, `owner_proposition_bytes_hex`, matching validate's owner check.
+    fn = proof_validation.__dict__["__find_reputation_proof_id_for_owner"]
+    names = fn.__code__.co_names
+    assert "owner_script_hash_hex" not in names
+    assert "owner_proposition_bytes_hex" in names
