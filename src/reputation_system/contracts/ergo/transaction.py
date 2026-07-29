@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple, TypedDict
 
 import requests
 
-from src.reputation_system.envs import CONTRACT
+from src.reputation_system.envs import CONTRACT, REPUTATION_PROOF_ADDRESS
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 from src.utils.logger import LOGGER
@@ -121,7 +121,7 @@ def __build_proof_box(
                     org_appkit.ErgoValue.of(jpype.JBoolean(int(token_amount) >= 0)),                # R8: positive/negative
                     org_appkit.ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                 # R9: content
                 ]) \
-                .contract(ergo._ctx.compileContract(org_appkit.ConstantsBuilder.empty(), CONTRACT)) \
+                .contract(org_appkit.Address.create(REPUTATION_PROOF_ADDRESS).toErgoContract()) \
                 .build()
 
 
@@ -173,9 +173,10 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     if proof_id:
         try:
-            compiled_contract = ergo._ctx.compileContract(org_appkit.ConstantsBuilder.empty(), CONTRACT)
-            ergo_tree = compiled_contract.getErgoTree()
-            script_address = org_appkit.Address.fromErgoTree(ergo_tree, org_appkit.NetworkType.MAINNET)
+            # Spend the existing proof from the canonical ecosystem contract address
+            # (ErgoTree v1), not a locally-recompiled ErgoTree v0 that would sit at a
+            # different, ecosystem-invisible address.
+            script_address = org_appkit.Address.create(REPUTATION_PROOF_ADDRESS)
             input_list = ergo.getInputBoxCovering(
                 amount_list=[SAFE_MIN_BOX_VALUE],
                 sender_address=script_address,
