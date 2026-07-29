@@ -127,8 +127,8 @@ def __build_proof_box(
     jpype = require_java_module("jpype", feature="Ergo reputation")
     org_appkit = jpype.JPackage("org").ergoplatform.appkit
     LOGGER(f"Building proof box with token amount {token_amount}")
-    type_nft_id = assigned_object['type'] if assigned_object else PLAIN_TEXT_TYPE_NFT_ID
-    object_to_assign = assigned_object['value'] if assigned_object else ""
+    type_nft_id = str(assigned_object['type']) if assigned_object else PLAIN_TEXT_TYPE_NFT_ID
+    object_to_assign = str(assigned_object['value']) if assigned_object else ""
 
     owner_proposition = _owner_proposition_bytes(sender_address)
     try:
@@ -224,7 +224,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             proof_id = None
 
     java_input_boxes = jpype.java.util.ArrayList(input_boxes)
-    proof_id = proof_id or java_input_boxes.get(0).getId().toString()
+    proof_id = proof_id or str(java_input_boxes.get(0).getId().toString())
 
     value_in_nanoergs = (__input_box_to_dict(selected_input_box)["value"] - fee - safe_min_out_box)
     assert value_in_nanoergs >= SAFE_MIN_BOX_VALUE, (
@@ -248,7 +248,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             sender_address=sender_address,
             assigned_object=ProofObject(
                 type=CELAUT_NODE_TYPE_NFT_ID,
-                value=obj[0] if not self_info else proof_id
+                value=obj[0] if not self_info and obj[0] else proof_id
             ),
             token_amount=int(obj[1]),
             data=data or ""
