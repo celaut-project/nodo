@@ -146,10 +146,6 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
         vec![
             metric_line("Peers", app.peers.items.len().to_string()),
             metric_line("Clients", app.clients.items.len().to_string()),
-            metric_line(
-                "Proof",
-                shorten(nonempty(&app.node_info.reputation_proof, "—"), 18),
-            ),
         ],
         Color::LightGreen,
     );
@@ -215,6 +211,10 @@ fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(format!(
             "Cold   {}",
             shorten(cold, 28)
+        )),
+        Line::from(format!(
+            "Proof  {}",
+            shorten(nonempty(&app.node_info.reputation_proof, "not registered"), 28)
         )),
         Line::from(Span::styled(
             nonempty(&app.node_info.error, "Balances refresh every 60 seconds"),
@@ -931,5 +931,27 @@ mod tests {
             .collect::<String>();
         assert!(!screen.contains("these words"));
         assert!(screen.contains("••••"));
+    }
+
+    #[test]
+    fn ergo_wallet_card_shows_reputation_proof() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.node_info.reputation_proof = "rep-proof-xyz".to_string();
+        app.node_info.wallet_address = "9walletaddr".to_string();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Overview).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        // Proof now lives in the ERGO WALLET card, not the NETWORK summary card.
+        assert!(screen.contains("ERGO WALLET"));
+        assert!(screen.contains("rep-proof-xyz"));
+        assert_eq!(screen.matches("rep-proof-xyz").count(), 1);
     }
 }
