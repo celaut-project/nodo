@@ -1,12 +1,21 @@
 import json
+import os
 from typing import List, Optional
 
-from protos import celaut_pb2 as celaut
+import grpc
+from bee_rpc import client as bee
 
-from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign
+from protos import celaut_pb2 as celaut
+from protos import celaut_pb2_grpc
+
+from src.reputation_system.bip_wallet_verification import (
+    bip_ecdsa_sign,
+    bip_ecdsa_verify_proposition,
+)
 from src.reputation_system.contracts.ergo.utils import (
     get_public_key,
     iter_unspent_boxes_by_address,
+    owner_proposition_bytes,
     owner_proposition_bytes_hex,
 )
 from src.reputation_system.envs import (
@@ -22,6 +31,10 @@ from src.utils.java_dependency import (
     require_java_module,
 )
 from src.utils.logger import LOGGER as logger
+
+# Ownership-challenge parameters.
+_CHALLENGE_TIMEOUT_SECONDS = 20
+_CHALLENGE_NONCE_BYTES = 32
 
 
 def _decode_coll_byte_hex(register_value: str) -> Optional[str]:
@@ -140,18 +153,110 @@ def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
     java_boxes = get_boxes_by_token_ids(ergo, node_url, [token_id])
     return [json.loads(str(box.toJson(True))) for box in java_boxes]
 
+
+def _validate_box_structure(box: dict) -> bool:
+    """
+    Structural validation of a single reputation box, replacing the former ``return True``.
+
+    Enforces the canonical register layout shared by the whole ecosystem
+    (reputation_proof.es):
+        R4 Coll[Byte] = type NFT token id    (present, decodable)
+        R5 Coll[Byte] = unique object data   (present, decodable)
+        R7 Coll[Byte] = owner propositionBytes (present, decodable, non-empty)
+    plus a reputation token in ``assets`` and — when the box carries an ``ergoTree`` — a
+    match against the canonical reputation contract ErgoTree. Boxes without an ``ergoTree``
+    field are deferred to :func:`_boxes_off_canonical_contract` / the ownership check.
+    """
+    for register in ("R4", "R5", "R7"):
+        decoded = _decode_coll_byte_hex(str(_extract_register_value(box, register) or ""))
+        if not decoded:
+            logger(f"Reputation box structure invalid: register {register} missing or undecodable.")
+            return False
+
+    assets = box.get("assets") or []
+    token_id = assets[0].get("tokenId") if assets else None
+    if not token_id:
+        logger("Reputation box structure invalid: no reputation token in assets.")
+        return False
+
+    ergo_tree = box.get("ergoTree")
+    if ergo_tree and ergo_tree.lower() != REPUTATION_PROOF_ERGO_TREE.lower():
+        logger("Reputation box structure invalid: ergoTree does not match the canonical contract.")
+        return False
+
+    return True
+
+
+def _challenge_peer_ownership(peer_id: str, owner_proposition_hex: str) -> bool:
+    """
+    Cryptographically prove that ``peer_id`` controls the R7 owner ``owner_proposition_hex``.
+
+    Creates a fresh random challenge, calls the peer's ``Gateway.SignPublicKey`` over gRPC
+    with the raw ``proposition_bytes`` + challenge, and verifies the returned signature
+    against the public key embedded in those proposition bytes. Any RPC error, malformed
+    response, timeout/expiry, or verification failure returns ``False`` (never raises).
+    """
+    from src.utils.utils import generate_uris_by_peer_id
+
+    try:
+        proposition_bytes = bytes.fromhex(owner_proposition_hex)
+    except (ValueError, TypeError):
+        logger(f"Ownership challenge: R7 owner {owner_proposition_hex!r} is not valid hex.")
+        return False
+
+    uri = next(generate_uris_by_peer_id(peer_id=peer_id), None)
+    if uri is None:
+        logger(f"Ownership challenge: no reachable URI for peer {peer_id}.")
+        return False
+
+    challenge = os.urandom(_CHALLENGE_NONCE_BYTES).hex()
+    try:
+        stub = celaut_pb2_grpc.GatewayStub(grpc.insecure_channel(uri))
+        response = next(
+            bee.client_grpc(
+                method=stub.SignPublicKey,
+                partitions_message_mode_parser=True,
+                input=celaut.SignRequest(
+                    proposition_bytes=proposition_bytes,
+                    to_sign=challenge.encode("utf-8"),
+                ),
+                indices_parser=celaut.SignResponse,
+                timeout=_CHALLENGE_TIMEOUT_SECONDS,
+            ),
+            None,
+        )
+    except grpc.RpcError as e:
+        logger(f"Ownership challenge RPC to peer {peer_id} failed: {e}")
+        return False
+    except Exception as e:  # bee parse / transport errors
+        logger(f"Ownership challenge to peer {peer_id} errored: {e}")
+        return False
+
+    if response is None or not response.signed:
+        logger(f"Ownership challenge: peer {peer_id} returned no signature.")
+        return False
+
+    signature_hex = bytes(response.signed).hex()
+    if not bip_ecdsa_verify_proposition(proposition_bytes, challenge, signature_hex):
+        logger(f"Ownership challenge: peer {peer_id} signature did not verify against R7.")
+        return False
+
+    return True
+
+
 """
-    Valida si el Perfil de Reputación es soportado por el nodo y si existe en la red. 
+    Valida si el Perfil de Reputación es soportado por el nodo y si existe en la red.
     Utilizado para validar Perfil de un par antes de almacenarlo.
 """
 def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> bool:
-    _ = peer_id  # retained to keep public signature stable.
-
+    # Equivalence policy: `formal` is the canonical machine-readable ledger identity, so we
+    # validate ONLY the compiled ErgoTree (get_script) plus `formal`. `tags`/`prose` are
+    # human-facing and intentionally not part of the compatibility decision.
     expected_script = bytes.fromhex(REPUTATION_PROOF_ERGO_TREE)
     compatibility = (
         contract_ledger.ledger.formal == ergo_ledger.formal
         and get_script(contract_ledger) == expected_script
-    )  # TODO Could check at Reputation System to consider tag-prose-formal equivalences.
+    )
 
     if not compatibility:
         logger(
@@ -176,49 +281,88 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
         logger(f"No unspent boxes found for proof token {token_id}")
         return False
 
-    def _validate_box_structure(box):  # TODO Aqui se debe validar que el ergotree del box es el correspondiente a CONTRACT
-        return True
+    # Reject boxes sitting on a non-canonical contract instance.
+    off_contract = _boxes_off_canonical_contract(boxes)
+    if off_contract:
+        logger(f"Reputation proof {token_id} has boxes off the canonical contract; rejecting.")
+        return False
 
     if not all(_validate_box_structure(box) for box in boxes):
         logger("Structural validation of the reputation profile failed.")
         return False
 
-    # TODO Verificar grpc(peer_id).SignPublicKey(public_key=r7_raw_proposition_bytes, to_sign=random_str) y verificar la respuesta.
+    # Peer ownership challenge: every box must declare the SAME R7 owner, and the peer must
+    # prove control of it by signing a fresh challenge with the matching key.
+    owners = {
+        _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or ""))
+        for box in boxes
+    }
+    owners.discard(None)
+    if len(owners) != 1:
+        logger(f"Reputation proof {token_id} has inconsistent R7 owners: {sorted(o for o in owners if o)}")
+        return False
+
+    owner_proposition_hex = next(iter(owners))
+    if not _challenge_peer_ownership(peer_id, owner_proposition_hex):
+        logger(f"Peer {peer_id} failed the R7 ownership challenge for proof {token_id}.")
+        return False
 
     return True
 
 
 """
-    Firma un mensaje con WALLET_MNEMONIC para demostrarle a un tercero autenticidad.
+    Firma un reto de propiedad con WALLET_MNEMONIC para demostrarle a un tercero
+    que este nodo controla exactamente esos propositionBytes (raw ErgoTree).
 """
-def sign_message(public_key, message) -> str | None:  # TODO Ojo!! Aqui public key debe ser el raw ergotree. Entre si, los nodos se intercambian ergotree en crudo.
-    mnemonic_phrase = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC") or ConfigManager().get("WALLET_MNEMONIC")
+def sign_message(proposition_bytes, message) -> Optional[str]:
+    mnemonic_phrase = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC")
     if not mnemonic_phrase:
         logger("Missing wallet mnemonic configuration")
         return None
-    
-    address = get_public_key(mnemonic_phrase=mnemonic_phrase)
-    if address.toString() is not public_key:
-        logger(f"Public_key {public_key} not mine.")
 
-    # Keep API compatibility: sign request if caller-provided public key is non-empty.
-    if not public_key:
-        logger("Public key is required")
+    # Normalize the challenged proposition bytes to raw bytes.
+    if isinstance(proposition_bytes, str):
+        try:
+            proposition_bytes = bytes.fromhex(proposition_bytes.strip())
+        except ValueError:
+            logger("SignPublicKey: proposition_bytes is not valid hex.")
+            return None
+    else:
+        proposition_bytes = bytes(proposition_bytes or b"")
+
+    if not proposition_bytes:
+        logger("SignPublicKey: empty proposition_bytes.")
         return None
 
+    # Sign ONLY when the challenged proposition bytes exactly match the raw propositionBytes
+    # derived from the local wallet. Byte equality (==), never identity (`is`).
+    local_proposition = owner_proposition_bytes(get_public_key(mnemonic_phrase=mnemonic_phrase))
+    if proposition_bytes != local_proposition:
+        logger("SignPublicKey: challenged proposition bytes are not mine; refusing to sign.")
+        return None
+
+    if isinstance(message, (bytes, bytearray)):
+        message = bytes(message).decode("utf-8")
+
     signed_msg = bip_ecdsa_sign(mnemonic_phrase=mnemonic_phrase, message=message)
-    logger(f"Message signed successfully for public key: {public_key}")
+    logger("Ownership challenge signed for the local wallet propositionBytes.")
     return signed_msg
 
 
 """
-    Verifica que el Perfil de Reputación y la cartera almacenados en la configuración están relacionados (el perfil pertenece a esa cartera).
+    Verifica que el Perfil de Reputación y la cartera del nodo están relacionados
+    (el perfil pertenece a la única cartera configurada).
 """
-def validate_reputation_proof_ownership(
-        mnemonic_phrase: str = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC"),   # TODO Esto no hace falta que sea un parámetro.
-        proof_id: str = ConfigManager().get("ledgers.ergo.reputation.REPUTATION_PROOF_ID")
-    ) -> bool:
+def validate_reputation_proof_ownership(proof_id: Optional[str] = None) -> bool:
+    config = ConfigManager()
+    mnemonic_phrase = config.get("ledgers.ergo.WALLET_MNEMONIC")
+    if proof_id is None:
+        proof_id = config.get("ledgers.ergo.reputation.REPUTATION_PROOF_ID")
+    return _validate_reputation_proof_ownership(mnemonic_phrase=mnemonic_phrase, proof_id=proof_id)
 
+
+def _validate_reputation_proof_ownership(mnemonic_phrase: str, proof_id: str) -> bool:
+    """Internal helper kept explicit so tests can pin a specific mnemonic/proof pair."""
     if not proof_id:
         logger('Missing reputation proof id on configuration, run submit reputation.')
         return False
@@ -228,7 +372,7 @@ def validate_reputation_proof_ownership(
         return False
 
     try:
-        # Obtiene expected_owner (raw propositionBytes) de WALLET_MNEMONIC.
+        # Owner (raw propositionBytes) derived from the single wallet mnemonic.
         address = get_public_key(mnemonic_phrase=mnemonic_phrase)
         expected_owner = owner_proposition_bytes_hex(address)
 
@@ -237,10 +381,6 @@ def validate_reputation_proof_ownership(
             logger(f"No boxes found for proof id {proof_id}")
             return False
 
-        # Reject proofs that are not on the canonical ecosystem contract (ErgoTree v1).
-        # A proof the wallet "owns" (R7 matches) but that sits on a different contract
-        # instance — e.g. a locally-recompiled v0 ErgoTree — is invisible to
-        # reputation-systems/reputation-system, so it must NOT be treated as valid.
         off_contract = _boxes_off_canonical_contract(boxes)
         if off_contract:
             logger(
@@ -251,16 +391,11 @@ def validate_reputation_proof_ownership(
             return False
 
         # R7 of a Reputation Box holds the owner's raw propositionBytes (Coll[Byte]).
-        # The reputation_proof.es contract authorises spends with
-        # `INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }`, so R7 is
-        # the raw ErgoTree of the owner — NOT blake2b256(propositionBytes).
         box_owners = {
             _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or ""))
             for box in boxes
         }
 
-        # ¡Si alguno de todos los boxes de ese perfil difiere, se considera invalido!
-        # Política: el R7 de cada caja del perfil debe ser el propositionBytes de la cartera.
         valid: bool = box_owners == {expected_owner}
         if not valid:
             logger(
@@ -273,14 +408,51 @@ def validate_reputation_proof_ownership(
         return False
 
 
+def _search_boxes_by_r7(ergo, contract_address: str, owner_proposition_hex: str) -> Optional[List[dict]]:
+    """
+    Try to fetch only the boxes whose R7 equals ``owner_proposition_hex`` using the
+    explorer's register-filtered search, avoiding a full paginated scan of the contract.
+
+    Returns the matching boxes, or ``None`` when the endpoint does not support register
+    filtering (so the caller falls back to the paginated scan).
+    """
+    import requests
+
+    api_url = str(ergo.get_api_url()).rstrip("/")
+    url = f"{api_url}/api/v1/boxes/unspent/search"
+    body = {
+        "ergoTreeTemplateHash": None,
+        "registers": {"R7": "0e" + format(len(owner_proposition_hex) // 2, "02x") + owner_proposition_hex},
+        "constants": {},
+        "assets": [],
+    }
+    try:
+        response = requests.post(url, json=body, params={"limit": 50, "offset": 0}, timeout=30)
+    except requests.RequestException as e:
+        logger(f"R7-filtered search unavailable ({e}); falling back to paginated scan.")
+        return None
+    if response.status_code != 200:
+        logger(f"R7-filtered search returned HTTP {response.status_code}; falling back to paginated scan.")
+        return None
+    try:
+        items = response.json().get("items", [])
+    except ValueError:
+        return None
+    # Filter defensively client-side: the endpoint matches on address, not always R7.
+    return [
+        b for b in items
+        if _decode_coll_byte_hex(str(_extract_register_value(b, "R7") or "")) == owner_proposition_hex
+    ]
+
+
 def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     """
     Look up an on-chain reputation proof owned by the given wallet.
 
-    Scans the unspent boxes of the reputation contract (a single address, paginated) and
-    returns the proof (token) id of the first box whose R7 equals the wallet's owner
-    propositionBytes — breaking as soon as it matches. Returns None when the wallet owns
-    no proof.
+    Prefers an R7/propositionBytes-filtered query; only when the endpoint lacks register
+    filtering does it fall back to the bounded paginated scan of the canonical contract
+    address (with the existing pagination/timeout/log limits). Returns the proof (token) id
+    of the first box whose R7 equals the wallet's owner propositionBytes, or None.
     """
     node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
     if not node_url:
@@ -291,14 +463,19 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     ergo = appkit.ErgoAppKit(node_url=node_url)
 
     owner_proposition = owner_proposition_bytes_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
-    # nodo's own proof carries R4 = the CELAUT node-type NFT; used to avoid adopting an
-    # unrelated proof (e.g. a user profile) that the same wallet happens to own.
     node_type_nft = ConfigManager().get("ledgers.ergo.reputation.CELAUT_NODE_TYPE_NFT_ID") or ""
-    # Scan the canonical ecosystem contract address (ErgoTree v1), where every real
-    # reputation proof lives — not a locally-recompiled v0 address.
     contract_address = REPUTATION_PROOF_ADDRESS
 
-    # TODO This pattern is heavily expensive. Must filter by R7 directly!!  Modify iter_unspent_boxes_by_address, its only used here.
+    # Fast path: register-filtered lookup.
+    filtered = _search_boxes_by_r7(ergo, contract_address, owner_proposition)
+    if filtered is not None:
+        for box in filtered:
+            token_id = _node_own_proof_token_id(box, owner_proposition, node_type_nft)
+            if token_id:
+                return token_id
+        return None
+
+    # Fallback: bounded paginated scan, breaking on first match.
     for box in iter_unspent_boxes_by_address(ergo, contract_address):
         token_id = _node_own_proof_token_id(box, owner_proposition, node_type_nft)
         if token_id:
@@ -310,25 +487,14 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
 def sync_reputation_proof_ownership() -> bool:
     """
     Reconcile the locally configured reputation proof with the wallet mnemonic and report
-    every step to the user. Wraps the (unmodified) validate_reputation_proof_ownership:
-
-    1. Validate the currently configured proof.
-    2. If it is invalid and a proof id is configured, remove it from the config.
-    3. If a wallet mnemonic is configured, look up an on-chain reputation proof owned by
-       that wallet and, if one exists, store its id in the config.
-    4. Print every step for the user.
-
-    Returns True when the node ends up in a coherent state (valid proof, or no proof and
-    none discoverable); False when an on-chain lookup failed.
+    every step to the user.
     """
     config = ConfigManager()
-    mnemonic_phrase = config.get("ledgers.ergo.WALLET_MNEMONIC") or config.get("WALLET_MNEMONIC")
+    mnemonic_phrase = config.get("ledgers.ergo.WALLET_MNEMONIC")
     proof_id = config.get("ledgers.ergo.reputation.REPUTATION_PROOF_ID")
 
-    # 1. Validate current state via the shared function (kept untouched).
-    is_valid = validate_reputation_proof_ownership(mnemonic_phrase=mnemonic_phrase, proof_id=proof_id)
+    is_valid = validate_reputation_proof_ownership(proof_id=proof_id)
 
-    # 2. Drop a configured proof that does not belong to this wallet.
     if is_valid:
         print(f"Reputation proof {proof_id} is valid for the configured wallet.", flush=True)
     else:
@@ -339,10 +505,9 @@ def sync_reputation_proof_ownership() -> bool:
         print(_msg, flush=True)
         logger(_msg)
         config.set("ledgers.ergo.reputation.REPUTATION_PROOF_ID", "")
-        proof_id=None
+        proof_id = None
 
-    # 3. With a wallet but no (valid) proof id, try to discover one on-chain.
-    if not is_valid and not mnemonic_phrase:  # Can't only be valid in case it has mnemonic and proof_id.
+    if not is_valid and not mnemonic_phrase:
         print(
             "No wallet mnemonic is configured; skipping the on-chain reputation proof lookup.",
             flush=True,
@@ -350,11 +515,9 @@ def sync_reputation_proof_ownership() -> bool:
         return False
 
     if proof_id:
-        # Already have a valid, configured proof — nothing to discover.
         return True
 
     else:
-        # In case there is no proof_id
         try:
             discovered_proof_id = __find_reputation_proof_id_for_owner(mnemonic_phrase)
         except JavaDependencyMissing:
