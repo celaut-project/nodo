@@ -190,7 +190,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
     def Observe(self, request_iterator, context, **kwargs):
         yield from ObserveIterable(request_iterator, context)
 
-    def SignPublicKey(self, request_iterator, context, **kwargs):
+    def SignPublicKey(self, request_iterator, context, **kwargs):  # TODO Esta llamada la debe utilizar validate_contract_ledger para verificar que el peer_id posee el R7.
         try:
             log.LOGGER('Signing public key.')
             
