@@ -26,7 +26,7 @@ The payment system between nodes is also implemented on **Ergo**. Here's how it 
 
 #### 1. Client Registration and Authentication
 
-- Each node shares a **public wallet** (a payment address) with its clients.
+- Each node shares its **wallet** payment address with its clients.
 - Clients (other nodes or external entities) register with the node and receive a **private key** to authenticate themselves.
 
 #### 2. ERG Deposits (Gas)
@@ -37,41 +37,58 @@ The payment system between nodes is also implemented on **Ergo**. Here's how it 
 #### 3. Deposit Verification
 
 - The node verifies that the **deposit token** belongs to the client.
-- If valid and the funds have been transferred to the node's **public wallet**, the client’s gas is increased according to the amount of ERGs received.
+- If valid and the funds have been transferred to the node's **wallet**, the client’s gas is increased according to the amount of ERGs received.
 - The deposit token is then marked as **approved**.
 
 #### 4. Wallet Management in the Nodo
 
-The node uses two wallets to manage its funds and transactions:
+The node controls a **single wallet**, derived from `ledgers.ergo.WALLET_MNEMONIC`.
+The flow is:
 
-- **Public wallet** (also called *hot wallet*): This is the address where clients send their payments. The node cannot spend directly from this wallet, but a **maintenance thread** transfers processed funds to the **sending wallet** or to a **cold address**.
+```
+client  ->  single wallet  ->  cold wallet (when both thresholds are met)
+```
 
-- **Sending wallet** (also hot): This is the wallet the node uses to pay and increase its gas on other nodes. It has a funds limit defined by **HOT_WALLET_LIMITS**. If the node operator has configured a **cold address**, the excess funds are sent to that address.
+- **Single wallet** (hot): the address clients pay directly to, and the wallet the
+  node signs with (payments to other nodes, reputation proofs). There is no separate
+  receiver/auxiliary wallet and no intermediate transfer between node wallets.
+- **Cold wallet** (`ledgers.ergo.payments.COLD_WALLET`): a **public address only** —
+  never a mnemonic inside Nodo. Excess funds are swept here for safekeeping.
 
-#### 5. Cold Address
+#### 5. Cold-wallet sweep
 
-- The **cold address** is a **public address** provided by the node operator. It is where ERGs that the node doesn't need for immediate operations are sent. It serves as a secure reserve for long-term management.
+A maintenance thread periodically computes, in integer nanoERG:
 
-#### 6. Maintenance and Transfers
+```
+excess = balance - HOT_WALLET_LIMITS - fee
+```
 
-- The **maintenance thread** moves funds from the **public wallet** to the **sending wallet** only when the deposit tokens have been verified and approved.
-- Funds are transferred to the **sending wallet** until it reaches the **HOT_WALLET_LIMITS**.
-- If this limit is exceeded, the excess ERGs are sent to the **cold address** provided by the node operator.
-- Additionally, a configurable percentage (default set to 0%) is transferred to a **donation wallet** for the **celaut-project/node** to support project development.
+and sweeps `excess` to the cold wallet only when it is at least
+`COLD_WALLET_MIN_TRANSFER` **and** a valid Ergo output. The hot-wallet limit, the
+transaction fee, and the technical minimum box value are always retained. When
+`COLD_WALLET` is empty, nothing is swept. A configurable percentage
+(`DONATION_PERCENTAGE`, default 0%) of the swept amount may go to a donation wallet.
+Amounts, destination, and transaction id are logged; mnemonics never are.
+
+`HOT_WALLET_LIMITS` and `COLD_WALLET_MIN_TRANSFER` are decimal ERG strings, parsed once
+with `Decimal` into nanoERG; all subsequent arithmetic is integer nanoERG.
 
 #### Difference Between Wallet and Address
 
-- **Wallet**: When the node has access to the **seed** of a wallet, it can sign transactions.
-- **Address**: The node only holds the **public key** for an address, meaning it can only send funds to it, without the ability to spend received funds.
+- **Wallet**: when the node has the **mnemonic**, it can sign transactions.
+- **Address**: a **public address** (e.g. the cold wallet) the node can only send to.
 
-The node operator can manually provide the seed for the **sending wallet** in case the node has been reinstalled. This wallet is also used to add reputation proofs to the network.
+The node operator can manually provide the mnemonic for the single wallet if the node
+has been reinstalled. This same wallet is used to add reputation proofs to the network.
 
 ### Sharing Information Between Celaut Nodes
 
 When a node shares information with another, it provides two key elements:
 
 1. The **ID of its reputation proof**.
-2. The **payment address** (its public wallet) where funds should be sent.
+2. The payment **contract**, whose `script` is the raw **ErgoTree / propositionBytes** of
+   the wallet's P2PK payment boxes. A readable address is derived only locally, for UI or
+   logs; it is never the value exchanged between nodes.
 
 
 #### Contract Definition
@@ -103,6 +120,7 @@ The reputation system utilizes the following fields:
 
 ##### Payment System
 The payment system implements these fields:
-- `contract`: Contains the sigma script of the box that holds each payment
+- `contract`/`script` xattr: the raw ErgoTree/propositionBytes of the box that receives each payment
 - `ledger`: Identifies the ledger system as `"ergo"`
-- `token_id`: Specifies the spending address of the Ergo contract
+- `script`: the raw **ErgoTree / propositionBytes** of the wallet's P2PK payment box
+- `token_id`: `"ERG"` for native-ERG payments
