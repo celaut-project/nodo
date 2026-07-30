@@ -94,7 +94,11 @@ def address_from_proposition_bytes(proposition_bytes: Union[bytes, str], mainnet
     jpype, org_appkit = _org_appkit()
     raw = as_bytes(proposition_bytes)
     serializer = jpype.JPackage("sigmastate").serialization.ErgoTreeSerializer.DefaultSerializer()
-    ergo_tree = serializer.deserializeErgoTree(jpype.JArray(jpype.JByte)(list(raw)))
+    # JVM bytes are signed (-128..127); map unsigned propositionBytes into range so
+    # high bytes (e.g. 0xcd in the 0008cd P2PK prefix) do not overflow JByte. Inverse
+    # of serialize_ergo_tree(b + 256) % 256 unsigned mapping.
+    signed = [b - 256 if b > 127 else b for b in raw]
+    ergo_tree = serializer.deserializeErgoTree(jpype.JArray(jpype.JByte)(signed))
     network = org_appkit.NetworkType.MAINNET if mainnet else org_appkit.NetworkType.TESTNET
     return org_appkit.Address.fromErgoTree(ergo_tree, network)
 
