@@ -131,9 +131,9 @@ floating-point errors.
 
 #### 4.1 `proof_validation.py`
 
-1. Replace the current `get_script(...) == CONTRACT.encode(...)` comparison
-   with comparison against the compiled raw ErgoTree. Cover incompatible
-   script, ledger, and token-id cases.
+1. Review the existing comparison to confirm that it uses the compiled raw
+   ErgoTree rather than `CONTRACT.encode(...)`, and verify coverage of
+   incompatible script, ledger, and token-id cases.
 2. Implement `_validate_box_structure` instead of the current `return True`:
    validate required register presence and types, reputation token data, and
    that `box.ergoTree` matches the ErgoTree of `CONTRACT`.
