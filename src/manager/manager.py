@@ -181,10 +181,10 @@ def get_execute_client(gas_amount: int, external: bool = False) -> str:
     return _acquire_dev_client(prefix, pool_size, gas_amount)
             
 def add_reputation_proof(contract_ledger, peer_id) -> bool:
-    from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_reputation_contract_ledger
+    from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_ergo_reputation
 
     # Verify contract and ledger compatibility and ownership
-    if not validate_reputation_contract_ledger(contract_ledger, peer_id):
+    if not validate_ergo_reputation(contract_ledger, peer_id):
         log.LOGGER(f"Not supported reputation contract.")
         return False
     
@@ -253,7 +253,6 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
         except Exception as e:
             log.LOGGER(f"Uncontrolled error adding reputation proof {contract} for peer {peer_id}: {e}")
 
-    print(peer)
     return peer_id
 
 def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str):

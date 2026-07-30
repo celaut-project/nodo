@@ -89,33 +89,6 @@ def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
     java_boxes = get_boxes_by_token_ids(ergo, node_url, [token_id])
     return [json.loads(str(box.toJson(True))) for box in java_boxes]
 
-
-def _validate_box_structure(box: dict) -> bool:
-    additional = box.get("additionalRegisters")
-    if not isinstance(additional, dict):
-        return False
-
-    required = {"R4", "R5", "R6", "R7", "R8", "R9"}
-    if not required.issubset(additional.keys()):
-        return False
-
-    r6 = _extract_register_value(box, "R6")
-    r8 = _extract_register_value(box, "R8")
-    r7 = _extract_register_value(box, "R7")
-
-    if r6 is None or str(r6).lower() not in {"true", "false", "0400", "0401"}:
-        return False
-    if r8 is None or str(r8).lower() not in {"true", "false", "0400", "0401"}:
-        return False
-    if _decode_coll_byte_hex(str(r7) if r7 is not None else "") is None:
-        return False
-
-    assets = box.get("assets", [])
-    if not isinstance(assets, list) or len(assets) == 0:
-        return False
-
-    return True
-
 """
     Valida si el Perfil de Reputación es soportado por el nodo y si existe en la red. 
     Utilizado para validar Perfil de un par antes de almacenarlo.
@@ -132,7 +105,7 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
         logger(
             "Contract ledger not compatible: "
             f"ledger={contract_ledger.ledger.formal == ergo_ledger.formal} "
-            f"script={get_script(contract_ledger) == CONTRACT.encode('utf-8')}"
+            f"script={get_script(contract_ledger) == CONTRACT.encode('utf-8')}"  # TODO get_script debe de contener el ergotree v1 tal como lo usan las boxes (no el código fuente .es)  Esto debe modificarse tambien al generar la prueba de reputación que se envia a los pares cuando te conectan.
         )
         return False
 
@@ -151,9 +124,14 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
         logger(f"No unspent boxes found for proof token {token_id}")
         return False
 
+    def _validate_box_structure(box):  # TODO Aqui se debe validar que el ergotree del box es el correspondiente a CONTRACT
+        return True
+
     if not all(_validate_box_structure(box) for box in boxes):
-        logger("Structural validation failed for one or more reputation boxes")
+        logger("Structural validation of the reputation profile failed.")
         return False
+
+    # TODO Verificar grpc(peer_id).SignPublicKey(public_key=r7_raw_proposition_bytes, to_sign=random_str) y verificar la respuesta.
 
     return True
 
@@ -161,7 +139,7 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
 """
     Firma un mensaje con WALLET_MNEMONIC para demostrarle a un tercero autenticidad.
 """
-def sign_message(public_key, message) -> str | None:
+def sign_message(public_key, message) -> str | None:  # TODO Ojo!! Aqui public key debe ser el raw ergotree. Entre si, los nodos se intercambian ergotree en crudo.
     mnemonic_phrase = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC") or ConfigManager().get("WALLET_MNEMONIC")
     if not mnemonic_phrase:
         logger("Missing wallet mnemonic configuration")
@@ -185,7 +163,7 @@ def sign_message(public_key, message) -> str | None:
     Verifica que el Perfil de Reputación y la cartera almacenados en la configuración están relacionados (el perfil pertenece a esa cartera).
 """
 def validate_reputation_proof_ownership(
-        mnemonic_phrase: str = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC"), 
+        mnemonic_phrase: str = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC"),   # TODO Esto no hace falta que sea un parámetro.
         proof_id: str = ConfigManager().get("reputation.REPUTATION_PROOF_ID")
     ) -> bool:
 
@@ -250,6 +228,7 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     owner_proposition = owner_proposition_bytes_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
     contract_address = get_contract_address(ergo, CONTRACT)
 
+    # TODO This pattern is heavily expensive. Must filter by R7 directly!!  Modify iter_unspent_boxes_by_address, its only used here.
     for box in iter_unspent_boxes_by_address(ergo, contract_address):
         # R7 stores the box owner's raw propositionBytes (Coll[Byte]).
         if _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or "")) != owner_proposition:
