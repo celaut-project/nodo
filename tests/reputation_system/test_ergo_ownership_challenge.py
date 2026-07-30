@@ -96,10 +96,10 @@ class ChallengePeerOwnershipTests(unittest.TestCase):
 
         def fake_client_grpc(method, input, indices_parser, partitions_message_mode_parser, timeout):
             from protos import celaut_pb2
-            captured["challenge"] = bytes(input.to_sign).decode("utf-8")
-            captured["prop"] = bytes(input.proposition_bytes)
+            captured["challenge"] = input.to_sign
+            captured["prop"] = bytes.fromhex(input.public_key)
             sig = bip_ecdsa_sign(MNEMONIC, captured["challenge"])
-            yield celaut_pb2.SignResponse(signed=bytes.fromhex(sig))
+            yield celaut_pb2.SignResponse(signed=sig)
 
         with mock.patch("src.utils.utils.generate_uris_by_peer_id", return_value=iter(["1.2.3.4:5"])), \
              mock.patch("grpc.insecure_channel"), \
@@ -112,8 +112,8 @@ class ChallengePeerOwnershipTests(unittest.TestCase):
     def test_challenge_fails_on_bad_signature(self):
         def fake_client_grpc(method, input, indices_parser, partitions_message_mode_parser, timeout):
             from protos import celaut_pb2
-            sig = bip_ecdsa_sign(OTHER, bytes(input.to_sign).decode("utf-8"))  # wrong key
-            yield celaut_pb2.SignResponse(signed=bytes.fromhex(sig))
+            sig = bip_ecdsa_sign(OTHER, input.to_sign)  # wrong key
+            yield celaut_pb2.SignResponse(signed=sig)
 
         with mock.patch("src.utils.utils.generate_uris_by_peer_id", return_value=iter(["1.2.3.4:5"])), \
              mock.patch("grpc.insecure_channel"), \
@@ -128,7 +128,7 @@ class ChallengePeerOwnershipTests(unittest.TestCase):
     def test_challenge_fails_on_empty_signature(self):
         def fake_client_grpc(method, input, indices_parser, partitions_message_mode_parser, timeout):
             from protos import celaut_pb2
-            yield celaut_pb2.SignResponse(signed=b"")
+            yield celaut_pb2.SignResponse(signed="")
 
         with mock.patch("src.utils.utils.generate_uris_by_peer_id", return_value=iter(["1.2.3.4:5"])), \
              mock.patch("grpc.insecure_channel"), \

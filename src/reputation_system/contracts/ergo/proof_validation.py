@@ -217,8 +217,8 @@ def _challenge_peer_ownership(peer_id: str, owner_proposition_hex: str) -> bool:
                 method=stub.SignPublicKey,
                 partitions_message_mode_parser=True,
                 input=celaut.SignRequest(
-                    proposition_bytes=proposition_bytes,
-                    to_sign=challenge.encode("utf-8"),
+                    public_key=proposition_bytes.hex(),
+                    to_sign=challenge,
                 ),
                 indices_parser=celaut.SignResponse,
                 timeout=_CHALLENGE_TIMEOUT_SECONDS,
@@ -236,7 +236,7 @@ def _challenge_peer_ownership(peer_id: str, owner_proposition_hex: str) -> bool:
         logger(f"Ownership challenge: peer {peer_id} returned no signature.")
         return False
 
-    signature_hex = bytes(response.signed).hex()
+    signature_hex = response.signed or ""
     if not bip_ecdsa_verify_proposition(proposition_bytes, challenge, signature_hex):
         logger(f"Ownership challenge: peer {peer_id} signature did not verify against R7.")
         return False
