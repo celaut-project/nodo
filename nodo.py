@@ -224,6 +224,8 @@ if __name__ == '__main__':
                     "\n- refresh_clients"
                     "\n- tx_history"
                     "\n- increase_peer_deposit <peer id> <gas to add>"
+                    "\n- verify_reputation <peer id>  (validate a peer's on-chain reputation proof + ownership challenge)"
+                    "\n- pay_and_verify <peer id> <amount in ERG>  (pay a peer via the single-wallet flow and verify it)"
                     "\n- local_docker_packer <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
                     "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
                     "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
@@ -654,6 +656,30 @@ if __name__ == '__main__':
             case "increase_peer_deposit":
                 from src.commands.increase_peer_deposit import increase_peer_deposit
                 increase_peer_deposit(peer_id=sys.argv[2], gas=int(sys.argv[3]))
+
+            case "verify_reputation":
+                if len(sys.argv) < 3:
+                    print("Usage: nodo verify_reputation <peer_id>", flush=True)
+                    os._exit(1)
+                try:
+                    from src.commands.verify_reputation import verify_reputation
+                    ok = verify_reputation(peer_id=sys.argv[2])
+                except JavaDependencyMissing as e:
+                    print_java_dependency_error(e)
+                    os._exit(1)
+                os._exit(0 if ok else 1)
+
+            case "pay_and_verify":
+                if len(sys.argv) < 4:
+                    print("Usage: nodo pay_and_verify <peer_id> <amount_erg>", flush=True)
+                    os._exit(1)
+                try:
+                    from src.commands.pay_and_verify import pay_and_verify
+                    ok = pay_and_verify(peer_id=sys.argv[2], amount_erg=sys.argv[3])
+                except JavaDependencyMissing as e:
+                    print_java_dependency_error(e)
+                    os._exit(1)
+                os._exit(0 if ok else 1)
 
             case "local_docker_packer":
                 # Run docker commands in nodo's isolated Docker context (the
