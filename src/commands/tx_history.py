@@ -13,48 +13,29 @@ def tx_history():
     print("=" * 50)
     
     try:
-        # Get wallet addresses
-        sending_address, receiving_address = _get_wallet_addresses()
-        
-        # Display transaction history for both wallets
-        _display_wallet_transactions("Sending Wallet", sending_address)
-        print()  # Add spacing between sections
-        _display_wallet_transactions("Receiver Wallet", receiving_address)
-        
+        # Single wallet.
+        address = _get_wallet_address()
+        _display_wallet_transactions("Wallet", address)
+
     except Exception as e:
         LOGGER(f"Error in tx_history command: {str(e)}")
         print(f"Error retrieving transaction history: {str(e)}")
 
 
-def _get_wallet_addresses() -> Tuple[str, str]:
+def _get_wallet_address() -> str:
     """
-    Retrieve both wallet addresses using existing Ergo utilities.
-    
-    Returns:
-        Tuple of (sending_address, receiving_address) as strings
-        
+    Retrieve the single wallet address using existing Ergo utilities.
+
     Raises:
         Exception: If wallet configuration is missing or invalid
     """
     try:
-        from src.payment_system.contracts.ergo.interface import (
-            __get_sender_addr,
-            WALLET_MNEMONIC,
-            AUXILIAR_MNEMONIC
-        )
+        from src.payment_system.contracts.ergo.interface import get_wallet_address
 
-        # Get sending wallet address
-        sending_addr = __get_sender_addr(WALLET_MNEMONIC())
-        sending_address = str(sending_addr.toString())
-        
-        # Get receiving wallet address  
-        receiving_addr = __get_sender_addr(AUXILIAR_MNEMONIC)
-        receiving_address = str(receiving_addr.toString())
-        
-        return sending_address, receiving_address
-        
+        return get_wallet_address()
+
     except Exception as e:
-        raise Exception(f"Failed to retrieve wallet addresses: {str(e)}")
+        raise Exception(f"Failed to retrieve wallet address: {str(e)}")
 
 
 def _display_wallet_transactions(wallet_type: str, address: str):
@@ -62,7 +43,7 @@ def _display_wallet_transactions(wallet_type: str, address: str):
     Display transaction history for a specific wallet.
     
     Args:
-        wallet_type: Type of wallet (e.g., "Sending Wallet", "Receiver Wallet")
+        wallet_type: Type of wallet (e.g., "Wallet")
         address: Wallet address to fetch transactions for
     """
     print(f"[{wallet_type}] - Address: {address}")
