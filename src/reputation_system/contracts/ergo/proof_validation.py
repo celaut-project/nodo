@@ -216,7 +216,7 @@ def sign_message(public_key, message) -> str | None:  # TODO Ojo!! Aqui public k
 """
 def validate_reputation_proof_ownership(
         mnemonic_phrase: str = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC"),   # TODO Esto no hace falta que sea un parámetro.
-        proof_id: str = ConfigManager().get("reputation.REPUTATION_PROOF_ID")
+        proof_id: str = ConfigManager().get("ledgers.ergo.reputation.REPUTATION_PROOF_ID")
     ) -> bool:
 
     if not proof_id:
@@ -293,7 +293,7 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     owner_proposition = owner_proposition_bytes_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
     # nodo's own proof carries R4 = the CELAUT node-type NFT; used to avoid adopting an
     # unrelated proof (e.g. a user profile) that the same wallet happens to own.
-    node_type_nft = ConfigManager().get("reputation.CELAUT_NODE_TYPE_NFT_ID") or ""
+    node_type_nft = ConfigManager().get("ledgers.ergo.reputation.CELAUT_NODE_TYPE_NFT_ID") or ""
     # Scan the canonical ecosystem contract address (ErgoTree v1), where every real
     # reputation proof lives — not a locally-recompiled v0 address.
     contract_address = REPUTATION_PROOF_ADDRESS
@@ -323,7 +323,7 @@ def sync_reputation_proof_ownership() -> bool:
     """
     config = ConfigManager()
     mnemonic_phrase = config.get("ledgers.ergo.WALLET_MNEMONIC") or config.get("WALLET_MNEMONIC")
-    proof_id = config.get("reputation.REPUTATION_PROOF_ID") or config.get("REPUTATION_PROOF_ID")
+    proof_id = config.get("ledgers.ergo.reputation.REPUTATION_PROOF_ID")
 
     # 1. Validate current state via the shared function (kept untouched).
     is_valid = validate_reputation_proof_ownership(mnemonic_phrase=mnemonic_phrase, proof_id=proof_id)
@@ -338,7 +338,7 @@ def sync_reputation_proof_ownership() -> bool:
         )
         print(_msg, flush=True)
         logger(_msg)
-        config.set("reputation.REPUTATION_PROOF_ID", "")
+        config.set("ledgers.ergo.reputation.REPUTATION_PROOF_ID", "")
         proof_id=None
 
     # 3. With a wallet but no (valid) proof id, try to discover one on-chain.
@@ -366,7 +366,7 @@ def sync_reputation_proof_ownership() -> bool:
             return False
 
         if discovered_proof_id:
-            config.set("reputation.REPUTATION_PROOF_ID", discovered_proof_id)
+            config.set("ledgers.ergo.reputation.REPUTATION_PROOF_ID", discovered_proof_id)
             _msg = (
                 f"Found reputation proof {discovered_proof_id} owned by the configured wallet; "
                 "saved it to the node configuration."
