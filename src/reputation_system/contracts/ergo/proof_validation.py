@@ -5,12 +5,15 @@ from protos import celaut_pb2 as celaut
 
 from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign
 from src.reputation_system.contracts.ergo.utils import (
-    get_contract_address,
     get_public_key,
     iter_unspent_boxes_by_address,
     owner_proposition_bytes_hex,
 )
-from src.reputation_system.envs import CONTRACT, ergo_ledger
+from src.reputation_system.envs import (
+    REPUTATION_PROOF_ADDRESS,
+    REPUTATION_PROOF_ERGO_TREE,
+    ergo_ledger,
+)
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
 from src.utils.java_dependency import (
@@ -75,6 +78,54 @@ def _extract_register_value(box: dict, register: str) -> Optional[str]:
     return None
 
 
+def _boxes_off_canonical_contract(boxes: List[dict]) -> List[str]:
+    """
+    Return the ErgoTrees of any boxes NOT sitting on the canonical reputation contract.
+
+    A proof the wallet "owns" (its R7 matches) but whose box lives on a different contract
+    instance — e.g. a locally-recompiled ErgoTree v0 — is invisible to
+    reputation-systems/reputation-system. Boxes without an ``ergoTree`` field are left to
+    the ownership check (not flagged here).
+    """
+    canonical = REPUTATION_PROOF_ERGO_TREE.lower()
+    return [
+        b["ergoTree"]
+        for b in boxes
+        if b.get("ergoTree") and b["ergoTree"].lower() != canonical
+    ]
+
+
+def _node_own_proof_token_id(box: dict, owner_proposition: str, node_type_nft: str) -> Optional[str]:
+    """
+    If ``box`` is the node's OWN reputation proof owned by ``owner_proposition``, return its
+    token id; otherwise None.
+
+    nodo mints its proof with R7 = owner propositionBytes, R4 = the CELAUT node-type NFT,
+    and R5 self-pointing to the proof's own token id (see transaction.py). The wallet may
+    also own unrelated proofs — e.g. a user profile of a different type, or reputation-edge
+    boxes pointing at another object — which must NOT be adopted as the node's proof.
+    """
+    if _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or "")) != owner_proposition:
+        return None
+
+    assets = box.get("assets") or []
+    token_id = assets[0].get("tokenId") if assets else None
+    if not token_id:
+        return None
+
+    r4 = (_decode_coll_byte_hex(str(_extract_register_value(box, "R4") or "")) or "").lower()
+    r5 = (_decode_coll_byte_hex(str(_extract_register_value(box, "R5") or "")) or "").lower()
+
+    # R5 must self-point: an identity/node proof, not a reputation edge to another object.
+    if r5 != token_id.lower():
+        return None
+    # When configured, R4 must be the node-type NFT — never a user PROFILE_TYPE_NFT etc.
+    if node_type_nft and r4 != node_type_nft.lower():
+        return None
+
+    return token_id
+
+
 def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
     from src.reputation_system.contracts.ergo.utils import get_boxes_by_token_ids
 
@@ -96,16 +147,17 @@ def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
 def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> bool:
     _ = peer_id  # retained to keep public signature stable.
 
+    expected_script = bytes.fromhex(REPUTATION_PROOF_ERGO_TREE)
     compatibility = (
         contract_ledger.ledger.formal == ergo_ledger.formal
-        and get_script(contract_ledger) == CONTRACT.encode("utf-8")
+        and get_script(contract_ledger) == expected_script
     )  # TODO Could check at Reputation System to consider tag-prose-formal equivalences.
 
     if not compatibility:
         logger(
             "Contract ledger not compatible: "
             f"ledger={contract_ledger.ledger.formal == ergo_ledger.formal} "
-            f"script={get_script(contract_ledger) == CONTRACT.encode('utf-8')}"  # TODO get_script debe de contener el ergotree v1 tal como lo usan las boxes (no el código fuente .es)  Esto debe modificarse tambien al generar la prueba de reputación que se envia a los pares cuando te conectan.
+            f"script={get_script(contract_ledger) == expected_script}"
         )
         return False
 
@@ -185,6 +237,19 @@ def validate_reputation_proof_ownership(
             logger(f"No boxes found for proof id {proof_id}")
             return False
 
+        # Reject proofs that are not on the canonical ecosystem contract (ErgoTree v1).
+        # A proof the wallet "owns" (R7 matches) but that sits on a different contract
+        # instance — e.g. a locally-recompiled v0 ErgoTree — is invisible to
+        # reputation-systems/reputation-system, so it must NOT be treated as valid.
+        off_contract = _boxes_off_canonical_contract(boxes)
+        if off_contract:
+            logger(
+                f"Reputation proof {proof_id} is not on the canonical contract "
+                f"(expected ErgoTree {REPUTATION_PROOF_ERGO_TREE[:16]}…, "
+                f"found {[t[:16] + '…' for t in off_contract]}); rejecting."
+            )
+            return False
+
         # R7 of a Reputation Box holds the owner's raw propositionBytes (Coll[Byte]).
         # The reputation_proof.es contract authorises spends with
         # `INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }`, so R7 is
@@ -226,17 +291,18 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     ergo = appkit.ErgoAppKit(node_url=node_url)
 
     owner_proposition = owner_proposition_bytes_hex(get_public_key(mnemonic_phrase=mnemonic_phrase))
-    contract_address = get_contract_address(ergo, CONTRACT)
+    # nodo's own proof carries R4 = the CELAUT node-type NFT; used to avoid adopting an
+    # unrelated proof (e.g. a user profile) that the same wallet happens to own.
+    node_type_nft = ConfigManager().get("reputation.CELAUT_NODE_TYPE_NFT_ID") or ""
+    # Scan the canonical ecosystem contract address (ErgoTree v1), where every real
+    # reputation proof lives — not a locally-recompiled v0 address.
+    contract_address = REPUTATION_PROOF_ADDRESS
 
     # TODO This pattern is heavily expensive. Must filter by R7 directly!!  Modify iter_unspent_boxes_by_address, its only used here.
     for box in iter_unspent_boxes_by_address(ergo, contract_address):
-        # R7 stores the box owner's raw propositionBytes (Coll[Byte]).
-        if _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or "")) != owner_proposition:
-            continue
-
-        assets = box.get("assets") or []
-        if assets and assets[0].get("tokenId"):
-            return assets[0]["tokenId"]
+        token_id = _node_own_proof_token_id(box, owner_proposition, node_type_nft)
+        if token_id:
+            return token_id
 
     return None
 

@@ -723,6 +723,132 @@ function Invoke-Wsl([string]$Command) {
     }
 }
 
+# ====================== NETWORKING HELPERS ======================
+
+function Merge-WslConfig {
+    # Return the merged .wslconfig text: existing content is preserved verbatim
+    # (comments, other sections, unrelated keys) while the required [wsl2] keys are
+    # set/updated in place. Missing keys are appended to [wsl2]; the section is
+    # created if absent.
+    param(
+        [string]$Path,
+        [System.Collections.Specialized.OrderedDictionary]$Wsl2
+    )
+
+    if (Test-Path $Path) {
+        $raw = Get-Content -Path $Path -Raw -ErrorAction SilentlyContinue
+        if ($null -eq $raw) { $raw = "" }
+        $lines = $raw -split "`r?`n"
+    }
+    else {
+        $lines = @()
+    }
+
+    $result   = New-Object System.Collections.Generic.List[string]
+    $inWsl2   = $false
+    $seenWsl2 = $false
+    $applied  = @{}
+
+    foreach ($line in $lines) {
+        $trim = $line.Trim()
+
+        if ($trim -match '^\[(.+)\]$') {
+            # Leaving a section: flush any required keys not yet written into [wsl2].
+            if ($inWsl2) {
+                foreach ($k in $Wsl2.Keys) {
+                    if (-not $applied.ContainsKey($k)) {
+                        $result.Add("$k=$($Wsl2[$k])")
+                        $applied[$k] = $true
+                    }
+                }
+            }
+            $inWsl2 = ($matches[1].Trim() -ieq 'wsl2')
+            if ($inWsl2) { $seenWsl2 = $true }
+            $result.Add($line)
+            continue
+        }
+
+        if ($inWsl2 -and $trim -match '^([^#;=]+)=(.*)$') {
+            $key = $matches[1].Trim()
+            if ($Wsl2.Contains($key)) {
+                if (-not $applied.ContainsKey($key)) {
+                    $result.Add("$key=$($Wsl2[$key])")   # override in place
+                    $applied[$key] = $true
+                }
+                continue   # drop duplicate/old lines for this key
+            }
+        }
+
+        $result.Add($line)
+    }
+
+    if ($inWsl2) {
+        foreach ($k in $Wsl2.Keys) {
+            if (-not $applied.ContainsKey($k)) {
+                $result.Add("$k=$($Wsl2[$k])")
+                $applied[$k] = $true
+            }
+        }
+    }
+
+    if (-not $seenWsl2) {
+        if ($result.Count -gt 0 -and $result[$result.Count - 1].Trim() -ne "") {
+            $result.Add("")
+        }
+        $result.Add("[wsl2]")
+        foreach ($k in $Wsl2.Keys) {
+            $result.Add("$k=$($Wsl2[$k])")
+        }
+    }
+
+    return ($result -join "`r`n").TrimEnd() + "`r`n"
+}
+
+function Set-WslHyperVFirewall {
+    # Allow inbound traffic to the WSL virtual machine through the Hyper-V firewall
+    # so that services on 0.0.0.0 inside WSL are reachable from the LAN when
+    # networkingMode=mirrored is in effect. The VMCreatorId is discovered
+    # dynamically and the rule is created only once.
+    if (-not (Get-Command Get-NetFirewallHyperVVMCreator -ErrorAction SilentlyContinue) -or
+        -not (Get-Command New-NetFirewallHyperVRule -ErrorAction SilentlyContinue)) {
+        Write-Warning "Hyper-V firewall cmdlets are unavailable on this Windows build; skipping the WSL inbound rule."
+        return
+    }
+
+    try {
+        $creator = Get-NetFirewallHyperVVMCreator -ErrorAction Stop |
+            Where-Object { $_.FriendlyName -eq "WSL" } |
+            Select-Object -First 1
+
+        if (-not $creator) {
+            Write-Warning "No WSL Hyper-V VM creator found; skipping the inbound firewall rule."
+            return
+        }
+
+        $vmCreator = $creator.VMCreatorId
+
+        $existing = Get-NetFirewallHyperVRule -VMCreatorId $vmCreator -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq "WSL-Allow-All" -or $_.DisplayName -eq "WSL Allow All Inbound" }
+
+        if ($existing) {
+            Write-Info "Hyper-V firewall rule 'WSL-Allow-All' already exists; reusing it."
+            return
+        }
+
+        New-NetFirewallHyperVRule `
+            -Name "WSL-Allow-All" `
+            -DisplayName "WSL Allow All Inbound" `
+            -VMCreatorId $vmCreator `
+            -Direction Inbound `
+            -Action Allow -ErrorAction Stop | Out-Null
+
+        Write-Success "[OK] Hyper-V inbound firewall rule created (WSL reachable from the LAN)"
+    }
+    catch {
+        Write-Warning "Could not configure the Hyper-V firewall rule: $_"
+    }
+}
+
 Write-Info "======================================================================="
 Write-Info "  WSL2 + Windows 11 + Nodo Setup - Automated Installation Script"
 Write-Info "======================================================================="
@@ -819,27 +945,36 @@ Write-Info "[STEP 3/8] Configuring WSL2 settings..."
 
 $wslConfigPath = Join-Path $env:USERPROFILE ".wslconfig"
 
-$wslConfigContent = @"
-[wsl2]
-nestedVirtualization=true
-kernel=C:\\wsl-kernel\\bzImage
-"@
-
-# Backup existing .wslconfig only if it exists and differs from what we are about to write
-if (Test-Path $wslConfigPath) {
-    $existingRaw = Get-Content -Path $wslConfigPath -Raw
-    if ($existingRaw -eq $null) { $existingContent = "" } else { $existingContent = $existingRaw }
-    if ($existingContent.Trim() -ne $wslConfigContent.Trim()) {
-        $wslConfigOldPath = Join-Path $env:USERPROFILE ".wslconfig.old"
-        Copy-Item -Path $wslConfigPath -Destination $wslConfigOldPath -Force
-        Write-Info "Existing .wslconfig differs — backed up to: $wslConfigOldPath"
-    } else {
-        Write-Info ".wslconfig already matches target content — no backup needed"
-    }
+# Keys this installer must ensure under [wsl2]. networkingMode=mirrored lets WSL
+# share the Windows network stack so services are reachable via the host IP.
+# Any other existing keys/sections in the user's .wslconfig are preserved.
+$requiredWsl2 = [ordered]@{
+    'nestedVirtualization' = 'true'
+    'kernel'               = 'C:\\wsl-kernel\\bzImage'
+    'networkingMode'       = 'mirrored'
 }
 
-Set-Content -Path $wslConfigPath -Value $wslConfigContent -Force
-Write-Success "[OK] .wslconfig created/updated at: $wslConfigPath"
+$wslConfigContent = Merge-WslConfig -Path $wslConfigPath -Wsl2 $requiredWsl2
+
+# Only touch the file (and back it up) when the merged content actually differs.
+$configChanged = $true
+if (Test-Path $wslConfigPath) {
+    $existingRaw = Get-Content -Path $wslConfigPath -Raw
+    if ($null -eq $existingRaw) { $existingRaw = "" }
+    if ($existingRaw.Trim() -eq $wslConfigContent.Trim()) { $configChanged = $false }
+}
+
+if ($configChanged) {
+    if (Test-Path $wslConfigPath) {
+        $wslConfigOldPath = Join-Path $env:USERPROFILE ".wslconfig.old"
+        Copy-Item -Path $wslConfigPath -Destination $wslConfigOldPath -Force
+        Write-Info "Existing .wslconfig backed up to: $wslConfigOldPath"
+    }
+    Set-Content -Path $wslConfigPath -Value $wslConfigContent -Force
+    Write-Success "[OK] .wslconfig updated at: $wslConfigPath"
+} else {
+    Write-Info ".wslconfig already contains the required settings - no changes needed"
+}
 Write-Info "Applied content:"
 Write-Info $wslConfigContent
 
@@ -1026,6 +1161,10 @@ Write-Success "[OK] Internal configuration completed"
 Write-Info ""
 Update-UI -Status "Configuring network..." -Progress 80
 Write-Info "[STEP 6/8] Configuring Windows-to-WSL network routing..."
+
+Write-Info "Configuring the Hyper-V firewall so WSL services are reachable from the LAN..."
+Set-WslHyperVFirewall
+
 
 try {
     $wslIP = & wsl -d $DistroName -- hostname -I *>&1 | Out-String
