@@ -8,6 +8,11 @@ SCRIPT_KEY = "script"
 ADDRESS_KEY = "address"
 TOKEN_ID_KEY = "token_id"
 REPUTATION_KEY_KEY = "reputation_key"
+# Stable, wallet-independent contract-type identity used to match the same kind of
+# payment contract across nodes (its sha3 is the contract_hash). Distinct from the
+# per-instance ``script`` xattr, which holds the raw ErgoTree/propositionBytes of the
+# specific wallet box and varies per node.
+CONTRACT_TYPE_KEY = "contract_type"
 
 
 def set_xattr_text(contract: celaut_pb2.Contract, key: str, value: str) -> None:
@@ -51,6 +56,14 @@ def set_reputation_key(contract: celaut_pb2.Contract, reputation_key: str) -> No
 
 def get_reputation_key(contract: celaut_pb2.Contract) -> str:
     return get_xattr_text(contract, REPUTATION_KEY_KEY)
+
+
+def set_contract_type(contract: celaut_pb2.Contract, contract_type: bytes) -> None:
+    contract.xattrs[CONTRACT_TYPE_KEY] = contract_type
+
+
+def get_contract_type(contract: celaut_pb2.Contract) -> bytes:
+    return contract.xattrs.get(CONTRACT_TYPE_KEY, b"")
 
 
 def contract_shape_bytes(contract: celaut_pb2.Contract) -> bytes:

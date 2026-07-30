@@ -66,14 +66,10 @@ DEMOS = [simulated.CONTRACT_HASH] if SIMULATED else []
 
 def print_payment_info() -> str:
     ergo = _ergo_interface()
-    main, aux = ergo.get_balances()
-    ergo_addr, ergo_amount = main
-    aux_addr, aux_amount = aux
-    total_amount = ergo_amount + aux_amount
+    address, amount = ergo.get_balance()
+    cold_wallet = ergo.COLD_WALLET()
 
-    return (
-        f"Sending Wallet: {ergo_addr}, Amount: {ergo_amount} ERGs \n"
-        f"Receiver Wallet: {aux_addr}, Received: {aux_amount} ERGs \n"
-        f"Total: {total_amount} ERGs \n"
-       #  "\n**Important Note**: The node periodically transfers funds from the Receiver Wallet to the Sending Wallet, where most deposits accumulate. To increase the node's deposit, please send funds to the Sending Wallet Address."
-    )
+    info = f"Wallet: {address}, Amount: {amount} ERGs \n"
+    if cold_wallet:
+        info += f"Cold Wallet: {cold_wallet} \n"
+    return info

@@ -15,7 +15,7 @@ from bee_rpc import client as bee
 
 from protos import celaut_pb2_grpc, celaut_pb2, celaut_pb2
 from src.utils import logger as log, logger
-from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_script, get_token_id
+from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_contract_type, get_script, get_token_id
 from src.utils.config import ConfigManager
 from src.utils.singleton import Singleton
 from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
@@ -23,7 +23,7 @@ from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
 env_manager = ConfigManager()
 
 CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = env_manager.get("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME")
-TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get("TOTAL_REPUTATION_TOKEN_AMOUNT"))
+TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get("ledgers.ergo.reputation.TOTAL_REPUTATION_TOKEN_AMOUNT"))
 CLIENT_EXPIRATION_TIME = env_manager.get("CLIENT_EXPIRATION_TIME")
 STORAGE = env_manager.get("STORAGE")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
@@ -742,7 +742,7 @@ class SQLConnection(metaclass=Singleton):
                         instance_json = MessageToJson(data['instance'])
 
                         # Calculate the percentage of the total reputation token amount
-                        if reputation_index - last_index_on_ledger >= env_manager.get("LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
+                        if reputation_index - last_index_on_ledger >= env_manager.get("ledgers.ergo.reputation.LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
                             logger.LOGGER(f'Peer {peer_id} with proof {reputation_proof_id} meets the submission threshold.')
                             needs_submit = True
                             percentage_amount = ((reputation_score / total_amount) * token_amount) if total_amount else 0
@@ -1121,25 +1121,31 @@ class SQLConnection(metaclass=Singleton):
             peer_id (Optional[str]): The ID of the peer or None for a self contract (to be send to clients.)
             gas_price (Int): Gas per unit of the token if the contract represents one, or gas per contract spend/execution/usage.
         """
-        contract_str: bytes = get_script(contract) or contract_shape_bytes(contract)
-        address: str = get_address(contract)
+        # The per-instance value is the raw ErgoTree/propositionBytes (script xattr). It is
+        # stored as hex so it round-trips as binary, never as a textual address. The
+        # contract_hash keys on the STABLE, wallet-independent contract_type so the same
+        # kind of contract matches across nodes (falling back to the script/shape when no
+        # explicit type is advertised, e.g. the simulator).
+        raw_script: bytes = get_script(contract)
+        type_bytes: bytes = get_contract_type(contract) or raw_script or contract_shape_bytes(contract)
+        instance_value: str = raw_script.hex() if raw_script else get_address(contract)
 
         ledger = self.check_if_ledger_exists(ledger_to_check=contract.ledger)
         ledger_str: bytes = ledger.SerializeToString()
 
-        contract_hash: str = sha3_256(contract_str).hexdigest()
+        contract_hash: str = sha3_256(type_bytes).hexdigest()
         ledger_hash: str = sha3_256(ledger_str).hexdigest()
 
         gas_str = str(gas_price)
 
         self._execute("INSERT OR IGNORE INTO contract (hash, content) VALUES (?,?)",
-                    (contract_hash, contract_str))
+                    (contract_hash, type_bytes))
 
         self._execute("INSERT OR IGNORE INTO ledger (hash, content) VALUES (?,?)",
                     (ledger_hash, ledger_str))
 
         self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_hash, contract_hash, peer_id, gas_price) "
-                    "VALUES (?,?,?,?,?)", (address, ledger_hash, contract_hash, peer_id, gas_str))
+                    "VALUES (?,?,?,?,?)", (instance_value, ledger_hash, contract_hash, peer_id, gas_str))
 
     def get_peer_contract_instances(self, contract_hash: str, peer_id: str = "LOCAL") -> Generator[Tuple[bytes, celaut_pb2.Contract.Ledger], None, None]:
         """
@@ -1163,7 +1169,13 @@ class SQLConnection(metaclass=Singleton):
             ledger = celaut_pb2.Contract.Ledger()
             ledger.ParseFromString(ledger_str)
 
-            script: bytes = row['address'].encode('utf-8')
+            stored = row['address'] or ""
+            try:
+                # Ergo instances store the raw ErgoTree/propositionBytes as hex.
+                script: bytes = bytes.fromhex(stored)
+            except (ValueError, TypeError):
+                # Legacy/simulator instances stored a textual value.
+                script = stored.encode('utf-8')
 
             yield script, ledger
 

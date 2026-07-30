@@ -221,11 +221,9 @@ pub struct NodeInfo {
     pub version: String,
     pub address: String,
     pub reputation_proof: String,
-    pub sender_address: String,
-    pub sender_balance: Option<f64>,
-    pub receiver_address: String,
-    pub receiver_balance: Option<f64>,
-    pub total_balance: Option<f64>,
+    pub wallet_address: String,
+    pub wallet_balance: Option<f64>,
+    pub cold_wallet_address: String,
     pub error: String,
 }
 
@@ -1068,16 +1066,12 @@ pub fn parse_node_info(output: &str) -> NodeInfo {
             info.address = value.to_string();
         } else if let Some(value) = line.strip_prefix("Reputation Proof ID: ") {
             info.reputation_proof = value.to_string();
-        } else if let Some(value) = line.strip_prefix("Sending Wallet: ") {
+        } else if let Some(value) = line.strip_prefix("Wallet: ") {
             let (address, balance) = parse_wallet_line(value, ", Amount:");
-            info.sender_address = address;
-            info.sender_balance = balance;
-        } else if let Some(value) = line.strip_prefix("Receiver Wallet: ") {
-            let (address, balance) = parse_wallet_line(value, ", Received:");
-            info.receiver_address = address;
-            info.receiver_balance = balance;
-        } else if let Some(value) = line.strip_prefix("Total: ") {
-            info.total_balance = parse_erg_amount(value);
+            info.wallet_address = address;
+            info.wallet_balance = balance;
+        } else if let Some(value) = line.strip_prefix("Cold Wallet: ") {
+            info.cold_wallet_address = value.trim().to_string();
         }
     }
     info
@@ -1537,15 +1531,13 @@ mod tests {
 Nodo version: abc123\n\
 Nodo address: 10.0.0.1:5000\n\
 Reputation Proof ID: proof-id\n\
-Sending Wallet: 9sender, Amount: 1.25 ERGs\n\
-Receiver Wallet: 9receiver, Received: 0.75 ERGs\n\
-Total: 2 ERGs\n";
+Wallet: 9wallet, Amount: 1.25 ERGs\n\
+Cold Wallet: 9cold\n";
         let info = parse_node_info(output);
         assert_eq!(info.service_status, "running");
-        assert_eq!(info.sender_address, "9sender");
-        assert_eq!(info.sender_balance, Some(1.25));
-        assert_eq!(info.receiver_balance, Some(0.75));
-        assert_eq!(info.total_balance, Some(2.0));
+        assert_eq!(info.wallet_address, "9wallet");
+        assert_eq!(info.wallet_balance, Some(1.25));
+        assert_eq!(info.cold_wallet_address, "9cold");
     }
 
     #[test]

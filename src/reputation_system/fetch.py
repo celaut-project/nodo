@@ -10,7 +10,7 @@ env_manager = ConfigManager()
 def local_proofs() -> Generator[celaut.Contract, None, None]:
     from src.reputation_system.envs import REPUTATION_PROOF_ERGO_TREE, ergo_ledger
 
-    proof_id = env_manager.get('REPUTATION_PROOF_ID')
+    proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
     if proof_id:
         contract = celaut.Contract(ledger=ergo_ledger)
         set_script(contract, bytes.fromhex(REPUTATION_PROOF_ERGO_TREE))
