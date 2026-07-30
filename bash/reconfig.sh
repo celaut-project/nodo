@@ -36,8 +36,9 @@ NC='\033[0m'
 # --- Variables ---
 ALL_VARIABLES=(
     "ledgers.ergo.NODE_URL" "ledgers.ergo.WALLET_MNEMONIC"
-    "reputation.REPUTATION_PROOF_ID"
-    "payments.PAYMENTS_RECEIVER_WALLET" "payments.DONATION_PERCENTAGE"
+    "ledgers.ergo.reputation.REPUTATION_PROOF_ID"
+    "ledgers.ergo.payments.COLD_WALLET" "ledgers.ergo.payments.HOT_WALLET_LIMITS"
+    "ledgers.ergo.payments.COLD_WALLET_MIN_TRANSFER" "ledgers.ergo.payments.DONATION_PERCENTAGE"
     "publisher.REPOSITORY" "publisher.TOKEN"
     "packer.local" "packer.PACKER_SERVICE_URL" "packer.PACKER_SOURCE_URL"
     "logs.DEBUG_MODE" "logs.MEMORY_LOGS"
@@ -100,6 +101,8 @@ validate_token() { [[ ${#1} -ge 10 ]]; }
 validate_bool() { [[ $1 == "true" || $1 == "false" ]]; }
 validate_percent() { [[ $1 =~ ^[0-9]+$ ]] && [ "$1" -ge 0 ] && [ "$1" -le 100 ]; }
 validate_pos_int() { [[ $1 =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ]; }
+# ERG decimal string (non-negative), e.g. "100" or "0.5".
+validate_erg() { [[ $1 =~ ^[0-9]+(\.[0-9]+)?$ ]]; }
 # Packer service id: a 64-char hex content hash (sha256).
 validate_service_id() { [[ $1 =~ ^[0-9a-fA-F]{64}$ ]]; }
 
@@ -191,9 +194,11 @@ run_quick_setup() {
 
     handle_variable "ledgers.ergo.NODE_URL" "Node URL" validate_url
     handle_variable "ledgers.ergo.WALLET_MNEMONIC" "Wallet Mnemonic" validate_wallet
-    handle_variable "reputation.REPUTATION_PROOF_ID" "Reputation ID" validate_wallet
-    handle_variable "payments.PAYMENTS_RECEIVER_WALLET" "Receiver Wallet" validate_wallet
-    handle_variable "payments.DONATION_PERCENTAGE" "Donation %" 
+    handle_variable "ledgers.ergo.reputation.REPUTATION_PROOF_ID" "Reputation ID" validate_wallet
+    handle_variable "ledgers.ergo.payments.COLD_WALLET" "Cold Wallet (public address, Enter = keep, '-' = clear)" validate_wallet opturl
+    handle_variable "ledgers.ergo.payments.HOT_WALLET_LIMITS" "Hot wallet limit (ERG)" validate_erg
+    handle_variable "ledgers.ergo.payments.COLD_WALLET_MIN_TRANSFER" "Cold-wallet minimum transfer (ERG)" validate_erg
+    handle_variable "ledgers.ergo.payments.DONATION_PERCENTAGE" "Donation %"
 
     echo -e "\n${MAGENTA}--- Publisher Setup ---${NC}"
     init_publisher_defaults
@@ -262,11 +267,13 @@ run_advanced_setup() {
                 handle_variable "ledgers.ergo.WALLET_MNEMONIC" "Mnemonic" validate_wallet
                 ;;
             2)
-                handle_variable "reputation.REPUTATION_PROOF_ID" "Reputation ID" validate_wallet
+                handle_variable "ledgers.ergo.reputation.REPUTATION_PROOF_ID" "Reputation ID" validate_wallet
                 ;;
             3)
-                handle_variable "payments.PAYMENTS_RECEIVER_WALLET" "Wallet" validate_wallet
-                handle_variable "payments.DONATION_PERCENTAGE" "Donation %"
+                handle_variable "ledgers.ergo.payments.COLD_WALLET" "Cold Wallet (public address, Enter = keep, '-' = clear)" validate_wallet opturl
+                handle_variable "ledgers.ergo.payments.HOT_WALLET_LIMITS" "Hot wallet limit (ERG)" validate_erg
+                handle_variable "ledgers.ergo.payments.COLD_WALLET_MIN_TRANSFER" "Cold-wallet minimum transfer (ERG)" validate_erg
+                handle_variable "ledgers.ergo.payments.DONATION_PERCENTAGE" "Donation %"
                 ;;
             4)
                 configure_publisher
