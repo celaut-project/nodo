@@ -197,25 +197,24 @@ fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
 }
 
 fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
-    let sender = nonempty(&app.node_info.sender_address, "not configured");
-    let receiver = nonempty(&app.node_info.receiver_address, "not configured");
+    let wallet = nonempty(&app.node_info.wallet_address, "not configured");
+    let cold = nonempty(&app.node_info.cold_wallet_address, "not configured");
     let lines = vec![
         Line::from(vec![
-            Span::styled("Total  ", Style::default().fg(MUTED)),
+            Span::styled("Balance  ", Style::default().fg(MUTED)),
             Span::styled(
-                format_balance(app.node_info.total_balance),
+                format_balance(app.node_info.wallet_balance),
                 Style::default().fg(Color::LightGreen).bold(),
             ),
         ]),
         Line::from(format!(
-            "Send   {}  {}",
-            shorten(sender, 28),
-            format_balance(app.node_info.sender_balance)
+            "Wallet {}  {}",
+            shorten(wallet, 28),
+            format_balance(app.node_info.wallet_balance)
         )),
         Line::from(format!(
-            "Recv   {}  {}",
-            shorten(receiver, 28),
-            format_balance(app.node_info.receiver_balance)
+            "Cold   {}",
+            shorten(cold, 28)
         )),
         Line::from(Span::styled(
             nonempty(&app.node_info.error, "Balances refresh every 60 seconds"),

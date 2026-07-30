@@ -1,11 +1,12 @@
 from bee_rpc import client as bee
+import grpc
 
 from protos import celaut_pb2_grpc, celaut_pb2
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
-from src.utils.contract_xattrs import get_script, get_address
+from src.utils.contract_xattrs import get_script, get_contract_type
 from src.tunneling.rpc_tunnel import service_tunnel
 from src.gateway.utils import generate_node_peer_info
 from src.manager.manager import add_peer_instance, modify_gas_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_gas, \
@@ -152,11 +153,15 @@ class Gateway(celaut_pb2_grpc.Gateway):
             indices=celaut_pb2.Payment,
             partitions_message_mode=True
         ), None)
+        raw_script = get_script(payment.contract)
+        # Select the payment validator by the stable, wallet-independent contract_type; the
+        # raw ErgoTree/propositionBytes travels as ``script`` (never a textual address).
+        contract_type = get_contract_type(payment.contract) or raw_script
         if not validate_payment_process(
                 amount=from_gas_amount(payment.gas_amount),
                 ledger=payment.contract.ledger,
-                contract=get_script(payment.contract),
-                script=get_address(payment.contract).encode("utf-8"),
+                contract=contract_type,
+                script=raw_script,
                 token=payment.deposit_token,
         ):
             raise Exception('Error: payment not valid.')
@@ -190,37 +195,69 @@ class Gateway(celaut_pb2_grpc.Gateway):
     def Observe(self, request_iterator, context, **kwargs):
         yield from ObserveIterable(request_iterator, context)
 
-    def SignPublicKey(self, request_iterator, context, **kwargs):  # TODO Esta llamada la debe utilizar validate_contract_ledger para verificar que el peer_id posee el R7.
+    # Ownership-challenge counterpart: a peer proves it controls the raw propositionBytes
+    # (R7 owner) of a reputation proof by signing our random challenge. This is NOT a
+    # generic "sign an arbitrary public key" operation.
+    _MAX_PROPOSITION_BYTES = 4096
+    _MAX_CHALLENGE_BYTES = 4096
+
+    def SignPublicKey(self, request_iterator, context, **kwargs):
         try:
-            log.LOGGER('Signing public key.')
-            
-            # Parse the input from the request iterator
+            log.LOGGER('Ownership challenge: SignPublicKey request.')
+
             sign_request = next(bee.parse_from_buffer(
                 request_iterator=request_iterator,
                 indices=celaut_pb2.SignRequest,
                 partitions_message_mode=True
             ), None)
-            
+
             if sign_request is None:
-                raise Exception("Invalid input for SignPublicKey method.")
-            
-            # Use the sign_message method to sign the public key
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("Empty SignPublicKey request.")
+                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
+                return
+
+            proposition_hex = (sign_request.public_key or "").strip()
+            try:
+                proposition_bytes = bytes.fromhex(proposition_hex)
+            except (ValueError, TypeError):
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("public_key is not valid hex propositionBytes.")
+                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
+                return
+            challenge = sign_request.to_sign or ""
+
+            if not proposition_bytes or len(proposition_bytes) > self._MAX_PROPOSITION_BYTES:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("proposition_bytes missing or too large.")
+                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
+                return
+            if not challenge or len(challenge) > self._MAX_CHALLENGE_BYTES:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("challenge (to_sign) missing or too large.")
+                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
+                return
+
             from src.reputation_system.contracts.ergo.proof_validation import sign_message
 
-            signed_message = sign_message(
-                public_key=sign_request.public_key,
-                message=sign_request.to_sign
+            signed_hex = sign_message(
+                proposition_bytes=proposition_bytes,
+                message=challenge,
             )
-            
-            # Create the response
-            sign_response = celaut_pb2.SignResponse(
-                signed=signed_message
-            )
-            
-            # Serialize and yield the response
+
+            if not signed_hex:
+                # We do not control those proposition bytes: controlled refusal, not a crash.
+                context.set_code(grpc.StatusCode.PERMISSION_DENIED)
+                context.set_details("Challenged proposition bytes are not owned by this node.")
+                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
+                return
+
             yield from bee.serialize_to_buffer(
-                message_iterator=sign_response
+                celaut_pb2.SignResponse(signed=signed_hex)
             )
-            
+
         except Exception as e:
-            raise Exception('Error in SignPublicKey method: ' + str(e))
+            log.LOGGER(f'Error in SignPublicKey method: {e}')
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details('SignPublicKey failed.')
+            yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
