@@ -214,21 +214,28 @@ class Gateway(celaut_pb2_grpc.Gateway):
             if sign_request is None:
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details("Empty SignPublicKey request.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=b""))
+                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
                 return
 
-            proposition_bytes = bytes(sign_request.proposition_bytes or b"")
-            challenge = bytes(sign_request.to_sign or b"")
+            proposition_hex = (sign_request.public_key or "").strip()
+            try:
+                proposition_bytes = bytes.fromhex(proposition_hex)
+            except (ValueError, TypeError):
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("public_key is not valid hex propositionBytes.")
+                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
+                return
+            challenge = sign_request.to_sign or ""
 
             if not proposition_bytes or len(proposition_bytes) > self._MAX_PROPOSITION_BYTES:
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details("proposition_bytes missing or too large.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=b""))
+                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
                 return
             if not challenge or len(challenge) > self._MAX_CHALLENGE_BYTES:
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details("challenge (to_sign) missing or too large.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=b""))
+                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
                 return
 
             from src.reputation_system.contracts.ergo.proof_validation import sign_message
@@ -242,15 +249,15 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 # We do not control those proposition bytes: controlled refusal, not a crash.
                 context.set_code(grpc.StatusCode.PERMISSION_DENIED)
                 context.set_details("Challenged proposition bytes are not owned by this node.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=b""))
+                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
                 return
 
             yield from bee.serialize_to_buffer(
-                celaut_pb2.SignResponse(signed=bytes.fromhex(signed_hex))
+                celaut_pb2.SignResponse(signed=signed_hex)
             )
 
         except Exception as e:
             log.LOGGER(f'Error in SignPublicKey method: {e}')
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details('SignPublicKey failed.')
-            yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=b""))
+            yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))

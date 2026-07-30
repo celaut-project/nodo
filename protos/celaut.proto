@@ -335,17 +335,12 @@ message Refund {
 }
 
 message SignRequest {
-    // Raw owner ErgoTree / propositionBytes being challenged for ownership.
-    // Never a textual address or hex string; the exact bytes a reputation box
-    // stores in its R7 register.
-    bytes proposition_bytes = 1;
-    // Random ownership challenge (opaque bytes) the peer must sign.
-    bytes to_sign = 2;
+    string public_key = 1;
+    string to_sign = 2;
 }
 
 message SignResponse {
-    // Raw signature bytes over the challenge, produced by the owner key.
-    bytes signed = 1;
+    string signed = 1;
 }
 
 message Payment {
