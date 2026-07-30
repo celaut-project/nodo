@@ -15,13 +15,13 @@ ERGO_NODE_URL = lambda: env_manager.get("ledgers.ergo.NODE_URL")
 SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF = env_manager.get('SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF')
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
-DEFAULT_TOKEN_AMOUNT = int(env_manager.get('TOTAL_REPUTATION_TOKEN_AMOUNT'))
+DEFAULT_TOKEN_AMOUNT = int(env_manager.get('ledgers.ergo.reputation.TOTAL_REPUTATION_TOKEN_AMOUNT'))
 PLAIN_TEXT_TYPE_NFT_ID = env_manager.get(
-    "reputation.PLAIN_TEXT_TYPE_NFT_ID",
+    "ledgers.ergo.reputation.PLAIN_TEXT_TYPE_NFT_ID",
     "",
 )
 CELAUT_NODE_TYPE_NFT_ID = env_manager.get(
-    "reputation.CELAUT_NODE_TYPE_NFT_ID",
+    "ledgers.ergo.reputation.CELAUT_NODE_TYPE_NFT_ID",
     "",
 )
 
@@ -177,7 +177,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         raise Exception("No input box available.")
 
     external_token_value = int(sum([obj[1] for obj in objects if obj[0]]))
-    expected_total_reputation = int(env_manager.get('TOTAL_REPUTATION_TOKEN_AMOUNT'))
+    expected_total_reputation = int(env_manager.get('ledgers.ergo.reputation.TOTAL_REPUTATION_TOKEN_AMOUNT'))
 
     if not external_token_value:
         is_self = any(obj[0] for obj in objects)
@@ -278,9 +278,9 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
     tx_id = ergo.txId(signed_tx)
 
-    if env_manager.get('REPUTATION_PROOF_ID') != proof_id:
+    if env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID') != proof_id:
         LOGGER(f"Store reputation proof id {proof_id} on config file.")
-        env_manager.set("reputation.REPUTATION_PROOF_ID", proof_id)
+        env_manager.set("ledgers.ergo.reputation.REPUTATION_PROOF_ID", proof_id)
 
     return tx_id
 
@@ -289,7 +289,7 @@ def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
     try:
         from src.payment_system.contracts.ergo.interface import get_amount_by_addr
 
-        proof_id = env_manager.get('reputation.REPUTATION_PROOF_ID') or env_manager.get('REPUTATION_PROOF_ID')
+        proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
         mnemonic = env_manager.get('ledgers.ergo.WALLET_MNEMONIC') or env_manager.get('WALLET_MNEMONIC')
         node_url = ERGO_NODE_URL()
 

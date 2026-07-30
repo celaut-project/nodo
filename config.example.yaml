@@ -327,27 +327,34 @@ general_flags:
   SUBMIT_REPUTATION_AT_INIT: false
   SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF: true
 
-# Reputation and payments configuration should be set in the ledgers section, depending on the ledger being used.
-reputation:
-  LEDGER_REPUTATION_SUBMISSION_THRESHOLD: 10
-  TOTAL_REPUTATION_TOKEN_AMOUNT: 1000000000
-  REPUTATION_PROOF_ID: ""
-  PLAIN_TEXT_TYPE_NFT_ID: "8299d98e15ebee7fa39ad716de7c8bb191790a1bf4b7c3f91af35a0e36187706"
-  CELAUT_NODE_TYPE_NFT_ID: "64060577c3393e0e3cf8938ec8e6a2002ded27ece17750aa5add7d5c3e1227ba"
-
-payments:
-  PAYMENT_MANAGER_ITERATION_TIME: 86400
-  PAYMENTS_RECEIVER_WALLET: ""
-  DONATION_WALLET: "9gGZp7HRAFxgGWSwvS4hCbxM2RpkYr6pHvwpU4GPrpvxY7Y2nQo"
-  DONATION_PERCENTAGE: "0.00"
-
+# Reputation and payments are configured per-ledger, under ledgers.<ledger>.
+# There is a SINGLE Ergo wallet (ledgers.ergo.WALLET_MNEMONIC). Clients pay
+# directly to its derived P2PK address; excess is swept to a cold wallet
+# (public address only) once both thresholds below are met:
+#     client  ->  single wallet  ->  cold wallet (when both thresholds met)
 ledgers:
   ergo:
     tags: [ ergo ]
     GAS_PER_ERG: 1.0e+58
     NODE_URL: "https://node.sigmaspace.io"
     GENESIS_BLOCK_ID: "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
-    HOT_WALLET_LIMITS: 100
+    # The one wallet the node controls. Leave empty to disable payments/reputation,
+    # or set to "auto" to have the node generate a fresh mnemonic on first load.
     WALLET_MNEMONIC: ""
-    AUXILIARY_MNEMONIC: ""
     HTTP_PEERS_PATH: "${main.STORAGE}/ergo_http_peers.json"
+    reputation:
+      LEDGER_REPUTATION_SUBMISSION_THRESHOLD: 10
+      TOTAL_REPUTATION_TOKEN_AMOUNT: 1000000000
+      REPUTATION_PROOF_ID: ""
+      PLAIN_TEXT_TYPE_NFT_ID: "8299d98e15ebee7fa39ad716de7c8bb191790a1bf4b7c3f91af35a0e36187706"
+      CELAUT_NODE_TYPE_NFT_ID: "64060577c3393e0e3cf8938ec8e6a2002ded27ece17750aa5add7d5c3e1227ba"
+    payments:
+      PAYMENT_MANAGER_ITERATION_TIME: 86400
+      # Maximum balance (ERG, decimal string) retained in the operational wallet.
+      HOT_WALLET_LIMITS: "100"
+      # Public Ergo address funds are swept to. Empty disables sweeping. Never a mnemonic.
+      COLD_WALLET: ""
+      # Minimum sweep amount (ERG, decimal string). Prevents dust transfers.
+      COLD_WALLET_MIN_TRANSFER: "1"
+      DONATION_WALLET: "9gGZp7HRAFxgGWSwvS4hCbxM2RpkYr6pHvwpU4GPrpvxY7Y2nQo"
+      DONATION_PERCENTAGE: "0.00"

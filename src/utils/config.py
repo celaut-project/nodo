@@ -180,6 +180,17 @@ class ConfigManager(metaclass=Singleton):
 
             original_config = copy.deepcopy(self._config)
 
+            # Fail fast on removed keys from the pre-single-wallet layout. There is no
+            # migration: a stale config must be updated by hand.
+            from src.utils.config_validation import _find_removed_keys, ConfigValidationError
+            _removed = _find_removed_keys(self._config)
+            if _removed:
+                raise ConfigValidationError(
+                    "Removed configuration keys are still present (no migration is "
+                    "provided; update the config manually): "
+                    + ", ".join(sorted(_removed))
+                )
+
             # Process dynamic values.
             gateway_port = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
             if gateway_port == "auto":
@@ -190,18 +201,19 @@ class ConfigManager(metaclass=Singleton):
                 self._set_nested(self._config, ["network", "GATEWAY_PORT"], port)
                 self.log(f"Dynamically assigned Gateway Port: {port}")
 
-            # Handle auto mnemonics in ledgers.
+            # Handle auto mnemonic for the single wallet of each ledger.
+            # ``ledgers`` is a mapping keyed by ledger name (e.g. ``ledgers.ergo``);
+            # each ledger owns exactly ONE wallet (WALLET_MNEMONIC). There is no
+            # auxiliary/receiver wallet.
             ledgers = self._config.get("ledgers")
-            if isinstance(ledgers, list):
-                for i, ledger in enumerate(ledgers):
+            if isinstance(ledgers, dict):
+                for name, ledger in ledgers.items():
+                    if not isinstance(ledger, dict):
+                        continue
                     if ledger.get("WALLET_MNEMONIC") == "auto":
                         mnemonic = Mnemonic("english").generate(strength=128)
-                        ledgers[i]["WALLET_MNEMONIC"] = mnemonic
-                        self.log(f"Generated new mnemonic for ledger '{ledger.get('name', i)}'")
-                    if ledger.get("AUXILIARY_MNEMONIC") == "auto":
-                        mnemonic = Mnemonic("english").generate(strength=128)
-                        ledgers[i]["AUXILIARY_MNEMONIC"] = mnemonic
-                        self.log(f"Generated new auxiliary mnemonic for ledger '{ledger.get('name', i)}'")
+                        ledger["WALLET_MNEMONIC"] = mnemonic
+                        self.log(f"Generated new mnemonic for ledger '{name}'")
 
             config_changed = self._config != original_config
 
@@ -233,6 +245,17 @@ class ConfigManager(metaclass=Singleton):
         with self._lock:
             self.ensure_loaded()
             self._save_config_unlocked()
+
+    def validate_ergo(self, payments_enabled: bool = True, reputation_enabled: bool = True) -> None:
+        """Validate the Ergo ledger config; raises ConfigValidationError when invalid."""
+        from src.utils.config_validation import validate_ergo_config
+        with self._lock:
+            self.ensure_loaded()
+            validate_ergo_config(
+                self._config,
+                payments_enabled=payments_enabled,
+                reputation_enabled=reputation_enabled,
+            )
 
     def get(self, key: str, default: Any = None) -> Any:
         """

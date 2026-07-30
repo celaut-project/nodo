@@ -246,7 +246,7 @@ if __name__ == '__main__':
 
                 print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}", flush=True)
 
-                reputation_proof_id = env_manager.get('REPUTATION_PROOF_ID')
+                reputation_proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
                 
                 try:
                     from src.payment_system.contracts.envs import print_payment_info
