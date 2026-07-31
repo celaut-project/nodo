@@ -152,6 +152,25 @@ class PayCommandTests(unittest.TestCase):
         # And it must NOT claim a local (payer-side) verify happened.
         self.assertNotIn("VERIFIED", out)
 
+    def test_paying_line_uses_scientific_gas_format(self):
+        # Regression for Josemi's feedback: the initial "Paying ..." line must
+        # sci-format the (huge ~1e63) gas integer via ssformat, matching the gas
+        # readback style below it — not dump the raw monster int.
+        from src.utils.logger import ssformat
+
+        before = (5_000, 1000, 5.0, "2026-07-31T09:00:00")
+        after = (7_000, 1000, 7.0, "2026-07-31T10:00:00")
+        _result, out = self._run(
+            balance_ok=True, scripts=[(b"s", object())], paid=True,
+            readback=[before, after], capture=True,
+        )
+        # gas_amount is computed with the same mocked GAS_PER_ERG=1000 the command
+        # uses, so this is exactly what pay() should have formatted.
+        gas_amount = pv._erg_to_gas("1")
+        self.assertIn(f"Paying 1 ERG ({ssformat(gas_amount)} gas)", out)
+        # The raw integer must NOT appear on the Paying line.
+        self.assertNotIn(f"({gas_amount} gas)", out)
+
 
 if __name__ == "__main__":
     unittest.main()
