@@ -2,6 +2,13 @@
 
 This guide will help you understand and use the available commands in **Nodo**, a service orchestration tool for distributed networks. Below is a complete list of commands along with usage examples.
 
+> New to Nodo? Start with the [End-to-End Walkthrough](WALKTHROUGH.md) (pack →
+> estimate → execute → call → observe → kill, with example output), then use this
+> page as the per-command reference. Concepts are defined in
+> [`CONCEPTS.md`](CONCEPTS.md); configuration in [`CONFIG.md`](CONFIG.md);
+> packing in [`PACKING.md`](PACKING.md); problems in
+> [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
+
 ---
 
 ## Non-interactive use (automation / agents) ⚙️
