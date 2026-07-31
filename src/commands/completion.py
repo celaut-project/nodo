@@ -40,7 +40,7 @@ SERVICE_COMMANDS = [
 INSTANCE_COMMANDS = ["kill", "observe", "increase_gas", "decrease_gas"]
 
 # Commands whose first positional argument is a peer id.
-PEER_COMMANDS = ["disconnect", "increase_peer_deposit", "verify_reputation", "pay_and_verify"]
+PEER_COMMANDS = ["disconnect", "increase_peer_deposit", "verify_reputation", "pay"]
 
 # Commands whose first positional argument is a filesystem path (a project dir,
 # a .bee file, a config dir, …). These get file/dir completion, not an id list.
@@ -96,7 +96,7 @@ COMMANDS = sorted(
         "tx_history",
         "increase_peer_deposit",
         "verify_reputation",
-        "pay_and_verify",
+        "pay",
         "local_docker_packer",
         "daemon",
         "doctor",
