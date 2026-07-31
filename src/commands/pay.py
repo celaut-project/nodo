@@ -101,7 +101,7 @@ def pay(peer_id: str, amount_erg: str) -> bool:
         return False
 
     print(
-        f"Paying {amount_erg} ERG ({gas_amount} gas) to peer {peer_id} ...",
+        f"Paying {amount_erg} ERG ({ssformat(gas_amount)} gas) to peer {peer_id} ...",
         flush=True,
     )
 
