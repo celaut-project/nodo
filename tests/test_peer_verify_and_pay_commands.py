@@ -1,15 +1,17 @@
-"""Unit tests for the `verify_reputation` and `pay_and_verify` dev commands.
+"""Unit tests for the `verify_reputation` and `pay` dev commands.
 
 These pin the command wiring — arg handling, reuse of the existing reputation /
 payment primitives, and the safety guards — with everything on-chain / gRPC
 mocked. No JVM, no network, no broadcast.
 """
 
+import io
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 from src.commands import verify_reputation as vr
-from src.commands import pay_and_verify as pv
+from src.commands import pay as pv
 
 
 class VerifyReputationCommandTests(unittest.TestCase):
@@ -64,8 +66,9 @@ class VerifyReputationCommandTests(unittest.TestCase):
         self.assertEqual(called["args"][0], "peer-1")
 
 
-class PayAndVerifyCommandTests(unittest.TestCase):
-    """`pay_and_verify(peer_id, amount_erg)` reuses the single-wallet payment flow."""
+class PayCommandTests(unittest.TestCase):
+    """`pay(peer_id, amount_erg)` reuses the single-wallet payment flow and, on
+    success, reads back this node's gas balance registered on the peer."""
 
     def test_erg_to_gas_inverts_gas_to_nanoerg(self):
         with mock.patch.object(pv, "ConfigManager",
@@ -76,15 +79,19 @@ class PayAndVerifyCommandTests(unittest.TestCase):
     def test_rejects_invalid_amount(self):
         with mock.patch.object(pv, "ConfigManager",
                                return_value=mock.Mock(get=lambda k: "1000")):
-            self.assertFalse(pv.pay_and_verify("peer-1", "not-a-number"))
+            self.assertFalse(pv.pay("peer-1", "not-a-number"))
 
-    def _wire(self, balance_ok, scripts, paid):
-        """Patch the deferred payment/ledger imports the command pulls at call time."""
+    def _wire(self, balance_ok, scripts, paid, readback=None):
+        """Patch the deferred payment/ledger imports the command pulls at call time.
+
+        ``readback`` optionally patches ``pay._read_peer_gas`` so the post-payment
+        gas readback is deterministic without a real DB. It is a list consumed as
+        successive return values (before, after)."""
         import src.payment_system.contracts.ergo.interface as ergo_iface
         import src.payment_system.payment_process as payment_process
         import src.database.access_functions.ledgers as ledgers
 
-        return [
+        patches = [
             mock.patch.object(pv, "ConfigManager",
                               return_value=mock.Mock(get=lambda k: "1000")),
             mock.patch.object(ergo_iface, "check_sender_balance",
@@ -94,12 +101,22 @@ class PayAndVerifyCommandTests(unittest.TestCase):
             mock.patch.object(payment_process, "increase_deposit_on_peer",
                               return_value=paid),
         ]
+        if readback is not None:
+            patches.append(
+                mock.patch.object(pv, "_read_peer_gas", side_effect=list(readback))
+            )
+        return patches
 
-    def _run(self, balance_ok, scripts, paid):
-        for p in self._wire(balance_ok, scripts, paid):
+    def _run(self, balance_ok, scripts, paid, readback=None, capture=False):
+        for p in self._wire(balance_ok, scripts, paid, readback):
             p.start()
         self.addCleanup(mock.patch.stopall)
-        return pv.pay_and_verify("peer-1", "1")
+        buf = io.StringIO()
+        if capture:
+            with redirect_stdout(buf):
+                result = pv.pay("peer-1", "1")
+            return result, buf.getvalue()
+        return pv.pay("peer-1", "1")
 
     def test_stops_cleanly_on_insufficient_balance(self):
         # No funded wallet -> stop before touching the payment flow.
@@ -108,11 +125,32 @@ class PayAndVerifyCommandTests(unittest.TestCase):
     def test_stops_cleanly_when_peer_has_no_contract(self):
         self.assertFalse(self._run(balance_ok=True, scripts=[], paid=True))
 
-    def test_pass_when_payment_completes_and_peer_verifies(self):
-        self.assertTrue(self._run(balance_ok=True, scripts=[(b"s", object())], paid=True))
+    def test_pass_when_payment_completes(self):
+        # gas readback stubbed: (before, after) -> gas grew by the paid amount.
+        before = (5_000, 1000, 5.0, "2026-07-31T09:00:00")
+        after = (7_000, 1000, 7.0, "2026-07-31T10:00:00")
+        self.assertTrue(
+            self._run(balance_ok=True, scripts=[(b"s", object())], paid=True,
+                      readback=[before, after])
+        )
 
-    def test_fail_when_payment_not_verified(self):
+    def test_fail_when_payment_not_accepted(self):
         self.assertFalse(self._run(balance_ok=True, scripts=[(b"s", object())], paid=False))
+
+    def test_prints_gas_readback_on_successful_pay(self):
+        # The whole point of the command post-rework: after a successful pay it
+        # reads back and prints THIS node's gas balance registered on the peer.
+        before = (5_000, 1000, 5.0, "2026-07-31T09:00:00")
+        after = (7_000, 1000, 7.0, "2026-07-31T10:00:00")
+        result, out = self._run(
+            balance_ok=True, scripts=[(b"s", object())], paid=True,
+            readback=[before, after], capture=True,
+        )
+        self.assertTrue(result)
+        self.assertIn("now credits you", out)
+        self.assertIn("since before this payment", out)
+        # And it must NOT claim a local (payer-side) verify happened.
+        self.assertNotIn("VERIFIED", out)
 
 
 if __name__ == "__main__":
