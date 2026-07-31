@@ -7,7 +7,9 @@ It follows the current runtime model:
 
 - Local runtimes and binaries under `MAIN_DIR` (Python, Java, yq).
 - Cloud Hypervisor assets under `MAIN_DIR/cloud_hypervisor` (services run as microVMs).
-- No local Docker: packing is delegated to an external packer-service.
+- No local Docker by default: packing is delegated to an external packer-service.
+  (Docker is only provisioned locally, in isolation, if you opt into
+  `packer.local: true`; see step 9.)
 
 ## 1) Scope and assumptions
 
@@ -218,18 +220,31 @@ mkdir -p "$PY_VENV_DIR"
 "$PY_VENV_BIN" -m pip install -r "$TARGET_DIR/bash/requirements.txt"
 ```
 
-## 9) (Removed) Local Docker install
+## 9) Docker is not installed by default
 
-nodo no longer installs Docker. Services run under Cloud Hypervisor, and
-packing is delegated to a **packer-service** (it runs Docker/buildx
-inside its own sealed microVM). To pack, set the packer-service's published
-service id under `core_services` in `config.yaml` — the single source of truth:
-`core_services: [{ name: "packer", id: "<id>" }]` — and `nodo execute` it so a
-running instance exists; nodo resolves that instance's `ip:port` automatically.
-When nodo needs to download the packer, it fetches it directly from
-`packer.PACKER_SOURCE_URL` if set, otherwise via the source-application core
-service. To point at an out-of-band packer instead, set
-`packer.PACKER_SERVICE_URL` to its `ip:8080` as an override.
+Docker is **not** installed at install time, and service **execution** never uses
+it — services run as **Cloud Hypervisor** microVMs. Docker is only relevant to the
+*packer*, and only in the opt-in local mode:
+
+- **Default (`packer.local: false`) — no Docker on this host.** `nodo pack`
+  delegates the build to a **packer-service** (it runs Docker/buildx inside its
+  own sealed microVM). Set the packer-service's published service id under
+  `core_services` in `config.yaml` — the single source of truth:
+  `core_services: [{ name: "packer", id: "<id>" }]` — and `nodo execute` it so a
+  running instance exists; nodo resolves that instance's `ip:port` automatically.
+  When nodo needs to download the packer, it fetches it directly from
+  `packer.PACKER_SOURCE_URL` if set, otherwise via the source-application core
+  service. To point at an out-of-band packer instead, set
+  `packer.PACKER_SERVICE_URL` to its `ip:8080` as an override.
+
+- **Opt-in (`packer.local: true`) — isolated local Docker toolchain.** If you set
+  `packer.local: true`, `nodo pack` builds on this host instead. Docker is still
+  not installed by the node installer; the first local pack provisions an
+  **isolated** toolchain on demand via `bash/install_docker.sh` (independent of
+  any Docker already on the host, mirroring `install_java.sh`) and drives its own
+  daemon under `MAIN_DIR` — never the host's Docker. See `dependencies.docker.*`
+  and `packer.docker.*` in `config.yaml`. Full packing reference:
+  [`PACKING.md`](PACKING.md).
 
 ## 10) Install Cloud Hypervisor assets
 

@@ -193,7 +193,10 @@ These are the most commonly used commands for daily tasks:
 
   **Example:**  
   `nodo pack /path/to/project`
-  > Check [detailed documentation](../src/commands/packer/zip_with_dockerfile/README.md)
+  > **Before packing, read [`PACKING.md`](PACKING.md)** — it is the canonical
+  > reference for the project layout, `pack_config.json`, `service.json`, and the
+  > `Dockerfile` rules (notably: no `CMD` / `ENTRYPOINT` / `EXPOSE`; the entrypoint
+  > is declared in `service.json → init.entry_path`). Do not guess the format.
 
 - **config**  
   Opens environment and runtime configuration options.  
