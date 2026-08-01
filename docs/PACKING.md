@@ -825,7 +825,7 @@ The older `entrypoint` top-level field is still supported and will be automatica
 #### `envs`
 - **Type:** `array of strings`
 - **Required:** No
-- **Description:** List of environment variable names whose descriptors (`.field` files) should be loaded and embedded into the service API specification. For each name listed, the packer will look for a `<name>.field` binary file in the service directory.
+- **Description:** List of environment variable **names** the service declares. This is a names-only declaration.
 
 ```json
 {
@@ -833,7 +833,7 @@ The older `entrypoint` top-level field is still supported and will be automatica
 }
 ```
 
-> If the corresponding `.field` file is not found, the variable is silently skipped.
+> **Note:** Per-variable `<name>.field` descriptors are **not** currently embedded. There is no target field for them in the packed schema (`pack.proto`'s `Container` has no `environment_variables` field), so the packer records the names only. Embedding descriptors would require adding that field to `pack.proto` first.
 
 ---
 
@@ -1002,7 +1002,7 @@ The Dockerfile should:
 The Dockerfile should **not**:
 - Define `CMD` or `ENTRYPOINT` (these are ignored — entrypoint is read from `service.json`)
 - Expose ports with `EXPOSE` (ports are defined in `service.json → api`)
-- Define `ENV` for runtime configuration (use `service.json → envs` and `.field` files)
+- Define `ENV` for runtime configuration (declare variable names with `service.json → envs`)
 
 ---
 
@@ -1385,7 +1385,7 @@ exec php-fpm
 }
 ```
 
-> **Important:** Never include `.env` files in the package. Laravel environment configuration should be injected at runtime via the service configuration mechanism (`service.json → envs` and `.field` files).
+> **Important:** Never include `.env` files in the package. Laravel environment configuration should be injected at runtime via the service configuration mechanism (declare variable names with `service.json → envs`).
 
 ---
 
@@ -1916,9 +1916,10 @@ Once the `.service.zip` is received, the packer extracts it and begins a multi-s
 │  API slots                                       │
 │  ├── port + transport protocol                   │
 │  ├── application protocol stack                  │
-│  ├── gas cost per method                         │
-│  └── environment variable descriptors            │
-│      (loaded from .field binary files)           │
+│  └── gas cost per method                         │
+│                                                  │
+│  Environment variables                           │
+│  └── names only (envs); no descriptors embedded  │
 │                                                  │
 │  Network requirements                            │
 │  └── tags + prose per network entry              │
@@ -1955,9 +1956,8 @@ Once the `.service.zip` is received, the packer extracts it and begins a multi-s
 │  │       └── format                              │
 │  │                                               │
 │  ├── api                                         │
-│  │   ├── environment_variables{}                 │
-│  │   │   └── name → DataFormat                   │
-│  │   │       (loaded from .field files)          │
+│  │   │   (envs declares names only; no field     │
+│  │   │    for environment_variables descriptors) │
 │  │   │                                           │
 │  │   └── slot[]                                  │
 │  │       ├── port                                │
@@ -2032,7 +2032,7 @@ The tar archive is extracted to a local directory. The total size of all exporte
 Every file, directory, symlink, and device node in the exported filesystem is traversed recursively. File permissions and ownership metadata are captured and stored as extended attributes on each entry. Files below a configured size threshold are embedded directly as raw bytes in the service specification. Files above that threshold are written to separate content-addressed blocks stored on disk, with only a reference hash kept in the specification. This deduplicates large identical files across services and keeps the specification itself compact.
 
 **Metadata Parsing**
-All runtime configuration declared in `service.json` is read and embedded into the service specification: resource limits, entrypoint path, config file location, architecture, API slots with their transport and protocol tags, gas costs per method, environment variable descriptors loaded from `.field` binary files, and network access requirements.
+All runtime configuration declared in `service.json` is read and embedded into the service specification: resource limits, entrypoint path, config file location, architecture, API slots with their transport and protocol tags, gas costs per method, environment-variable names (declared via `envs`; per-variable `.field` descriptors are not embedded — no target field in `pack.proto`), and network access requirements.
 
 **Service Spec., Hashing & Storage**
 The service identifier is generated by hashing the fully serialized Service definition—including container specification, API, and network requirements—where filesystem hashing incorporates either the raw filesystem bytes or the reconstructed multiblock directory contents, after which the resulting digests, tags, and nested filesystem hash are stored in a HashTag tree structure with duplicate-hash-type validation enforced before finalization.

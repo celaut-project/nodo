@@ -380,15 +380,15 @@ class ZipContainerPacker:
         )
     
     def parseApi(self):
-        
-        # Envs
-        if self.json.get('envs'):
-            for env in self.json.get('envs'):
-                try:
-                    with open(self.path + env + ".field", "rb") as env_desc:
-                        self.service.api.environment_variables[env].ParseFromString(env_desc.read())
-                except FileNotFoundError:
-                    pass
+
+        # Envs: `service.json` may declare environment-variable NAMES via `envs`.
+        # Per-variable `<ENV>.field` descriptors are NOT embedded: there is no
+        # target field for them in the packed schema. `Service.Api` has no
+        # `environment_variables` field (it lives on `celaut.Container`), and
+        # `pack.proto`'s Container omits it too, so the previous write crashed
+        # with AttributeError whenever a `.field` descriptor was actually
+        # present. Embedding descriptors would require adding the field to
+        # pack.proto first (deferred design decision — see issue #192).
 
         if not self.json.get('api'): return
         
