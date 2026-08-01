@@ -216,18 +216,19 @@ nodo export <service id|tag> /export/dir --raw
 # Publish a local service in chunks to the configured repository (see publisher.* in config)
 nodo publish <service id|tag>
 
-# Download a published service from a manifest URL, verify integrity, and import it
+# Download a published service from a manifest URL and import it locally (the service id is recomputed from content on import)
 nodo download <manifest url> [-o <output dir>]
 ```
 
 ### Feasibility & Cost Estimation
 
 Before launching any workload, run `nodo estimate` to check the memory guard
-(`resources.at_most.mem_limit`), gas fees, and hardware availability (RAM, CPU,
-disk):
+(`resources.at_most.mem_limit`) and gas fees. It prints an execution-feasibility
+verdict (`YES/NO`) and the estimated gas costs — it does not print a resource or
+hardware-availability table:
 
 ```bash
-nodo estimate ./my-service.celaut        # a .celaut path
+nodo estimate ./my-service.celaut.bee    # a .celaut.bee path
 nodo estimate 1234567890abcdef           # an installed service id
 nodo estimate my_service_tag             # or a tag
 ```
@@ -251,17 +252,18 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
  ```
 
 2. **Launching Instances (`nodo execute`):**
- Execute by service id, tag, or a `.celaut` path (the path form runs it without
- importing first). Pass declared env vars with `-e <key> <value>`; use `--remote`
- to advertise the host-facing IP.
+ Execute by service id, tag, or a `.celaut.bee` path (the path form imports the
+ package first, then executes it). Pass declared env vars with `-e <key> <value>`;
+ use `--remote` to advertise the host-facing IP.
  ```bash
  nodo execute 1234567890abcdef
  nodo execute --remote -e workers 8 -e timeout 20 my_service_tag
- # signature: execute [--remote] [--name <instance-name>] [-e key value]... <service id | tag | '.celaut' path>
+ # signature: execute [--remote] [--name <instance-name>] [-e key value]... <service id | tag | '.celaut.bee' path>
  ```
- `execute` provisions and returns the instance's **communication address**
- (`ip:port`, from `service.json → api`) and its **authentication token** — you
- need both to call the service (see [`../CONCEPTS.md`](../CONCEPTS.md)).
+ `execute` launches the instance; read its id (which is also its token) and API
+ address from `nodo instances` — `execute` itself prints the `nodo inspect` dump
+ and the available `http` endpoints, not an id, token, or address (see
+ [`../CONCEPTS.md`](../CONCEPTS.md)).
 
 3. **Observation, Monitoring & Gas Control:**
  ```bash
@@ -269,7 +271,7 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
  # --save writes metrics.jsonl and a Wireshark-openable capture.pcap.
  nodo observe <instance id> [--save <path>]
 
- # List active instances (shows id, status, and virtualizer — the standard is `ch`).
+ # List active instances (shows id, name, API address, gas, and virtualizer — the standard is `ch`).
  nodo instances
  nodo instances --grouped        # grouped by parent service
 
@@ -277,11 +279,11 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
  nodo increase_gas <instance id> 100
  nodo decrease_gas <instance id> 50
 
- # Stop a running instance
- nodo kill <instance id>
+ # Stop a running instance (requires root)
+ sudo nodo kill <instance id>
 
- # Remove a service specification from the local registry
- nodo remove <service id|tag>
+ # Remove a service specification from the local registry (requires root)
+ sudo nodo remove <service id|tag>
  ```
 
 ---
@@ -402,11 +404,13 @@ sudo nodo update
 
 > **Scope note.** This skill documents the commands an agent needs to install,
 > pack, distribute, execute, observe, and discover. Node-operator / maintenance
-> commands (`serve`, `tui`, `migrate`, `storage:prune_blocks`, `prune_containers`,
-> `submit_reputation`, `sync_reputation_proof`, `refresh_ergo_nodes`, `test`,
-> `ggconf`, `pay`, `verify_reputation`, `local_docker_packer`, `completion`) are
-> intentionally out of scope here — see [`../USAGE.md`](../USAGE.md), which lists
-> them and separates user from development commands.
+> and development commands (`serve`, `tui`, `migrate`, `storage:prune_blocks`,
+> `prune_containers`, `submit_reputation`, `sync_reputation_proof`,
+> `refresh_ergo_nodes`, `refresh_clients`, `tx_history`, `increase_peer_deposit`,
+> `disconnect`, `envs`, `test`, `ggconf`, `pay`, `verify_reputation`,
+> `local_docker_packer`, `completion`) are intentionally out of scope here. Note
+> that [`../USAGE.md`](../USAGE.md) does not document these either; consult
+> `nodo --help` for the development-command surface.
 
 ---
 
@@ -414,7 +418,7 @@ sudo nodo update
 
 1. **Terminal-First CLI Execution:** Execute all interactions with Celaut via standard bash terminal commands.
 2. **Idempotency Setup Check:** Prior to executing installation scripts, run `command -v nodo` to verify if the node binary is already available in PATH.
-3. **Sudo Privileges Handling:** Automated installation and system daemon management (`daemon`, `doctor`, `update`) require root elevation. Ensure non-interactive execution (`sudo -n true`) is permitted or handle prompt elevation safely.
+3. **Sudo Privileges Handling:** Automated installation, system daemon management (`daemon`, `doctor`, `update`), and instance/service teardown (`kill`, `remove`) require root elevation. Ensure non-interactive execution (`sudo -n true`) is permitted or handle prompt elevation safely.
 4. **Strict Environment Variable Declaration:** When preparing `nodo execute -e <key> <value>`, **never guess environment variables**. Always run `nodo inspect <service>` first to determine the exact environment variables declared and supported by the service package.
 5. **MicroVM Execution Awareness:** Understand that services execute inside isolated microVMs (`ch`). Do not attempt to use Docker commands to inspect running service instances; Docker is used only for the `nodo pack` build phase (and only locally in the opt-in `packer.local` mode) — never for execution.
 6. **Pre-flight Estimation:** Always run `nodo estimate <service>` before deploying unknown workloads to verify memory guard limits (`resources.at_most.mem_limit`) and ensure sufficient gas availability.
