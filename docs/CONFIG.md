@@ -4,30 +4,48 @@ Nodo reads a single `config.yaml`, created from
 [`config.example.yaml`](../config.example.yaml) at install time. It lives in the
 installation root (`TARGET_DIR`, default `/nodo`), i.e. `/nodo/config.yaml`. The
 `main.MAIN_DIR` value inside it is the same root. Edit it directly, or use
-`nodo config` / the `nodo tui` Config page (which preserves comments and writes a
-`config.yaml.tui.bak` backup on each change).
+`nodo config` (`bash/reconfig.sh` — edits in place with `yq -i`, preserving
+comments, but writes **no** backup) or the `nodo tui` Config page (which also
+preserves comments and additionally writes a `config.yaml.tui.bak` backup on each
+change).
 
-This page documents the load-bearing keys. `config.example.yaml` is the exhaustive,
-commented source of truth — when in doubt, read it. Values below are the shipped
-defaults.
+> ⚠️ nodo **rewrites** `config.yaml` on its first load: `auto` values such as
+> `network.GATEWAY_PORT` and `ledgers.ergo.WALLET_MNEMONIC` are resolved to
+> concrete values, and the file is re-dumped with `yaml.safe_dump`. This **strips
+> all comments**, alphabetizes keys, and persists already-interpolated paths. So a
+> live `config.yaml` is uncommented and reordered; `config.example.yaml` remains
+> the commented reference.
 
-> Paths in `config.yaml` may reference `${main.MAIN_DIR}` and similar; nodo expands
-> them. After moving any runtime/binary, update the matching `dependencies.*` key
-> and restart `nodo.service`.
+This page documents the load-bearing keys. `config.example.yaml` is the most
+complete reference — when in doubt, read it (though at least one live key,
+`packer.PACKER_HEALTH_TIMEOUT`, is read by code but absent from the example).
+Values below are the shipped defaults.
+
+> Paths in `config.yaml` may reference other fully-qualified keys such as
+> `${main.STORAGE}`; nodo expands them (see the `main` note below). After moving any
+> runtime/binary, update the matching `dependencies.*` key and restart
+> `nodo.service`.
 
 ## `main` — paths
 
 | Key | Default | Meaning |
 |---|---|---|
 | `main.MAIN_DIR` | `/nodo` | Installation root. |
-| `main.STORAGE` | `${MAIN_DIR}/storage` | Node storage root. |
-| `main.CACHE` | `${STORAGE}/__cache__/` | Build/scratch cache. |
-| `main.REGISTRY` | `${STORAGE}/__registry__/` | Service specification registry. |
-| `main.METADATA_REGISTRY` | `${STORAGE}/__metadata__/` | Service metadata. |
-| `main.BLOCKDIR` | `${STORAGE}/__block__/` | Content-addressed blocks (large files). |
-| `main.DATABASE_FILE` | `${STORAGE}/database.sqlite` | SQLite database. |
+| `main.STORAGE` | `/nodo/storage` | Node storage root. |
+| `main.CACHE` | `${main.STORAGE}/__cache__/` | Build/scratch cache. |
+| `main.REGISTRY` | `${main.STORAGE}/__registry__/` | Service specification registry. |
+| `main.METADATA_REGISTRY` | `${main.STORAGE}/__metadata__/` | Service metadata. |
+| `main.BLOCKDIR` | `${main.STORAGE}/__block__/` | Content-addressed blocks (large files). |
+| `main.DATABASE_FILE` | `${main.STORAGE}/database.sqlite` | SQLite database. |
 
-The KyA acceptance marker is `${STORAGE}/.acceptedkya` (see
+> Interpolation only expands the **fully-qualified**, dot-flattened form
+> `${main.STORAGE}` — a bare `${STORAGE}` is left literal. `install.sh`
+> (`sync_config_main_paths`) rewrites these `main.*` keys to absolute paths at
+> install time, so an installed `config.yaml` contains no placeholders.
+
+The KyA acceptance marker is `${main.MAIN_DIR}/storage/.acceptedkya` — it derives
+from `MAIN_DIR`, **not** from `main.STORAGE`, so relocating `STORAGE` does not move
+it (see
 [`USAGE.md`](USAGE.md#non-interactive-use-automation--agents-️)).
 
 ## `dependencies` — local runtimes
@@ -55,6 +73,28 @@ removed, so the node needs no local Docker install to *run* services.
 | `virtualizers.ch.MIN_MEM_MIB` / `DEFAULT_MEM_MIB` | `128` / `256` | Boot memory floor / default. |
 | `virtualizers.ch.SECURITY.*` | — | rootfs path confinement, device-node policy, trusted-service allowlists. |
 
+## `builder` — architectures the node can *execute*
+
+These keys govern **which architectures the node can EXECUTE** — they drive
+`SUPPORTED_ARCHITECTURES` (`src/utils/architectures.py`). Setting **both** to
+`false` means the node executes nothing. Do **not** confuse them with the
+packer-side pair below (`packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT`), which
+only affect what `nodo pack` builds/announces: to limit *execution* architectures,
+edit these `builder.*` keys, not the packer pair.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `builder.ARM_SUPPORT` | `true` | Node can execute `linux/arm64` services. |
+| `builder.X86_SUPPORT` | `true` | Node can execute `linux/amd64` services. |
+| `builder.WAIT_FOR_UNLOCK_MEMORY` | `60` | Seconds to wait for a memory lock to release during a build (`src/utils/utils.py`). |
+
+## `communication` — peer messaging policy
+
+`communication.*` tunes peer-to-peer messaging behaviour —
+`SELF_ANNOUNCE_TO_CONNECTING_PEERS`, `SEND_ONLY_HASHES_ASKING_COST`, and
+`DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH` (read by `src/commands/connect.py` and
+the execution balancer).
+
 ## `packer` — how `nodo pack` builds
 
 The most important choice for anyone packing services. Full authoring format:
@@ -65,7 +105,7 @@ The most important choice for anyone packing services. Full authoring format:
 | `packer.local` | `false` | `false` → delegate the build to a **packer-service** microVM (no Docker on this host). `true` → build **locally** with nodo's isolated Docker toolchain (provisioned on demand). |
 | `packer.PACKER_SOURCE_URL` | `""` | Manifest URL nodo downloads the packer service from directly when it needs to acquire it. Empty → resolve via the `source-application` core service. |
 | `packer.PACKER_SERVICE_URL` | `""` | Override: `ip:port` base URL of an out-of-band packer-service. Used only when no packer id is set / no running instance is found. |
-| `packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT` | `true` | Architectures `nodo pack` accepts/announces. |
+| `packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT` | `true` | Architectures `nodo pack` accepts/announces (**packer-side** — to limit what the node can *execute*, use `builder.*` instead). |
 | `packer.PACKER_MEMORY_SIZE_FACTOR` | `2.0` | Local-packer only: RAM to lock as a factor of the exported filesystem size. |
 | `packer.docker.BUILDX_NETWORK` / `BUILDX_BUILDER` | `host` / `nodo-hostnet` | Local-packer buildx settings. |
 
@@ -131,6 +171,9 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 ## `general_flags`, `misc`, `logs`, `low_demand`, `publisher`
 
 - `general_flags.SIMULATE_PAYMENTS` — dry-run payments (dev).
+- `misc.MIN_BUFFER_BLOCK_SIZE` (`1.0e+7` = 10 MB) — inline/block threshold: files
+  at or above this size are stored as content-addressed blocks (`main.BLOCKDIR`),
+  smaller ones inline.
 - `misc.VALIDATE_ON_IMPORT` (`true`), `misc.CONFIGURATION_REQUIRED`.
 - `logs.DEBUG_MODE`, `logs.MEMORY_LOGS`.
 - `low_demand.*` — opportunistic idle scheduler (off by default; WIP).
