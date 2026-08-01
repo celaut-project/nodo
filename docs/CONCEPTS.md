@@ -96,9 +96,10 @@ can address its dependencies by id regardless of which node runs them. See the
 
 Celaut services the node treats as part of its own workflow, referenced by service
 id (content hash) in `core_services` in `config.yaml`. The well-known roles today
-are `packer` (builds services in a sealed microVM for `nodo pack`) and
-`source-application` (resolves a service id to its downloadable sources). See
-[`CONFIG.md`](CONFIG.md).
+are `packer` (builds services in a sealed microVM for `nodo pack`),
+`source-application` (resolves a service id to its downloadable sources), and
+`low-demand-fallback` (an opportunistic service run only when the node is idle;
+WIP). See [`CONFIG.md`](CONFIG.md).
 
 ## Reputation proof
 
