@@ -170,7 +170,7 @@ The `pack_config.json` is the central configuration file that controls how your 
 - **Type:** `array of strings`
 - **Required:** No
 - **Default:** `[]`
-- **Description:** List of files or patterns to exclude from the build. Works similarly to `.dockerignore`. Patterns in `.dockerignore` are automatically merged into this list.
+- **Description:** List of files or directory patterns to exclude from the build. Each pattern is matched **recursively** against every path under the packaged source directory, so a pattern like `*.pyc` or `__pycache__/` also removes nested matches (e.g. `src/foo.pyc`, `src/__pycache__/`). Matching is filename/glob based (via `rglob`), not a full re-implementation of the `.dockerignore` specification. Trailing slashes on directory patterns are tolerated, and blank lines, comments (`#`), and negation patterns (`!keep.txt`) are skipped. Patterns in `.dockerignore` are automatically merged into this list.
 
 **Example:**
 ```json
