@@ -13,8 +13,9 @@
 > VM, so Docker is never installed on your host) and imports the returned
 > `.celaut.bee`. Reference the packer by its published service id under
 > `core_services` in `config.yaml` — the single source of truth
-> (`core_services: [{ name: "packer", id: "<id>" }]`) — and `nodo execute` it so a
-> running instance exists — nodo resolves that instance's `ip:port` automatically.
+> (`core_services: [{ name: "packer", id: "<id>" }]`). nodo launches an instance
+> on demand if none is running (or reuses one you started with `nodo execute`) —
+> nodo resolves that instance's `ip:port` automatically.
 > When nodo needs to download the packer it uses `packer.PACKER_SOURCE_URL` if
 > set, otherwise the source-application core service. Use
 > `packer.PACKER_SERVICE_URL` only to override with an out-of-band packer.
@@ -71,8 +72,10 @@ my-service/
 
 > **Note:** When using Option 2, the script will automatically:
 > 1. Create the `.service` directory
-> 2. Copy `Dockerfile`, `service.json`, and `.dockerignore` to `.service`
+> 2. Copy `Dockerfile` and `service.json` to `.service`
 > 3. Create a default `pack_config.json` with `{"ignore": []}`
+> 4. Read `.dockerignore` and merge its lines into `pack_config.json → ignore`
+>    (the file itself is not copied, so Docker never sees it)
 >
 > Both structures will end up properly organized in `.service` during the build process.
 
@@ -84,7 +87,7 @@ my-service/
 
 | File | Required | Location | Purpose |
 |------|----------|----------|---------|
-| `pack_config.json` | Yes | `.service/` or root | Main build and packaging configuration |
+| `pack_config.json` | No (auto-created) | `.service/` or root | Main build and packaging configuration |
 | `Dockerfile` | Yes | `.service/` or root | Docker image build instructions |
 | `service.json` | Yes | `.service/` or root | Service metadata and runtime configuration |
 | `.dockerignore` | No | `.service/` or root | Docker build exclusions |
@@ -99,7 +102,6 @@ The `pack_config.json` is the central configuration file that controls how your 
 
 ```json
 {
-    "workdir": "my-service",
     "service_dependencies_directory": "__services__",
     "metadata_dependencies_directory": "__metadata__",
     "blocks_directory": "__block__",
@@ -129,19 +131,6 @@ The `pack_config.json` is the central configuration file that controls how your 
 ---
 
 ### Configuration Options Reference
-
-#### `workdir`
-- **Type:** `string`
-- **Required:** No
-- **Description:** Defines the working directory name for the service inside the package.
-
-```json
-{
-    "workdir": "my-service"
-}
-```
-
----
 
 #### `include`
 - **Type:** `array of strings`
@@ -724,6 +713,10 @@ standard protobuf JSON base64 encoding.
 
 > Path segments are normalized automatically: leading/trailing slashes are stripped and the path is split into individual components. All three formats above produce the same result: `["usr", "local", "bin", "start.sh"]`.
 
+> ⚠️ **Packs fine, but never runs without it.** Only `architecture` is a hard requirement for *packing* — a service with no `init.entry_path` packs successfully. But at runtime `resolve_entrypoint_path` raises `entry_path is empty.`, so the service can **never** start. Always set `init.entry_path`.
+>
+> **`entry_path` constraints** (enforced at runtime): it must be a **single** path — no whitespace, no `.` or `..` segments, and no CLI arguments appended (the entry path is a path only, not a command line). Put any flags or arguments inside your entrypoint script instead.
+
 **Example — With xattrs:**
 ```json
 {
@@ -782,7 +775,7 @@ The older `entrypoint` top-level field is still supported and will be automatica
 |-------|------|----------|-------------|
 | `port` | int | Yes | Port number the service listens on |
 | `transport` | string or array | No | Transport protocol(s). Defaults to `["tcp"]` |
-| `protocol` | array | Yes | Application-level protocol tags (e.g. `["grpc"]`) |
+| `protocol` | array | No | Application-level protocol tags (e.g. `["grpc"]`). Accepts `None` if omitted |
 | `gas_amount_per_call` | object | No | Map of method name → gas cost (integer) |
 
 **Example — Single gRPC slot:**
@@ -842,10 +835,10 @@ The older `entrypoint` top-level field is still supported and will be automatica
 - **Required:** No
 - **Description:** Declares the network access requirements of the service.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `tags` | array of strings | Network type identifiers |
-| `prose` | string | Human-readable description of the network requirement |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `tags` | array of strings | Yes | Network type identifiers. Required when a `network` entry is present — omitting it raises `KeyError` |
+| `prose` | string | Yes | Human-readable description of the network requirement. Required when a `network` entry is present — omitting it raises `KeyError` |
 
 ```json
 {
@@ -1008,7 +1001,7 @@ The Dockerfile should **not**:
 
 ### COPY Path Adjustment
 
-When the Dockerfile is located in the root of the project and is moved to `.service/` during preparation, **relative `COPY` paths are automatically adjusted** by prefixing them with `service/`:
+During preparation the `.service/Dockerfile` **always** has its `COPY` paths rewritten (this applies whether the Dockerfile started at the project root or was already in `.service/`). Any `COPY` origin that starts with `.` is adjusted by prefixing it with `service/`:
 
 ```dockerfile
 # Original Dockerfile (at project root)
@@ -1022,7 +1015,9 @@ COPY service/requirements.txt /app/
 
 This happens because the Docker build context is set to `.service/`, where the `service/` directory contains the packaged project files.
 
-> ⚠️ Only **relative paths** (starting with `./`) are adjusted. Absolute paths and URLs are left unchanged.
+> ⚠️ The rewrite applies to any origin starting with `.` (so `./src` and `.env` — which becomes `serviceenv` — are affected), **except** `--from=` origins in multi-stage builds. Absolute paths and URLs are left unchanged.
+>
+> ⚠️ A bare relative origin **without** a leading `./` (e.g. `COPY src /app`) is **not** adjusted. Because the build context is `.service/` and the project files live under `service/`, such a path will break the build. Always write project-relative `COPY` origins with a `./` prefix.
 
 ---
 
@@ -1725,7 +1720,7 @@ Once the Docker build produces the filesystem tar, the packer recursively parses
 ### Dockerfile Best Practices for This Packer
 
 1. **Always use multi-stage builds** to keep the exported filesystem minimal
-2. **Do not define `CMD`, `ENTRYPOINT`, or `EXPOSE`** — these are all managed by `service.json`
+2. **`CMD`, `ENTRYPOINT`, and `EXPOSE` are ignored** — the entrypoint comes from `service.json → init.entry_path`, and ports from `service.json → api`
 3. **Make your entrypoint script executable** (`chmod +x`) inside the Dockerfile, since file permissions are preserved in the exported filesystem
 4. **Minimize the number of layers** in the final stage to keep the filesystem clean
 5. **Use slim or minimal base images** (`-slim`, `alpine`, `distroless`) to reduce the final package size
@@ -1752,15 +1747,17 @@ Input: local directory or Git repo URL
       │           │
       │    Create .service/
       │    Copy Dockerfile,
-      │    service.json,
-      │    .dockerignore
+      │    service.json
+      │    (.dockerignore is NOT copied)
       │    Create default pack_config.json
       │           │
       └─────┬─────┘
             │
             ▼
-   Merge .dockerignore patterns
-   into pack_config.json ignore list
+   Read .dockerignore and merge its
+   patterns into pack_config.json ignore
+   list (the file itself is never copied,
+   so Docker never sees it)
             │
             ▼
    Adjust Dockerfile COPY commands
@@ -1979,12 +1976,18 @@ Once the `.service.zip` is received, the packer extracts it and begins a multi-s
 │                                                  │
 │  Serialize Service specification                 │
 │                                                  │
-│  Case A — no large file blocks:                  │
-│  └── Hash serialized bytes directly              │
+│  Service id: save() ALWAYS builds a              │
+│  multiblock directory and streams all            │
+│  blocks to compute the hash (no shortcut).       │
 │                                                  │
-│  Case B — contains large file blocks:            │
-│  └── Build multiblock directory                  │
-│      Stream all blocks to compute hash           │
+│  The Case A / Case B split below applies         │
+│  only to the *filesystem* HashTag, not the       │
+│  service id:                                     │
+│  ├── Case A — no large file blocks:              │
+│  │   └── hash the raw filesystem bytes           │
+│  └── Case B — contains large file blocks:        │
+│      └── hash the reconstructed multiblock       │
+│          directory contents                      │
 │                                                  │
 │  Metadata                                        │
 │  ├── hashtag                                     │
@@ -2050,7 +2053,7 @@ All temporary directories created during extraction, building, and filesystem ex
 
 ### Dockerfile
 - Always use multi-stage builds
-- Never define `CMD`, `ENTRYPOINT`, or `EXPOSE` — use `service.json` instead
+- `CMD`, `ENTRYPOINT`, and `EXPOSE` are ignored — the entrypoint comes from `service.json → init.entry_path`
 - Use minimal base images for the final stage
 - Ensure entrypoint scripts are executable inside the Dockerfile
 
