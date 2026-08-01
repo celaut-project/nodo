@@ -414,15 +414,25 @@ These are intended for development or advanced maintenance environments:
 
 ---
 
-## No local Docker
+## Docker backends
 
-nodo does **not** install or run Docker on the host. Services run as
-**Cloud Hypervisor** microVMs, and packing is delegated to an external
-**packer-service** (which runs Docker/buildx inside its own sealed microVM).
-There is no `nodo docker` command and no isolated Docker daemon to manage.
+nodo supports two packing backends, and **no Docker is installed or run on the
+host by default**. Services run as **Cloud Hypervisor** microVMs, and packing is
+normally delegated to an external **packer-service** (which runs Docker/buildx
+inside its own sealed microVM). In this default mode there is no Docker daemon
+for nodo to manage.
 
-To pack, point nodo at a packer service and run `nodo pack` (see the **pack**
-command above):
+With **`packer.local: true`**, nodo instead builds services on this host with its
+**own isolated Docker toolchain** (see the **pack** command above). Docker is
+provisioned on demand under `MAIN_DIR` via `bash/install_docker.sh`, kept
+independent of any Docker already on the host; nodo starts its isolated daemon
+right before a build and stops it right after. That isolated daemon is managed
+with `nodo local_docker_packer <docker args>` (requires root) — its own usage
+string reads `nodo docker <docker command>`, and it is listed in `nodo help`.
+It runs `docker` against nodo's isolated daemon rather than any host Docker.
+
+To pack with the default external backend, point nodo at a packer service and run
+`nodo pack` (see the **pack** command above):
 
 ```bash
 # set the packer id under core_services in config.yaml (single source of truth):
