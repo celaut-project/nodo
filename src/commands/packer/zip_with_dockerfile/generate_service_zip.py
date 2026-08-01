@@ -1,5 +1,6 @@
 import json
 import os
+import pathlib
 import shutil
 from typing import Dict
 from src.utils.config import ConfigManager
@@ -147,10 +148,25 @@ def generate_service_zip(project_directory: str) -> str:
             else:
                 shutil.copy2(src_path, dest_path)
 
-    # Remove the files and directories specified in the "ignore" list from the configuration
+    # Remove the files and directories specified in the "ignore" list from the configuration.
+    # Recursive, .dockerignore-like exclusion done in Python (no shell). Each pattern is matched
+    # against every path under the packaged source dir via rglob, so nested matches (e.g. src/foo.pyc,
+    # src/__pycache__/) are excluded too. Blank lines, comments (#) and negations (!) — which get merged
+    # in raw from .dockerignore — are skipped, and trailing-slash directory patterns are tolerated.
     if 'ignore' in pack_config:
-        for file in pack_config['ignore']:
-            os.system(f"cd {complete_source_directory} && rm -rf {file}")
+        source_root = pathlib.Path(complete_source_directory)
+        for pattern in pack_config['ignore']:
+            pattern = pattern.strip()
+            if not pattern or pattern.startswith(("#", "!")):
+                continue
+            pattern = pattern.rstrip("/")  # "__pycache__/" -> "__pycache__"
+            if not pattern:
+                continue
+            for p in source_root.rglob(pattern):
+                if p.is_dir():
+                    shutil.rmtree(p, ignore_errors=True)
+                else:
+                    p.unlink(missing_ok=True)
 
     # Add the dependencies
     __export_registry(project_dir=project_directory, directory=complete_source_directory, pack_config=pack_config)
