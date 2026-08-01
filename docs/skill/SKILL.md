@@ -193,10 +193,11 @@ executable:
 }
 ```
 
-**Critical Dockerfile rule (irreversible-build footgun).** The Dockerfile only
-produces a **filesystem snapshot — the container is never run**. Therefore it must
-**not** define `CMD`, `ENTRYPOINT`, or `EXPOSE` (the entrypoint comes from
-`service.json → init.entry_path`; ports come from `service.json → api`). Make the
+**Dockerfile rule.** The Dockerfile only produces a **filesystem snapshot — the
+container is never run** (the build is `docker buildx build --output type=tar`, a
+filesystem export). `CMD`, `ENTRYPOINT`, and `EXPOSE` are simply **ignored** — no
+error, nothing irreversible; the entrypoint comes from `service.json →
+init.entry_path` and ports come from `service.json → api`. Make the
 entrypoint executable in the image (e.g. `RUN chmod +x /usr/local/bin/worker`).
 The full `service.json` / `pack_config.json` / Dockerfile spec — including
 `resources`, `api`, `envs`, `config_declaration`, `network`, and dependencies — is
