@@ -849,10 +849,10 @@ def _local_instances_table_exists(conn: sqlite3.Connection) -> bool:
 
 
 def resolve_instance(instance_id: str) -> Optional[Dict[str, Any]]:
-    """Find a local instance by exact id or unique id-prefix.
+    """Find a local instance by exact instance id.
 
     Returns the row (id, ip, father_id, service_id, virtualizer, name, gas) or
-    ``None``. Raises ``ValueError`` when a prefix is ambiguous.
+    ``None``. Matching is exact (``WHERE id = ?``); no prefix resolution.
     """
     conn = _connect()
     try:
@@ -1131,8 +1131,10 @@ def observe_event_stream(
       "data"; raw packets are opt-in).
     * ``notice``  — degraded-mode / lifecycle messages (never fabricated data).
 
+    ``instance_id`` is matched exactly against an instance id, instance name, or
+    URI; there is no prefix resolution.
+
     :raises ObserveInstanceError: instance not found, unreachable, or not running.
-    :raises ValueError: ambiguous instance-id prefix (from :func:`resolve_instance`).
     """
     instance = resolve_instance(instance_id)  # may raise ValueError / sqlite3.Error
     if instance is None:
