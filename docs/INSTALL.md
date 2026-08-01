@@ -30,10 +30,18 @@ These are host-level packages used by setup/build tools. Python/JRE runtimes for
 sudo apt-get update
 sudo apt-get install -y \
   build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
-  protobuf-compiler libssl-dev libreadline-dev libffi-dev libsqlite3-dev \
+  libssl-dev libreadline-dev libffi-dev libsqlite3-dev \
   wget libbz2-dev busybox-static cpio gzip initramfs-tools-core iputils-ping \
-  ca-certificates curl gnupg lsb-release git procps locales
+  ca-certificates curl gnupg lsb-release git procps locales \
+  iproute2 zip iptables e2fsprogs
 ```
+
+`iproute2` and `zip` are load-bearing at runtime: `ip` is a hard preflight
+requirement for `execute` (CH networking), and `zip` is invoked when packing —
+without them the first `execute`/`pack` fails. `iptables`/`e2fsprogs` provide
+the `iptables`/`debugfs` tools also checked by the execute preflight.
+`protobuf-compiler` is not installed by the setup script and is only needed for
+development (regenerating protobufs), so it is omitted here.
 
 ## 3) Get source and create config
 
@@ -302,9 +310,20 @@ CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$CH_INITRAMFS_TARGET" "$YQ_BIN" 
   "$TARGET_DIR/config.yaml"
 ```
 
-## 11) (Removed) Isolated Docker daemon directories
+## 11) Isolated local Docker daemon directories
 
-Not applicable — nodo no longer runs a local Docker daemon.
+Nodo does not use the host Docker daemon. When packing with `packer.local: true`,
+the first local pack lazily starts a private, isolated Docker daemon and creates
+its state under `$TARGET_DIR/docker`:
+
+- `$TARGET_DIR/docker/data` — data-root
+- `$TARGET_DIR/docker/config` — daemon config
+- `$TARGET_DIR/docker/exec` — exec root
+- `$TARGET_DIR/docker/docker.sock` — the daemon's private socket
+
+These are created automatically on the first local pack (nothing to do here at
+install time) and the daemon is stopped again after each pack. `uninstall.sh`
+removes this tree during teardown.
 
 ## 12) Run DB migration
 
