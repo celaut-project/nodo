@@ -1,6 +1,9 @@
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 
 from src.commands import completion
@@ -19,6 +22,8 @@ class CommandCatalogueTests(unittest.TestCase):
             completion.SERVICE_COMMANDS
             + completion.INSTANCE_COMMANDS
             + completion.PEER_COMMANDS
+            + completion.PATH_COMMANDS
+            + completion.SECOND_ARG_PATH_COMMANDS
         ):
             self.assertIn(command, completion.COMMANDS, command)
 
@@ -33,9 +38,24 @@ class CommandCatalogueTests(unittest.TestCase):
         service = set(completion.SERVICE_COMMANDS)
         instance = set(completion.INSTANCE_COMMANDS)
         peer = set(completion.PEER_COMMANDS)
+        path = set(completion.PATH_COMMANDS)
         self.assertFalse(service & instance)
         self.assertFalse(service & peer)
         self.assertFalse(instance & peer)
+        # A path-first command is never also an id-first command.
+        self.assertFalse(path & (service | instance | peer))
+
+    def test_second_arg_path_commands_take_an_id_first(self):
+        # `export <service> <path>`: the command's first arg is still an id, so it
+        # must live in one of the id lists (services here), not PATH_COMMANDS.
+        first_arg_id = (
+            set(completion.SERVICE_COMMANDS)
+            | set(completion.INSTANCE_COMMANDS)
+            | set(completion.PEER_COMMANDS)
+        )
+        for command in completion.SECOND_ARG_PATH_COMMANDS:
+            self.assertIn(command, first_arg_id, command)
+            self.assertNotIn(command, completion.PATH_COMMANDS, command)
 
 
 class DatabaseCandidateTests(unittest.TestCase):
@@ -127,21 +147,88 @@ class ScriptGenerationTests(unittest.TestCase):
         self.assertIn('nodo_py="/opt/nodo/venv/bin/python"', script)
         self.assertIn('nodo_dir="/opt/nodo"', script)
         self.assertIn('"$nodo_dir/src/commands/completion.py"', script)
-        self.assertIn("complete -o default -F _nodo_completion nodo", script)
+        self.assertIn("complete -o bashdefault -o default -F _nodo_completion nodo", script)
         self.assertIn("execute", script)  # a service command routed
         self.assertIn("kill", script)  # an instance command routed
+        # Config must be loaded from the install dir, not the user's cwd.
+        self.assertIn('NODO_COMPLETION_DIR="$nodo_dir"', script)
+        # Directory-aware path completion + path-first / second-arg-path commands.
+        self.assertIn("compopt -o filenames", script)
+        self.assertIn("import", script)  # a path-first command routed
+        self.assertIn("_nodo_paths", script)
 
     def test_zsh_script_bakes_paths_and_header(self):
         script = completion.zsh_script("/opt/nodo", "/opt/nodo/venv/bin/python")
         self.assertTrue(script.lstrip().startswith("#compdef nodo"))
         self.assertIn("/opt/nodo/venv/bin/python", script)
         self.assertIn("_describe", script)
+        self.assertIn('NODO_COMPLETION_DIR="$nodo_dir"', script)
+        self.assertIn("_files", script)  # path completion
 
     def test_install_targets_differ_for_user_and_system(self):
         user = completion._completion_targets(user=True)
         system = completion._completion_targets(user=False)
         self.assertNotEqual(user["bash"], system["bash"])
         self.assertTrue(user["bash"].endswith("/completions/nodo"))
+
+
+class ConfigDirResolutionTests(unittest.TestCase):
+    """The shell runs the helper from the user's cwd; id completion must still
+    resolve by loading config.yaml from the nodo install dir (NODO_COMPLETION_DIR),
+    not from that cwd. This is the regression the fix addresses."""
+
+    _COMPLETION_PY = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "src",
+        "commands",
+        "completion.py",
+    )
+
+    def _write_nodo_dir(self) -> str:
+        root = tempfile.mkdtemp(prefix="nodo-completion-root-")
+        storage = os.path.join(root, "storage")
+        os.makedirs(os.path.join(storage, "__registry__", "svc-xyz-123"))
+        with open(os.path.join(root, "config.yaml"), "w", encoding="utf-8") as handle:
+            handle.write(
+                textwrap.dedent(
+                    f"""\
+                    main:
+                      MAIN_DIR: "{root}"
+                      STORAGE: "{storage}"
+                      REGISTRY: "${{main.STORAGE}}/__registry__/"
+                      METADATA_REGISTRY: "${{main.STORAGE}}/__metadata__/"
+                      DATABASE_FILE: "${{main.STORAGE}}/database.sqlite"
+                    """
+                )
+            )
+        return root
+
+    def _run_list(self, kind, cwd, env):
+        return subprocess.run(
+            [sys.executable, self._COMPLETION_PY, "list", kind],
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    def test_ids_resolve_from_any_cwd(self):
+        nodo_dir = self._write_nodo_dir()
+        elsewhere = tempfile.mkdtemp(prefix="nodo-completion-cwd-")  # no config.yaml
+        env = dict(os.environ, NODO_COMPLETION_DIR=nodo_dir)
+        result = self._run_list("services", cwd=elsewhere, env=env)
+        if result.returncode != 0 and "ModuleNotFoundError" in result.stderr:
+            self.skipTest(f"runtime deps unavailable: {result.stderr.strip()[:200]}")
+        self.assertIn("svc-xyz-123", result.stdout, result.stderr)
+
+    def test_commands_list_needs_no_config(self):
+        # `list commands` must never depend on config resolution.
+        elsewhere = tempfile.mkdtemp(prefix="nodo-completion-cwd-")
+        result = self._run_list("commands", cwd=elsewhere, env=dict(os.environ))
+        if result.returncode != 0 and "ModuleNotFoundError" in result.stderr:
+            self.skipTest(f"runtime deps unavailable: {result.stderr.strip()[:200]}")
+        self.assertIn("execute", result.stdout.split())
 
 
 if __name__ == "__main__":

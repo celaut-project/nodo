@@ -1,0 +1,51 @@
+name: skill-bundle
+
+# Keeps the vendored Celaut bridge skill (docs/skill/SKILL.md) and the docs it
+# links honest. Runs the hub bundler in --check mode, which:
+#   - fails on any unresolvable relative link (the durable fix for stale refs),
+#   - fails on any absolute URL that pins a nonexistent "master" branch,
+#   - asserts every `nodo <cmd>` used in SKILL.md exists in the CLI dispatcher
+#     (nodo.py) — catching command-signature drift.
+# Also verifies the generated bundle stays reproducible and git-ignored.
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'nodo.py'
+      - '.github/workflows/skill-bundle.yml'
+  push:
+    branches: [dev, stable]
+    paths:
+      - 'docs/**'
+      - 'nodo.py'
+
+jobs:
+  validate-skill-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # bundler reads the committed SHA/date for provenance
+
+      - name: Validate links + command signatures (--check)
+        run: bash docs/skill/build-hub-bundle.sh --check
+
+      - name: Build the bundle
+        run: bash docs/skill/build-hub-bundle.sh
+
+      - name: Bundle must be reproducible and git-ignored
+        run: |
+          # A second build must be byte-identical to the first.
+          find docs/skill/skill-hub -type f -exec sha256sum {} \; | sort > /tmp/hub-a.sums
+          bash docs/skill/build-hub-bundle.sh >/dev/null
+          find docs/skill/skill-hub -type f -exec sha256sum {} \; | sort > /tmp/hub-b.sums
+          if ! diff -u /tmp/hub-a.sums /tmp/hub-b.sums; then
+            echo "::error::skill-hub bundle is not reproducible (same commit produced different bytes)."
+            exit 1
+          fi
+          # The generated bundle must never be committed.
+          if git ls-files --error-unmatch docs/skill/skill-hub >/dev/null 2>&1; then
+            echo "::error::docs/skill/skill-hub/ is tracked; it must stay git-ignored (generated artifact)."
+            exit 1
+          fi

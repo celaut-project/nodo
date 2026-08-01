@@ -282,11 +282,6 @@ def allow_all_egress(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
 
         return ch_allow_all_egress(vmachine_id=vmachine_id, source_ip=source_ip)
 
-    if virtualizer == "docker":
-        from src.virtualizers.docker.firewall import allow_all_egress as docker_allow_all_egress
-
-        return docker_allow_all_egress(container_id=vmachine_id)
-
     raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
 
 

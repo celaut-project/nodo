@@ -21,8 +21,15 @@ sudo ./uninstall.sh
 What it does (best effort):
 
 - Stops/disables `nodo.service`.
-- Tries to clean node-managed service instances (Cloud Hypervisor microVMs).
+- Stops any systemd `--type=service` units whose `ExecStart` references `/nodo`,
+  kills any embedded `dockerd` left running, and unmounts everything under `/nodo`.
 - Removes `/etc/systemd/system/nodo.service`, `/usr/local/bin/nodo`, and `/nodo`.
+
+> **Note:** the script does **not** clean up running Cloud Hypervisor microVMs.
+> CH instances are subprocess children of the daemon (not systemd units), so
+> their bridge/tap/iptables state is left orphaned on the host. Run
+> `nodo kill <instance>` for each active microVM (or reboot) **before**
+> uninstalling to clear residual microVMs and bridge/tap devices.
 
 ## 2) Manual uninstall (recommended for custom `MAIN_DIR`)
 
@@ -76,12 +83,14 @@ sudo systemctl stop nodo.service 2>/dev/null || true
 sudo systemctl disable nodo.service 2>/dev/null || true
 ```
 
-### 2.4 Remove service file and wrapper
+### 2.4 Remove service file, wrapper, and shell completions
 
 ```bash
 sudo rm -f "$SERVICE_FILE"
 sudo systemctl daemon-reload
 sudo rm -f "$WRAPPER_SCRIPT"
+# System-level shell completions installed by install.sh (uninstall.sh does not remove these):
+sudo rm -f /etc/bash_completion.d/nodo /usr/local/share/zsh/site-functions/_nodo
 ```
 
 ### 2.5 Remove installation directory
@@ -102,6 +111,12 @@ Removed (if inside `TARGET_DIR`):
 Not removed automatically:
 
 - Host packages installed via `apt` (`build-essential`, `curl`, etc.).
+- System-level shell completions installed by `install.sh`:
+  `/etc/bash_completion.d/nodo` and `/usr/local/share/zsh/site-functions/_nodo`
+  (remove with the command in §2.4).
+- The four `git config --global` keys `install.sh` writes to root's gitconfig —
+  these are never reverted; remove them manually with `sudo git config --global --unset <key>` if desired.
+- Running Cloud Hypervisor microVMs and their bridge/tap/iptables state (see the note in §1).
 - Any custom files outside `TARGET_DIR`.
 
 If you want to remove host packages too, do it explicitly with `apt` according to your system policy.

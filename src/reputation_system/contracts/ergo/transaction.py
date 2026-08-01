@@ -1,10 +1,9 @@
-import hashlib
 import json
 from typing import List, Optional, Tuple, TypedDict
 
 import requests
 
-from src.reputation_system.envs import CONTRACT
+from src.reputation_system.envs import REPUTATION_PROOF_ADDRESS
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 from src.utils.logger import LOGGER
@@ -16,13 +15,13 @@ ERGO_NODE_URL = lambda: env_manager.get("ledgers.ergo.NODE_URL")
 SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF = env_manager.get('SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF')
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
-DEFAULT_TOKEN_AMOUNT = int(env_manager.get('TOTAL_REPUTATION_TOKEN_AMOUNT'))
+DEFAULT_TOKEN_AMOUNT = int(env_manager.get('ledgers.ergo.reputation.TOTAL_REPUTATION_TOKEN_AMOUNT'))
 PLAIN_TEXT_TYPE_NFT_ID = env_manager.get(
-    "reputation.PLAIN_TEXT_TYPE_NFT_ID",
+    "ledgers.ergo.reputation.PLAIN_TEXT_TYPE_NFT_ID",
     "",
 )
 CELAUT_NODE_TYPE_NFT_ID = env_manager.get(
-    "reputation.CELAUT_NODE_TYPE_NFT_ID",
+    "ledgers.ergo.reputation.CELAUT_NODE_TYPE_NFT_ID",
     "",
 )
 
@@ -40,10 +39,38 @@ def _java_bytes_to_python_bytes(java_bytes) -> bytes:
     return bytes((byte + 256) % 256 for byte in java_bytes)
 
 
-def _owner_script_hash(sender_address) -> bytes:
-    from src.reputation_system.contracts.ergo.utils import owner_script_hash_hex
+def _owner_proposition_bytes(sender_address) -> bytes:
+    from src.reputation_system.contracts.ergo.utils import owner_proposition_bytes
 
-    return bytes.fromhex(owner_script_hash_hex(sender_address))
+    return owner_proposition_bytes(sender_address)
+
+
+def _looks_like_hex(value: str) -> bool:
+    """True when ``value`` is an even-length string of hex digits (a token id / hash)."""
+    if not value or len(value) % 2 != 0:
+        return False
+    try:
+        bytes.fromhex(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _id_bytes(value: str) -> bytes:
+    """
+    Encode a register payload the way the whole reputation ecosystem expects: token
+    ids / hex pointers are stored as their *raw bytes* (never as UTF-8 text of the
+    hex string), and only genuine free-text pointers fall back to UTF-8. Mirrors the
+    web app's ``hexOrUtf8ToBytes``. An empty string encodes to an empty Coll[Byte].
+    """
+    if _looks_like_hex(value):
+        return bytes.fromhex(value)
+    return (value or "").encode("utf-8")
+
+
+def _java_bytes(jpype, data: bytes):
+    """Wrap Python ``bytes`` (0–255) as a Java signed ``byte[]`` for ErgoValue.of."""
+    return jpype.JArray(jpype.JByte)(data)
 
 
 def _attach_data_inputs(tx_builder, data_inputs) -> None:
@@ -100,10 +127,10 @@ def __build_proof_box(
     jpype = require_java_module("jpype", feature="Ergo reputation")
     org_appkit = jpype.JPackage("org").ergoplatform.appkit
     LOGGER(f"Building proof box with token amount {token_amount}")
-    type_nft_id = assigned_object['type'] if assigned_object else PLAIN_TEXT_TYPE_NFT_ID
-    object_to_assign = assigned_object['value'] if assigned_object else ""
+    type_nft_id = str(assigned_object['type']) if assigned_object else PLAIN_TEXT_TYPE_NFT_ID
+    object_to_assign = str(assigned_object['value']) if assigned_object else ""
 
-    owner_hash = _owner_script_hash(sender_address)
+    owner_proposition = _owner_proposition_bytes(sender_address)
     try:
         ergo_token_cls = org_appkit.ErgoToken
     except AttributeError:
@@ -114,14 +141,14 @@ def __build_proof_box(
                 .value(SAFE_MIN_BOX_VALUE) \
                 .tokens([ergo_token_cls(proof_id, jpype.JLong(abs(int(token_amount))))]) \
                 .registers([
-                    org_appkit.ErgoValue.of(jpype.JString(type_nft_id).getBytes("utf-8")),         # R4: typeNftTokenId
-                    org_appkit.ErgoValue.of(jpype.JString(object_to_assign).getBytes("utf-8")),    # R5: uniqueObjectData
+                    org_appkit.ErgoValue.of(_java_bytes(jpype, _id_bytes(type_nft_id))),            # R4: typeNftTokenId (raw bytes)
+                    org_appkit.ErgoValue.of(_java_bytes(jpype, _id_bytes(object_to_assign))),       # R5: uniqueObjectData (raw bytes; self = own token id)
                     org_appkit.ErgoValue.of(jpype.JBoolean(False)),                                  # R6: isLocked
-                    org_appkit.ErgoValue.of(jpype.JArray(jpype.JByte)(owner_hash)),                  # R7: blake2b256(propositionBytes)
-                    org_appkit.ErgoValue.of(jpype.JBoolean(int(token_amount) >= 0)),                # R8: positive/negative
+                    org_appkit.ErgoValue.of(_java_bytes(jpype, owner_proposition)),                  # R7: raw propositionBytes of the owner
+                    org_appkit.ErgoValue.of(jpype.JBoolean(int(token_amount) >= 0)),                # R8: customFlag (sign of the amount)
                     org_appkit.ErgoValue.of(jpype.JString(data).getBytes("utf-8"))                 # R9: content
                 ]) \
-                .contract(ergo._ctx.compileContract(org_appkit.ConstantsBuilder.empty(), CONTRACT)) \
+                .contract(org_appkit.Address.create(REPUTATION_PROOF_ADDRESS).toErgoContract()) \
                 .build()
 
 
@@ -150,7 +177,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
         raise Exception("No input box available.")
 
     external_token_value = int(sum([obj[1] for obj in objects if obj[0]]))
-    expected_total_reputation = int(env_manager.get('TOTAL_REPUTATION_TOKEN_AMOUNT'))
+    expected_total_reputation = int(env_manager.get('ledgers.ergo.reputation.TOTAL_REPUTATION_TOKEN_AMOUNT'))
 
     if not external_token_value:
         is_self = any(obj[0] for obj in objects)
@@ -167,15 +194,16 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     input_boxes = [selected_input_box]
 
-    if proof_id and not validate_reputation_proof_ownership(mnemonic_phrase=wallet_mnemonic):
+    if proof_id and not validate_reputation_proof_ownership(proof_id=proof_id):
         LOGGER(f"The reputation proof ID {proof_id} is not associated with the current Ergo wallet mnemonic and will be removed.")
         proof_id = None
 
     if proof_id:
         try:
-            compiled_contract = ergo._ctx.compileContract(org_appkit.ConstantsBuilder.empty(), CONTRACT)
-            ergo_tree = compiled_contract.getErgoTree()
-            script_address = org_appkit.Address.fromErgoTree(ergo_tree, org_appkit.NetworkType.MAINNET)
+            # Spend the existing proof from the canonical ecosystem contract address
+            # (ErgoTree v1), not a locally-recompiled ErgoTree v0 that would sit at a
+            # different, ecosystem-invisible address.
+            script_address = org_appkit.Address.create(REPUTATION_PROOF_ADDRESS)
             input_list = ergo.getInputBoxCovering(
                 amount_list=[SAFE_MIN_BOX_VALUE],
                 sender_address=script_address,
@@ -197,7 +225,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             proof_id = None
 
     java_input_boxes = jpype.java.util.ArrayList(input_boxes)
-    proof_id = proof_id or java_input_boxes.get(0).getId().toString()
+    proof_id = proof_id or str(java_input_boxes.get(0).getId().toString())
 
     value_in_nanoergs = (__input_box_to_dict(selected_input_box)["value"] - fee - safe_min_out_box)
     assert value_in_nanoergs >= SAFE_MIN_BOX_VALUE, (
@@ -221,7 +249,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             sender_address=sender_address,
             assigned_object=ProofObject(
                 type=CELAUT_NODE_TYPE_NFT_ID,
-                value=obj[0] if not self_info else proof_id
+                value=obj[0] if not self_info and obj[0] else proof_id
             ),
             token_amount=int(obj[1]),
             data=data or ""
@@ -250,9 +278,9 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     signed_tx = ergo.signTransaction(unsigned_tx, mnemonic[0], prover_index=0)
     tx_id = ergo.txId(signed_tx)
 
-    if env_manager.get('REPUTATION_PROOF_ID') != proof_id:
+    if env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID') != proof_id:
         LOGGER(f"Store reputation proof id {proof_id} on config file.")
-        env_manager.set("reputation.REPUTATION_PROOF_ID", proof_id)
+        env_manager.set("ledgers.ergo.reputation.REPUTATION_PROOF_ID", proof_id)
 
     return tx_id
 
@@ -261,7 +289,7 @@ def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
     try:
         from src.payment_system.contracts.ergo.interface import get_amount_by_addr
 
-        proof_id = env_manager.get('reputation.REPUTATION_PROOF_ID') or env_manager.get('REPUTATION_PROOF_ID')
+        proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
         mnemonic = env_manager.get('ledgers.ergo.WALLET_MNEMONIC') or env_manager.get('WALLET_MNEMONIC')
         node_url = ERGO_NODE_URL()
 
