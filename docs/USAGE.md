@@ -38,41 +38,40 @@ When this file exists, Nodo treats the KyA as already accepted and starts withou
 
 These are the most commonly used commands for daily tasks:
 
-- **execute `[--remote] [-e key value] <service id | service tag | '.celaut' file path>`**  
-  Launches a service instance. Use `--remote` to advertise the host-facing IP instead of the internal VM/container IP. Use `-e` to add service enviroment variables.  
+- **execute `[--remote] [--name <instance-name>] [-e key value] <service id | service tag | '.celaut.bee' file path>`**  
+  Launches a service instance. Use `--remote` to advertise the host-facing IP instead of the internal VM/container IP. Use `--name` to assign a human-readable instance name. Use `-e` to add service enviroment variables.  
   **Example:**  
   `nodo execute 1234567890abcdef`
   `nodo execute --remote 1234567890abcdef`
   `nodo execute --remote -e workers 8 -e timeout 20 1234567890abcdef`
 
-- **estimate `<service id | service tag | '.celaut' file path>`**  
+- **estimate `<service id | service tag | '.celaut.bee' file path>`**  
   Estimates service execution cost without launching it.  
   Prints:
   - execution feasibility (`YES/NO`)
   - reason when execution is not possible
   - estimated gas costs (initial and maintenance)
-  - resource availability and total capacity (CPU, RAM, disk)
   
   **Examples:**  
   `nodo estimate 1234567890abcdef`  
   `nodo estimate my_service_tag`  
-  `nodo estimate ./my-service.celaut`
+  `nodo estimate ./my-service.celaut.bee`
 
-- **remove `<service id>`**  
+- **remove `<service id>`** (requires root)  
   Removes a service from the node using its ID.  
   **Example:**  
-  `nodo remove 1234567890abcdef`
+  `sudo nodo remove 1234567890abcdef`
 
-- **kill `<instance id>`**  
+- **kill `<instance id>`** (requires root)  
   Stops a running service instance by ID.  
   **Example:**  
-  `nodo kill abcdef1234567890`
+  `sudo nodo kill abcdef1234567890`
 
 - **observe `<instance id> [--save <path>]`**  
   Attaches to a running instance and continuously displays live resource
   metrics (CPU and memory, current + session peak) **together with a live
-  per-flow view of the microVM's network activity in the same frame**. Instance
-  IDs may be abbreviated to a unique prefix. Press `Ctrl-C` to exit.  
+  per-flow view of the microVM's network activity in the same frame**. Address
+  the instance by its full instance id or its instance name. Press `Ctrl-C` to exit.  
 
   **Live network panel.** The network section is a live table of active flows,
   newest activity first. Each flow (direction + transport + addresses/ports) is
@@ -120,10 +119,10 @@ These are the most commonly used commands for daily tasks:
     `CAP_NET_RAW` / non-Linux host), so the artifact folder is self-explanatory.
 
   **Examples:**  
-  `nodo observe 8a7fd2`  
-  `nodo observe 8a7fd2 --save ./captures`  
-  → `./captures/gateway_8a7fd2.../{metrics.jsonl,capture.pcap}`, then
-  `wireshark ./captures/gateway_8a7fd2.../capture.pcap`
+  `nodo observe 8a7fd2c1e094b6f0`  
+  `nodo observe my-instance --save ./captures`  
+  → `./captures/gateway_8a7fd2c1e094b6f0/{metrics.jsonl,capture.pcap}`, then
+  `wireshark ./captures/gateway_8a7fd2c1e094b6f0/capture.pcap`
 
   **Observe over the gateway (`Gateway.Observe` bee_rpc):** the same live data is
   exposed as a streaming RPC so peers/agents can subscribe remotely instead of
@@ -131,7 +130,7 @@ These are the most commonly used commands for daily tasks:
   uses (`observe_event_stream`) — no duplicated logic.
   - **Input:** one `ObserveRequest { instance_id, include_packets }`. The
     `instance_id` addresses the instance the same way `GetMetrics` does
-    (`TokenMessage.token` semantics — id or unique id-prefix). Set
+    (`TokenMessage.token` semantics — full instance id or its instance name). Set
     `include_packets = true` to also receive raw per-packet records; leave it
     `false` (default) for the lighter metrics-only stream.
   - **Output:** a live stream of `ObserveEvent`. Each event names its payload via
@@ -245,7 +244,7 @@ These are the most commonly used commands for daily tasks:
   `nodo publish my_service_tag`
 
 - **download `<manifest url>`**  
-  Downloads a published service from a manifest URL, verifies integrity, and imports it locally.
+  Downloads a published service from a manifest URL and imports it locally (the service id is recomputed from content on import).
   **Examples:**  
   `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest`  
   `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest -o /tmp/services`
@@ -306,9 +305,12 @@ These commands offer extended management and exploration features:
 
 ---
 
-## Estimate Resource Calculation Notes
+## Estimate Resource Calculation Notes (internal)
 
-`nodo estimate` uses the same internal checks as runtime cost estimation:
+These are the **internal** server-side calculations `nodo estimate` performs to
+decide feasibility; they are **not** printed by the command (its output is the
+feasibility verdict and the gas figures only). `nodo estimate` uses the same
+internal checks as runtime cost estimation:
 
 - **Execution feasibility check**
   - Uses the service `resources.at_most.mem_limit`.
