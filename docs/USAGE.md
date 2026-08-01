@@ -2,6 +2,13 @@
 
 This guide will help you understand and use the available commands in **Nodo**, a service orchestration tool for distributed networks. Below is a complete list of commands along with usage examples.
 
+> New to Nodo? Start with the [End-to-End Walkthrough](WALKTHROUGH.md) (pack →
+> estimate → execute → call → observe → kill, with example output), then use this
+> page as the per-command reference. Concepts are defined in
+> [`CONCEPTS.md`](CONCEPTS.md); configuration in [`CONFIG.md`](CONFIG.md);
+> packing in [`PACKING.md`](PACKING.md); problems in
+> [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
+
 ---
 
 ## Non-interactive use (automation / agents) ⚙️
@@ -193,7 +200,10 @@ These are the most commonly used commands for daily tasks:
 
   **Example:**  
   `nodo pack /path/to/project`
-  > Check [detailed documentation](../src/commands/packer/zip_with_dockerfile/README.md)
+  > **Before packing, read [`PACKING.md`](PACKING.md)** — it is the canonical
+  > reference for the project layout, `pack_config.json`, `service.json`, and the
+  > `Dockerfile` rules (notably: no `CMD` / `ENTRYPOINT` / `EXPOSE`; the entrypoint
+  > is declared in `service.json → init.entry_path`). Do not guess the format.
 
 - **config**  
   Opens environment and runtime configuration options.  
@@ -497,6 +507,15 @@ Open a new shell to pick it up. Bash needs the `bash-completion` package install
 install directory on your `fpath`. Completion never edits your shell rc files. The dynamic
 candidate list comes from `nodo completion list <commands|services|instances|peers|refs>`, which is
 deliberately lightweight so it stays fast on every keypress.
+
+---
+
+## Uninstalling
+
+To remove Nodo — automatically (`uninstall.sh`) or manually — follow the
+[Uninstallation Guide](UNINSTALL.md). The installer touches a systemd unit, a
+wrapper at `/usr/local/bin/nodo`, and the `TARGET_DIR` install root; the guide
+covers each.
 
 ---
 
