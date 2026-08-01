@@ -1,5 +1,12 @@
 # Cloud Hypervisor as Virtualizer (Strong Isolation)
 
+> **Historical design document (pre-migration).** This file describes the
+> original plan to add Cloud Hypervisor *alongside* Docker and reflects a
+> Docker-centric world that no longer exists. **Current reality:** Cloud
+> Hypervisor (CH) is the only supported virtualizer; the Docker virtualizer
+> has been removed (`src/virtualizers/interface.py` hard-returns `"ch"`).
+> Treat references to Docker below as historical context, not current state.
+
 ## Objective and Context
 
 Integrate **Cloud Hypervisor (CH)** as a virtualization backend to execute services with **strong isolation** (microVMs over KVM), while maintaining the existing contract exposed by `src/virtualizers/interface.py`.
