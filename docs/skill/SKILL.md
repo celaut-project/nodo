@@ -64,9 +64,10 @@ Understand these before running anything. Full glossary:
 * **microVM execution:** services **run** as isolated Cloud Hypervisor (`ch`)
   microVMs — never Docker containers. Docker, if used at all, only builds the
   filesystem during packing (§2).
-* **Gas:** the compute unit clients pay for. A client tops up gas by minting an
-  Ergo **deposit token** and submitting an Ergo transaction carrying that token
-  plus ERG; the node verifies it and credits gas. Nodes run two hot wallets
+* **Gas:** the compute unit clients pay for. A client tops up gas by generating a
+  **deposit token** — a locally-generated identifier, not an on-chain asset — and
+  submitting an Ergo transaction carrying that identifier plus ERG; the node
+  verifies it and credits gas. Nodes run two hot wallets
   (public/receiving + sending) and an optional cold address. See
   [`../ERGO.md`](../ERGO.md).
 * **Ergo relationship:** Celaut is multi-ledger *by design*; Ergo is the ledger
