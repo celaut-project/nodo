@@ -52,8 +52,9 @@ service. Do not use `docker ps` to inspect a running instance — use
 ## Gas
 
 The unit of compute a client pays for. A client tops up its gas balance on a node
-by minting an Ergo **deposit token** and submitting an Ergo transaction that
-carries that token plus some ERG; the node verifies the deposit belongs to the
+by generating a **deposit token** — a locally-generated identifier, not an
+on-chain asset — and submitting an Ergo transaction that carries that identifier
+(in register R4) plus some ERG; the node verifies the deposit belongs to the
 client and that the funds reached its public wallet, then credits gas. Nodes run
 two hot wallets (a public/receiving wallet and a sending wallet) plus an optional
 cold address. `nodo estimate` reports a service's gas cost before you run it;
