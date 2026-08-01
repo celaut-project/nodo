@@ -1,7 +1,7 @@
 ---
 name: celaut-bridge-skill
 version: 1.2.0
-description: Bridge skill for the Celaut decentralised-compute network — install the Celaut node (nodo), package projects into reproducible content-addressed microVM services, execute and observe workloads, and discover on-chain "Unstoppable Skills" via the read-only MCP server (publishing is via the reputation-system TypeScript library).
+description: Bridge skill for the Celaut decentralised-compute network — install the Celaut node (nodo), package projects into content-addressed microVM services, execute and observe workloads, and discover on-chain "Unstoppable Skills" via the read-only MCP server (publishing is via the reputation-system TypeScript library).
 author: Community Contribution
 license: MIT
 compatibility:
@@ -18,11 +18,9 @@ system_requirements:
  # node + npm: required only to run the Celaut Skills MCP server (§5).
  - node
  - npm
- # docker: required only for the opt-in LOCAL packer (packer.local: true, §2).
- #   Not needed for default packing (external packer-service) or execution.
- - docker
- # java: optional — only for Ergo-backed payment / reputation features.
- - java
+ # Note: docker and java are NOT host requirements. Nodo auto-provisions both
+ # under MAIN_DIR (bash/install_docker.sh, bash/install_java.sh) and drives an
+ # isolated Docker daemon; the host's Docker is never used.
 ---
 
 # Celaut Bridge Skill
@@ -58,8 +56,9 @@ Understand these before running anything. Full glossary:
 [celaut-project/paradigm](https://github.com/celaut-project/paradigm).
 
 * **Deterministic / content-addressed:** a service is a specification identified
-  by the hash of its content (its **service id**). The same project always packs
-  to the same id, on any node. `.celaut.bee` is the importable package; a raw
+  by the hash of its content (its **service id**). The same specification always
+  has the same id; byte-identical rebuilds from source are not guaranteed.
+  `.celaut.bee` is the importable package; a raw
   `.celaut` is for hash verification only.
 * **microVM execution:** services **run** as isolated Cloud Hypervisor (`ch`)
   microVMs — never Docker containers. Docker, if used at all, only builds the
@@ -67,8 +66,9 @@ Understand these before running anything. Full glossary:
 * **Gas:** the compute unit clients pay for. A client tops up gas by generating a
   **deposit token** — a locally-generated identifier, not an on-chain asset — and
   submitting an Ergo transaction carrying that identifier plus ERG; the node
-  verifies it and credits gas. Nodes run two hot wallets
-  (public/receiving + sending) and an optional cold address. See
+  verifies it and credits gas. Nodes run a single hot wallet
+  (`ledgers.ergo.WALLET_MNEMONIC`); clients pay its derived P2PK address, and
+  excess is swept to an optional cold address. See
   [`../ERGO.md`](../ERGO.md).
 * **Ergo relationship:** Celaut is multi-ledger *by design*; Ergo is the ledger
   implemented today — "not necessarily the only ledger to be used"
