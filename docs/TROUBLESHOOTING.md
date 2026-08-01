@@ -41,8 +41,12 @@ virtualization (`/dev/kvm`). It is commonly unavailable when:
   ensure the nodo user can access `/dev/kvm`.
 - **Cloud Hypervisor binary existence and version** — reinstall CH assets
   ([`INSTALL.md`](INSTALL.md) step 10) if missing.
-- **Guest kernel (`vmlinuz`) / initramfs presence** — must exist and pass size
-  validation; rebuild via `bash/build_ch_initramfs.sh` if missing.
+- **Guest kernel (`vmlinuz`) / initramfs presence** — the guest kernel must
+  exist and be ≥1 MiB; the initramfs must exist and contain `init`,
+  `bin/busybox`, and the `etc/nodo-ch-initramfs.marker` marker (verified with
+  `lsinitramfs`). To rebuild the initramfs, re-run the installer, or invoke the
+  builder with its positional arguments, e.g.
+  `sudo bash /nodo/bash/build_ch_initramfs.sh /nodo linux/amd64 /nodo/cloud_hypervisor/initramfs/linux/amd64/initramfs`.
 - **KVM smoke test** — launches a minimal VM; a failure here means CH cannot
   execute vCPUs on this kernel even though the earlier checks passed (often a
   container/nested-virt limitation, or a bleeding-edge host kernel that `doctor`

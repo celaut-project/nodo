@@ -514,8 +514,10 @@ deliberately lightweight so it stays fast on every keypress.
 
 To remove Nodo — automatically (`uninstall.sh`) or manually — follow the
 [Uninstallation Guide](UNINSTALL.md). The installer touches a systemd unit, a
-wrapper at `/usr/local/bin/nodo`, and the `TARGET_DIR` install root; the guide
-covers each.
+wrapper at `/usr/local/bin/nodo`, the `TARGET_DIR` install root, and system-level
+shell completions (`/etc/bash_completion.d/nodo` and
+`/usr/local/share/zsh/site-functions/_nodo`); the guide covers each — note that
+`uninstall.sh` does not remove the completions.
 
 ---
 
