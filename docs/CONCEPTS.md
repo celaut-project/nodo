@@ -55,9 +55,10 @@ The unit of compute a client pays for. A client tops up its gas balance on a nod
 by generating a **deposit token** — a locally-generated identifier, not an
 on-chain asset — and submitting an Ergo transaction that carries that identifier
 (in register R4) plus some ERG; the node verifies the deposit belongs to the
-client and that the funds reached its public wallet, then credits gas. Nodes run
-two hot wallets (a public/receiving wallet and a sending wallet) plus an optional
-cold address. `nodo estimate` reports a service's gas cost before you run it;
+client and that the funds reached its wallet, then credits gas. Nodes run a
+single hot wallet (`ledgers.ergo.WALLET_MNEMONIC`); clients pay its derived P2PK
+address, and excess is swept to an optional cold address. `nodo estimate` reports
+a service's gas cost before you run it;
 `nodo increase_gas` / `nodo decrease_gas` adjust a running instance. Full model:
 [`ERGO.md`](ERGO.md).
 
