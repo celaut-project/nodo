@@ -194,7 +194,7 @@ if __name__ == '__main__':
                     "\n- peers"
                     "\n- instances"
                     "\n- instances --grouped"
-                    "\n- connect <ip:url>"
+                    "\n- connect <ip:port>"
                     "\n- disconnect <peer_id>"
                     "\n- pack <project directory>"
                     "\n- config"
