@@ -236,13 +236,14 @@ fi
 sync_config_main_paths
 
 # Apply custom architecture-specific setup
-if [ "$(uname -m)" = "arm64" ]; then
-  SETUP_SCRIPT="bash/setup_ubuntu_arm.sh"
-elif [ "$(uname -m)" = "x86_64" ]; then
-  SETUP_SCRIPT="bash/setup_ubuntu_x86.sh"
-else
-  exit 1
-fi
+case "$(uname -m)" in
+  aarch64|arm64)  SETUP_SCRIPT="bash/setup_ubuntu_arm.sh" ;;
+  x86_64|amd64)   SETUP_SCRIPT="bash/setup_ubuntu_x86.sh" ;;
+  *)
+    printf "Error: unsupported architecture '%s'. Supported: x86_64/amd64, aarch64/arm64.\n" "$(uname -m)" >&2
+    exit 1
+    ;;
+esac
 
 printf "Running setup script $SETUP_SCRIPT...\n"
 if ! /bin/bash "$SETUP_SCRIPT" "$TARGET_DIR" "$CH_VERSION"; then
