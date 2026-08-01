@@ -81,3 +81,36 @@ def bip_ecdsa_verify(message: str, signature_hex: str, public_key_hex: str) -> b
 
     except (binascii.Error, ValueError, ecdsa.BadSignatureError):
         return False
+
+
+# P2PK propositionBytes are `0008cd` + 33-byte SEC-compressed public key.
+_P2PK_PREFIX = bytes.fromhex("0008cd")
+
+
+def public_key_from_proposition_bytes(proposition_bytes: bytes) -> bytes:
+    """Extract the 33-byte compressed public key from raw P2PK propositionBytes."""
+    if isinstance(proposition_bytes, str):
+        proposition_bytes = bytes.fromhex(proposition_bytes.strip())
+    if len(proposition_bytes) != len(_P2PK_PREFIX) + 33 or not proposition_bytes.startswith(_P2PK_PREFIX):
+        raise ValueError("Not a P2PK propositionBytes value.")
+    return proposition_bytes[len(_P2PK_PREFIX):]
+
+
+def bip_ecdsa_verify_proposition(proposition_bytes: bytes, message: str, signature_hex: str) -> bool:
+    """
+    Verify that ``signature_hex`` over ``message`` was produced by the owner of the
+    P2PK ``proposition_bytes`` (raw ErgoTree stored in a reputation box R7).
+
+    The public key is taken directly from the propositionBytes, so this proves the
+    peer controls exactly that R7 owner — the ownership-challenge counterpart of
+    :func:`bip_ecdsa_sign`. Returns ``False`` for any malformed input or bad signature.
+    """
+    try:
+        compressed = public_key_from_proposition_bytes(proposition_bytes)
+        vk = ecdsa.VerifyingKey.from_string(
+            compressed, curve=ecdsa.SECP256k1, valid_encodings=["compressed"]
+        )
+        msg_hash = hashlib.sha256(message.encode()).digest()
+        return vk.verify(binascii.unhexlify(signature_hex), msg_hash)
+    except (binascii.Error, ValueError, ecdsa.BadSignatureError, ecdsa.MalformedPointError):
+        return False

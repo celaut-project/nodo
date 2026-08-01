@@ -2,6 +2,13 @@
 
 This guide will help you understand and use the available commands in **Nodo**, a service orchestration tool for distributed networks. Below is a complete list of commands along with usage examples.
 
+> New to Nodo? Start with the [End-to-End Walkthrough](WALKTHROUGH.md) (pack →
+> estimate → execute → call → observe → kill, with example output), then use this
+> page as the per-command reference. Concepts are defined in
+> [`CONCEPTS.md`](CONCEPTS.md); configuration in [`CONFIG.md`](CONFIG.md);
+> packing in [`PACKING.md`](PACKING.md); problems in
+> [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
+
 ---
 
 ## Non-interactive use (automation / agents) ⚙️
@@ -31,41 +38,40 @@ When this file exists, Nodo treats the KyA as already accepted and starts withou
 
 These are the most commonly used commands for daily tasks:
 
-- **execute `[--remote] [-e key value] <service id | service tag | '.celaut' file path>`**  
-  Launches a service instance. Use `--remote` to advertise the host-facing IP instead of the internal VM/container IP. Use `-e` to add service enviroment variables.  
+- **execute `[--remote] [--name <instance-name>] [-e key value] <service id | service tag | '.celaut.bee' file path>`**  
+  Launches a service instance. Use `--remote` to advertise the host-facing IP instead of the internal VM/container IP. Use `--name` to assign a human-readable instance name. Use `-e` to add service enviroment variables.  
   **Example:**  
   `nodo execute 1234567890abcdef`
   `nodo execute --remote 1234567890abcdef`
   `nodo execute --remote -e workers 8 -e timeout 20 1234567890abcdef`
 
-- **estimate `<service id | service tag | '.celaut' file path>`**  
+- **estimate `<service id | service tag | '.celaut.bee' file path>`**  
   Estimates service execution cost without launching it.  
   Prints:
   - execution feasibility (`YES/NO`)
   - reason when execution is not possible
   - estimated gas costs (initial and maintenance)
-  - resource availability and total capacity (CPU, RAM, disk)
   
   **Examples:**  
   `nodo estimate 1234567890abcdef`  
   `nodo estimate my_service_tag`  
-  `nodo estimate ./my-service.celaut`
+  `nodo estimate ./my-service.celaut.bee`
 
-- **remove `<service id>`**  
+- **remove `<service id>`** (requires root)  
   Removes a service from the node using its ID.  
   **Example:**  
-  `nodo remove 1234567890abcdef`
+  `sudo nodo remove 1234567890abcdef`
 
-- **kill `<instance id>`**  
+- **kill `<instance id>`** (requires root)  
   Stops a running service instance by ID.  
   **Example:**  
-  `nodo kill abcdef1234567890`
+  `sudo nodo kill abcdef1234567890`
 
 - **observe `<instance id> [--save <path>]`**  
   Attaches to a running instance and continuously displays live resource
   metrics (CPU and memory, current + session peak) **together with a live
-  per-flow view of the microVM's network activity in the same frame**. Instance
-  IDs may be abbreviated to a unique prefix. Press `Ctrl-C` to exit.  
+  per-flow view of the microVM's network activity in the same frame**. Address
+  the instance by its full instance id or its instance name. Press `Ctrl-C` to exit.  
 
   **Live network panel.** The network section is a live table of active flows,
   newest activity first. Each flow (direction + transport + addresses/ports) is
@@ -113,10 +119,10 @@ These are the most commonly used commands for daily tasks:
     `CAP_NET_RAW` / non-Linux host), so the artifact folder is self-explanatory.
 
   **Examples:**  
-  `nodo observe 8a7fd2`  
-  `nodo observe 8a7fd2 --save ./captures`  
-  → `./captures/gateway_8a7fd2.../{metrics.jsonl,capture.pcap}`, then
-  `wireshark ./captures/gateway_8a7fd2.../capture.pcap`
+  `nodo observe 8a7fd2c1e094b6f0`  
+  `nodo observe my-instance --save ./captures`  
+  → `./captures/gateway_8a7fd2c1e094b6f0/{metrics.jsonl,capture.pcap}`, then
+  `wireshark ./captures/gateway_8a7fd2c1e094b6f0/capture.pcap`
 
   **Observe over the gateway (`Gateway.Observe` bee_rpc):** the same live data is
   exposed as a streaming RPC so peers/agents can subscribe remotely instead of
@@ -124,7 +130,7 @@ These are the most commonly used commands for daily tasks:
   uses (`observe_event_stream`) — no duplicated logic.
   - **Input:** one `ObserveRequest { instance_id, include_packets }`. The
     `instance_id` addresses the instance the same way `GetMetrics` does
-    (`TokenMessage.token` semantics — id or unique id-prefix). Set
+    (`TokenMessage.token` semantics — full instance id or its instance name). Set
     `include_packets = true` to also receive raw per-packet records; leave it
     `false` (default) for the lighter metrics-only stream.
   - **Output:** a live stream of `ObserveEvent`. Each event names its payload via
@@ -193,7 +199,10 @@ These are the most commonly used commands for daily tasks:
 
   **Example:**  
   `nodo pack /path/to/project`
-  > Check [detailed documentation](../src/commands/packer/zip_with_dockerfile/README.md)
+  > **Before packing, read [`PACKING.md`](PACKING.md)** — it is the canonical
+  > reference for the project layout, `pack_config.json`, `service.json`, and the
+  > `Dockerfile` rules (notably: no `CMD` / `ENTRYPOINT` / `EXPOSE`; the entrypoint
+  > is declared in `service.json → init.entry_path`). Do not guess the format.
 
 - **config**  
   Opens environment and runtime configuration options.  
@@ -235,7 +244,7 @@ These are the most commonly used commands for daily tasks:
   `nodo publish my_service_tag`
 
 - **download `<manifest url>`**  
-  Downloads a published service from a manifest URL, verifies integrity, and imports it locally.
+  Downloads a published service from a manifest URL and imports it locally (the service id is recomputed from content on import).
   **Examples:**  
   `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest`  
   `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest -o /tmp/services`
@@ -296,9 +305,12 @@ These commands offer extended management and exploration features:
 
 ---
 
-## Estimate Resource Calculation Notes
+## Estimate Resource Calculation Notes (internal)
 
-`nodo estimate` uses the same internal checks as runtime cost estimation:
+These are the **internal** server-side calculations `nodo estimate` performs to
+decide feasibility; they are **not** printed by the command (its output is the
+feasibility verdict and the gas figures only). `nodo estimate` uses the same
+internal checks as runtime cost estimation:
 
 - **Execution feasibility check**
   - Uses the service `resources.at_most.mem_limit`.
@@ -402,15 +414,25 @@ These are intended for development or advanced maintenance environments:
 
 ---
 
-## No local Docker
+## Docker backends
 
-nodo does **not** install or run Docker on the host. Services run as
-**Cloud Hypervisor** microVMs, and packing is delegated to an external
-**packer-service** (which runs Docker/buildx inside its own sealed microVM).
-There is no `nodo docker` command and no isolated Docker daemon to manage.
+nodo supports two packing backends, and **no Docker is installed or run on the
+host by default**. Services run as **Cloud Hypervisor** microVMs, and packing is
+normally delegated to an external **packer-service** (which runs Docker/buildx
+inside its own sealed microVM). In this default mode there is no Docker daemon
+for nodo to manage.
 
-To pack, point nodo at a packer service and run `nodo pack` (see the **pack**
-command above):
+With **`packer.local: true`**, nodo instead builds services on this host with its
+**own isolated Docker toolchain** (see the **pack** command above). Docker is
+provisioned on demand under `MAIN_DIR` via `bash/install_docker.sh`, kept
+independent of any Docker already on the host; nodo starts its isolated daemon
+right before a build and stops it right after. That isolated daemon is managed
+with `nodo local_docker_packer <docker args>` (requires root) — its own usage
+string reads `nodo docker <docker command>`, and it is listed in `nodo help`.
+It runs `docker` against nodo's isolated daemon rather than any host Docker.
+
+To pack with the default external backend, point nodo at a packer service and run
+`nodo pack` (see the **pack** command above):
 
 ```bash
 # set the packer id under core_services in config.yaml (single source of truth):
@@ -497,6 +519,17 @@ Open a new shell to pick it up. Bash needs the `bash-completion` package install
 install directory on your `fpath`. Completion never edits your shell rc files. The dynamic
 candidate list comes from `nodo completion list <commands|services|instances|peers|refs>`, which is
 deliberately lightweight so it stays fast on every keypress.
+
+---
+
+## Uninstalling
+
+To remove Nodo — automatically (`uninstall.sh`) or manually — follow the
+[Uninstallation Guide](UNINSTALL.md). The installer touches a systemd unit, a
+wrapper at `/usr/local/bin/nodo`, the `TARGET_DIR` install root, and system-level
+shell completions (`/etc/bash_completion.d/nodo` and
+`/usr/local/share/zsh/site-functions/_nodo`); the guide covers each — note that
+`uninstall.sh` does not remove the completions.
 
 ---
 

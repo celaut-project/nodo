@@ -1,5 +1,6 @@
-use crate::app::{format_bytes, percent, shorten, App, InputMode, Page, HISTORY_POINTS};
+use crate::app::{format_bytes, percent, shorten, App, Instance, InputMode, Page, HISTORY_POINTS};
 use ratatui::{prelude::*, widgets::*};
+use std::collections::{HashMap, HashSet};
 
 const ACCENT: Color = Color::Cyan;
 const MUTED: Color = Color::DarkGray;
@@ -25,8 +26,13 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     }
     draw_footer(frame, app, layout[2]);
 
-    if app.input_mode != InputMode::Normal {
-        draw_input_popup(frame, app);
+    match app.input_mode {
+        InputMode::Normal => {}
+        InputMode::Confirm => draw_confirm_popup(frame, app),
+        InputMode::Details => draw_details_popup(frame, app),
+        InputMode::Connect | InputMode::EditConfig | InputMode::FilterConfig => {
+            draw_input_popup(frame, app)
+        }
     }
 }
 
@@ -140,10 +146,6 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
         vec![
             metric_line("Peers", app.peers.items.len().to_string()),
             metric_line("Clients", app.clients.items.len().to_string()),
-            metric_line(
-                "Proof",
-                shorten(nonempty(&app.node_info.reputation_proof, "—"), 18),
-            ),
         ],
         Color::LightGreen,
     );
@@ -191,25 +193,28 @@ fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
 }
 
 fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
-    let sender = nonempty(&app.node_info.sender_address, "not configured");
-    let receiver = nonempty(&app.node_info.receiver_address, "not configured");
+    let wallet = nonempty(&app.node_info.wallet_address, "not configured");
+    let cold = nonempty(&app.node_info.cold_wallet_address, "not configured");
     let lines = vec![
         Line::from(vec![
-            Span::styled("Total  ", Style::default().fg(MUTED)),
+            Span::styled("Balance  ", Style::default().fg(MUTED)),
             Span::styled(
-                format_balance(app.node_info.total_balance),
+                format_balance(app.node_info.wallet_balance),
                 Style::default().fg(Color::LightGreen).bold(),
             ),
         ]),
         Line::from(format!(
-            "Send   {}  {}",
-            shorten(sender, 28),
-            format_balance(app.node_info.sender_balance)
+            "Wallet {}  {}",
+            shorten(wallet, 28),
+            format_balance(app.node_info.wallet_balance)
         )),
         Line::from(format!(
-            "Recv   {}  {}",
-            shorten(receiver, 28),
-            format_balance(app.node_info.receiver_balance)
+            "Cold   {}",
+            shorten(cold, 28)
+        )),
+        Line::from(format!(
+            "Proof  {}",
+            shorten(nonempty(&app.node_info.reputation_proof, "not registered"), 28)
         )),
         Line::from(Span::styled(
             nonempty(&app.node_info.error, "Balances refresh every 60 seconds"),
@@ -290,42 +295,66 @@ fn draw_sparkline(
 }
 
 fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
+    if app.instances_grouped {
+        draw_instances_tree(frame, app, area);
+        return;
+    }
     let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(6)]).split(area);
     let rows = app.instances.items.iter().map(|instance| {
+        let location = if instance.is_local() {
+            "local".to_string()
+        } else {
+            shorten(&instance.location, 14)
+        };
+        let location_style = if instance.is_local() {
+            Style::default().fg(GOOD)
+        } else {
+            Style::default().fg(WARN)
+        };
         Row::new(vec![
-            instance.name.clone(),
-            shorten(&instance.id, 18),
-            instance.service.clone(),
-            instance.ip.clone(),
-            instance.virtualizer.clone(),
-            instance
-                .memory_current
-                .map(format_bytes)
-                .unwrap_or_else(|| "—".to_string()),
-            format_bytes(instance.memory_limit),
-            format_bytes(instance.disk_limit),
-            instance.gas.clone(),
+            Cell::from(instance.name.clone()),
+            Cell::from(location).style(location_style),
+            Cell::from(shorten(&instance.id, 18)),
+            Cell::from(instance.service.clone()),
+            Cell::from(instance.ip.clone()),
+            Cell::from(instance.virtualizer.clone()),
+            Cell::from(
+                instance
+                    .memory_current
+                    .map(format_bytes)
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            Cell::from(format_bytes(instance.memory_limit)),
+            Cell::from(format_bytes(instance.disk_limit)),
+            Cell::from(instance.gas.clone()),
         ])
     });
+    let local_count = app.instances.items.iter().filter(|i| i.is_local()).count();
+    let remote_count = app.instances.items.len() - local_count;
     let table = Table::new(
         rows,
         [
             Constraint::Length(16),
+            Constraint::Length(14),
             Constraint::Length(19),
             Constraint::Length(18),
             Constraint::Length(15),
-            Constraint::Length(5),
-            Constraint::Length(11),
-            Constraint::Length(11),
-            Constraint::Length(11),
+            Constraint::Length(7),
+            Constraint::Length(9),
+            Constraint::Length(9),
+            Constraint::Length(9),
             Constraint::Min(12),
         ],
     )
     .header(header_row(vec![
-        "Name", "Instance", "Service", "IP", "VM", "RAM now", "RAM max", "Disk max", "Gas",
+        "Name", "Location", "Instance", "Service", "IP", "VM", "RAM now", "RAM max", "Disk max",
+        "Gas",
     ]))
     .block(section_block(
-        format!(" INSTANCES • {} running ", app.instances.items.len()),
+        format!(
+            " INSTANCES • {} local • {} remote ",
+            local_count, remote_count
+        ),
         Color::LightBlue,
     ))
     .highlight_style(selected_style())
@@ -335,6 +364,14 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     let detail = if let Some(instance) = app.instances.selected() {
         vec![
             metric_line("Instance", instance.id.clone()),
+            metric_line(
+                "Location",
+                if instance.is_local() {
+                    "local".to_string()
+                } else {
+                    format!("remote • peer {}", instance.location)
+                },
+            ),
             metric_line("Service", instance.service.clone()),
             metric_line("Endpoint", nonempty(&instance.ip, "—")),
             metric_line("Gas", instance.gas.clone()),
@@ -352,6 +389,109 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         detail,
         Color::LightBlue,
     );
+}
+
+/// Render instances as a dependency tree grouped by `father_id`, porting the
+/// Python `list_instances(groupable=True)` builder from commands/instances.py.
+fn draw_instances_tree(frame: &mut Frame, app: &App, area: Rect) {
+    let items = &app.instances.items;
+    let inst_map: HashMap<&str, &Instance> = items
+        .iter()
+        .filter(|instance| !instance.id.is_empty())
+        .map(|instance| (instance.id.as_str(), instance))
+        .collect();
+
+    // Group children under their parent; a father_id that is empty, "None", or
+    // not present locally makes the node a root (mirrors the Python logic).
+    let mut children: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut has_parent: HashSet<&str> = HashSet::new();
+    for instance in items.iter().filter(|instance| !instance.id.is_empty()) {
+        let father = instance.father_id.as_str();
+        if !father.is_empty() && father != "None" && inst_map.contains_key(father) {
+            children.entry(father).or_default().push(instance.id.as_str());
+            has_parent.insert(instance.id.as_str());
+        }
+    }
+    let roots: Vec<&str> = items
+        .iter()
+        .filter(|instance| !instance.id.is_empty())
+        .map(|instance| instance.id.as_str())
+        .filter(|id| !has_parent.contains(id))
+        .collect();
+
+    let mut lines: Vec<Line> = Vec::new();
+    let mut printed: HashSet<&str> = HashSet::new();
+    for root in &roots {
+        build_tree_lines(root, 0, &inst_map, &children, &mut printed, &mut lines);
+    }
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No instances to display.",
+            Style::default().fg(MUTED),
+        )));
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(section_block(
+                format!(
+                    " INSTANCE DEPENDENCY TREE • {} nodes • g toggles flat view ",
+                    inst_map.len()
+                ),
+                Color::LightBlue,
+            ))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn build_tree_lines<'a>(
+    node_id: &'a str,
+    depth: usize,
+    inst_map: &HashMap<&'a str, &'a Instance>,
+    children: &HashMap<&'a str, Vec<&'a str>>,
+    printed: &mut HashSet<&'a str>,
+    lines: &mut Vec<Line<'static>>,
+) {
+    if printed.contains(node_id) {
+        return;
+    }
+    printed.insert(node_id);
+    let Some(instance) = inst_map.get(node_id) else {
+        return;
+    };
+
+    let indent = "    ".repeat(depth);
+    let marker = if depth == 0 { "● " } else { "└─ " };
+    let label = if instance.name.is_empty() {
+        shorten(&instance.id, 20)
+    } else {
+        instance.name.clone()
+    };
+    let location = if instance.is_local() {
+        "local".to_string()
+    } else {
+        format!("peer {}", shorten(&instance.location, 12))
+    };
+    lines.push(Line::from(vec![
+        Span::raw(format!("{indent}{marker}")),
+        Span::styled(label, Style::default().fg(Color::White).bold()),
+        Span::styled(format!("  [{}]", instance.service), Style::default().fg(MUTED)),
+        Span::styled(
+            format!("  {location}"),
+            Style::default().fg(if instance.is_local() { GOOD } else { WARN }),
+        ),
+        Span::styled(
+            format!("  gas {}", instance.gas),
+            Style::default().fg(ACCENT),
+        ),
+    ]));
+
+    if let Some(kids) = children.get(node_id) {
+        for kid in kids {
+            build_tree_lines(kid, depth + 1, inst_map, children, printed, lines);
+        }
+    }
 }
 
 fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -416,25 +556,28 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let peers = app.peers.items.iter().map(|peer| {
         Row::new(vec![
-            peer.id.clone(),
-            peer.uris.clone(),
-            peer.gas.clone(),
-            peer.reputation.clone(),
+            Cell::from(peer.id.clone()),
+            Cell::from(peer.uris.clone()),
+            Cell::from(peer.gas.clone()),
+            Cell::from(peer.reputation_score.clone()).style(Style::default().fg(GOOD).bold()),
+            Cell::from(peer.reputation.clone()),
         ])
     });
     let peer_table = Table::new(
         peers,
         [
             Constraint::Length(30),
-            Constraint::Length(28),
-            Constraint::Length(18),
-            Constraint::Min(24),
+            Constraint::Length(24),
+            Constraint::Length(13),
+            Constraint::Length(7),
+            Constraint::Min(20),
         ],
     )
     .header(header_row(vec![
         "Peer ID",
         "Endpoints",
-        "Gas",
+        "Our Gas",
+        "Rep",
         "Reputation proof",
     ]))
     .block(section_block(
@@ -533,9 +676,11 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let controls = match app.page() {
         Page::Overview => "←/→ page  •  r refresh  •  q quit",
-        Page::Instances => "↑/↓ select  •  ←/→ page  •  r refresh  •  q quit",
-        Page::Services => "↑/↓ select  •  e execute  •  ←/→ page  •  q quit",
-        Page::Network => "↑/↓ select  •  Tab peers/clients  •  c connect  •  q quit",
+        Page::Instances => {
+            "↑/↓ select  •  g tree/flat  •  k kill  •  ←/→ page  •  r refresh  •  q quit"
+        }
+        Page::Services => "↑/↓ select  •  e execute  •  i details  •  d delete  •  ←/→ page  •  q quit",
+        Page::Network => "↑/↓ select  •  Tab peers/clients  •  +/- reputation  •  c connect  •  q quit",
         Page::Config => "↑/↓ select  •  e edit  •  / filter  •  x clear filter  •  q quit",
         Page::Logs => "←/→ page  •  r refresh  •  q quit",
     };
@@ -571,6 +716,57 @@ fn draw_input_popup(frame: &mut Frame, app: &App) {
             Block::bordered()
                 .title(Span::styled(
                     format!(" {} ", app.input_title),
+                    Style::default().fg(ACCENT).bold(),
+                ))
+                .border_style(Style::default().fg(ACCENT)),
+        )
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+    frame.render_widget(popup, area);
+}
+
+fn draw_confirm_popup(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 6, frame.size());
+    frame.render_widget(Clear, area);
+    let content = vec![
+        Line::from(Span::styled(
+            app.input_title.clone(),
+            Style::default().fg(Color::White).bold(),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "y confirms • n / Esc cancels",
+            Style::default().fg(MUTED),
+        )),
+    ];
+    let popup = Paragraph::new(content)
+        .alignment(Alignment::Center)
+        .block(
+            Block::bordered()
+                .title(Span::styled(" CONFIRM ", Style::default().fg(WARN).bold()))
+                .border_style(Style::default().fg(WARN)),
+        )
+        .style(Style::default().fg(Color::White).bg(Color::Black));
+    frame.render_widget(popup, area);
+}
+
+fn draw_details_popup(frame: &mut Frame, app: &App) {
+    let area = centered_rect(80, frame.size().height.saturating_sub(4).max(8), frame.size());
+    frame.render_widget(Clear, area);
+    let (title, text, scroll) = match &app.details {
+        Some(details) => (
+            details.title.clone(),
+            details.lines.join("\n"),
+            details.scroll as u16,
+        ),
+        None => (String::new(), String::new(), 0),
+    };
+    let popup = Paragraph::new(text)
+        .scroll((scroll, 0))
+        .wrap(Wrap { trim: false })
+        .block(
+            Block::bordered()
+                .title(Span::styled(
+                    format!(" {title} • ↑/↓ scroll • Esc close "),
                     Style::default().fg(ACCENT).bold(),
                 ))
                 .border_style(Style::default().fg(ACCENT)),
@@ -656,6 +852,67 @@ mod tests {
     }
 
     #[test]
+    fn grouped_instance_tree_renders() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Instances).unwrap();
+        app.instances_grouped = true;
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("DEPENDENCY TREE"));
+    }
+
+    #[test]
+    fn confirm_popup_shows_prompt_and_choices() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.input_mode = InputMode::Confirm;
+        app.input_title = "Delete service demo? (y/N)".to_string();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("Delete service demo?"));
+        assert!(screen.contains("y confirms"));
+    }
+
+    #[test]
+    fn details_popup_renders_inspect_output() {
+        use crate::app::DetailsView;
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.input_mode = InputMode::Details;
+        app.details = Some(DetailsView {
+            title: "Service abcdef".to_string(),
+            lines: vec!["tag: demo".to_string(), "size: 42 bytes".to_string()],
+            scroll: 0,
+        });
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("Service abcdef"));
+        assert!(screen.contains("tag: demo"));
+    }
+
+    #[test]
     fn secret_editor_never_renders_plaintext() {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -674,5 +931,27 @@ mod tests {
             .collect::<String>();
         assert!(!screen.contains("these words"));
         assert!(screen.contains("••••"));
+    }
+
+    #[test]
+    fn ergo_wallet_card_shows_reputation_proof() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.node_info.reputation_proof = "rep-proof-xyz".to_string();
+        app.node_info.wallet_address = "9walletaddr".to_string();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Overview).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        // Proof now lives in the ERGO WALLET card, not the NETWORK summary card.
+        assert!(screen.contains("ERGO WALLET"));
+        assert!(screen.contains("rep-proof-xyz"));
+        assert_eq!(screen.matches("rep-proof-xyz").count(), 1);
     }
 }

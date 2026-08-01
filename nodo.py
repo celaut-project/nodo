@@ -194,7 +194,7 @@ if __name__ == '__main__':
                     "\n- peers"
                     "\n- instances"
                     "\n- instances --grouped"
-                    "\n- connect <ip:url>"
+                    "\n- connect <ip:port>"
                     "\n- disconnect <peer_id>"
                     "\n- pack <project directory>"
                     "\n- config"
@@ -224,6 +224,8 @@ if __name__ == '__main__':
                     "\n- refresh_clients"
                     "\n- tx_history"
                     "\n- increase_peer_deposit <peer id> <gas to add>"
+                    "\n- verify_reputation <peer id>  (validate a peer's on-chain reputation proof + ownership challenge)"
+                    "\n- pay <peer id> <amount in ERG>  (pay a peer via the single-wallet flow; shows your gas balance on that peer afterward)"
                     "\n- local_docker_packer <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
                     "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
                     "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
@@ -246,7 +248,7 @@ if __name__ == '__main__':
 
                 print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}", flush=True)
 
-                reputation_proof_id = env_manager.get('REPUTATION_PROOF_ID')
+                reputation_proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
                 
                 try:
                     from src.payment_system.contracts.envs import print_payment_info
@@ -557,15 +559,6 @@ if __name__ == '__main__':
 
             case 'config':
                 os.system("/bin/bash bash/reconfig.sh")
-                # After (re)configuring — e.g. a new wallet mnemonic — reconcile the
-                # reputation proof: drop it if it no longer belongs to the wallet, and
-                # discover/store the wallet's on-chain proof if one exists.
-                try:
-                    from src.reputation_system.contracts.ergo.proof_validation import sync_reputation_proof_ownership
-
-                    sync_reputation_proof_ownership()
-                except JavaDependencyMissing as e:
-                    print_java_dependency_error(e)
 
             case 'envs':
                 os.system(f"yq . {MAIN_DIR}/config.yaml")
@@ -664,6 +657,30 @@ if __name__ == '__main__':
                 from src.commands.increase_peer_deposit import increase_peer_deposit
                 increase_peer_deposit(peer_id=sys.argv[2], gas=int(sys.argv[3]))
 
+            case "verify_reputation":
+                if len(sys.argv) < 3:
+                    print("Usage: nodo verify_reputation <peer_id>", flush=True)
+                    os._exit(1)
+                try:
+                    from src.commands.verify_reputation import verify_reputation
+                    ok = verify_reputation(peer_id=sys.argv[2])
+                except JavaDependencyMissing as e:
+                    print_java_dependency_error(e)
+                    os._exit(1)
+                os._exit(0 if ok else 1)
+
+            case "pay":
+                if len(sys.argv) < 4:
+                    print("Usage: nodo pay <peer_id> <amount_erg>", flush=True)
+                    os._exit(1)
+                try:
+                    from src.commands.pay import pay
+                    ok = pay(peer_id=sys.argv[2], amount_erg=sys.argv[3])
+                except JavaDependencyMissing as e:
+                    print_java_dependency_error(e)
+                    os._exit(1)
+                os._exit(0 if ok else 1)
+
             case "local_docker_packer":
                 # Run docker commands in nodo's isolated Docker context (the
                 # optional local packer's toolchain). Import lazily so this never
@@ -705,3 +722,13 @@ if __name__ == '__main__':
 
             case other:
                 print('Unknown command.', flush=True)
+
+    # Hand the console back when a one-shot command finishes. The Ergo / reputation
+    # commands (sync_reputation_proof, submit_reputation, tx_history, config, …)
+    # start a JVM through jpype, whose non-daemon threads otherwise keep the
+    # interpreter alive and hang the shell after the command has already done its
+    # work. `serve` blocks in wait_for_termination() and never reaches here, and the
+    # codebase registers no atexit handlers, so flush the streams and exit hard.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)

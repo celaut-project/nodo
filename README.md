@@ -110,6 +110,9 @@ Below is a breakdown of **Nodo** feature support across different operating syst
 
 For detailed usage instructions, please refer to the [User Guide](docs/USAGE.md).
 
+To package your own project into a Celaut service, see the [Packing Guide](docs/PACKING.md).
+To remove Nodo, see the [Uninstallation Guide](docs/UNINSTALL.md).
+
 
 ## Know Your Assumptions
 

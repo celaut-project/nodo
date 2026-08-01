@@ -40,7 +40,15 @@ SERVICE_COMMANDS = [
 INSTANCE_COMMANDS = ["kill", "observe", "increase_gas", "decrease_gas"]
 
 # Commands whose first positional argument is a peer id.
-PEER_COMMANDS = ["disconnect", "increase_peer_deposit"]
+PEER_COMMANDS = ["disconnect", "increase_peer_deposit", "verify_reputation", "pay"]
+
+# Commands whose first positional argument is a filesystem path (a project dir,
+# a .bee file, a config dir, …). These get file/dir completion, not an id list.
+PATH_COMMANDS = ["import", "pack", "ggconf"]
+
+# Commands whose SECOND positional argument is a filesystem path
+# (e.g. `export <service> <path>`). The first arg is still an id.
+SECOND_ARG_PATH_COMMANDS = ["export"]
 
 DAEMON_SUBCOMMANDS = ["start", "status", "stop", "restart"]
 
@@ -87,6 +95,8 @@ COMMANDS = sorted(
         "refresh_clients",
         "tx_history",
         "increase_peer_deposit",
+        "verify_reputation",
+        "pay",
         "local_docker_packer",
         "daemon",
         "doctor",
@@ -108,7 +118,12 @@ def config_paths() -> Dict[str, Optional[str]]:
         sys.path.insert(0, _ROOT)
     from src.utils.config import ConfigManager  # deferred: reads config.yaml
 
-    env = ConfigManager()
+    # Load config.yaml from the nodo install dir, NOT the caller's cwd. The shell
+    # runs this helper from wherever the user is standing, so a bare relative
+    # "config.yaml" would resolve against that cwd, find nothing, and silently kill
+    # service / instance / peer id completion everywhere but the nodo directory.
+    nodo_dir = os.environ.get("NODO_COMPLETION_DIR", _ROOT)
+    env = ConfigManager(os.path.join(nodo_dir, "config.yaml"))
     return {
         "registry": env.get("REGISTRY"),
         "metadata": env.get("METADATA_REGISTRY"),
@@ -237,7 +252,15 @@ _nodo_completion() {{
 
     local nodo_py="{python_bin}"
     local nodo_dir="{nodo_dir}"
-    _nodo_cand() {{ "$nodo_py" "$nodo_dir/src/commands/completion.py" list "$1" 2>/dev/null; }}
+    # Pass the install dir so the helper loads nodo's config.yaml regardless of the
+    # user's current directory.
+    _nodo_cand() {{ NODO_COMPLETION_DIR="$nodo_dir" "$nodo_py" "$nodo_dir/src/commands/completion.py" list "$1" 2>/dev/null; }}
+    # Path completion that actually descends directories (trailing slash) and keeps
+    # filenames intact — `compopt -o filenames` is what plain `compgen -f` lacks.
+    _nodo_paths() {{
+        compopt -o filenames 2>/dev/null
+        COMPREPLY=( $(compgen -f -- "$cur") )
+    }}
 
     # Complete the command itself (static, space-separated list -> default IFS).
     if [ "$cword" -eq 1 ]; then
@@ -246,13 +269,14 @@ _nodo_completion() {{
     fi
 
     local cmd="${{COMP_WORDS[1]}}"
-    # Only the first positional argument carries an id/tag.
+    # First positional argument: an id/tag, a path, or a daemon subcommand.
     if [ "$cword" -eq 2 ]; then
         local kind=""
         case "$cmd" in
             {"|".join(SERVICE_COMMANDS)}) kind="services" ;;
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
+            {"|".join(PATH_COMMANDS)}) _nodo_paths; return 0 ;;
             daemon)
                 COMPREPLY=( $(compgen -W "{_quote_words(DAEMON_SUBCOMMANDS)}" -- "$cur") )
                 return 0
@@ -265,13 +289,23 @@ _nodo_completion() {{
             COMPREPLY=( $(compgen -W "$(_nodo_cand "$kind")" -- "$cur") )
             return 0
         fi
+        # Unknown command's first argument -> offer filesystem paths.
+        _nodo_paths
+        return 0
+    fi
+
+    # Second positional argument that is a path (e.g. `export <service> <path>`).
+    if [ "$cword" -eq 3 ]; then
+        case "$cmd" in
+            {"|".join(SECOND_ARG_PATH_COMMANDS)}) _nodo_paths; return 0 ;;
+        esac
     fi
 
     # Everything else falls back to filename completion.
-    COMPREPLY=( $(compgen -f -- "$cur") )
+    _nodo_paths
     return 0
 }}
-complete -o default -F _nodo_completion nodo
+complete -o bashdefault -o default -F _nodo_completion nodo
 """
 
 
@@ -283,7 +317,8 @@ _nodo() {{
     local nodo_py="{python_bin}"
     local nodo_dir="{nodo_dir}"
     local -a items
-    _nodo_cand() {{ "$nodo_py" "$nodo_dir/src/commands/completion.py" list "$1" 2>/dev/null }}
+    # Pass the install dir so the helper loads nodo's config.yaml regardless of cwd.
+    _nodo_cand() {{ NODO_COMPLETION_DIR="$nodo_dir" "$nodo_py" "$nodo_dir/src/commands/completion.py" list "$1" 2>/dev/null }}
 
     if (( CURRENT == 2 )); then
         items=({_quote_words(COMMANDS)})
@@ -298,6 +333,7 @@ _nodo() {{
             {"|".join(SERVICE_COMMANDS)}) kind="services" ;;
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
+            {"|".join(PATH_COMMANDS)}) _files; return ;;
             daemon)
                 items=({_quote_words(DAEMON_SUBCOMMANDS)})
                 _describe -t subcommands 'daemon subcommand' items
@@ -309,6 +345,13 @@ _nodo() {{
             _describe -t $kind $kind items
             return
         fi
+    fi
+
+    # Second positional path argument (e.g. `export <service> <path>`).
+    if (( CURRENT == 4 )); then
+        case $cmd in
+            {"|".join(SECOND_ARG_PATH_COMMANDS)}) _files; return ;;
+        esac
     fi
 
     _files

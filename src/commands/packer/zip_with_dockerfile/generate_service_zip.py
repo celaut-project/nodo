@@ -1,5 +1,6 @@
 import json
 import os
+import pathlib
 import shutil
 from typing import Dict
 from src.utils.config import ConfigManager
@@ -18,22 +19,36 @@ DEPENDENCIES_DIR = "dependencies"
 SKIP_WBP = "ignore_loadable_protobuf"
 DEPENDENCIES_ENV = "dependencies_env"
 
+# Default directory names used when the corresponding pack_config keys are
+# omitted. These match the values documented in docs/PACKING.md, so the
+# "Required: No" contract holds even when `dependencies` are declared.
+DEFAULT_SERVICE_DEPENDENCIES_DIRECTORY = "__services__"
+DEFAULT_METADATA_DEPENDENCIES_DIRECTORY = "__metadata__"
+DEFAULT_BLOCKS_DIRECTORY = "__block__"
+
 
 def __export_registry(project_dir: str, directory: str, pack_config: Dict):
+    # Resolve the dependency-directory names. These keys are optional in
+    # pack_config.json (see docs/PACKING.md); when omitted we fall back to the
+    # documented default directory names instead of raising a KeyError.
+    service_deps_dir = pack_config.get(SERVICE_DEPENDENCIES_DIRECTORY, DEFAULT_SERVICE_DEPENDENCIES_DIRECTORY)
+    metadata_deps_dir = pack_config.get(METADATA_DEPENDENCIES_DIRECTORY, DEFAULT_METADATA_DEPENDENCIES_DIRECTORY)
+    blocks_dir = pack_config.get(BLOCKS_DIRECTORY, DEFAULT_BLOCKS_DIRECTORY)
+
     list(map(
-        lambda _reg: os.makedirs(f"{directory}/{pack_config[_reg]}")
-            if _reg in pack_config and type(pack_config[_reg]) is str else 1,
+        lambda _dir: os.makedirs(f"{directory}/{_dir}", exist_ok=True)
+            if type(_dir) is str else 1,
         [
-            SERVICE_DEPENDENCIES_DIRECTORY,
-            METADATA_DEPENDENCIES_DIRECTORY,
-            BLOCKS_DIRECTORY
+            service_deps_dir,
+            metadata_deps_dir,
+            blocks_dir
         ]
     ))
 
     if DEPENDENCIES_DIR in pack_config:
         skip_wbp = pack_config[SKIP_WBP] if SKIP_WBP in pack_config else False  # By default, will be included.
         write_env = pack_config[DEPENDENCIES_ENV] if DEPENDENCIES_ENV in pack_config else False  # Write a file with the final hashes for the case where some dependencies need to be packed too.
-        dest_dir = f"{directory}/{pack_config[SERVICE_DEPENDENCIES_DIRECTORY]}"
+        dest_dir = f"{directory}/{service_deps_dir}"
         
         if type(pack_config[DEPENDENCIES_DIR]) is dict:
             dependencies = pack_config[DEPENDENCIES_DIR]
@@ -79,7 +94,7 @@ def __export_registry(project_dir: str, directory: str, pack_config: Dict):
             # Move dependency's metadata
             if os.path.exists(f"{METADATA}/{dependency}"):
                 os.system(f"cp -R {METADATA}/{dependency} "
-                          f"{directory}/{pack_config[METADATA_DEPENDENCIES_DIRECTORY]}")
+                          f"{directory}/{metadata_deps_dir}")
 
             # Move dependency's blocks.
             if os.path.isdir(f"{SERVICES}/{dependency}"):
@@ -89,10 +104,10 @@ def __export_registry(project_dir: str, directory: str, pack_config: Dict):
                         if type(_e) == list:
                             block: str = _e[0]
                             if not os.path.exists(
-                                    f'{directory}/{pack_config[BLOCKS_DIRECTORY]}/{block}'
+                                    f'{directory}/{blocks_dir}/{block}'
                             ):
                                 os.system(f"cp -r {BLOCKS}/{block} "
-                                          f"{directory}/{pack_config[BLOCKS_DIRECTORY]}")
+                                          f"{directory}/{blocks_dir}")
 
             # Write env
             if write_env:
@@ -147,24 +162,44 @@ def generate_service_zip(project_directory: str) -> str:
             else:
                 shutil.copy2(src_path, dest_path)
 
-    # Remove the files and directories specified in the "ignore" list from the configuration
+    # Remove the files and directories specified in the "ignore" list from the configuration.
+    # Recursive, .dockerignore-like exclusion done in Python (no shell). Each pattern is matched
+    # against every path under the packaged source dir via rglob, so nested matches (e.g. src/foo.pyc,
+    # src/__pycache__/) are excluded too. Blank lines, comments (#) and negations (!) — which get merged
+    # in raw from .dockerignore — are skipped, and trailing-slash directory patterns are tolerated.
     if 'ignore' in pack_config:
-        for file in pack_config['ignore']:
-            os.system(f"cd {complete_source_directory} && rm -rf {file}")
+        source_root = pathlib.Path(complete_source_directory)
+        for pattern in pack_config['ignore']:
+            pattern = pattern.strip()
+            if not pattern or pattern.startswith(("#", "!")):
+                continue
+            pattern = pattern.rstrip("/")  # "__pycache__/" -> "__pycache__"
+            if not pattern:
+                continue
+            for p in source_root.rglob(pattern):
+                if p.is_dir():
+                    shutil.rmtree(p, ignore_errors=True)
+                else:
+                    p.unlink(missing_ok=True)
 
     # Add the dependencies
     __export_registry(project_dir=project_directory, directory=complete_source_directory, pack_config=pack_config)
 
     if 'zip' in pack_config and pack_config['zip']:
+        # Dependency-directory keys are optional; fall back to the documented
+        # default directory names (matching __export_registry) when omitted.
+        service_deps_dir = pack_config.get(SERVICE_DEPENDENCIES_DIRECTORY, DEFAULT_SERVICE_DEPENDENCIES_DIRECTORY)
+        metadata_deps_dir = pack_config.get(METADATA_DEPENDENCIES_DIRECTORY, DEFAULT_METADATA_DEPENDENCIES_DIRECTORY)
+        blocks_dir = pack_config.get(BLOCKS_DIRECTORY, DEFAULT_BLOCKS_DIRECTORY)
         os.system(f'cd {complete_source_directory} && '
                   f'zip -r services.zip'
-                  f' {pack_config[SERVICE_DEPENDENCIES_DIRECTORY]}'
-                  f' {pack_config[METADATA_DEPENDENCIES_DIRECTORY]}'
-                  f' {pack_config[BLOCKS_DIRECTORY]}')
+                  f' {service_deps_dir}'
+                  f' {metadata_deps_dir}'
+                  f' {blocks_dir}')
         os.system(f'cd {complete_source_directory} && '
-                  f'rm -rf {pack_config[SERVICE_DEPENDENCIES_DIRECTORY]} '
-                  f'{pack_config[METADATA_DEPENDENCIES_DIRECTORY]} '
-                  f'{pack_config[BLOCKS_DIRECTORY]}')
+                  f'rm -rf {service_deps_dir} '
+                  f'{metadata_deps_dir} '
+                  f'{blocks_dir}')
 
     # Create a ZIP file of the destination source directory
     os.system(f"cd {project_directory}/.service && zip -r .service.zip .")
