@@ -124,6 +124,11 @@ def get_wallet_proposition_bytes() -> bytes:
     return proposition_bytes_from_address(get_wallet_address())
 
 
+def get_amount_by_addr(mnemonic: str) -> int:
+    """Confirmed balance in integer nanoERG of the wallet derived from ``mnemonic``."""
+    return __confirmed_balance_nanoerg(__get_sender_addr(mnemonic=mnemonic))
+
+
 def get_balance() -> Tuple[str, float]:
     """Return (address, confirmed balance in ERG) for the single wallet."""
     addr = __get_sender_addr(WALLET_MNEMONIC())

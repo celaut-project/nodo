@@ -325,6 +325,9 @@ publisher:
 general_flags:
   SIMULATE_PAYMENTS: false
   SUBMIT_REPUTATION_AT_INIT: false
+  # Publish how to reach this node (network.PUBLIC_IP or, if empty, the outbound IP
+  # when it is publicly routable) on its own reputation proof. Private/LAN addresses
+  # are never published, so a node behind NAT must set network.PUBLIC_IP to advertise.
   SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF: true
 
 # Reputation and payments are configured per-ledger, under ledgers.<ledger>.
