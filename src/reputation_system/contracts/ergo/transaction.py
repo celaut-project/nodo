@@ -1,3 +1,4 @@
+import ipaddress
 import json
 from typing import List, Optional, Tuple, TypedDict
 
@@ -12,7 +13,7 @@ from src.utils.logger import LOGGER
 # Constants
 env_manager = ConfigManager()
 ERGO_NODE_URL = lambda: env_manager.get("ledgers.ergo.NODE_URL")
-SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF = env_manager.get('SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF')
+SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF = lambda: env_manager.get('SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF')
 DEFAULT_FEE = 1_000_000
 SAFE_MIN_BOX_VALUE = 1_000_000
 DEFAULT_TOKEN_AMOUNT = int(env_manager.get('ledgers.ergo.reputation.TOTAL_REPUTATION_TOKEN_AMOUNT'))
@@ -152,6 +153,68 @@ def __build_proof_box(
                 .build()
 
 
+NO_NETWORK_ADDRESS = "No IP available."
+
+
+def resolve_public_host(configured: str, outbound_ip: Optional[str]) -> Optional[str]:
+    """Which host this node advertises about itself in its own proof object.
+
+    ``configured`` is ``network.PUBLIC_IP`` (a public IP or a DNS name); when it is
+    empty the outbound-interface IP is used instead, which is the right answer on a
+    node with a directly routable address (a VPS) and the wrong one behind NAT.
+    Hence the filter: a private, loopback or link-local address is never published,
+    since a LAN address is meaningless to whoever reads the proof from the ledger.
+    A non-IP string is taken as a DNS name and advertised as-is.
+    """
+    host = (configured or "").strip() or (outbound_ip or "").strip()
+    if not host:
+        return None
+    try:
+        return host if ipaddress.ip_address(host).is_global else None
+    except ValueError:
+        return host
+
+
+def _self_network_data() -> str:
+    """Instance JSON describing how to reach this node, for its self-pointing object.
+
+    Same shape as the data published for the other peers (``MessageToJson`` of a
+    ``celaut.Instance``), so a reader parses every object of the proof alike. Only
+    the gateway URI is included; the rest of the node info is served by GetPeerInfo.
+    """
+    if not SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF():
+        return NO_NETWORK_ADDRESS
+
+    from google.protobuf.json_format import MessageToJson
+
+    from protos import celaut_pb2
+    from src.utils.network import get_local_ip
+
+    try:
+        outbound_ip = get_local_ip()
+    except Exception as e:
+        LOGGER(f"Could not resolve the outbound IP for the reputation proof: {e}")
+        outbound_ip = None
+
+    host = resolve_public_host(
+        configured=str(env_manager.get("network.PUBLIC_IP", "") or ""),
+        outbound_ip=outbound_ip,
+    )
+    if not host:
+        LOGGER("No public address to advertise (set network.PUBLIC_IP if the node is behind NAT).")
+        return NO_NETWORK_ADDRESS
+
+    port = int(env_manager.get("GATEWAY_PORT"))
+    instance = celaut_pb2.Instance()
+    uri_slot = instance.uri_slot.add()
+    uri_slot.internal_port = port
+    uri = uri_slot.uri.add()
+    uri.ip = host
+    uri.port = port
+    LOGGER(f"Advertising {host}:{port} on the reputation proof.")
+    return MessageToJson(instance)
+
+
 def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: Optional[str], objects: List[Tuple[Optional[str], int, Optional[str]]]):
     ensure_ergpy_jvm(feature="Ergo reputation")
     appkit = require_java_module("ergpy.appkit", feature="Ergo reputation")
@@ -237,9 +300,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     for obj in objects:
         self_info = not obj[0]
         if self_info:
-            data = "No IP available."
-            # if SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF:
-            #     pass TODO add public ip or DNS.
+            data = _self_network_data()
         else:
             data = obj[2]
 
