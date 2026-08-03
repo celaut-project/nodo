@@ -36,6 +36,17 @@ _CHALLENGE_TIMEOUT_SECONDS = 20
 _CHALLENGE_NONCE_BYTES = 32
 
 
+class ProofLookupUnavailable(ValueError):
+    """The Ergo node could not be queried, so a proof's status is UNDETERMINED.
+
+    Distinct from a negative verdict ("the chain says this proof is not yours").
+    Callers that act destructively on a negative — dropping REPUTATION_PROOF_ID
+    from the config, or minting a fresh proof instead of spending the existing
+    one — must not treat an unreachable node as one. Subclasses ValueError so
+    existing callers that only expect that keep working.
+    """
+
+
 def _decode_coll_byte_hex(register_value: str) -> Optional[str]:
     """
     Return the raw byte payload (hex) of a Coll[Byte] register.
@@ -158,19 +169,32 @@ def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
 
     The endpoint returns the token's whole history, so spent boxes are dropped
     here: one stale box would be enough to fail an otherwise valid proof.
+
+    Raises :class:`ProofLookupUnavailable` when the node cannot be queried, so
+    callers can tell "the chain says no" from "the chain did not answer".
     """
     import requests
 
     node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
     if not node_url:
-        raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
+        raise ProofLookupUnavailable("Missing configuration: ledgers.ergo.NODE_URL")
 
     url = f"{str(node_url).rstrip('/')}/blockchain/box/byTokenId/{token_id}"
-    response = requests.get(url, timeout=30)
-    if response.status_code != 200:
-        raise ValueError(f"Could not fetch token {token_id}: HTTP {response.status_code}")
+    try:
+        response = requests.get(url, timeout=30)
+    except requests.RequestException as e:
+        raise ProofLookupUnavailable(f"Could not reach the Ergo node at {node_url}: {e}")
 
-    payload = response.json()
+    if response.status_code != 200:
+        raise ProofLookupUnavailable(
+            f"Could not fetch token {token_id}: HTTP {response.status_code}"
+        )
+
+    try:
+        payload = response.json()
+    except ValueError as e:
+        raise ProofLookupUnavailable(f"Unreadable response for token {token_id}: {e}")
+
     items = payload.get("items") if isinstance(payload, dict) else None
     return [box for box in (items or []) if not box.get("spentTransactionId")]
 
@@ -424,6 +448,10 @@ def _validate_reputation_proof_ownership(mnemonic_phrase: str, proof_id: str) ->
                 f"found R7 values {sorted([h for h in box_owners if h])}"
             )
         return valid
+    except ProofLookupUnavailable:
+        # UNDETERMINED, not "not yours": let the caller decide, since the ones
+        # here drop config or mint a new proof on a False.
+        raise
     except Exception as e:
         logger(f"Error validating reputation proof ownership: {e}")
         return False
@@ -514,7 +542,19 @@ def sync_reputation_proof_ownership() -> bool:
     mnemonic_phrase = config.get("ledgers.ergo.WALLET_MNEMONIC")
     proof_id = config.get("ledgers.ergo.reputation.REPUTATION_PROOF_ID")
 
-    is_valid = validate_reputation_proof_ownership(proof_id=proof_id)
+    try:
+        is_valid = validate_reputation_proof_ownership(proof_id=proof_id)
+    except ProofLookupUnavailable as e:
+        # Nothing was verified, so nothing is reconciled: clearing the proof id
+        # here would lose it over a node outage, and the node would go back to
+        # advertising no reputation proof at all.
+        _msg = (
+            f"Could not check reputation proof {proof_id} against the chain ({e}); "
+            "leaving the node configuration untouched."
+        )
+        print(_msg, flush=True)
+        logger(_msg)
+        return False
 
     if is_valid:
         print(f"Reputation proof {proof_id} is valid for the configured wallet.", flush=True)
