@@ -163,6 +163,34 @@ class OwnershipValidationTests(_ConfigTestCase):
             with self.assertRaises(ProofLookupUnavailable):
                 proof_validation.validate_reputation_proof_ownership(proof_id=PROOF_ID)
 
+    def test_a_failure_deriving_the_wallet_identity_is_undetermined(self):
+        # Found on a live node: get_public_key builds an ErgoAppKit against
+        # NODE_URL, so an outage blows up here — before any box is read — and the
+        # generic handler used to turn that into False, which cleared the config.
+        with mock.patch.object(
+            proof_validation,
+            "get_public_key",
+            side_effect=RuntimeError("Failed to parse: http://127.0.0.1:1info"),
+        ):
+            with self.assertRaises(ProofLookupUnavailable):
+                proof_validation.validate_reputation_proof_ownership(proof_id=PROOF_ID)
+
+    def test_any_unexpected_error_is_undetermined(self):
+        with self._patched_wallet(), mock.patch.object(
+            proof_validation, "_get_unspent_boxes_by_token", side_effect=RuntimeError("jvm gone")
+        ):
+            with self.assertRaises(ProofLookupUnavailable):
+                proof_validation.validate_reputation_proof_ownership(proof_id=PROOF_ID)
+
+    def test_no_boxes_on_chain_is_still_a_verdict(self):
+        # The node answered: this token has no unspent output. Not an outage.
+        with self._patched_wallet(), mock.patch.object(
+            proof_validation, "_get_unspent_boxes_by_token", return_value=[]
+        ):
+            self.assertFalse(
+                proof_validation.validate_reputation_proof_ownership(proof_id=PROOF_ID)
+            )
+
     def test_a_real_negative_still_returns_false(self):
         # Chain answered and the proof belongs to someone else: a verdict, not an outage.
         with self._patched_wallet(owner=OWNER), mock.patch.object(
@@ -220,6 +248,32 @@ class SyncKeepsConfigOnOutageTests(_ConfigTestCase):
             proof_validation.sync_reputation_proof_ownership()
 
         self.assertEqual(self._stored_proof_id(), "")
+
+    def test_an_outage_while_deriving_the_wallet_keeps_the_proof_id(self):
+        # End-to-end version of the live failure: only NODE_URL is unusable.
+        with mock.patch.object(
+            proof_validation,
+            "get_public_key",
+            side_effect=RuntimeError("Failed to parse: http://127.0.0.1:1info"),
+        ):
+            self.assertFalse(proof_validation.sync_reputation_proof_ownership())
+
+        self.assertEqual(self._stored_proof_id(), PROOF_ID)
+
+    def test_without_a_mnemonic_nothing_is_touched(self):
+        # No wallet means no identity to reconcile against, so no grounds to drop
+        # a configured proof id. It used to be cleared first, then skipped.
+        Singleton._instances.pop(ConfigManager, None)
+        path = Path(_TMPDIR) / "no-mnemonic.yaml"
+        path.write_text(_config_text(mnemonic="''"), encoding="utf-8")
+        ConfigManager(config_path=str(path)).load_config()
+
+        self.assertFalse(proof_validation.sync_reputation_proof_ownership())
+
+        stored = yaml.safe_load(path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            stored["ledgers"]["ergo"]["reputation"]["REPUTATION_PROOF_ID"], PROOF_ID
+        )
 
     def test_a_valid_proof_is_left_alone(self):
         with mock.patch.object(
