@@ -1,4 +1,3 @@
-import json
 import os
 from typing import List, Optional
 
@@ -140,18 +139,40 @@ def _node_own_proof_token_id(box: dict, owner_proposition: str, node_type_nft: s
 
 
 def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
-    from src.reputation_system.contracts.ergo.utils import get_boxes_by_token_ids
+    """
+    Unspent boxes holding ``token_id``, as the Ergo node's own JSON.
+
+    Read straight from ``GET /blockchain/box/byTokenId/{token_id}``: that response
+    already carries every box in full, with ``ergoTree`` as canonical hex and
+    ``additionalRegisters`` in the serialized ``0e…`` form that
+    :func:`_boxes_off_canonical_contract`, :func:`_validate_box_structure` and
+    :func:`_decode_coll_byte_hex` all expect — the same shape
+    :func:`iter_unspent_boxes_by_address` yields on the ownership-lookup path.
+
+    Do NOT route this through AppKit's ``InputBox.toJson()``: it renders
+    ``ergoTree`` as the Scala object's ``toString``
+    (``ErgoTree(25,ArraySeq(IntConstant(0),…``) instead of hex, so every hex
+    comparison against the canonical contract failed and *every* peer proof was
+    rejected as "off the canonical contract". It also cost a JVM start plus
+    minutes of wall clock per validation.
+
+    The endpoint returns the token's whole history, so spent boxes are dropped
+    here: one stale box would be enough to fail an otherwise valid proof.
+    """
+    import requests
 
     node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
     if not node_url:
         raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
 
-    ensure_ergpy_jvm(feature="Ergo reputation")
-    appkit = require_java_module("ergpy.appkit", feature="Ergo reputation")
-    ergo = appkit.ErgoAppKit(node_url=node_url)
+    url = f"{str(node_url).rstrip('/')}/blockchain/box/byTokenId/{token_id}"
+    response = requests.get(url, timeout=30)
+    if response.status_code != 200:
+        raise ValueError(f"Could not fetch token {token_id}: HTTP {response.status_code}")
 
-    java_boxes = get_boxes_by_token_ids(ergo, node_url, [token_id])
-    return [json.loads(str(box.toJson(True))) for box in java_boxes]
+    payload = response.json()
+    items = payload.get("items") if isinstance(payload, dict) else None
+    return [box for box in (items or []) if not box.get("spentTransactionId")]
 
 
 def _validate_box_structure(box: dict) -> bool:
