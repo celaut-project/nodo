@@ -1093,12 +1093,13 @@ class SQLConnection(metaclass=Singleton):
                 
             return False
 
-        # Fetch all stored ledgers. The 'ledger_hash' column contains the serialized ledger.
-        cursor = self._execute("SELECT hash FROM ledger")
-        
+        # Fetch all stored ledgers. 'content' holds the serialized ledger; 'hash' is
+        # only its sha3 digest, and there is no 'id' column at all (see migrate.py).
+        cursor = self._execute("SELECT content FROM ledger")
+
         for row in cursor.fetchall():
             # The ledger from the DB is in a serialized byte format.
-            db_ledger_bytes = row['id']
+            db_ledger_bytes = row['content']
             
             # Deserialize the bytes to reconstruct the Ledger object.
             db_ledger = celaut_pb2.Contract.Ledger()
