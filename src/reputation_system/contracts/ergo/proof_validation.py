@@ -418,6 +418,10 @@ def _validate_reputation_proof_ownership(mnemonic_phrase: str, proof_id: str) ->
 
     try:
         # Owner (raw propositionBytes) derived from the single wallet mnemonic.
+        # NOTE: get_public_key builds an ErgoAppKit against ledgers.ergo.NODE_URL,
+        # so this line needs the Ergo node too — and it runs BEFORE any box is
+        # read. An outage surfaces here first, which is why the handler below
+        # cannot treat an unexpected error as a verdict.
         address = get_public_key(mnemonic_phrase=mnemonic_phrase)
         expected_owner = owner_proposition_bytes_hex(address)
 
@@ -453,8 +457,14 @@ def _validate_reputation_proof_ownership(mnemonic_phrase: str, proof_id: str) ->
         # here drop config or mint a new proof on a False.
         raise
     except Exception as e:
-        logger(f"Error validating reputation proof ownership: {e}")
-        return False
+        # Same reasoning, for anything else that went wrong: AppKit unable to
+        # reach the node while deriving the wallet identity, an unexpected
+        # response shape, a JVM problem… None of those are the chain telling us
+        # the proof is not ours. Only a completed check may return False, because
+        # False is what makes callers delete config or mint a new proof.
+        raise ProofLookupUnavailable(
+            f"Could not validate ownership of reputation proof {proof_id}: {e}"
+        ) from e
 
 
 def _search_boxes_by_r7(ergo, contract_address: str, owner_proposition_hex: str) -> Optional[List[dict]]:
@@ -542,6 +552,17 @@ def sync_reputation_proof_ownership() -> bool:
     mnemonic_phrase = config.get("ledgers.ergo.WALLET_MNEMONIC")
     proof_id = config.get("ledgers.ergo.reputation.REPUTATION_PROOF_ID")
 
+    if not mnemonic_phrase:
+        # Without a wallet there is no identity to reconcile against, so there is
+        # no ground to drop a configured proof id either.
+        _msg = (
+            "No wallet mnemonic is configured; skipping the reputation proof "
+            "reconciliation and leaving the node configuration untouched."
+        )
+        print(_msg, flush=True)
+        logger(_msg)
+        return False
+
     try:
         is_valid = validate_reputation_proof_ownership(proof_id=proof_id)
     except ProofLookupUnavailable as e:
@@ -558,6 +579,11 @@ def sync_reputation_proof_ownership() -> bool:
 
     if is_valid:
         print(f"Reputation proof {proof_id} is valid for the configured wallet.", flush=True)
+    elif not proof_id:
+        # Nothing configured yet: go straight to the on-chain lookup below. Saying
+        # "not owned by the configured wallet" here (with an empty id) only made
+        # this state harder to read in the logs.
+        print("No reputation proof configured; looking one up on-chain.", flush=True)
     else:
         _msg = (
             f"Reputation proof {proof_id} is not owned by the configured wallet; "
@@ -567,13 +593,6 @@ def sync_reputation_proof_ownership() -> bool:
         logger(_msg)
         config.set("ledgers.ergo.reputation.REPUTATION_PROOF_ID", "")
         proof_id = None
-
-    if not is_valid and not mnemonic_phrase:
-        print(
-            "No wallet mnemonic is configured; skipping the on-chain reputation proof lookup.",
-            flush=True,
-        )
-        return False
 
     if proof_id:
         return True
