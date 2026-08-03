@@ -7,7 +7,7 @@ import time
 from decimal import Decimal, InvalidOperation
 from hashlib import sha3_256
 from threading import Lock
-from typing import Callable, Dict, Generator, List, Tuple, Optional
+from typing import Any, Callable, Dict, Generator, List, Tuple, Optional
 from google.protobuf.json_format import MessageToJson
 
 import grpc
@@ -782,31 +782,44 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error submitting to ledger: {e}')
             return False
 
-    def update_double_attempt_retry_time_on_ledger(self, ledger: str):
+    @staticmethod
+    def ledger_key(ledger: Any) -> str:
+        """The ``hash`` value the ledger table is keyed by, from a Ledger or a hash.
+
+        Callers on the payment path hold the deserialized ``Contract.Ledger``
+        message (that is what ``get_peer_contract_instances`` yields), so derive
+        the digest the same way ``add_contract`` does when it stores the row.
+        """
+        if isinstance(ledger, str):
+            return ledger
+        return sha3_256(ledger.SerializeToString()).hexdigest()
+
+    def update_double_attempt_retry_time_on_ledger(self, ledger: Any):
         """
         Updates the double_spending_retry_time field in the ledger table
         by setting it to the current time plus 10 minutes for the specified ledger.
 
         Args:
-            ledger (str): The identifier of the ledger whose retry_time needs to be updated.
+            ledger: The ledger whose retry_time needs updating, as a
+                ``Contract.Ledger`` message or as its ``hash``.
         """
         query = """
         UPDATE ledger
         SET double_spending_retry_time = DATETIME('now', '+10 minutes')
-        WHERE id = ?
+        WHERE hash = ?
         """
 
-        # Execute the query, passing the ledger ID to update the appropriate record.
-        self._execute(query, (ledger,))
+        self._execute(query, (self.ledger_key(ledger),))
 
-    def check_if_ledger_is_available(self, ledger: str) -> bool:
+    def check_if_ledger_is_available(self, ledger: Any) -> bool:
         """
         Checks if the specified ledger is available for use.
         A ledger is considered available if its double_spending_retry_time is NULL
         or is in the past.
 
         Args:
-            ledger (str): The identifier of the ledger to check.
+            ledger: The ledger to check, as a ``Contract.Ledger`` message or as
+                its ``hash``.
 
         Returns:
             bool: True if the ledger is available, False otherwise.
@@ -814,11 +827,11 @@ class SQLConnection(metaclass=Singleton):
         query = """
         SELECT double_spending_retry_time
         FROM ledger
-        WHERE id = ?
+        WHERE hash = ?
         """
 
         # Execute the query to get the retry time for the specified ledger.
-        result = self._execute(query, (ledger,)).fetchone()
+        result = self._execute(query, (self.ledger_key(ledger),)).fetchone()
 
         # Check if a result was returned and evaluate its availability.
         if result:

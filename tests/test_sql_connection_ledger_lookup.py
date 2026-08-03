@@ -1,13 +1,22 @@
-"""check_if_ledger_exists must read the serialized ledger, not a digest.
+"""The ledger table must be read with its real schema: hash + content, no `id`.
 
-It selected ``hash`` and then subscripted ``row['id']`` — a column that does not
-exist in the ledger table. With an empty table the loop never ran and nothing
-broke; as soon as one ledger was stored, every add_contract raised
-``IndexError: No item with that key``. That killed the registration of the node's
-own payment contract and the storing of a peer's, so payments could not work on
-any node that had ever recorded a ledger.
+Three queries were written against a column that does not exist:
+
+* ``check_if_ledger_exists`` selected ``hash`` and then subscripted ``row['id']``.
+  With an empty table the loop never ran and nothing broke; as soon as one ledger
+  was stored, every ``add_contract`` raised ``IndexError: No item with that key``,
+  killing the registration of the node's own payment contract and the storing of
+  a peer's.
+* ``check_if_ledger_is_available`` and
+  ``update_double_attempt_retry_time_on_ledger`` used ``WHERE id = ?``, and their
+  only callers pass the deserialized ``Contract.Ledger`` message rather than any
+  identifier.
+
+Together they made payments impossible on any node that had ever recorded a
+ledger.
 """
 import unittest
+from hashlib import sha3_256
 from unittest.mock import patch
 
 IMPORT_ERROR = None
@@ -80,6 +89,47 @@ class LedgerLookupTests(unittest.TestCase):
         ]
         result, _ = self._lookup(rows, self.ergo)
         self.assertEqual(result.prose, "Ergo chain")
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class LedgerKeyedQueriesTests(unittest.TestCase):
+    """The other two queries against the ledger table used `WHERE id = ?` too."""
+
+    def setUp(self):
+        self.conn = SQLConnection()
+        self.ledger = celaut_pb2.Contract.Ledger(tags=["ergo"], prose="Ergo chain", formal=b"")
+        self.expected_key = sha3_256(self.ledger.SerializeToString()).hexdigest()
+
+    def test_availability_is_queried_by_hash(self):
+        # A NULL retry time means available; the row is indexed positionally, as
+        # sqlite3.Row is in the code under test.
+        with patch.object(
+            self.conn, "_execute", return_value=_FakeCursor([[None]])
+        ) as execute:
+            self.assertTrue(self.conn.check_if_ledger_is_available(ledger=self.ledger))
+
+        query, params = execute.call_args[0]
+        self.assertIn("WHERE hash = ?", query)
+        self.assertEqual(params, (self.expected_key,))
+
+    def test_retry_time_update_is_keyed_by_hash(self):
+        with patch.object(self.conn, "_execute", return_value=_FakeCursor([])) as execute:
+            self.conn.update_double_attempt_retry_time_on_ledger(ledger=self.ledger)
+
+        query, params = execute.call_args[0]
+        self.assertIn("WHERE hash = ?", query)
+        self.assertEqual(params, (self.expected_key,))
+
+    def test_a_hash_string_is_accepted_as_is(self):
+        with patch.object(self.conn, "_execute", return_value=_FakeCursor([])) as execute:
+            self.conn.update_double_attempt_retry_time_on_ledger(ledger="deadbeef")
+
+        self.assertEqual(execute.call_args[0][1], ("deadbeef",))
+
+    def test_the_key_matches_what_add_contract_stores(self):
+        # add_contract stores sha3(ledger.SerializeToString()) as ledger_hash; the
+        # lookups must derive exactly that or they silently match no row.
+        self.assertEqual(SQLConnection.ledger_key(self.ledger), self.expected_key)
 
 
 if __name__ == "__main__":
