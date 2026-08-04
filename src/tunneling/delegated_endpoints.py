@@ -38,6 +38,7 @@ same ports after a node restart, and firewall cleanup on stop targets the addres
 the client was actually given.
 """
 
+import random
 import socket
 import threading
 from typing import Dict, List, Optional, Tuple
@@ -49,7 +50,6 @@ from src.database.sql_connection import SQLConnection
 from src.utils import utils
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
-from src.utils.network import get_free_port
 from src.tunneling.tunnel_client import serve_tcp, serve_udp
 from src.virtualizers.firewall import TransportProtocol, resolve_slot_transport_protocols
 
@@ -232,6 +232,62 @@ def advertise_ip_for(father_id: str, father_ip: str) -> Optional[str]:
         return None
 
 
+def _bind_on_interface(
+    listener: socket.socket,
+    bind_ip: str,
+    local_port: Optional[int],
+    is_udp: bool,
+) -> Optional[int]:
+    """Bind ``listener`` on ``bind_ip`` and return the port it got, or None.
+
+    Binding is the allocation: the kernel hands out a free port on the exact
+    interface in a single syscall, so nothing can steal it between pick and use.
+    A pinned ``local_port`` must rebind that exact port (restoring an endpoint a
+    client already knows); otherwise, if ``network.FREE_PORTS_RANGE`` restricts
+    which ports the firewall forwards, try those on the interface directly (the
+    bind is the check); with no range, let the kernel pick an ephemeral port.
+    """
+    def _finish() -> int:
+        if not is_udp:
+            listener.listen(16)
+        return int(listener.getsockname()[1])
+
+    if local_port:
+        try:
+            listener.bind((bind_ip, local_port))
+            return _finish()
+        except OSError as e:
+            logger(f"{LOG_PREFIX} Cannot rebind {bind_ip}:{local_port}: {e}")
+            return None
+
+    candidates: List[int] = []
+    for r in env_manager.get("network.FREE_PORTS_RANGE", []) or []:
+        try:
+            start, end = int(r["START"]), int(r["END"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if start <= end:
+            candidates.extend(range(start, end + 1))
+
+    if candidates:
+        random.shuffle(candidates)
+        for candidate in candidates:
+            try:
+                listener.bind((bind_ip, candidate))
+                return _finish()
+            except OSError:
+                continue
+        logger(f"{LOG_PREFIX} No free port on {bind_ip} within FREE_PORTS_RANGE.")
+        return None
+
+    try:
+        listener.bind((bind_ip, 0))
+        return _finish()
+    except OSError as e:
+        logger(f"{LOG_PREFIX} Cannot bind an ephemeral port on {bind_ip}: {e}")
+        return None
+
+
 def _open_endpoint(
     token: str,
     internal_port: int,
@@ -247,17 +303,15 @@ def _open_endpoint(
     )
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-    port = local_port or get_free_port(
-        free_port_ranges=env_manager.get("network.FREE_PORTS_RANGE", [])
-    )
-    try:
-        # Bound to the address the client was told, not 0.0.0.0: a stand-in for a
-        # remote service must not widen what this host exposes.
-        listener.bind((bind_ip, port))
-        if not is_udp:
-            listener.listen(16)
-    except OSError as e:
-        logger(f"{LOG_PREFIX} Cannot bind {bind_ip}:{port} for slot {internal_port}: {e}")
+    # Bind on bind_ip itself — never the wildcard address — so the port is
+    # acquired atomically on the exact interface the client was told to use.
+    # The bind IS the allocation, which removes the check-then-bind race and the
+    # wildcard-vs-interface mismatch of picking a "free" port and binding it in
+    # two steps. (A stand-in for a remote service must also not widen what this
+    # host exposes.)
+    port = _bind_on_interface(listener, bind_ip, local_port, is_udp)
+    if port is None:
+        logger(f"{LOG_PREFIX} Could not bind a listener on {bind_ip} for slot {internal_port}.")
         listener.close()
         return None
 
