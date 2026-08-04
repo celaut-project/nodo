@@ -73,7 +73,7 @@ import select
 import socket
 import threading
 import time
-from typing import Callable, Generator, Iterator, Optional, Tuple
+from typing import Callable, Generator, Iterator, List, Optional, Tuple
 
 from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
@@ -386,6 +386,7 @@ def _pump_to_service(
     target: str,
     is_udp: bool,
     meter: GasMeter,
+    activity: List[float],
 ) -> None:
     """Forward caller payload to the service until the caller stops sending.
 
@@ -421,6 +422,7 @@ def _pump_to_service(
 
             sent += len(message)
             messages += 1
+            activity[0] = time.monotonic()  # caller->service counts as activity too
 
             if not meter.add(len(message)):
                 break  # Out of gas.
@@ -457,6 +459,9 @@ def _relay(
     """Yield everything the service sends while forwarding the caller's payload."""
     stop = threading.Event()
     caller_done = threading.Event()
+    # Shared last-activity clock (a one-element list so both threads see writes),
+    # bumped on traffic in either direction; the UDP idle timeout reads it.
+    activity = [time.monotonic()]
     writer = threading.Thread(
         target=_pump_to_service,
         kwargs={
@@ -467,6 +472,7 @@ def _relay(
             "target": target,
             "is_udp": is_udp,
             "meter": meter,
+            "activity": activity,
         },
         name=f"tunnel-writer-{target}",
         daemon=True,
@@ -475,7 +481,6 @@ def _relay(
 
     read_size = MAX_DATAGRAM_SIZE if is_udp else RECV_BUFFER_SIZE
     idle_timeout = _udp_idle_timeout() if is_udp else None
-    last_activity = time.monotonic()
     received = 0
     messages = 0
     empty_datagrams = 0
@@ -486,16 +491,17 @@ def _relay(
 
             if not readable:
                 # A datagram socket never reports EOF, so silence is the only
-                # signal we get that an exchange is over.
-                if is_udp and caller_done.is_set() and (
-                    time.monotonic() - last_activity > idle_timeout
-                ):
+                # signal we get that an exchange is over. Fire on inactivity in
+                # *either* direction, not only after the caller half-closes: a
+                # UDP caller that never ends its request stream would otherwise
+                # hold the relay, socket and billing loop open indefinitely.
+                if is_udp and (time.monotonic() - activity[0] > idle_timeout):
                     logger(f"{LOG_PREFIX} {target}: idle for {idle_timeout}s, closing.")
                     break
                 continue
 
             data = conn.recv(read_size)
-            last_activity = time.monotonic()
+            activity[0] = time.monotonic()
 
             if not data:
                 if not is_udp:  # The TCP service closed its write side.
