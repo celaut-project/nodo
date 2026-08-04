@@ -155,7 +155,11 @@ class GasMeter:
     noticed one block late: a tunnel can overrun by up to the charge interval
     before it closes. Shrink the interval to tighten that bound.
 
-    Rates of zero disable the corresponding charge. Note that whether an empty
+    The two rates are independent knobs, each self-disabling at zero:
+    ``TUNNEL_OPEN_COST`` of 0 makes opening free (``charge_open`` spends 0, which
+    ``_spend`` treats as always affordable) and ``TUNNEL_COST_PER_KB`` of 0
+    disables the per-traffic charge (``enabled`` is False, so ``add``/``settle``
+    no-op). Zero on one does not disable the other. Note that whether an empty
     balance actually stops a tunnel depends on ``costs.ALLOW_GAS_DEBT``, which
     ``spend_gas`` honours for us.
     """
@@ -210,7 +214,11 @@ class GasMeter:
         return False
 
     def charge_open(self) -> bool:
-        """Charge for opening a tunnel. False means the caller cannot afford it."""
+        """Charge for opening a tunnel. False means the caller cannot afford it.
+
+        Independent of the per-KB rate: a ``TUNNEL_OPEN_COST`` of 0 spends
+        nothing and always returns True, even when per-KB metering is disabled.
+        """
         return self._spend(int(_cost("TUNNEL_OPEN_COST", DEFAULT_TUNNEL_OPEN_COST)))
 
     def add(self, byte_count: int) -> bool:
