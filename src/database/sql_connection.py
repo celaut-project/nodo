@@ -1368,6 +1368,10 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
             return False
 
+    # The delegated_instances key column is `token_delegation` (the token as the
+    # remote peer knows it); `id` holds our hashed alias of it. There is no
+    # `token` column, and the payload column is `serialized_instance`.
+
     def get_external_father_id(self, token: str) -> str:
         """
         Retrieves the father_id of an delegated instance based on the token.
@@ -1381,29 +1385,52 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT father_id
             FROM delegated_instances
-            WHERE token = ?
+            WHERE token_delegation = ?
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else ""
 
     def get_delegated_instance(self, token: str) -> Optional[str]:
         """
-        Retrieves the serialized_service of an external container based on the token.
+        Retrieves the serialized instance of an external container based on the token.
 
         Args:
             token (str): The token of the external container.
 
         Returns:
-            str: The serialized_service of the external container, or None if not found.
+            str: The serialized instance of the external container, or None if not found.
         """
         cursor = self._execute('''
-            SELECT serialized_service
+            SELECT serialized_instance
             FROM delegated_instances
-            WHERE token = ?
+            WHERE token_delegation = ?
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else None
-    
+
+    def get_delegated_instances(self) -> List[dict]:
+        """
+        Fetches every delegated instance, for restoring state on startup.
+
+        Returns:
+            List[dict]: token (as the peer knows it), id (our hashed alias),
+                peer_id, father_id and the serialized instance.
+        """
+        result = self._execute('''
+            SELECT token_delegation, id, peer_id, father_id, serialized_instance
+            FROM delegated_instances
+        ''')
+        return [
+            {
+                'token': row[0],
+                'id': row[1],
+                'peer_id': row[2],
+                'father_id': row[3],
+                'serialized_instance': row[4],
+            }
+            for row in result.fetchall()
+        ]
+
     def purgue_delegated(self, token: str):
         """
         Purges an external container
@@ -1413,7 +1440,7 @@ class SQLConnection(metaclass=Singleton):
 
         """
         self._execute('''
-            DELETE FROM delegated_instances WHERE token = ?
+            DELETE FROM delegated_instances WHERE token_delegation = ?
         ''', (token,))
 
     def peer_has_client(self, peer_id: str) -> bool:
@@ -1522,7 +1549,7 @@ class SQLConnection(metaclass=Singleton):
             ''', (id,))
             row = result.fetchone()
             if row:
-                return row['token']
+                return row['token_delegation']
             return None
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to retrieve token for hashed external container token {id}: {e}')
@@ -1540,7 +1567,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             result = self._execute('''
-                SELECT peer_id FROM delegated_instances WHERE token = ?
+                SELECT peer_id FROM delegated_instances WHERE token_delegation = ?
             ''', (token,))
             row = result.fetchone()
             if row:
@@ -1565,11 +1592,11 @@ class SQLConnection(metaclass=Singleton):
         refund = 0
 
         hashed_token = self._execute('''
-            SELECT id FROM delegated_instances WHERE token = ?
+            SELECT id FROM delegated_instances WHERE token_delegation = ?
         ''', (his_token,)).fetchone()["id"]
 
         self._execute('''
-            DELETE FROM delegated_instances WHERE token = ?
+            DELETE FROM delegated_instances WHERE token_delegation = ?
         ''', (his_token,))
 
         try:
@@ -1627,79 +1654,6 @@ class SQLConnection(metaclass=Singleton):
             return self.get_container_gas(id=id)
         else:
             return int(DEFAULT_INITIAL_GAS_AMOUNT)
-
-    # Tunnel system
-
-    def add_tunnel(self, uri: str, service: str, live: bool):
-        """
-        Adds a tunnel to the database.
-
-        Args:
-            tunnel_id (str): The ID of the tunnel.
-            uri (str): The URI of the tunnel.
-            service (str): The service associated with the tunnel.
-            live (bool): Whether the tunnel is live or not.
-        """
-        tunnel_id = str(uuid.uuid4())
-        self._execute('''
-            INSERT INTO tunnels (id, uri, service, live)
-            VALUES (?, ?, ?, ?)
-        ''', (tunnel_id, uri, service, live))
-
-    def get_tunnels(self) -> List[dict]:
-        """
-        Fetches all tunnels from the database.
-
-        Returns:
-            List[dict]: A list of dictionaries containing tunnel details.
-        """
-        result = self._execute("SELECT id, uri, service, live FROM tunnels")
-        tunnels = [{'id': row['id'], 'uri': row['uri'], 'service': row['service'], 'live': row['live']} for row in result.fetchall()]
-        logger.LOGGER(f'Found tunnels: {tunnels}')
-        return tunnels
-
-    def update_tunnel(self, tunnel_id: str, uri: Optional[str] = None, service: Optional[str] = None, live: Optional[bool] = None):
-        """
-        Updates a tunnel in the database.
-
-        Args:
-            tunnel_id (str): The ID of the tunnel to update.
-            uri (Optional[str]): The new URI of the tunnel (if provided).
-            service (Optional[str]): The new service of the tunnel (if provided).
-            live (Optional[bool]): The new live status of the tunnel (if provided).
-        """
-        updates = []
-        params = []
-
-        if uri is not None:
-            updates.append("uri = ?")
-            params.append(uri)
-
-        if service is not None:
-            updates.append("service = ?")
-            params.append(service)
-
-        if live is not None:
-            updates.append("live = ?")
-            params.append(live)
-
-        if not updates:
-            raise ValueError("No values to update.")
-
-        params.append(tunnel_id)
-        query = f"UPDATE tunnels SET {', '.join(updates)} WHERE id = ?"
-        self._execute(query, tuple(params))
-
-    def delete_tunnel(self, tunnel_id: str):
-        """
-        Deletes a tunnel from the database.
-
-        Args:
-            tunnel_id (str): The ID of the tunnel to delete.
-        """
-        self._execute('''
-            DELETE FROM tunnels WHERE id = ?
-        ''', (tunnel_id,))
 
     # Payment system
     def add_deposit_token(self, client_id: str, status: str) -> str:

@@ -158,11 +158,28 @@ network:
   # If false, child instances will be published and reachable from the internet (subject to host firewall).
   ISOLATE_INTERNAL_CHILDREN: true
   CONSIDER_DEV_AS_INTERNAL: true  # If true, instances with "dev" in their father_id are considered internal regardless of actual network location. Use false in case node is controlled via ssh session for example.
-  DISABLE_EXPOSE_OUTSIDE: false  # If true, no instances will be exposed outside regardless of other settings. Use for maximum isolation. QUIC tunnel will be need to access services from outside in this case.
+  DISABLE_EXPOSE_OUTSIDE: false  # If true, no instances will be exposed outside regardless of other settings. Use for maximum isolation. Services stay reachable through service tunneling (Gateway.ServiceTunnel / `nodo tunnel`), which needs no port of its own -- see docs/TUNNELING.md.
   FREE_PORTS_RANGE:  # Free ports range to use for exposing services. Ports outside this range will not be used for service exposure. Useful to match router forwarding rules. Can be multiple ranges, e.g.: - START: 10000 \n END: 20000 \n - START: 30000 \n END: 40000
     - START: 50000
       END: 60000
   DEFAULT_EXECUTE_REMOTE: false  # If true, `nodo execute` will default to remote execution. Use for nodes running in environments without reliable public IPs or with strict isolation requirements, e.g. on-premises servers behind NAT or in private cloud VPCs, or WSL2 Windows nodes.
+  # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
+  DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
+  TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.
+
+# Dynamic DNS: keep a hostname pointing at this node's public IP, so peers can
+# find it by name when the address changes. Tunneling means only the gateway port
+# needs to be reachable -- but it still needs forwarding on the router, which is
+# the operator's job. `nodo info` reports whether that looks done.
+ddns:
+  ENABLED: false
+  PROVIDER: desec  # Only "desec" is implemented (update.dedyn.io, dyndns2 protocol).
+  DOMAIN: ""  # The hostname to keep updated, e.g. "my-node.dedyn.io".
+  TOKEN: ""  # Provider API token. Treat as a secret.
+  INTERVAL_SECONDS: 600  # How often the address is republished. The manager also publishes once at startup.
+  # Which address gets published: by default none is sent and the provider records
+  # the request's source address, which is the only value that is certainly right
+  # behind NAT. Set network.PUBLIC_IP to override that.
 
 logs:
   MEMORY_LOGS: false
@@ -186,6 +203,12 @@ costs:
   EXECUTION_BENEFIT: 100.0
   BUILD_COST: 10.0
   MODIFY_RESOURCES_COST: 100.0
+  # Service tunneling is metered against the tunnelled instance's gas, since
+  # relaying costs this node CPU, memory and bandwidth. Running out closes the
+  # tunnel (subject to ALLOW_GAS_DEBT). Set a rate to 0 to stop charging for it.
+  TUNNEL_OPEN_COST: 10.0  # Charged once when a tunnel is opened. Refused up front if the instance cannot pay it.
+  TUNNEL_COST_PER_KB: 1.0  # Charged per KiB relayed, counting both directions.
+  TUNNEL_GAS_CHARGE_INTERVAL_KB: 1024  # How much traffic accumulates before it is billed. Smaller reacts faster to an empty balance, larger costs less bookkeeping.
   ALLOW_GAS_DEBT: true
 
 timing:
