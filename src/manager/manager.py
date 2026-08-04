@@ -524,6 +524,7 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
 
     else:  # It's external
         log.LOGGER(f"Token {token} is external; let's stop it.")
+        external_token = None
         try:
             external_token = sc.get_delegated_token_by_id(id=token)
             if not external_token:
@@ -553,15 +554,22 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
             father_id = sc.get_external_father_id(token=external_token)
             serialized_instance = sc.get_delegated_instance(token=external_token)
 
-            # Tear down any local tunnel endpoints that stood in for this instance
-            # before the record they were derived from is gone.
-            delegated_endpoints.close(token=external_token)
-
+            # Drop the delegation record only after the peer confirmed the stop:
+            # if StopService raised we must keep the row so the stop can be
+            # retried and the (remote-computed) refund reconciled, rather than
+            # orphaning an instance the peer may still be running.
             sc.purgue_delegated(token=external_token)
 
         except Exception as e:
             log.LOGGER('Error purging external instance with hashed token ' + token + ' ' + str(e))
             return None
+        finally:
+            # Local tunnel endpoints are our own listeners; tearing them down is
+            # independent of the remote call and must happen even when it fails,
+            # or the listener socket, its serving thread and the bound port leak
+            # for the process lifetime. close() is idempotent.
+            if external_token:
+                delegated_endpoints.close(token=external_token)
 
     # Block the parent's access to the ports of the removed service.
     if sc.internal_instance_exists(id=father_id):  # Check if the father is an internal instance.
