@@ -297,6 +297,16 @@ def _open_endpoint(
     local_port: Optional[int] = None,
 ) -> Optional[_Endpoint]:
     """Bind one local listener that tunnels to ``internal_port`` on the peer."""
+    if ":" in bind_ip:
+        # IPv6 is not implemented on this path yet. Skip explicitly instead of
+        # creating an AF_INET socket, letting bind() raise, and silently handing
+        # the client back the peer's unreachable v6 address.
+        logger(
+            f"{LOG_PREFIX} IPv6 bind_ip {bind_ip} is unsupported for delegated "
+            f"endpoints; skipping slot {internal_port}."
+        )
+        return None
+
     is_udp = transport is TransportProtocol.UDP
     listener = socket.socket(
         socket.AF_INET, socket.SOCK_DGRAM if is_udp else socket.SOCK_STREAM
