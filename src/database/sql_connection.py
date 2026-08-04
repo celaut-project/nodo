@@ -529,6 +529,41 @@ class SQLConnection(metaclass=Singleton):
             UPDATE local_instances SET gas = ? WHERE id = ?
         ''', (gas, id))
 
+    def spend_container_gas(self, id: str, gas_to_spend: int, allow_debt: bool) -> Optional[bool]:
+        """Atomically deduct ``gas_to_spend`` from a container's balance.
+
+        The read, the sufficiency check and the write happen under a single hold
+        of the connection lock, so two threads billing the same instance (e.g.
+        the two directions of a service tunnel) can never both read the same
+        balance and clobber each other's deduction — the lost-update race that a
+        separate ``get_container_gas`` + ``update_gas_to_container`` allows.
+
+        Returns True when the gas was spent, False when the balance is
+        insufficient and debt is not allowed, and None when the container does
+        not exist. ``gas`` is stored as TEXT, so the arithmetic is done in
+        Python (``int``) rather than in SQL to avoid affinity surprises.
+        """
+        gas_to_spend = int(gas_to_spend)
+        with SQLConnection._lock:
+            try:
+                cursor = SQLConnection._connection.cursor()
+                cursor.execute('SELECT gas FROM local_instances WHERE id = ?', (id,))
+                row = cursor.fetchone()
+                if row is None:
+                    return None
+                current = int(row['gas'])
+                if current < gas_to_spend and not allow_debt:
+                    return False
+                cursor.execute(
+                    'UPDATE local_instances SET gas = ? WHERE id = ?',
+                    (str(current - gas_to_spend), id),
+                )
+                SQLConnection._connection.commit()
+                return True
+            except sqlite3.Error as e:
+                SQLConnection._connection.rollback()
+                raise e
+
     def internal_instance_exists(self, id: str) -> bool:
         """
         Checks if a internal instance exists in the database.

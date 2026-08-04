@@ -380,15 +380,19 @@ def spend_gas(
                     log.LOGGER(f"Resolved container ID '{id}' does not exist.")
                     return False
 
-            current_gas = sc.get_container_gas(id=id)
-            if current_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
-                log.LOGGER(f"Insufficient gas for container '{id}': {log.ssformat(current_gas)} available, needed {log.ssformat(gas_to_spend)}.")
+            # Atomic read-check-write: a service tunnel bills the same container
+            # from both relay directions at once, and a separate get/update would
+            # let two threads read the same balance and lose one deduction.
+            spent = sc.spend_container_gas(
+                id=id, gas_to_spend=gas_to_spend, allow_debt=bool(ALLOW_GAS_DEBT)
+            )
+            if spent is None:
+                log.LOGGER(f"Container '{id}' does not exist; cannot spend gas.")
                 return False
-
-            updated_gas = current_gas - gas_to_spend
-            if debug_mode: log.LOGGER(f"Container {id} reduced gas from {log.ssformat(current_gas)} to {log.ssformat(updated_gas)} (- {log.ssformat(gas_to_spend)})")
-            
-            sc.update_gas_to_container(id=id, gas=updated_gas)
+            if spent is False:
+                log.LOGGER(f"Insufficient gas for container '{id}': needed {log.ssformat(gas_to_spend)}.")
+                return False
+            if debug_mode: log.LOGGER(f"Container {id} spent {log.ssformat(gas_to_spend)} gas.")
 
             __refund_gas_function_factory(
                 gas=gas_to_spend,
