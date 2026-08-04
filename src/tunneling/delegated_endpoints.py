@@ -116,6 +116,23 @@ class _Endpoint:
 _endpoints: Dict[str, List[_Endpoint]] = {}
 _endpoints_lock = threading.Lock()
 
+# Per-token publish locks. publish() opens listeners *outside* _endpoints_lock,
+# so two concurrent publishes for the same token would both bind and both
+# register, orphaning a generation of listeners (and colliding on pinned ports).
+# Serialise the whole check->close->open->register per token, while still letting
+# different tokens publish in parallel.
+_publish_locks: Dict[str, threading.Lock] = {}
+_publish_locks_guard = threading.Lock()
+
+
+def _publish_lock(token: str) -> threading.Lock:
+    with _publish_locks_guard:
+        lock = _publish_locks.get(token)
+        if lock is None:
+            lock = threading.Lock()
+            _publish_locks[token] = lock
+        return lock
+
 
 def _policy() -> str:
     configured = str(env_manager.get("network.DELEGATION_TUNNEL_POLICY", POLICY_AUTO) or "").strip().lower()
@@ -288,6 +305,22 @@ def publish(
     ServiceTunnel validates. ``port_by_slot`` pins local ports when restoring
     endpoints that a client already knows about.
     """
+    with _publish_lock(token):
+        return _publish_locked(token, peer_gateway, instance, bind_ip, port_by_slot)
+
+
+def _publish_locked(
+    token: str,
+    peer_gateway: str,
+    instance: celaut_pb2.Instance,
+    bind_ip: str,
+    port_by_slot: Optional[Dict[int, int]] = None,
+) -> celaut_pb2.Instance:
+    # Replace any previous generation of endpoints for this token so a retried
+    # restore() or a re-delegation cannot orphan the earlier listeners.
+    if endpoint_count(token):
+        close(token)
+
     transports = _slot_transports(instance)
     rewritten = celaut_pb2.Instance()
     rewritten.api.CopyFrom(instance.api)
@@ -326,7 +359,8 @@ def publish(
 
     if opened:
         with _endpoints_lock:
-            _endpoints.setdefault(token, []).extend(opened)
+            # close() above already cleared any prior generation, so replace.
+            _endpoints[token] = opened
 
     return rewritten
 
