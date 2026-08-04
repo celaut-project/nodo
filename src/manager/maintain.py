@@ -6,6 +6,7 @@ from bee_rpc import client as beerpc
 
 from protos import celaut_pb2 as celaut, celaut_pb2_grpc, celaut_pb2
 from protos.gateway_bee import StartService_input_indices, StartService_input_message_mode
+from src.manager.ddns import ddns_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ensure_dev_client_pools, stop_instance, spend_gas, update_peer_instance
 from src.manager.metrics import gas_amount_on_other_peer
@@ -259,6 +260,9 @@ def manager_thread():
         log_java_dependency_warning(log.LOGGER, feature="Ergo payments or reputation")
     check_dev_clients()
     check_ergo_node_availability()
+    # Publish the public IP right away rather than after a whole interval: a node
+    # that just booted with a new address is exactly when the record is stalest.
+    ddns_tick()
     if SUBMIT_REPUTATION_AT_INIT:
         try:
             _reputation_interface().submit_reputation(force_submit=True)
@@ -291,6 +295,10 @@ def manager_thread():
             scheduler_tick()
         except Exception:
             pass
+
+        # Publish this node's public IP to its DDNS provider (OFF unless
+        # ddns.ENABLED). Self-gates to ddns.INTERVAL_SECONDS and never raises.
+        ddns_tick()
 
         sleep(MANAGER_ITERATION_TIME)
         if DEBUG_MODE():

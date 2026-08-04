@@ -10,6 +10,7 @@ from src.manager.resources import IOBigData
 from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc
 
 from src.database.sql_connection import SQLConnection, is_peer_available
+from src.tunneling import delegated_endpoints
 
 from src.utils import logger as log
 from src.utils import utils
@@ -547,9 +548,13 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
             )
             father_id = sc.get_external_father_id(token=external_token)
             serialized_instance = sc.get_delegated_instance(token=external_token)
-            
-            sc.purgue_delegated(id=external_token)
-            
+
+            # Tear down any local tunnel endpoints that stood in for this instance
+            # before the record they were derived from is gone.
+            delegated_endpoints.close(token=external_token)
+
+            sc.purgue_delegated(token=external_token)
+
         except Exception as e:
             log.LOGGER('Error purging external instance with hashed token ' + token + ' ' + str(e))
             return None

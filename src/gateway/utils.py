@@ -44,6 +44,21 @@ def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
     slot = celaut.Service.Api.Slot()
     slot.port = GATEWAY_PORT
     slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
+
+    # Advertise what this node charges on a recurring basis, so a peer knows the
+    # rate before negotiating anything. The price of a *specific service* is not
+    # here: that is what GetServiceEstimatedCost is for. Values are ceilings; see
+    # node_advertised_rates(). This rides in the gateway slot because a peer
+    # already stores that slot verbatim (manager.add_peer_instance keeps
+    # api.slot[0] in peer.protocol_stack), so it needs no schema of its own.
+    #
+    # Imported here, like local_proofs below: the cost-function package reaches the
+    # virtualizer stack, which imports this module back at import time.
+    from src.utils.cost_functions.general_cost_functions import node_advertised_rates
+
+    for rate, gas in node_advertised_rates().items():
+        slot.gas_amount_per_call[rate].n = str(gas)
+
     instance.api.slot.append(slot)
 
     payment_contracts = [e for e in local_payment_methods()]

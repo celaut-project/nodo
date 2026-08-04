@@ -152,6 +152,35 @@ These are the most commonly used commands for daily tasks:
   - Full AF_PACKET capture needs a Linux host with `CAP_NET_RAW`; elsewhere the
     RPC degrades to the conntrack fallback exactly like the CLI.
 
+- **tunnel `<instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]`**  
+  Binds a local port and forwards its traffic to `<slot>` of the instance through
+  the node's `Gateway.ServiceTunnel` stream, so a service can be reached without
+  publishing a port of its own. `<slot>` must be a port the service **declares**
+  in its API (see `nodo instances` / the instance's `uri_slot`); undeclared ports
+  are refused. With `--peer` the tunnel goes through a remote node and
+  `<instance id>` must be the token as **that** node knows it, since only it can
+  resolve the token. The listener binds to `127.0.0.1` unless `--host` says
+  otherwise, and `--listen` is optional (an ephemeral port is picked and
+  printed). Press `Ctrl-C` to stop.  
+
+  `--udp` makes the local socket a datagram socket, for slots that declare UDP;
+  the node picks the node-to-service transport from the slot's own declaration,
+  so the two must match. TCP gives each connection its own stream. UDP has no
+  connections, so traffic is keyed by source address and a flow is dropped after
+  `--idle` seconds of silence (30 by default). Datagram boundaries are preserved,
+  but a tunnelled datagram is reliable and ordered rather than lossy — see
+  [TUNNELING.md](TUNNELING.md) for that and the rest of the wire protocol.  
+  **Examples:**  
+  `nodo tunnel my-instance 8080` → then `curl http://127.0.0.1:<printed port>/`  
+  `nodo tunnel abcdef1234567890 8080 --listen 9000`  
+  `nodo tunnel abcdef1234567890 5353 --udp --listen 5353`  
+  `nodo tunnel abcdef1234567890 8080 --peer 192.168.1.10:4040`  
+
+  The node also opens these tunnels for itself: when a service is delegated to a
+  peer whose advertised addresses this node cannot reach, it stands in for the
+  service locally and hands our client an endpoint of its own. That is controlled
+  by `network.DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`).
+
 - **increase_gas `<instance id> <gas amount>`**  
   Increases the allocated gas for a service instance.  
   **Example:**  
@@ -362,9 +391,23 @@ These are intended for development or advanced maintenance environments:
   - Host kernel version (warns about bleeding-edge kernels with KVM incompatibilities)
   - Guest kernel (`vmlinuz`) presence and size validation
   - Custom initramfs presence and required entry validation
-  - **KVM smoke test**: launches a minimal VM to verify that the Cloud Hypervisor binary can actually execute vCPUs on the host kernel  
+  - **KVM smoke test**: launches a minimal VM to verify that the Cloud Hypervisor binary can actually execute vCPUs on the host kernel
+  - **Inbound reachability**: gateway port resolvable and listening, and DDNS resolution — deferring the router steps to `nodo nat-guide`  
   **Example:**  
   `sudo nodo doctor`
+
+- **nat-guide**  
+  Prints how to make this node reachable from the Internet: which port to forward on
+  your router (with this machine's own address, port and detected router filled in),
+  how DDNS fits, how to test it from outside, and what to check when it still fails
+  (CGNAT, a second router, the host firewall). Does **not** require superuser.  
+
+  Only the **gateway port** needs forwarding: service tunneling carries every service
+  through it, so `FREE_PORTS_RANGE` only matters if you also want direct exposure.
+  Nothing here verifies the forwarding from outside — that cannot be done from this
+  host, since a connection from inside your own network succeeds either way.  
+  **Example:**  
+  `nodo nat-guide`
 
 - **migrate**  
   Updates the database schema.  
@@ -496,7 +539,7 @@ commands that take one, the identifier of the relevant object:
 
 - **Service id or tag** — `execute`, `estimate`, `inspect`, `remove`, `publish`, `tag`,
   `export`, `integrity`
-- **Instance id or name** — `kill`, `observe`, `increase_gas`, `decrease_gas`
+- **Instance id or name** — `kill`, `observe`, `tunnel`, `increase_gas`, `decrease_gas`
 - **Peer id** — `disconnect`, `increase_peer_deposit`
 - **Subcommands** — `daemon start|status|stop|restart`
 

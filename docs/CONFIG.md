@@ -142,11 +142,40 @@ Controls exposure and remote execution. Key entries: `GATEWAY_PORT` (`auto`),
 `DISABLE_EXPOSE_OUTSIDE`, `ISOLATE_INTERNAL_CHILDREN`, and `DEFAULT_EXECUTE_REMOTE`
 (default remote for NAT/WSL2 nodes). See also [`NETWORKS.md`](NETWORKS.md).
 
+Service tunneling adds `DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`) and
+`TUNNEL_UDP_IDLE_TIMEOUT_S` — see [`TUNNELING.md`](TUNNELING.md).
+
+## `ddns`
+
+Keeps a hostname pointing at this node's public IP, so peers can find it by name
+when the address changes. The manager publishes once at startup and then every
+`INTERVAL_SECONDS`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `ddns.ENABLED` | `false` | Whether to publish at all. |
+| `ddns.PROVIDER` | `desec` | Only `desec` is implemented (`update.dedyn.io`, dyndns2). An unknown value falls back to it. |
+| `ddns.DOMAIN` | `""` | Hostname to keep updated, e.g. `my-node.dedyn.io`. |
+| `ddns.TOKEN` | `""` | Provider API token. A secret; it never appears in logs or `nodo info`. |
+| `ddns.INTERVAL_SECONDS` | `600` | Republish cadence. Invalid values fall back to the default. |
+
+By default **no address is sent** and the provider records the request's source
+address — behind NAT that is the only value guaranteed to be right. Set
+`network.PUBLIC_IP` to override it (static address, or ingress ≠ egress).
+
+Publishing a name is not the same as being reachable: the router must still
+forward the gateway port to this host. Run **`nodo nat-guide`** for the steps with
+this machine's addresses filled in; `nodo info` and `sudo nodo doctor` report what
+resolves and whether the port is listening. Nothing verifies the forwarding from
+*outside* yet — that needs a peer to connect back.
+
 ## `costs`, `timing`, `client`
 
 Gas/cost economics (`EXECUTION_COST`, `BUILD_COST`, deposit factors, gas
 thresholds), maintenance-loop timing, and client slot/expiration policy. Defaults
 are sensible for a single dev node; change only with the economics in mind.
+Tunnel metering lives here too: `TUNNEL_OPEN_COST`, `TUNNEL_COST_PER_KB` and
+`TUNNEL_GAS_CHARGE_INTERVAL_KB` (see [`TUNNELING.md`](TUNNELING.md)).
 
 ## `ledgers.ergo` — payments & reputation
 
