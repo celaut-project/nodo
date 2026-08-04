@@ -541,12 +541,18 @@ def _relay(
 def service_tunnel(
     iterator: Iterator,
     is_active: Callable[[], bool] = lambda: True,
-) -> Generator[bytes, None, None]:
-    """Establish a tunnel and return a generator of the service's replies.
+) -> Tuple[socket.socket, Generator[bytes, None, None]]:
+    """Establish a tunnel and return ``(conn, relay)``.
 
     Deliberately *not* a generator itself: the handshake, slot validation and
     connect all run eagerly on call, so a ``TunnelError`` surfaces before the
     gateway has serialized a single buffer and can still become a gRPC status.
+
+    The connected socket is returned alongside the relay generator because it is
+    opened eagerly, before the generator is iterated. ``_relay``'s own ``finally``
+    closes it, but that only runs once the generator has been entered; if the
+    consumer (``serialize_to_buffer``) fails before its first pull, the socket
+    would leak. Handing ``conn`` back lets the caller close it unconditionally.
 
     ``is_active`` is polled while relaying (the gateway passes
     ``context.is_active``) so a cancelled RPC tears the tunnel down instead of
@@ -569,7 +575,7 @@ def service_tunnel(
     conn = _connect(ip, port, transport)
     logger(f"{LOG_PREFIX} {target}: tunnel established.")
 
-    return _relay(
+    relay = _relay(
         iterator=iterator,
         conn=conn,
         is_active=is_active,
@@ -577,3 +583,4 @@ def service_tunnel(
         is_udp=transport is TransportProtocol.UDP,
         meter=meter,
     )
+    return conn, relay

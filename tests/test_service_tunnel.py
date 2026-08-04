@@ -145,7 +145,8 @@ class ServiceTunnelRelayTests(unittest.TestCase):
         with patch.object(
             rpc_tunnel.sc, "get_internal_instance", return_value=instance
         ), patch.object(rpc_tunnel.sc, "get_internal_ip", return_value=ip), _gas_granted():
-            return rpc_tunnel.service_tunnel(iter(messages), is_active=_deadline())
+            _conn, relay = rpc_tunnel.service_tunnel(iter(messages), is_active=_deadline())
+            return relay
 
     def test_payload_is_relayed_in_both_directions(self):
         port, _ = _start_server(_echo)
@@ -215,7 +216,7 @@ class ServiceTunnelUdpTests(unittest.TestCase):
         ), patch.object(
             rpc_tunnel, "_udp_idle_timeout", return_value=self.IDLE_TIMEOUT_S
         ), _gas_granted():
-            relay = rpc_tunnel.service_tunnel(iter(messages), is_active=_deadline())
+            _conn, relay = rpc_tunnel.service_tunnel(iter(messages), is_active=_deadline())
             # Drain inside the patch context: the idle timeout is read per relay.
             return list(relay)
 
@@ -391,7 +392,7 @@ class ServiceTunnelGasTests(unittest.TestCase):
         ), patch.object(
             rpc_tunnel.env_manager, "get", side_effect=rates or self._rates()
         ), patch("src.manager.manager.spend_gas", spend):
-            relay = rpc_tunnel.service_tunnel(
+            _conn, relay = rpc_tunnel.service_tunnel(
                 iter([celaut.TokenMessage(token="tok", slot=str(port))] + payload),
                 is_active=_deadline(),
             )
@@ -512,7 +513,7 @@ class ServiceTunnelSerializationTests(unittest.TestCase):
         ), patch.object(
             rpc_tunnel.sc, "get_internal_ip", return_value="127.0.0.1"
         ), _gas_granted():
-            relay = rpc_tunnel.service_tunnel(
+            _conn, relay = rpc_tunnel.service_tunnel(
                 iter([celaut.TokenMessage(token="tok", slot=str(port)), b"payload"]),
                 is_active=_deadline(),
             )
@@ -540,7 +541,7 @@ class ServiceTunnelSerializationTests(unittest.TestCase):
         ), patch.object(
             rpc_tunnel.sc, "get_internal_ip", return_value="127.0.0.1"
         ), _gas_granted():
-            relay = rpc_tunnel.service_tunnel(
+            _conn, relay = rpc_tunnel.service_tunnel(
                 iter([celaut.TokenMessage(token="tok", slot=str(port)), b"ignored"]),
                 is_active=_deadline(),
             )

@@ -186,7 +186,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
             # handshake (index 1) and the raw payload (index 0). Both are parsed
             # in memory — `partitions_message_mode=False` would spill every
             # payload chunk to a temporary file, which no byte pipe can afford.
-            relay = service_tunnel(
+            conn, relay = service_tunnel(
                 iterator=bee.parse_from_buffer(
                     request_iterator=request_iterator,
                     indices={1: celaut_pb2.TokenMessage, 0: bytes},
@@ -199,15 +199,25 @@ class Gateway(celaut_pb2_grpc.Gateway):
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
             return
 
-        yield from bee.serialize_to_buffer(
-                message_iterator=relay,
-                # Mirrors the input map. Declaring a second index also keeps
-                # bee_rpc from inferring the index off the first message, which
-                # it does by calling next() unguarded — a service that closes
-                # without replying would surface as a RuntimeError instead of an
-                # empty stream.
-                indices={1: celaut_pb2.TokenMessage, 0: bytes},
-        )
+        try:
+            yield from bee.serialize_to_buffer(
+                    message_iterator=relay,
+                    # Mirrors the input map. Declaring a second index also keeps
+                    # bee_rpc from inferring the index off the first message, which
+                    # it does by calling next() unguarded — a service that closes
+                    # without replying would surface as a RuntimeError instead of an
+                    # empty stream.
+                    indices={1: celaut_pb2.TokenMessage, 0: bytes},
+            )
+        finally:
+            # The socket is opened eagerly inside service_tunnel; guarantee it is
+            # released even if serialize_to_buffer bails before the relay
+            # generator is ever iterated (its own finally would not run then).
+            relay.close()
+            try:
+                conn.close()
+            except OSError:
+                pass
 
     def Observe(self, request_iterator, context, **kwargs):
         yield from ObserveIterable(request_iterator, context)
