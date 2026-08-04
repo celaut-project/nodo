@@ -45,6 +45,9 @@ DESEC = "desec"
 DESEC_UPDATE_URL = "https://update.dedyn.io/"
 
 DEFAULT_INTERVAL_SECONDS = 600
+# deSEC throttles abusive clients; never publish more often than this even if
+# ddns.INTERVAL_SECONDS is misconfigured to a tiny positive value.
+MIN_INTERVAL_SECONDS = 60
 DEFAULT_TIMEOUT_SECONDS = 15
 
 # dyndns2 success bodies: the record was set, or it already held this value.
@@ -71,13 +74,22 @@ def is_enabled() -> bool:
 def interval_seconds() -> int:
     try:
         configured = int(_setting("INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS))
-        return configured if configured > 0 else DEFAULT_INTERVAL_SECONDS
     except (TypeError, ValueError):
         log.LOGGER(
             f"{LOG_PREFIX} ddns.INTERVAL_SECONDS is not a number; "
             f"using {DEFAULT_INTERVAL_SECONDS}s."
         )
         return DEFAULT_INTERVAL_SECONDS
+
+    if configured <= 0:
+        return DEFAULT_INTERVAL_SECONDS
+    if configured < MIN_INTERVAL_SECONDS:
+        log.LOGGER(
+            f"{LOG_PREFIX} ddns.INTERVAL_SECONDS={configured}s is below the "
+            f"{MIN_INTERVAL_SECONDS}s floor; using {MIN_INTERVAL_SECONDS}s."
+        )
+        return MIN_INTERVAL_SECONDS
+    return configured
 
 
 def configured_hostname() -> str:

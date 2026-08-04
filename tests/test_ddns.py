@@ -175,8 +175,9 @@ class DdnsTickTests(unittest.TestCase):
             ddns, "publish_public_ip", publish
         ):
             ddns.ddns_tick()
-            # Pretend the last tick was long ago rather than sleeping.
-            ddns._last_tick_monotonic -= 5
+            # Pretend the last tick was long ago rather than sleeping. Step past
+            # the effective interval (which is floored to MIN_INTERVAL_SECONDS).
+            ddns._last_tick_monotonic -= ddns.interval_seconds() + 1
             ddns.ddns_tick()
 
         self.assertEqual(publish.call_count, 2)
