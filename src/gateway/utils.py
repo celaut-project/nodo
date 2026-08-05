@@ -4,7 +4,7 @@ from typing import Generator, Optional
 
 import netifaces as ni
 
-from src.payment_system.ledgers import local_payment_methods
+from src.payment_system.ledgers import local_payment_methods, register_local_contracts
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
 from src.utils.config import ConfigManager
@@ -15,6 +15,33 @@ env_manager = ConfigManager()
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+
+
+# Guards the lazy recovery below: registering a contract spins up the ledger runtime
+# (a JVM and a node connection, for Ergo), so a node that genuinely has no usable
+# wallet must not pay that cost on every incoming GetPeerInfo.
+_local_contracts_retried = False
+
+
+def _local_payment_contracts() -> list:
+    """The payment contracts to present, recovering from a skipped ledger init.
+
+    ``init()`` writes the LOCAL contract row once at daemon boot and is skipped when
+    its runtime dependency is unavailable at that instant — Java installed *after*
+    the daemon started, for instance. Presenting ourselves with no payment contract
+    makes this node unpayable for as long as it stays up, so retry the registration
+    once before announcing nothing.
+    """
+    global _local_contracts_retried
+
+    contracts = list(local_payment_methods())
+    if contracts or _local_contracts_retried:
+        return contracts
+
+    _local_contracts_retried = True
+    log.LOGGER('No local payment contract registered; retrying the ledger init.')
+    register_local_contracts()
+    return list(local_payment_methods())
 
 
 def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
@@ -46,7 +73,7 @@ def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
     slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
     instance.api.slot.append(slot)
 
-    payment_contracts = [e for e in local_payment_methods()]
+    payment_contracts = _local_payment_contracts()
     log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
     if payment_contracts:
         instance.api.payment_contracts.extend(payment_contracts)

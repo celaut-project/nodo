@@ -205,10 +205,32 @@ def _peer_slot_transport_payloads(peer: celaut_pb2.Peer, peer_id: str) -> Dict[i
 
     return payloads_by_port
 
-# Insert the instance if it does not exist.
+def _known_peer_id(instance: celaut_pb2.Instance) -> Optional[str]:
+    """Resolve the id of an already-registered peer from the URIs it advertises."""
+    from src.database.access_functions.peers import get_peer_id_by_ip
+
+    for slot in instance.uri_slot:
+        for uri in slot.uri:
+            try:
+                return get_peer_id_by_ip(ip=uri.ip)
+            except (StopIteration, IndexError, TypeError):
+                continue
+    return None
+
+
+# Insert the instance if it does not exist, refresh it otherwise.
 def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
     if sc.instance_exists(peer.instance):
-        return None
+        # A peer we already know is re-introducing itself. Dropping the message here
+        # would freeze whatever it advertised the *first* time, so a peer that had no
+        # payment contract back then (no wallet yet, ledger init skipped, ...) would
+        # stay unpayable forever. Re-run the same registration path instead.
+        peer_id = _known_peer_id(peer.instance)
+        if not peer_id:
+            log.LOGGER("Peer instance already exists but its id could not be resolved.")
+            return None
+        update_peer_instance(peer=peer, peer_id=peer_id)
+        return peer_id
 
     peer_id = str(uuid4())
     protocol_stack: bytes = (
@@ -277,14 +299,48 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str):
         sc.add_slot(slot=slot, peer_id=peer_id, transport_protocol=payload)
 
     # Contracts
+    if not peer.instance.api.payment_contracts:
+        log.LOGGER(f"Peer {peer_id} advertises no payment contract; it cannot be paid.")
     for gas_price in peer.instance.api.payment_contracts:
-        sc.add_contract(contract=gas_price.contract, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
+        log.LOGGER(f"Adding contract {gas_price.contract} for peer {peer_id}")
+        try:
+            sc.add_contract(contract=gas_price.contract, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
+        except Exception as e:
+            # One malformed contract must not abort the rest of the refresh.
+            log.LOGGER(f"Error adding contract {gas_price.contract} for peer {peer_id}: {e}")
 
     for contract_ledger in peer.reputation_proofs:
         if not add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id):
             continue
 
     log.LOGGER(f"Peer {peer_id} updated.")
+
+
+def refresh_peer_instance(peer_id: str) -> bool:
+    """Re-fetch a known peer's instance over ``GetPeerInfo`` and re-register it.
+
+    Used when the locally-stored view of a peer is stale — most importantly when we
+    hold no payment contract for it, since the peer may have started advertising one
+    after the handshake that created its row.
+    """
+    try:
+        peer = next(bee.client_grpc(
+            method=celaut_pb2_grpc.GatewayStub(
+                grpc.insecure_channel(next(generate_uris_by_peer_id(peer_id=peer_id), ""))
+            ).GetPeerInfo,
+            indices_parser=celaut_pb2.Peer,
+            partitions_message_mode_parser=True
+        ), None)
+    except Exception as e:
+        log.LOGGER(f"Could not fetch info for peer {peer_id}: {e}")
+        return False
+
+    if not peer:
+        log.LOGGER(f"No peer info returned by {peer_id}.")
+        return False
+
+    update_peer_instance(peer=peer, peer_id=peer_id)
+    return True
 
 def get_internal_service_id_by_uri(uri: str) -> str:
     return sc.get_local_instance_id_by_uri(uri=uri)

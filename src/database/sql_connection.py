@@ -794,6 +794,34 @@ class SQLConnection(metaclass=Singleton):
             return ledger
         return sha3_256(ledger.SerializeToString()).hexdigest()
 
+    def ledger_hashes(self, ledger: Any) -> List[str]:
+        """Stored ``ledger.hash`` values a ledger identifier resolves to.
+
+        The ``ledger`` table is keyed by the sha3 of the serialized
+        ``Contract.Ledger`` message, but payment-path callers only hold the ledger
+        *tag* (``"ergo"``) — that is all a peer's advertisement carries as a stable
+        name. Accept either: an exact stored hash, or a tag to resolve against the
+        deserialized rows.
+        """
+        key = self.ledger_key(ledger)
+        rows = self._execute("SELECT hash, content FROM ledger").fetchall()
+
+        exact = [row['hash'] for row in rows if row['hash'] == key]
+        if exact:
+            return exact
+
+        by_tag: List[str] = []
+        for row in rows:
+            parsed = celaut_pb2.Contract.Ledger()
+            try:
+                parsed.ParseFromString(row['content'])
+            except Exception as e:
+                logger.LOGGER(f'Could not parse stored ledger {row["hash"]}: {e}')
+                continue
+            if key in parsed.tags:
+                by_tag.append(row['hash'])
+        return by_tag
+
     def update_double_attempt_retry_time_on_ledger(self, ledger: Any):
         """
         Updates the double_spending_retry_time field in the ledger table
@@ -896,37 +924,38 @@ class SQLConnection(metaclass=Singleton):
         Parameters:
         - peer_id (str): The unique identifier of the peer.
         - contract_hash (str): The hash of the contract.
-        - ledger_hash (str): The unique identifier of the ledger.
+        - ledger_hash (str): The ledger, either as its stored ``ledger.hash`` or as
+          a ledger tag such as ``"ergo"`` (see ``ledger_hashes``). Callers on the
+          payment path only hold the tag, so matching the column verbatim would
+          never find the row the peer's advertisement created.
 
         Returns:
         - int: The gas price as an integer if the specific contract instance is found.
         - None: If the specific contract instance is not found or an error occurs.
         """
         try:
-            # Corrected SQL query with AND conditions
-            result = self._execute('''
-                SELECT gas_price
-                FROM contract_instance
-                WHERE peer_id = ? AND contract_hash = ? AND ledger_hash = ?
-            ''', (peer_id, contract_hash, ledger_hash))
+            for stored_hash in self.ledger_hashes(ledger_hash):
+                result = self._execute('''
+                    SELECT gas_price
+                    FROM contract_instance
+                    WHERE peer_id = ? AND contract_hash = ? AND ledger_hash = ?
+                ''', (peer_id, contract_hash, stored_hash))
 
-            # Fetch one row (we expect at most one for this combination)
-            row = result.fetchone()
+                # Fetch one row (we expect at most one for this combination)
+                row = result.fetchone()
+                if not row:
+                    continue
 
-            # Check if a row was found
-            if row:
                 gas_price_str = row['gas_price']
                 try:
                     # Convert the string gas_price to an integer
-                    gas_price = int(gas_price_str)
-                    return gas_price
+                    return int(gas_price_str)
                 except (ValueError, TypeError) as ve:
                     logger.LOGGER(f'Error converting stored gas_price "{gas_price_str}" to int for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {ve}')
                     return None # Return None if conversion fails
 
-            else:
-                # No row found for the given criteria
-                return None # Indicate that the specific instance was not found
+            # No row found for the given criteria
+            return None # Indicate that the specific instance was not found
 
         except Exception as e:
             # Catch potential database errors during execution

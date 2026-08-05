@@ -16,9 +16,10 @@ sc = SQLConnection()
 def connect(peer: str):
     print('Connecting to peer ->', peer)
 
+    # A known peer is re-handshaked rather than skipped: that is how a payment
+    # contract it only started advertising later gets registered locally.
     if sc.uri_exists(uri=peer):
-        print(f"Peer {peer} is already registered.")
-        return
+        print(f"Peer {peer} is already registered; refreshing what it advertises.")
 
     try:
         channel = grpc.insecure_channel(peer)
@@ -34,9 +35,14 @@ def connect(peer: str):
         peer_id = add_peer_instance(peer_info)
         if not peer_id:
             print("Failed to add a peer.")
-            
-        print(f'Added peer {peer} with id {peer_id}')
-        
+        else:
+            print(f'Added peer {peer} with id {peer_id}')
+            if not peer_info.instance.api.payment_contracts:
+                print(
+                    f"Note: peer {peer} advertises no payment contract, so it cannot "
+                    "be paid yet (its ledger interface may not be initialised)."
+                )
+
         if SELF_ANNOUNCE_TO_CONNECTING_PEERS:
             from src.gateway.utils import generate_node_peer_info
             print(f'Sending instance to peer: {peer}')
