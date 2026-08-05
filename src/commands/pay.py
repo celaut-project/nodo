@@ -115,14 +115,25 @@ def pay(peer_id: str, amount_erg: str) -> bool:
         return False
 
     # Guard 2 — the peer advertises an Ergo payment contract. Clean stop at the
-    # no-peer boundary; nothing sent.
+    # no-peer boundary; nothing sent. The stored row only reflects what the peer
+    # advertised at handshake time, so before giving up we re-ask it: a peer that
+    # had no payment contract back then may well advertise one now.
     scripts: List[Tuple[bytes, object]] = list(
         get_peer_contract_instances(CONTRACT_HASH, peer_id)
     )
     if not scripts:
+        from src.manager.manager import refresh_peer_instance
+
         print(
-            f"STOP: peer {peer_id} has no known Ergo payment contract instance. "
-            "Nothing was broadcast.",
+            f"No Ergo payment contract known for peer {peer_id}; asking it again ...",
+            flush=True,
+        )
+        if refresh_peer_instance(peer_id=peer_id):
+            scripts = list(get_peer_contract_instances(CONTRACT_HASH, peer_id))
+    if not scripts:
+        print(
+            f"STOP: peer {peer_id} has no known Ergo payment contract instance "
+            "(it does not advertise one). Nothing was broadcast.",
             flush=True,
         )
         return False
