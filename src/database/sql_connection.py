@@ -1312,6 +1312,24 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to remove peer {peer_id}: {e}')
             return False
 
+    def clear_peer_slots(self, peer_id: str) -> None:
+        """Delete a peer's slots and their URIs so a refresh can re-add them cleanly.
+
+        ``add_slot`` is a plain INSERT, so re-registering a peer we already know
+        (a reconnect, a pay-time refresh, or a re-introduction routed through
+        ``update_peer_instance``) would otherwise append a duplicate set of
+        slot/uri rows on every call. Clearing first makes the refresh idempotent
+        and lets a peer drop a slot it no longer advertises. Run as one
+        transaction so a peer is never left with slots but no URIs.
+        """
+        self._execute2([
+            ('''DELETE FROM uri
+                WHERE slot_id IN (
+                    SELECT id FROM slot WHERE peer_id = ?
+                )''', (peer_id,)),
+            ('DELETE FROM slot WHERE peer_id = ?', (peer_id,)),
+        ])
+
     def instance_exists(self, instance: celaut_pb2.Instance) -> bool:
         """
         Checks if any URI within an instance exists in the database.

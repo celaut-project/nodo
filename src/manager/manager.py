@@ -283,7 +283,12 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str):
     # It is assumed that protocol stack and metadata have not been modified.
     slot_transport_payloads = _peer_slot_transport_payloads(peer=peer, peer_id=peer_id)
 
-    # Slots
+    # Slots. Clear the peer's existing slots first: this function now runs on
+    # every re-handshake of a known peer (reconnect / pay-time refresh /
+    # re-introduction), and add_slot is a plain INSERT, so without this the
+    # slot+uri rows would duplicate on each call. Re-adding from the fresh
+    # advertisement also drops any slot the peer no longer offers.
+    sc.clear_peer_slots(peer_id=peer_id)
     for slot in peer.instance.uri_slot:
         payload = slot_transport_payloads.get(slot.internal_port)
         if payload is None:
@@ -323,10 +328,14 @@ def refresh_peer_instance(peer_id: str) -> bool:
     hold no payment contract for it, since the peer may have started advertising one
     after the handshake that created its row.
     """
+    uri = next(generate_uris_by_peer_id(peer_id=peer_id), "")
+    if not uri:
+        log.LOGGER(f"No known URI for peer {peer_id}; cannot refresh.")
+        return False
     try:
         peer = next(bee.client_grpc(
             method=celaut_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(next(generate_uris_by_peer_id(peer_id=peer_id), ""))
+                grpc.insecure_channel(uri)
             ).GetPeerInfo,
             indices_parser=celaut_pb2.Peer,
             partitions_message_mode_parser=True
