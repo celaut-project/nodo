@@ -1,5 +1,6 @@
 import os
 import shutil
+import threading
 from typing import Generator, Optional
 
 import netifaces as ni
@@ -19,8 +20,11 @@ METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 
 # Guards the lazy recovery below: registering a contract spins up the ledger runtime
 # (a JVM and a node connection, for Ergo), so a node that genuinely has no usable
-# wallet must not pay that cost on every incoming GetPeerInfo.
+# wallet must not pay that cost on every incoming GetPeerInfo. The lock makes the
+# "once per process" bound hold under concurrent GetPeerInfo (gRPC serves it on
+# several threads); without it two callers could both retry and spin two JVMs.
 _local_contracts_retried = False
+_local_contracts_lock = threading.Lock()
 
 
 def _local_payment_contracts() -> list:
@@ -35,13 +39,18 @@ def _local_payment_contracts() -> list:
     global _local_contracts_retried
 
     contracts = list(local_payment_methods())
-    if contracts or _local_contracts_retried:
+    if contracts:
         return contracts
 
-    _local_contracts_retried = True
-    log.LOGGER('No local payment contract registered; retrying the ledger init.')
-    register_local_contracts()
-    return list(local_payment_methods())
+    with _local_contracts_lock:
+        # Re-check inside the lock: another thread may have just retried (and
+        # possibly registered the contract) while we waited.
+        if _local_contracts_retried:
+            return list(local_payment_methods())
+        _local_contracts_retried = True
+        log.LOGGER('No local payment contract registered; retrying the ledger init.')
+        register_local_contracts()
+        return list(local_payment_methods())
 
 
 def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
