@@ -1,5 +1,6 @@
 import importlib
 import os
+import sys
 from typing import Optional
 
 from src.utils.config import ConfigManager
@@ -7,6 +8,61 @@ from src.utils.config import ConfigManager
 
 class JavaDependencyMissing(RuntimeError):
     """Raised when a Java-backed Ergo/Reputation feature is used without Java."""
+
+
+_SLF4J_STARTUP_MESSAGES = {
+    "SLF4J: Failed to load class \"org.slf4j.impl.StaticLoggerBinder\".",
+    "SLF4J: Defaulting to no-operation (NOP) logger implementation",
+    "SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.",
+}
+
+
+class _Slf4jStderrFilter:
+    """Forward Java stderr except for SLF4J's harmless missing-binder notice."""
+
+    def __init__(self, target):
+        self._target = target
+        self._buffer = ""
+
+    def write(self, data):
+        if isinstance(data, bytes):
+            data = data.decode(errors="replace")
+        self._buffer += str(data)
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            if line.rstrip("\r") not in _SLF4J_STARTUP_MESSAGES:
+                self._target.write(line + "\n")
+
+    def flush(self):
+        if self._buffer:
+            if self._buffer.rstrip("\r") not in _SLF4J_STARTUP_MESSAGES:
+                self._target.write(self._buffer)
+            self._buffer = ""
+        self._target.flush()
+
+
+_java_stderr_filter_installed = False
+
+
+def _hide_slf4j_startup_notice() -> None:
+    """Hide only SLF4J's missing optional binding message from the embedded JVM."""
+    global _java_stderr_filter_installed
+    if _java_stderr_filter_installed:
+        return
+
+    jpype = importlib.import_module("jpype")
+    if not jpype.isJVMStarted():
+        return
+    redirect_stderr = getattr(jpype, "redirectStdErr", None)
+    if not callable(redirect_stderr):
+        return
+    try:
+        redirect_stderr(_Slf4jStderrFilter(sys.stderr))
+    except Exception:
+        # This is cosmetic only: a JVM that cannot redirect stderr must remain
+        # usable for payments and reputation operations.
+        return
+    _java_stderr_filter_installed = True
 
 
 def _detect_main_dir() -> str:
@@ -76,3 +132,4 @@ def ensure_ergpy_jvm(feature: Optional[str] = None) -> None:
         return None
 
     _noop()
+    _hide_slf4j_startup_notice()

@@ -1,5 +1,6 @@
 from textwrap import dedent
 from typing import Callable, Dict
+from contextlib import nullcontext
 from protos import celaut_pb2
 
 from src.payment_system.contracts.simulator import interface as simulated
@@ -39,6 +40,13 @@ def available_payment_process() -> Dict[contract_hash, Callable[[amount, token, 
         **({simulated.CONTRACT_HASH: simulated.process_payment} if SIMULATED else {}),
         ergo.CONTRACT_HASH: ergo.process_payment
     }
+
+
+def transaction_url_reporting(reporter):
+    """Provide the current payment flow with an Ergo transaction URL reporter."""
+    if SIMULATED:
+        return nullcontext()
+    return _ergo_interface().transaction_url_reporting(reporter)
 
 
 def check_sender_balances() -> Dict[contract_hash, Callable[[amount], bool]]:

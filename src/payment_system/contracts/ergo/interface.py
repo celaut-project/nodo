@@ -14,6 +14,8 @@ from src.utils.ergo_tree import (
     proposition_bytes_from_address,
 )
 from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
+from contextlib import contextmanager
+from contextvars import ContextVar
 from threading import Lock
 from time import sleep
 
@@ -71,6 +73,19 @@ WAIT_TX_TIME = 240  # (each 5 seconds)
 WAT_TX_SLEEP_TIME = 5
 
 payment_lock = Lock()  # Ensures the same input box is not spent for more than it holds.
+_transaction_url_reporter: ContextVar = ContextVar(
+    "ergo_transaction_url_reporter", default=None
+)
+
+
+@contextmanager
+def transaction_url_reporting(reporter):
+    """Temporarily report a submitted Ergo transaction URL to the caller."""
+    token = _transaction_url_reporter.set(reporter)
+    try:
+        yield
+    finally:
+        _transaction_url_reporter.reset(token)
 
 
 def __gas_to_nanoerg(amount: int) -> int:
@@ -284,7 +299,14 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
 
             try:
                 tx_id = ergo.txId(signed_tx)
-                LOGGER(f"Transaction submitted: {tx_id} for token {deposit_token}")
+                LOGGER(
+                    "Transaction submitted: "
+                    f"https://sigmaspace.io/en/transaction/{tx_id} "
+                    f"for token {deposit_token}"
+                )
+                reporter = _transaction_url_reporter.get()
+                if reporter:
+                    reporter(f"https://sigmaspace.io/en/transaction/{tx_id}")
             except Exception as e:
                 if "Double spending attempt" in str(e):
                     raise DoubleSpendingAttempt(LEDGER)
