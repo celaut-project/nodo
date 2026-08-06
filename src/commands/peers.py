@@ -18,7 +18,8 @@ def list_peers():
     Lists all peers stored in the database, showing grouped information in sections:
       1. General
       2. Client & Gas
-      3. Reputation
+      3. Rates advertised by the peer
+      4. Reputation
     If the table does not exist, it prints a warning message.
     """
     # Connect to the SQLite database
@@ -59,10 +60,16 @@ def list_peers():
                 reputation_index, last_index_on_ledger
             ) = peer
 
+            advertised_rates = {}
             if protocol_stack:
                 slot = celaut.Service.Api.Slot()
                 slot.ParseFromString(protocol_stack)
                 protocol_stack_tags = " ".join([p.tags[0] for p in slot.protocol_stack if p.tags])
+                # Rates the peer advertised in its gateway slot. Absent for peers
+                # running a version from before nodes published them.
+                advertised_rates = {
+                    rate: gas.n for rate, gas in slot.gas_amount_per_call.items()
+                }
             else:
                 protocol_stack_tags = "N/A"
 
@@ -83,6 +90,18 @@ def list_peers():
             print(f"  Gas: {ssformat(gas)}")
             print(f"       {ssformat(gas_on_ergs)} nanoERG")
             print(f"  Gas Last Update: {gas_last_update or 'None'}")
+            print()
+
+            # Section: Advertised rates
+            # What this peer charges on a recurring basis, as it advertised. These
+            # are ceilings, not quotes -- the price of a specific service still
+            # comes from GetServiceEstimatedCost.
+            print("[Rates] (advertised ceilings, gas)")
+            if advertised_rates:
+                for rate, gas_value in sorted(advertised_rates.items()):
+                    print(f"  {rate}: {gas_value}")
+            else:
+                print("  Not advertised by this peer.")
             print()
 
             # Section: Reputation

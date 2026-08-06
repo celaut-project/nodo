@@ -10,6 +10,7 @@ from src.manager.resources import IOBigData
 from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc
 
 from src.database.sql_connection import SQLConnection, is_peer_available
+from src.tunneling import delegated_endpoints
 
 from src.utils import logger as log
 from src.utils import utils
@@ -444,15 +445,19 @@ def spend_gas(
                     log.LOGGER(f"Resolved container ID '{id}' does not exist.")
                     return False
 
-            current_gas = sc.get_container_gas(id=id)
-            if current_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
-                log.LOGGER(f"Insufficient gas for container '{id}': {log.ssformat(current_gas)} available, needed {log.ssformat(gas_to_spend)}.")
+            # Atomic read-check-write: a service tunnel bills the same container
+            # from both relay directions at once, and a separate get/update would
+            # let two threads read the same balance and lose one deduction.
+            spent = sc.spend_container_gas(
+                id=id, gas_to_spend=gas_to_spend, allow_debt=bool(ALLOW_GAS_DEBT)
+            )
+            if spent is None:
+                log.LOGGER(f"Container '{id}' does not exist; cannot spend gas.")
                 return False
-
-            updated_gas = current_gas - gas_to_spend
-            if debug_mode: log.LOGGER(f"Container {id} reduced gas from {log.ssformat(current_gas)} to {log.ssformat(updated_gas)} (- {log.ssformat(gas_to_spend)})")
-            
-            sc.update_gas_to_container(id=id, gas=updated_gas)
+            if spent is False:
+                log.LOGGER(f"Insufficient gas for container '{id}': needed {log.ssformat(gas_to_spend)}.")
+                return False
+            if debug_mode: log.LOGGER(f"Container {id} spent {log.ssformat(gas_to_spend)} gas.")
 
             __refund_gas_function_factory(
                 gas=gas_to_spend,
@@ -584,6 +589,7 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
 
     else:  # It's external
         log.LOGGER(f"Token {token} is external; let's stop it.")
+        external_token = None
         try:
             external_token = sc.get_delegated_token_by_id(id=token)
             if not external_token:
@@ -612,12 +618,23 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
             )
             father_id = sc.get_external_father_id(token=external_token)
             serialized_instance = sc.get_delegated_instance(token=external_token)
-            
-            sc.purgue_delegated(id=external_token)
-            
+
+            # Drop the delegation record only after the peer confirmed the stop:
+            # if StopService raised we must keep the row so the stop can be
+            # retried and the (remote-computed) refund reconciled, rather than
+            # orphaning an instance the peer may still be running.
+            sc.purgue_delegated(token=external_token)
+
         except Exception as e:
             log.LOGGER('Error purging external instance with hashed token ' + token + ' ' + str(e))
             return None
+        finally:
+            # Local tunnel endpoints are our own listeners; tearing them down is
+            # independent of the remote call and must happen even when it fails,
+            # or the listener socket, its serving thread and the bound port leak
+            # for the process lifetime. close() is idempotent.
+            if external_token:
+                delegated_endpoints.close(token=external_token)
 
     # Block the parent's access to the ports of the removed service.
     if sc.internal_instance_exists(id=father_id):  # Check if the father is an internal instance.

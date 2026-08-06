@@ -186,6 +186,7 @@ if __name__ == '__main__':
                     "\n- remove <service id> | <service tag>"
                     "\n- kill <instance id>"
                     "\n- observe <instance id> [--save <path>]"
+                    "\n- tunnel <instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]"
                     "\n- increase_gas <instance id> <gas to add>"
                     "\n- decrease_gas <instance id> <gas to retire>"
                     "\n- services"
@@ -229,6 +230,7 @@ if __name__ == '__main__':
                     "\n- local_docker_packer <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
                     "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
                     "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
+                    "\n- nat-guide  (how to forward the gateway port on your router so this node is reachable)"
                     "\n\n",
                     flush=True)
                 try:
@@ -247,6 +249,28 @@ if __name__ == '__main__':
                 print(f"Nodo version: {get_git_commit()}", flush=True)
 
                 print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}", flush=True)
+
+                try:
+                    from src.manager.ddns import status as ddns_status
+                    ddns_info = ddns_status()
+                    if ddns_info["enabled"]:
+                        resolves = ddns_info["resolves_to"] or "does not resolve"
+                        print(
+                            f"DDNS: {ddns_info['hostname'] or 'no domain set'} "
+                            f"({ddns_info['provider']}) -> {resolves}",
+                            flush=True
+                        )
+                        if ddns_info["resolves_to"]:
+                            print(
+                                f"  Reachable from outside only if your router forwards "
+                                f"{ddns_info['resolves_to']}:{GATEWAY_PORT} to this host.",
+                                flush=True
+                            )
+                        print("  Run 'nodo nat-guide' for the router steps.", flush=True)
+                    else:
+                        print("DDNS: disabled (see ddns.ENABLED)", flush=True)
+                except Exception as e:
+                    log.LOGGER(f"Error getting DDNS status: {e}.")
 
                 reputation_proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
                 
@@ -464,7 +488,61 @@ if __name__ == '__main__':
                     sys.exit(1)
 
                 observe(instance_id=instance_id, save_path=save_path)
-                
+
+            case "tunnel":
+                from src.commands.tunnel import tunnel
+
+                args = sys.argv[2:]
+                usage = (
+                    "Usage: nodo tunnel <instance id> <slot> [--udp] "
+                    "[--listen <port>] [--host <addr>] [--peer <host:port>] "
+                    "[--idle <seconds>]"
+                )
+
+                udp = "--udp" in args
+                if udp:
+                    args.remove("--udp")
+
+                valued_flags = {"--listen": None, "--host": None, "--peer": None, "--idle": None}
+                try:
+                    for flag in valued_flags:
+                        if flag not in args:
+                            continue
+                        index = args.index(flag)
+                        valued_flags[flag] = args[index + 1]
+                        args = args[:index] + args[index + 2:]
+                except IndexError:
+                    print(f"Error: missing value for a flag.\n{usage}", flush=True)
+                    sys.exit(1)
+
+                if len(args) != 2:
+                    print(usage, flush=True)
+                    sys.exit(1)
+
+                try:
+                    slot = int(args[1])
+                    listen_port = int(valued_flags["--listen"]) if valued_flags["--listen"] else None
+                    idle_timeout = float(valued_flags["--idle"]) if valued_flags["--idle"] else None
+                except ValueError:
+                    print(
+                        "Error: <slot> and --listen take a port number, --idle takes seconds.",
+                        flush=True,
+                    )
+                    sys.exit(1)
+
+                tunnel_kwargs = {
+                    "instance": args[0],
+                    "slot": slot,
+                    "listen_port": listen_port,
+                    "listen_host": valued_flags["--host"] or "127.0.0.1",
+                    "peer": valued_flags["--peer"],
+                    "udp": udp,
+                }
+                if idle_timeout is not None:
+                    tunnel_kwargs["idle_timeout"] = idle_timeout
+
+                tunnel(**tunnel_kwargs)
+
             case "increase_gas":
                 from src.commands.modify_gas import modify_gas
                 modify_gas(instance=sys.argv[2], gas=int(sys.argv[3]), decrement=False)
@@ -712,6 +790,10 @@ if __name__ == '__main__':
             case "doctor":
                 from src.commands.doctor import doctor_command
                 doctor_command(main_dir=MAIN_DIR)
+
+            case "nat-guide":
+                from src.commands.nat_guide import nat_guide
+                nat_guide()
 
             case "completion":
                 # Shell tab-completion for commands and service/instance/peer ids.
