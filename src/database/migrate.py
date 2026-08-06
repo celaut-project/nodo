@@ -120,14 +120,6 @@ def create_tables(cursor):
                 service_id TEXT
             )
         ''',
-        "tunnels": '''
-            CREATE TABLE IF NOT EXISTS tunnels (
-                id TEXT PRIMARY KEY,
-                uri TEXT,
-                service TEXT,
-                live BOOLEAN
-            )
-        ''',
         "deposit_tokens": '''
             CREATE TABLE IF NOT EXISTS deposit_tokens (
                 id TEXT PRIMARY KEY,

@@ -7,7 +7,7 @@ from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type
-from src.tunneling.rpc_tunnel import service_tunnel
+from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
 from src.gateway.utils import generate_node_peer_info
 from src.manager.manager import add_peer_instance, modify_gas_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_gas, \
     hotplug, get_sysresources
@@ -181,16 +181,43 @@ class Gateway(celaut_pb2_grpc.Gateway):
         )
 
     def ServiceTunnel(self, request_iterator, context, **kwargs):
-        yield from bee.serialize_to_buffer(
-                message_iterator=service_tunnel(
-                    iterator=bee.parse_from_buffer(
-                        request_iterator=request_iterator,
-                        indices={0: bytes},
-                        partitions_message_mode={0: False}
-                    )
+        try:
+            # The stream carries two message types: the leading TokenMessage
+            # handshake (index 1) and the raw payload (index 0). Both are parsed
+            # in memory — `partitions_message_mode=False` would spill every
+            # payload chunk to a temporary file, which no byte pipe can afford.
+            conn, relay = service_tunnel(
+                iterator=bee.parse_from_buffer(
+                    request_iterator=request_iterator,
+                    indices={1: celaut_pb2.TokenMessage, 0: bytes},
+                    partitions_message_mode={1: True, 0: True}
                 ),
-                indices=celaut_pb2.Metrics,
-        )
+                is_active=context.is_active,
+            )
+        except TunnelError as e:
+            log.LOGGER(f'Tunnel refused: {e}')
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
+            return
+
+        try:
+            yield from bee.serialize_to_buffer(
+                    message_iterator=relay,
+                    # Mirrors the input map. Declaring a second index also keeps
+                    # bee_rpc from inferring the index off the first message, which
+                    # it does by calling next() unguarded — a service that closes
+                    # without replying would surface as a RuntimeError instead of an
+                    # empty stream.
+                    indices={1: celaut_pb2.TokenMessage, 0: bytes},
+            )
+        finally:
+            # The socket is opened eagerly inside service_tunnel; guarantee it is
+            # released even if serialize_to_buffer bails before the relay
+            # generator is ever iterated (its own finally would not run then).
+            relay.close()
+            try:
+                conn.close()
+            except OSError:
+                pass
 
     def Observe(self, request_iterator, context, **kwargs):
         yield from ObserveIterable(request_iterator, context)

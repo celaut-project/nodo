@@ -37,7 +37,7 @@ SERVICE_COMMANDS = [
 ]
 
 # Commands whose first positional argument is an instance id.
-INSTANCE_COMMANDS = ["kill", "observe", "increase_gas", "decrease_gas"]
+INSTANCE_COMMANDS = ["kill", "observe", "increase_gas", "decrease_gas", "tunnel"]
 
 # Commands whose first positional argument is a peer id.
 PEER_COMMANDS = ["disconnect", "increase_peer_deposit", "verify_reputation", "pay"]
@@ -68,6 +68,7 @@ COMMANDS = sorted(
         "update",
         "kill",
         "observe",
+        "tunnel",
         "increase_gas",
         "decrease_gas",
         "remove",
@@ -91,6 +92,7 @@ COMMANDS = sorted(
         "pack",
         "tui",
         "ggconf",
+        "nat-guide",
         "prune_containers",
         "refresh_clients",
         "tx_history",
