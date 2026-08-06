@@ -152,6 +152,26 @@ class PayCommandTests(unittest.TestCase):
         # And it must NOT claim a local (payer-side) verify happened.
         self.assertNotIn("VERIFIED", out)
 
+    def test_prints_transaction_url_when_payment_reports_it(self):
+        before = (5_000, 1000, 5.0, "2026-07-31T09:00:00")
+        after = (7_000, 1000, 7.0, "2026-07-31T10:00:00")
+        transaction_url = "https://sigmaspace.io/en/transaction/abc123"
+
+        patches = self._wire(True, [(b"s", object())], True, [before, after])
+        for patch in patches:
+            patch.start()
+        self.addCleanup(mock.patch.stopall)
+
+        import src.payment_system.payment_process as payment_process
+        payment_process.increase_deposit_on_peer.side_effect = (
+            lambda **kwargs: kwargs["on_transaction_url"](transaction_url) or True
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertTrue(pv.pay("peer-1", "1"))
+
+        self.assertIn(f"Transaction URL: {transaction_url}", buf.getvalue())
+
     def test_paying_line_uses_scientific_gas_format(self):
         # Regression for Josemi's feedback: the initial "Paying ..." line must
         # sci-format the (huge ~1e63) gas integer via ssformat, matching the gas

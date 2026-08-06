@@ -6,8 +6,8 @@ payment, or gRPC logic is reimplemented here:
   Pay -> :func:`src.payment_system.payment_process.increase_deposit_on_peer`,
          which drives
          :func:`src.payment_system.contracts.ergo.interface.process_payment`
-         (build + sign + broadcast + wait for confirmations; the tx id is
-         emitted to the node log) and then the ``Payable`` gRPC round-trip.
+         (build + sign + broadcast + wait for confirmations; the transaction
+         URL is emitted to the node log) and then the ``Payable`` gRPC round-trip.
 
 There is deliberately **no payer-side verify** step. The authoritative check —
 :func:`...ergo.interface.payment_process_validator` — is *receiver-scoped*: it
@@ -143,19 +143,26 @@ def pay(peer_id: str, amount_erg: str) -> bool:
 
     # Pay via the existing single-wallet flow. On success the receiving peer has
     # accepted + validated the deposit with payment_process_validator (see module
-    # docstring); the tx id is emitted to the node log by process_payment.
-    paid = increase_deposit_on_peer(peer_id=peer_id, amount=gas_amount)
+    # docstring); process_payment emits its SigmaSpace URL to the node log.
+    def print_transaction_url(transaction_url: str) -> None:
+        print(f"Transaction URL: {transaction_url}", flush=True)
+
+    paid = increase_deposit_on_peer(
+        peer_id=peer_id,
+        amount=gas_amount,
+        on_transaction_url=print_transaction_url,
+    )
     if not paid:
         print(
             f"FAIL: payment to peer {peer_id} did not complete or was not "
-            "accepted by the peer (see node log for the tx id / failure reason).",
+            "accepted by the peer (see node log for the transaction URL / failure reason).",
             flush=True,
         )
         return False
 
     print(
         f"PAID: peer {peer_id} accepted and validated the {amount_erg} ERG "
-        "deposit server-side (tx id emitted to the node log).",
+        "deposit server-side (transaction URL emitted to the node log).",
         flush=True,
     )
 

@@ -4,6 +4,7 @@ from time import sleep
 from datetime import datetime, timedelta
 from threading import Lock
 from typing import Optional
+from contextlib import nullcontext
 import grpc
 from bee_rpc import client as bee
 from src.payment_system.exceptions import DoubleSpendingAttempt
@@ -89,7 +90,7 @@ def __obtain_deposit_token(peer_id) -> Optional[str]:
         _l.LOGGER(f"Error generating deposit token: {str(e)}")
         return
 
-def __peer_payment_process(peer_id: str, amount: int) -> bool:
+def __peer_payment_process(peer_id: str, amount: int, on_transaction_url=None) -> bool:
     payment_envs = _payment_envs()
     deposit_token = None
 
@@ -131,12 +132,19 @@ def __peer_payment_process(peer_id: str, amount: int) -> bool:
 
                 # Process the payment
                 try:
-                    contract_ledger = process_payment(
-                        amount=amount,
-                        deposit_token=deposit_token,
-                        ledger=ledger,
-                        script=script
+                    report_url = getattr(payment_envs, "transaction_url_reporting", None)
+                    reporting_context = (
+                        report_url(on_transaction_url)
+                        if callable(report_url)
+                        else nullcontext()
                     )
+                    with reporting_context:
+                        contract_ledger = process_payment(
+                            amount=amount,
+                            deposit_token=deposit_token,
+                            ledger=ledger,
+                            script=script
+                        )
                     _l.LOGGER(f"Payment processed. Deposit token: {deposit_token}")
                     # if token_idess and ledger:
                         # update_reputation(=token_idess, amount=10)  # TODO On envs.
@@ -218,12 +226,16 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
     return False
 
 
-def increase_deposit_on_peer(peer_id: str, amount: int) -> bool:
+def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None) -> bool:
     if amount < MIN_DEPOSIT_PEER: amount = MIN_DEPOSIT_PEER
     
     _l.LOGGER('Increase deposit on peer ' + peer_id + ' by ' + str(_l.ssformat(amount)))
     try:
-        if __peer_payment_process(peer_id=peer_id, amount=amount):
+        if __peer_payment_process(
+            peer_id=peer_id,
+            amount=amount,
+            on_transaction_url=on_transaction_url,
+        ):
             if sc.add_gas_to_peer(peer_id=peer_id, gas=amount):
                 return True
             else:
