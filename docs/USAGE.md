@@ -414,6 +414,19 @@ These are intended for development or advanced maintenance environments:
   **Example:**  
   `nodo migrate`
 
+- **force_execution `<peer_id>` `<service id|tag|'.celaut' path>` `[-e key value]` `[--name instance-name]`**  
+  Testing/dev only. `execute` always picks the peer through `execution_balancer`
+  (cheapest local-or-connected-peer candidate, tried in cost order). This command
+  skips that entirely and delegates straight to `peer_id` — no comparison against
+  `local` or any other peer, and no fallback if it fails. It still goes through the
+  normal cost/gas accounting for the delegated instance (the peer's own cost
+  estimate, `spend_gas`, `gas_amount_on_other_peer`) — only peer *selection* is
+  skipped. Fails immediately if `peer_id` isn't currently connected (see `nodo peers`).
+  Useful for exercising peer-to-peer delegation and tunneling deterministically
+  without disconnecting every other peer first.  
+  **Example:**  
+  `nodo force_execution a1b2c3d4-... my-service`
+
 - **storage:prune_blocks**  
   Cleans up storage by removing unnecessary blocks.  
   **Example:**  
