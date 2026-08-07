@@ -261,9 +261,14 @@ if __name__ == '__main__':
                             flush=True
                         )
                         if ddns_info["resolves_to"]:
+                            from src.utils.network import resolve_public_port
+                            public_port = resolve_public_port(
+                                env_manager.get("network.PUBLIC_TCP_PORT", ""), GATEWAY_PORT
+                            )
                             print(
                                 f"  Reachable from outside only if your router forwards "
-                                f"{ddns_info['resolves_to']}:{GATEWAY_PORT} to this host.",
+                                f"{ddns_info['resolves_to']}:{public_port} to this host's "
+                                f"port {GATEWAY_PORT}.",
                                 flush=True
                             )
                         print("  Run 'nodo nat-guide' for the router steps.", flush=True)

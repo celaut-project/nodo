@@ -154,6 +154,8 @@ network:
   LOCAL_NETWORK: "lo"
   PUBLIC_IP: ""  # Optional public IP or DNS name to advertise for `nodo execute --remote`. Leave empty to auto-detect from the default outbound interface.
   EXTERNAL_INTERFACE: ""  # Optional interface name to use when PUBLIC_IP is empty, e.g. "eth0".
+  PUBLIC_TCP_PORT: ""  # Optional external TCP port to advertise for the gateway (GATEWAY_PORT), in case your router forwards a different port than the one this node listens on. Leave empty to advertise GATEWAY_PORT itself.
+  PUBLIC_UDP_PORT: ""  # Optional external UDP port to advertise, for when a peer-facing feature that listens on UDP exists. Nothing in nodo does yet -- GATEWAY_PORT is TCP-only (gRPC).
   # If true, child instances launched by internal instances are NOT exposed on the host.
   # If false, child instances will be published and reachable from the internet (subject to host firewall).
   ISOLATE_INTERNAL_CHILDREN: true
