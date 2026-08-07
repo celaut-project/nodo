@@ -1,7 +1,7 @@
 """Core services: Celaut services the node treats as part of its own workflow.
 
 Core services are referenced by service id (content hash), configured under the
-top-level ``core_services`` list in ``config.yaml`` as ``{name, id}`` entries.
+top-level ``core_services`` mapping in ``config.yaml`` as ``role: id`` entries.
 They let the node bootstrap capabilities it does not ship with — for example,
 resolving and auto-downloading a service that ``nodo execute`` is asked to run
 but does not have locally (see :mod:`src.core_services.source_application`).
@@ -38,18 +38,11 @@ def get_core_service_id(name: str) -> Optional[str]:
     Callers must treat ``None`` as "this capability is not configured" and degrade
     gracefully rather than fabricate an id.
     """
-    entries = _env_manager.get("core_services", []) or []
-    if not isinstance(entries, list):
+    entries = _env_manager.get("core_services", {}) or {}
+    if not isinstance(entries, dict):
         return None
 
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("name") != name:
-            continue
-        service_id = str(entry.get("id", "") or "").strip()
-        if not service_id or service_id == UNSET_PLACEHOLDER:
-            return None
-        return service_id
-
-    return None
+    service_id = str(entries.get(name, "") or "").strip()
+    if not service_id or service_id == UNSET_PLACEHOLDER:
+        return None
+    return service_id
