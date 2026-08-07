@@ -138,6 +138,9 @@ placeholder fails closed ("Service not allowed.").
 
 Controls exposure and remote execution. Key entries: `GATEWAY_PORT` (`auto`),
 `PUBLIC_IP` / `EXTERNAL_INTERFACE` (what `nodo execute --remote` advertises),
+`PUBLIC_TCP_PORT` / `PUBLIC_UDP_PORT` (the external port a router forwards, when it
+differs from the internal one — empty means "same as internal"; only
+`PUBLIC_TCP_PORT` is used today, since the gateway is TCP-only),
 `FREE_PORTS_RANGE` (ports used to expose services — match your router forwarding),
 `DISABLE_EXPOSE_OUTSIDE`, `ISOLATE_INTERNAL_CHILDREN`, and `DEFAULT_EXECUTE_REMOTE`
 (default remote for NAT/WSL2 nodes). See also [`NETWORKS.md`](NETWORKS.md).
