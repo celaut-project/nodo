@@ -1543,14 +1543,14 @@ Cold Wallet: 9cold\n";
     #[test]
     fn flattens_all_yaml_leaf_values_and_masks_secrets() {
         let value: Value = serde_yaml::from_str(
-            "network:\n  port: 5000\nledgers:\n  ergo:\n    WALLET_MNEMONIC: secret words\ncore_services:\n  - name: packer\n    id: abc\nempty: []\n",
+            "network:\n  port: 5000\nledgers:\n  ergo:\n    WALLET_MNEMONIC: secret words\nservers:\n  - name: packer\n    id: abc\nempty: []\n",
         )
         .unwrap();
         let mut entries = Vec::new();
         flatten_yaml(&value, &mut Vec::new(), &mut entries);
         let paths: Vec<_> = entries.iter().map(|entry| entry.path.as_str()).collect();
         assert!(paths.contains(&"network.port"));
-        assert!(paths.contains(&"core_services[0].id"));
+        assert!(paths.contains(&"servers[0].id"));
         assert!(paths.contains(&"empty"));
         let mnemonic = entries
             .iter()
@@ -1591,9 +1591,10 @@ Cold Wallet: 9cold\n";
         assert!(entries
             .iter()
             .any(|entry| entry.path == "virtualizers.ch.MIN_MEM_MIB"));
+        // core_services is a role -> id mapping (issue #232), not an array.
         assert!(entries
             .iter()
-            .any(|entry| entry.path == "core_services[1].id"));
+            .any(|entry| entry.path == "core_services.packer"));
         assert!(
             entries
                 .iter()
@@ -1606,11 +1607,11 @@ Cold Wallet: 9cold\n";
     #[test]
     fn emits_safe_yq_paths() {
         let path = vec![
-            ConfigPathSegment::Key("core_services".to_string()),
+            ConfigPathSegment::Key("servers".to_string()),
             ConfigPathSegment::Index(1),
             ConfigPathSegment::Key("id".to_string()),
         ];
-        assert_eq!(yq_path_expression(&path), ".[\"core_services\"][1][\"id\"]");
+        assert_eq!(yq_path_expression(&path), ".[\"servers\"][1][\"id\"]");
     }
 
     #[test]
