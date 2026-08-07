@@ -997,6 +997,56 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Database error fetching gas price for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {e}')
             return None # Return None on database error
 
+    def get_peer_payment_contracts(self, peer_id: str) -> List[dict]:
+        """
+        Lists every payment contract instance registered for a peer, resolving
+        each row's ledger to its tag (e.g. ``"ergo"``) instead of the opaque
+        stored hash.
+
+        Args:
+            peer_id (str): The peer id (``"LOCAL"`` for our own contracts).
+
+        Returns:
+            List[dict]: One entry per ``contract_instance`` row, each with
+            ``contract_hash``, ``ledger_tag`` (falling back to the raw
+            ``ledger_hash`` if the ledger content can't be resolved to a tag),
+            ``address``, and ``gas_price`` (int, or None if unset/invalid).
+        """
+        rows = self._execute(
+            "SELECT contract_hash, ledger_hash, address, gas_price "
+            "FROM contract_instance WHERE peer_id = ?",
+            (peer_id,)
+        ).fetchall()
+
+        contracts = []
+        for row in rows:
+            ledger_tag = row['ledger_hash']
+            ledger_row = self._execute(
+                "SELECT content FROM ledger WHERE hash = ?", (row['ledger_hash'],)
+            ).fetchone()
+            if ledger_row:
+                ledger = celaut_pb2.Contract.Ledger()
+                try:
+                    ledger.ParseFromString(ledger_row['content'])
+                    if ledger.tags:
+                        ledger_tag = ledger.tags[0]
+                except Exception as e:
+                    logger.LOGGER(f'Could not parse stored ledger {row["ledger_hash"]}: {e}')
+
+            try:
+                gas_price = int(row['gas_price'])
+            except (TypeError, ValueError):
+                gas_price = None
+
+            contracts.append({
+                'contract_hash': row['contract_hash'],
+                'ledger_tag': ledger_tag,
+                'address': row['address'],
+                'gas_price': gas_price,
+            })
+
+        return contracts
+
     def get_peers_id(self) -> List[str]:
         """
         Fetches all peer IDs from the database.
