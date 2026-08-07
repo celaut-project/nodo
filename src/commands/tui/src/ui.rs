@@ -1,4 +1,6 @@
-use crate::app::{format_bytes, percent, shorten, App, Instance, InputMode, Page, HISTORY_POINTS};
+use crate::app::{
+    format_bytes, percent, shorten, App, EditKind, Instance, InputMode, Page, HISTORY_POINTS,
+};
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
 
@@ -691,26 +693,78 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
 }
 
+/// Body lines and hint text for the `EditConfig` popup, one variant per
+/// [`EditKind`]: a checkbox, a steppable number, a cyclable enum picker, or the
+/// original freeform text field (also used outside config editing, e.g. Connect
+/// and the filter box).
+fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
+    if app.input_mode != InputMode::EditConfig {
+        return (
+            vec![Line::from(app.input.clone())],
+            "Enter saves • Esc cancels • Ctrl+U clears".to_string(),
+        );
+    }
+
+    match &app.edit_kind {
+        EditKind::Bool => {
+            let checked = app.input.trim() == "true";
+            let label = if checked { "[x] true" } else { "[ ] false" };
+            (
+                vec![Line::from(Span::styled(
+                    label,
+                    Style::default().fg(Color::White).bold(),
+                ))],
+                "Space / ←/→ toggles • Enter saves • Esc cancels".to_string(),
+            )
+        }
+        EditKind::Number => (
+            vec![Line::from(app.input.clone())],
+            "↑/↓ adjust by 1 • type to overwrite • Enter saves • Esc cancels".to_string(),
+        ),
+        EditKind::Enum(options) => {
+            let current = app.input.trim();
+            let lines = options
+                .iter()
+                .map(|option| {
+                    let selected = option == current;
+                    let marker = if selected { "▸ " } else { "  " };
+                    Line::from(Span::styled(
+                        format!("{marker}{option}"),
+                        if selected {
+                            Style::default().fg(ACCENT).bold()
+                        } else {
+                            Style::default().fg(Color::White)
+                        },
+                    ))
+                })
+                .collect();
+            (lines, "↑/↓ cycle • Enter saves • Esc cancels".to_string())
+        }
+        EditKind::Text => {
+            let secret_hint = if app.edit_config_secret {
+                " • existing secret hidden; blank keeps it, type \"\" to clear"
+            } else {
+                ""
+            };
+            let display = if app.edit_config_secret {
+                "•".repeat(app.input.chars().count())
+            } else {
+                app.input.clone()
+            };
+            (
+                vec![Line::from(display)],
+                format!("Enter saves • Esc cancels • Ctrl+U clears{secret_hint}"),
+            )
+        }
+    }
+}
+
 fn draw_input_popup(frame: &mut Frame, app: &App) {
-    let area = centered_rect(72, 7, frame.size());
+    let (mut content, hint) = edit_popup_body(app);
+    let height = (content.len() as u16 + 2).max(3) + 2;
+    let area = centered_rect(72, height, frame.size());
     frame.render_widget(Clear, area);
-    let secret_hint = if app.edit_config_secret {
-        " • existing secret hidden; blank keeps it, type \"\" to clear"
-    } else {
-        ""
-    };
-    let display = if app.edit_config_secret {
-        "•".repeat(app.input.chars().count())
-    } else {
-        app.input.clone()
-    };
-    let content = vec![
-        Line::from(display),
-        Line::from(Span::styled(
-            format!("Enter saves • Esc cancels • Ctrl+U clears{secret_hint}"),
-            Style::default().fg(MUTED),
-        )),
-    ];
+    content.push(Line::from(Span::styled(hint, Style::default().fg(MUTED))));
     let popup = Paragraph::new(content)
         .block(
             Block::bordered()
