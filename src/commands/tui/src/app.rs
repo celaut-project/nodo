@@ -119,6 +119,22 @@ pub struct Peer {
     pub reputation: String,
     /// Local reputation score (nodo-managed, independent of the on-chain proof).
     pub reputation_score: String,
+    /// Every payment contract this peer has registered. Rendered in the peer
+    /// detail card rather than the table: a peer can hold several instances,
+    /// and each carries more than a row can show (see issue #231).
+    pub contracts: Vec<PeerContract>,
+}
+
+/// One `contract_instance` row: the ledger a peer settles on, the contract it
+/// charges through, the address it gets paid at, and its gas price.
+#[derive(Debug, Clone)]
+pub struct PeerContract {
+    /// Ledger tag (e.g. "ergo"), falling back to the raw stored hash when the
+    /// ledger row can't be resolved or carries no tag.
+    pub ledger: String,
+    pub contract_hash: String,
+    pub address: String,
+    pub gas_price: String,
 }
 
 impl Identifiable for Peer {
@@ -1116,16 +1132,61 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 .get::<_, Option<i64>>(4)?
                 .map(|score| score.to_string())
                 .unwrap_or_else(|| "0".to_string());
+            let id: String = row.get(0)?;
             Ok(Peer {
-                id: row.get(0)?,
                 uris: row.get(1)?,
                 gas: format_gas(row.get::<_, String>(2)?),
                 reputation: row.get(3)?,
                 reputation_score,
+                // `contract_instance` isn't touched by the join above (it isn't
+                // keyed by slot/uri), so its rows are fetched per peer below.
+                contracts: Vec::new(),
+                id,
+            })
+        })?
+        .collect::<SqlResult<Vec<_>>>()?;
+
+    peers
+        .into_iter()
+        .map(|mut peer| {
+            peer.contracts = get_peer_contracts(&connection, &peer.id)?;
+            Ok(peer)
+        })
+        .collect()
+}
+
+/// Every payment contract instance a peer has registered. A peer's
+/// `contract_instance` rows aren't reachable from the slot/uri join `get_peers`
+/// already runs, and before this the TUI surfaced none of it at all (issue #231).
+fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<PeerContract>> {
+    let mut statement = connection.prepare(
+        "SELECT ci.contract_hash, ci.ledger_hash, ci.address, ci.gas_price, l.content
+         FROM contract_instance ci
+         LEFT JOIN ledger l ON ci.ledger_hash = l.hash
+         WHERE ci.peer_id = ?1",
+    )?;
+    let contracts = statement
+        .query_map([peer_id], |row| {
+            let ledger_hash: String = row.get(1)?;
+            let ledger_content: Option<Vec<u8>> = row.get(4)?;
+            // Peers only ever name a ledger by tag, so show the tag; the stored
+            // hash is the fallback when the row is unresolvable or untagged.
+            let ledger = ledger_content
+                .and_then(|bytes| protos::contract::Ledger::decode(&*bytes).ok())
+                .and_then(|ledger| ledger.tags.into_iter().next())
+                .unwrap_or(ledger_hash);
+            Ok(PeerContract {
+                ledger,
+                contract_hash: row.get(0)?,
+                address: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                gas_price: row
+                    .get::<_, Option<String>>(3)?
+                    .map(format_gas)
+                    .unwrap_or_default(),
             })
         })?
         .collect();
-    peers
+    contracts
 }
 
 /// Adjust a peer's local reputation score by `delta`, mirroring
@@ -1524,6 +1585,127 @@ pub fn shorten(value: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A database with just the tables `get_peers` touches, one peer, and
+    /// whatever contract instances the caller asks for.
+    fn peer_database(dir: &Path, instances: &[(&str, &str, &str, Option<&[u8]>)]) -> PathBuf {
+        let path = dir.join("database.sqlite");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE peer (id TEXT PRIMARY KEY, gas TEXT, reputation_proof_id TEXT,
+                                    reputation_score INTEGER);
+                 CREATE TABLE slot (id INTEGER PRIMARY KEY, peer_id TEXT);
+                 CREATE TABLE uri (id INTEGER PRIMARY KEY, slot_id INTEGER, ip TEXT, port INTEGER);
+                 CREATE TABLE ledger (hash TEXT PRIMARY KEY, content BLOB);
+                 CREATE TABLE contract_instance (id INTEGER PRIMARY KEY, address TEXT,
+                                    ledger_hash TEXT, contract_hash TEXT, peer_id TEXT,
+                                    gas_price TEXT);
+                 INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7);",
+            )
+            .unwrap();
+        for (contract_hash, ledger_hash, address, ledger_content) in instances {
+            connection
+                .execute(
+                    "INSERT INTO contract_instance (address, ledger_hash, contract_hash, peer_id, gas_price)
+                     VALUES (?1, ?2, ?3, 'peer-1', '500')",
+                    rusqlite::params![address, ledger_hash, contract_hash],
+                )
+                .unwrap();
+            if let Some(content) = ledger_content {
+                connection
+                    .execute(
+                        "INSERT OR IGNORE INTO ledger (hash, content) VALUES (?1, ?2)",
+                        rusqlite::params![ledger_hash, content],
+                    )
+                    .unwrap();
+            }
+        }
+        path
+    }
+
+    fn ergo_ledger_bytes() -> Vec<u8> {
+        let ledger = protos::contract::Ledger {
+            tags: vec!["ergo".to_string()],
+            prose: String::new(),
+            formal: Vec::new(),
+        };
+        ledger.encode_to_vec()
+    }
+
+    #[test]
+    fn peer_contracts_resolve_the_ledger_tag() {
+        // Peers name a ledger by tag; the stored hash is meaningless to a human.
+        let dir = std::env::temp_dir().join("nodo-tui-test-ledger-tag");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let bytes = ergo_ledger_bytes();
+        let database = peer_database(
+            &dir,
+            &[("contract-hash-1", "ledger-hash-1", "addr-1", Some(&bytes))],
+        );
+
+        let peers = get_peers(&database).unwrap();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].contracts.len(), 1);
+        let contract = &peers[0].contracts[0];
+        assert_eq!(contract.ledger, "ergo");
+        assert_eq!(contract.contract_hash, "contract-hash-1");
+        assert_eq!(contract.address, "addr-1");
+        assert_eq!(contract.gas_price, format_gas("500".to_string()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn peer_contracts_fall_back_to_the_raw_hash_when_the_ledger_is_unresolvable() {
+        let dir = std::env::temp_dir().join("nodo-tui-test-ledger-fallback");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        // No matching `ledger` row at all: better to show the hash than nothing.
+        let database = peer_database(&dir, &[("contract-hash-1", "ledger-hash-1", "addr-1", None)]);
+
+        let peers = get_peers(&database).unwrap();
+        assert_eq!(peers[0].contracts[0].ledger, "ledger-hash-1");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn every_contract_instance_of_a_peer_is_returned() {
+        // The pre-#231 lookup could only ever surface a single instance.
+        let dir = std::env::temp_dir().join("nodo-tui-test-multi-contract");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let bytes = ergo_ledger_bytes();
+        let database = peer_database(
+            &dir,
+            &[
+                ("contract-a", "ledger-hash-1", "addr-a", Some(&bytes)),
+                ("contract-b", "ledger-hash-2", "addr-b", None),
+            ],
+        );
+
+        let peers = get_peers(&database).unwrap();
+        let hashes: Vec<&str> = peers[0]
+            .contracts
+            .iter()
+            .map(|contract| contract.contract_hash.as_str())
+            .collect();
+        assert_eq!(hashes, vec!["contract-a", "contract-b"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_peer_without_contracts_still_loads() {
+        let dir = std::env::temp_dir().join("nodo-tui-test-no-contract");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let database = peer_database(&dir, &[]);
+
+        let peers = get_peers(&database).unwrap();
+        assert_eq!(peers.len(), 1);
+        assert!(peers[0].contracts.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn parses_nodo_info_wallets() {
