@@ -3,11 +3,10 @@ Node identity keypair (issue #236): a node's own secp256k1 keypair, derived in p
 Python from a BIP-39 mnemonic. Used as the ``peer_id`` a node presents to others and
 to sign its ``GetPeerInfo`` response (``Peer.public_key`` / ``Peer.signature``).
 
-The identity mnemonic is ``ledgers.ergo.WALLET_MNEMONIC`` when configured, so a node's
-identity and its Ergo wallet are the same key and a reputation proof published later
-is already tied to this node's identity "for free". A node with no Ergo wallet
-configured falls back to ``network.NODE_MNEMONIC`` (auto-generated on first boot, see
-ConfigManager), so identity does not depend on Ergo being set up at all.
+A node has exactly ONE mnemonic, ``ledgers.ergo.WALLET_MNEMONIC``, generated on first
+config load when unset. It is both the node's wallet and its identity, so a reputation
+proof published later is already tied to this node's identity for free, and the
+identity can never change underneath the peers that recorded it.
 """
 import hashlib
 import string
@@ -51,17 +50,17 @@ def normalize_public_key_hex(public_key_hex: str) -> Optional[str]:
 
 
 def get_identity_mnemonic() -> Optional[str]:
-    """The mnemonic backing this node's identity keypair, or None if none is set yet.
+    """The mnemonic backing this node's identity keypair, or None if there is none.
 
-    ``network.NODE_MNEMONIC`` is auto-generated on first config load (like a ledger
-    wallet mnemonic), so this is only None when the config has not been loaded at all.
+    There is exactly ONE mnemonic in a node: ``ledgers.ergo.WALLET_MNEMONIC``, which is
+    both its wallet and its identity. ConfigManager generates it on first load when
+    unset, so this returns None only if the config was never loaded -- and never
+    changes underfoot, which matters because the derived public key IS this node's
+    ``peer_id``: a second source would let the node's identity silently change (and
+    orphan its deposits and reputation network-wide) the moment a wallet was added.
     """
-    config = ConfigManager()
-    wallet_mnemonic = str(config.get("ledgers.ergo.WALLET_MNEMONIC", "") or "").strip()
-    if wallet_mnemonic and wallet_mnemonic != "auto":
-        return wallet_mnemonic
-    node_mnemonic = str(config.get("network.NODE_MNEMONIC", "") or "").strip()
-    return node_mnemonic if node_mnemonic and node_mnemonic != "auto" else None
+    mnemonic = str(ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC", "") or "").strip()
+    return mnemonic if mnemonic and mnemonic != "auto" else None
 
 
 @lru_cache(maxsize=4)
