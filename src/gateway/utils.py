@@ -106,6 +106,23 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     return uris
 
 
+def _estimated_invalid_after(now: int) -> int:
+    """When the addresses announced now may stop being valid, or 0 for no estimate.
+
+    Derived from ``network.ADDRESS_VALIDITY_SECONDS`` -- an operator-supplied
+    estimate of how long this node keeps its address (typically the ISP's DHCP
+    lease for a dynamic public IP). Left at 0 by default: claiming an expiry that
+    is not actually known would be worse than saying nothing, since a peer would
+    then drop a perfectly valid address.
+    """
+    try:
+        validity = int(env_manager.get("network.ADDRESS_VALIDITY_SECONDS", 0) or 0)
+    except (TypeError, ValueError):
+        log.LOGGER('Invalid network.ADDRESS_VALIDITY_SECONDS; announcing no expiry estimate.')
+        return 0
+    return now + validity if validity > 0 else 0
+
+
 def _sign_peer(peer: celaut_pb2.Peer) -> None:
     """Sign ``peer`` with this node's identity key, if one is configured yet.
 
@@ -128,7 +145,10 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     uris = [f"{uri.ip}:{uri.port}" for slot in peer.instance.uri_slot for uri in slot.uri]
     ts = int(time.time())
     seq = next(_seq_counter)
-    signature = sign_peer_payload(canonical_peer_payload(public_key_hex, ts, seq, uris))
+    estimated_invalid_after = _estimated_invalid_after(ts)
+    signature = sign_peer_payload(
+        canonical_peer_payload(public_key_hex, ts, seq, uris, estimated_invalid_after)
+    )
     if not signature:
         return
 
@@ -136,6 +156,7 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     peer.signature = signature
     peer.ts = ts
     peer.seq = seq
+    peer.estimated_invalid_after = estimated_invalid_after
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:

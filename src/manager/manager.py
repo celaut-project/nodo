@@ -243,7 +243,11 @@ def _verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
     from src.reputation_system.node_identity import canonical_peer_payload, verify_peer_payload
 
     payload = canonical_peer_payload(
-        peer.public_key, peer.ts, peer.seq, _peer_uris(peer.instance)
+        peer.public_key,
+        peer.ts,
+        peer.seq,
+        _peer_uris(peer.instance),
+        peer.estimated_invalid_after,
     )
     if not verify_peer_payload(peer.public_key, payload, peer.signature):
         log.LOGGER(f"Peer signature failed to verify for claimed public_key {peer.public_key}.")
@@ -274,7 +278,10 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
                 log.LOGGER(f"Peer {peer_id} sent a stale (ts, seq); ignoring the update.")
                 return peer_id
             update_peer_instance(peer=peer, peer_id=peer_id)
-            sc.set_peer_last_ts_seq(peer_id=peer_id, ts=peer.ts, seq=peer.seq)
+            sc.set_peer_last_ts_seq(
+                peer_id=peer_id, ts=peer.ts, seq=peer.seq,
+                estimated_invalid_after=peer.estimated_invalid_after,
+            )
             return peer_id
         # Falls through to the fresh-registration path below with peer_id already
         # resolved to the verified public key (no uuid4(), no address lookup).
@@ -303,7 +310,10 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
         return None
 
     if verified_public_key:
-        sc.set_peer_last_ts_seq(peer_id=peer_id, ts=peer.ts, seq=peer.seq)
+        sc.set_peer_last_ts_seq(
+            peer_id=peer_id, ts=peer.ts, seq=peer.seq,
+            estimated_invalid_after=peer.estimated_invalid_after,
+        )
 
     # Slots
     for slot in peer.instance.uri_slot:

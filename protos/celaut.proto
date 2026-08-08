@@ -365,6 +365,15 @@ message Peer {
     // downgrade to a stale address; the claim itself is safe to freely redistribute.
     int64 ts = 5;
     int64 seq = 6;
+    // Unix timestamp after which the addresses in `instance` may stop being valid
+    // (e.g. a typical ISP DHCP lease expiry). Optional: 0 means no estimate is made.
+    // Lets a reader anticipate the change -- preferring a fresher announcement or a
+    // DNS re-resolution -- instead of assuming a dynamic address stays valid forever
+    // (issue #236, absorbing #235). It sits here rather than on Instance.Uri because
+    // that message is shared with ServiceInstance / ConfigurationFile.gateway /
+    // StartService, where an address-lease estimate is meaningless. Covered by
+    // `signature`, so it cannot be stripped or extended in transit.
+    int64 estimated_invalid_after = 7;
 }
 
 message Client {
