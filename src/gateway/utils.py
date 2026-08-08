@@ -178,43 +178,6 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     return uris
 
 
-# When this process first observed its current announced address. The expiry estimate
-# is anchored here, NOT to request time: `now + validity` recomputed per request slides
-# forward forever, so a peer polling every minute would always be told "valid for
-# another N seconds" and the deadline would never arrive -- exactly what point 9 of
-# issue #236 set out to avoid. Reset whenever the announced address actually changes.
-_address_acquired_at: Optional[int] = None
-_address_last_seen: Optional[str] = None
-_address_lock = threading.Lock()
-
-
-def _note_announced_address(host: Optional[str], now: int) -> int:
-    """Record the currently announced address and return when it was acquired."""
-    global _address_acquired_at, _address_last_seen
-    with _address_lock:
-        if host != _address_last_seen or _address_acquired_at is None:
-            _address_last_seen = host
-            _address_acquired_at = now
-        return _address_acquired_at
-
-
-def _estimated_invalid_after_unix_seconds(acquired_at: int) -> int:
-    """When the announced address may stop being valid, or 0 for no estimate.
-
-    ``network.ADDRESS_VALIDITY_SECONDS`` is an operator-supplied estimate of how long
-    this node keeps its address (typically the ISP's DHCP lease for a dynamic public
-    IP), counted from when the address was *acquired*. Left at 0 by default: claiming
-    an expiry that is not actually known is worse than saying nothing, since a peer
-    would then discard a perfectly valid address.
-    """
-    try:
-        validity = int(env_manager.get("network.ADDRESS_VALIDITY_SECONDS", 0) or 0)
-    except (TypeError, ValueError):
-        log.LOGGER('Invalid network.ADDRESS_VALIDITY_SECONDS; announcing no expiry estimate.')
-        return 0
-    return acquired_at + validity if validity > 0 else 0
-
-
 def _sign_peer(peer: celaut_pb2.Peer) -> None:
     """Sign ``peer`` with this node's identity key, if one is configured yet.
 
@@ -235,14 +198,14 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     if not public_key_hex:
         return
 
+    from src.utils.network import announced_address_expiry
+
     ts = int(time.time())
     seq = next(_seq_counter)
     announced = next(
         (uri.ip for slot in peer.instance.uri_slot for uri in slot.uri), None
     )
-    estimated_invalid_after_unix_seconds = _estimated_invalid_after_unix_seconds(
-        _note_announced_address(announced, ts)
-    )
+    estimated_invalid_after_unix_seconds = announced_address_expiry(announced, ts)
     signature = sign_peer_payload(
         canonical_peer_payload(
             public_key_hex,
