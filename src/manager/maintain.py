@@ -1,5 +1,6 @@
 from time import sleep
 import os
+import time
 
 import grpc
 from bee_rpc import client as beerpc
@@ -8,7 +9,7 @@ from protos import celaut_pb2 as celaut, celaut_pb2_grpc, celaut_pb2
 from protos.gateway_bee import StartService_input_indices, StartService_input_message_mode
 from src.manager.ddns import ddns_tick
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import ensure_dev_client_pools, stop_instance, spend_gas, update_peer_instance
+from src.manager.manager import accept_peer_refresh, ensure_dev_client_pools, stop_instance, spend_gas
 from src.manager.metrics import gas_amount_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.utils import logger as log
@@ -182,8 +183,17 @@ def peer_deposits(debug_mode: bool = False):
     for peer_id in SQLConnection().get_peers_id():
         if debug_mode: log.LOGGER(f"Starting check for peer {peer_id}.")
 
-        if not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
-            if debug_mode: log.LOGGER(f"Peer {peer_id} is not available. Attempting to fetch info.")
+        # A peer that told us when its address expires is re-fetched once that moment
+        # passes, without waiting for it to become unreachable first -- which is the
+        # whole point of announcing the estimate (issue #236 point 9). Anticipating the
+        # change costs one GetPeerInfo; missing it costs a failed delegation or payment.
+        expiry = SQLConnection().get_peer_estimated_invalid_after_unix_seconds(peer_id=peer_id)
+        address_expired = bool(expiry) and expiry <= int(time.time())
+        if address_expired and debug_mode:
+            log.LOGGER(f"Peer {peer_id} announced its address expires at {expiry}; refreshing.")
+
+        if address_expired or not is_peer_available(peer_id=peer_id, min_slots_open=MIN_SLOTS_OPEN_PER_PEER):
+            if debug_mode: log.LOGGER(f"Peer {peer_id} needs a refresh. Attempting to fetch info.")
 
             try:
                 peer = next(beerpc.client_grpc(
@@ -205,10 +215,13 @@ def peer_deposits(debug_mode: bool = False):
                 continue
 
             try:
-                update_peer_instance(
-                    peer=peer,
-                    peer_id=peer_id
-                )
+                # Same signature check as an inbound IntroducePeer: whoever answers at
+                # a stored address is not necessarily this peer (no TLS, and the
+                # address may have been reassigned), and this refresh feeds the
+                # payment contracts used further down this very loop.
+                if not accept_peer_refresh(peer=peer, peer_id=peer_id):
+                    if debug_mode: log.LOGGER(f"Refresh for peer {peer_id} was rejected.")
+                    continue
                 if debug_mode: log.LOGGER(f"Peer {peer_id} instance updated successfully.")
             except Exception as update_exception:
                 log.LOGGER(f"[ERROR] Exception updating peer {peer_id}: {str(update_exception)}")

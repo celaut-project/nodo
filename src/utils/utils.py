@@ -1,3 +1,4 @@
+import collections
 import os
 import socket
 import threading
@@ -295,16 +296,34 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     )
 
 
+def format_uri(ip: str, port: int) -> str:
+    """``ip:port`` as a gRPC target, bracketing IPv6 literals.
+
+    A bare ``2001:db8::1:8080`` is not a parseable target -- the host has to be
+    ``[2001:db8::1]:8080``. Announcing IPv6 became possible once a node advertises
+    every interface (issue #236), so the formatting can no longer assume IPv4.
+    """
+    try:
+        if isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address):
+            return f"[{ip}]:{port}"
+    except ValueError:
+        pass  # A DNS name: no brackets.
+    return f"{ip}:{port}"
+
+
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
     yield from (
-        ip + ':' + str(port) for ip, port in get_peer_directions(
+        format_uri(ip, port) for ip, port in get_peer_directions(
         peer_id=peer_id
     ) if is_open(ip=ip, port=port)
     )
 
 
 _IS_OPEN_CACHE_TTL_SECONDS = 30
-_is_open_cache: typing.Dict[typing.Tuple[str, int], typing.Tuple[bool, float]] = {}
+_IS_OPEN_CACHE_MAX_ENTRIES = 4096
+_is_open_cache: "collections.OrderedDict[typing.Tuple[str, int], typing.Tuple[bool, float]]" = (
+    collections.OrderedDict()
+)
 _is_open_cache_lock = threading.Lock()
 
 
@@ -316,6 +335,10 @@ def is_open(ip: str, port: int) -> bool:
     several addresses per peer (issue #236) multiplies how often that timeout gets
     paid. A short TTL trades a little staleness for not re-paying it on every call
     within the same handful of seconds.
+
+    Bounded: the keys come from peer-announced addresses and ``IntroducePeer`` accepts
+    an unbounded URI list from anyone, so an unbounded dict would be a memory sink.
+    Expired entries are swept and the oldest are evicted past the cap.
     """
     key = (ip, port)
     now = time.monotonic()
@@ -323,10 +346,17 @@ def is_open(ip: str, port: int) -> bool:
     with _is_open_cache_lock:
         cached = _is_open_cache.get(key)
         if cached is not None and cached[1] > now:
+            _is_open_cache.move_to_end(key)
             return cached[0]
 
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        family = socket.AF_INET
+        try:
+            if isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address):
+                family = socket.AF_INET6
+        except ValueError:
+            pass  # A DNS name: let getaddrinfo pick via AF_INET.
+        sock = socket.socket(family, socket.SOCK_STREAM)
         sock.settimeout(1)
         sock.connect((ip, port))
         sock.close()
@@ -335,5 +365,10 @@ def is_open(ip: str, port: int) -> bool:
         result = False
 
     with _is_open_cache_lock:
+        for stale_key in [k for k, (_, expiry) in _is_open_cache.items() if expiry <= now]:
+            _is_open_cache.pop(stale_key, None)
         _is_open_cache[key] = (result, now + _IS_OPEN_CACHE_TTL_SECONDS)
+        _is_open_cache.move_to_end(key)
+        while len(_is_open_cache) > _IS_OPEN_CACHE_MAX_ENTRIES:
+            _is_open_cache.popitem(last=False)
     return result

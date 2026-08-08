@@ -1,5 +1,30 @@
+import ipaddress
 import random
 import socket
+from typing import Optional
+
+
+def resolve_public_host(configured: str, outbound_ip: Optional[str]) -> Optional[str]:
+    """Which host this node advertises about itself to the outside world.
+
+    ``configured`` is ``network.PUBLIC_IP`` (a public IP or a DNS name); when it is
+    empty the outbound-interface IP is used instead, which is the right answer on a
+    node with a directly routable address (a VPS) and the wrong one behind NAT.
+    Hence the filter: a private, loopback or link-local address is never published,
+    since a LAN address is meaningless to a remote reader. A non-IP string is taken
+    as a DNS name and advertised as-is -- which is how a DDNS hostname reaches peers.
+
+    Lives here, not in the Ergo transaction module where it started, because both the
+    on-chain proof (R9) and the signed P2P announcement (GetPeerInfo) need it, and the
+    announce path must not have to import the Ergo/JVM stack to decide its own address.
+    """
+    host = (configured or "").strip() or (outbound_ip or "").strip()
+    if not host:
+        return None
+    try:
+        return host if ipaddress.ip_address(host).is_global else None
+    except ValueError:
+        return host
 
 
 def _is_port_free(port: int) -> bool:

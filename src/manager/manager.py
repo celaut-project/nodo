@@ -218,7 +218,9 @@ def _known_peer_id(instance: celaut_pb2.Instance) -> Optional[str]:
     for slot in instance.uri_slot:
         for uri in slot.uri:
             try:
-                return get_peer_id_by_ip(ip=uri.ip)
+                # Match ip AND port: a bare-IP match is ambiguous now that several
+                # unrelated peers can legitimately share a private address.
+                return get_peer_id_by_ip(ip=uri.ip, port=uri.port)
             except (StopIteration, IndexError, TypeError):
                 continue
     return None
@@ -231,28 +233,45 @@ def _peer_uris(instance: celaut_pb2.Instance) -> List[str]:
 def _verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
     """The sender's public key, if ``peer`` carries a signature that verifies against it.
 
-    Issue #236: a node's identity is its public key, proven by a signature over the
-    canonical encoding of (public_key, ts, seq, its own URIs) -- no interactive
-    challenge needed. Returns None for a peer with no public_key/signature at all (a
-    peer that predates this, or one with no identity mnemonic configured), so callers
-    can fall back to the legacy address-based identity.
+    Issue #236: a node's identity is its public key, proven by a signature over
+    (public_key, ts, seq, a digest of its whole Instance, expiry) -- no interactive
+    challenge needed. The digest covers the advertised payment contracts and API
+    slots, not just the addresses, so a relayed message cannot have its payment
+    contract swapped out and still verify.
+
+    Returns None for a peer with no public_key/signature at all (a peer that predates
+    this, or one with no identity mnemonic configured), so callers can fall back to
+    the legacy address-based identity, and None for a non-canonical public key.
     """
     if not peer.public_key or not peer.signature:
         return None
 
-    from src.reputation_system.node_identity import canonical_peer_payload, verify_peer_payload
+    from src.reputation_system.node_identity import (
+        canonical_instance_digest,
+        canonical_peer_payload,
+        normalize_public_key_hex,
+        verify_peer_payload,
+    )
+
+    public_key = normalize_public_key_hex(peer.public_key)
+    if public_key is None or public_key != peer.public_key:
+        # Not a canonical 66-char lowercase hex key. Refusing rather than normalizing
+        # keeps one spelling per identity: bytes.fromhex would happily accept "02AB…"
+        # or "02 ab…", each of which would otherwise become its own peer row.
+        log.LOGGER(f"Peer announced a non-canonical public_key {peer.public_key!r}; ignoring it.")
+        return None
 
     payload = canonical_peer_payload(
-        peer.public_key,
+        public_key,
         peer.ts,
         peer.seq,
-        _peer_uris(peer.instance),
+        canonical_instance_digest(peer.instance),
         peer.estimated_invalid_after_unix_seconds,
     )
-    if not verify_peer_payload(peer.public_key, payload, peer.signature):
-        log.LOGGER(f"Peer signature failed to verify for claimed public_key {peer.public_key}.")
+    if not verify_peer_payload(public_key, payload, peer.signature):
+        log.LOGGER(f"Peer signature failed to verify for claimed public_key {public_key}.")
         return None
-    return peer.public_key
+    return public_key
 
 
 def _passes_anti_replay(peer_id: str, ts: int, seq: int) -> bool:
@@ -273,11 +292,26 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
     verified_public_key = _verified_peer_public_key(peer)
     if verified_public_key:
         peer_id = verified_public_key
+        if not sc.peer_exists(peer_id=peer_id):
+            # Migration (issue #236): this peer may already be here under the random
+            # uuid4 id it got before node identity existed. Adopt that row instead of
+            # starting a second one, or its gas, external client id, contracts and
+            # reputation would be stranded on a record nothing references again.
+            legacy_id = _known_peer_id(peer.instance)
+            if legacy_id and legacy_id != peer_id and sc.rekey_peer(legacy_id, peer_id):
+                log.LOGGER(f"Adopted legacy peer {legacy_id} as its public key {peer_id}.")
+
         if sc.peer_exists(peer_id=peer_id):
             if not _passes_anti_replay(peer_id, peer.ts, peer.seq):
                 log.LOGGER(f"Peer {peer_id} sent a stale (ts, seq); ignoring the update.")
                 return peer_id
             update_peer_instance(peer=peer, peer_id=peer_id)
+            # Only a verified, strictly-newer announcement may drop addresses, so a
+            # replayed or unsigned message can never prune a peer's real ones.
+            sc.prune_peer_uris(
+                peer_id=peer_id,
+                keep=[(uri.ip, uri.port) for slot in peer.instance.uri_slot for uri in slot.uri],
+            )
             sc.set_peer_last_ts_seq(
                 peer_id=peer_id, ts=peer.ts, seq=peer.seq,
                 estimated_invalid_after_unix_seconds=peer.estimated_invalid_after_unix_seconds,
@@ -417,7 +451,48 @@ def refresh_peer_instance(peer_id: str) -> bool:
         log.LOGGER(f"No peer info returned by {peer_id}.")
         return False
 
+    return accept_peer_refresh(peer=peer, peer_id=peer_id)
+
+
+def accept_peer_refresh(peer: celaut_pb2.Peer, peer_id: str) -> bool:
+    """Store a ``GetPeerInfo`` response we solicited from ``peer_id``, if it is genuinely theirs.
+
+    Whoever answers at a stored address is not necessarily the peer we meant to reach:
+    the channel is plain ``grpc.insecure_channel`` with no TLS, and the address may have
+    been reassigned by the ISP. This path feeds ``payment_contracts`` straight into the
+    DB and runs immediately before ``pay`` sends money, so it must apply the same
+    signature check as an inbound IntroducePeer rather than trusting the response.
+
+    A peer whose id is already a public key MUST present a matching, valid signature.
+    A legacy uuid-keyed peer has no key to check against, so it is accepted as before
+    (no worse than the previous behaviour) until it re-handshakes and gets adopted.
+    """
+    verified_public_key = _verified_peer_public_key(peer)
+
+    from src.reputation_system.node_identity import normalize_public_key_hex
+
+    if normalize_public_key_hex(peer_id) is not None:
+        # peer_id is an identity key: nothing but a signature from that exact key will do.
+        if verified_public_key != peer_id:
+            log.LOGGER(
+                f"Refusing refresh for peer {peer_id}: response was not signed by that identity."
+            )
+            return False
+        if not _passes_anti_replay(peer_id, peer.ts, peer.seq):
+            log.LOGGER(f"Refusing refresh for peer {peer_id}: stale (ts, seq).")
+            return False
+
     update_peer_instance(peer=peer, peer_id=peer_id)
+
+    if verified_public_key == peer_id:
+        sc.prune_peer_uris(
+            peer_id=peer_id,
+            keep=[(uri.ip, uri.port) for slot in peer.instance.uri_slot for uri in slot.uri],
+        )
+        sc.set_peer_last_ts_seq(
+            peer_id=peer_id, ts=peer.ts, seq=peer.seq,
+            estimated_invalid_after_unix_seconds=peer.estimated_invalid_after_unix_seconds,
+        )
     return True
 
 def get_internal_service_id_by_uri(uri: str) -> str:

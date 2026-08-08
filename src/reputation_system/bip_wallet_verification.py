@@ -26,12 +26,13 @@ def __bip32_derive_key(bip32: BIP32, derivation_path: str):
     return privkey, pubkey
 
 
-def derive_compressed_pubkey(mnemonic_phrase: str, derivation_path: str = ERGO_DERIVATION_PATH) -> bytes:
+def derive_keypair(mnemonic_phrase: str, derivation_path: str = ERGO_DERIVATION_PATH):
     """
-    Derive the 33-byte SEC-compressed public key for a mnemonic, in pure Python.
+    Derive the (private key bytes, 33-byte SEC-compressed public key) for a mnemonic.
 
-    Same BIP-39 -> BIP-32 derivation as :func:`bip_ecdsa_sign`, computing only the
-    public key. No JVM/Ergo node needed, unlike the AppKit-based
+    Single BIP-39 -> BIP-32 derivation shared by :func:`derive_compressed_pubkey` and
+    :func:`bip_ecdsa_sign`, so signing a message costs one PBKDF2 rather than two.
+    Pure Python: no JVM/Ergo node needed, unlike the AppKit-based
     ``contracts.ergo.utils.get_public_key`` -- this is what lets a node derive its
     identity keypair (node_identity.py) from first boot.
     """
@@ -41,8 +42,25 @@ def derive_compressed_pubkey(mnemonic_phrase: str, derivation_path: str = ERGO_D
 
     seed = mnemo.to_seed(mnemonic_phrase, passphrase="")
     bip32 = BIP32.from_seed(seed)
-    _, pubkey = __bip32_derive_key(bip32, derivation_path)
+    return __bip32_derive_key(bip32, derivation_path)
+
+
+def derive_compressed_pubkey(mnemonic_phrase: str, derivation_path: str = ERGO_DERIVATION_PATH) -> bytes:
+    """The 33-byte SEC-compressed public key for a mnemonic. See :func:`derive_keypair`."""
+    _, pubkey = derive_keypair(mnemonic_phrase, derivation_path)
     return pubkey
+
+
+def derive_signing_key(mnemonic_phrase: str, derivation_path: str = ERGO_DERIVATION_PATH):
+    """The ``ecdsa.SigningKey`` for a mnemonic, ready to sign. See :func:`derive_keypair`."""
+    private_key_bytes, _ = derive_keypair(mnemonic_phrase, derivation_path)
+    return ecdsa.SigningKey.from_string(private_key_bytes, curve=ecdsa.SECP256k1)
+
+
+def sign_with_key(signing_key, message: str) -> str:
+    """Sign ``message`` (SHA-256 then ECDSA) with an already-derived signing key."""
+    msg_hash = hashlib.sha256(message.encode()).digest()
+    return binascii.hexlify(signing_key.sign(msg_hash)).decode()
 
 
 def bip_ecdsa_sign(mnemonic_phrase: str, message: str) -> str:
@@ -53,31 +71,7 @@ def bip_ecdsa_sign(mnemonic_phrase: str, message: str) -> str:
     :param message: Message to be signed.
     :return: Signature in hexadecimal format.
     """
-    # Validate the mnemonic phrase
-    mnemo = Mnemonic("english")
-    if not mnemo.check(mnemonic_phrase):
-        raise ValueError("Invalid mnemonic phrase.")
-
-    # Generate the seed from the mnemonic phrase
-    seed = mnemo.to_seed(mnemonic_phrase, passphrase="")
-
-    # Initialize BIP32 with the seed
-    bip32 = BIP32.from_seed(seed)
-
-    # Obtain private and public keys
-    private_key_bytes, _ = __bip32_derive_key(bip32, ERGO_DERIVATION_PATH)
-
-    # Load the private key in the appropriate format for ecdsa
-    sk = ecdsa.SigningKey.from_string(private_key_bytes, curve=ecdsa.SECP256k1)
-
-    # Hash the message using SHA-256
-    msg_hash = hashlib.sha256(message.encode()).digest()
-
-    # Sign the hash of the message using ECDSA
-    signature = sk.sign(msg_hash)
-
-    # Return the signature in hexadecimal format
-    return binascii.hexlify(signature).decode()
+    return sign_with_key(derive_signing_key(mnemonic_phrase), message)
 
 def bip_ecdsa_verify(message: str, signature_hex: str, public_key_hex: str) -> bool:
     """
