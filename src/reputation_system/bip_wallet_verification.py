@@ -4,6 +4,12 @@ import ecdsa
 import hashlib
 import binascii
 
+# Ergo's SLIP-44 derivation path. Reused as-is for the node's identity keypair
+# (see src/reputation_system/node_identity.py) so that a node whose identity mnemonic
+# is the same as its ledgers.ergo.WALLET_MNEMONIC gets the same key for both, with no
+# extra derivation step.
+ERGO_DERIVATION_PATH = "m/44'/429'/0'/0/0"
+
 def __bip32_derive_key(bip32: BIP32, derivation_path: str):
     """
     Derives private and public keys using a BIP32 object and a derivation path.
@@ -18,6 +24,26 @@ def __bip32_derive_key(bip32: BIP32, derivation_path: str):
     privkey = bip32.get_privkey_from_path(indices)
     pubkey = bip32.get_pubkey_from_path(indices)
     return privkey, pubkey
+
+
+def derive_compressed_pubkey(mnemonic_phrase: str, derivation_path: str = ERGO_DERIVATION_PATH) -> bytes:
+    """
+    Derive the 33-byte SEC-compressed public key for a mnemonic, in pure Python.
+
+    Same BIP-39 -> BIP-32 derivation as :func:`bip_ecdsa_sign`, computing only the
+    public key. No JVM/Ergo node needed, unlike the AppKit-based
+    ``contracts.ergo.utils.get_public_key`` -- this is what lets a node derive its
+    identity keypair (node_identity.py) from first boot.
+    """
+    mnemo = Mnemonic("english")
+    if not mnemo.check(mnemonic_phrase):
+        raise ValueError("Invalid mnemonic phrase.")
+
+    seed = mnemo.to_seed(mnemonic_phrase, passphrase="")
+    bip32 = BIP32.from_seed(seed)
+    _, pubkey = __bip32_derive_key(bip32, derivation_path)
+    return pubkey
+
 
 def bip_ecdsa_sign(mnemonic_phrase: str, message: str) -> str:
     """
@@ -38,11 +64,8 @@ def bip_ecdsa_sign(mnemonic_phrase: str, message: str) -> str:
     # Initialize BIP32 with the seed
     bip32 = BIP32.from_seed(seed)
 
-    # Define the derivation path for Ergo platform
-    derivation_path = "m/44'/429'/0'/0/0"
-
     # Obtain private and public keys
-    private_key_bytes, _ = __bip32_derive_key(bip32, derivation_path)
+    private_key_bytes, _ = __bip32_derive_key(bip32, ERGO_DERIVATION_PATH)
 
     # Load the private key in the appropriate format for ecdsa
     sk = ecdsa.SigningKey.from_string(private_key_bytes, curve=ecdsa.SECP256k1)

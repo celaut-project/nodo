@@ -254,6 +254,11 @@ message Instance {
     message Uri {
         string ip = 1;
         int32 port = 2;
+        // Unix timestamp after which this address may no longer be valid (e.g. a
+        // typical ISP DHCP lease expiry). Optional: absent means no estimate is made.
+        // Lets a reader prefer a fresher announcement or a DNS re-resolution over
+        // assuming a dynamic address stays valid indefinitely (issue #236 / #235).
+        optional int64 estimated_invalid_after = 3;
     }
     message Uri_Slot {
         int32 internal_port = 1;
@@ -334,15 +339,6 @@ message Refund {
     GasAmount amount = 1;
 }
 
-message SignRequest {
-    string public_key = 1;
-    string to_sign = 2;
-}
-
-message SignResponse {
-    string signed = 1;
-}
-
 message Payment {
     string deposit_token = 1;
     Contract contract = 2;
@@ -361,6 +357,19 @@ message ServiceInstance {
 message Peer {
     repeated Contract reputation_proofs = 1;
     Instance instance = 2;
+    // Node identity (issue #236): the raw 33-byte SEC-compressed public key (hex) of
+    // the node's identity keypair, and a signature over the canonical encoding of
+    // (public_key, ts, seq, instance's URIs) -- see node_identity.canonical_peer_payload.
+    // Verifying it proves the sender controls public_key without any interactive
+    // challenge, so GetPeerInfo alone is enough (SignPublicKey is removed). Absent on
+    // a peer that predates this or has no identity mnemonic configured yet.
+    string public_key = 3;
+    string signature = 4;
+    // Anti-replay: a verifier rejects a message whose (ts, seq) is not strictly newer
+    // than the last one it accepted for this public_key. Guards only against a
+    // downgrade to a stale address; the claim itself is safe to freely redistribute.
+    int64 ts = 5;
+    int64 seq = 6;
 }
 
 message Client {
@@ -489,7 +498,6 @@ service Gateway {
     rpc GenerateClient(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  -> Client
     rpc GenerateDepositToken(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client -> TokenMessage
     rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Payment -> Empty
-    rpc SignPublicKey(stream buffer.Buffer) returns (stream buffer.Buffer) {} // SignRequest -> SignResponse
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput -> ModifyServiceSystemResourcesOutput
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash & Service -> EstimatedCost
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash -> Service

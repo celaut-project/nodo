@@ -266,6 +266,16 @@ class ConfigManager(metaclass=Singleton):
                         ledger["WALLET_MNEMONIC"] = mnemonic
                         self.log(f"Generated new mnemonic for ledger '{name}'")
 
+            # Node identity keypair (see src/reputation_system/node_identity.py): a node
+            # needs a stable identity from first boot even with no ledger configured, so
+            # this gets the same "auto" treatment as a ledger wallet. When a ledger wallet
+            # IS configured, node_identity prefers it instead, so the two coincide and a
+            # reputation proof published later reuses the node's own identity for free.
+            network_section = self._config.get("network")
+            if isinstance(network_section, dict) and network_section.get("NODE_MNEMONIC") == "auto":
+                network_section["NODE_MNEMONIC"] = Mnemonic("english").generate(strength=128)
+                self.log("Generated new node identity mnemonic")
+
             config_changed = self._config != original_config
 
             # Interpolate paths after dynamic values are processed.

@@ -1,20 +1,10 @@
-import os
 from typing import List, Optional
 
-import grpc
-from bee_rpc import client as bee
-
 from protos import celaut_pb2 as celaut
-from protos import celaut_pb2_grpc
 
-from src.reputation_system.bip_wallet_verification import (
-    bip_ecdsa_sign,
-    bip_ecdsa_verify_proposition,
-)
 from src.reputation_system.contracts.ergo.utils import (
     get_public_key,
     iter_unspent_boxes_by_address,
-    owner_proposition_bytes,
     owner_proposition_bytes_hex,
 )
 from src.reputation_system.envs import (
@@ -22,6 +12,7 @@ from src.reputation_system.envs import (
     REPUTATION_PROOF_ERGO_TREE,
     ergo_ledger,
 )
+from src.reputation_system.node_identity import node_proposition_hex
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
 from src.utils.java_dependency import (
@@ -30,10 +21,6 @@ from src.utils.java_dependency import (
     require_java_module,
 )
 from src.utils.logger import LOGGER as logger
-
-# Ownership-challenge parameters.
-_CHALLENGE_TIMEOUT_SECONDS = 20
-_CHALLENGE_NONCE_BYTES = 32
 
 
 class ProofLookupUnavailable(ValueError):
@@ -232,63 +219,6 @@ def _validate_box_structure(box: dict) -> bool:
     return True
 
 
-def _challenge_peer_ownership(peer_id: str, owner_proposition_hex: str) -> bool:
-    """
-    Cryptographically prove that ``peer_id`` controls the R7 owner ``owner_proposition_hex``.
-
-    Creates a fresh random challenge, calls the peer's ``Gateway.SignPublicKey`` over gRPC
-    with the raw ``proposition_bytes`` + challenge, and verifies the returned signature
-    against the public key embedded in those proposition bytes. Any RPC error, malformed
-    response, timeout/expiry, or verification failure returns ``False`` (never raises).
-    """
-    from src.utils.utils import generate_uris_by_peer_id
-
-    try:
-        proposition_bytes = bytes.fromhex(owner_proposition_hex)
-    except (ValueError, TypeError):
-        logger(f"Ownership challenge: R7 owner {owner_proposition_hex!r} is not valid hex.")
-        return False
-
-    uri = next(generate_uris_by_peer_id(peer_id=peer_id), None)
-    if uri is None:
-        logger(f"Ownership challenge: no reachable URI for peer {peer_id}.")
-        return False
-
-    challenge = os.urandom(_CHALLENGE_NONCE_BYTES).hex()
-    try:
-        stub = celaut_pb2_grpc.GatewayStub(grpc.insecure_channel(uri))
-        response = next(
-            bee.client_grpc(
-                method=stub.SignPublicKey,
-                partitions_message_mode_parser=True,
-                input=celaut.SignRequest(
-                    public_key=proposition_bytes.hex(),
-                    to_sign=challenge,
-                ),
-                indices_parser=celaut.SignResponse,
-                timeout=_CHALLENGE_TIMEOUT_SECONDS,
-            ),
-            None,
-        )
-    except grpc.RpcError as e:
-        logger(f"Ownership challenge RPC to peer {peer_id} failed: {e}")
-        return False
-    except Exception as e:  # bee parse / transport errors
-        logger(f"Ownership challenge to peer {peer_id} errored: {e}")
-        return False
-
-    if response is None or not response.signed:
-        logger(f"Ownership challenge: peer {peer_id} returned no signature.")
-        return False
-
-    signature_hex = response.signed or ""
-    if not bip_ecdsa_verify_proposition(proposition_bytes, challenge, signature_hex):
-        logger(f"Ownership challenge: peer {peer_id} signature did not verify against R7.")
-        return False
-
-    return True
-
-
 """
     Valida si el Perfil de Reputación es soportado por el nodo y si existe en la red.
     Utilizado para validar Perfil de un par antes de almacenarlo.
@@ -336,8 +266,12 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
         logger("Structural validation of the reputation profile failed.")
         return False
 
-    # Peer ownership challenge: every box must declare the SAME R7 owner, and the peer must
-    # prove control of it by signing a fresh challenge with the matching key.
+    # Every box must declare the SAME R7 owner, and it must match the identity
+    # public_key peer_id announced (and cryptographically proved, see
+    # manager._verified_peer_public_key) over GetPeerInfo -- a direct byte
+    # comparison, replacing the interactive SignPublicKey ownership challenge.
+    # Identity no longer depends on holding a proof; a proof, when present, is
+    # verified against the identity instead.
     owners = {
         _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or ""))
         for box in boxes
@@ -348,50 +282,11 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
         return False
 
     owner_proposition_hex = next(iter(owners))
-    if not _challenge_peer_ownership(peer_id, owner_proposition_hex):
-        logger(f"Peer {peer_id} failed the R7 ownership challenge for proof {token_id}.")
+    if owner_proposition_hex != node_proposition_hex(peer_id):
+        logger(f"Peer {peer_id} does not control the R7 owner for proof {token_id}.")
         return False
 
     return True
-
-
-"""
-    Firma un reto de propiedad con WALLET_MNEMONIC para demostrarle a un tercero
-    que este nodo controla exactamente esos propositionBytes (raw ErgoTree).
-"""
-def sign_message(proposition_bytes, message) -> Optional[str]:
-    mnemonic_phrase = ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC")
-    if not mnemonic_phrase:
-        logger("Missing wallet mnemonic configuration")
-        return None
-
-    # Normalize the challenged proposition bytes to raw bytes.
-    if isinstance(proposition_bytes, str):
-        try:
-            proposition_bytes = bytes.fromhex(proposition_bytes.strip())
-        except ValueError:
-            logger("SignPublicKey: proposition_bytes is not valid hex.")
-            return None
-    else:
-        proposition_bytes = bytes(proposition_bytes or b"")
-
-    if not proposition_bytes:
-        logger("SignPublicKey: empty proposition_bytes.")
-        return None
-
-    # Sign ONLY when the challenged proposition bytes exactly match the raw propositionBytes
-    # derived from the local wallet. Byte equality (==), never identity (`is`).
-    local_proposition = owner_proposition_bytes(get_public_key(mnemonic_phrase=mnemonic_phrase))
-    if proposition_bytes != local_proposition:
-        logger("SignPublicKey: challenged proposition bytes are not mine; refusing to sign.")
-        return None
-
-    if isinstance(message, (bytes, bytearray)):
-        message = bytes(message).decode("utf-8")
-
-    signed_msg = bip_ecdsa_sign(mnemonic_phrase=mnemonic_phrase, message=message)
-    logger("Ownership challenge signed for the local wallet propositionBytes.")
-    return signed_msg
 
 
 """

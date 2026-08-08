@@ -1110,7 +1110,14 @@ class SQLConnection(metaclass=Singleton):
         transport_protocol: bytes,
     ):
         """
-        Adds a slot to the database.
+        Adds or merges a peer's slot into the database.
+
+        Upserts on (peer_id, internal_port) and merges each URI (insert if new,
+        refresh ``estimated_invalid_after`` if already known) instead of always
+        inserting fresh rows. This makes re-registering an already-known peer (a
+        reconnect, a pay-time refresh, a re-introduction) idempotent by construction,
+        and lets a peer accumulate several reachable addresses over time instead of
+        losing every one but the last it happened to advertise (issue #236).
 
         Args:
             slot (celaut_pb2.Instance.Uri_Slot): The slot to add.
@@ -1118,13 +1125,26 @@ class SQLConnection(metaclass=Singleton):
             transport_protocol (bytes): Serialized transport tags for this slot.
         """
         internal_port: int = slot.internal_port
-        cursor = self._execute("INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
-                            (internal_port, transport_protocol, peer_id))
-        slot_id = cursor.lastrowid
-        if slot_id:
-            slot_id = str(slot_id)
-            for uri in slot.uri:
-                self.add_uri(uri, slot_id=slot_id)
+        row = self._execute(
+            "SELECT id FROM slot WHERE peer_id = ? AND internal_port = ?",
+            (peer_id, internal_port),
+        ).fetchone()
+
+        if row:
+            slot_id = str(row[0])
+            self._execute(
+                "UPDATE slot SET transport_protocol = ? WHERE id = ?",
+                (transport_protocol, slot_id),
+            )
+        else:
+            cursor = self._execute(
+                "INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
+                (internal_port, transport_protocol, peer_id),
+            )
+            slot_id = str(cursor.lastrowid)
+
+        for uri in slot.uri:
+            self.add_uri(uri, slot_id=slot_id)
 
     def check_if_ledger_exists(self, ledger_to_check: celaut_pb2.Contract.Ledger) -> celaut_pb2.Contract.Ledger:
         """
@@ -1347,23 +1367,26 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to remove peer {peer_id}: {e}')
             return False
 
-    def clear_peer_slots(self, peer_id: str) -> None:
-        """Delete a peer's slots and their URIs so a refresh can re-add them cleanly.
+    def get_peer_last_ts_seq(self, peer_id: str) -> Optional[Tuple[int, int]]:
+        """The (ts, seq) of the last signed Peer message accepted from ``peer_id``.
 
-        ``add_slot`` is a plain INSERT, so re-registering a peer we already know
-        (a reconnect, a pay-time refresh, or a re-introduction routed through
-        ``update_peer_instance``) would otherwise append a duplicate set of
-        slot/uri rows on every call. Clearing first makes the refresh idempotent
-        and lets a peer drop a slot it no longer advertises. Run as one
-        transaction so a peer is never left with slots but no URIs.
+        None when the peer has never presented one (a legacy/unsigned peer, or one
+        seen for the first time), so the caller's "strictly newer than last accepted"
+        anti-replay check has nothing to compare against and lets the message through.
         """
-        self._execute2([
-            ('''DELETE FROM uri
-                WHERE slot_id IN (
-                    SELECT id FROM slot WHERE peer_id = ?
-                )''', (peer_id,)),
-            ('DELETE FROM slot WHERE peer_id = ?', (peer_id,)),
-        ])
+        row = self._execute(
+            "SELECT last_ts, last_seq FROM peer WHERE id = ?", (peer_id,)
+        ).fetchone()
+        if not row or row[0] is None or row[1] is None:
+            return None
+        return int(row[0]), int(row[1])
+
+    def set_peer_last_ts_seq(self, peer_id: str, ts: int, seq: int) -> None:
+        """Record the (ts, seq) of the last signed Peer message accepted from ``peer_id``."""
+        self._execute(
+            "UPDATE peer SET last_ts = ?, last_seq = ? WHERE id = ?",
+            (int(ts), int(seq), peer_id),
+        )
 
     def instance_exists(self, instance: celaut_pb2.Instance) -> bool:
         """
@@ -1587,7 +1610,9 @@ class SQLConnection(metaclass=Singleton):
 
     def add_uri(self, uri: celaut_pb2.Instance.Uri, slot_id: str):
         """
-        Adds a URI to the database.
+        Merges a URI into the database: inserts it if new for this slot, otherwise
+        just refreshes its ``estimated_invalid_after``. Idempotent so a slot can
+        accumulate several addresses across re-handshakes without duplicating rows.
 
         Args:
             uri (celaut_pb2.Instance.Uri): The URI to add.
@@ -1595,8 +1620,23 @@ class SQLConnection(metaclass=Singleton):
         """
         ip: str = uri.ip
         port: int = uri.port
-        self._execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
-                    (ip, port, slot_id))
+        invalid_after = uri.estimated_invalid_after if uri.HasField("estimated_invalid_after") else None
+
+        existing = self._execute(
+            "SELECT id FROM uri WHERE slot_id = ? AND ip = ? AND port = ?",
+            (slot_id, ip, port),
+        ).fetchone()
+
+        if existing:
+            self._execute(
+                "UPDATE uri SET estimated_invalid_after = ? WHERE id = ?",
+                (invalid_after, existing[0]),
+            )
+            return
+
+        self._execute(
+            "INSERT INTO uri (ip, port, slot_id, estimated_invalid_after) VALUES (?, ?, ?, ?)",
+            (ip, port, slot_id, invalid_after))
 
     def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str, service_id: str):
         """

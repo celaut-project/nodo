@@ -152,6 +152,12 @@ packer:
 network:
   GATEWAY_PORT: auto
   LOCAL_NETWORK: "lo"
+  # This node's identity keypair (secp256k1, BIP-39/BIP-32), used to sign GetPeerInfo
+  # and as the peer_id peers store for this node. Leave as "auto" to have the node
+  # generate one on first load. If ledgers.ergo.WALLET_MNEMONIC is also set, it takes
+  # priority: the node's identity and its Ergo wallet become the same key, so a
+  # reputation proof published later is already tied to this node's identity.
+  NODE_MNEMONIC: auto
   PUBLIC_IP: ""  # Optional public IP or DNS name to advertise for `nodo execute --remote`. Leave empty to auto-detect from the default outbound interface.
   EXTERNAL_INTERFACE: ""  # Optional interface name to use when PUBLIC_IP is empty, e.g. "eth0".
   # If true, child instances launched by internal instances are NOT exposed on the host.
