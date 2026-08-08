@@ -28,6 +28,9 @@ class CanonicalPayloadTests(unittest.TestCase):
         self.assertNotEqual(base, ni.canonical_peer_payload("ab", 9, 2, ["1.1.1.1:1"]))
         self.assertNotEqual(base, ni.canonical_peer_payload("ab", 1, 9, ["1.1.1.1:1"]))
         self.assertNotEqual(base, ni.canonical_peer_payload("ab", 1, 2, ["1.1.1.1:9"]))
+        # The address-expiry estimate is covered too, so it cannot be stripped or
+        # extended in transit without breaking the signature.
+        self.assertNotEqual(base, ni.canonical_peer_payload("ab", 1, 2, ["1.1.1.1:1"], 999))
 
 
 class SignAndVerifyTests(unittest.TestCase):
@@ -55,6 +58,15 @@ class SignAndVerifyTests(unittest.TestCase):
 
     def test_node_proposition_hex_is_r7_shaped(self):
         self.assertEqual(ni.node_proposition_hex(self.pubkey_hex), "0008cd" + self.pubkey_hex)
+
+    def test_tampering_with_the_expiry_estimate_breaks_the_signature(self):
+        # A signature made with no estimate must not validate once an attacker
+        # claims one (nor the reverse), since peers act on it to re-resolve.
+        signed = ni.canonical_peer_payload(self.pubkey_hex, 100, 1, ["1.2.3.4:80"], 0)
+        tampered = ni.canonical_peer_payload(self.pubkey_hex, 100, 1, ["1.2.3.4:80"], 2 ** 40)
+        signature = bip_ecdsa_sign(MNEMONIC, signed)
+        self.assertTrue(ni.verify_peer_payload(self.pubkey_hex, signed, signature))
+        self.assertFalse(ni.verify_peer_payload(self.pubkey_hex, tampered, signature))
 
 
 if __name__ == "__main__":

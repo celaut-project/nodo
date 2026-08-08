@@ -294,6 +294,7 @@ message Peer {
     string signature = 4;
     int64 ts = 5;
     int64 seq = 6;
+    int64 estimated_invalid_after = 7;
 }
 
 message Client {

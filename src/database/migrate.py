@@ -41,7 +41,8 @@ def create_tables(cursor):
                 reputation_index INTEGER,
                 last_index_on_ledger INTEGER,
                 last_ts INTEGER DEFAULT NULL,
-                last_seq INTEGER DEFAULT NULL
+                last_seq INTEGER DEFAULT NULL,
+                estimated_invalid_after INTEGER DEFAULT NULL
             )
         ''',
         "clients": '''
@@ -164,6 +165,7 @@ def create_tables(cursor):
     ensure_columns(cursor, "peer", {
         "last_ts": "INTEGER DEFAULT NULL",
         "last_seq": "INTEGER DEFAULT NULL",
+        "estimated_invalid_after": "INTEGER DEFAULT NULL",
     })
 
 

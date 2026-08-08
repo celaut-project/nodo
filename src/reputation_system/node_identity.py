@@ -52,7 +52,13 @@ def node_proposition_hex(public_key_hex: str) -> str:
     return _P2PK_PREFIX_HEX + public_key_hex
 
 
-def canonical_peer_payload(public_key_hex: str, ts: int, seq: int, uris: List[str]) -> str:
+def canonical_peer_payload(
+    public_key_hex: str,
+    ts: int,
+    seq: int,
+    uris: List[str],
+    estimated_invalid_after: int = 0,
+) -> str:
     """
     The exact string a ``Peer`` signature is computed over.
 
@@ -60,8 +66,12 @@ def canonical_peer_payload(public_key_hex: str, ts: int, seq: int, uris: List[st
     varints), so the signed payload is this explicit, deterministic encoding instead
     of ``SerializeToString()``. URIs are sorted so the signature does not depend on
     the order a node happened to enumerate its interfaces in.
+
+    ``estimated_invalid_after`` is part of the signed payload so it cannot be
+    stripped (making a soon-to-expire address look permanent) or extended (keeping
+    peers pinned to an address the signer knows is about to change).
     """
-    return f"{public_key_hex}|{ts}|{seq}|{','.join(sorted(uris))}"
+    return f"{public_key_hex}|{ts}|{seq}|{','.join(sorted(uris))}|{estimated_invalid_after}"
 
 
 def sign_peer_payload(payload: str) -> Optional[str]:
