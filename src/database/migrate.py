@@ -42,7 +42,7 @@ def create_tables(cursor):
                 last_index_on_ledger INTEGER,
                 last_ts INTEGER DEFAULT NULL,
                 last_seq INTEGER DEFAULT NULL,
-                estimated_invalid_after INTEGER DEFAULT NULL
+                estimated_invalid_after_unix_seconds INTEGER DEFAULT NULL
             )
         ''',
         "clients": '''
@@ -165,7 +165,7 @@ def create_tables(cursor):
     ensure_columns(cursor, "peer", {
         "last_ts": "INTEGER DEFAULT NULL",
         "last_seq": "INTEGER DEFAULT NULL",
-        "estimated_invalid_after": "INTEGER DEFAULT NULL",
+        "estimated_invalid_after_unix_seconds": "INTEGER DEFAULT NULL",
     })
 
 

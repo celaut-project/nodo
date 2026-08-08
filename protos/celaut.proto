@@ -373,7 +373,7 @@ message Peer {
     // that message is shared with ServiceInstance / ConfigurationFile.gateway /
     // StartService, where an address-lease estimate is meaningless. Covered by
     // `signature`, so it cannot be stripped or extended in transit.
-    int64 estimated_invalid_after = 7;
+    int64 estimated_invalid_after_unix_seconds = 7;
 }
 
 message Client {
