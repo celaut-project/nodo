@@ -156,19 +156,40 @@ NO_NETWORK_ADDRESS = "No IP available."
 
 
 def _self_network_data() -> str:
-    """Instance JSON describing how to reach this node, for its self-pointing object.
+    """Signed ``Peer`` JSON describing how to reach this node, for its self-pointing object.
 
-    Same shape as the data published for the other peers (``MessageToJson`` of a
-    ``celaut.Instance``), so a reader parses every object of the proof alike. Only
-    the gateway URI is included; the rest of the node info is served by GetPeerInfo.
+    A ``Peer``, not a bare ``Instance``: the envelope carries the node's identity
+    (``public_key``), the ``signature`` over its addresses, the anti-replay
+    ``(ts, seq)`` and the address-expiry estimate -- so a reader gets from the ledger
+    the same self-verifying claim GetPeerInfo serves, rather than an unattributed list
+    of addresses (issue #236).
+
+    It is verifiable *against this very box*: R7 holds the owner propositionBytes,
+    which are ``0008cd`` + the same public key (there is one mnemonic per node), so a
+    reader can check the R9 signature against R7 without contacting the node at all.
+    That is what makes the published expiry trustworthy -- otherwise whoever relays
+    the data could stretch or strip it.
+
+    Deliberately minimal: only the gateway URI. The API slots, payment contracts and
+    reputation proofs are served by GetPeerInfo (and the proof is this box), and an
+    Ergo register is not the place to grow unbounded. The signature covers exactly
+    this minimal instance, so it verifies as published.
     """
     if not SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF():
         return NO_NETWORK_ADDRESS
 
+    import time
+
     from google.protobuf.json_format import MessageToJson
 
     from protos import celaut_pb2
-    from src.utils.network import get_local_ip, resolve_public_host
+    from src.reputation_system.node_identity import (
+        canonical_instance_digest,
+        canonical_peer_payload,
+        get_node_public_key_hex,
+        sign_peer_payload,
+    )
+    from src.utils.network import announced_address_expiry, get_local_ip, resolve_public_host
 
     try:
         outbound_ip = get_local_ip()
@@ -185,14 +206,39 @@ def _self_network_data() -> str:
         return NO_NETWORK_ADDRESS
 
     port = int(env_manager.get("GATEWAY_PORT"))
-    instance = celaut_pb2.Instance()
-    uri_slot = instance.uri_slot.add()
+    peer = celaut_pb2.Peer()
+    uri_slot = peer.instance.uri_slot.add()
     uri_slot.internal_port = port
     uri = uri_slot.uri.add()
     uri.ip = host
     uri.port = port
+
+    public_key_hex = get_node_public_key_hex()
+    if public_key_hex:
+        ts = int(time.time())
+        expiry = announced_address_expiry(host, ts)
+        # seq 0: the on-chain object is replaced by spending its box, so there is no
+        # stream of messages to order here. A P2P announcement (seq >= 1) always wins
+        # the (ts, seq) comparison against an equally-timestamped on-chain one, which
+        # is the right precedence -- it is the fresher channel.
+        signature = sign_peer_payload(
+            canonical_peer_payload(
+                public_key_hex, ts, 0,
+                canonical_instance_digest(peer.instance),
+                expiry,
+            )
+        )
+        if signature:
+            peer.public_key = public_key_hex
+            peer.signature = signature
+            peer.ts = ts
+            peer.seq = 0
+            peer.estimated_invalid_after_unix_seconds = expiry
+    else:
+        LOGGER("No node identity available; publishing the address unsigned.")
+
     LOGGER(f"Advertising {host}:{port} on the reputation proof.")
-    return MessageToJson(instance)
+    return MessageToJson(peer)
 
 
 def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: Optional[str], objects: List[Tuple[Optional[str], int, Optional[str]]]):

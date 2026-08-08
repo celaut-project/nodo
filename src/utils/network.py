@@ -1,7 +1,49 @@
 import ipaddress
 import random
 import socket
+import threading
 from typing import Optional
+
+# When this process first observed the address it currently advertises. The expiry
+# estimate is anchored here, NOT to request time: `now + validity` recomputed per
+# request slides forward forever, so a reader polling repeatedly would always be told
+# "valid for another N seconds" and the deadline would never arrive. Shared by the
+# signed P2P announcement (GetPeerInfo) and the on-chain proof (R9) so both publish
+# the same deadline for the same address.
+_address_acquired_at: Optional[int] = None
+_address_last_seen: Optional[str] = None
+_address_lock = threading.Lock()
+
+
+def note_announced_address(host: Optional[str], now: int) -> int:
+    """Record the currently advertised address; return when it was first seen."""
+    global _address_acquired_at, _address_last_seen
+    with _address_lock:
+        if host != _address_last_seen or _address_acquired_at is None:
+            _address_last_seen = host
+            _address_acquired_at = now
+        return _address_acquired_at
+
+
+def announced_address_expiry(host: Optional[str], now: int) -> int:
+    """Unix timestamp after which ``host`` may stop being valid, or 0 for no estimate.
+
+    ``network.ADDRESS_VALIDITY_SECONDS`` is an operator-supplied estimate of how long
+    this node keeps its address (typically the ISP's DHCP lease for a dynamic public
+    IP), counted from when the address was acquired. 0 by default: claiming an expiry
+    that is not actually known is worse than saying nothing, since a reader would then
+    discard a perfectly valid address.
+    """
+    # Imported lazily: src.utils.config imports get_free_port from this module, so a
+    # module-level import here would be circular.
+    from src.utils.config import ConfigManager
+
+    acquired_at = note_announced_address(host, now)
+    try:
+        validity = int(ConfigManager().get("network.ADDRESS_VALIDITY_SECONDS", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return acquired_at + validity if validity > 0 else 0
 
 
 def resolve_public_host(configured: str, outbound_ip: Optional[str]) -> Optional[str]:
