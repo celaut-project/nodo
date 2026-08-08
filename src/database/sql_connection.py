@@ -1113,11 +1113,11 @@ class SQLConnection(metaclass=Singleton):
         Adds or merges a peer's slot into the database.
 
         Upserts on (peer_id, internal_port) and merges each URI (insert if new,
-        refresh ``estimated_invalid_after`` if already known) instead of always
-        inserting fresh rows. This makes re-registering an already-known peer (a
-        reconnect, a pay-time refresh, a re-introduction) idempotent by construction,
-        and lets a peer accumulate several reachable addresses over time instead of
-        losing every one but the last it happened to advertise (issue #236).
+        no-op if already known) instead of always inserting fresh rows. This makes
+        re-registering an already-known peer (a reconnect, a pay-time refresh, a
+        re-introduction) idempotent by construction, and lets a peer accumulate
+        several reachable addresses over time instead of losing every one but the
+        last it happened to advertise (issue #236).
 
         Args:
             slot (celaut_pb2.Instance.Uri_Slot): The slot to add.
@@ -1610,9 +1610,9 @@ class SQLConnection(metaclass=Singleton):
 
     def add_uri(self, uri: celaut_pb2.Instance.Uri, slot_id: str):
         """
-        Merges a URI into the database: inserts it if new for this slot, otherwise
-        just refreshes its ``estimated_invalid_after``. Idempotent so a slot can
-        accumulate several addresses across re-handshakes without duplicating rows.
+        Merges a URI into the database: a no-op if already present for this slot,
+        otherwise inserts it. Idempotent so a slot can accumulate several addresses
+        across re-handshakes without duplicating rows.
 
         Args:
             uri (celaut_pb2.Instance.Uri): The URI to add.
@@ -1620,23 +1620,17 @@ class SQLConnection(metaclass=Singleton):
         """
         ip: str = uri.ip
         port: int = uri.port
-        invalid_after = uri.estimated_invalid_after if uri.HasField("estimated_invalid_after") else None
 
         existing = self._execute(
             "SELECT id FROM uri WHERE slot_id = ? AND ip = ? AND port = ?",
             (slot_id, ip, port),
         ).fetchone()
-
         if existing:
-            self._execute(
-                "UPDATE uri SET estimated_invalid_after = ? WHERE id = ?",
-                (invalid_after, existing[0]),
-            )
             return
 
         self._execute(
-            "INSERT INTO uri (ip, port, slot_id, estimated_invalid_after) VALUES (?, ?, ?, ?)",
-            (ip, port, slot_id, invalid_after))
+            "INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
+            (ip, port, slot_id))
 
     def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str, service_id: str):
         """

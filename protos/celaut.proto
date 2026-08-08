@@ -254,11 +254,6 @@ message Instance {
     message Uri {
         string ip = 1;
         int32 port = 2;
-        // Unix timestamp after which this address may no longer be valid (e.g. a
-        // typical ISP DHCP lease expiry). Optional: absent means no estimate is made.
-        // Lets a reader prefer a fresher announcement or a DNS re-resolution over
-        // assuming a dynamic address stays valid indefinitely (issue #236 / #235).
-        optional int64 estimated_invalid_after = 3;
     }
     message Uri_Slot {
         int32 internal_port = 1;
