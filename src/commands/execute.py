@@ -115,6 +115,102 @@ def rocket_animation(stop_event: threading.Event):
     sys.stdout.flush()
 
 
+def launch_via_gateway(service: str, input_generator, success_message: str):
+    """Run a `StartService` call against this node's own gateway daemon.
+
+    Shared by `execute()` and `force_execution()`: same channel setup,
+    launching animation, and friendly error mapping either way -- they only
+    differ in how `input_generator` steers peer selection server-side.
+    Returns the `ServiceInstance` response, or None (having already printed
+    why) on any failure.
+    """
+    channel = None
+    stop_event = threading.Event()
+    animation_thread = threading.Thread(
+        target=rocket_animation,
+        args=(stop_event,),
+        daemon=True,
+    )
+    try:
+        channel = grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
+        g_stub = celaut_pb2_grpc.GatewayStub(channel)
+
+        inspect_service(service)
+        animation_thread.start()
+
+        response = next(client_grpc(
+            method=g_stub.StartService,
+            input=input_generator,
+            indices_parser=celaut_pb2.ServiceInstance,
+            partitions_message_mode_parser=True,
+            indices_serializer=gateway_bee.StartService_input_indices
+        ))
+        stop_event.set()
+        animation_thread.join()
+        print(success_message)
+        return response
+
+    except grpc.RpcError as e:
+        stop_event.set()
+        if animation_thread.is_alive():
+            animation_thread.join()
+
+        status_code = e.code()
+        details = e.details()
+
+        FRIENDLY_ERRORS = {
+            grpc.StatusCode.NOT_FOUND: "Service not found.",
+            grpc.StatusCode.UNAVAILABLE: "Gateway is unavailable.",
+            grpc.StatusCode.PERMISSION_DENIED: "Permission denied.",
+            grpc.StatusCode.DEADLINE_EXCEEDED: "Request timed out."
+        }
+
+        print("❌ Failed to launch service.")
+        message = FRIENDLY_ERRORS.get(status_code, "Unknown error occurred.")
+        print(f"Reason: {message}")
+
+        if details:
+            print(f"Details: {details}")
+
+        return None
+
+    except Exception as e:
+        stop_event.set()
+        if animation_thread.is_alive():
+            animation_thread.join()
+        print("❌ Unexpected error while launching service.")
+        print(f"Details: {str(e)}")
+        return None
+    finally:
+        if channel is not None:
+            channel.close()
+
+
+def print_endpoints(response) -> None:
+    """Print the HTTP endpoints (if any) a `ServiceInstance` response exposes."""
+    endpoints: list[str] = []
+    for slot in response.instance.api.slot:
+        protocol_tags = {
+            tag.lower()
+            for protocol in slot.protocol_stack
+            for tag in protocol.tags
+        }
+        transport_tags = {tag.lower() for tag in slot.transport.tags}
+        if "http" in protocol_tags or "http" in transport_tags:
+            for _exp in response.instance.uri_slot:
+                if _exp.internal_port == slot.port:
+                    for _uri in _exp.uri:
+                        endpoints.append(f"http://{_uri.ip}:{_uri.port}")
+                    break
+
+    if endpoints:
+        print("🌐 Endpoints available:\n")
+        for endpoint in endpoints:
+            print(f"  • {endpoint}")
+    else:
+        print("No endpoints available")
+
+
 def execute(
     service: str,
     external: bool = False,
@@ -141,94 +237,22 @@ def execute(
 
         service = resolved
 
-        channel = None
-        stop_event = threading.Event()
-        animation_thread = threading.Thread(
-            target=rocket_animation,
-            args=(stop_event,),
-            daemon=True,
+        response = launch_via_gateway(
+            service=service,
+            input_generator=generator(
+                _hash=service,
+                initial_gas_amount=10**16,
+                mem_limit=10**9,
+                external=external,
+                envs=envs,
+                instance_name=instance_name,
+            ),
+            success_message="🚀 Service launched successfully!\n",
         )
-        try:
-            channel = grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
-            g_stub = celaut_pb2_grpc.GatewayStub(channel)
-
-            inspect_service(service)
-            animation_thread.start()
-
-            response = next(client_grpc(
-                method=g_stub.StartService,
-                input=generator(
-                    _hash=service,
-                    initial_gas_amount=10**16,
-                    mem_limit=10**9,
-                    external=external,
-                    envs=envs,
-                    instance_name=instance_name,
-                ),
-                indices_parser=celaut_pb2.ServiceInstance,
-                partitions_message_mode_parser=True,
-                indices_serializer=gateway_bee.StartService_input_indices
-            ))
-            stop_event.set()
-            animation_thread.join()
-            print("🚀 Service launched successfully!\n")
-
-        except grpc.RpcError as e:
-            stop_event.set()
-            if animation_thread.is_alive():
-                animation_thread.join()
-
-            status_code = e.code()
-            details = e.details()
-
-            FRIENDLY_ERRORS = {
-                grpc.StatusCode.NOT_FOUND: "Service not found.",
-                grpc.StatusCode.UNAVAILABLE: "Gateway is unavailable.",
-                grpc.StatusCode.PERMISSION_DENIED: "Permission denied.",
-                grpc.StatusCode.DEADLINE_EXCEEDED: "Request timed out."
-            }
-
-            print("❌ Failed to launch service.")
-            message = FRIENDLY_ERRORS.get(status_code, "Unknown error occurred.")
-            print(f"Reason: {message}")
-
-            if details:
-                print(f"Details: {details}")
-
+        if response is None:
             return
 
-        except Exception as e:
-            stop_event.set()
-            if animation_thread.is_alive():
-                animation_thread.join()
-            print("❌ Unexpected error while launching service.")
-            print(f"Details: {str(e)}")
-            return
-        finally:
-            if channel is not None:
-                channel.close()
-
-        endpoints: list[str] = []
-        for slot in response.instance.api.slot:
-            protocol_tags = {
-                tag.lower()
-                for protocol in slot.protocol_stack
-                for tag in protocol.tags
-            }
-            transport_tags = {tag.lower() for tag in slot.transport.tags}
-            if "http" in protocol_tags or "http" in transport_tags:
-                for _exp in response.instance.uri_slot:
-                    if _exp.internal_port == slot.port:
-                        for _uri in _exp.uri:
-                            endpoints.append(f"http://{_uri.ip}:{_uri.port}")
-                        break
-
-        if endpoints:
-            print("🌐 Endpoints available:\n")
-            for endpoint in endpoints:
-                print(f"  • {endpoint}")
-        else:
-            print("No endpoints available")
+        print_endpoints(response)
 
     finally:
         if sink:

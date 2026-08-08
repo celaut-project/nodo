@@ -145,6 +145,13 @@ def create_tables(cursor):
                 cost_per_kwh REAL,
                 last_updated DATETIME
             )
+        ''',
+        "forced_execution_peer": '''
+            CREATE TABLE IF NOT EXISTS forced_execution_peer (
+                token TEXT PRIMARY KEY,
+                peer_id TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
         '''
     }
 

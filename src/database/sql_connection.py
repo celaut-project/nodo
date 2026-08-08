@@ -1307,6 +1307,50 @@ class SQLConnection(metaclass=Singleton):
         ''', (peer_id,))
         return result.fetchone()[0] > 0
 
+    def set_forced_execution_peer(self, token: str, peer_id: str) -> None:
+        """
+        Records that the `StartService` call correlated with ``token`` (its
+        ``recursion_guard_token``, set by `nodo force_execution` before opening
+        the call) must be delegated straight to ``peer_id``, bypassing
+        ``execution_balancer``.
+
+        Keyed by a fresh, single-use token rather than the client id: dev
+        client ids are drawn from a small reusable pool (see
+        `manager.get_execute_client`), so keying on the client id could leak a
+        stale forced-peer hint onto a later, unrelated `nodo execute` call that
+        happens to draw the same recycled id.
+
+        Args:
+            token (str): The one-time correlation token for this call.
+            peer_id (str): The peer to force delegation to.
+        """
+        self._execute(
+            "INSERT OR REPLACE INTO forced_execution_peer (token, peer_id) VALUES (?, ?)",
+            (token, peer_id)
+        )
+
+    def pop_forced_execution_peer(self, token: str) -> Optional[str]:
+        """
+        Reads and deletes the forced-peer hint for ``token``, if any.
+
+        Consuming it (rather than just reading it) means the hint can only ever
+        apply to the single `launch_service` call it was created for.
+
+        Args:
+            token (str): The one-time correlation token to look up.
+
+        Returns:
+            Optional[str]: The peer id to force delegation to, or None if no
+            hint is recorded for this token.
+        """
+        row = self._execute(
+            "SELECT peer_id FROM forced_execution_peer WHERE token = ?", (token,)
+        ).fetchone()
+        if not row:
+            return None
+        self._execute("DELETE FROM forced_execution_peer WHERE token = ?", (token,))
+        return row['peer_id']
+
     def remove_peer(self, peer_id: str) -> bool:
         """
         Removes a peer from the database along with all related records.
