@@ -247,7 +247,7 @@ def _verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
         peer.ts,
         peer.seq,
         _peer_uris(peer.instance),
-        peer.estimated_invalid_after,
+        peer.estimated_invalid_after_unix_seconds,
     )
     if not verify_peer_payload(peer.public_key, payload, peer.signature):
         log.LOGGER(f"Peer signature failed to verify for claimed public_key {peer.public_key}.")
@@ -280,7 +280,7 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
             update_peer_instance(peer=peer, peer_id=peer_id)
             sc.set_peer_last_ts_seq(
                 peer_id=peer_id, ts=peer.ts, seq=peer.seq,
-                estimated_invalid_after=peer.estimated_invalid_after,
+                estimated_invalid_after_unix_seconds=peer.estimated_invalid_after_unix_seconds,
             )
             return peer_id
         # Falls through to the fresh-registration path below with peer_id already
@@ -312,7 +312,7 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
     if verified_public_key:
         sc.set_peer_last_ts_seq(
             peer_id=peer_id, ts=peer.ts, seq=peer.seq,
-            estimated_invalid_after=peer.estimated_invalid_after,
+            estimated_invalid_after_unix_seconds=peer.estimated_invalid_after_unix_seconds,
         )
 
     # Slots

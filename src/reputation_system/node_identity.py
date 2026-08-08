@@ -57,7 +57,7 @@ def canonical_peer_payload(
     ts: int,
     seq: int,
     uris: List[str],
-    estimated_invalid_after: int = 0,
+    estimated_invalid_after_unix_seconds: int = 0,
 ) -> str:
     """
     The exact string a ``Peer`` signature is computed over.
@@ -67,11 +67,11 @@ def canonical_peer_payload(
     of ``SerializeToString()``. URIs are sorted so the signature does not depend on
     the order a node happened to enumerate its interfaces in.
 
-    ``estimated_invalid_after`` is part of the signed payload so it cannot be
+    ``estimated_invalid_after_unix_seconds`` is part of the signed payload so it cannot be
     stripped (making a soon-to-expire address look permanent) or extended (keeping
     peers pinned to an address the signer knows is about to change).
     """
-    return f"{public_key_hex}|{ts}|{seq}|{','.join(sorted(uris))}|{estimated_invalid_after}"
+    return f"{public_key_hex}|{ts}|{seq}|{','.join(sorted(uris))}|{estimated_invalid_after_unix_seconds}"
 
 
 def sign_peer_payload(payload: str) -> Optional[str]:

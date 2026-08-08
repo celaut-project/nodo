@@ -106,7 +106,7 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     return uris
 
 
-def _estimated_invalid_after(now: int) -> int:
+def _estimated_invalid_after_unix_seconds(now: int) -> int:
     """When the addresses announced now may stop being valid, or 0 for no estimate.
 
     Derived from ``network.ADDRESS_VALIDITY_SECONDS`` -- an operator-supplied
@@ -145,9 +145,9 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     uris = [f"{uri.ip}:{uri.port}" for slot in peer.instance.uri_slot for uri in slot.uri]
     ts = int(time.time())
     seq = next(_seq_counter)
-    estimated_invalid_after = _estimated_invalid_after(ts)
+    estimated_invalid_after_unix_seconds = _estimated_invalid_after_unix_seconds(ts)
     signature = sign_peer_payload(
-        canonical_peer_payload(public_key_hex, ts, seq, uris, estimated_invalid_after)
+        canonical_peer_payload(public_key_hex, ts, seq, uris, estimated_invalid_after_unix_seconds)
     )
     if not signature:
         return
@@ -156,7 +156,7 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     peer.signature = signature
     peer.ts = ts
     peer.seq = seq
-    peer.estimated_invalid_after = estimated_invalid_after
+    peer.estimated_invalid_after_unix_seconds = estimated_invalid_after_unix_seconds
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:

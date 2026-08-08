@@ -1382,23 +1382,23 @@ class SQLConnection(metaclass=Singleton):
         return int(row[0]), int(row[1])
 
     def set_peer_last_ts_seq(
-        self, peer_id: str, ts: int, seq: int, estimated_invalid_after: int = 0
+        self, peer_id: str, ts: int, seq: int, estimated_invalid_after_unix_seconds: int = 0
     ) -> None:
         """Record the (ts, seq) of the last signed Peer message accepted from ``peer_id``.
 
-        ``estimated_invalid_after`` is the peer's own estimate of when the addresses
+        ``estimated_invalid_after_unix_seconds`` is the peer's own estimate of when the addresses
         it just announced may stop being valid (0 = no estimate); stored so a reader
         can prefer re-resolving a peer whose address is due to change.
         """
         self._execute(
-            "UPDATE peer SET last_ts = ?, last_seq = ?, estimated_invalid_after = ? WHERE id = ?",
-            (int(ts), int(seq), int(estimated_invalid_after) or None, peer_id),
+            "UPDATE peer SET last_ts = ?, last_seq = ?, estimated_invalid_after_unix_seconds = ? WHERE id = ?",
+            (int(ts), int(seq), int(estimated_invalid_after_unix_seconds) or None, peer_id),
         )
 
-    def get_peer_estimated_invalid_after(self, peer_id: str) -> Optional[int]:
+    def get_peer_estimated_invalid_after_unix_seconds(self, peer_id: str) -> Optional[int]:
         """When ``peer_id``'s announced addresses may stop being valid, or None."""
         row = self._execute(
-            "SELECT estimated_invalid_after FROM peer WHERE id = ?", (peer_id,)
+            "SELECT estimated_invalid_after_unix_seconds FROM peer WHERE id = ?", (peer_id,)
         ).fetchone()
         return int(row[0]) if row and row[0] is not None else None
 
