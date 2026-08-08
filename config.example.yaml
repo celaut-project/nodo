@@ -152,12 +152,6 @@ packer:
 network:
   GATEWAY_PORT: auto
   LOCAL_NETWORK: "lo"
-  # This node's identity keypair (secp256k1, BIP-39/BIP-32), used to sign GetPeerInfo
-  # and as the peer_id peers store for this node. Leave as "auto" to have the node
-  # generate one on first load. If ledgers.ergo.WALLET_MNEMONIC is also set, it takes
-  # priority: the node's identity and its Ergo wallet become the same key, so a
-  # reputation proof published later is already tied to this node's identity.
-  NODE_MNEMONIC: auto
   # How long (seconds) this node expects to keep its current address -- typically the
   # ISP's DHCP lease for a dynamic public IP. Published (signed) alongside the
   # addresses this node announces, so peers can anticipate the change and re-resolve
@@ -382,8 +376,16 @@ ledgers:
     GAS_PER_ERG: 1.0e+58
     NODE_URL: "https://node.sigmaspace.io"
     GENESIS_BLOCK_ID: "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
-    # The one wallet the node controls. Leave empty to disable payments/reputation,
-    # or set to "auto" to have the node generate a fresh mnemonic on first load.
+    # The ONE mnemonic of the whole node. It is both the wallet the node controls and
+    # its identity: the key it signs GetPeerInfo with, and whose public key IS the
+    # peer_id other nodes store for it (issue #236). Leave empty (or "auto") and a
+    # fresh one is generated on first load -- a node always needs an identity, and
+    # generating a mnemonic commits to nothing, since the wallet holds no funds until
+    # someone sends some.
+    #
+    # TREAT AS A SECRET, and back it up: losing it means losing both the funds and the
+    # node's identity, and changing it makes every peer see a brand-new node, orphaning
+    # the deposits and reputation recorded against the old one.
     WALLET_MNEMONIC: ""
     HTTP_PEERS_PATH: "${main.STORAGE}/ergo_http_peers.json"
     reputation:
