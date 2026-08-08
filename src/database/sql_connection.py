@@ -7,7 +7,7 @@ import time
 from decimal import Decimal, InvalidOperation
 from hashlib import sha3_256
 from threading import Lock
-from typing import Any, Callable, Dict, Generator, List, Tuple, Optional
+from typing import Any, Callable, Dict, Generator, Iterable, List, Tuple, Optional
 from google.protobuf.json_format import MessageToJson
 
 import grpc
@@ -1125,24 +1125,23 @@ class SQLConnection(metaclass=Singleton):
             transport_protocol (bytes): Serialized transport tags for this slot.
         """
         internal_port: int = slot.internal_port
+        # Single atomic upsert against idx_slot_peer_port. A SELECT-then-INSERT would
+        # race: _execute commits per statement, so the lock is released in between and
+        # two concurrent IntroducePeer threads would both insert.
+        self._execute(
+            "INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?) "
+            "ON CONFLICT (peer_id, internal_port) DO UPDATE SET transport_protocol = excluded.transport_protocol",
+            (internal_port, transport_protocol, peer_id),
+        )
         row = self._execute(
             "SELECT id FROM slot WHERE peer_id = ? AND internal_port = ?",
             (peer_id, internal_port),
         ).fetchone()
+        if not row:
+            logger.LOGGER(f'Could not resolve slot {internal_port} for peer {peer_id}.')
+            return
 
-        if row:
-            slot_id = str(row[0])
-            self._execute(
-                "UPDATE slot SET transport_protocol = ? WHERE id = ?",
-                (transport_protocol, slot_id),
-            )
-        else:
-            cursor = self._execute(
-                "INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
-                (internal_port, transport_protocol, peer_id),
-            )
-            slot_id = str(cursor.lastrowid)
-
+        slot_id = str(row[0])
         for uri in slot.uri:
             self.add_uri(uri, slot_id=slot_id)
 
@@ -1366,6 +1365,70 @@ class SQLConnection(metaclass=Singleton):
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to remove peer {peer_id}: {e}')
             return False
+
+    def rekey_peer(self, old_peer_id: str, new_peer_id: str) -> bool:
+        """Move a peer's whole record from ``old_peer_id`` to ``new_peer_id``.
+
+        The migration path for issue #236: peers registered before node identity
+        existed hold a random uuid4 id, and the first time such a peer re-handshakes
+        with a valid signature we must adopt its public key as the id *in place* --
+        otherwise it registers as a brand-new peer and its gas balance, external
+        client id, payment contracts and reputation stay stranded on an orphaned row
+        that nothing references again.
+
+        ``peer_id`` is a foreign key in slot, contract_instance and delegated_instances,
+        so all four tables move together, in one transaction. ``"LOCAL"`` is a reserved
+        sentinel for this node's own contracts and is never a discovered peer, so it is
+        refused outright.
+        """
+        if not old_peer_id or not new_peer_id or old_peer_id == new_peer_id:
+            return False
+        if "LOCAL" in (old_peer_id, new_peer_id):
+            logger.LOGGER('Refusing to re-key the reserved LOCAL peer id.')
+            return False
+        if self.peer_exists(peer_id=new_peer_id):
+            logger.LOGGER(f'Cannot re-key {old_peer_id}: {new_peer_id} already exists.')
+            return False
+
+        try:
+            self._execute2([
+                ('UPDATE peer SET id = ? WHERE id = ?', (new_peer_id, old_peer_id)),
+                ('UPDATE slot SET peer_id = ? WHERE peer_id = ?', (new_peer_id, old_peer_id)),
+                ('UPDATE contract_instance SET peer_id = ? WHERE peer_id = ?', (new_peer_id, old_peer_id)),
+                ('UPDATE delegated_instances SET peer_id = ? WHERE peer_id = ?', (new_peer_id, old_peer_id)),
+            ])
+            logger.LOGGER(f'Re-keyed peer {old_peer_id} to its public key {new_peer_id}.')
+            return True
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to re-key peer {old_peer_id} to {new_peer_id}: {e}')
+            return False
+
+    def prune_peer_uris(self, peer_id: str, keep: Iterable[Tuple[str, int]]) -> int:
+        """Drop every URI of ``peer_id`` that is not in ``keep``; return how many went.
+
+        Merging alone would let a peer's addresses grow without bound and, worse, keep
+        a superseded one forever: ``generate_uris_by_peer_id`` yields in insertion
+        order, so the *stale* address is the one every ``next(...)`` call site picks
+        while anything still answers on it -- exactly the downgrade the signed
+        (ts, seq) counter exists to prevent, arriving through the back door. Only ever
+        driven by a verified, strictly-newer announcement, so an unsigned or replayed
+        message can never prune a peer's real addresses.
+        """
+        kept = {(str(ip), int(port)) for ip, port in keep}
+        current = self._execute(
+            "SELECT u.id, u.ip, u.port FROM uri u "
+            "JOIN slot s ON u.slot_id = s.id WHERE s.peer_id = ?",
+            (peer_id,),
+        ).fetchall()
+
+        stale = [row[0] for row in current if (str(row[1]), int(row[2])) not in kept]
+        if not stale:
+            return 0
+        self._execute2([
+            (f"DELETE FROM uri WHERE id IN ({','.join('?' * len(stale))})", tuple(stale)),
+        ])
+        logger.LOGGER(f'Pruned {len(stale)} superseded URI(s) from peer {peer_id}.')
+        return len(stale)
 
     def get_peer_last_ts_seq(self, peer_id: str) -> Optional[Tuple[int, int]]:
         """The (ts, seq) of the last signed Peer message accepted from ``peer_id``.
@@ -1632,19 +1695,12 @@ class SQLConnection(metaclass=Singleton):
             uri (celaut_pb2.Instance.Uri): The URI to add.
             slot_id (str): The ID of the slot.
         """
-        ip: str = uri.ip
-        port: int = uri.port
-
-        existing = self._execute(
-            "SELECT id FROM uri WHERE slot_id = ? AND ip = ? AND port = ?",
-            (slot_id, ip, port),
-        ).fetchone()
-        if existing:
-            return
-
+        # Single atomic upsert against idx_uri_slot_ip_port -- see add_slot on why a
+        # SELECT-then-INSERT would race.
         self._execute(
-            "INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
-            (ip, port, slot_id))
+            "INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?) "
+            "ON CONFLICT (slot_id, ip, port) DO NOTHING",
+            (uri.ip, uri.port, slot_id))
 
     def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str, service_id: str):
         """
@@ -1946,7 +2002,11 @@ def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     """
     SQLConnection().peer_exists(peer_id=peer_id)
     try:
-        return any(list(generate_uris_by_peer_id(peer_id))) if min_slots_open == 1 else \
-            len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open
+        if min_slots_open == 1:
+            # Short-circuit on the first reachable address. Materialising the whole
+            # list would probe every address the peer ever announced, each up to the
+            # 1s is_open timeout, just to answer "is at least one open?".
+            return next(generate_uris_by_peer_id(peer_id), None) is not None
+        return len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open
     except Exception:
         return False

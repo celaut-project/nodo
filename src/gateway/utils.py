@@ -1,3 +1,4 @@
+import ipaddress
 import itertools
 import os
 import shutil
@@ -78,49 +79,140 @@ def _uri_for_network(network: str) -> celaut.Instance.Uri:
     return uri
 
 
+def _public_host() -> Optional[str]:
+    """The outward-facing host to advertise: ``network.PUBLIC_IP``, else the outbound IP.
+
+    Reuses ``resolve_public_host``, which is exactly the filter issue #236 point 7
+    names: it prefers the operator-configured value (a public IP *or* a DNS name --
+    which is how a DDNS hostname reaches peers at all), falls back to the outbound
+    interface address, and refuses to publish anything private, loopback or
+    link-local, since a LAN address is meaningless to a remote peer.
+    """
+    from src.utils.network import get_local_ip, resolve_public_host
+
+    try:
+        outbound_ip = get_local_ip()
+    except Exception as e:
+        log.LOGGER(f'Could not resolve the outbound IP: {e}')
+        outbound_ip = None
+
+    return resolve_public_host(
+        configured=str(env_manager.get("network.PUBLIC_IP", "") or ""),
+        outbound_ip=outbound_ip,
+    )
+
+
+def _is_loopback(ip: str) -> bool:
+    """True for the whole loopback range, not just 127.0.0.1 / ::1."""
+    try:
+        return ipaddress.ip_address(ip).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_globally_routable(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_global
+    except ValueError:
+        # Not an IP literal at all -- a DNS name, which we cannot judge here and
+        # which is the operator's explicit choice anyway.
+        return True
+
+
 def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     """Every address this node is reachable at, not just one caller's subnet.
 
     Before issue #236, GetPeerInfo picked the single interface matching whoever
     asked (``get_network_name(direction=caller_ip)``), so two callers on different
-    subnets each learned only the one address matching their own -- never the
-    other. ``uri_slot.uri`` is already ``repeated``, so announcing every valid
-    address under the one gateway port needs no schema change.
+    subnets each learned only the one address matching their own -- never the other.
+    ``uri_slot.uri`` is already ``repeated``, so announcing several addresses under
+    the one gateway port needs no schema change.
+
+    The public host comes first, because it is the one a remote peer can actually
+    use and ``generate_uris_by_peer_id`` yields in insertion order. Private/LAN
+    addresses are announced only when ``network.ANNOUNCE_PRIVATE_ADDRESSES`` is set:
+    by default they are noise to a remote peer, they cost it a 1s connect timeout
+    each, and -- being shared strings like ``172.17.0.1`` -- they collide across
+    unrelated peers in the address-keyed lookups.
     """
-    seen_ips = set()
     uris: List[celaut.Instance.Uri] = []
+    seen_ips = set()
+
+    public_host = _public_host()
+    if public_host:
+        seen_ips.add(public_host)
+        uris.append(celaut.Instance.Uri(ip=public_host, port=GATEWAY_PORT))
+        log.LOGGER(f'Announcing public host {public_host}:{GATEWAY_PORT}')
+    else:
+        log.LOGGER('No public address to announce (set network.PUBLIC_IP if behind NAT).')
+
+    announce_private = bool(env_manager.get("network.ANNOUNCE_PRIVATE_ADDRESSES", False))
+    private: List[celaut.Instance.Uri] = []
     for interface in ni.interfaces():
         try:
             ip = get_local_ip_from_network(interface, allow_link_local=False)
         except (KeyError, ValueError):
             continue
-        if ip in ("127.0.0.1", "::1") or ip in seen_ips:
+        if ip in seen_ips or _is_loopback(ip):
             continue
         seen_ips.add(ip)
-        uris.append(celaut.Instance.Uri(ip=ip, port=GATEWAY_PORT))
+        if _is_globally_routable(ip):
+            uris.append(celaut.Instance.Uri(ip=ip, port=GATEWAY_PORT))
+        else:
+            private.append(celaut.Instance.Uri(ip=ip, port=GATEWAY_PORT))
+
+    if announce_private:
+        uris.extend(private)
+    elif not uris:
+        # Nothing globally routable to announce -- a node on a LAN with no
+        # network.PUBLIC_IP set. Announce the LAN addresses anyway: they are useless
+        # to a remote peer, but they are what makes an all-on-one-LAN deployment work
+        # at all, and they beat the loopback fallback below, which is useful to nobody.
+        log.LOGGER('No routable address; falling back to announcing private addresses.')
+        uris.extend(private)
 
     if not uris:
-        # No usable non-loopback interface (an isolated dev box, say): fall back to
-        # loopback rather than announce nothing.
+        # Not even a private address (an isolated box): announce loopback rather than
+        # nothing at all, which would make this node unreachable by definition.
         uris = [_uri_for_network(get_network_name(direction="0.0.0.0"))]
     return uris
 
 
-def _estimated_invalid_after_unix_seconds(now: int) -> int:
-    """When the addresses announced now may stop being valid, or 0 for no estimate.
+# When this process first observed its current announced address. The expiry estimate
+# is anchored here, NOT to request time: `now + validity` recomputed per request slides
+# forward forever, so a peer polling every minute would always be told "valid for
+# another N seconds" and the deadline would never arrive -- exactly what point 9 of
+# issue #236 set out to avoid. Reset whenever the announced address actually changes.
+_address_acquired_at: Optional[int] = None
+_address_last_seen: Optional[str] = None
+_address_lock = threading.Lock()
 
-    Derived from ``network.ADDRESS_VALIDITY_SECONDS`` -- an operator-supplied
-    estimate of how long this node keeps its address (typically the ISP's DHCP
-    lease for a dynamic public IP). Left at 0 by default: claiming an expiry that
-    is not actually known would be worse than saying nothing, since a peer would
-    then drop a perfectly valid address.
+
+def _note_announced_address(host: Optional[str], now: int) -> int:
+    """Record the currently announced address and return when it was acquired."""
+    global _address_acquired_at, _address_last_seen
+    with _address_lock:
+        if host != _address_last_seen or _address_acquired_at is None:
+            _address_last_seen = host
+            _address_acquired_at = now
+        return _address_acquired_at
+
+
+def _estimated_invalid_after_unix_seconds(acquired_at: int) -> int:
+    """When the announced address may stop being valid, or 0 for no estimate.
+
+    ``network.ADDRESS_VALIDITY_SECONDS`` is an operator-supplied estimate of how long
+    this node keeps its address (typically the ISP's DHCP lease for a dynamic public
+    IP), counted from when the address was *acquired*. Left at 0 by default: claiming
+    an expiry that is not actually known is worse than saying nothing, since a peer
+    would then discard a perfectly valid address.
     """
     try:
         validity = int(env_manager.get("network.ADDRESS_VALIDITY_SECONDS", 0) or 0)
     except (TypeError, ValueError):
         log.LOGGER('Invalid network.ADDRESS_VALIDITY_SECONDS; announcing no expiry estimate.')
         return 0
-    return now + validity if validity > 0 else 0
+    return acquired_at + validity if validity > 0 else 0
 
 
 def _sign_peer(peer: celaut_pb2.Peer) -> None:
@@ -133,6 +225,7 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     peers fall back to treating it as a legacy, address-identified peer.
     """
     from src.reputation_system.node_identity import (
+        canonical_instance_digest,
         canonical_peer_payload,
         get_node_public_key_hex,
         sign_peer_payload,
@@ -142,12 +235,22 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     if not public_key_hex:
         return
 
-    uris = [f"{uri.ip}:{uri.port}" for slot in peer.instance.uri_slot for uri in slot.uri]
     ts = int(time.time())
     seq = next(_seq_counter)
-    estimated_invalid_after_unix_seconds = _estimated_invalid_after_unix_seconds(ts)
+    announced = next(
+        (uri.ip for slot in peer.instance.uri_slot for uri in slot.uri), None
+    )
+    estimated_invalid_after_unix_seconds = _estimated_invalid_after_unix_seconds(
+        _note_announced_address(announced, ts)
+    )
     signature = sign_peer_payload(
-        canonical_peer_payload(public_key_hex, ts, seq, uris, estimated_invalid_after_unix_seconds)
+        canonical_peer_payload(
+            public_key_hex,
+            ts,
+            seq,
+            canonical_instance_digest(peer.instance),
+            estimated_invalid_after_unix_seconds,
+        )
     )
     if not signature:
         return

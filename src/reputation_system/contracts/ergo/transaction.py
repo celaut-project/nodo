@@ -1,4 +1,3 @@
-import ipaddress
 import json
 from typing import List, Optional, Tuple, TypedDict
 
@@ -156,25 +155,6 @@ def __build_proof_box(
 NO_NETWORK_ADDRESS = "No IP available."
 
 
-def resolve_public_host(configured: str, outbound_ip: Optional[str]) -> Optional[str]:
-    """Which host this node advertises about itself in its own proof object.
-
-    ``configured`` is ``network.PUBLIC_IP`` (a public IP or a DNS name); when it is
-    empty the outbound-interface IP is used instead, which is the right answer on a
-    node with a directly routable address (a VPS) and the wrong one behind NAT.
-    Hence the filter: a private, loopback or link-local address is never published,
-    since a LAN address is meaningless to whoever reads the proof from the ledger.
-    A non-IP string is taken as a DNS name and advertised as-is.
-    """
-    host = (configured or "").strip() or (outbound_ip or "").strip()
-    if not host:
-        return None
-    try:
-        return host if ipaddress.ip_address(host).is_global else None
-    except ValueError:
-        return host
-
-
 def _self_network_data() -> str:
     """Instance JSON describing how to reach this node, for its self-pointing object.
 
@@ -188,7 +168,7 @@ def _self_network_data() -> str:
     from google.protobuf.json_format import MessageToJson
 
     from protos import celaut_pb2
-    from src.utils.network import get_local_ip
+    from src.utils.network import get_local_ip, resolve_public_host
 
     try:
         outbound_ip = get_local_ip()

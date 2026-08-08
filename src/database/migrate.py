@@ -167,6 +167,57 @@ def create_tables(cursor):
         "last_seq": "INTEGER DEFAULT NULL",
         "estimated_invalid_after_unix_seconds": "INTEGER DEFAULT NULL",
     })
+    ensure_peer_address_uniqueness(cursor)
+
+
+def ensure_peer_address_uniqueness(cursor) -> None:
+    """Enforce one row per (peer, internal_port) and per (slot, ip, port).
+
+    ``add_slot``/``add_uri`` merge a peer's advertisement instead of clearing and
+    reinserting it, and they run concurrently: gRPC serves IntroducePeer on a 30-thread
+    pool, and ``_execute`` commits each statement separately, so a plain
+    SELECT-then-INSERT is not atomic. These indexes make the upsert the database's job
+    rather than a race the application hopes to win.
+
+    Existing databases may already hold duplicates (created before this), so de-dup
+    first -- keeping the lowest rowid and re-pointing its URIs -- or the CREATE fails.
+    """
+    try:
+        # Re-point URIs of duplicate slots onto the surviving slot, then drop the extras.
+        cursor.execute('''
+            UPDATE uri SET slot_id = (
+                SELECT MIN(keep.id) FROM slot keep
+                WHERE keep.peer_id = (SELECT s.peer_id FROM slot s WHERE s.id = uri.slot_id)
+                  AND keep.internal_port = (SELECT s.internal_port FROM slot s WHERE s.id = uri.slot_id)
+            )
+            WHERE slot_id IN (
+                SELECT s.id FROM slot s
+                WHERE s.id > (
+                    SELECT MIN(k.id) FROM slot k
+                    WHERE k.peer_id = s.peer_id AND k.internal_port = s.internal_port
+                )
+            )
+        ''')
+        cursor.execute('''
+            DELETE FROM slot WHERE id > (
+                SELECT MIN(k.id) FROM slot k
+                WHERE k.peer_id = slot.peer_id AND k.internal_port = slot.internal_port
+            )
+        ''')
+        cursor.execute('''
+            DELETE FROM uri WHERE id > (
+                SELECT MIN(k.id) FROM uri k
+                WHERE k.slot_id = uri.slot_id AND k.ip = uri.ip AND k.port = uri.port
+            )
+        ''')
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_slot_peer_port ON slot (peer_id, internal_port)"
+        )
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_uri_slot_ip_port ON uri (slot_id, ip, port)"
+        )
+    except sqlite3.Error as e:
+        print(f"Error enforcing peer address uniqueness: {e}")
 
 
 def ensure_columns(cursor, table_name: str, columns: dict) -> None:
