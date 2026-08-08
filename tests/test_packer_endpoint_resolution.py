@@ -79,13 +79,14 @@ class PackResolutionOrderTests(unittest.TestCase):
         self.assertEqual(endpoint, "http://override:8080")
         ensure.assert_not_called()
 
-    def test_id_resolves_from_core_services_list(self):
-        # The id comes solely from the single source of truth: the
-        # {name: "packer", id: ...} entry in core_services. There is no env var or
-        # `packer.*` override anymore (issue #135).
+    def test_id_resolves_from_core_services_mapping(self):
+        # The id comes solely from the single source of truth: the `packer` entry
+        # in the core_services mapping. There is no env var or `packer.*` override
+        # anymore (issue #135), and the mapping replaced the old {name, id} array
+        # layout (issue #232).
         def fake_get(key, default=None):
             if key == "core_services":
-                return [{"name": "packer", "id": "coreid789"}]
+                return {"packer": "coreid789"}
             return default
         with patch.dict(os.environ, {"PACKER_SERVICE_ID": "envid-should-be-ignored"}), \
              patch.object(pack_mod.env_manager, "get", side_effect=fake_get), \

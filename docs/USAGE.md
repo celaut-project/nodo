@@ -211,7 +211,7 @@ These are the most commonly used commands for daily tasks:
   and imports the returned `.celaut.bee`. Configure the packer by its published
   service id first, then `nodo execute` it so a running instance exists:  
   set the packer id under `core_services` in `config.yaml` — the single source of
-  truth: `core_services: [{ name: "packer", id: "<packer-service id>" }]`  
+  truth: `core_services: { packer: "<packer-service id>" }`  
   nodo resolves the running instance's `ip:port` automatically. When nodo needs to
   download the packer it uses `packer.PACKER_SOURCE_URL` if set, otherwise the
   source-application core service. To override with an out-of-band packer instead,
@@ -479,7 +479,7 @@ To pack with the default external backend, point nodo at a packer service and ru
 
 ```bash
 # set the packer id under core_services in config.yaml (single source of truth):
-#   core_services: [{ name: "packer", id: "<packer-service id>" }]
+#   core_services: { packer: "<packer-service id>" }
 # download source (optional): packer.PACKER_SOURCE_URL: "<manifest url>"
 #   when empty, nodo resolves the packer via the source-application core service.
 nodo execute <packer-service id>               # start a running instance nodo resolves by id
