@@ -73,6 +73,35 @@ pub enum InputMode {
     Details,
 }
 
+/// How the `EditConfig` popup should let the user set a value, chosen from the
+/// entry's inferred YAML type (and, for a handful of known keys, a fixed set of
+/// accepted values) rather than always falling back to freeform text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditKind {
+    /// Freeform YAML literal (the original behaviour) — strings, secrets, lists,
+    /// objects, and anything else with no more specific editor.
+    Text,
+    /// A checkbox: Space/←/→ toggles, no character input.
+    Bool,
+    /// A number: ↑/↓ steps by 1 on top of ordinary typing.
+    Number,
+    /// A closed set of accepted values (e.g. `network.DELEGATION_TUNNEL_POLICY`):
+    /// ↑/↓ cycles through them on top of ordinary typing.
+    Enum(Vec<String>),
+}
+
+/// Fixed value sets for config keys whose comment in `config.example.yaml`
+/// documents a closed set of options. Deliberately small and explicit: a key
+/// like `hashing.HASH` documents aliases but also accepts an arbitrary hex
+/// hash-id, so it stays freeform text rather than a misleadingly restrictive
+/// picker. Add an entry here only when every accepted value is enumerable.
+fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
+    match path {
+        "network.DELEGATION_TUNNEL_POLICY" => Some(&["auto", "always", "never"]),
+        _ => None,
+    }
+}
+
 /// A destructive action awaiting user confirmation.
 #[derive(Debug, Clone)]
 pub enum PendingAction {
@@ -453,6 +482,9 @@ pub struct App {
     pub input_title: String,
     pub edit_config_path: Option<Vec<ConfigPathSegment>>,
     pub edit_config_secret: bool,
+    /// Which widget the `EditConfig` popup should present for the value
+    /// currently being edited (checkbox, stepper, enum picker, or freeform text).
+    pub edit_kind: EditKind,
     /// Destructive action awaiting a y/N confirmation.
     pub pending_action: Option<PendingAction>,
     /// Contents of the read-only Details overlay, when open.
@@ -500,6 +532,7 @@ impl Default for App {
             input_title: String::new(),
             edit_config_path: None,
             edit_config_secret: false,
+            edit_kind: EditKind::Text,
             pending_action: None,
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
@@ -606,6 +639,7 @@ impl App {
         self.input_title.clear();
         self.edit_config_path = None;
         self.edit_config_secret = false;
+        self.edit_kind = EditKind::Text;
         self.pending_action = None;
     }
 
@@ -618,12 +652,14 @@ impl App {
         self.input_mode = InputMode::Connect;
         self.input.clear();
         self.input_title = "Connect peer (host:port)".to_string();
+        self.edit_kind = EditKind::Text;
     }
 
     pub fn open_config_filter(&mut self) {
         self.input_mode = InputMode::FilterConfig;
         self.input = self.config_filter.clone();
         self.input_title = "Filter configuration paths".to_string();
+        self.edit_kind = EditKind::Text;
     }
 
     pub fn clear_config_filter(&mut self) {
@@ -646,6 +682,67 @@ impl App {
         };
         self.edit_config_path = Some(entry.path_segments);
         self.edit_config_secret = entry.secret;
+        self.edit_kind = if entry.secret {
+            // A secret is always retyped from scratch as plain text (see the blank
+            // `self.input` above); a checkbox/stepper/picker would have nothing to
+            // show without briefly displaying the value it exists to hide.
+            EditKind::Text
+        } else if let Some(options) = known_enum_values(&entry.path) {
+            EditKind::Enum(options.iter().map(|value| value.to_string()).collect())
+        } else {
+            match entry.value_type.as_str() {
+                "bool" => EditKind::Bool,
+                "number" => EditKind::Number,
+                _ => EditKind::Text,
+            }
+        };
+    }
+
+    /// Apply Up/Down (and, for a checkbox, Space/←/→) inside the `EditConfig`
+    /// popup: toggles a bool, steps a number by 1, or cycles an enum by one
+    /// position. A no-op for freeform text, where arrow keys do nothing special.
+    pub fn adjust_edit_value(&mut self, delta: i32) {
+        match self.edit_kind.clone() {
+            EditKind::Bool => {
+                let current = self.input.trim() == "true";
+                self.input = (!current).to_string();
+            }
+            EditKind::Number => {
+                let trimmed = self.input.trim();
+                let Ok(current) = trimmed.parse::<f64>() else {
+                    return;
+                };
+                let next = current + delta as f64;
+                self.input = if trimmed.contains('.') {
+                    format!("{next}")
+                } else {
+                    format!("{}", next.round() as i64)
+                };
+            }
+            EditKind::Enum(options) => {
+                if options.is_empty() {
+                    return;
+                }
+                let current_index = options
+                    .iter()
+                    .position(|option| option == self.input.trim())
+                    .unwrap_or(0) as i32;
+                let len = options.len() as i32;
+                let next_index = (current_index + delta).rem_euclid(len) as usize;
+                self.input = options[next_index].clone();
+            }
+            EditKind::Text => {}
+        }
+    }
+
+    /// Live side effect of a keystroke inside a text-entry popup: only
+    /// `FilterConfig` reacts as-you-type (search results narrow immediately
+    /// instead of waiting for Enter); `EditConfig`/`Connect` are unaffected.
+    pub fn on_input_changed(&mut self) {
+        if self.input_mode == InputMode::FilterConfig {
+            self.config_filter = self.input.clone();
+            self.apply_config_filter();
+        }
     }
 
     pub fn apply_config_filter(&mut self) {
@@ -1753,6 +1850,142 @@ Cold Wallet: 9cold\n";
             serde_yaml::from_str::<Value>(&string_bool.edit_value).unwrap(),
             Value::String(_)
         ));
+    }
+
+    fn config_entry(path: &str, value: &str, edit_value: &str, value_type: &str, secret: bool) -> ConfigEntry {
+        ConfigEntry {
+            path: path.to_string(),
+            path_segments: path
+                .split('.')
+                .map(|key| ConfigPathSegment::Key(key.to_string()))
+                .collect(),
+            value: value.to_string(),
+            edit_value: edit_value.to_string(),
+            value_type: value_type.to_string(),
+            secret,
+        }
+    }
+
+    fn select_config_entry(app: &mut App, entry: ConfigEntry) {
+        app.config = StatefulList::with_items(vec![entry]);
+        app.config.state.select(Some(0));
+    }
+
+    #[test]
+    fn known_enum_values_covers_the_documented_policy_and_nothing_else() {
+        assert_eq!(
+            known_enum_values("network.DELEGATION_TUNNEL_POLICY"),
+            Some(["auto", "always", "never"].as_slice())
+        );
+        assert_eq!(known_enum_values("packer.local"), None);
+    }
+
+    #[test]
+    fn opening_the_editor_picks_the_widget_from_the_inferred_type() {
+        let mut app = App::default();
+
+        select_config_entry(&mut app, config_entry("builder.ARM_SUPPORT", "true", "true", "bool", false));
+        app.open_config_editor();
+        assert_eq!(app.edit_kind, EditKind::Bool);
+
+        select_config_entry(&mut app, config_entry("timing.MANAGER_ITERATION_TIME", "30", "30", "number", false));
+        app.open_config_editor();
+        assert_eq!(app.edit_kind, EditKind::Number);
+
+        select_config_entry(
+            &mut app,
+            config_entry("network.DELEGATION_TUNNEL_POLICY", "auto", "auto", "string", false),
+        );
+        app.open_config_editor();
+        assert_eq!(
+            app.edit_kind,
+            EditKind::Enum(vec!["auto".to_string(), "always".to_string(), "never".to_string()])
+        );
+
+        select_config_entry(&mut app, config_entry("publisher.REPOSITORY", "owner/repo", "owner/repo", "string", false));
+        app.open_config_editor();
+        assert_eq!(app.edit_kind, EditKind::Text);
+
+        // A secret always gets the plain text field, whatever its inferred type --
+        // there's nothing meaningful to check/step/cycle in a value that is never shown.
+        select_config_entry(
+            &mut app,
+            config_entry("ledgers.ergo.WALLET_MNEMONIC", "word word word", "word word word", "string", true),
+        );
+        app.open_config_editor();
+        assert_eq!(app.edit_kind, EditKind::Text);
+        assert!(app.input.is_empty());
+    }
+
+    #[test]
+    fn arrow_keys_toggle_a_checkbox_both_ways() {
+        let mut app = App::default();
+        app.edit_kind = EditKind::Bool;
+        app.input = "false".to_string();
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "true");
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "false");
+    }
+
+    #[test]
+    fn arrow_keys_step_a_number_preserving_int_vs_float_shape() {
+        let mut app = App::default();
+        app.edit_kind = EditKind::Number;
+
+        app.input = "30".to_string();
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "31");
+        app.adjust_edit_value(-1);
+        assert_eq!(app.input, "30");
+
+        app.input = "2.5".to_string();
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "3.5");
+    }
+
+    #[test]
+    fn arrow_keys_cycle_an_enum_and_wrap_at_both_ends() {
+        let mut app = App::default();
+        app.edit_kind = EditKind::Enum(vec!["auto".to_string(), "always".to_string(), "never".to_string()]);
+
+        app.input = "auto".to_string();
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "always");
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "never");
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "auto", "cycling past the last option wraps to the first");
+        app.adjust_edit_value(-1);
+        assert_eq!(app.input, "never", "cycling before the first option wraps to the last");
+    }
+
+    #[test]
+    fn typing_in_a_filter_narrows_results_live_without_pressing_enter() {
+        let mut app = App::default();
+        app.config_all = vec![
+            config_entry("network.GATEWAY_PORT", "5000", "5000", "number", false),
+            config_entry("packer.local", "false", "false", "bool", false),
+        ];
+        app.config = StatefulList::with_items(app.config_all.clone());
+        app.input_mode = InputMode::FilterConfig;
+
+        app.input = "network".to_string();
+        app.on_input_changed();
+        assert_eq!(app.config.items.len(), 1);
+        assert_eq!(app.config.items[0].path, "network.GATEWAY_PORT");
+        // Live narrowing shouldn't require Enter to have been pressed.
+        assert_eq!(app.config_filter, "network");
+    }
+
+    #[test]
+    fn typing_while_editing_a_value_does_not_touch_the_filter() {
+        let mut app = App::default();
+        app.config_filter = "kept".to_string();
+        app.input_mode = InputMode::EditConfig;
+        app.input = "anything".to_string();
+        app.on_input_changed();
+        assert_eq!(app.config_filter, "kept");
     }
 
     #[test]
