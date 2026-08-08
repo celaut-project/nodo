@@ -66,7 +66,6 @@ def create_tables(cursor):
                 ip TEXT,
                 port INTEGER,
                 slot_id INTEGER,
-                estimated_invalid_after INTEGER DEFAULT NULL,
                 FOREIGN KEY (slot_id) REFERENCES slot (id)
             )
         ''',
@@ -166,7 +165,6 @@ def create_tables(cursor):
         "last_ts": "INTEGER DEFAULT NULL",
         "last_seq": "INTEGER DEFAULT NULL",
     })
-    ensure_columns(cursor, "uri", {"estimated_invalid_after": "INTEGER DEFAULT NULL"})
 
 
 def ensure_columns(cursor, table_name: str, columns: dict) -> None:
