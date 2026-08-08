@@ -39,7 +39,9 @@ def create_tables(cursor):
                 reputation_proof_id TEXT,
                 reputation_score INTEGER,
                 reputation_index INTEGER,
-                last_index_on_ledger INTEGER
+                last_index_on_ledger INTEGER,
+                last_ts INTEGER DEFAULT NULL,
+                last_seq INTEGER DEFAULT NULL
             )
         ''',
         "clients": '''
@@ -64,6 +66,7 @@ def create_tables(cursor):
                 ip TEXT,
                 port INTEGER,
                 slot_id INTEGER,
+                estimated_invalid_after INTEGER DEFAULT NULL,
                 FOREIGN KEY (slot_id) REFERENCES slot (id)
             )
         ''',
@@ -159,6 +162,11 @@ def create_tables(cursor):
     # `CREATE TABLE IF NOT EXISTS` never alters an existing table, so new columns
     # must be back-filled here. Each entry is idempotent (skipped when present).
     ensure_columns(cursor, "local_instances", {"envs": "TEXT DEFAULT NULL"})
+    ensure_columns(cursor, "peer", {
+        "last_ts": "INTEGER DEFAULT NULL",
+        "last_seq": "INTEGER DEFAULT NULL",
+    })
+    ensure_columns(cursor, "uri", {"estimated_invalid_after": "INTEGER DEFAULT NULL"})
 
 
 def ensure_columns(cursor, table_name: str, columns: dict) -> None:

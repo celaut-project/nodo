@@ -58,11 +58,6 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
-        self.SignPublicKey = channel.stream_stream(
-                '/celaut.Gateway/SignPublicKey',
-                request_serializer=buffer__pb2.Buffer.SerializeToString,
-                response_deserializer=buffer__pb2.Buffer.FromString,
-                )
         self.ModifyServiceSystemResources = channel.stream_stream(
                 '/celaut.Gateway/ModifyServiceSystemResources',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
@@ -150,12 +145,6 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def SignPublicKey(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def ModifyServiceSystemResources(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -232,11 +221,6 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'Payable': grpc.stream_stream_rpc_method_handler(
                     servicer.Payable,
-                    request_deserializer=buffer__pb2.Buffer.FromString,
-                    response_serializer=buffer__pb2.Buffer.SerializeToString,
-            ),
-            'SignPublicKey': grpc.stream_stream_rpc_method_handler(
-                    servicer.SignPublicKey,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
@@ -415,23 +399,6 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/Payable',
-            buffer__pb2.Buffer.SerializeToString,
-            buffer__pb2.Buffer.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
-
-    @staticmethod
-    def SignPublicKey(request_iterator,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/SignPublicKey',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

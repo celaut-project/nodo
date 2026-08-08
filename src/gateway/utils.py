@@ -1,7 +1,9 @@
+import itertools
 import os
 import shutil
 import threading
-from typing import Generator, Optional
+import time
+from typing import Generator, List, Optional
 
 import netifaces as ni
 
@@ -9,13 +11,18 @@ from src.payment_system.ledgers import local_payment_methods, register_local_con
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
 from src.utils.config import ConfigManager
-from src.utils.utils import to_gas_amount
+from src.utils.utils import get_local_ip_from_network, get_network_name, to_gas_amount
 
 env_manager = ConfigManager()
 
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
+
+# Anti-replay sequence counter for this node's signed Peer messages (see
+# node_identity.canonical_peer_payload). Reset on restart; that is fine, since
+# verifiers key on (ts, seq) together and ts moves forward across restarts too.
+_seq_counter = itertools.count(1)
 
 
 # Guards the lazy recovery below: registering a contract spins up the ledger runtime
@@ -53,10 +60,7 @@ def _local_payment_contracts() -> list:
         return list(local_payment_methods())
 
 
-def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
-    log.LOGGER(f'Generating gateway instance for the network {network}')
-    instance = celaut.Instance()
-
+def _uri_for_network(network: str) -> celaut.Instance.Uri:
     uri = celaut.Instance.Uri()
     if network == "localhost":
         uri.ip = "127.0.0.1"
@@ -70,11 +74,76 @@ def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
             raise Exception('Error generating gateway instance --> ' + str(e))
     else:
         raise ValueError('Network interface name cannot be None')
-
     uri.port = GATEWAY_PORT
+    return uri
+
+
+def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
+    """Every address this node is reachable at, not just one caller's subnet.
+
+    Before issue #236, GetPeerInfo picked the single interface matching whoever
+    asked (``get_network_name(direction=caller_ip)``), so two callers on different
+    subnets each learned only the one address matching their own -- never the
+    other. ``uri_slot.uri`` is already ``repeated``, so announcing every valid
+    address under the one gateway port needs no schema change.
+    """
+    seen_ips = set()
+    uris: List[celaut.Instance.Uri] = []
+    for interface in ni.interfaces():
+        try:
+            ip = get_local_ip_from_network(interface, allow_link_local=False)
+        except (KeyError, ValueError):
+            continue
+        if ip in ("127.0.0.1", "::1") or ip in seen_ips:
+            continue
+        seen_ips.add(ip)
+        uris.append(celaut.Instance.Uri(ip=ip, port=GATEWAY_PORT))
+
+    if not uris:
+        # No usable non-loopback interface (an isolated dev box, say): fall back to
+        # loopback rather than announce nothing.
+        uris = [_uri_for_network(get_network_name(direction="0.0.0.0"))]
+    return uris
+
+
+def _sign_peer(peer: celaut_pb2.Peer) -> None:
+    """Sign ``peer`` with this node's identity key, if one is configured yet.
+
+    Issue #236: this signature is what a verifier checks instead of the old
+    interactive ``SignPublicKey`` ownership challenge -- GetPeerInfo alone now
+    proves the sender controls ``public_key``. A node with no identity mnemonic
+    configured (see node_identity.get_identity_mnemonic) is left unsigned, and
+    peers fall back to treating it as a legacy, address-identified peer.
+    """
+    from src.reputation_system.node_identity import (
+        canonical_peer_payload,
+        get_node_public_key_hex,
+        sign_peer_payload,
+    )
+
+    public_key_hex = get_node_public_key_hex()
+    if not public_key_hex:
+        return
+
+    uris = [f"{uri.ip}:{uri.port}" for slot in peer.instance.uri_slot for uri in slot.uri]
+    ts = int(time.time())
+    seq = next(_seq_counter)
+    signature = sign_peer_payload(canonical_peer_payload(public_key_hex, ts, seq, uris))
+    if not signature:
+        return
+
+    peer.public_key = public_key_hex
+    peer.signature = signature
+    peer.ts = ts
+    peer.seq = seq
+
+
+def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
+    instance = celaut.Instance()
+
     uri_slot = celaut.Instance.Uri_Slot()
     uri_slot.internal_port = GATEWAY_PORT
-    uri_slot.uri.append(uri)
+    uri_slot.uri.extend(uris)
     instance.uri_slot.append(uri_slot)
 
     slot = celaut.Service.Api.Slot()
@@ -107,10 +176,32 @@ def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
     reputation_proofs = list(local_proofs())
     log.LOGGER(f'Using {len(reputation_proofs)} local reputation proofs')
 
-    return celaut_pb2.Peer(
+    peer = celaut_pb2.Peer(
         reputation_proofs=reputation_proofs,
         instance=instance
     )
+    _sign_peer(peer)
+    return peer
+
+
+def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
+    """A Peer advertising a single, specific network's address.
+
+    For internal, non-discovery uses that need exactly one network's address (a
+    container's bridge network, a service's own gateway config) -- P2P discovery
+    uses :func:`generate_full_node_peer_info` instead.
+    """
+    log.LOGGER(f'Generating gateway instance for the network {network}')
+    return _build_peer([_uri_for_network(network)])
+
+
+def generate_full_node_peer_info() -> celaut_pb2.Peer:
+    """A Peer advertising every address this node is reachable at, signed with its
+    identity key. Used for peer-to-peer discovery (GetPeerInfo, IntroducePeer
+    self-announce) -- see :func:`generate_node_peer_info` for the single-network form.
+    """
+    log.LOGGER('Generating gateway instance for all reachable interfaces')
+    return _build_peer(_uris_for_all_interfaces())
 
 
 # If the service is not on the registry, save it.

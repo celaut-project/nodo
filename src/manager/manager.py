@@ -207,7 +207,12 @@ def _peer_slot_transport_payloads(peer: celaut_pb2.Peer, peer_id: str) -> Dict[i
     return payloads_by_port
 
 def _known_peer_id(instance: celaut_pb2.Instance) -> Optional[str]:
-    """Resolve the id of an already-registered peer from the URIs it advertises."""
+    """Resolve the id of an already-registered peer from the URIs it advertises.
+
+    Legacy fallback path only: a signed ``Peer`` (public_key + valid signature) is
+    identified by its public key directly (see :func:`_verified_peer_public_key`),
+    with no need to look anything up by address.
+    """
     from src.database.access_functions.peers import get_peer_id_by_ip
 
     for slot in instance.uri_slot:
@@ -219,21 +224,74 @@ def _known_peer_id(instance: celaut_pb2.Instance) -> Optional[str]:
     return None
 
 
+def _peer_uris(instance: celaut_pb2.Instance) -> List[str]:
+    return [f"{uri.ip}:{uri.port}" for slot in instance.uri_slot for uri in slot.uri]
+
+
+def _verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
+    """The sender's public key, if ``peer`` carries a signature that verifies against it.
+
+    Issue #236: a node's identity is its public key, proven by a signature over the
+    canonical encoding of (public_key, ts, seq, its own URIs) -- no interactive
+    challenge needed. Returns None for a peer with no public_key/signature at all (a
+    peer that predates this, or one with no identity mnemonic configured), so callers
+    can fall back to the legacy address-based identity.
+    """
+    if not peer.public_key or not peer.signature:
+        return None
+
+    from src.reputation_system.node_identity import canonical_peer_payload, verify_peer_payload
+
+    payload = canonical_peer_payload(
+        peer.public_key, peer.ts, peer.seq, _peer_uris(peer.instance)
+    )
+    if not verify_peer_payload(peer.public_key, payload, peer.signature):
+        log.LOGGER(f"Peer signature failed to verify for claimed public_key {peer.public_key}.")
+        return None
+    return peer.public_key
+
+
+def _passes_anti_replay(peer_id: str, ts: int, seq: int) -> bool:
+    """Reject a signed Peer message that is not strictly newer than the last accepted.
+
+    Guards only against a downgrade to a stale address; the claim itself (this
+    node's own public_key, freely signed by itself) is safe to accept from anyone
+    who relays it, so there is no check beyond monotonicity.
+    """
+    last = sc.get_peer_last_ts_seq(peer_id=peer_id)
+    if last is None:
+        return True
+    return (int(ts), int(seq)) > last
+
+
 # Insert the instance if it does not exist, refresh it otherwise.
 def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
-    if sc.instance_exists(peer.instance):
-        # A peer we already know is re-introducing itself. Dropping the message here
-        # would freeze whatever it advertised the *first* time, so a peer that had no
-        # payment contract back then (no wallet yet, ledger init skipped, ...) would
-        # stay unpayable forever. Re-run the same registration path instead.
+    verified_public_key = _verified_peer_public_key(peer)
+    if verified_public_key:
+        peer_id = verified_public_key
+        if sc.peer_exists(peer_id=peer_id):
+            if not _passes_anti_replay(peer_id, peer.ts, peer.seq):
+                log.LOGGER(f"Peer {peer_id} sent a stale (ts, seq); ignoring the update.")
+                return peer_id
+            update_peer_instance(peer=peer, peer_id=peer_id)
+            sc.set_peer_last_ts_seq(peer_id=peer_id, ts=peer.ts, seq=peer.seq)
+            return peer_id
+        # Falls through to the fresh-registration path below with peer_id already
+        # resolved to the verified public key (no uuid4(), no address lookup).
+    elif sc.instance_exists(peer.instance):
+        # A peer we already know is re-introducing itself, unsigned (legacy). Dropping
+        # the message here would freeze whatever it advertised the *first* time, so a
+        # peer that had no payment contract back then (no wallet yet, ledger init
+        # skipped, ...) would stay unpayable forever. Re-run the same registration path.
         peer_id = _known_peer_id(peer.instance)
         if not peer_id:
             log.LOGGER("Peer instance already exists but its id could not be resolved.")
             return None
         update_peer_instance(peer=peer, peer_id=peer_id)
         return peer_id
+    else:
+        peer_id = str(uuid4())
 
-    peer_id = str(uuid4())
     protocol_stack: bytes = (
         peer.instance.api.slot[0].SerializeToString()
         if peer.instance.api.slot
@@ -243,6 +301,9 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
 
     if not sc.add_peer(peer_id=peer_id, protocol_stack=protocol_stack):
         return None
+
+    if verified_public_key:
+        sc.set_peer_last_ts_seq(peer_id=peer_id, ts=peer.ts, seq=peer.seq)
 
     # Slots
     for slot in peer.instance.uri_slot:
@@ -284,12 +345,9 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str):
     # It is assumed that protocol stack and metadata have not been modified.
     slot_transport_payloads = _peer_slot_transport_payloads(peer=peer, peer_id=peer_id)
 
-    # Slots. Clear the peer's existing slots first: this function now runs on
-    # every re-handshake of a known peer (reconnect / pay-time refresh /
-    # re-introduction), and add_slot is a plain INSERT, so without this the
-    # slot+uri rows would duplicate on each call. Re-adding from the fresh
-    # advertisement also drops any slot the peer no longer offers.
-    sc.clear_peer_slots(peer_id=peer_id)
+    # Slots. add_slot upserts on (peer_id, internal_port) and merges each URI, so
+    # re-registering a known peer accumulates its reachable addresses instead of
+    # wiping them down to whatever it happened to advertise this time (issue #236).
     for slot in peer.instance.uri_slot:
         payload = slot_transport_payloads.get(slot.internal_port)
         if payload is None:

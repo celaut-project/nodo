@@ -8,12 +8,13 @@ is implemented here — to check, in order:
      (:func:`_boxes_off_canonical_contract`),
   2. each box carries the canonical R4/R5/R7 register layout plus a reputation
      token (:func:`_validate_box_structure`), and
-  3. the peer *cryptographically* controls the R7 owner ``propositionBytes`` via
-     a fresh gRPC ``Gateway.SignPublicKey`` challenge
-     (:func:`_challenge_peer_ownership`).
+  3. the peer's identity public key (its ``peer_id``, since issue #236) matches
+     the R7 owner ``propositionBytes`` -- a direct byte comparison, since the
+     peer already proved control of that public key by signing its
+     ``GetPeerInfo`` response (see ``manager._verified_peer_public_key``).
 
-It is strictly read-only: only Ergo-explorer reads and a single gRPC challenge
-round-trip against the peer. No transaction is built or broadcast.
+It is strictly read-only: only Ergo-explorer reads. No transaction is built or
+broadcast, and no RPC round-trip against the peer is needed anymore.
 """
 
 import sqlite3
@@ -22,12 +23,12 @@ from typing import Optional
 from src.utils.config import ConfigManager
 from src.reputation_system.contracts.ergo.proof_validation import (
     _boxes_off_canonical_contract,
-    _challenge_peer_ownership,
     _decode_coll_byte_hex,
     _extract_register_value,
     _get_unspent_boxes_by_token,
     _validate_box_structure,
 )
+from src.reputation_system.node_identity import node_proposition_hex
 
 
 def _peer_reputation_proof_id(peer_id: str) -> Optional[str]:
@@ -107,21 +108,18 @@ def verify_reputation(peer_id: str) -> bool:
     owner_proposition_hex = owner_propositions.pop()
     print(f"  R7 owner propositionBytes: {owner_proposition_hex[:24]}...", flush=True)
 
-    print(
-        "  Challenging the peer to sign a fresh nonce (gRPC SignPublicKey) ...",
-        flush=True,
-    )
-    if not _challenge_peer_ownership(peer_id, owner_proposition_hex):
+    if owner_proposition_hex != node_proposition_hex(peer_id):
         print(
-            "FAIL: peer did not prove control of the R7 owner key "
-            "(unreachable, RPC error, or signature did not verify — see node log).",
+            f"FAIL: peer {peer_id}'s identity public key does not match the R7 owner "
+            "(the peer never proved this key over a signed GetPeerInfo, or peer_id "
+            "is a legacy, address-identified id).",
             flush=True,
         )
         return False
 
     print(
         f"PASS: peer {peer_id} owns reputation proof {proof_id} "
-        "(canonical contract + valid structure + verified ownership challenge).",
+        "(canonical contract + valid structure + R7 owner matches its identity key).",
         flush=True,
     )
     return True

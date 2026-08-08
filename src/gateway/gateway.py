@@ -8,13 +8,13 @@ from src.gateway.iterables.observe_iterable import ObserveIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type
 from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
-from src.gateway.utils import generate_node_peer_info
+from src.gateway.utils import generate_full_node_peer_info
 from src.manager.manager import add_peer_instance, modify_gas_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_gas, \
     hotplug, get_sysresources
 from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import logger as log
-from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name
+from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
@@ -78,10 +78,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def GetPeerInfo(self, request_iterator, context, **kwargs):
         log.LOGGER(f'Request for instance by {context.peer()}')
-        ip = get_only_the_ip_from_context(context_peer=context.peer())
-        gateway_instance = generate_node_peer_info(
-                network=get_network_name(direction=ip)
-            )
+        gateway_instance = generate_full_node_peer_info()
         yield from bee.serialize_to_buffer(gateway_instance)
 
     def IntroducePeer(self, request_iterator, context, **kwargs):
@@ -221,70 +218,3 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def Observe(self, request_iterator, context, **kwargs):
         yield from ObserveIterable(request_iterator, context)
-
-    # Ownership-challenge counterpart: a peer proves it controls the raw propositionBytes
-    # (R7 owner) of a reputation proof by signing our random challenge. This is NOT a
-    # generic "sign an arbitrary public key" operation.
-    _MAX_PROPOSITION_BYTES = 4096
-    _MAX_CHALLENGE_BYTES = 4096
-
-    def SignPublicKey(self, request_iterator, context, **kwargs):
-        try:
-            log.LOGGER('Ownership challenge: SignPublicKey request.')
-
-            sign_request = next(bee.parse_from_buffer(
-                request_iterator=request_iterator,
-                indices=celaut_pb2.SignRequest,
-                partitions_message_mode=True
-            ), None)
-
-            if sign_request is None:
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("Empty SignPublicKey request.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
-                return
-
-            proposition_hex = (sign_request.public_key or "").strip()
-            try:
-                proposition_bytes = bytes.fromhex(proposition_hex)
-            except (ValueError, TypeError):
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("public_key is not valid hex propositionBytes.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
-                return
-            challenge = sign_request.to_sign or ""
-
-            if not proposition_bytes or len(proposition_bytes) > self._MAX_PROPOSITION_BYTES:
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("proposition_bytes missing or too large.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
-                return
-            if not challenge or len(challenge) > self._MAX_CHALLENGE_BYTES:
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("challenge (to_sign) missing or too large.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
-                return
-
-            from src.reputation_system.contracts.ergo.proof_validation import sign_message
-
-            signed_hex = sign_message(
-                proposition_bytes=proposition_bytes,
-                message=challenge,
-            )
-
-            if not signed_hex:
-                # We do not control those proposition bytes: controlled refusal, not a crash.
-                context.set_code(grpc.StatusCode.PERMISSION_DENIED)
-                context.set_details("Challenged proposition bytes are not owned by this node.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
-                return
-
-            yield from bee.serialize_to_buffer(
-                celaut_pb2.SignResponse(signed=signed_hex)
-            )
-
-        except Exception as e:
-            log.LOGGER(f'Error in SignPublicKey method: {e}')
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details('SignPublicKey failed.')
-            yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))

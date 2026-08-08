@@ -1,5 +1,7 @@
 import os
 import socket
+import threading
+import time
 import typing
 import ipaddress
 from typing import Generator, Optional
@@ -301,12 +303,37 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
     )
 
 
+_IS_OPEN_CACHE_TTL_SECONDS = 30
+_is_open_cache: typing.Dict[typing.Tuple[str, int], typing.Tuple[bool, float]] = {}
+_is_open_cache_lock = threading.Lock()
+
+
 def is_open(ip: str, port: int) -> bool:
+    """Whether ``ip:port`` accepts a TCP connection, cached for a short while.
+
+    Each check is a 1s-timeout connect, and generate_uris_by_peer_id (and the ~15
+    call sites that take its first result) run it on every call -- accumulating
+    several addresses per peer (issue #236) multiplies how often that timeout gets
+    paid. A short TTL trades a little staleness for not re-paying it on every call
+    within the same handful of seconds.
+    """
+    key = (ip, port)
+    now = time.monotonic()
+
+    with _is_open_cache_lock:
+        cached = _is_open_cache.get(key)
+        if cached is not None and cached[1] > now:
+            return cached[0]
+
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(1)
         sock.connect((ip, port))
         sock.close()
-        return True
+        result = True
     except Exception:
-        return False
+        result = False
+
+    with _is_open_cache_lock:
+        _is_open_cache[key] = (result, now + _IS_OPEN_CACHE_TTL_SECONDS)
+    return result
