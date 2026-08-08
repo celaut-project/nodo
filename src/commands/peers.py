@@ -1,5 +1,4 @@
 import sqlite3
-from hashlib import sha3_256
 
 from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
@@ -8,8 +7,6 @@ from src.database.sql_connection import SQLConnection
 
 env_manager = ConfigManager()
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
-ERGO_LEDGER = "ergo"
-ERGO_CONTRACT_HASH = sha3_256("proveDlog(decodePoint())".encode("utf-8")).hexdigest()
 
 sq = SQLConnection()
 
@@ -74,8 +71,7 @@ def list_peers():
                 protocol_stack_tags = "N/A"
 
             gas = int(gas_str)
-            gas_price = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_hash=ERGO_LEDGER)
-            gas_on_ergs = (gas/gas_price) if gas_price else 0
+            contracts = sq.get_peer_payment_contracts(peer_id)
 
             # Section: General
             print(f"ID: {peer_id}")
@@ -86,10 +82,23 @@ def list_peers():
             # Section: Client & Gas
             print("[Client & Gas]")
             print(f"  Remote Client ID: {remote_client_id}")
-            print(f"  Gas/ERG: {ssformat(gas_price)}")
             print(f"  Gas: {ssformat(gas)}")
-            print(f"       {ssformat(gas_on_ergs)} nanoERG")
             print(f"  Gas Last Update: {gas_last_update or 'None'}")
+            print()
+
+            # Section: Payment contracts
+            # Every payment contract instance this peer has registered, across
+            # every ledger and contract type -- not just a single hardcoded one.
+            print("[Payment Contracts]")
+            if contracts:
+                for contract in contracts:
+                    print(f"  Ledger: {contract['ledger_tag']}")
+                    print(f"    Contract hash: {contract['contract_hash']}")
+                    print(f"    Address:       {contract['address'] or 'N/A'}")
+                    gas_price = contract['gas_price']
+                    print(f"    Gas price:     {ssformat(gas_price) if gas_price is not None else 'N/A'}")
+            else:
+                print("  No payment contract registered for this peer.")
             print()
 
             # Section: Advertised rates
