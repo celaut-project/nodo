@@ -49,26 +49,12 @@ _INTERFACE_PREFIX_PRIORITY = (
     "eth",
 )
 
-_VIRTUAL_INTERFACE_PREFIXES = (
-    "docker",
-    "br-",
-    "veth",
-    "virbr",
-    "zt",
-    "tailscale",
-    "tun",
-    "tap",
-    "wg",
-    "vmnet",
-    "vboxnet",
-)
-
 
 def _interface_priority(interface: str) -> tuple[int, int, str]:
     normalized = (interface or "").strip().lower()
     if normalized in {"lo", "localhost"}:
         return (3, len(normalized), normalized)
-    if normalized.startswith(_VIRTUAL_INTERFACE_PREFIXES):
+    if utils.is_virtual_interface(normalized):
         return (2, len(normalized), normalized)
     if normalized.startswith(_INTERFACE_PREFIX_PRIORITY):
         return (0, len(normalized), normalized)

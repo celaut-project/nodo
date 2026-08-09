@@ -167,6 +167,32 @@ def _is_link_local_ip(ip: str) -> bool:
         return False
 
 
+_VIRTUAL_INTERFACE_PREFIXES = (
+    "docker",
+    "br-",
+    "veth",
+    "virbr",
+    "zt",
+    "tailscale",
+    "tun",
+    "tap",
+    "wg",
+    "vmnet",
+    "vboxnet",
+)
+
+
+def is_virtual_interface(interface: str) -> bool:
+    """True for container/VPN/VM interfaces (docker0, br-*, veth*, tailscale0, ...).
+
+    Their addresses are real on the host but not a way anyone else reaches this
+    node through, so callers enumerating interfaces to advertise or prioritise a
+    LAN address should skip them -- otherwise a Docker bridge IP (e.g.
+    172.17.0.1) gets treated the same as the actual LAN interface.
+    """
+    return (interface or "").strip().lower().startswith(_VIRTUAL_INTERFACE_PREFIXES)
+
+
 def get_local_ip_from_network(network: str, *, allow_link_local: bool = True) -> str:
     addresses = ni.ifaddresses(network)
 

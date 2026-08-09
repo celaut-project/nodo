@@ -30,6 +30,14 @@ class UtilsNetworkResolutionTests(unittest.TestCase):
             with self.assertRaisesRegex(KeyError, "without link-local"):
                 utils.get_local_ip_from_network("eth0", allow_link_local=False)
 
+    def test_is_virtual_interface_flags_container_and_vpn_interfaces(self):
+        for name in ("docker0", "br-abc123", "veth1234", "virbr0", "tailscale0", "wg0"):
+            self.assertTrue(utils.is_virtual_interface(name), name)
+
+    def test_is_virtual_interface_leaves_real_interfaces_alone(self):
+        for name in ("eth0", "wlan0", "en0", "lo"):
+            self.assertFalse(utils.is_virtual_interface(name), name)
+
     def test_get_network_name_handles_raw_ipv6_without_truncating_on_colon(self):
         with patch.object(utils.ni, "interfaces", return_value=["eth0"]), patch.object(
             utils,
