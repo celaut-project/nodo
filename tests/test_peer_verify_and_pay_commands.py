@@ -26,7 +26,7 @@ class VerifyReputationCommandTests(unittest.TestCase):
             _validate_box_structure=lambda box: True,
             _extract_register_value=lambda box, reg: "owner-r7-raw",
             _decode_coll_byte_hex=lambda value: "aabbccddeeff00112233",
-            _challenge_peer_ownership=lambda peer_id, owner: True,
+            node_proposition_hex=lambda peer_id: "aabbccddeeff00112233",
         )
         defaults.update(overrides)
         return [mock.patch.object(vr, name, new=fn)
@@ -54,16 +54,17 @@ class VerifyReputationCommandTests(unittest.TestCase):
     def test_fail_when_box_structure_invalid(self):
         self.assertFalse(self._run(_validate_box_structure=lambda box: False))
 
-    def test_fail_when_ownership_challenge_fails(self):
-        # This is the crypto gate: structure is fine, but the peer can't sign.
+    def test_fail_when_identity_key_does_not_match_owner(self):
+        # This is the crypto gate: structure is fine, but the peer's identity
+        # public key (its peer_id) does not match the R7 owner.
         called = {}
 
-        def challenge(peer_id, owner):
-            called["args"] = (peer_id, owner)
-            return False
+        def node_proposition_hex(peer_id):
+            called["peer_id"] = peer_id
+            return "some-other-owner"
 
-        self.assertFalse(self._run(_challenge_peer_ownership=challenge))
-        self.assertEqual(called["args"][0], "peer-1")
+        self.assertFalse(self._run(node_proposition_hex=node_proposition_hex))
+        self.assertEqual(called["peer_id"], "peer-1")
 
 
 class PayCommandTests(unittest.TestCase):

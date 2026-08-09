@@ -1,11 +1,12 @@
 """Tests for the recurring rates a node advertises to its peers.
 
-The rates ride inside ``Service.Api.Slot.gas_amount_per_call`` of the gateway slot,
-which is exactly the slot a receiving peer stores verbatim in
-``peer.protocol_stack`` (``manager.add_peer_instance``) and that ``submit_to_ledger``
-reconstructs for the reputation JSON. So the test that matters is the round trip:
-the rates have to survive being serialized and parsed back the way those two paths
-do it, or the whole mechanism is decoration.
+The rates ride in ``Peer.gas_amount_per_call`` -- node-wide, not per-address, since
+they do not depend on which of a node's addresses you reach it through. A receiving
+peer stores the whole message verbatim in ``peer.advertisement``
+(``manager.add_peer_instance``) and ``submit_to_ledger`` republishes it for the
+reputation JSON. So the test that matters is the round trip: the rates have to
+survive being serialized and parsed back the way those two paths do it, or the whole
+mechanism is decoration.
 """
 
 import unittest
@@ -93,23 +94,27 @@ class NodeAdvertisedRatesTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
-    """The rates must survive the two paths a peer's slot actually goes through."""
+    """The rates must survive the two paths a peer's advertisement goes through.
 
-    def _slot_with_rates(self) -> "celaut.Service.Api.Slot":
-        slot = celaut.Service.Api.Slot(
-            port=8090,
-            transport=celaut.Service.Api.Protocol(tags=["tcp"]),
-        )
+    They are node-wide, so they live on ``Peer`` itself rather than on any one
+    address: ``add_peer_instance`` stores the whole serialized ``Peer`` in
+    ``peer.advertisement``, and ``peers.py`` / ``submit_to_ledger`` read it back.
+    """
+
+    def _peer_with_rates(self) -> "celaut.Peer":
+        peer = celaut.Peer()
+        uri = peer.uri.add(ip="1.2.3.4", port=8090)
+        uri.transport.tags.append("tcp")
         with _config():
             for rate, gas in rates_module.node_advertised_rates().items():
-                slot.gas_amount_per_call[rate].n = str(gas)
-        return slot
+                peer.gas_amount_per_call[rate].n = str(gas)
+        return peer
 
-    def test_rates_survive_the_peer_protocol_stack_round_trip(self):
-        """add_peer_instance stores slot bytes; peers.py parses them back."""
-        stored = self._slot_with_rates().SerializeToString()
+    def test_rates_survive_the_advertisement_round_trip(self):
+        """add_peer_instance stores the Peer bytes; peers.py parses them back."""
+        stored = self._peer_with_rates().SerializeToString()
 
-        parsed = celaut.Service.Api.Slot()
+        parsed = celaut.Peer()
         parsed.ParseFromString(stored)
 
         self.assertEqual(
@@ -120,29 +125,26 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
                 "tunnel_per_kb": "1",
             },
         )
-        # The rest of the slot is untouched by carrying rates.
-        self.assertEqual(parsed.port, 8090)
-        self.assertEqual(list(parsed.transport.tags), ["tcp"])
+        # The addresses are untouched by carrying rates alongside them.
+        self.assertEqual(parsed.uri[0].port, 8090)
+        self.assertEqual(list(parsed.uri[0].transport.tags), ["tcp"])
 
     def test_rates_reach_the_reputation_json(self):
-        """submit_to_ledger rebuilds the slot into an Instance and JSON-encodes it."""
-        parsed = celaut.Service.Api.Slot()
-        parsed.ParseFromString(self._slot_with_rates().SerializeToString())
+        """submit_to_ledger republishes the stored Peer and JSON-encodes it."""
+        parsed = celaut.Peer()
+        parsed.ParseFromString(self._peer_with_rates().SerializeToString())
 
-        instance = celaut.Instance()
-        instance.api.slot.append(parsed)
-        published = MessageToJson(instance)
+        published = MessageToJson(parsed)
 
         self.assertIn("maintenance_max_per_second", published)
         self.assertIn("tunnel_per_kb", published)
 
-    def test_a_slot_from_an_older_peer_has_no_rates_and_that_is_fine(self):
+    def test_a_peer_from_an_older_version_has_no_rates_and_that_is_fine(self):
         """Peers predating this feature must not break the reader."""
-        old = celaut.Service.Api.Slot(
-            port=8090, transport=celaut.Service.Api.Protocol(tags=["tcp"])
-        )
+        old = celaut.Peer()
+        old.uri.add(ip="1.2.3.4", port=8090)
 
-        parsed = celaut.Service.Api.Slot()
+        parsed = celaut.Peer()
         parsed.ParseFromString(old.SerializeToString())
 
         self.assertEqual(dict(parsed.gas_amount_per_call), {})
