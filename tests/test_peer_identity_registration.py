@@ -57,24 +57,22 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         self.conn.close()
         os.unlink(self.db_path)
 
-    def _peer(self, uris, *, signed=True, ts=100, seq=1, contract=b"HONEST"):
+    def _peer(self, uris, *, signed=True, ts=100, contract=b"HONEST"):
         peer = celaut_pb2.Peer()
         for ip, port in uris:
-            slot = peer.instance.uri_slot.add()
-            slot.internal_port = 9999
-            slot.uri.add(ip=ip, port=port)
-        api_slot = peer.instance.api.slot.add()
+            peer.uri.add(ip=ip, port=port)
+        api_slot = peer.api.slot.add()
         api_slot.port = 9999
         api_slot.transport.tags.append("tcp")
-        gas_price = peer.instance.api.payment_contracts.add()
+        gas_price = peer.api.payment_contracts.add()
         gas_price.contract.ledger.formal = contract
         gas_price.gas_amount.n = "1"
         if signed:
-            peer.public_key, peer.ts, peer.seq = self.pubkey, ts, seq
+            peer.public_key, peer.ts = self.pubkey, ts
             peer.signature = bip_ecdsa_sign(
                 self.mnemonic,
                 ni.canonical_peer_payload(
-                    self.pubkey, ts, seq, ni.canonical_instance_digest(peer.instance), 0
+                    self.pubkey, ts, ni.canonical_peer_content_digest(peer.api, peer.uri)
                 ),
             )
         return peer
@@ -92,12 +90,12 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
 
     def test_swapped_payment_contract_is_rejected(self):
         peer = self._peer([("10.0.0.1", 9999)])
-        peer.instance.api.payment_contracts[0].contract.ledger.formal = b"ATTACKER"
+        peer.api.payment_contracts[0].contract.ledger.formal = b"ATTACKER"
         self.assertIsNone(manager._verified_peer_public_key(peer))
 
     def test_injected_address_is_rejected(self):
         peer = self._peer([("10.0.0.1", 9999)])
-        peer.instance.uri_slot[0].uri.add(ip="6.6.6.6", port=9999)
+        peer.uri.add(ip="6.6.6.6", port=9999)
         self.assertIsNone(manager._verified_peer_public_key(peer))
 
     def test_legacy_uuid_peer_is_adopted_keeping_its_state(self):
@@ -118,26 +116,26 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         self.assertEqual(rows[0][2], "client-abc")
 
     def test_a_newer_signed_announcement_drops_superseded_addresses(self):
-        manager.add_peer_instance(self._peer([("1.2.3.4", 9999)], ts=100, seq=1))
-        manager.add_peer_instance(self._peer([("5.6.7.8", 9999)], ts=200, seq=2))
+        manager.add_peer_instance(self._peer([("1.2.3.4", 9999)], ts=100))
+        manager.add_peer_instance(self._peer([("5.6.7.8", 9999)], ts=200))
         self.assertEqual(self._uris(self.pubkey), ["5.6.7.8"])
 
     def test_several_addresses_in_one_announcement_are_all_kept(self):
         manager.add_peer_instance(
-            self._peer([("5.6.7.8", 9999), ("9.9.9.9", 9999)], ts=100, seq=1)
+            self._peer([("5.6.7.8", 9999), ("9.9.9.9", 9999)], ts=100)
         )
         self.assertEqual(self._uris(self.pubkey), ["5.6.7.8", "9.9.9.9"])
 
     def test_a_replayed_announcement_cannot_prune_addresses(self):
-        manager.add_peer_instance(self._peer([("5.6.7.8", 9999)], ts=200, seq=2))
+        manager.add_peer_instance(self._peer([("5.6.7.8", 9999)], ts=200))
         # An attacker replays an older, genuinely signed message to push the peer
         # back to a stale address.
-        manager.add_peer_instance(self._peer([("1.2.3.4", 9999)], ts=100, seq=1))
+        manager.add_peer_instance(self._peer([("1.2.3.4", 9999)], ts=100))
         self.assertEqual(self._uris(self.pubkey), ["5.6.7.8"])
 
     def test_registration_is_idempotent(self):
-        manager.add_peer_instance(self._peer([("5.6.7.8", 9999)], ts=100, seq=1))
-        manager.add_peer_instance(self._peer([("5.6.7.8", 9999)], ts=200, seq=2))
+        manager.add_peer_instance(self._peer([("5.6.7.8", 9999)], ts=100))
+        manager.add_peer_instance(self._peer([("5.6.7.8", 9999)], ts=200))
         self.assertEqual(self._uris(self.pubkey), ["5.6.7.8"])
         self.assertEqual(
             self.conn.execute(

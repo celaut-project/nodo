@@ -287,14 +287,19 @@ message ServiceInstance {
 }
 
 message Peer {
+    message UriEphemeral {
+        string ip = 1;
+        int32 port = 2;
+        int64 expiry_unix_timestamp = 3;
+    }
+
     repeated Contract reputation_proofs = 1;
-    Instance instance = 2;
+    Service.Api api = 2;
+    repeated UriEphemeral uri = 3;
     // Node identity (issue #236): see celaut.proto's Peer for the full explanation.
-    string public_key = 3;
-    string signature = 4;
-    int64 ts = 5;
-    int64 seq = 6;
-    int64 estimated_invalid_after_unix_seconds = 7;
+    string public_key = 4;
+    string signature = 5;
+    int64 ts = 6;
 }
 
 message Client {

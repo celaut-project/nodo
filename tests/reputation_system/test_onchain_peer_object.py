@@ -61,14 +61,12 @@ class OnChainPeerObjectTests(unittest.TestCase):
         return ni.canonical_peer_payload(
             peer.public_key,
             peer.ts,
-            peer.seq,
-            ni.canonical_instance_digest(peer.instance),
-            peer.estimated_invalid_after_unix_seconds,
+            ni.canonical_peer_content_digest(peer.api, peer.uri),
         )
 
     def test_publishes_the_address(self):
         peer = self._publish()
-        self.assertEqual(peer.instance.uri_slot[0].uri[0].ip, PUBLIC_IP)
+        self.assertEqual(peer.uri[0].ip, PUBLIC_IP)
 
     def test_publishes_a_peer_envelope_not_a_bare_instance(self):
         peer = self._publish()
@@ -78,10 +76,10 @@ class OnChainPeerObjectTests(unittest.TestCase):
 
     def test_publishes_the_expiry_estimate(self):
         peer = self._publish(validity=86400)
-        self.assertEqual(peer.estimated_invalid_after_unix_seconds - peer.ts, 86400)
+        self.assertEqual(peer.uri[0].expiry_unix_timestamp - peer.ts, 86400)
 
     def test_no_expiry_is_published_when_none_is_configured(self):
-        self.assertEqual(self._publish(validity=0).estimated_invalid_after_unix_seconds, 0)
+        self.assertEqual(self._publish(validity=0).uri[0].expiry_unix_timestamp, 0)
 
     def test_the_published_key_is_the_r7_owner(self):
         # One mnemonic per node, so the identity signing R9 is the wallet owning R7.
@@ -97,14 +95,14 @@ class OnChainPeerObjectTests(unittest.TestCase):
         # Whoever relays the on-chain data must not be able to make a soon-to-expire
         # address look durable, nor strip the estimate.
         peer = self._publish()
-        peer.estimated_invalid_after_unix_seconds += 999_999
+        peer.uri[0].expiry_unix_timestamp += 999_999
         self.assertFalse(
             ni.verify_peer_payload(self._r7_owner_key(), self._payload_for(peer), peer.signature)
         )
 
     def test_a_swapped_address_breaks_the_signature(self):
         peer = self._publish()
-        peer.instance.uri_slot[0].uri[0].ip = "6.6.6.6"
+        peer.uri[0].ip = "6.6.6.6"
         self.assertFalse(
             ni.verify_peer_payload(self._r7_owner_key(), self._payload_for(peer), peer.signature)
         )

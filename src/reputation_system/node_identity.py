@@ -120,54 +120,42 @@ def _canonical_api_slot(slot) -> str:
     ])
 
 
-def canonical_instance_digest(instance) -> str:
+def canonical_peer_content_digest(api, uris) -> str:
     """A stable digest of everything a peer advertises about itself.
 
-    The signature has to cover the *whole* ``Instance``, not just its addresses:
+    The signature has to cover the *whole* advertisement, not just the addresses:
     ``api.payment_contracts`` is what decides where this node's money is sent, and
     ``api.slot`` carries the advertised rates. Leaving them unsigned let anyone take
     a legitimately signed ``Peer``, swap in their own payment contract, and have it
     accepted and stored (``add_contract`` is INSERT OR IGNORE, so the forged contract
-    lands *next to* the real one rather than replacing it).
+    lands *next to* the real one rather than replacing it). Each URI's own
+    ``expiry_unix_timestamp`` is included too, so it cannot be stripped (making a
+    soon-to-expire address look permanent) or extended (keeping peers pinned to an
+    address the signer knows is about to change).
 
     Built field by field rather than from ``SerializeToString()``, which protobuf does
     not guarantee to be canonical (field order, unknown fields, non-minimal varints).
     Every repeated element is sorted so the digest does not depend on the order a node
     happened to enumerate things in.
     """
-    uri_slots = sorted(
-        "{}>{}".format(
-            slot.internal_port,
-            ",".join(sorted(f"{uri.ip}:{uri.port}" for uri in slot.uri)),
-        )
-        for slot in instance.uri_slot
-    )
-    api_slots = sorted(_canonical_api_slot(slot) for slot in instance.api.slot)
-    contracts = sorted(_canonical_contract(gp) for gp in instance.api.payment_contracts)
+    uri_entries = sorted(f"{u.ip}:{u.port}:{u.expiry_unix_timestamp}" for u in uris)
+    api_slots = sorted(_canonical_api_slot(slot) for slot in api.slot)
+    contracts = sorted(_canonical_contract(gp) for gp in api.payment_contracts)
 
-    canonical = "|".join(["/".join(uri_slots), "/".join(api_slots), "/".join(contracts)])
+    canonical = "|".join(["/".join(uri_entries), "/".join(api_slots), "/".join(contracts)])
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def canonical_peer_payload(
-    public_key_hex: str,
-    ts: int,
-    seq: int,
-    instance_digest: str,
-    estimated_invalid_after_unix_seconds: int = 0,
-) -> str:
+def canonical_peer_payload(public_key_hex: str, ts: int, content_digest: str) -> str:
     """
     The exact string a ``Peer`` signature is computed over.
 
-    ``instance_digest`` comes from :func:`canonical_instance_digest`, so the signature
-    covers every advertised address, API slot and payment contract at once, and any
-    field added to ``Instance`` later is covered as soon as the digest accounts for it.
-
-    ``estimated_invalid_after_unix_seconds`` is part of the payload so it cannot be
-    stripped (making a soon-to-expire address look permanent) or extended (keeping
-    peers pinned to an address the signer knows is about to change).
+    ``content_digest`` comes from :func:`canonical_peer_content_digest`, so the
+    signature covers every advertised address (and its expiry), API slot and payment
+    contract at once, and any field added later is covered as soon as the digest
+    accounts for it.
     """
-    return f"{public_key_hex}|{ts}|{seq}|{instance_digest}|{estimated_invalid_after_unix_seconds}"
+    return f"{public_key_hex}|{ts}|{content_digest}"
 
 
 def sign_peer_payload(payload: str) -> Optional[str]:

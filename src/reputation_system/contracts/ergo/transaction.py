@@ -160,10 +160,10 @@ def _self_network_data() -> str:
     """Signed ``Peer`` JSON describing how to reach this node, for its self-pointing object.
 
     A ``Peer``, not a bare ``Instance``: the envelope carries the node's identity
-    (``public_key``), the ``signature`` over its addresses, the anti-replay
-    ``(ts, seq)`` and the address-expiry estimate -- so a reader gets from the ledger
-    the same self-verifying claim GetPeerInfo serves, rather than an unattributed list
-    of addresses (issue #236).
+    (``public_key``), the ``signature`` over its addresses, the anti-replay ``ts``
+    and the address-expiry estimate -- so a reader gets from the ledger the same
+    self-verifying claim GetPeerInfo serves, rather than an unattributed list of
+    addresses (issue #236).
 
     It is verifiable *against this very box*: R7 holds the owner propositionBytes,
     which are ``0008cd`` + the same public key (there is one mnemonic per node), so a
@@ -185,12 +185,12 @@ def _self_network_data() -> str:
 
     from protos import celaut_pb2
     from src.reputation_system.node_identity import (
-        canonical_instance_digest,
+        canonical_peer_content_digest,
         canonical_peer_payload,
         get_node_public_key_hex,
         sign_peer_payload,
     )
-    from src.utils.network import announced_address_expiry, get_local_ip, resolve_public_host
+    from src.utils.network import get_local_ip, resolve_public_host, uri_expiry
 
     try:
         outbound_ip = get_local_ip()
@@ -209,33 +209,23 @@ def _self_network_data() -> str:
     internal_port = int(env_manager.get("GATEWAY_PORT"))
     public_port = resolve_public_port(env_manager.get("network.PUBLIC_TCP_PORT", ""), internal_port)
     peer = celaut_pb2.Peer()
-    uri_slot = peer.instance.uri_slot.add()
-    uri_slot.internal_port = internal_port
-    uri = uri_slot.uri.add()
+    uri = peer.uri.add()
     uri.ip = host
     uri.port = public_port
 
     public_key_hex = get_node_public_key_hex()
     if public_key_hex:
         ts = int(time.time())
-        expiry = announced_address_expiry(host, ts)
-        # seq 0: the on-chain object is replaced by spending its box, so there is no
-        # stream of messages to order here. A P2P announcement (seq >= 1) always wins
-        # the (ts, seq) comparison against an equally-timestamped on-chain one, which
-        # is the right precedence -- it is the fresher channel.
+        uri.expiry_unix_timestamp = uri_expiry(ts)
         signature = sign_peer_payload(
             canonical_peer_payload(
-                public_key_hex, ts, 0,
-                canonical_instance_digest(peer.instance),
-                expiry,
+                public_key_hex, ts, canonical_peer_content_digest(peer.api, peer.uri),
             )
         )
         if signature:
             peer.public_key = public_key_hex
             peer.signature = signature
             peer.ts = ts
-            peer.seq = 0
-            peer.estimated_invalid_after_unix_seconds = expiry
     else:
         LOGGER("No node identity available; publishing the address unsigned.")
 

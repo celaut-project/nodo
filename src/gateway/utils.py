@@ -1,5 +1,4 @@
 import ipaddress
-import itertools
 import os
 import shutil
 import threading
@@ -19,11 +18,6 @@ env_manager = ConfigManager()
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
-
-# Anti-replay sequence counter for this node's signed Peer messages (see
-# node_identity.canonical_peer_payload). Reset on restart; that is fine, since
-# verifiers key on (ts, seq) together and ts moves forward across restarts too.
-_seq_counter = itertools.count(1)
 
 
 # Guards the lazy recovery below: registering a contract spins up the ledger runtime
@@ -188,7 +182,7 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     peers fall back to treating it as a legacy, address-identified peer.
     """
     from src.reputation_system.node_identity import (
-        canonical_instance_digest,
+        canonical_peer_content_digest,
         canonical_peer_payload,
         get_node_public_key_hex,
         sign_peer_payload,
@@ -198,21 +192,15 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     if not public_key_hex:
         return
 
-    from src.utils.network import announced_address_expiry
+    from src.utils.network import uri_expiry
 
     ts = int(time.time())
-    seq = next(_seq_counter)
-    announced = next(
-        (uri.ip for slot in peer.instance.uri_slot for uri in slot.uri), None
-    )
-    estimated_invalid_after_unix_seconds = announced_address_expiry(announced, ts)
+    expiry = uri_expiry(ts)
+    for uri in peer.uri:
+        uri.expiry_unix_timestamp = expiry
     signature = sign_peer_payload(
         canonical_peer_payload(
-            public_key_hex,
-            ts,
-            seq,
-            canonical_instance_digest(peer.instance),
-            estimated_invalid_after_unix_seconds,
+            public_key_hex, ts, canonical_peer_content_digest(peer.api, peer.uri)
         )
     )
     if not signature:
@@ -221,18 +209,9 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     peer.public_key = public_key_hex
     peer.signature = signature
     peer.ts = ts
-    peer.seq = seq
-    peer.estimated_invalid_after_unix_seconds = estimated_invalid_after_unix_seconds
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
-    instance = celaut.Instance()
-
-    uri_slot = celaut.Instance.Uri_Slot()
-    uri_slot.internal_port = GATEWAY_PORT
-    uri_slot.uri.extend(uris)
-    instance.uri_slot.append(uri_slot)
-
     slot = celaut.Service.Api.Slot()
     slot.port = GATEWAY_PORT
     slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
@@ -251,24 +230,37 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     for rate, gas in node_advertised_rates().items():
         slot.gas_amount_per_call[rate].n = str(gas)
 
-    instance.api.slot.append(slot)
+    peer = celaut_pb2.Peer()
+    peer.api.slot.append(slot)
+    peer.uri.extend(
+        celaut_pb2.Peer.UriEphemeral(ip=uri.ip, port=uri.port) for uri in uris
+    )
 
     payment_contracts = _local_payment_contracts()
     log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
     if payment_contracts:
-        instance.api.payment_contracts.extend(payment_contracts)
+        peer.api.payment_contracts.extend(payment_contracts)
 
     from src.reputation_system.fetch import local_proofs
 
     reputation_proofs = list(local_proofs())
     log.LOGGER(f'Using {len(reputation_proofs)} local reputation proofs')
+    peer.reputation_proofs.extend(reputation_proofs)
 
-    peer = celaut_pb2.Peer(
-        reputation_proofs=reputation_proofs,
-        instance=instance
-    )
     _sign_peer(peer)
     return peer
+
+
+def peer_gateway_instance(peer: celaut_pb2.Peer) -> celaut.Instance:
+    """Convert a ``Peer`` into the ``Instance`` shape ``ConfigurationFile.gateway``
+    expects. All of ``peer.uri`` is folded into one slot at ``GATEWAY_PORT``, since
+    that is the only internal port a self-generated ``Peer`` ever advertises."""
+    instance = celaut.Instance()
+    instance.api.CopyFrom(peer.api)
+    uri_slot = instance.uri_slot.add()
+    uri_slot.internal_port = GATEWAY_PORT
+    uri_slot.uri.extend(celaut.Instance.Uri(ip=u.ip, port=u.port) for u in peer.uri)
+    return instance
 
 
 def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
