@@ -187,7 +187,7 @@ def peer_deposits(debug_mode: bool = False):
         # passes, without waiting for it to become unreachable first -- which is the
         # whole point of announcing the estimate (issue #236 point 9). Anticipating the
         # change costs one GetPeerInfo; missing it costs a failed delegation or payment.
-        expiry = SQLConnection().get_peer_estimated_invalid_after_unix_seconds(peer_id=peer_id)
+        expiry = SQLConnection().get_peer_expiry_unix_timestamp(peer_id=peer_id)
         address_expired = bool(expiry) and expiry <= int(time.time())
         if address_expired and debug_mode:
             log.LOGGER(f"Peer {peer_id} announced its address expires at {expiry}; refreshing.")

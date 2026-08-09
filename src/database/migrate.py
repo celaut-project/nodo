@@ -40,9 +40,7 @@ def create_tables(cursor):
                 reputation_score INTEGER,
                 reputation_index INTEGER,
                 last_index_on_ledger INTEGER,
-                last_ts INTEGER DEFAULT NULL,
-                last_seq INTEGER DEFAULT NULL,
-                estimated_invalid_after_unix_seconds INTEGER DEFAULT NULL
+                last_ts INTEGER DEFAULT NULL
             )
         ''',
         "clients": '''
@@ -67,6 +65,7 @@ def create_tables(cursor):
                 ip TEXT,
                 port INTEGER,
                 slot_id INTEGER,
+                expiry_unix_timestamp INTEGER DEFAULT NULL,
                 FOREIGN KEY (slot_id) REFERENCES slot (id)
             )
         ''',
@@ -171,8 +170,9 @@ def create_tables(cursor):
     ensure_columns(cursor, "local_instances", {"envs": "TEXT DEFAULT NULL"})
     ensure_columns(cursor, "peer", {
         "last_ts": "INTEGER DEFAULT NULL",
-        "last_seq": "INTEGER DEFAULT NULL",
-        "estimated_invalid_after_unix_seconds": "INTEGER DEFAULT NULL",
+    })
+    ensure_columns(cursor, "uri", {
+        "expiry_unix_timestamp": "INTEGER DEFAULT NULL",
     })
     ensure_peer_address_uniqueness(cursor)
 

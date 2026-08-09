@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.gateway.utils import GATEWAY_PORT
-from src.gateway.utils import generate_node_peer_info
+from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.utils import logger as log
 from src.utils.config import ConfigManager
@@ -460,7 +460,7 @@ def _build_configuration_file(
 ) -> celaut.ConfigurationFile:
     cfg = celaut.ConfigurationFile()
     local_peer = generate_node_peer_info(network=NETWORK_BRIDGE_NAME)
-    cfg.gateway.CopyFrom(local_peer.instance)
+    cfg.gateway.CopyFrom(peer_gateway_instance(local_peer))
 
     if config:
         cfg.config.CopyFrom(config)

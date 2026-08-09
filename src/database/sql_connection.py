@@ -1155,7 +1155,7 @@ class SQLConnection(metaclass=Singleton):
 
     def add_slot(
         self,
-        slot: celaut_pb2.Instance.Uri_Slot,
+        slot,
         peer_id: str,
         transport_protocol: bytes,
     ):
@@ -1163,14 +1163,16 @@ class SQLConnection(metaclass=Singleton):
         Adds or merges a peer's slot into the database.
 
         Upserts on (peer_id, internal_port) and merges each URI (insert if new,
-        no-op if already known) instead of always inserting fresh rows. This makes
+        refreshed if already known) instead of always inserting fresh rows. This makes
         re-registering an already-known peer (a reconnect, a pay-time refresh, a
         re-introduction) idempotent by construction, and lets a peer accumulate
         several reachable addresses over time instead of losing every one but the
         last it happened to advertise (issue #236).
 
         Args:
-            slot (celaut_pb2.Instance.Uri_Slot): The slot to add.
+            slot: any object exposing ``.internal_port`` and an iterable ``.uri`` of
+                URI-shaped objects (``celaut_pb2.Instance.Uri_Slot``, or a lightweight
+                stand-in grouping a flat ``Peer.uri`` list by port).
             peer_id (str): The ID of the peer.
             transport_protocol (bytes): Serialized transport tags for this slot.
         """
@@ -1503,8 +1505,8 @@ class SQLConnection(metaclass=Singleton):
         Merging alone would let a peer's addresses grow without bound and, worse, keep
         a superseded one forever: ``generate_uris_by_peer_id`` yields in insertion
         order, so the *stale* address is the one every ``next(...)`` call site picks
-        while anything still answers on it -- exactly the downgrade the signed
-        (ts, seq) counter exists to prevent, arriving through the back door. Only ever
+        while anything still answers on it -- exactly the downgrade the signed ``ts``
+        anti-replay check exists to prevent, arriving through the back door. Only ever
         driven by a verified, strictly-newer announcement, so an unsigned or replayed
         message can never prune a peer's real addresses.
         """
@@ -1524,62 +1526,53 @@ class SQLConnection(metaclass=Singleton):
         logger.LOGGER(f'Pruned {len(stale)} superseded URI(s) from peer {peer_id}.')
         return len(stale)
 
-    def get_peer_last_ts_seq(self, peer_id: str) -> Optional[Tuple[int, int]]:
-        """The (ts, seq) of the last signed Peer message accepted from ``peer_id``.
+    def get_peer_last_ts(self, peer_id: str) -> Optional[int]:
+        """The ``ts`` of the last signed Peer message accepted from ``peer_id``.
 
         None when the peer has never presented one (a legacy/unsigned peer, or one
         seen for the first time), so the caller's "strictly newer than last accepted"
         anti-replay check has nothing to compare against and lets the message through.
         """
         row = self._execute(
-            "SELECT last_ts, last_seq FROM peer WHERE id = ?", (peer_id,)
-        ).fetchone()
-        if not row or row[0] is None or row[1] is None:
-            return None
-        return int(row[0]), int(row[1])
-
-    def set_peer_last_ts_seq(
-        self, peer_id: str, ts: int, seq: int, estimated_invalid_after_unix_seconds: int = 0
-    ) -> None:
-        """Record the (ts, seq) of the last signed Peer message accepted from ``peer_id``.
-
-        ``estimated_invalid_after_unix_seconds`` is the peer's own estimate of when the addresses
-        it just announced may stop being valid (0 = no estimate); stored so a reader
-        can prefer re-resolving a peer whose address is due to change.
-        """
-        self._execute(
-            "UPDATE peer SET last_ts = ?, last_seq = ?, estimated_invalid_after_unix_seconds = ? WHERE id = ?",
-            (int(ts), int(seq), int(estimated_invalid_after_unix_seconds) or None, peer_id),
-        )
-
-    def get_peer_estimated_invalid_after_unix_seconds(self, peer_id: str) -> Optional[int]:
-        """When ``peer_id``'s announced addresses may stop being valid, or None."""
-        row = self._execute(
-            "SELECT estimated_invalid_after_unix_seconds FROM peer WHERE id = ?", (peer_id,)
+            "SELECT last_ts FROM peer WHERE id = ?", (peer_id,)
         ).fetchone()
         return int(row[0]) if row and row[0] is not None else None
 
-    def instance_exists(self, instance: celaut_pb2.Instance) -> bool:
-        """
-        Checks if any URI within an instance exists in the database.
+    def set_peer_last_ts(self, peer_id: str, ts: int) -> None:
+        """Record the ``ts`` of the last signed Peer message accepted from ``peer_id``."""
+        self._execute(
+            "UPDATE peer SET last_ts = ? WHERE id = ?",
+            (int(ts), peer_id),
+        )
+
+    def get_peer_expiry_unix_timestamp(self, peer_id: str) -> Optional[int]:
+        """When the soonest of ``peer_id``'s announced addresses may stop being valid, or None."""
+        row = self._execute(
+            "SELECT MIN(u.expiry_unix_timestamp) FROM uri u "
+            "JOIN slot s ON u.slot_id = s.id "
+            "WHERE s.peer_id = ? AND u.expiry_unix_timestamp > 0",
+            (peer_id,),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    def peer_uris_exist(self, uris) -> bool:
+        """True if any of ``uris`` (each exposing ``.ip``/``.port``) is already known.
 
         Args:
-            instance (celaut_pb2.Instance): The instance containing URI slots to be checked.
+            uris: an iterable of URI-shaped objects (e.g. ``Peer.UriEphemeral``).
 
         Returns:
-            bool: 
-                - True if at least one URI from the instance exists in the database.
+            bool:
+                - True if at least one URI exists in the database.
                 - True in case of an unexpected error (failsafe behavior).
-                - False if no URIs exist in the database or the instance is empty.
+                - False if no URIs exist in the database or ``uris`` is empty.
         """
         try:
-            # Iterate through URI slots and URIs to check existence
-            for slot in instance.uri_slot:
-                for uri in slot.uri:
-                    if self.uri_exists(uri=uri):
-                        return True
+            for uri in uris:
+                if self.uri_exists(uri=uri):
+                    return True
         except Exception as e:
-            logger.LOGGER(f"Error while checking instance existence: {e}")
+            logger.LOGGER(f"Error while checking peer URI existence: {e}")
             return True  # Failsafe: Return True to prevent disruption in case of error
         return False
 
@@ -1779,22 +1772,27 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to delete external client associated with peer {peer_id}: {e}')
             pass
 
-    def add_uri(self, uri: celaut_pb2.Instance.Uri, slot_id: str):
+    def add_uri(self, uri, slot_id: str):
         """
-        Merges a URI into the database: a no-op if already present for this slot,
-        otherwise inserts it. Idempotent so a slot can accumulate several addresses
-        across re-handshakes without duplicating rows.
+        Merges a URI into the database: inserted if new, or has its expiry refreshed
+        if already present for this slot. Idempotent so a slot can accumulate several
+        addresses across re-handshakes without duplicating rows.
 
         Args:
-            uri (celaut_pb2.Instance.Uri): The URI to add.
+            uri: a URI-shaped object (``celaut_pb2.Instance.Uri`` or
+                ``celaut_pb2.Peer.UriEphemeral``) exposing ``.ip``/``.port`` and,
+                optionally, ``.expiry_unix_timestamp`` (defaults to 0/unknown when
+                the type has no such field).
             slot_id (str): The ID of the slot.
         """
+        expiry = getattr(uri, "expiry_unix_timestamp", 0) or None
         # Single atomic upsert against idx_uri_slot_ip_port -- see add_slot on why a
         # SELECT-then-INSERT would race.
         self._execute(
-            "INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?) "
-            "ON CONFLICT (slot_id, ip, port) DO NOTHING",
-            (uri.ip, uri.port, slot_id))
+            "INSERT INTO uri (ip, port, slot_id, expiry_unix_timestamp) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (slot_id, ip, port) DO UPDATE SET "
+            "expiry_unix_timestamp = excluded.expiry_unix_timestamp",
+            (uri.ip, uri.port, slot_id, expiry))
 
     def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str, service_id: str):
         """
