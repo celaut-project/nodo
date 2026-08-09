@@ -7,6 +7,7 @@ from src.reputation_system.envs import REPUTATION_PROOF_ADDRESS
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 from src.utils.logger import LOGGER
+from src.utils.network import resolve_public_port
 
 
 # Constants
@@ -205,13 +206,14 @@ def _self_network_data() -> str:
         LOGGER("No public address to advertise (set network.PUBLIC_IP if the node is behind NAT).")
         return NO_NETWORK_ADDRESS
 
-    port = int(env_manager.get("GATEWAY_PORT"))
+    internal_port = int(env_manager.get("GATEWAY_PORT"))
+    public_port = resolve_public_port(env_manager.get("network.PUBLIC_TCP_PORT", ""), internal_port)
     peer = celaut_pb2.Peer()
     uri_slot = peer.instance.uri_slot.add()
-    uri_slot.internal_port = port
+    uri_slot.internal_port = internal_port
     uri = uri_slot.uri.add()
     uri.ip = host
-    uri.port = port
+    uri.port = public_port
 
     public_key_hex = get_node_public_key_hex()
     if public_key_hex:
@@ -237,7 +239,7 @@ def _self_network_data() -> str:
     else:
         LOGGER("No node identity available; publishing the address unsigned.")
 
-    LOGGER(f"Advertising {host}:{port} on the reputation proof.")
+    LOGGER(f"Advertising {host}:{public_port} on the reputation proof.")
     return MessageToJson(peer)
 
 

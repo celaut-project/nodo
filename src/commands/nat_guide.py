@@ -21,6 +21,7 @@ import subprocess
 from typing import Dict, List, Optional
 
 from src.utils.config import ConfigManager
+from src.utils.network import resolve_public_port
 
 env_manager = ConfigManager()
 
@@ -99,8 +100,11 @@ def collect_facts() -> Dict[str, object]:
     except Exception:
         ddns = {}
 
+    public_tcp_port = resolve_public_port(env_manager.get("network.PUBLIC_TCP_PORT", ""), port) if port else None
+
     return {
         "gateway_port": port or None,
+        "public_tcp_port": public_tcp_port,
         "local_ip": _detect_local_ip(),
         "router_ip": _detect_default_gateway(),
         "listening": _gateway_port_is_listening(port),
@@ -125,6 +129,8 @@ def _format_port_ranges(ranges: List[dict]) -> str:
 def render_guide(facts: Dict[str, object]) -> str:
     """Compose the guide from ``facts``. Pure: no host access, no network."""
     port = facts.get("gateway_port")
+    public_port = facts.get("public_tcp_port")
+    ports_differ = bool(port and public_port and public_port != port)
     local_ip = facts.get("local_ip")
     router_ip = facts.get("router_ip")
     lines: List[str] = []
@@ -134,7 +140,12 @@ def render_guide(facts: Dict[str, object]) -> str:
     lines.append("")
 
     lines.append("What this node needs:")
-    if port:
+    if port and ports_differ:
+        lines.append(
+            f"  * Inbound TCP on external port {public_port}, forwarded to this "
+            f"host's gateway port {port} (set via network.PUBLIC_TCP_PORT)."
+        )
+    elif port:
         lines.append(f"  * Inbound TCP on port {port} (the gateway port).")
     else:
         lines.append(
@@ -158,6 +169,8 @@ def render_guide(facts: Dict[str, object]) -> str:
     lines.append("This machine:")
     lines.append(f"  Local address:  {local_ip or 'could not detect'}")
     lines.append(f"  Gateway port:   {port or 'not resolvable'}")
+    if ports_differ:
+        lines.append(f"  Public TCP port: {public_port} (network.PUBLIC_TCP_PORT)")
     lines.append(f"  Router:         {router_ip or 'could not detect a default gateway'}")
 
     listening = facts.get("listening")
@@ -180,7 +193,7 @@ def render_guide(facts: Dict[str, object]) -> str:
     )
     lines.append("  3. Add a rule:")
     lines.append("       Protocol:      TCP")
-    lines.append(f"       External port: {port if port else '<gateway port>'}")
+    lines.append(f"       External port: {public_port if public_port else (port if port else '<gateway port>')}")
     lines.append(f"       Internal host: {local_ip or '<this machine>'}")
     lines.append(f"       Internal port: {port if port else '<gateway port>'}")
     lines.append(
@@ -215,9 +228,10 @@ def render_guide(facts: Dict[str, object]) -> str:
 
     lines.append("Checking it worked:")
     target = facts.get("ddns_hostname") if facts.get("ddns_enabled") else "<your public IP>"
+    check_port = public_port if public_port else (port or '<gateway port>')
     lines.append(
         f"  From OUTSIDE your network (mobile data, a remote host):\n"
-        f"      nc -vz {target or '<your public IP>'} {port or '<gateway port>'}"
+        f"      nc -vz {target or '<your public IP>'} {check_port}"
     )
     lines.append(
         "  Testing from inside your own network usually succeeds regardless of the "

@@ -161,8 +161,7 @@ specification with `nodo pack`. **Do not guess the input format — read
 # DEFAULT — delegate to an external packer-service (no local Docker).
 # Set the packer's published service id under core_services (single source of truth):
 core_services:
-  - name: "packer"
-    id: "<packer-service id>"
+  packer: "<packer-service id>"
 # …then run a packer instance so nodo can resolve its ip:port:  nodo execute <packer-service id>
 ```
 

@@ -73,6 +73,35 @@ pub enum InputMode {
     Details,
 }
 
+/// How the `EditConfig` popup should let the user set a value, chosen from the
+/// entry's inferred YAML type (and, for a handful of known keys, a fixed set of
+/// accepted values) rather than always falling back to freeform text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditKind {
+    /// Freeform YAML literal (the original behaviour) — strings, secrets, lists,
+    /// objects, and anything else with no more specific editor.
+    Text,
+    /// A checkbox: Space/←/→ toggles, no character input.
+    Bool,
+    /// A number: ↑/↓ steps by 1 on top of ordinary typing.
+    Number,
+    /// A closed set of accepted values (e.g. `network.DELEGATION_TUNNEL_POLICY`):
+    /// ↑/↓ cycles through them on top of ordinary typing.
+    Enum(Vec<String>),
+}
+
+/// Fixed value sets for config keys whose comment in `config.example.yaml`
+/// documents a closed set of options. Deliberately small and explicit: a key
+/// like `hashing.HASH` documents aliases but also accepts an arbitrary hex
+/// hash-id, so it stays freeform text rather than a misleadingly restrictive
+/// picker. Add an entry here only when every accepted value is enumerable.
+fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
+    match path {
+        "network.DELEGATION_TUNNEL_POLICY" => Some(&["auto", "always", "never"]),
+        _ => None,
+    }
+}
+
 /// A destructive action awaiting user confirmation.
 #[derive(Debug, Clone)]
 pub enum PendingAction {
@@ -119,6 +148,22 @@ pub struct Peer {
     pub reputation: String,
     /// Local reputation score (nodo-managed, independent of the on-chain proof).
     pub reputation_score: String,
+    /// Every payment contract this peer has registered. Rendered in the peer
+    /// detail card rather than the table: a peer can hold several instances,
+    /// and each carries more than a row can show (see issue #231).
+    pub contracts: Vec<PeerContract>,
+}
+
+/// One `contract_instance` row: the ledger a peer settles on, the contract it
+/// charges through, the address it gets paid at, and its gas price.
+#[derive(Debug, Clone)]
+pub struct PeerContract {
+    /// Ledger tag (e.g. "ergo"), falling back to the raw stored hash when the
+    /// ledger row can't be resolved or carries no tag.
+    pub ledger: String,
+    pub contract_hash: String,
+    pub address: String,
+    pub gas_price: String,
 }
 
 impl Identifiable for Peer {
@@ -437,6 +482,9 @@ pub struct App {
     pub input_title: String,
     pub edit_config_path: Option<Vec<ConfigPathSegment>>,
     pub edit_config_secret: bool,
+    /// Which widget the `EditConfig` popup should present for the value
+    /// currently being edited (checkbox, stepper, enum picker, or freeform text).
+    pub edit_kind: EditKind,
     /// Destructive action awaiting a y/N confirmation.
     pub pending_action: Option<PendingAction>,
     /// Contents of the read-only Details overlay, when open.
@@ -484,6 +532,7 @@ impl Default for App {
             input_title: String::new(),
             edit_config_path: None,
             edit_config_secret: false,
+            edit_kind: EditKind::Text,
             pending_action: None,
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
@@ -590,6 +639,7 @@ impl App {
         self.input_title.clear();
         self.edit_config_path = None;
         self.edit_config_secret = false;
+        self.edit_kind = EditKind::Text;
         self.pending_action = None;
     }
 
@@ -602,12 +652,14 @@ impl App {
         self.input_mode = InputMode::Connect;
         self.input.clear();
         self.input_title = "Connect peer (host:port)".to_string();
+        self.edit_kind = EditKind::Text;
     }
 
     pub fn open_config_filter(&mut self) {
         self.input_mode = InputMode::FilterConfig;
         self.input = self.config_filter.clone();
         self.input_title = "Filter configuration paths".to_string();
+        self.edit_kind = EditKind::Text;
     }
 
     pub fn clear_config_filter(&mut self) {
@@ -630,6 +682,67 @@ impl App {
         };
         self.edit_config_path = Some(entry.path_segments);
         self.edit_config_secret = entry.secret;
+        self.edit_kind = if entry.secret {
+            // A secret is always retyped from scratch as plain text (see the blank
+            // `self.input` above); a checkbox/stepper/picker would have nothing to
+            // show without briefly displaying the value it exists to hide.
+            EditKind::Text
+        } else if let Some(options) = known_enum_values(&entry.path) {
+            EditKind::Enum(options.iter().map(|value| value.to_string()).collect())
+        } else {
+            match entry.value_type.as_str() {
+                "bool" => EditKind::Bool,
+                "number" => EditKind::Number,
+                _ => EditKind::Text,
+            }
+        };
+    }
+
+    /// Apply Up/Down (and, for a checkbox, Space/←/→) inside the `EditConfig`
+    /// popup: toggles a bool, steps a number by 1, or cycles an enum by one
+    /// position. A no-op for freeform text, where arrow keys do nothing special.
+    pub fn adjust_edit_value(&mut self, delta: i32) {
+        match self.edit_kind.clone() {
+            EditKind::Bool => {
+                let current = self.input.trim() == "true";
+                self.input = (!current).to_string();
+            }
+            EditKind::Number => {
+                let trimmed = self.input.trim();
+                let Ok(current) = trimmed.parse::<f64>() else {
+                    return;
+                };
+                let next = current + delta as f64;
+                self.input = if trimmed.contains('.') {
+                    format!("{next}")
+                } else {
+                    format!("{}", next.round() as i64)
+                };
+            }
+            EditKind::Enum(options) => {
+                if options.is_empty() {
+                    return;
+                }
+                let current_index = options
+                    .iter()
+                    .position(|option| option == self.input.trim())
+                    .unwrap_or(0) as i32;
+                let len = options.len() as i32;
+                let next_index = (current_index + delta).rem_euclid(len) as usize;
+                self.input = options[next_index].clone();
+            }
+            EditKind::Text => {}
+        }
+    }
+
+    /// Live side effect of a keystroke inside a text-entry popup: only
+    /// `FilterConfig` reacts as-you-type (search results narrow immediately
+    /// instead of waiting for Enter); `EditConfig`/`Connect` are unaffected.
+    pub fn on_input_changed(&mut self) {
+        if self.input_mode == InputMode::FilterConfig {
+            self.config_filter = self.input.clone();
+            self.apply_config_filter();
+        }
     }
 
     pub fn apply_config_filter(&mut self) {
@@ -1116,16 +1229,61 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 .get::<_, Option<i64>>(4)?
                 .map(|score| score.to_string())
                 .unwrap_or_else(|| "0".to_string());
+            let id: String = row.get(0)?;
             Ok(Peer {
-                id: row.get(0)?,
                 uris: row.get(1)?,
                 gas: format_gas(row.get::<_, String>(2)?),
                 reputation: row.get(3)?,
                 reputation_score,
+                // `contract_instance` isn't touched by the join above (it isn't
+                // keyed by slot/uri), so its rows are fetched per peer below.
+                contracts: Vec::new(),
+                id,
+            })
+        })?
+        .collect::<SqlResult<Vec<_>>>()?;
+
+    peers
+        .into_iter()
+        .map(|mut peer| {
+            peer.contracts = get_peer_contracts(&connection, &peer.id)?;
+            Ok(peer)
+        })
+        .collect()
+}
+
+/// Every payment contract instance a peer has registered. A peer's
+/// `contract_instance` rows aren't reachable from the slot/uri join `get_peers`
+/// already runs, and before this the TUI surfaced none of it at all (issue #231).
+fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<PeerContract>> {
+    let mut statement = connection.prepare(
+        "SELECT ci.contract_hash, ci.ledger_hash, ci.address, ci.gas_price, l.content
+         FROM contract_instance ci
+         LEFT JOIN ledger l ON ci.ledger_hash = l.hash
+         WHERE ci.peer_id = ?1",
+    )?;
+    let contracts = statement
+        .query_map([peer_id], |row| {
+            let ledger_hash: String = row.get(1)?;
+            let ledger_content: Option<Vec<u8>> = row.get(4)?;
+            // Peers only ever name a ledger by tag, so show the tag; the stored
+            // hash is the fallback when the row is unresolvable or untagged.
+            let ledger = ledger_content
+                .and_then(|bytes| protos::contract::Ledger::decode(&*bytes).ok())
+                .and_then(|ledger| ledger.tags.into_iter().next())
+                .unwrap_or(ledger_hash);
+            Ok(PeerContract {
+                ledger,
+                contract_hash: row.get(0)?,
+                address: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                gas_price: row
+                    .get::<_, Option<String>>(3)?
+                    .map(format_gas)
+                    .unwrap_or_default(),
             })
         })?
         .collect();
-    peers
+    contracts
 }
 
 /// Adjust a peer's local reputation score by `delta`, mirroring
@@ -1525,6 +1683,127 @@ pub fn shorten(value: &str, max: usize) -> String {
 mod tests {
     use super::*;
 
+    /// A database with just the tables `get_peers` touches, one peer, and
+    /// whatever contract instances the caller asks for.
+    fn peer_database(dir: &Path, instances: &[(&str, &str, &str, Option<&[u8]>)]) -> PathBuf {
+        let path = dir.join("database.sqlite");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE peer (id TEXT PRIMARY KEY, gas TEXT, reputation_proof_id TEXT,
+                                    reputation_score INTEGER);
+                 CREATE TABLE slot (id INTEGER PRIMARY KEY, peer_id TEXT);
+                 CREATE TABLE uri (id INTEGER PRIMARY KEY, slot_id INTEGER, ip TEXT, port INTEGER);
+                 CREATE TABLE ledger (hash TEXT PRIMARY KEY, content BLOB);
+                 CREATE TABLE contract_instance (id INTEGER PRIMARY KEY, address TEXT,
+                                    ledger_hash TEXT, contract_hash TEXT, peer_id TEXT,
+                                    gas_price TEXT);
+                 INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7);",
+            )
+            .unwrap();
+        for (contract_hash, ledger_hash, address, ledger_content) in instances {
+            connection
+                .execute(
+                    "INSERT INTO contract_instance (address, ledger_hash, contract_hash, peer_id, gas_price)
+                     VALUES (?1, ?2, ?3, 'peer-1', '500')",
+                    rusqlite::params![address, ledger_hash, contract_hash],
+                )
+                .unwrap();
+            if let Some(content) = ledger_content {
+                connection
+                    .execute(
+                        "INSERT OR IGNORE INTO ledger (hash, content) VALUES (?1, ?2)",
+                        rusqlite::params![ledger_hash, content],
+                    )
+                    .unwrap();
+            }
+        }
+        path
+    }
+
+    fn ergo_ledger_bytes() -> Vec<u8> {
+        let ledger = protos::contract::Ledger {
+            tags: vec!["ergo".to_string()],
+            prose: String::new(),
+            formal: Vec::new(),
+        };
+        ledger.encode_to_vec()
+    }
+
+    #[test]
+    fn peer_contracts_resolve_the_ledger_tag() {
+        // Peers name a ledger by tag; the stored hash is meaningless to a human.
+        let dir = std::env::temp_dir().join("nodo-tui-test-ledger-tag");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let bytes = ergo_ledger_bytes();
+        let database = peer_database(
+            &dir,
+            &[("contract-hash-1", "ledger-hash-1", "addr-1", Some(&bytes))],
+        );
+
+        let peers = get_peers(&database).unwrap();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].contracts.len(), 1);
+        let contract = &peers[0].contracts[0];
+        assert_eq!(contract.ledger, "ergo");
+        assert_eq!(contract.contract_hash, "contract-hash-1");
+        assert_eq!(contract.address, "addr-1");
+        assert_eq!(contract.gas_price, format_gas("500".to_string()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn peer_contracts_fall_back_to_the_raw_hash_when_the_ledger_is_unresolvable() {
+        let dir = std::env::temp_dir().join("nodo-tui-test-ledger-fallback");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        // No matching `ledger` row at all: better to show the hash than nothing.
+        let database = peer_database(&dir, &[("contract-hash-1", "ledger-hash-1", "addr-1", None)]);
+
+        let peers = get_peers(&database).unwrap();
+        assert_eq!(peers[0].contracts[0].ledger, "ledger-hash-1");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn every_contract_instance_of_a_peer_is_returned() {
+        // The pre-#231 lookup could only ever surface a single instance.
+        let dir = std::env::temp_dir().join("nodo-tui-test-multi-contract");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let bytes = ergo_ledger_bytes();
+        let database = peer_database(
+            &dir,
+            &[
+                ("contract-a", "ledger-hash-1", "addr-a", Some(&bytes)),
+                ("contract-b", "ledger-hash-2", "addr-b", None),
+            ],
+        );
+
+        let peers = get_peers(&database).unwrap();
+        let hashes: Vec<&str> = peers[0]
+            .contracts
+            .iter()
+            .map(|contract| contract.contract_hash.as_str())
+            .collect();
+        assert_eq!(hashes, vec!["contract-a", "contract-b"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_peer_without_contracts_still_loads() {
+        let dir = std::env::temp_dir().join("nodo-tui-test-no-contract");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let database = peer_database(&dir, &[]);
+
+        let peers = get_peers(&database).unwrap();
+        assert_eq!(peers.len(), 1);
+        assert!(peers[0].contracts.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn parses_nodo_info_wallets() {
         let output = "Nodo service is currently running.\n\
@@ -1543,14 +1822,14 @@ Cold Wallet: 9cold\n";
     #[test]
     fn flattens_all_yaml_leaf_values_and_masks_secrets() {
         let value: Value = serde_yaml::from_str(
-            "network:\n  port: 5000\nledgers:\n  ergo:\n    WALLET_MNEMONIC: secret words\ncore_services:\n  - name: packer\n    id: abc\nempty: []\n",
+            "network:\n  port: 5000\nledgers:\n  ergo:\n    WALLET_MNEMONIC: secret words\nservers:\n  - name: packer\n    id: abc\nempty: []\n",
         )
         .unwrap();
         let mut entries = Vec::new();
         flatten_yaml(&value, &mut Vec::new(), &mut entries);
         let paths: Vec<_> = entries.iter().map(|entry| entry.path.as_str()).collect();
         assert!(paths.contains(&"network.port"));
-        assert!(paths.contains(&"core_services[0].id"));
+        assert!(paths.contains(&"servers[0].id"));
         assert!(paths.contains(&"empty"));
         let mnemonic = entries
             .iter()
@@ -1573,6 +1852,142 @@ Cold Wallet: 9cold\n";
         ));
     }
 
+    fn config_entry(path: &str, value: &str, edit_value: &str, value_type: &str, secret: bool) -> ConfigEntry {
+        ConfigEntry {
+            path: path.to_string(),
+            path_segments: path
+                .split('.')
+                .map(|key| ConfigPathSegment::Key(key.to_string()))
+                .collect(),
+            value: value.to_string(),
+            edit_value: edit_value.to_string(),
+            value_type: value_type.to_string(),
+            secret,
+        }
+    }
+
+    fn select_config_entry(app: &mut App, entry: ConfigEntry) {
+        app.config = StatefulList::with_items(vec![entry]);
+        app.config.state.select(Some(0));
+    }
+
+    #[test]
+    fn known_enum_values_covers_the_documented_policy_and_nothing_else() {
+        assert_eq!(
+            known_enum_values("network.DELEGATION_TUNNEL_POLICY"),
+            Some(["auto", "always", "never"].as_slice())
+        );
+        assert_eq!(known_enum_values("packer.local"), None);
+    }
+
+    #[test]
+    fn opening_the_editor_picks_the_widget_from_the_inferred_type() {
+        let mut app = App::default();
+
+        select_config_entry(&mut app, config_entry("builder.ARM_SUPPORT", "true", "true", "bool", false));
+        app.open_config_editor();
+        assert_eq!(app.edit_kind, EditKind::Bool);
+
+        select_config_entry(&mut app, config_entry("timing.MANAGER_ITERATION_TIME", "30", "30", "number", false));
+        app.open_config_editor();
+        assert_eq!(app.edit_kind, EditKind::Number);
+
+        select_config_entry(
+            &mut app,
+            config_entry("network.DELEGATION_TUNNEL_POLICY", "auto", "auto", "string", false),
+        );
+        app.open_config_editor();
+        assert_eq!(
+            app.edit_kind,
+            EditKind::Enum(vec!["auto".to_string(), "always".to_string(), "never".to_string()])
+        );
+
+        select_config_entry(&mut app, config_entry("publisher.REPOSITORY", "owner/repo", "owner/repo", "string", false));
+        app.open_config_editor();
+        assert_eq!(app.edit_kind, EditKind::Text);
+
+        // A secret always gets the plain text field, whatever its inferred type --
+        // there's nothing meaningful to check/step/cycle in a value that is never shown.
+        select_config_entry(
+            &mut app,
+            config_entry("ledgers.ergo.WALLET_MNEMONIC", "word word word", "word word word", "string", true),
+        );
+        app.open_config_editor();
+        assert_eq!(app.edit_kind, EditKind::Text);
+        assert!(app.input.is_empty());
+    }
+
+    #[test]
+    fn arrow_keys_toggle_a_checkbox_both_ways() {
+        let mut app = App::default();
+        app.edit_kind = EditKind::Bool;
+        app.input = "false".to_string();
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "true");
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "false");
+    }
+
+    #[test]
+    fn arrow_keys_step_a_number_preserving_int_vs_float_shape() {
+        let mut app = App::default();
+        app.edit_kind = EditKind::Number;
+
+        app.input = "30".to_string();
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "31");
+        app.adjust_edit_value(-1);
+        assert_eq!(app.input, "30");
+
+        app.input = "2.5".to_string();
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "3.5");
+    }
+
+    #[test]
+    fn arrow_keys_cycle_an_enum_and_wrap_at_both_ends() {
+        let mut app = App::default();
+        app.edit_kind = EditKind::Enum(vec!["auto".to_string(), "always".to_string(), "never".to_string()]);
+
+        app.input = "auto".to_string();
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "always");
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "never");
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "auto", "cycling past the last option wraps to the first");
+        app.adjust_edit_value(-1);
+        assert_eq!(app.input, "never", "cycling before the first option wraps to the last");
+    }
+
+    #[test]
+    fn typing_in_a_filter_narrows_results_live_without_pressing_enter() {
+        let mut app = App::default();
+        app.config_all = vec![
+            config_entry("network.GATEWAY_PORT", "5000", "5000", "number", false),
+            config_entry("packer.local", "false", "false", "bool", false),
+        ];
+        app.config = StatefulList::with_items(app.config_all.clone());
+        app.input_mode = InputMode::FilterConfig;
+
+        app.input = "network".to_string();
+        app.on_input_changed();
+        assert_eq!(app.config.items.len(), 1);
+        assert_eq!(app.config.items[0].path, "network.GATEWAY_PORT");
+        // Live narrowing shouldn't require Enter to have been pressed.
+        assert_eq!(app.config_filter, "network");
+    }
+
+    #[test]
+    fn typing_while_editing_a_value_does_not_touch_the_filter() {
+        let mut app = App::default();
+        app.config_filter = "kept".to_string();
+        app.input_mode = InputMode::EditConfig;
+        app.input = "anything".to_string();
+        app.on_input_changed();
+        assert_eq!(app.config_filter, "kept");
+    }
+
     #[test]
     fn only_actual_tokens_are_masked() {
         assert!(is_secret_path("publisher.TOKEN"));
@@ -1591,9 +2006,10 @@ Cold Wallet: 9cold\n";
         assert!(entries
             .iter()
             .any(|entry| entry.path == "virtualizers.ch.MIN_MEM_MIB"));
+        // core_services is a role -> id mapping (issue #232), not an array.
         assert!(entries
             .iter()
-            .any(|entry| entry.path == "core_services[1].id"));
+            .any(|entry| entry.path == "core_services.packer"));
         assert!(
             entries
                 .iter()
@@ -1606,11 +2022,11 @@ Cold Wallet: 9cold\n";
     #[test]
     fn emits_safe_yq_paths() {
         let path = vec![
-            ConfigPathSegment::Key("core_services".to_string()),
+            ConfigPathSegment::Key("servers".to_string()),
             ConfigPathSegment::Index(1),
             ConfigPathSegment::Key("id".to_string()),
         ];
-        assert_eq!(yq_path_expression(&path), ".[\"core_services\"][1][\"id\"]");
+        assert_eq!(yq_path_expression(&path), ".[\"servers\"][1][\"id\"]");
     }
 
     #[test]

@@ -13,7 +13,7 @@
 > VM, so Docker is never installed on your host) and imports the returned
 > `.celaut.bee`. Reference the packer by its published service id under
 > `core_services` in `config.yaml` — the single source of truth
-> (`core_services: [{ name: "packer", id: "<id>" }]`). nodo launches an instance
+> (`core_services: { packer: "<id>" }`). nodo launches an instance
 > on demand if none is running (or reuses one you started with `nodo execute`) —
 > nodo resolves that instance's `ip:port` automatically.
 > When nodo needs to download the packer it uses `packer.PACKER_SOURCE_URL` if

@@ -997,6 +997,56 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Database error fetching gas price for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {e}')
             return None # Return None on database error
 
+    def get_peer_payment_contracts(self, peer_id: str) -> List[dict]:
+        """
+        Lists every payment contract instance registered for a peer, resolving
+        each row's ledger to its tag (e.g. ``"ergo"``) instead of the opaque
+        stored hash.
+
+        Args:
+            peer_id (str): The peer id (``"LOCAL"`` for our own contracts).
+
+        Returns:
+            List[dict]: One entry per ``contract_instance`` row, each with
+            ``contract_hash``, ``ledger_tag`` (falling back to the raw
+            ``ledger_hash`` if the ledger content can't be resolved to a tag),
+            ``address``, and ``gas_price`` (int, or None if unset/invalid).
+        """
+        rows = self._execute(
+            "SELECT contract_hash, ledger_hash, address, gas_price "
+            "FROM contract_instance WHERE peer_id = ?",
+            (peer_id,)
+        ).fetchall()
+
+        contracts = []
+        for row in rows:
+            ledger_tag = row['ledger_hash']
+            ledger_row = self._execute(
+                "SELECT content FROM ledger WHERE hash = ?", (row['ledger_hash'],)
+            ).fetchone()
+            if ledger_row:
+                ledger = celaut_pb2.Contract.Ledger()
+                try:
+                    ledger.ParseFromString(ledger_row['content'])
+                    if ledger.tags:
+                        ledger_tag = ledger.tags[0]
+                except Exception as e:
+                    logger.LOGGER(f'Could not parse stored ledger {row["ledger_hash"]}: {e}')
+
+            try:
+                gas_price = int(row['gas_price'])
+            except (TypeError, ValueError):
+                gas_price = None
+
+            contracts.append({
+                'contract_hash': row['contract_hash'],
+                'ledger_tag': ledger_tag,
+                'address': row['address'],
+                'gas_price': gas_price,
+            })
+
+        return contracts
+
     def get_peers_id(self) -> List[str]:
         """
         Fetches all peer IDs from the database.
@@ -1325,6 +1375,50 @@ class SQLConnection(metaclass=Singleton):
             WHERE id = ?
         ''', (peer_id,))
         return result.fetchone()[0] > 0
+
+    def set_forced_execution_peer(self, token: str, peer_id: str) -> None:
+        """
+        Records that the `StartService` call correlated with ``token`` (its
+        ``recursion_guard_token``, set by `nodo force_execution` before opening
+        the call) must be delegated straight to ``peer_id``, bypassing
+        ``execution_balancer``.
+
+        Keyed by a fresh, single-use token rather than the client id: dev
+        client ids are drawn from a small reusable pool (see
+        `manager.get_execute_client`), so keying on the client id could leak a
+        stale forced-peer hint onto a later, unrelated `nodo execute` call that
+        happens to draw the same recycled id.
+
+        Args:
+            token (str): The one-time correlation token for this call.
+            peer_id (str): The peer to force delegation to.
+        """
+        self._execute(
+            "INSERT OR REPLACE INTO forced_execution_peer (token, peer_id) VALUES (?, ?)",
+            (token, peer_id)
+        )
+
+    def pop_forced_execution_peer(self, token: str) -> Optional[str]:
+        """
+        Reads and deletes the forced-peer hint for ``token``, if any.
+
+        Consuming it (rather than just reading it) means the hint can only ever
+        apply to the single `launch_service` call it was created for.
+
+        Args:
+            token (str): The one-time correlation token to look up.
+
+        Returns:
+            Optional[str]: The peer id to force delegation to, or None if no
+            hint is recorded for this token.
+        """
+        row = self._execute(
+            "SELECT peer_id FROM forced_execution_peer WHERE token = ?", (token,)
+        ).fetchone()
+        if not row:
+            return None
+        self._execute("DELETE FROM forced_execution_peer WHERE token = ?", (token,))
+        return row['peer_id']
 
     def remove_peer(self, peer_id: str) -> bool:
         """

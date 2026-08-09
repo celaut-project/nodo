@@ -1,4 +1,4 @@
-use crate::app::{App, AppResult, InputMode, Page};
+use crate::app::{App, AppResult, EditKind, InputMode, Page};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// Handle keyboard input without allowing page shortcuts to leak into modal input.
@@ -32,15 +32,39 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         InputMode::Normal => {}
         // Text-entry modals: Connect, EditConfig, FilterConfig.
         _ => {
+            let is_bool_editor =
+                app.input_mode == InputMode::EditConfig && app.edit_kind == EditKind::Bool;
             match (key.modifiers, key.code) {
                 (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
                 (_, KeyCode::Enter) => app.submit_input().await,
                 (_, KeyCode::Esc) => app.close_input(),
-                (KeyModifiers::CONTROL, KeyCode::Char('u')) => app.input.clear(),
+                // ↑/↓ step a number, cycle an enum, or (with ←/→/Space) flip a
+                // checkbox — additive on top of typing for number/enum, the only
+                // way to change a checkbox (see the char/backspace guard below).
+                (_, KeyCode::Up) if app.input_mode == InputMode::EditConfig => {
+                    app.adjust_edit_value(1)
+                }
+                (_, KeyCode::Down) if app.input_mode == InputMode::EditConfig => {
+                    app.adjust_edit_value(-1)
+                }
+                (_, KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')) if is_bool_editor => {
+                    app.adjust_edit_value(1)
+                }
+                (KeyModifiers::CONTROL, KeyCode::Char('u')) if !is_bool_editor => {
+                    app.input.clear();
+                    app.on_input_changed();
+                }
+                // A checkbox has exactly two states, both reachable above; free
+                // text entry would just let you type something that isn't a bool.
+                (_, KeyCode::Backspace | KeyCode::Char(_)) if is_bool_editor => {}
                 (_, KeyCode::Backspace) => {
                     app.input.pop();
+                    app.on_input_changed();
                 }
-                (_, KeyCode::Char(character)) => app.input.push(character),
+                (_, KeyCode::Char(character)) => {
+                    app.input.push(character);
+                    app.on_input_changed();
+                }
                 _ => {}
             }
             return Ok(());

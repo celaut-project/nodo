@@ -33,7 +33,7 @@ Two hard rules:
    threshold, the fallback does not start (and a running one is stopped).
 
 Like the other core services, it is referenced by service id (content hash) in
-the top-level `core_services:` list — never by URL — so trust and resolution
+the top-level `core_services:` mapping — never by URL — so trust and resolution
 reuse the exact framework from PR #120.
 
 ### Proposed role name
@@ -151,12 +151,9 @@ Added to `config.example.yaml` next to the other tunables, plus the
 
 ```yaml
 core_services:
-  - name: "source-application"
-    id: "<SET_ME>"
-  - name: "packer"
-    id: "<SET_ME>"
-  - name: "low-demand-fallback"      # NEW
-    id: "<SET_ME>"
+  source-application: "<SET_ME>"
+  packer: "<SET_ME>"
+  low-demand-fallback: "<SET_ME>"      # NEW
 
 low_demand:
   ENABLED: false            # master switch; opportunistic fallback is OFF by default

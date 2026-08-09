@@ -1,4 +1,6 @@
-use crate::app::{format_bytes, percent, shorten, App, Instance, InputMode, Page, HISTORY_POINTS};
+use crate::app::{
+    format_bytes, percent, shorten, App, EditKind, Instance, InputMode, Page, Peer, HISTORY_POINTS,
+};
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
 
@@ -541,8 +543,33 @@ fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
-    let split =
-        Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)]).split(area);
+    // The peer detail card sizes itself to the selected peer's contract count,
+    // so a peer with several instances stays readable without the table having
+    // to carry any of it (issue #231). It yields first when the terminal is
+    // short: a card that squeezed the peers table off-screen would leave no way
+    // to pick the peer it is describing.
+    const MIN_PEERS_HEIGHT: u16 = 7;
+    const MIN_CLIENTS_HEIGHT: u16 = 5;
+    let available = area
+        .height
+        .saturating_sub(MIN_PEERS_HEIGHT + MIN_CLIENTS_HEIGHT);
+    let selected = app.peers.selected();
+    // Prefer the roomy breakdown, but fall back to one line per contract rather
+    // than let a short terminal clip the contracts away silently -- an empty
+    // card reads as "no contract registered", the exact confusion #231 is about.
+    let full = peer_detail_lines(selected, false);
+    let detail = if full.len() as u16 + 2 <= available {
+        full
+    } else {
+        peer_detail_lines(selected, true)
+    };
+    let detail_height = (detail.len() as u16 + 2).min(available);
+    let split = Layout::vertical([
+        Constraint::Min(MIN_PEERS_HEIGHT),
+        Constraint::Length(detail_height),
+        Constraint::Min(MIN_CLIENTS_HEIGHT),
+    ])
+    .split(area);
     let peer_color = if app.network_focus == 0 {
         ACCENT
     } else {
@@ -588,6 +615,8 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
     .highlight_symbol("▸ ");
     frame.render_stateful_widget(peer_table, split[0], &mut app.peers.state);
 
+    draw_card(frame, split[1], "SELECTED PEER", detail, ACCENT);
+
     let clients = app.clients.items.iter().map(|client| {
         Row::new(vec![
             client.id.clone(),
@@ -613,7 +642,95 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
     ))
     .highlight_style(selected_style())
     .highlight_symbol("▸ ");
-    frame.render_stateful_widget(client_table, split[1], &mut app.clients.state);
+    frame.render_stateful_widget(client_table, split[2], &mut app.clients.state);
+}
+
+/// Full breakdown of the peer highlighted in the peers table: identity, our gas
+/// with it, reputation, and every payment contract it has registered — ledger,
+/// contract, payout address and gas price per instance. Before this the only
+/// way to get at any of it was a raw sqlite query (issue #231).
+/// `compact` collapses each contract onto a single line and drops the fields the
+/// peers table already shows verbatim, for terminals too short for the full card.
+fn peer_detail_lines(peer: Option<&Peer>, compact: bool) -> Vec<Line<'static>> {
+    let Some(peer) = peer else {
+        return vec![Line::from(Span::styled(
+            "Select a peer to inspect its endpoints, reputation and payment contracts.",
+            Style::default().fg(MUTED),
+        ))];
+    };
+
+    // The full id is worth repeating even in compact mode: the table truncates it.
+    let mut lines = vec![metric_line("Peer", peer.id.clone())];
+    if !compact {
+        lines.push(metric_line(
+            "Endpoints",
+            nonempty(&peer.uris, "—").to_string(),
+        ));
+        lines.push(metric_line("Our gas", peer.gas.clone()));
+        lines.push(metric_line(
+            "Reputation",
+            format!(
+                "{}  •  proof {}",
+                peer.reputation_score,
+                nonempty(&peer.reputation, "none")
+            ),
+        ));
+        lines.push(Line::from(""));
+    }
+
+    if peer.contracts.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No payment contract registered for this peer.",
+            Style::default().fg(WARN),
+        )));
+        return lines;
+    }
+
+    lines.push(Line::from(Span::styled(
+        format!("Payment contracts ({})", peer.contracts.len()),
+        Style::default().fg(ACCENT).bold(),
+    )));
+    for contract in &peer.contracts {
+        if compact {
+            lines.push(Line::from(vec![
+                Span::styled("  ● ", Style::default().fg(GOOD)),
+                Span::styled(contract.ledger.clone(), Style::default().fg(GOOD).bold()),
+                Span::styled(
+                    format!(
+                        "  {}  {}  {} gas",
+                        shorten(&contract.contract_hash, 14),
+                        shorten(nonempty(&contract.address, "—"), 14),
+                        nonempty(&contract.gas_price, "—")
+                    ),
+                    Style::default().fg(Color::White),
+                ),
+            ]));
+            continue;
+        }
+        lines.push(Line::from(vec![
+            Span::styled("  ● ", Style::default().fg(GOOD)),
+            Span::styled(contract.ledger.clone(), Style::default().fg(GOOD).bold()),
+            Span::styled(
+                format!("  contract {}", shorten(&contract.contract_hash, 24)),
+                Style::default().fg(Color::White),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("      address  ", Style::default().fg(MUTED)),
+            Span::styled(
+                shorten(nonempty(&contract.address, "—"), 46),
+                Style::default().fg(Color::White),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("      price    ", Style::default().fg(MUTED)),
+            Span::styled(
+                format!("{} gas", nonempty(&contract.gas_price, "—")),
+                Style::default().fg(Color::White),
+            ),
+        ]));
+    }
+    lines
 }
 
 fn draw_config(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -691,26 +808,78 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
 }
 
+/// Body lines and hint text for the `EditConfig` popup, one variant per
+/// [`EditKind`]: a checkbox, a steppable number, a cyclable enum picker, or the
+/// original freeform text field (also used outside config editing, e.g. Connect
+/// and the filter box).
+fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
+    if app.input_mode != InputMode::EditConfig {
+        return (
+            vec![Line::from(app.input.clone())],
+            "Enter saves • Esc cancels • Ctrl+U clears".to_string(),
+        );
+    }
+
+    match &app.edit_kind {
+        EditKind::Bool => {
+            let checked = app.input.trim() == "true";
+            let label = if checked { "[x] true" } else { "[ ] false" };
+            (
+                vec![Line::from(Span::styled(
+                    label,
+                    Style::default().fg(Color::White).bold(),
+                ))],
+                "Space / ←/→ toggles • Enter saves • Esc cancels".to_string(),
+            )
+        }
+        EditKind::Number => (
+            vec![Line::from(app.input.clone())],
+            "↑/↓ adjust by 1 • type to overwrite • Enter saves • Esc cancels".to_string(),
+        ),
+        EditKind::Enum(options) => {
+            let current = app.input.trim();
+            let lines = options
+                .iter()
+                .map(|option| {
+                    let selected = option == current;
+                    let marker = if selected { "▸ " } else { "  " };
+                    Line::from(Span::styled(
+                        format!("{marker}{option}"),
+                        if selected {
+                            Style::default().fg(ACCENT).bold()
+                        } else {
+                            Style::default().fg(Color::White)
+                        },
+                    ))
+                })
+                .collect();
+            (lines, "↑/↓ cycle • Enter saves • Esc cancels".to_string())
+        }
+        EditKind::Text => {
+            let secret_hint = if app.edit_config_secret {
+                " • existing secret hidden; blank keeps it, type \"\" to clear"
+            } else {
+                ""
+            };
+            let display = if app.edit_config_secret {
+                "•".repeat(app.input.chars().count())
+            } else {
+                app.input.clone()
+            };
+            (
+                vec![Line::from(display)],
+                format!("Enter saves • Esc cancels • Ctrl+U clears{secret_hint}"),
+            )
+        }
+    }
+}
+
 fn draw_input_popup(frame: &mut Frame, app: &App) {
-    let area = centered_rect(72, 7, frame.size());
+    let (mut content, hint) = edit_popup_body(app);
+    let height = (content.len() as u16 + 2).max(3) + 2;
+    let area = centered_rect(72, height, frame.size());
     frame.render_widget(Clear, area);
-    let secret_hint = if app.edit_config_secret {
-        " • existing secret hidden; blank keeps it, type \"\" to clear"
-    } else {
-        ""
-    };
-    let display = if app.edit_config_secret {
-        "•".repeat(app.input.chars().count())
-    } else {
-        app.input.clone()
-    };
-    let content = vec![
-        Line::from(display),
-        Line::from(Span::styled(
-            format!("Enter saves • Esc cancels • Ctrl+U clears{secret_hint}"),
-            Style::default().fg(MUTED),
-        )),
-    ];
+    content.push(Line::from(Span::styled(hint, Style::default().fg(MUTED))));
     let popup = Paragraph::new(content)
         .block(
             Block::bordered()
@@ -849,6 +1018,139 @@ mod tests {
                 terminal.draw(|frame| render(&mut app, frame)).unwrap();
             }
         }
+    }
+
+    fn peer_with(contracts: Vec<crate::app::PeerContract>) -> Peer {
+        Peer {
+            id: "f3b61c2e-aaaa-bbbb-cccc-ddddeeeeffff".to_string(),
+            uris: "10.0.0.4:8080".to_string(),
+            gas: "1.000e3".to_string(),
+            reputation: String::new(),
+            reputation_score: "7".to_string(),
+            contracts,
+        }
+    }
+
+    fn ergo_contract() -> crate::app::PeerContract {
+        crate::app::PeerContract {
+            ledger: "ergo".to_string(),
+            contract_hash: "1c691f72deadbeef".to_string(),
+            address: "0008cd0392aabbcc".to_string(),
+            gas_price: "1.000e58".to_string(),
+        }
+    }
+
+    fn rendered(lines: Vec<Line<'static>>) -> String {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn peer_detail_prompts_when_nothing_is_selected() {
+        let text = rendered(peer_detail_lines(None, false));
+        assert!(text.contains("Select a peer"));
+    }
+
+    #[test]
+    fn peer_detail_shows_ledger_contract_address_and_price() {
+        // The whole point of issue #231: these four facts were only reachable
+        // through a raw sqlite query before.
+        let text = rendered(peer_detail_lines(Some(&peer_with(vec![ergo_contract()])), false));
+        assert!(text.contains("Payment contracts (1)"));
+        assert!(text.contains("ergo"));
+        assert!(text.contains("1c691f72deadbeef"));
+        assert!(text.contains("0008cd0392aabbcc"));
+        assert!(text.contains("1.000e58 gas"));
+    }
+
+    #[test]
+    fn peer_detail_lists_every_contract_instance() {
+        // A peer with several instances used to get silently truncated to one.
+        let second = crate::app::PeerContract {
+            ledger: "simulator".to_string(),
+            contract_hash: "abc123".to_string(),
+            address: "sim-address".to_string(),
+            gas_price: "5.000e2".to_string(),
+        };
+        let text = rendered(peer_detail_lines(
+            Some(&peer_with(vec![ergo_contract(), second])),
+            false,
+        ));
+        assert!(text.contains("Payment contracts (2)"));
+        assert!(text.contains("ergo"));
+        assert!(text.contains("simulator"));
+        assert!(text.contains("sim-address"));
+    }
+
+    #[test]
+    fn peer_detail_says_so_when_no_contract_is_registered() {
+        // Must stay distinguishable from "peer charges through something we
+        // don't render", which is exactly what the old hardcoded lookup did.
+        let text = rendered(peer_detail_lines(Some(&peer_with(vec![])), false));
+        assert!(text.contains("No payment contract registered"));
+    }
+
+    #[test]
+    fn network_page_renders_the_peer_detail_card() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Network).unwrap();
+        app.peers.items = vec![peer_with(vec![ergo_contract()])];
+        app.peers.state.select(Some(0));
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("SELECTED PEER"));
+        assert!(screen.contains("Payment contracts (1)"));
+        // The table itself stays lean -- no contract columns were added to it.
+        assert!(screen.contains("Reputation proof"));
+        assert!(!screen.contains("Ledger  "));
+    }
+
+    #[test]
+    fn a_short_terminal_keeps_both_the_peers_table_and_the_contracts() {
+        // Regression: a fixed-height detail card pushed the peers table off an
+        // 80x24 screen entirely, and clipped the contracts out of the card --
+        // leaving it looking exactly like a peer with nothing registered.
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Network).unwrap();
+        let second = crate::app::PeerContract {
+            ledger: "simulator".to_string(),
+            contract_hash: "abc123def456".to_string(),
+            address: "sim-address".to_string(),
+            gas_price: "5.000e2".to_string(),
+        };
+        app.peers.items = vec![peer_with(vec![ergo_contract(), second])];
+        app.peers.state.select(Some(0));
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("PEERS • 1 connected"));
+        assert!(screen.contains("CLIENTS"));
+        assert!(screen.contains("Payment contracts (2)"));
+        assert!(screen.contains("ergo"));
+        assert!(screen.contains("simulator"));
     }
 
     #[test]

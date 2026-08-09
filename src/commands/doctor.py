@@ -592,6 +592,14 @@ def _doctor_network_checks():
     else:
         print("[FAIL] network.GATEWAY_PORT is not resolvable; configure it first.", flush=True)
 
+    public_port = facts.get("public_tcp_port")
+    if port and public_port and public_port != port:
+        print(
+            f"[OK] network.PUBLIC_TCP_PORT is set: router should forward external "
+            f"port {public_port} to this host's port {port}.",
+            flush=True
+        )
+
     listening = facts.get("listening")
     if listening is True:
         print(f"[OK] Something is listening on 127.0.0.1:{port}.", flush=True)
