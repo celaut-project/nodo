@@ -987,10 +987,8 @@ def is_service_built(service_hash: str) -> bool:
     if not base_dir.exists() or not base_dir.is_dir():
         return False
 
-    for entry in base_dir.iterdir():
-        if not entry.is_dir():
-            continue
-        if (entry / "rootfs.ext4").is_file() and (entry / "bundle.json").is_file():
+    for rootfs_path in base_dir.rglob("rootfs.ext4"):
+        if rootfs_path.is_file() and (rootfs_path.parent / "bundle.json").is_file():
             return True
     return False
 
