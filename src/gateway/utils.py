@@ -11,7 +11,11 @@ from src.payment_system.ledgers import local_payment_methods, register_local_con
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
 from src.utils.config import ConfigManager
-from src.utils.utils import get_local_ip_from_network, get_network_name, to_gas_amount
+from src.utils.utils import (
+    get_local_ip_from_network,
+    get_network_name,
+    is_virtual_interface
+)
 
 env_manager = ConfigManager()
 
@@ -122,6 +126,11 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     ``uri_slot.uri`` is already ``repeated``, so announcing several addresses under
     the one gateway port needs no schema change.
 
+    Container/VPN interfaces (docker0, br-*, veth*, ...) are skipped outright via
+    ``is_virtual_interface``: their addresses (e.g. 172.17.0.1) are real on this
+    host but unreachable from anywhere else, so they are never a candidate LAN
+    address, let alone a routable one.
+
     The public host comes first, because it is the one a remote peer can actually
     use and ``generate_uris_by_peer_id`` yields in insertion order. Private/LAN
     addresses are announced only when ``network.ANNOUNCE_PRIVATE_ADDRESSES`` is set:
@@ -143,6 +152,8 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     announce_private = bool(env_manager.get("network.ANNOUNCE_PRIVATE_ADDRESSES", False))
     private: List[celaut.Instance.Uri] = []
     for interface in ni.interfaces():
+        if is_virtual_interface(interface):
+            continue
         try:
             ip = get_local_ip_from_network(interface, allow_link_local=False)
         except (KeyError, ValueError):
