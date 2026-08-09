@@ -252,18 +252,22 @@ class ConfigManager(metaclass=Singleton):
                 self._set_nested(self._config, ["network", "GATEWAY_PORT"], port)
                 self.log(f"Dynamically assigned Gateway Port: {port}")
 
-            # Handle auto mnemonic for the single wallet of each ledger.
-            # ``ledgers`` is a mapping keyed by ledger name (e.g. ``ledgers.ergo``);
-            # each ledger owns exactly ONE wallet (WALLET_MNEMONIC). There is no
-            # auxiliary/receiver wallet.
+            # Each ledger owns exactly ONE wallet (WALLET_MNEMONIC) -- there is no
+            # auxiliary/receiver wallet -- and that same key is the node's identity
+            # (src/reputation_system/node_identity.py): the peer_id it presents and the
+            # key it signs GetPeerInfo with. So there is exactly one mnemonic in the
+            # whole node, and it must always exist: an unset or "auto" value is
+            # generated here on first load rather than left empty, or the node would
+            # have no identity at all. Generating one is free and commits to nothing --
+            # the wallet holds no funds until someone sends some.
             ledgers = self._config.get("ledgers")
             if isinstance(ledgers, dict):
                 for name, ledger in ledgers.items():
                     if not isinstance(ledger, dict):
                         continue
-                    if ledger.get("WALLET_MNEMONIC") == "auto":
-                        mnemonic = Mnemonic("english").generate(strength=128)
-                        ledger["WALLET_MNEMONIC"] = mnemonic
+                    configured = str(ledger.get("WALLET_MNEMONIC") or "").strip()
+                    if not configured or configured == "auto":
+                        ledger["WALLET_MNEMONIC"] = Mnemonic("english").generate(strength=128)
                         self.log(f"Generated new mnemonic for ledger '{name}'")
 
             config_changed = self._config != original_config

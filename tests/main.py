@@ -29,7 +29,7 @@ from bee_rpc.client import Dir
 GATEWAY: str = next(
         f"{ip}:{port}"
         for peer_id in get_peer_ids()
-        for ip, port in get_peer_directions(peer_id=peer_id)
+        for ip, port, _transport in get_peer_directions(peer_id=peer_id)
     ) or f"localhost:{GATEWAY_PORT}"
 
 SHA3_256 = SHA3_256_ID.hex()

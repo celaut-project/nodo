@@ -2,7 +2,7 @@
 
 A LAN address must never reach the ledger: it is useless to whoever reads the proof.
 """
-from src.reputation_system.contracts.ergo.transaction import resolve_public_host
+from src.utils.network import resolve_public_host
 
 
 def test_configured_public_ip_wins_over_the_outbound_one():

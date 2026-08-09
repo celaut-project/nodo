@@ -271,15 +271,6 @@ message Refund {
     GasAmount amount = 1;
 }
 
-message SignRequest {
-    string public_key = 1;
-    string to_sign = 2;
-}
-
-message SignResponse {
-    string signed = 1;
-}
-
 message Payment {
     string deposit_token = 1;
     Contract contract = 2;
@@ -296,8 +287,27 @@ message ServiceInstance {
 }
 
 message Peer {
+    message Uri {
+        message Protocol {
+            repeated string tags = 1;
+            string prose = 2;
+            bytes formal = 3;
+        }
+        string ip = 1;
+        int32 port = 2;
+        int64 expiry_unix_timestamp = 3;
+        Protocol transport = 4;
+        repeated Protocol protocol_stack = 5;
+    }
+
     repeated Contract reputation_proofs = 1;
-    Instance instance = 2;
+    repeated Uri uri = 2;
+    repeated GasPrice payment_contracts = 3;
+    map<string, GasAmount> gas_amount_per_call = 4;
+    // Node identity (issue #236): see celaut.proto's Peer for the full explanation.
+    string public_key = 5;
+    string signature = 6;
+    int64 ts = 7;
 }
 
 message Client {
@@ -342,7 +352,6 @@ service Gateway {
     rpc GenerateClient(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  -> Client
     rpc GenerateDepositToken(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client -> TokenMessage
     rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Payment -> Empty
-    rpc SignPublicKey(stream buffer.Buffer) returns (stream buffer.Buffer) {} // SignRequest -> SignResponse
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput -> ModifyServiceSystemResourcesOutput
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash & Service -> EstimatedCost
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash -> Service

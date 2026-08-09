@@ -152,6 +152,18 @@ packer:
 network:
   GATEWAY_PORT: auto
   LOCAL_NETWORK: "lo"
+  # How long (seconds) this node expects to keep its current address -- typically the
+  # ISP's DHCP lease for a dynamic public IP. Published (signed) alongside the
+  # addresses this node announces, so peers can anticipate the change and re-resolve
+  # instead of assuming the address is permanent. 0 disables the estimate; prefer that
+  # over guessing, since a wrong expiry makes peers drop a still-valid address.
+  ADDRESS_VALIDITY_SECONDS: 0
+  # Also announce this node's private/LAN addresses to peers, on top of the public one
+  # (network.PUBLIC_IP or the outbound address). Off by default: a LAN address is
+  # unreachable noise to a remote peer, costs it a connect timeout per probe, and
+  # collides across unrelated nodes (every Docker host has 172.17.0.1). Turn it on for
+  # an all-on-one-LAN deployment where peers have no public addresses at all.
+  ANNOUNCE_PRIVATE_ADDRESSES: false
   PUBLIC_IP: ""  # Optional public IP or DNS name to advertise for `nodo execute --remote`. Leave empty to auto-detect from the default outbound interface.
   EXTERNAL_INTERFACE: ""  # Optional interface name to use when PUBLIC_IP is empty, e.g. "eth0".
   PUBLIC_TCP_PORT: ""  # Optional external TCP port to advertise for the gateway (GATEWAY_PORT), in case your router forwards a different port than the one this node listens on. Leave empty to advertise GATEWAY_PORT itself.
@@ -364,8 +376,16 @@ ledgers:
     GAS_PER_ERG: 1.0e+58
     NODE_URL: "https://node.sigmaspace.io"
     GENESIS_BLOCK_ID: "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
-    # The one wallet the node controls. Leave empty to disable payments/reputation,
-    # or set to "auto" to have the node generate a fresh mnemonic on first load.
+    # The ONE mnemonic of the whole node. It is both the wallet the node controls and
+    # its identity: the key it signs GetPeerInfo with, and whose public key IS the
+    # peer_id other nodes store for it (issue #236). Leave empty (or "auto") and a
+    # fresh one is generated on first load -- a node always needs an identity, and
+    # generating a mnemonic commits to nothing, since the wallet holds no funds until
+    # someone sends some.
+    #
+    # TREAT AS A SECRET, and back it up: losing it means losing both the funds and the
+    # node's identity, and changing it makes every peer see a brand-new node, orphaning
+    # the deposits and reputation recorded against the old one.
     WALLET_MNEMONIC: ""
     HTTP_PEERS_PATH: "${main.STORAGE}/ergo_http_peers.json"
     reputation:

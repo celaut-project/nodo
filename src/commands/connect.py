@@ -6,7 +6,6 @@ import grpc
 from src.manager.manager import add_peer_instance
 from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
-from src.utils.utils import get_network_name
 
 env_manager = ConfigManager()
 SELF_ANNOUNCE_TO_CONNECTING_PEERS = env_manager.get("SELF_ANNOUNCE_TO_CONNECTING_PEERS")
@@ -37,20 +36,18 @@ def connect(peer: str):
             print("Failed to add a peer.")
         else:
             print(f'Added peer {peer} with id {peer_id}')
-            if not peer_info.instance.api.payment_contracts:
+            if not peer_info.payment_contracts:
                 print(
                     f"Note: peer {peer} advertises no payment contract, so it cannot "
                     "be paid yet (its ledger interface may not be initialised)."
                 )
 
         if SELF_ANNOUNCE_TO_CONNECTING_PEERS:
-            from src.gateway.utils import generate_node_peer_info
+            from src.gateway.utils import generate_full_node_peer_info
             print(f'Sending instance to peer: {peer}')
-            
+
             try:
-                gateway_instance = generate_node_peer_info(
-                        network=get_network_name(direction=peer)
-                    )
+                gateway_instance = generate_full_node_peer_info()
             except Exception as e:
                 print(f"Error generating instance for peer {peer}. {e}")
                 return

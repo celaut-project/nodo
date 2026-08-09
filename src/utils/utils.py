@@ -1,5 +1,8 @@
+import collections
 import os
 import socket
+import threading
+import time
 import typing
 import ipaddress
 from typing import Generator, Optional
@@ -293,20 +296,101 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     )
 
 
+def format_uri(ip: str, port: int) -> str:
+    """``ip:port`` as a gRPC target, bracketing IPv6 literals.
+
+    A bare ``2001:db8::1:8080`` is not a parseable target -- the host has to be
+    ``[2001:db8::1]:8080``. Announcing IPv6 became possible once a node advertises
+    every interface (issue #236), so the formatting can no longer assume IPv4.
+    """
+    try:
+        if isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address):
+            return f"[{ip}]:{port}"
+    except ValueError:
+        pass  # A DNS name: no brackets.
+    return f"{ip}:{port}"
+
+
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
+    """Every address of ``peer_id`` that this node can open a gRPC channel to.
+
+    Non-TCP addresses are skipped, not merely left unprobed: every consumer of this
+    feeds the result straight to ``grpc.insecure_channel``, so yielding a UDP endpoint
+    would hand them an address that can never answer -- and, since callers take the
+    *first* result, it would shadow the peer's working TCP address indefinitely.
+    An empty transport is a row from before addresses declared one; those were all TCP
+    gateways.
+    """
     yield from (
-        ip + ':' + str(port) for ip, port in get_peer_directions(
+        format_uri(ip, port) for ip, port, transport in get_peer_directions(
         peer_id=peer_id
-    ) if is_open(ip=ip, port=port)
+    ) if (not transport or transport.strip().lower() == "tcp")
+        and is_open(ip=ip, port=port, transport=transport)
     )
 
 
-def is_open(ip: str, port: int) -> bool:
+_IS_OPEN_CACHE_TTL_SECONDS = 30
+_IS_OPEN_CACHE_MAX_ENTRIES = 4096
+_is_open_cache: "collections.OrderedDict[typing.Tuple[str, int], typing.Tuple[bool, float]]" = (
+    collections.OrderedDict()
+)
+_is_open_cache_lock = threading.Lock()
+
+
+def is_open(ip: str, port: int, transport: str = "tcp") -> bool:
+    """Whether ``ip:port`` accepts a TCP connection, cached for a short while.
+
+    Each check is a 1s-timeout connect, and generate_uris_by_peer_id (and the ~15
+    call sites that take its first result) run it on every call -- accumulating
+    several addresses per peer (issue #236) multiplies how often that timeout gets
+    paid. A short TTL trades a little staleness for not re-paying it on every call
+    within the same handful of seconds.
+
+    ``transport`` is what the peer declared for this address. Only TCP can be probed
+    this way: a ``connect()`` on a datagram socket sends nothing and always succeeds
+    locally, so it would answer "open" for every UDP address, reachable or not. A
+    non-TCP address is therefore reported as usable without probing -- claiming it is
+    open on no evidence is no worse than the meaningless probe, and dropping it would
+    hide an address that may be perfectly reachable.
+
+    Bounded: the keys come from peer-announced addresses and ``IntroducePeer`` accepts
+    an unbounded URI list from anyone, so an unbounded dict would be a memory sink.
+    Expired entries are swept and the oldest are evicted past the cap.
+    """
+    # Empty transport = a legacy row from before addresses declared one; those were
+    # all TCP gateways, so probing them as TCP keeps the old behaviour.
+    if transport and transport.strip().lower() != "tcp":
+        return True
+
+    key = (ip, port)
+    now = time.monotonic()
+
+    with _is_open_cache_lock:
+        cached = _is_open_cache.get(key)
+        if cached is not None and cached[1] > now:
+            _is_open_cache.move_to_end(key)
+            return cached[0]
+
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        family = socket.AF_INET
+        try:
+            if isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address):
+                family = socket.AF_INET6
+        except ValueError:
+            pass  # A DNS name: let getaddrinfo pick via AF_INET.
+        sock = socket.socket(family, socket.SOCK_STREAM)
         sock.settimeout(1)
         sock.connect((ip, port))
         sock.close()
-        return True
+        result = True
     except Exception:
-        return False
+        result = False
+
+    with _is_open_cache_lock:
+        for stale_key in [k for k, (_, expiry) in _is_open_cache.items() if expiry <= now]:
+            _is_open_cache.pop(stale_key, None)
+        _is_open_cache[key] = (result, now + _IS_OPEN_CACHE_TTL_SECONDS)
+        _is_open_cache.move_to_end(key)
+        while len(_is_open_cache) > _IS_OPEN_CACHE_MAX_ENTRIES:
+            _is_open_cache.popitem(last=False)
+    return result
