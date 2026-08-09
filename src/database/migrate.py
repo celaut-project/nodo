@@ -27,12 +27,15 @@ def connect_to_database(db_file):
 
 def create_tables(cursor):
     """Create tables in the SQLite database."""
-    # Know that the protocol_stack on the peer table it's a Service.Api.Slot
+    # Know that the advertisement on the peer table is a serialized celaut.Peer,
+    # carrying what a peer declares node-wide (payment contracts and rates). Its
+    # addresses live in the `uri` table, one row each, since they are queried by
+    # ip/port rather than read back as a whole.
     tables = {
         "peer": '''
             CREATE TABLE IF NOT EXISTS peer (
                 id TEXT PRIMARY KEY,
-                protocol_stack BLOB,
+                advertisement BLOB,
                 remote_client_id TEXT,
                 gas TEXT,
                 gas_last_update DATETIME DEFAULT NULL,
@@ -50,23 +53,16 @@ def create_tables(cursor):
                 last_usage FLOAT NULL
             )
         ''',
-        "slot": '''
-            CREATE TABLE IF NOT EXISTS slot (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                internal_port INTEGER,
-                transport_protocol BLOB,
-                peer_id TEXT,
-                FOREIGN KEY (peer_id) REFERENCES peer (id)
-            )
-        ''',
         "uri": '''
             CREATE TABLE IF NOT EXISTS uri (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                peer_id TEXT,
                 ip TEXT,
                 port INTEGER,
-                slot_id INTEGER,
                 expiry_unix_timestamp INTEGER DEFAULT NULL,
-                FOREIGN KEY (slot_id) REFERENCES slot (id)
+                transport TEXT DEFAULT NULL,
+                protocol_stack BLOB DEFAULT NULL,
+                FOREIGN KEY (peer_id) REFERENCES peer (id)
             )
         ''',
         "contract": '''
@@ -170,58 +166,69 @@ def create_tables(cursor):
     ensure_columns(cursor, "local_instances", {"envs": "TEXT DEFAULT NULL"})
     ensure_columns(cursor, "peer", {
         "last_ts": "INTEGER DEFAULT NULL",
+        "advertisement": "BLOB DEFAULT NULL",
     })
     ensure_columns(cursor, "uri", {
+        "peer_id": "TEXT DEFAULT NULL",
         "expiry_unix_timestamp": "INTEGER DEFAULT NULL",
+        "transport": "TEXT DEFAULT NULL",
+        "protocol_stack": "BLOB DEFAULT NULL",
     })
+    retire_slot_table(cursor)
     ensure_peer_address_uniqueness(cursor)
 
 
-def ensure_peer_address_uniqueness(cursor) -> None:
-    """Enforce one row per (peer, internal_port) and per (slot, ip, port).
+def retire_slot_table(cursor) -> None:
+    """Move a peer's addresses off the ``slot`` indirection and onto the peer itself.
 
-    ``add_slot``/``add_uri`` merge a peer's advertisement instead of clearing and
-    reinserting it, and they run concurrently: gRPC serves IntroducePeer on a 30-thread
-    pool, and ``_execute`` commits each statement separately, so a plain
-    SELECT-then-INSERT is not atomic. These indexes make the upsert the database's job
-    rather than a race the application hopes to win.
+    ``slot`` grouped a peer's URIs by ``internal_port`` so they could be matched
+    against an ``Api.Slot`` of the same port number. A ``Peer.Uri`` now carries its own
+    transport and protocol stack, so there is nothing left to match and nothing left
+    for the row to hold -- its other column, ``transport_protocol``, was only ever
+    written, never read back.
 
-    Existing databases may already hold duplicates (created before this), so de-dup
-    first -- keeping the lowest rowid and re-pointing its URIs -- or the CREATE fails.
+    Idempotent: a no-op once the table is gone.
     """
     try:
-        # Re-point URIs of duplicate slots onto the surviving slot, then drop the extras.
-        cursor.execute('''
-            UPDATE uri SET slot_id = (
-                SELECT MIN(keep.id) FROM slot keep
-                WHERE keep.peer_id = (SELECT s.peer_id FROM slot s WHERE s.id = uri.slot_id)
-                  AND keep.internal_port = (SELECT s.internal_port FROM slot s WHERE s.id = uri.slot_id)
-            )
-            WHERE slot_id IN (
-                SELECT s.id FROM slot s
-                WHERE s.id > (
-                    SELECT MIN(k.id) FROM slot k
-                    WHERE k.peer_id = s.peer_id AND k.internal_port = s.internal_port
-                )
-            )
-        ''')
-        cursor.execute('''
-            DELETE FROM slot WHERE id > (
-                SELECT MIN(k.id) FROM slot k
-                WHERE k.peer_id = slot.peer_id AND k.internal_port = slot.internal_port
-            )
-        ''')
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='slot'")
+        if not cursor.fetchone():
+            return
+        # Adopt the owning peer before the join disappears. Rows whose slot is already
+        # missing are orphans and would be unreachable anyway, so they go.
+        cursor.execute(
+            "UPDATE uri SET peer_id = (SELECT s.peer_id FROM slot s WHERE s.id = uri.slot_id) "
+            "WHERE peer_id IS NULL"
+        )
+        cursor.execute("DELETE FROM uri WHERE peer_id IS NULL")
+        cursor.execute("DROP INDEX IF EXISTS idx_uri_slot_ip_port")
+        cursor.execute("DROP INDEX IF EXISTS idx_slot_peer_port")
+        cursor.execute("DROP TABLE slot")
+        print("Retired the 'slot' table; peer URIs now hang off the peer directly.")
+    except sqlite3.Error as e:
+        print(f"Error retiring the slot table: {e}")
+
+
+def ensure_peer_address_uniqueness(cursor) -> None:
+    """Enforce one row per (peer, ip, port).
+
+    ``add_peer_uri`` merges a peer's advertisement instead of clearing and reinserting
+    it, and it runs concurrently: gRPC serves IntroducePeer on a 30-thread pool, and
+    ``_execute`` commits each statement separately, so a plain SELECT-then-INSERT is
+    not atomic. This index makes the upsert the database's job rather than a race the
+    application hopes to win.
+
+    Existing databases may already hold duplicates (created before this), so de-dup
+    first -- keeping the lowest rowid -- or the CREATE fails.
+    """
+    try:
         cursor.execute('''
             DELETE FROM uri WHERE id > (
                 SELECT MIN(k.id) FROM uri k
-                WHERE k.slot_id = uri.slot_id AND k.ip = uri.ip AND k.port = uri.port
+                WHERE k.peer_id = uri.peer_id AND k.ip = uri.ip AND k.port = uri.port
             )
         ''')
         cursor.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_slot_peer_port ON slot (peer_id, internal_port)"
-        )
-        cursor.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_uri_slot_ip_port ON uri (slot_id, ip, port)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_uri_peer_ip_port ON uri (peer_id, ip, port)"
         )
     except sqlite3.Error as e:
         print(f"Error enforcing peer address uniqueness: {e}")

@@ -312,10 +312,20 @@ def format_uri(ip: str, port: int) -> str:
 
 
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
+    """Every address of ``peer_id`` that this node can open a gRPC channel to.
+
+    Non-TCP addresses are skipped, not merely left unprobed: every consumer of this
+    feeds the result straight to ``grpc.insecure_channel``, so yielding a UDP endpoint
+    would hand them an address that can never answer -- and, since callers take the
+    *first* result, it would shadow the peer's working TCP address indefinitely.
+    An empty transport is a row from before addresses declared one; those were all TCP
+    gateways.
+    """
     yield from (
-        format_uri(ip, port) for ip, port in get_peer_directions(
+        format_uri(ip, port) for ip, port, transport in get_peer_directions(
         peer_id=peer_id
-    ) if is_open(ip=ip, port=port)
+    ) if (not transport or transport.strip().lower() == "tcp")
+        and is_open(ip=ip, port=port, transport=transport)
     )
 
 
@@ -327,7 +337,7 @@ _is_open_cache: "collections.OrderedDict[typing.Tuple[str, int], typing.Tuple[bo
 _is_open_cache_lock = threading.Lock()
 
 
-def is_open(ip: str, port: int) -> bool:
+def is_open(ip: str, port: int, transport: str = "tcp") -> bool:
     """Whether ``ip:port`` accepts a TCP connection, cached for a short while.
 
     Each check is a 1s-timeout connect, and generate_uris_by_peer_id (and the ~15
@@ -336,10 +346,22 @@ def is_open(ip: str, port: int) -> bool:
     paid. A short TTL trades a little staleness for not re-paying it on every call
     within the same handful of seconds.
 
+    ``transport`` is what the peer declared for this address. Only TCP can be probed
+    this way: a ``connect()`` on a datagram socket sends nothing and always succeeds
+    locally, so it would answer "open" for every UDP address, reachable or not. A
+    non-TCP address is therefore reported as usable without probing -- claiming it is
+    open on no evidence is no worse than the meaningless probe, and dropping it would
+    hide an address that may be perfectly reachable.
+
     Bounded: the keys come from peer-announced addresses and ``IntroducePeer`` accepts
     an unbounded URI list from anyone, so an unbounded dict would be a memory sink.
     Expired entries are swept and the oldest are evicted past the cap.
     """
+    # Empty transport = a legacy row from before addresses declared one; those were
+    # all TCP gateways, so probing them as TCP keeps the old behaviour.
+    if transport and transport.strip().lower() != "tcp":
+        return True
+
     key = (ip, port)
     now = time.monotonic()
 

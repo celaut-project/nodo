@@ -350,7 +350,19 @@ message ServiceInstance {
 }
 
 message Peer {
-    message UriEphemeral {
+    // One address this peer is reachable at, fully self-describing: the transport
+    // and protocol stack belong to the endpoint, not to the node, so no separate
+    // slot message and no port-based matching between the two is needed.
+    message Uri {
+        // Deliberately not Service.Api.Protocol: a peer's endpoint is not a service
+        // API declaration, and reusing that message coupled the two schemas for no
+        // reason other than that the fields happened to line up.
+        message Protocol {
+            repeated string tags = 1;
+            string prose = 2;
+            bytes formal = 3;
+        }
+
         string ip = 1;
         int32 port = 2;
         // Unix timestamp after which this address may stop being valid (e.g. a
@@ -360,28 +372,38 @@ message Peer {
         // valid forever (issue #236, absorbing #235). Covered by `signature`, so
         // it cannot be stripped or extended in transit.
         int64 expiry_unix_timestamp = 3;
+        // Transport this address speaks (tcp / udp). Per-address rather than
+        // per-node: tcp:8080 and udp:9000 are different endpoints, and a reader
+        // needs this to probe the address with the right kind of socket.
+        Protocol transport = 4;
+        repeated Protocol protocol_stack = 5;
     }
 
     repeated Contract reputation_proofs = 1;
 
-    // API definition of the gateway this peer exposes.
-    Service.Api api = 2;
+    // Every address this peer is reachable at.
+    repeated Uri uri = 2;
 
-    // Every address this peer is reachable at, each with its own expiry estimate.
-    repeated UriEphemeral uri = 3;
+    // Node-wide, not per-address: what this peer accepts as payment and what it
+    // charges on a recurring basis. A node's rates do not depend on which of its
+    // addresses you reach it through (see cost_functions.node_advertised_rates,
+    // which has no notion of a port), so they are not repeated per Uri.
+    repeated GasPrice payment_contracts = 3;
+    map<string, GasAmount> gas_amount_per_call = 4;
 
     // Node identity (issue #236): the raw 33-byte SEC-compressed public key (hex) of
     // the node's identity keypair, and a signature over the canonical encoding of
-    // (public_key, ts, api, uri) -- see node_identity.canonical_peer_payload.
+    // (public_key, ts, uri, payment_contracts, gas_amount_per_call) -- see
+    // node_identity.canonical_peer_payload.
     // Verifying it proves the sender controls public_key without any interactive
     // challenge, so GetPeerInfo alone is enough (SignPublicKey is removed). Absent on
     // a peer that predates this or has no identity mnemonic configured yet.
-    string public_key = 4;
-    string signature = 5;
+    string public_key = 5;
+    string signature = 6;
     // Anti-replay: a verifier rejects a message whose ts is not strictly newer than
     // the last one it accepted for this public_key. Guards only against a downgrade
     // to a stale address; the claim itself is safe to freely redistribute.
-    int64 ts = 6;
+    int64 ts = 7;
 }
 
 message Client {

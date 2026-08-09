@@ -20,36 +20,25 @@ def get_peer_id_by_ip(ip: str, port: int = None) -> str:
     if port is None:
         return next(fetch_query(
             query="SELECT id FROM peer "
-                  "WHERE id IN ("
-                  "   SELECT peer_id FROM slot "
-                  "   WHERE id IN ("
-                  "       SELECT slot_id FROM uri "
-                  "       WHERE ip = ?"
-                  "   )"
-                  ")",
+                  "WHERE id IN (SELECT peer_id FROM uri WHERE ip = ?)",
             params=(ip,)
         ))[0]
 
     return next(fetch_query(
         query="SELECT id FROM peer "
-              "WHERE id IN ("
-              "   SELECT peer_id FROM slot "
-              "   WHERE id IN ("
-              "       SELECT slot_id FROM uri "
-              "       WHERE ip = ? AND port = ?"
-              "   )"
-              ")",
+              "WHERE id IN (SELECT peer_id FROM uri WHERE ip = ? AND port = ?)",
         params=(ip, port)
     ))[0]
 
 
-def get_peer_directions(peer_id) -> Generator[Tuple[str, int], None, None]:
-    for ip, port in fetch_query(
-            query="SELECT ip, port FROM uri "
-                  "WHERE slot_id IN ("
-                  "   SELECT id FROM slot "
-                  "   WHERE peer_id = ?"
-                  ")",
+def get_peer_directions(peer_id) -> Generator[Tuple[str, int, str], None, None]:
+    """Every address announced by ``peer_id``, as ``(ip, port, transport)``.
+
+    ``transport`` is the tag the peer declared for that address ("tcp"/"udp"), or an
+    empty string for a legacy row that predates per-address transports.
+    """
+    for ip, port, transport in fetch_query(
+            query="SELECT ip, port, transport FROM uri WHERE peer_id = ?",
             params=(peer_id,)
     ):
-        yield ip, port
+        yield ip, port, transport or ""

@@ -61,12 +61,24 @@ class OnChainPeerObjectTests(unittest.TestCase):
         return ni.canonical_peer_payload(
             peer.public_key,
             peer.ts,
-            ni.canonical_peer_content_digest(peer.api, peer.uri),
+            ni.canonical_peer_content_digest(peer),
         )
 
     def test_publishes_the_address(self):
         peer = self._publish()
         self.assertEqual(peer.uri[0].ip, PUBLIC_IP)
+
+    def test_publishes_the_transport_of_the_address(self):
+        # A reader has to know which kind of socket the advertised address takes.
+        self.assertEqual(list(self._publish().uri[0].transport.tags), ["tcp"])
+
+    def test_a_downgraded_transport_breaks_the_signature(self):
+        peer = self._publish()
+        del peer.uri[0].transport.tags[:]
+        peer.uri[0].transport.tags.append("udp")
+        self.assertFalse(
+            ni.verify_peer_payload(self._r7_owner_key(), self._payload_for(peer), peer.signature)
+        )
 
     def test_publishes_a_peer_envelope_not_a_bare_instance(self):
         peer = self._publish()

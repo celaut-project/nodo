@@ -89,9 +89,8 @@ def node_proposition_hex(public_key_hex: str) -> str:
     return _P2PK_PREFIX_HEX + public_key_hex
 
 
-def _canonical_contract(gas_price) -> str:
-    """Deterministic encoding of one advertised payment contract."""
-    contract = gas_price.contract
+def _canonical_contract_message(contract) -> str:
+    """Deterministic encoding of one ``Contract`` (a ledger plus its xattrs)."""
     xattrs = ";".join(
         f"{key}={bytes(contract.xattrs[key]).hex()}" for key in sorted(contract.xattrs)
     )
@@ -100,49 +99,70 @@ def _canonical_contract(gas_price) -> str:
         ",".join(sorted(contract.ledger.tags)),
         contract.ledger.prose,
         xattrs,
+    ])
+
+
+def _canonical_contract(gas_price) -> str:
+    """Deterministic encoding of one advertised payment contract and its price."""
+    return "~".join([
+        _canonical_contract_message(gas_price.contract),
         gas_price.gas_amount.n,
     ])
 
 
-def _canonical_api_slot(slot) -> str:
-    """Deterministic encoding of one advertised API slot, including its rates."""
-    rates = ";".join(
-        f"{key}={slot.gas_amount_per_call[key].n}" for key in sorted(slot.gas_amount_per_call)
-    )
-    protocol_stack = ";".join(
-        sorted(",".join(sorted(protocol.tags)) for protocol in slot.protocol_stack)
-    )
+def _canonical_protocol(protocol) -> str:
+    """Deterministic encoding of one ``Peer.Uri.Protocol``."""
     return "~".join([
-        str(slot.port),
-        ",".join(sorted(slot.transport.tags)),
-        protocol_stack,
-        rates,
+        protocol.formal.hex(),
+        ",".join(sorted(protocol.tags)),
+        protocol.prose,
     ])
 
 
-def canonical_peer_content_digest(api, uris) -> str:
+def _canonical_uri(uri) -> str:
+    """Deterministic encoding of one advertised address and everything it declares."""
+    protocol_stack = ";".join(sorted(_canonical_protocol(p) for p in uri.protocol_stack))
+    return "~".join([
+        uri.ip,
+        str(uri.port),
+        str(uri.expiry_unix_timestamp),
+        _canonical_protocol(uri.transport),
+        protocol_stack,
+    ])
+
+
+def canonical_peer_content_digest(peer) -> str:
     """A stable digest of everything a peer advertises about itself.
 
     The signature has to cover the *whole* advertisement, not just the addresses:
-    ``api.payment_contracts`` is what decides where this node's money is sent, and
-    ``api.slot`` carries the advertised rates. Leaving them unsigned let anyone take
-    a legitimately signed ``Peer``, swap in their own payment contract, and have it
-    accepted and stored (``add_contract`` is INSERT OR IGNORE, so the forged contract
-    lands *next to* the real one rather than replacing it). Each URI's own
-    ``expiry_unix_timestamp`` is included too, so it cannot be stripped (making a
-    soon-to-expire address look permanent) or extended (keeping peers pinned to an
-    address the signer knows is about to change).
+    ``payment_contracts`` is what decides where this node's money is sent, and
+    ``gas_amount_per_call`` carries the advertised rates. Leaving them unsigned let
+    anyone take a legitimately signed ``Peer``, swap in their own payment contract,
+    and have it accepted and stored (``add_contract`` is INSERT OR IGNORE, so the
+    forged contract lands *next to* the real one rather than replacing it). Each
+    URI's own ``expiry_unix_timestamp`` and ``transport`` are included too, so
+    neither can be stripped (making a soon-to-expire address look permanent, or a
+    UDP endpoint look like a TCP one) nor extended in transit.
+
+    ``reputation_proofs`` is covered as well. The proofs are validated against the
+    peer's own id before being stored, so a forged one cannot enter the database --
+    but the message is kept verbatim and republished on-chain, where a reader is told
+    the signature vouches for it. Leaving them out would let a relay graft proofs onto
+    (or strip them from) a claim that still verifies.
 
     Built field by field rather than from ``SerializeToString()``, which protobuf does
     not guarantee to be canonical (field order, unknown fields, non-minimal varints).
     Every repeated element is sorted so the digest does not depend on the order a node
     happened to enumerate things in.
     """
-    uri_entries = sorted(f"{u.ip}:{u.port}:{u.expiry_unix_timestamp}" for u in uris)
-    api_slots = sorted(_canonical_api_slot(slot) for slot in api.slot)
-    contracts = sorted(_canonical_contract(gp) for gp in api.payment_contracts)
+    uris = sorted(_canonical_uri(uri) for uri in peer.uri)
+    contracts = sorted(_canonical_contract(gp) for gp in peer.payment_contracts)
+    proofs = sorted(_canonical_contract_message(c) for c in peer.reputation_proofs)
+    rates = ";".join(
+        f"{key}={peer.gas_amount_per_call[key].n}" for key in sorted(peer.gas_amount_per_call)
+    )
 
-    canonical = "|".join(["/".join(uri_entries), "/".join(api_slots), "/".join(contracts)])
+    canonical = "|".join(["/".join(uris), "/".join(contracts), "/".join(proofs), rates])
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -151,9 +171,9 @@ def canonical_peer_payload(public_key_hex: str, ts: int, content_digest: str) ->
     The exact string a ``Peer`` signature is computed over.
 
     ``content_digest`` comes from :func:`canonical_peer_content_digest`, so the
-    signature covers every advertised address (and its expiry), API slot and payment
-    contract at once, and any field added later is covered as soon as the digest
-    accounts for it.
+    signature covers every advertised address (with its expiry and transport), the
+    payment contracts and the rates at once, and any field added later is covered as
+    soon as the digest accounts for it.
     """
     return f"{public_key_hex}|{ts}|{content_digest}"
 

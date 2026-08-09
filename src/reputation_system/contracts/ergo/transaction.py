@@ -171,10 +171,10 @@ def _self_network_data() -> str:
     That is what makes the published expiry trustworthy -- otherwise whoever relays
     the data could stretch or strip it.
 
-    Deliberately minimal: only the gateway URI. The API slots, payment contracts and
+    Deliberately minimal: only the gateway URI. The payment contracts, rates and
     reputation proofs are served by GetPeerInfo (and the proof is this box), and an
     Ergo register is not the place to grow unbounded. The signature covers exactly
-    this minimal instance, so it verifies as published.
+    this minimal object, so it verifies as published.
     """
     if not SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF():
         return NO_NETWORK_ADDRESS
@@ -212,6 +212,7 @@ def _self_network_data() -> str:
     uri = peer.uri.add()
     uri.ip = host
     uri.port = public_port
+    uri.transport.tags.append("tcp")
 
     public_key_hex = get_node_public_key_hex()
     if public_key_hex:
@@ -219,7 +220,7 @@ def _self_network_data() -> str:
         uri.expiry_unix_timestamp = uri_expiry(ts)
         signature = sign_peer_payload(
             canonical_peer_payload(
-                public_key_hex, ts, canonical_peer_content_digest(peer.api, peer.uri),
+                public_key_hex, ts, canonical_peer_content_digest(peer),
             )
         )
         if signature:

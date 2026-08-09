@@ -1219,8 +1219,7 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 COALESCE(p.reputation_proof_id, ''),
                 p.reputation_score
          FROM peer p
-         LEFT JOIN slot s ON p.id = s.peer_id
-         LEFT JOIN uri u ON s.id = u.slot_id
+         LEFT JOIN uri u ON p.id = u.peer_id
          GROUP BY p.id, p.gas, p.reputation_proof_id, p.reputation_score",
     )?;
     let peers = statement
@@ -1236,7 +1235,7 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 reputation: row.get(3)?,
                 reputation_score,
                 // `contract_instance` isn't touched by the join above (it isn't
-                // keyed by slot/uri), so its rows are fetched per peer below.
+                // keyed by uri), so its rows are fetched per peer below.
                 contracts: Vec::new(),
                 id,
             })
@@ -1253,7 +1252,7 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
 }
 
 /// Every payment contract instance a peer has registered. A peer's
-/// `contract_instance` rows aren't reachable from the slot/uri join `get_peers`
+/// `contract_instance` rows aren't reachable from the uri join `get_peers`
 /// already runs, and before this the TUI surfaced none of it at all (issue #231).
 fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<PeerContract>> {
     let mut statement = connection.prepare(
@@ -1692,8 +1691,7 @@ mod tests {
             .execute_batch(
                 "CREATE TABLE peer (id TEXT PRIMARY KEY, gas TEXT, reputation_proof_id TEXT,
                                     reputation_score INTEGER);
-                 CREATE TABLE slot (id INTEGER PRIMARY KEY, peer_id TEXT);
-                 CREATE TABLE uri (id INTEGER PRIMARY KEY, slot_id INTEGER, ip TEXT, port INTEGER);
+                 CREATE TABLE uri (id INTEGER PRIMARY KEY, peer_id TEXT, ip TEXT, port INTEGER);
                  CREATE TABLE ledger (hash TEXT PRIMARY KEY, content BLOB);
                  CREATE TABLE contract_instance (id INTEGER PRIMARY KEY, address TEXT,
                                     ledger_hash TEXT, contract_hash TEXT, peer_id TEXT,

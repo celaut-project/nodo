@@ -199,9 +199,7 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     for uri in peer.uri:
         uri.expiry_unix_timestamp = expiry
     signature = sign_peer_payload(
-        canonical_peer_payload(
-            public_key_hex, ts, canonical_peer_content_digest(peer.api, peer.uri)
-        )
+        canonical_peer_payload(public_key_hex, ts, canonical_peer_content_digest(peer))
     )
     if not signature:
         return
@@ -212,34 +210,33 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
-    slot = celaut.Service.Api.Slot()
-    slot.port = GATEWAY_PORT
-    slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
+    peer = celaut_pb2.Peer()
+
+    # Every address this node serves its gateway at. The transport rides on the
+    # address itself rather than on a separate slot: tcp:8080 and udp:9000 would be
+    # different endpoints, so a reader needs to know which without matching the two
+    # by port number.
+    for uri in uris:
+        announced = peer.uri.add(ip=uri.ip, port=uri.port)
+        announced.transport.tags.append("tcp")
 
     # Advertise what this node charges on a recurring basis, so a peer knows the
     # rate before negotiating anything. The price of a *specific service* is not
     # here: that is what GetServiceEstimatedCost is for. Values are ceilings; see
-    # node_advertised_rates(). This rides in the gateway slot because a peer
-    # already stores that slot verbatim (manager.add_peer_instance keeps
-    # api.slot[0] in peer.protocol_stack), so it needs no schema of its own.
+    # node_advertised_rates(). Node-wide rather than per-address, because a node's
+    # rates do not depend on which of its addresses you reach it through.
     #
     # Imported here, like local_proofs below: the cost-function package reaches the
     # virtualizer stack, which imports this module back at import time.
     from src.utils.cost_functions.general_cost_functions import node_advertised_rates
 
     for rate, gas in node_advertised_rates().items():
-        slot.gas_amount_per_call[rate].n = str(gas)
-
-    peer = celaut_pb2.Peer()
-    peer.api.slot.append(slot)
-    peer.uri.extend(
-        celaut_pb2.Peer.UriEphemeral(ip=uri.ip, port=uri.port) for uri in uris
-    )
+        peer.gas_amount_per_call[rate].n = str(gas)
 
     payment_contracts = _local_payment_contracts()
     log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
     if payment_contracts:
-        peer.api.payment_contracts.extend(payment_contracts)
+        peer.payment_contracts.extend(payment_contracts)
 
     from src.reputation_system.fetch import local_proofs
 
@@ -253,10 +250,22 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
 
 def peer_gateway_instance(peer: celaut_pb2.Peer) -> celaut.Instance:
     """Convert a ``Peer`` into the ``Instance`` shape ``ConfigurationFile.gateway``
-    expects. All of ``peer.uri`` is folded into one slot at ``GATEWAY_PORT``, since
-    that is the only internal port a self-generated ``Peer`` ever advertises."""
+    expects.
+
+    ``Instance`` still groups addresses under an ``internal_port``, so all of
+    ``peer.uri`` is folded into one slot at ``GATEWAY_PORT`` -- the only port a
+    self-generated ``Peer`` ever serves. The rates ride in that slot because an
+    ``Instance`` has nowhere else to carry them.
+    """
     instance = celaut.Instance()
-    instance.api.CopyFrom(peer.api)
+
+    slot = instance.api.slot.add()
+    slot.port = GATEWAY_PORT
+    slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
+    for rate, gas in peer.gas_amount_per_call.items():
+        slot.gas_amount_per_call[rate].n = gas.n
+    instance.api.payment_contracts.extend(peer.payment_contracts)
+
     uri_slot = instance.uri_slot.add()
     uri_slot.internal_port = GATEWAY_PORT
     uri_slot.uri.extend(celaut.Instance.Uri(ip=u.ip, port=u.port) for u in peer.uri)
