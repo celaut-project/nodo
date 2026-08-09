@@ -699,7 +699,7 @@ class SQLConnection(metaclass=Singleton):
         """
 
         try:
-            # Fetch all peers' data along with slots, URIs, and contracts in one query
+            # Fetch all peers' data along with their URIs in one query
             result = self._execute('''
                 SELECT
                     p.id,
@@ -707,15 +707,12 @@ class SQLConnection(metaclass=Singleton):
                     p.reputation_score,
                     p.reputation_index,
                     p.last_index_on_ledger,
-                    p.protocol_stack,
-                    s.internal_port,
+                    p.advertisement,
                     u.ip,
                     u.port
                 FROM peer p
-                -- Joining slot table to get information about ports
-                LEFT JOIN slot s ON s.peer_id = p.id
-                -- Joining uri table to get IP and port details for each slot
-                LEFT JOIN uri u ON u.slot_id = s.id
+                -- Joining uri table to get the addresses this peer announced
+                LEFT JOIN uri u ON u.peer_id = p.id
             ''')
 
             rows = result.fetchall()
@@ -726,37 +723,49 @@ class SQLConnection(metaclass=Singleton):
             # Fetch the total sum of all reputation amounts from the table
             total_amount = self.total_peer_reputation()
 
-            # Dictionary to store instance data (for peers with multiple slots or contracts)
+            # Dictionary to store the object published for each peer
             peers_dict = {}
             for row in rows:
                 peer_id = row['id']
                 if peer_id not in peers_dict:
-                    # Initialize the instance for this peer
-                    instance = celaut_pb2.Instance()
+                    # A peer that handshaked with an identity gave us a signed Peer.
+                    # Publishing it verbatim keeps that signature verifiable straight
+                    # off the ledger, so a reader can check the claim without ever
+                    # contacting the peer -- the same property the node's own R9 has.
+                    peer_msg = celaut_pb2.Peer()
+                    stored = False
+                    if row['advertisement']:
+                        try:
+                            peer_msg.ParseFromString(row['advertisement'])
+                            stored = True
+                        except Exception as e:
+                            logger.LOGGER(f'Peer {peer_id} has an unreadable advertisement: {e}')
+                            peer_msg = celaut_pb2.Peer()
 
-                    # Set protocol stack if available
-                    if row['protocol_stack']:
-                        slot = celaut_pb2.Service.Api.Slot()
-                        slot.ParseFromString(row['protocol_stack'])
-                        instance.api.slot.append(slot)
+                    # Republish only a signature we ourselves verified. The stored blob
+                    # is whatever the peer last sent, and a message that failed
+                    # verification can still carry a non-empty `signature` field --
+                    # trusting that field alone would publish a forgery on-chain under
+                    # the "verifiable against the peer's key" promise.
+                    if peer_msg.signature and peer_msg.public_key != peer_id:
+                        peer_msg.ClearField('signature')
+                        peer_msg.ClearField('public_key')
 
-                    # Store in the dict
                     peers_dict[peer_id] = {
-                        'instance': instance,
+                        'peer': peer_msg,
+                        # An address list rebuilt from our own rows would not match what
+                        # the peer signed, so only fill it in when we have no stored
+                        # message at all (a peer migrated from before advertisements).
+                        'needs_addresses': not stored,
                         'reputation_proof_id': row['reputation_proof_id'],
                         'reputation_score': row['reputation_score'] or 0,
                         'reputation_index': row['reputation_index'] or 0,
                         'last_index_on_ledger': row['last_index_on_ledger'] or 0
                     }
 
-                # Add slots and URIs to the instance
-                if row['internal_port']:
-                    slot = peers_dict[peer_id]['instance'].uri_slot.add()
-                    slot.internal_port = row['internal_port']
-                    if row['ip'] and row['port']:
-                        uri = slot.uri.add()
-                        uri.ip = row['ip']
-                        uri.port = row['port']
+                entry = peers_dict[peer_id]
+                if entry['needs_addresses'] and row['ip'] and row['port']:
+                    entry['peer'].uri.add(ip=row['ip'], port=row['port'])
 
             # List to hold data for peers that need to be submitted to the ledger
             needs_submit = force_submit
@@ -773,8 +782,8 @@ class SQLConnection(metaclass=Singleton):
                     last_index_on_ledger = data['last_index_on_ledger']
 
                     if reputation_proof_id:
-                        # Convert instance to JSON string
-                        instance_json = MessageToJson(data['instance'])
+                        # Convert the peer object to JSON string
+                        instance_json = MessageToJson(data['peer'])
 
                         # Calculate the percentage of the total reputation token amount
                         if reputation_index - last_index_on_ledger >= env_manager.get("ledgers.ergo.reputation.LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
@@ -1126,12 +1135,15 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error refreshing gas for peer {peer_id}: {e}')
             return False
 
-    def add_peer(self, peer_id: str, protocol_stack: bytes) -> bool:
+    def add_peer(self, peer_id: str, advertisement: bytes) -> bool:
         """
         Adds a peer to the database.
 
         Args:
             peer_id (str): The ID of the peer to add.
+            advertisement (bytes): Serialized ``celaut.Peer`` holding what the peer
+                declares node-wide (payment contracts and rates). Its addresses are
+                stored separately, one ``uri`` row each.
 
         Returns:
             bool: True if the peer was successfully added, False otherwise.
@@ -1141,9 +1153,9 @@ class SQLConnection(metaclass=Singleton):
         if not self.peer_exists(peer_id=peer_id):
             try:
                 self._execute('''
-                    INSERT INTO peer (id, protocol_stack, remote_client_id, gas)
+                    INSERT INTO peer (id, advertisement, remote_client_id, gas)
                     VALUES (?, ?, '', '0')  -- Initialize with empty remote_client_id and 0 gas
-                ''', (peer_id, protocol_stack))
+                ''', (peer_id, advertisement))
                 logger.LOGGER(f'Peer {peer_id} added')
                 return True
             except sqlite3.Error as e:
@@ -1153,49 +1165,56 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Peer {peer_id} already exists')
             return False
 
-    def add_slot(
-        self,
-        slot,
-        peer_id: str,
-        transport_protocol: bytes,
-    ):
-        """
-        Adds or merges a peer's slot into the database.
+    def set_peer_advertisement(self, peer_id: str, advertisement: bytes) -> None:
+        """Refresh what a known peer declares node-wide (payment contracts, rates)."""
+        self._execute(
+            "UPDATE peer SET advertisement = ? WHERE id = ?", (advertisement, peer_id)
+        )
 
-        Upserts on (peer_id, internal_port) and merges each URI (insert if new,
-        refreshed if already known) instead of always inserting fresh rows. This makes
-        re-registering an already-known peer (a reconnect, a pay-time refresh, a
-        re-introduction) idempotent by construction, and lets a peer accumulate
-        several reachable addresses over time instead of losing every one but the
-        last it happened to advertise (issue #236).
+    def get_peer_advertisement(self, peer_id: str) -> Optional[bytes]:
+        """The peer's last stored node-wide declaration, or None if it has none."""
+        row = self._execute(
+            "SELECT advertisement FROM peer WHERE id = ?", (peer_id,)
+        ).fetchone()
+        return bytes(row[0]) if row and row[0] else None
+
+    def add_peer_uri(self, uri: celaut_pb2.Peer.Uri, peer_id: str, transport: str):
+        """
+        Adds or merges one of a peer's addresses into the database.
+
+        Upserts on (peer_id, ip, port): inserted if new, refreshed otherwise, instead
+        of always inserting a fresh row. This makes re-registering an already-known
+        peer (a reconnect, a pay-time refresh, a re-introduction) idempotent by
+        construction, and lets a peer accumulate several reachable addresses over time
+        instead of losing every one but the last it happened to advertise (issue #236).
 
         Args:
-            slot: any object exposing ``.internal_port`` and an iterable ``.uri`` of
-                URI-shaped objects (``celaut_pb2.Instance.Uri_Slot``, or a lightweight
-                stand-in grouping a flat ``Peer.uri`` list by port).
-            peer_id (str): The ID of the peer.
-            transport_protocol (bytes): Serialized transport tags for this slot.
+            uri (celaut_pb2.Peer.Uri): The address to add.
+            peer_id (str): The ID of the peer that announced it.
+            transport (str): Host-supported transport this address speaks ("tcp"/"udp"),
+                resolved from ``uri.transport`` by the caller.
         """
-        internal_port: int = slot.internal_port
-        # Single atomic upsert against idx_slot_peer_port. A SELECT-then-INSERT would
+        # Single atomic upsert against idx_uri_peer_ip_port. A SELECT-then-INSERT would
         # race: _execute commits per statement, so the lock is released in between and
         # two concurrent IntroducePeer threads would both insert.
+        protocol_stack = celaut_pb2.Peer.Uri()
+        protocol_stack.protocol_stack.extend(uri.protocol_stack)
         self._execute(
-            "INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?) "
-            "ON CONFLICT (peer_id, internal_port) DO UPDATE SET transport_protocol = excluded.transport_protocol",
-            (internal_port, transport_protocol, peer_id),
+            "INSERT INTO uri (peer_id, ip, port, expiry_unix_timestamp, transport, protocol_stack) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (peer_id, ip, port) DO UPDATE SET "
+            "expiry_unix_timestamp = excluded.expiry_unix_timestamp, "
+            "transport = excluded.transport, "
+            "protocol_stack = excluded.protocol_stack",
+            (
+                peer_id,
+                uri.ip,
+                uri.port,
+                int(uri.expiry_unix_timestamp) or None,
+                transport,
+                protocol_stack.SerializeToString(),
+            ),
         )
-        row = self._execute(
-            "SELECT id FROM slot WHERE peer_id = ? AND internal_port = ?",
-            (peer_id, internal_port),
-        ).fetchone()
-        if not row:
-            logger.LOGGER(f'Could not resolve slot {internal_port} for peer {peer_id}.')
-            return
-
-        slot_id = str(row[0])
-        for uri in slot.uri:
-            self.add_uri(uri, slot_id=slot_id)
 
     def check_if_ledger_exists(self, ledger_to_check: celaut_pb2.Contract.Ledger) -> celaut_pb2.Contract.Ledger:
         """
@@ -1425,7 +1444,7 @@ class SQLConnection(metaclass=Singleton):
     def remove_peer(self, peer_id: str) -> bool:
         """
         Removes a peer from the database along with all related records.
-        This includes contract_instances, slots, and URIs associated with the peer.
+        This includes contract_instances and URIs associated with the peer.
 
         Args:
             peer_id (str): The ID of the peer to remove.
@@ -1436,15 +1455,9 @@ class SQLConnection(metaclass=Singleton):
         try:
             # Define all deletion queries in proper order
             deletion_queries = [
-                # Delete URIs related to slots that belong to this peer
-                ('''DELETE FROM uri 
-                    WHERE slot_id IN (
-                        SELECT id FROM slot WHERE peer_id = ?
-                    )''', (peer_id,)),
-                
-                # Delete slots related to this peer
-                ('DELETE FROM slot WHERE peer_id = ?', (peer_id,)),
-                
+                # Delete URIs announced by this peer
+                ('DELETE FROM uri WHERE peer_id = ?', (peer_id,)),
+
                 # Delete contract instances related to this peer
                 ('DELETE FROM contract_instance WHERE peer_id = ?', (peer_id,)),
                 
@@ -1472,7 +1485,7 @@ class SQLConnection(metaclass=Singleton):
         client id, payment contracts and reputation stay stranded on an orphaned row
         that nothing references again.
 
-        ``peer_id`` is a foreign key in slot, contract_instance and delegated_instances,
+        ``peer_id`` is a foreign key in uri, contract_instance and delegated_instances,
         so all four tables move together, in one transaction. ``"LOCAL"`` is a reserved
         sentinel for this node's own contracts and is never a discovered peer, so it is
         refused outright.
@@ -1489,7 +1502,7 @@ class SQLConnection(metaclass=Singleton):
         try:
             self._execute2([
                 ('UPDATE peer SET id = ? WHERE id = ?', (new_peer_id, old_peer_id)),
-                ('UPDATE slot SET peer_id = ? WHERE peer_id = ?', (new_peer_id, old_peer_id)),
+                ('UPDATE uri SET peer_id = ? WHERE peer_id = ?', (new_peer_id, old_peer_id)),
                 ('UPDATE contract_instance SET peer_id = ? WHERE peer_id = ?', (new_peer_id, old_peer_id)),
                 ('UPDATE delegated_instances SET peer_id = ? WHERE peer_id = ?', (new_peer_id, old_peer_id)),
             ])
@@ -1513,7 +1526,7 @@ class SQLConnection(metaclass=Singleton):
         kept = {(str(ip), int(port)) for ip, port in keep}
         current = self._execute(
             "SELECT u.id, u.ip, u.port FROM uri u "
-            "JOIN slot s ON u.slot_id = s.id WHERE s.peer_id = ?",
+            "WHERE u.peer_id = ?",
             (peer_id,),
         ).fetchall()
 
@@ -1548,9 +1561,8 @@ class SQLConnection(metaclass=Singleton):
     def get_peer_expiry_unix_timestamp(self, peer_id: str) -> Optional[int]:
         """When the soonest of ``peer_id``'s announced addresses may stop being valid, or None."""
         row = self._execute(
-            "SELECT MIN(u.expiry_unix_timestamp) FROM uri u "
-            "JOIN slot s ON u.slot_id = s.id "
-            "WHERE s.peer_id = ? AND u.expiry_unix_timestamp > 0",
+            "SELECT MIN(expiry_unix_timestamp) FROM uri "
+            "WHERE peer_id = ? AND expiry_unix_timestamp > 0",
             (peer_id,),
         ).fetchone()
         return int(row[0]) if row and row[0] is not None else None
@@ -1559,7 +1571,7 @@ class SQLConnection(metaclass=Singleton):
         """True if any of ``uris`` (each exposing ``.ip``/``.port``) is already known.
 
         Args:
-            uris: an iterable of URI-shaped objects (e.g. ``Peer.UriEphemeral``).
+            uris: an iterable of URI-shaped objects (e.g. ``celaut_pb2.Peer.Uri``).
 
         Returns:
             bool:
@@ -1771,28 +1783,6 @@ class SQLConnection(metaclass=Singleton):
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to delete external client associated with peer {peer_id}: {e}')
             pass
-
-    def add_uri(self, uri, slot_id: str):
-        """
-        Merges a URI into the database: inserted if new, or has its expiry refreshed
-        if already present for this slot. Idempotent so a slot can accumulate several
-        addresses across re-handshakes without duplicating rows.
-
-        Args:
-            uri: a URI-shaped object (``celaut_pb2.Instance.Uri`` or
-                ``celaut_pb2.Peer.UriEphemeral``) exposing ``.ip``/``.port`` and,
-                optionally, ``.expiry_unix_timestamp`` (defaults to 0/unknown when
-                the type has no such field).
-            slot_id (str): The ID of the slot.
-        """
-        expiry = getattr(uri, "expiry_unix_timestamp", 0) or None
-        # Single atomic upsert against idx_uri_slot_ip_port -- see add_slot on why a
-        # SELECT-then-INSERT would race.
-        self._execute(
-            "INSERT INTO uri (ip, port, slot_id, expiry_unix_timestamp) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT (slot_id, ip, port) DO UPDATE SET "
-            "expiry_unix_timestamp = excluded.expiry_unix_timestamp",
-            (uri.ip, uri.port, slot_id, expiry))
 
     def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str, service_id: str):
         """

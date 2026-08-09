@@ -36,7 +36,7 @@ def list_peers():
         cursor.execute(
             '''
             SELECT
-                id, protocol_stack, remote_client_id,
+                id, advertisement, remote_client_id,
                 gas, gas_last_update,
                 reputation_proof_id, reputation_score,
                 reputation_index, last_index_on_ledger
@@ -51,24 +51,36 @@ def list_peers():
 
         for peer in peers:
             (
-                peer_id, protocol_stack, remote_client_id,
+                peer_id, advertisement, remote_client_id,
                 gas_str, gas_last_update,
                 reputation_proof_id, reputation_score,
                 reputation_index, last_index_on_ledger
             ) = peer
 
             advertised_rates = {}
-            if protocol_stack:
-                slot = celaut.Service.Api.Slot()
-                slot.ParseFromString(protocol_stack)
-                protocol_stack_tags = " ".join([p.tags[0] for p in slot.protocol_stack if p.tags])
-                # Rates the peer advertised in its gateway slot. Absent for peers
-                # running a version from before nodes published them.
-                advertised_rates = {
-                    rate: gas.n for rate, gas in slot.gas_amount_per_call.items()
+            protocol_stack_tags = "N/A"
+            if advertisement:
+                announced = celaut.Peer()
+                try:
+                    announced.ParseFromString(advertisement)
+                except Exception as e:
+                    print(f"  (unreadable advertisement for {peer_id}: {e})")
+                    announced = celaut.Peer()
+                # The stack is per-address now, so show the union across the peer's
+                # addresses rather than a single gateway slot's.
+                tags = {
+                    protocol.tags[0]
+                    for uri in announced.uri
+                    for protocol in uri.protocol_stack
+                    if protocol.tags
                 }
-            else:
-                protocol_stack_tags = "N/A"
+                if tags:
+                    protocol_stack_tags = " ".join(sorted(tags))
+                # Rates the peer advertised. Absent for peers running a version from
+                # before nodes published them.
+                advertised_rates = {
+                    rate: gas.n for rate, gas in announced.gas_amount_per_call.items()
+                }
 
             gas = int(gas_str)
             contracts = sq.get_peer_payment_contracts(peer_id)

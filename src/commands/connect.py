@@ -36,7 +36,7 @@ def connect(peer: str):
             print("Failed to add a peer.")
         else:
             print(f'Added peer {peer} with id {peer_id}')
-            if not peer_info.api.payment_contracts:
+            if not peer_info.payment_contracts:
                 print(
                     f"Note: peer {peer} advertises no payment contract, so it cannot "
                     "be paid yet (its ledger interface may not be initialised)."

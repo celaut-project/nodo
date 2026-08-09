@@ -57,14 +57,12 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         self.conn.close()
         os.unlink(self.db_path)
 
-    def _peer(self, uris, *, signed=True, ts=100, contract=b"HONEST"):
+    def _peer(self, uris, *, signed=True, ts=100, contract=b"HONEST", transport="tcp"):
         peer = celaut_pb2.Peer()
         for ip, port in uris:
-            peer.uri.add(ip=ip, port=port)
-        api_slot = peer.api.slot.add()
-        api_slot.port = 9999
-        api_slot.transport.tags.append("tcp")
-        gas_price = peer.api.payment_contracts.add()
+            uri = peer.uri.add(ip=ip, port=port)
+            uri.transport.tags.append(transport)
+        gas_price = peer.payment_contracts.add()
         gas_price.contract.ledger.formal = contract
         gas_price.gas_amount.n = "1"
         if signed:
@@ -72,7 +70,7 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
             peer.signature = bip_ecdsa_sign(
                 self.mnemonic,
                 ni.canonical_peer_payload(
-                    self.pubkey, ts, ni.canonical_peer_content_digest(peer.api, peer.uri)
+                    self.pubkey, ts, ni.canonical_peer_content_digest(peer)
                 ),
             )
         return peer
@@ -80,8 +78,7 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
     def _uris(self, peer_id):
         return sorted(
             row[0] for row in self.conn.execute(
-                "SELECT u.ip FROM uri u JOIN slot s ON u.slot_id = s.id WHERE s.peer_id = ?",
-                (peer_id,),
+                "SELECT ip FROM uri WHERE peer_id = ?", (peer_id,)
             ).fetchall()
         )
 
@@ -90,13 +87,62 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
 
     def test_swapped_payment_contract_is_rejected(self):
         peer = self._peer([("10.0.0.1", 9999)])
-        peer.api.payment_contracts[0].contract.ledger.formal = b"ATTACKER"
+        peer.payment_contracts[0].contract.ledger.formal = b"ATTACKER"
         self.assertIsNone(manager._verified_peer_public_key(peer))
 
     def test_injected_address_is_rejected(self):
         peer = self._peer([("10.0.0.1", 9999)])
         peer.uri.add(ip="6.6.6.6", port=9999)
         self.assertIsNone(manager._verified_peer_public_key(peer))
+
+    def test_downgraded_transport_is_rejected(self):
+        # Flipping an address's transport would send a reader at it with the wrong
+        # kind of socket, so it must not survive the signature check.
+        peer = self._peer([("10.0.0.1", 9999)])
+        del peer.uri[0].transport.tags[:]
+        peer.uri[0].transport.tags.append("udp")
+        self.assertIsNone(manager._verified_peer_public_key(peer))
+
+    def test_an_unsigned_message_cannot_hijack_an_identified_peer(self):
+        # A peer's addresses are public (GetPeerInfo serves them, and they go
+        # on-chain). Naming one must not let a stranger rewrite that peer's
+        # advertisement or payment contracts without signing for its identity.
+        self.assertEqual(
+            manager.add_peer_instance(self._peer([("10.0.0.1", 9999)])), self.pubkey
+        )
+        honest = self.conn.execute(
+            "SELECT advertisement FROM peer WHERE id=?", (self.pubkey,)
+        ).fetchone()[0]
+
+        forged = self._peer([("10.0.0.1", 9999)], signed=False, contract=b"ATTACKER")
+        forged.public_key, forged.signature = self.pubkey, "not-a-signature"
+        manager.add_peer_instance(forged)
+
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT advertisement FROM peer WHERE id=?", (self.pubkey,)
+            ).fetchone()[0],
+            honest,
+            "an unsigned announcement overwrote a verified peer's advertisement",
+        )
+
+    def test_an_address_whose_transport_is_unusable_is_not_kept(self):
+        # Storing it would leave a row the node can never speak to, and pruning must
+        # not resurrect it just because the announcement listed it.
+        manager.add_peer_instance(self._peer([("5.6.7.8", 9999)], ts=100))
+        manager.add_peer_instance(
+            self._peer([("5.6.7.8", 9999)], ts=200, transport="carrier-pigeon")
+        )
+        self.assertEqual(self._uris(self.pubkey), [])
+
+    def test_the_declared_transport_is_stored(self):
+        peer_id = manager.add_peer_instance(self._peer([("10.0.0.1", 9999)], transport="udp"))
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT transport FROM uri WHERE peer_id = ?", (peer_id,)
+            ).fetchone()[0],
+            "udp",
+        )
 
     def test_legacy_uuid_peer_is_adopted_keeping_its_state(self):
         legacy = manager.add_peer_instance(self._peer([("10.0.0.1", 9999)], signed=False))
@@ -139,7 +185,7 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         self.assertEqual(self._uris(self.pubkey), ["5.6.7.8"])
         self.assertEqual(
             self.conn.execute(
-                "SELECT COUNT(*) FROM slot WHERE peer_id=?", (self.pubkey,)
+                "SELECT COUNT(*) FROM uri WHERE peer_id=?", (self.pubkey,)
             ).fetchone()[0], 1
         )
 

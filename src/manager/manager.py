@@ -1,6 +1,5 @@
 from uuid import uuid4
 from decimal import Decimal, InvalidOperation
-from types import SimpleNamespace
 from typing import Dict, List, Optional, Generator, Tuple
 import secrets
 
@@ -29,7 +28,6 @@ from src.virtualizers.interface import hotplug
 from src.virtualizers.firewall import (
     TransportProtocol,
     resolve_slot_transport_protocols,
-    serialize_transport_protocol,
 )
 
 env_manager = ConfigManager()
@@ -194,28 +192,48 @@ def add_reputation_proof(contract_ledger, peer_id) -> bool:
     return sc.add_reputation_proof(contract=contract_ledger, peer_id=peer_id)
 
 
-def _peer_slot_transport_payloads(peer: celaut_pb2.Peer, peer_id: str) -> Dict[int, bytes]:
-    payloads_by_port: Dict[int, bytes] = {}
+def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int]]:
+    """Persist every address ``peer`` announced, each with the transport it declares.
 
-    for api_slot in peer.api.slot:
-        protocol = resolve_slot_transport_protocols(
-            api_slot,
-            logger_fn=log.LOGGER,
-            context=f"[PEER][{peer_id}]",
-        )
-        payloads_by_port[api_slot.port] = serialize_transport_protocol(protocol)
+    ``resolve_slot_transport_protocols`` reads ``.transport.tags`` and ``.port``, both
+    of which a ``Peer.Uri`` carries, so it applies unchanged. An address whose
+    transport the host does not support is skipped rather than stored: storing it
+    would hand every later reader an endpoint it cannot speak to.
 
-    return payloads_by_port
+    Returns the addresses actually stored, so a caller pruning superseded ones keeps
+    exactly those and not the ones it just refused: an address skipped here but left
+    in ``keep`` would survive as a stale row carrying its previous transport.
+    """
+    stored: List[Tuple[str, int]] = []
+    for uri in peer.uri:
+        try:
+            protocol = resolve_slot_transport_protocols(
+                uri,
+                logger_fn=log.LOGGER,
+                context=f"[PEER][{peer_id}]",
+            )
+        except ValueError as e:
+            log.LOGGER(f"[PEER][{peer_id}] Ignoring {uri.ip}:{uri.port}: {e}")
+            continue
+        if not protocol:
+            log.LOGGER(
+                f"[PEER][{peer_id}] Address {uri.ip}:{uri.port} declares no "
+                "host-supported transport. Skipping."
+            )
+            continue
+        sc.add_peer_uri(uri=uri, peer_id=peer_id, transport=protocol.value)
+        stored.append((uri.ip, uri.port))
+    return stored
 
 
-def _group_uris_by_port(uris) -> Dict[int, list]:
-    """Group a flat ``Peer.uri`` list by port, to feed ``sc.add_slot`` (keyed on
-    ``(peer_id, internal_port)``): a self-generated ``Peer`` always advertises a URI
-    under the same port as the ``api.slot`` it belongs to."""
-    groups: Dict[int, list] = {}
-    for uri in uris:
-        groups.setdefault(uri.port, []).append(uri)
-    return groups
+def _peer_advertisement(peer: celaut_pb2.Peer) -> bytes:
+    """The bytes stored in ``peer.advertisement``: the message exactly as it arrived.
+
+    Kept verbatim rather than rebuilt from the stored columns so the signature it
+    carries stays verifiable -- ``submit_to_ledger`` republishes it on-chain, where a
+    reader can check it against the peer's public key without contacting the peer.
+    """
+    return peer.SerializeToString()
 
 
 def _known_peer_id(uris) -> Optional[str]:
@@ -271,7 +289,7 @@ def _verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
     payload = canonical_peer_payload(
         public_key,
         peer.ts,
-        canonical_peer_content_digest(peer.api, peer.uri),
+        canonical_peer_content_digest(peer),
     )
     if not verify_peer_payload(public_key, payload, peer.signature):
         log.LOGGER(f"Peer signature failed to verify for claimed public_key {public_key}.")
@@ -310,13 +328,10 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
             if not _passes_anti_replay(peer_id, peer.ts):
                 log.LOGGER(f"Peer {peer_id} sent a stale ts; ignoring the update.")
                 return peer_id
-            update_peer_instance(peer=peer, peer_id=peer_id)
+            stored = update_peer_instance(peer=peer, peer_id=peer_id)
             # Only a verified, strictly-newer announcement may drop addresses, so a
             # replayed or unsigned message can never prune a peer's real ones.
-            sc.prune_peer_uris(
-                peer_id=peer_id,
-                keep=[(uri.ip, uri.port) for uri in peer.uri],
-            )
+            sc.prune_peer_uris(peer_id=peer_id, keep=stored)
             sc.set_peer_last_ts(peer_id=peer_id, ts=peer.ts)
             return peer_id
         # Falls through to the fresh-registration path below with peer_id already
@@ -330,44 +345,35 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
         if not peer_id:
             log.LOGGER("Peer instance already exists but its id could not be resolved.")
             return None
+        from src.reputation_system.node_identity import normalize_public_key_hex
+
+        if normalize_public_key_hex(peer_id) is not None:
+            # The address resolved to a peer that already proved an identity, and this
+            # message did not sign for it. Anyone can reach that address -- it is
+            # published by GetPeerInfo and on-chain -- so accepting this would let a
+            # stranger rewrite a verified peer's advertisement and payment contracts
+            # just by naming its IP. Same rule accept_peer_refresh applies.
+            log.LOGGER(
+                f"Refusing an unsigned announcement for {peer_id}: that address belongs "
+                "to a peer with an identity, and this message is not signed by it."
+            )
+            return peer_id
         update_peer_instance(peer=peer, peer_id=peer_id)
         return peer_id
     else:
         peer_id = str(uuid4())
 
-    protocol_stack: bytes = (
-        peer.api.slot[0].SerializeToString()
-        if peer.api.slot
-        else b""
-    )
-    slot_transport_payloads = _peer_slot_transport_payloads(peer=peer, peer_id=peer_id)
-
-    if not sc.add_peer(peer_id=peer_id, protocol_stack=protocol_stack):
+    if not sc.add_peer(peer_id=peer_id, advertisement=_peer_advertisement(peer)):
         return None
 
     if verified_public_key:
         sc.set_peer_last_ts(peer_id=peer_id, ts=peer.ts)
 
-    # Slots
-    for internal_port, uris in _group_uris_by_port(peer.uri).items():
-        payload = slot_transport_payloads.get(internal_port)
-        if payload is None:
-            log.LOGGER(
-                f"[PEER][{peer_id}] Internal URI slot {internal_port} not present in API slot declaration. Skipping."
-            )
-            continue
-        if not payload:
-            log.LOGGER(
-                f"[PEER][{peer_id}] Internal URI slot {internal_port} has no host-supported transports. Skipping."
-            )
-            continue
-        sc.add_slot(
-            slot=SimpleNamespace(internal_port=internal_port, uri=uris),
-            peer_id=peer_id, transport_protocol=payload,
-        )
+    # Addresses
+    _store_peer_uris(peer=peer, peer_id=peer_id)
 
     # Contracts
-    for gas_price in peer.api.payment_contracts:
+    for gas_price in peer.payment_contracts:
         log.LOGGER(f"Adding contract {gas_price.contract} for peer {peer_id}")
         try:
             sc.add_contract(contract=gas_price.contract, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
@@ -385,36 +391,22 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
 
     return peer_id
 
-def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str):
+def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int]]:
+    """Refresh a known peer; returns the addresses actually stored (see
+    :func:`_store_peer_uris`), which is what a caller may then prune down to."""
     log.LOGGER(f"Updating peer {peer_id}")
-    # parsed_peer = json.loads(MessageToJson(peer))
-    # It is assumed that protocol stack and metadata have not been modified.
-    slot_transport_payloads = _peer_slot_transport_payloads(peer=peer, peer_id=peer_id)
 
-    # Slots. add_slot upserts on (peer_id, internal_port) and merges each URI, so
-    # re-registering a known peer accumulates its reachable addresses instead of
-    # wiping them down to whatever it happened to advertise this time (issue #236).
-    for internal_port, uris in _group_uris_by_port(peer.uri).items():
-        payload = slot_transport_payloads.get(internal_port)
-        if payload is None:
-            log.LOGGER(
-                f"[PEER][{peer_id}] Internal URI slot {internal_port} not present in API slot declaration. Skipping."
-            )
-            continue
-        if not payload:
-            log.LOGGER(
-                f"[PEER][{peer_id}] Internal URI slot {internal_port} has no host-supported transports. Skipping."
-            )
-            continue
-        sc.add_slot(
-            slot=SimpleNamespace(internal_port=internal_port, uri=uris),
-            peer_id=peer_id, transport_protocol=payload,
-        )
+    sc.set_peer_advertisement(peer_id=peer_id, advertisement=_peer_advertisement(peer))
+
+    # Addresses. add_peer_uri upserts on (peer_id, ip, port), so re-registering a known
+    # peer accumulates its reachable addresses instead of wiping them down to whatever
+    # it happened to advertise this time (issue #236).
+    stored = _store_peer_uris(peer=peer, peer_id=peer_id)
 
     # Contracts
-    if not peer.api.payment_contracts:
+    if not peer.payment_contracts:
         log.LOGGER(f"Peer {peer_id} advertises no payment contract; it cannot be paid.")
-    for gas_price in peer.api.payment_contracts:
+    for gas_price in peer.payment_contracts:
         log.LOGGER(f"Adding contract {gas_price.contract} for peer {peer_id}")
         try:
             sc.add_contract(contract=gas_price.contract, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
@@ -427,6 +419,7 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str):
             continue
 
     log.LOGGER(f"Peer {peer_id} updated.")
+    return stored
 
 
 def refresh_peer_instance(peer_id: str) -> bool:
@@ -487,13 +480,10 @@ def accept_peer_refresh(peer: celaut_pb2.Peer, peer_id: str) -> bool:
             log.LOGGER(f"Refusing refresh for peer {peer_id}: stale ts.")
             return False
 
-    update_peer_instance(peer=peer, peer_id=peer_id)
+    stored = update_peer_instance(peer=peer, peer_id=peer_id)
 
     if verified_public_key == peer_id:
-        sc.prune_peer_uris(
-            peer_id=peer_id,
-            keep=[(uri.ip, uri.port) for uri in peer.uri],
-        )
+        sc.prune_peer_uris(peer_id=peer_id, keep=stored)
         sc.set_peer_last_ts(peer_id=peer_id, ts=peer.ts)
     return True
 
